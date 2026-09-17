@@ -28,8 +28,12 @@ no longer declares, and never runs by default. See: `crates/contexts/delonix-sta
 [04 — Declarative reconciliation](04-cloud-native-primer.md#48-declarative-reconciliation).
 
 **CAS (content-addressed storage)** — The image blob store: each blob lives under
-`blobs/sha256/<hex>` in the state root, addressed by its digest, so identical content is stored once
-and any corruption is detected on read. See: `crates/adapters/delonix-oci/src/cas.rs::Cas`,
+`blobs/sha256/<hex>` in the state root, addressed by its digest, so identical content is stored once.
+Integrity is checked when content **enters** the store, not when it is read: a pull compares the
+manifest, the config and each layer against the expected digest (`verify_manifest_digest` and the
+digest comparisons in `crates/adapters/delonix-oci/src/registry.rs`). `Cas::read` is a plain file
+read and does not re-hash; `Cas::verify` re-hashes on demand. See:
+`crates/adapters/delonix-oci/src/cas.rs::Cas`,
 [05 — State on disk](05-architecture.md#state-on-disk).
 
 **CDI (Container Device Interface)** — A CNCF spec describing how to expose a device (typically a
@@ -44,7 +48,7 @@ opened over SSH is often not delegated; `systemd-run --user --scope -p Delegate=
 is. `delonix system info` shows the answer as `cgroup2 delegated`. See:
 `crates/adapters/delonix-linux/src/lib.rs::cgroup_limits_apply`,
 [04 — cgroups v2 and delegation](04-cloud-native-primer.md#42-cgroups-v2-and-delegation),
-[01 — cgroup delegation](01-environment.md#cgroup-delegation-limits-are-accepted-and-silently-ignored).
+[01 — cgroup delegation](01-environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced).
 
 **CNI (Container Network Interface)** — The plugin standard Kubernetes uses to give a pod its
 network. Delonix can run a node's CNI plugin chain against a named network namespace, which is how

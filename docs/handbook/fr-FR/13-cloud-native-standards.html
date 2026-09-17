@@ -59,19 +59,19 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Guide du contributeur</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Rechercher <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/13-cloud-native-standards.html">EN · English</option><option value="../pt-AO/13-cloud-native-standards.html">PT-AO · Português (Angola)</option><option value="../fr-FR/13-cloud-native-standards.html" selected>FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manuel du contributeur</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="01-environment.html">1. Préparer votre environnement</a>
+<a class="" href="02-build-and-test.html">2. Cloner, compiler et tester</a>
+<a class="" href="03-rust-primer.html">3. Initiation à Rust pour cette base de code</a>
+<a class="" href="04-cloud-native-primer.html">4. Initiation au cloud native</a>
 <a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="06-crates.html">6. Les crates</a>
+<a class="" href="07-system-design-interview.html">7. Entretien de conception de système — le Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile et VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construire des microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Flux de contribution</a>
+<a class="" href="11-publishing-docs.html">11. Publier la documentation</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="on" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
@@ -679,10 +679,15 @@ to the calling session.</p>
 <li>Under the kubelet, <code>transient_scope_argv</code> builds the <code>StartTransientUnit</code> call for a delegated
   scope under a pod slice (ADR-0038).</li>
 </ul>
-<p><strong>Conformance status / gaps.</strong> Limits are inert in a plain SSH session scope; the remedy is
-<code>systemd-run --user --scope -p Delegate=yes</code> (measured 2026-08-04 per <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). <code>cpuset</code> and
-<code>io</code> are usually not delegated to user sessions on stock Ubuntu. See
-<a href="01-environment.html">1. Environment</a> and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>.</p>
+<p><strong>Conformance status / gaps.</strong> A plain SSH session scope is not delegated; the remedy is
+<code>systemd-run --user --scope -p Delegate=yes</code> (measured 2026-08-04 per <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). Without
+delegation <code>container run</code> refuses <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> with exit 69
+(<code>preflight_resource_limits</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>;
+<code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> runs unenforced, with a warning). That probe covers only the
+<code>memory</code>/<code>cpu</code>/<code>pids</code> base: <code>--cpuset</code>, <code>--io-weight</code> and the <code>--device-*-bps</code>/<code>--device-*-iops</code>
+flags are still accepted best-effort, and <code>cpuset</code> and <code>io</code> are usually not delegated to user
+sessions on stock Ubuntu — so those can be accepted without effect. See
+<a href="01-environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">1. Environment</a> and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>.</p>
 <p><strong>Where to start reading.</strong> <code>cgroup_limits_apply</code> → <code>user_service_base</code> → <code>try_delegated_base</code> →
 <code>transient_scope_argv</code>, all in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.</p>
 <hr />

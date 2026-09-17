@@ -560,7 +560,7 @@ and <code>delonix_vm::create_with</code>).</p>
 <p><strong>Offline by default, and why.</strong> A <code>RUN</code> that reaches the internet produces a different image
 depending on when it ran. <code>--network</code> is opt-in because the most common thing a VMfile wants is to
 install a package. With <code>--network</code>, libguestfs's appliance gets its network from <code>passt</code>, which has
-host traps documented in <a href="09-microvm-setup.html#troubleshooting">09</a>.</p>
+host traps documented in <a href="09-microvm-setup.html#6-troubleshooting">09</a>.</p>
 <p><strong>Scratch space.</strong> The work directory is created under <code>std::env::temp_dir()</code>
 (<code>delonix-vmfile-&lt;pid&gt;</code>), i.e. <code>$TMPDIR</code> or <code>/tmp</code>, and holds one full flattened disk per stage. Point
 <code>TMPDIR</code> at a filesystem with room — <code>/tmp</code> is often a small tmpfs and is emptied on reboot. A build

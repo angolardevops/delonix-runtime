@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>2. Clone, build and test · Delonix Runtime — Manual do contribuidor</title>
+<title>2. Clonar, compilar e testar · Delonix Runtime — Manual do contribuidor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,50 +59,50 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Manual do contribuidor</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Pesquisar <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/02-build-and-test.html">EN · English</option><option value="../pt-AO/02-build-and-test.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/02-build-and-test.html">FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manual do Contribuidor</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="on" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
-<a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="01-environment.html">1. Preparar o teu ambiente</a>
+<a class="on" href="02-build-and-test.html">2. Clonar, compilar e testar</a>
+<a class="" href="03-rust-primer.html">3. Introdução ao Rust para esta base de código</a>
+<a class="" href="04-cloud-native-primer.html">4. Introdução ao cloud native</a>
+<a class="" href="05-architecture.html">5. Arquitectura</a>
+<a class="" href="06-crates.html">6. Os crates</a>
+<a class="" href="07-system-design-interview.html">7. System Design Interview — o Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile e VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construir microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Fluxo de contribuição</a>
+<a class="" href="11-publishing-docs.html">11. Publicar a documentação</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="2-clone-build-and-test">2. Clone, build and test</h1>
-<p>This page assumes the host from <a href="01-environment.html">01 — Preparing your environment</a>: the pinned
-Rust toolchain and <code>protoc</code>. Everything here runs from the root of your checkout — ideally a
-<strong>git worktree</strong>, see <a href="10-contributing-workflow.html">10 — Contribution workflow</a>.</p>
-<h2 id="clone">Clone</h2>
+<main><h1 id="2-clone-build-and-test">2. Clonar, compilar e testar</h1>
+<p>Esta página assume o host de <a href="01-environment.html">01 — Preparar o teu ambiente</a>: a toolchain de Rust
+fixada e o <code>protoc</code>. Tudo aqui corre a partir da raiz da tua checkout — idealmente um
+<strong>git worktree</strong>, ver <a href="10-contributing-workflow.html">10 — Fluxo de contribuição</a>.</p>
+<h2 id="clone">Clonar</h2>
 <div class="code" data-shell><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
 cd delonix-runtime
 git fetch --tags origin      # several gates compare against the release tags
 </code></pre></div>
-<h2 id="build">Build</h2>
+<h2 id="build">Compilar</h2>
 <div class="code" data-shell><pre><code class="language-bash">cargo build --workspace                    # every crate and every binary
 cargo build -p delonix-runtime-bin         # just the `delonix` CLI
 cargo build --release -p delonix-runtime-bin   # what the docs generator and the CLI gates use
 </code></pre></div>
-<p>The workspace ships these binaries, from these packages:</p>
+<p>O workspace produz estes binários, a partir destes pacotes:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Binary</th>
-<th>Package</th>
-<th>Output</th>
+<th>Binário</th>
+<th>Pacote</th>
+<th>Saída</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>delonix</code> (the CLI)</td>
+<td><code>delonix</code> (a CLI)</td>
 <td><code>delonix-runtime-bin</code></td>
-<td><code>target/debug/delonix</code> or <code>target/release/delonix</code></td>
+<td><code>target/debug/delonix</code> ou <code>target/release/delonix</code></td>
 </tr>
 <tr>
 <td><code>delonix-cri</code></td>
@@ -121,39 +121,39 @@ cargo build --release -p delonix-runtime-bin   # what the docs generator and the
 </tr>
 </tbody>
 </table></div>
-<p>The release workflow builds exactly these four packages. If you set <code>CARGO_TARGET_DIR</code>, binaries
-land there instead of <code>target/</code>.</p>
-<p>Two practical notes:</p>
+<p>O workflow de release compila exactamente estes quatro pacotes. Se definires <code>CARGO_TARGET_DIR</code>, os
+binários vão para lá em vez de <code>target/</code>.</p>
+<p>Duas notas práticas:</p>
 <ul>
-<li><strong>Always test the binary you built</strong> (<code>./target/debug/delonix</code>), never a <code>delonix</code> on your
-  <code>PATH</code> — that is an installed release, often several versions behind.</li>
-<li>If you work in several worktrees, pointing them all at one shared <code>CARGO_TARGET_DIR</code> saves disk,
-  but two builds running at the same time on it will wait on each other and can invalidate each
-  other's artefacts. A target directory per worktree is slower the first time and predictable
-  afterwards.</li>
+<li><strong>Testa sempre o binário que compilaste</strong> (<code>./target/debug/delonix</code>), nunca um <code>delonix</code> no teu
+  <code>PATH</code> — esse é uma release instalada, muitas vezes várias versões atrás.</li>
+<li>Se trabalhas em vários worktrees, apontá-los todos para um <code>CARGO_TARGET_DIR</code> partilhado poupa
+  disco, mas dois builds a correr ao mesmo tempo sobre ele esperam um pelo outro e podem invalidar os
+  artefactos um do outro. Um directório de target por worktree é mais lento da primeira vez e
+  previsível depois disso.</li>
 </ul>
-<h2 id="run-the-tests">Run the tests</h2>
+<h2 id="run-the-tests">Correr os testes</h2>
 <div class="code" data-shell><pre><code class="language-bash">cargo test --workspace                       # the whole suite
 cargo test -p delonix-sdn                    # one crate
 cargo test -p delonix-stack -- reconcile       # tests whose path contains &quot;reconcile&quot;
 cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_vezes
 </code></pre></div>
-<p>Tests that need privileges or a real host skip themselves instead of failing, so the suite is
-meaningful on a laptop and on CI. A few live tests are marked <code>#[ignore]</code> and name the command to
-run them in their doc comment (for example in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>); run those
-only on a machine you own:</p>
+<p>Os testes que precisam de privilégios ou de um host real saltam-se a si próprios em vez de falharem,
+por isso a suite tem significado num portátil e na CI. Alguns testes ao vivo estão marcados com
+<code>#[ignore]</code> e nomeiam o comando para os correr no seu doc comment (por exemplo em
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>); corre-os só numa máquina que é tua:</p>
 <div class="code" data-shell><pre><code class="language-bash">cargo test -p &lt;crate&gt; -- --ignored &lt;test-name&gt;
 </code></pre></div>
-<p>A green <code>cargo test</code> proves the pure logic. It does <strong>not</strong> prove that a change to namespaces,
-cgroups, the network holder or VM boot works — that needs a live run (see
-<a href="#end-to-end-battery-scriptse2esh">End-to-end battery</a> and <a href="#chaos-harness-scriptschaossh">Chaos harness</a>).</p>
-<h2 id="the-gates-ci-runs">The gates CI runs</h2>
+<p>Um <code>cargo test</code> verde prova a lógica pura. <strong>Não</strong> prova que uma mudança em namespaces, cgroups, no
+holder de rede ou no arranque de VMs funciona — isso precisa de uma corrida ao vivo (ver
+<a href="#end-to-end-battery-scriptse2esh">Bateria end-to-end</a> e <a href="#chaos-harness-scriptschaossh">Arnês de caos</a>).</p>
+<h2 id="the-gates-ci-runs">Os gates que a CI corre</h2>
 <!-- dev-docs:begin ci-gates -->
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>CI job</th>
-<th>What it checks</th>
+<th>Job de CI</th>
+<th>O que verifica</th>
 </tr>
 </thead>
 <tbody>
@@ -201,170 +201,171 @@ cgroups, the network holder or VM boot works — that needs a live run (see
 </table></div>
 <!-- dev-docs:end ci-gates -->
 
-<p>Every job in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> can be reproduced locally. Run the ones that match what you
-touched before you push; run all of them before asking for review.</p>
+<p>Todos os jobs de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> podem ser reproduzidos localmente. Corre os que
+correspondem ao que tocaste antes de fazeres push; corre todos antes de pedires revisão.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Job</th>
-<th>Local command</th>
-<th>Fails when</th>
+<th>Comando local</th>
+<th>Falha quando</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>fmt</code></td>
 <td><code>cargo fmt --all --check</code></td>
-<td>the code is not rustfmt-formatted (default config)</td>
+<td>o código não está formatado pelo rustfmt (configuração por omissão)</td>
 </tr>
 <tr>
 <td><code>lang</code></td>
 <td><code>python3 scripts/lang_ratchet.py</code></td>
-<td>Portuguese identifiers, comments or messages <strong>increase</strong> — or decrease without lowering <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a> in the same commit (<code>--list</code> shows them, <code>--update</code> lowers the baseline)</td>
+<td>identificadores, comentários ou mensagens em português <strong>aumentam</strong> — ou diminuem sem baixar o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a> no mesmo commit (<code>--list</code> mostra-os, <code>--update</code> baixa a linha de base)</td>
 </tr>
 <tr>
 <td><code>arch</code></td>
 <td><code>python3 scripts/arch_fitness.py</code></td>
-<td>a dependency goes against the layer direction, a crate sits in the wrong directory, a member crate pins a dependency version, a consumer name appears in code, or a debt ratchet moves (<code>--list</code>, <code>--update</code>)</td>
+<td>uma dependência vai contra a direcção das camadas, um crate está no directório errado, um crate membro fixa a versão de uma dependência, um nome de consumidor aparece no código, ou um ratchet de dívida se move (<code>--list</code>, <code>--update</code>)</td>
 </tr>
 <tr>
 <td><code>arch</code></td>
 <td><code>python3 scripts/dev_docs.py --check</code></td>
-<td>a generated fact in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> is stale — run <code>python3 scripts/dev_docs.py</code> and commit</td>
+<td>um facto gerado em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> está desactualizado — corre <code>python3 scripts/dev_docs.py</code> e faz commit</td>
 </tr>
 <tr>
 <td><code>contract</code></td>
 <td><code>python3 scripts/contract_gate.py</code></td>
-<td>the node contract in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is not <code>buf format</code>-clean, fails <code>buf lint</code>, breaks compatibility with the last tag, lacks an HTTP mapping, or <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is not the generated one (<code>--update</code> rewrites it). Needs <code>protoc</code>, <code>buf</code> v1.73.0 and <code>protoc-gen-openapi</code> v0.7.1 on <code>PATH</code>, and the tags</td>
+<td>o contrato de nó em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> não está limpo segundo o <code>buf format</code>, falha o <code>buf lint</code>, quebra a compatibilidade com a última tag, não tem um mapeamento HTTP, ou o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> não é o gerado (<code>--update</code> reescreve-o). Precisa de <code>protoc</code>, <code>buf</code> v1.73.0 e <code>protoc-gen-openapi</code> v0.7.1 no <code>PATH</code>, e das tags</td>
 </tr>
 <tr>
 <td><code>version</code></td>
 <td><code>python3 scripts/version_gate.py</code></td>
-<td>the workspace version is not the newest tag the commit contains (see <a href="10-contributing-workflow.html#version-alignment">10</a>) or the branch does not contain the newest tag. Needs the tags</td>
+<td>a versão do workspace não é a tag mais recente que o commit contém (ver <a href="10-contributing-workflow.html#version-alignment">10</a>) ou o branch não contém a tag mais recente. Precisa das tags</td>
 </tr>
 <tr>
 <td><code>cli-surface</code></td>
 <td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; scripts/cli-tree.sh --gate</code></td>
-<td>a CLI leaf was added, removed or reclassified without updating <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> in the same commit (<code>scripts/cli-tree.sh --update</code>)</td>
+<td>uma folha da CLI foi acrescentada, removida ou reclassificada sem actualizar o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> no mesmo commit (<code>scripts/cli-tree.sh --update</code>)</td>
 </tr>
 <tr>
 <td><code>cli-surface</code></td>
 <td><code>python3 scripts/docs_cli_gate.py</code></td>
-<td>a <code>delonix …</code> command quoted in current documentation does not exist in the binary's tree</td>
+<td>um comando <code>delonix …</code> citado na documentação actual não existe na árvore do binário</td>
 </tr>
 <tr>
 <td><code>clippy</code></td>
 <td><code>cargo clippy --workspace --all-targets --locked -- -D warnings</code></td>
-<td>any warning</td>
+<td>qualquer aviso</td>
 </tr>
 <tr>
 <td><code>test</code></td>
 <td><code>cargo build --workspace --locked &amp;&amp; cargo test --workspace --locked --no-fail-fast</code></td>
-<td>any test fails</td>
+<td>qualquer teste falha</td>
 </tr>
 <tr>
 <td><code>deny</code></td>
 <td><code>cargo deny check advisories licenses sources</code></td>
-<td>a RUSTSEC advisory, a disallowed licence or source (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>)</td>
+<td>um aviso RUSTSEC, uma licença ou fonte não permitida (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>)</td>
 </tr>
 <tr>
 <td><code>docs</code></td>
 <td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; python3 docs/gen.py &amp;&amp; git diff --exit-code -- docs/</code></td>
-<td>the committed site is not what the generator produces from this binary</td>
+<td>o site em commit não é o que o gerador produz a partir deste binário</td>
 </tr>
 <tr>
 <td><code>docs</code></td>
-<td><code>./target/release/delonix stack apply -f examples/&lt;file&gt;.yaml --dry-run</code> and <code>./target/release/delonix stack validate -f examples/&lt;file&gt;.yaml</code></td>
-<td>a published example uses a deprecated form or has unresolved references</td>
+<td><code>./target/release/delonix stack apply -f examples/&lt;file&gt;.yaml --dry-run</code> e <code>./target/release/delonix stack validate -f examples/&lt;file&gt;.yaml</code></td>
+<td>um exemplo publicado usa uma forma obsoleta ou tem referências por resolver</td>
 </tr>
 </tbody>
 </table></div>
-<p><code>cli-tree.sh</code> and <code>docs_cli_gate.py</code> read the tree from the binary's real <code>--help</code>; set
-<code>DELONIX_BIN=/path/to/delonix</code> to choose which binary. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> defaults to
-<code>target/release/delonix</code> and needs the Python <code>markdown</code> module. The <code>docs</code> job also generates the
-man pages (<code>delonix man --dir &lt;dir&gt; --index</code>) and checks them with <code>groff -mandoc -ww -z</code>.</p>
-<p>Separate workflows, not required on every change: <code>chaos.yml</code> runs the chaos harness on a clean
-runner (and reports <code>skipped</code> when the runner blocks user namespaces), <code>release.yml</code> publishes a
-tag, and <code>vm-image.yml</code> / <code>vm-appliances.yml</code> build VM images.</p>
-<h2 id="isolating-the-engines-state">Isolating the engine's state</h2>
-<p>Anything beyond <code>--help</code> touches engine state. By default that is <strong>your real state</strong>: your
-containers, networks, volumes and the network holder. Before running the engine for testing —
-by hand, through <code>e2e.sh</code>, or through any script — point <strong>both</strong> state roots at a scratch
-directory:</p>
+<p>O <code>cli-tree.sh</code> e o <code>docs_cli_gate.py</code> lêem a árvore a partir do <code>--help</code> real do binário; define
+<code>DELONIX_BIN=/path/to/delonix</code> para escolher qual binário. O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> usa por omissão
+<code>target/release/delonix</code> e precisa do módulo Python <code>markdown</code>. O job <code>docs</code> também gera as
+man pages (<code>delonix man --dir &lt;dir&gt; --index</code>) e verifica-as com <code>groff -mandoc -ww -z</code>.</p>
+<p>Workflows à parte, não exigidos em todas as mudanças: o <code>chaos.yml</code> corre o arnês de caos num runner
+limpo (e reporta <code>skipped</code> quando o runner bloqueia user namespaces), o <code>release.yml</code> publica uma
+tag, e o <code>vm-image.yml</code> / <code>vm-appliances.yml</code> constroem imagens de VM.</p>
+<h2 id="isolating-the-engines-state">Isolar o estado do motor</h2>
+<p>Tudo o que vá além do <code>--help</code> toca no estado do motor. Por omissão esse é <strong>o teu estado real</strong>: os
+teus containers, redes, volumes e o holder de rede. Antes de correres o motor para testar —
+à mão, através do <code>e2e.sh</code>, ou através de qualquer script — aponta <strong>as duas</strong> raízes de estado para
+um directório descartável:</p>
 <div class="code" data-shell><pre><code class="language-bash">export DELONIX_ROOT=$HOME/scratch/dlx/root          # containers, images, networks, IPAM, volumes
 export DELONIX_NET_RUNTIME_DIR=/tmp/dlx-run          # the holder&#x27;s control and slirp sockets
 mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 </code></pre></div>
-<p><strong>Both, always. Half isolation is worse than none.</strong> The network sockets and the pidfiles are
-resolved separately: pidfiles live under the <em>state root</em>, while the holder's control and slirp
-sockets live in a <em>runtime directory</em> (by default <code>/tmp/delonix-net-&lt;uid&gt;</code>). When two state roots
-ended up on the same runtime directory, each read its own (absent) pidfile, concluded there was no
-network infra, and started or tore down infra on top of the other one's sockets. On a development
-host running live workloads this ended with the real root rebuilding its network infra and
-restarting real containers.</p>
-<p>The engine now derives a suffix from a non-default <code>DELONIX_ROOT</code> for the runtime directory
-(<code>runtime_dir</code>/<code>root_suffix</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>), which closes that
-collision for the common case. Keep exporting both anyway: it makes the isolation explicit, keeps
-the socket path short and under your control, and it is what <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> and
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> do (e2e fills in whichever variable you did not export).</p>
-<p>Keep <code>DELONIX_NET_RUNTIME_DIR</code> short: a unix socket path longer than about 108 bytes fails with
-<code>path must be shorter than SUN_LEN</code>. <code>e2e.sh</code> refuses a runtime dir longer than 80 bytes.</p>
-<p>When you are done, tear down the isolated network infra with the same two variables exported:</p>
+<p><strong>As duas, sempre. Meia isolação é pior do que nenhuma.</strong> Os sockets de rede e os pidfiles são
+resolvidos separadamente: os pidfiles vivem debaixo da <em>raiz de estado</em>, enquanto os sockets de
+controlo e do slirp do holder vivem num <em>directório de runtime</em> (por omissão <code>/tmp/delonix-net-&lt;uid&gt;</code>).
+Quando duas raízes de estado acabaram no mesmo directório de runtime, cada uma leu o seu próprio
+pidfile (ausente), concluiu que não havia infra de rede, e arrancou ou desmontou infra por cima dos
+sockets da outra. Num host de desenvolvimento com workloads vivos isto acabou com a raiz real a
+reconstruir a sua infra de rede e a reiniciar containers reais.</p>
+<p>O motor deriva agora um sufixo a partir de um <code>DELONIX_ROOT</code> que não seja o de omissão para o
+directório de runtime (<code>runtime_dir</code>/<code>root_suffix</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>), o
+que fecha essa colisão no caso comum. Continua a exportar as duas na mesma: torna a isolação
+explícita, mantém o caminho do socket curto e sob o teu controlo, e é o que o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> e o
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> fazem (o e2e preenche a variável que não tiveres exportado).</p>
+<p>Mantém o <code>DELONIX_NET_RUNTIME_DIR</code> curto: um caminho de socket unix com mais de cerca de 108 bytes
+falha com <code>path must be shorter than SUN_LEN</code>. O <code>e2e.sh</code> recusa um directório de runtime com mais de
+80 bytes.</p>
+<p>Quando terminares, desmonta a infra de rede isolada com as mesmas duas variáveis exportadas:</p>
 <div class="code" data-shell><pre><code class="language-bash">./target/debug/delonix net netns down
 </code></pre></div>
-<h2 id="end-to-end-battery-scriptse2esh">End-to-end battery (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)</h2>
-<p><code>e2e.sh</code> runs the CLI against the real kernel: every leaf's <code>--help</code>, plus real executions of a
-large part of the surface, and prints a PASS/FAIL/SKIP/XFAIL report (JSONL detail in
-<code>$OUT/results.jsonl</code>, default <code>OUT=/tmp/delonix-e2e</code>).</p>
+<h2 id="end-to-end-battery-scriptse2esh">Bateria end-to-end (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)</h2>
+<p>O <code>e2e.sh</code> corre a CLI contra o kernel real: o <code>--help</code> de todas as folhas, mais execuções reais de
+uma grande parte da superfície, e imprime um relatório PASS/FAIL/SKIP/XFAIL (detalhe em JSONL em
+<code>$OUT/results.jsonl</code>, por omissão <code>OUT=/tmp/delonix-e2e</code>).</p>
 <div class="code" data-shell><pre><code class="language-bash">./scripts/e2e.sh                          # uses ./target/debug/delonix
 ./scripts/e2e.sh ./target/release/delonix
 </code></pre></div>
 <ul>
-<li>It <strong>isolates itself by default</strong>: it sets <code>DELONIX_ROOT</code> and <code>DELONIX_NET_RUNTIME_DIR</code> to its own
-  directories (unless you export both first) and tears down the infra it started.
-  <code>E2E_SHARED_STATE=1</code> runs against the real machine state — only for diagnosing a host.</li>
-<li>Exit code is non-zero when a check fails, or when a check marked as a known defect (<code>XFAIL</code>)
-  unexpectedly passes. SKIPs do not fail the run but are listed in their own block: a skipped
-  check proved nothing.</li>
-<li>It needs network access to pull images; sections whose preconditions are missing skip with the
-  reason.</li>
-<li>A green run means the <code>--help</code> of every leaf was verified and <em>some</em> leaves were executed.
-  Read the header of the script for what is executed and what is not.</li>
+<li><strong>Isola-se por omissão</strong>: define <code>DELONIX_ROOT</code> e <code>DELONIX_NET_RUNTIME_DIR</code> para directórios
+  próprios (a menos que exportes as duas primeiro) e desmonta a infra que arrancou.
+  <code>E2E_SHARED_STATE=1</code> corre contra o estado real da máquina — só para diagnosticar um host.</li>
+<li>O código de saída é diferente de zero quando uma verificação falha, ou quando uma verificação
+  marcada como defeito conhecido (<code>XFAIL</code>) passa inesperadamente. Os SKIPs não fazem falhar a corrida
+  mas são listados num bloco próprio: uma verificação saltada não provou nada.</li>
+<li>Precisa de acesso à rede para fazer pull de imagens; as secções cujas pré-condições faltem saltam-se
+  com a razão.</li>
+<li>Uma corrida verde significa que o <code>--help</code> de todas as folhas foi verificado e que <em>algumas</em> folhas
+  foram executadas. Lê o cabeçalho do script para saber o que é executado e o que não é.</li>
 </ul>
-<h2 id="chaos-harness-scriptschaossh">Chaos harness (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)</h2>
-<p>The chaos harness breaks a running engine on purpose — killing the holder, filling the disk,
-concurrent attaches, partial applies — and reports whether it degraded the way it promises to.</p>
+<h2 id="chaos-harness-scriptschaossh">Arnês de caos (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)</h2>
+<p>O arnês de caos parte de propósito um motor a correr — mata o holder, enche o disco, faz attaches
+concorrentes, applies parciais — e reporta se degradou da forma que promete.</p>
 <div class="code" data-shell><pre><code class="language-bash">scripts/chaos.sh                        # every scenario, ./target/debug/delonix
 scripts/chaos.sh holder_kill oom        # selected scenarios
 scripts/chaos.sh --keep scale           # leave the sandbox up for a post-mortem
 scripts/chaos.sh --clean                # tear the kept sandbox down
 </code></pre></div>
 <ul>
-<li>It always redirects both roots into its sandbox (<code>DELONIX_CHAOS_DIR</code>, default <code>/tmp/dlx-chaos</code>)
-  and never touches the real engine's containers, networks or records. The image directories
-  (<code>images</code>, <code>layers</code>, <code>blobs</code>) are <strong>symlinks to your real store</strong> to avoid downloads: the harness
-  only reads them in practice, but a scenario that wrote an image would write to the real store.</li>
-<li>It <strong>refuses to run on a busy machine</strong> (load above a threshold, shared with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bench.sh" target="_blank" rel="noopener"><code>scripts/bench.sh</code></a>
-  through <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bancada.sh" target="_blank" rel="noopener"><code>scripts/bancada.sh</code></a>): under load, scenarios fail for reasons that belong to the bench,
-  not the product. <code>--max-load N</code> changes the threshold; <code>--force</code> runs anyway and marks the
-  verdict as not publishable.</li>
-<li>Exit code is 0 only when no scenario fails. SKIPs are listed separately.</li>
-<li>Some scenarios need external resources and skip without them (for example <code>truenas_destroy</code>
-  needs <code>DELONIX_CHAOS_TRUENAS_URL</code>/<code>_USER</code>/<code>_PASS</code>).</li>
+<li>Redirecciona sempre as duas raízes para o seu sandbox (<code>DELONIX_CHAOS_DIR</code>, por omissão
+  <code>/tmp/dlx-chaos</code>) e nunca toca nos containers, redes ou registos do motor real. Os directórios de
+  imagens (<code>images</code>, <code>layers</code>, <code>blobs</code>) são <strong>symlinks para o teu store real</strong>, para evitar downloads:
+  na prática o arnês só os lê, mas um cenário que escrevesse uma imagem escreveria no store real.</li>
+<li><strong>Recusa-se a correr numa máquina ocupada</strong> (carga acima de um limiar, partilhado com o
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bench.sh" target="_blank" rel="noopener"><code>scripts/bench.sh</code></a> através do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bancada.sh" target="_blank" rel="noopener"><code>scripts/bancada.sh</code></a>): sob carga, os cenários falham por razões que
+  pertencem à bancada, não ao produto. <code>--max-load N</code> muda o limiar; <code>--force</code> corre na mesma e marca
+  o veredicto como não publicável.</li>
+<li>O código de saída só é 0 quando nenhum cenário falha. Os SKIPs são listados à parte.</li>
+<li>Alguns cenários precisam de recursos externos e saltam-se sem eles (por exemplo o <code>truenas_destroy</code>
+  precisa de <code>DELONIX_CHAOS_TRUENAS_URL</code>/<code>_USER</code>/<code>_PASS</code>).</li>
 </ul>
-<p>Scratch directories under <code>/tmp</code> are fine for these throwaway sandboxes. Your <strong>worktrees</strong> are
-not — see <a href="10-contributing-workflow.html#one-worktree-per-task">10</a>.</p>
-<div class="pager"><a href="01-environment.html"><span>← Anterior</span>1. Preparing your environment</a><a class="next" href="03-rust-primer.html"><span>Seguinte →</span>3. Rust primer for this codebase</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/02-build-and-test.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/02-build-and-test.md</code></p></main>
+<p>Os directórios descartáveis debaixo de <code>/tmp</code> servem para estes sandboxes efémeros. Os teus
+<strong>worktrees</strong> não — ver <a href="10-contributing-workflow.html#one-worktree-per-task">10</a>.</p>
+<div class="pager"><a href="01-environment.html"><span>← Anterior</span>1. Preparar o teu ambiente</a><a class="next" href="03-rust-primer.html"><span>Seguinte →</span>3. Introdução ao Rust para esta base de código</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/02-build-and-test.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/pt-AO/02-build-and-test.md</code></p></main>
 <aside class="toc"><h5>Nesta página</h5><div class="toc">
 <ul>
-<li><a href="#clone">Clone</a></li>
-<li><a href="#build">Build</a></li>
-<li><a href="#run-the-tests">Run the tests</a></li>
-<li><a href="#the-gates-ci-runs">The gates CI runs</a></li>
-<li><a href="#isolating-the-engines-state">Isolating the engine's state</a></li>
-<li><a href="#end-to-end-battery-scriptse2esh">End-to-end battery (scripts/e2e.sh)</a></li>
-<li><a href="#chaos-harness-scriptschaossh">Chaos harness (scripts/chaos.sh)</a></li>
+<li><a href="#clone">Clonar</a></li>
+<li><a href="#build">Compilar</a></li>
+<li><a href="#run-the-tests">Correr os testes</a></li>
+<li><a href="#the-gates-ci-runs">Os gates que a CI corre</a></li>
+<li><a href="#isolating-the-engines-state">Isolar o estado do motor</a></li>
+<li><a href="#end-to-end-battery-scriptse2esh">Bateria end-to-end (scripts/e2e.sh)</a></li>
+<li><a href="#chaos-harness-scriptschaossh">Arnês de caos (scripts/chaos.sh)</a></li>
 </ul>
 </div>
 </aside></div>

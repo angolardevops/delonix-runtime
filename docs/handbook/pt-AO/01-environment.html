@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>1. Preparing your environment · Delonix Runtime — Manual do contribuidor</title>
+<title>1. Preparar o teu ambiente · Delonix Runtime — Manual do contribuidor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,284 +59,285 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Manual do contribuidor</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Pesquisar <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/01-environment.html">EN · English</option><option value="../pt-AO/01-environment.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/01-environment.html">FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manual do Contribuidor</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="on" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
-<a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="on" href="01-environment.html">1. Preparar o teu ambiente</a>
+<a class="" href="02-build-and-test.html">2. Clonar, compilar e testar</a>
+<a class="" href="03-rust-primer.html">3. Introdução ao Rust para esta base de código</a>
+<a class="" href="04-cloud-native-primer.html">4. Introdução ao cloud native</a>
+<a class="" href="05-architecture.html">5. Arquitectura</a>
+<a class="" href="06-crates.html">6. Os crates</a>
+<a class="" href="07-system-design-interview.html">7. System Design Interview — o Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile e VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construir microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Fluxo de contribuição</a>
+<a class="" href="11-publishing-docs.html">11. Publicar a documentação</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="1-preparing-your-environment">1. Preparing your environment</h1>
-<p>Delonix Runtime is <strong>Linux-only</strong>: every primitive it uses — namespaces, cgroups v2, nftables,
-<code>pivot_root</code>, the new mount API — lives in the Linux kernel. You can <em>compile</em> most of the
-workspace and run its pure-logic tests on any Linux box with the toolchain below; to <em>run</em>
-containers and exercise the live paths you need a host that satisfies the kernel and package
-requirements in this page.</p>
-<p>A lot of what looks like an engine bug on a fresh machine is a host prerequisite. Read the
-<a href="#known-host-traps">Known host traps</a> section before you open an issue.</p>
+<main><div class="notice">Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/01-environment.html">Ler a página em inglês</a></div><h1 id="1-preparing-your-environment">1. Preparar o teu ambiente</h1>
+<p>O Delonix Runtime é <strong>só para Linux</strong>: todos os primitivos que usa — namespaces, cgroups v2, nftables,
+<code>pivot_root</code>, a nova API de mount — vivem no kernel Linux. Consegues <em>compilar</em> a maior parte do
+workspace e correr os seus testes de lógica pura em qualquer máquina Linux com a toolchain abaixo;
+para <em>correr</em> containers e exercitar os caminhos ao vivo precisas de um host que cumpra os requisitos
+de kernel e de pacotes desta página.</p>
+<p>Muito do que parece um bug do motor numa máquina acabada de instalar é um pré-requisito do host. Lê a
+secção <a href="#known-host-traps">Armadilhas conhecidas do host</a> antes de abrires uma issue.</p>
 <h2 id="toolchain">Toolchain</h2>
 <!-- dev-docs:begin toolchain -->
 <ul>
-<li><strong>Rust toolchain:</strong> <code>1.96.0</code> (pinned in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>; <code>rustup</code> installs it on the first <code>cargo</code> call)</li>
-<li><strong>Components:</strong> <code>rustfmt</code>, <code>clippy</code></li>
+<li><strong>Toolchain de Rust:</strong> <code>1.96.0</code> (fixada no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>; o <code>rustup</code> instala-a na primeira chamada ao <code>cargo</code>)</li>
+<li><strong>Componentes:</strong> <code>rustfmt</code>, <code>clippy</code></li>
 </ul>
 <!-- dev-docs:end toolchain -->
 
-<p>Install <a href="https://rustup.rs/"><code>rustup</code></a> and let it pick up the pinned channel; do not override it
-with <code>stable</code>. CI uses exactly the same file (<code>rustup show</code> in every job).</p>
-<h3 id="protoc-required-to-build"><code>protoc</code> (required to build)</h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compiles the Kubernetes CRI protobuf with
-<code>tonic-build</code>/<code>prost</code>, which needs the Protocol Buffers compiler on <code>PATH</code>. The <code>delonix</code> binary
-depends on <code>delonix-cri</code>, so <strong>a plain <code>cargo build --workspace</code> fails without it</strong>:</p>
+<p>Instala o <a href="https://rustup.rs/"><code>rustup</code></a> e deixa-o apanhar o canal fixado; não o substituas por
+<code>stable</code>. A CI usa exactamente o mesmo ficheiro (<code>rustup show</code> em todos os jobs).</p>
+<h3 id="protoc-required-to-build"><code>protoc</code> (necessário para compilar)</h3>
+<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compila o protobuf do CRI do Kubernetes com
+<code>tonic-build</code>/<code>prost</code>, que precisa do compilador de Protocol Buffers no <code>PATH</code>. O binário <code>delonix</code>
+depende do <code>delonix-cri</code>, por isso <strong>um simples <code>cargo build --workspace</code> falha sem ele</strong>:</p>
 <div class="code" data-shell><pre><code class="language-bash"># Debian / Ubuntu
 sudo apt install protobuf-compiler
 # Fedora / RHEL family
 sudo dnf install protobuf-compiler
 </code></pre></div>
-<p>Or download a release from <a href="https://github.com/protocolbuffers/protobuf/releases">https://github.com/protocolbuffers/protobuf/releases</a>. CI installs
-<code>protobuf-compiler</code> from apt in every job that compiles.</p>
-<h3 id="optional-tools-only-for-specific-gates">Optional tools, only for specific gates</h3>
+<p>Ou descarrega uma release de <a href="https://github.com/protocolbuffers/protobuf/releases">https://github.com/protocolbuffers/protobuf/releases</a>. A CI instala o
+<code>protobuf-compiler</code> do apt em todos os jobs que compilam.</p>
+<h3 id="optional-tools-only-for-specific-gates">Ferramentas opcionais, só para gates específicos</h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Tool</th>
-<th>Needed for</th>
-<th>Where it is pinned</th>
+<th>Ferramenta</th>
+<th>Necessária para</th>
+<th>Onde está fixada</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Python 3.11+</td>
-<td>every <code>scripts/*.py</code> gate (they use <code>tomllib</code>)</td>
+<td>todos os gates <code>scripts/*.py</code> (usam <code>tomllib</code>)</td>
 <td>—</td>
 </tr>
 <tr>
-<td><code>buf</code> v1.73.0 and <code>protoc-gen-openapi</code> v0.7.1 (Go toolchain to install them)</td>
+<td><code>buf</code> v1.73.0 e <code>protoc-gen-openapi</code> v0.7.1 (toolchain de Go para os instalar)</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a></td>
-<td><code>contract</code> job in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a></td>
+<td>job <code>contract</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a></td>
 </tr>
 <tr>
 <td><code>cargo-deny</code></td>
-<td>the supply-chain check</td>
-<td><code>deny</code> job, config in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
+<td>a verificação da cadeia de fornecimento</td>
+<td>job <code>deny</code>, configuração em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
 </tr>
 <tr>
-<td>Python <code>markdown</code> module</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> (renders <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>)</td>
-<td><code>docs</code> job</td>
+<td>Módulo Python <code>markdown</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> (renderiza o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>)</td>
+<td>job <code>docs</code></td>
 </tr>
 <tr>
 <td><code>groff</code></td>
-<td>checking the generated man pages</td>
-<td><code>docs</code> job</td>
+<td>verificar as man pages geradas</td>
+<td>job <code>docs</code></td>
 </tr>
 </tbody>
 </table></div>
-<p>See <a href="02-build-and-test.html">02 — Clone, build and test</a> for how each one is run.</p>
-<h2 id="kernel-requirements">Kernel requirements</h2>
-<p>These are the kernel features the engine relies on. The installer (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>) and
-<code>delonix system doctor</code> check most of them for you.</p>
+<p>Ver <a href="02-build-and-test.html">02 — Clonar, compilar e testar</a> para saber como cada uma é corrida.</p>
+<h2 id="kernel-requirements">Requisitos de kernel</h2>
+<p>Estas são as funcionalidades do kernel de que o motor depende. O instalador (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>) e o
+<code>delonix system doctor</code> verificam a maior parte delas por ti.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Requirement</th>
-<th>Why</th>
-<th>How to check</th>
+<th>Requisito</th>
+<th>Porquê</th>
+<th>Como verificar</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>cgroup v2</strong> (unified hierarchy)</td>
-<td>resource limits and accounting are written to <code>/sys/fs/cgroup</code></td>
-<td><code>stat -fc %T /sys/fs/cgroup</code> prints <code>cgroup2fs</code></td>
+<td><strong>cgroup v2</strong> (hierarquia unificada)</td>
+<td>os limites de recursos e a contabilização são escritos em <code>/sys/fs/cgroup</code></td>
+<td><code>stat -fc %T /sys/fs/cgroup</code> imprime <code>cgroup2fs</code></td>
 </tr>
 <tr>
-<td><strong>Unprivileged user namespaces</strong></td>
-<td>the rootless model: the engine becomes "root" only inside its own user namespace</td>
-<td><code>unshare -r -n true</code> succeeds</td>
+<td><strong>User namespaces sem privilégio</strong></td>
+<td>o modelo rootless: o motor só se torna "root" dentro do seu próprio user namespace</td>
+<td><code>unshare -r -n true</code> tem sucesso</td>
 </tr>
 <tr>
 <td><strong><code>/dev/net/tun</code></strong></td>
-<td><code>slirp4netns</code> (rootless networking) and VM taps</td>
+<td><code>slirp4netns</code> (rede rootless) e taps de VM</td>
 <td><code>test -e /dev/net/tun</code></td>
 </tr>
 <tr>
-<td><strong>overlayfs</strong> with the new mount API and <code>lowerdir+</code> (Linux <strong>6.5</strong> or newer)</td>
-<td>container root filesystems are overlay mounts built with <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>, one <code>lowerdir+</code> call per layer — see <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
+<td><strong>overlayfs</strong> com a nova API de mount e <code>lowerdir+</code> (Linux <strong>6.5</strong> ou mais recente)</td>
+<td>os sistemas de ficheiros raiz dos containers são mounts overlay construídos com <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>, uma chamada <code>lowerdir+</code> por camada — ver <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
 <td><code>uname -r</code></td>
 </tr>
 <tr>
-<td><strong><code>br_netfilter</code></strong> loaded, <code>net.bridge.bridge-nf-call-iptables=1</code></td>
-<td>namespace isolation is enforced in nftables <code>forward</code> chains; without this module traffic between two containers on the same bridge never reaches them, and isolation is silently inert</td>
+<td><strong><code>br_netfilter</code></strong> carregado, <code>net.bridge.bridge-nf-call-iptables=1</code></td>
+<td>o isolamento de namespace é imposto em chains <code>forward</code> do nftables; sem este módulo o tráfego entre dois containers na mesma bridge nunca lhes chega, e o isolamento fica inerte em silêncio</td>
 <td><code>delonix system doctor</code></td>
 </tr>
 <tr>
 <td><strong>KVM</strong> (<code>/dev/kvm</code>)</td>
-<td>only for microVMs — see <a href="09-microvm-setup.html">09</a></td>
+<td>só para microVMs — ver <a href="09-microvm-setup.html">09</a></td>
 <td><code>test -w /dev/kvm</code></td>
 </tr>
 </tbody>
 </table></div>
-<p>The 6.5 requirement has <strong>no preflight check</strong>: an older kernel fails when the first container
-rootfs is mounted, not at startup (ADR-0037 records this as a deliberate choice).</p>
-<p>On older Debian kernels unprivileged user namespaces are switched off by
-<code>kernel.unprivileged_userns_clone=0</code>; the installer sets it to <code>1</code>.</p>
-<h2 id="host-packages">Host packages</h2>
-<p>The source of truth is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, which is also the
-official installer (it is published as a release asset). It detects the package manager through
-<code>/etc/os-release</code> and supports <strong>apt</strong> (Debian, Ubuntu and derivatives), <strong>dnf</strong> (Fedora, RHEL,
-CentOS Stream, Rocky, AlmaLinux), <strong>zypper</strong> (openSUSE, SLES) and <strong>pacman</strong> (Arch and
-derivatives). Prebuilt binaries exist only for <strong>x86_64</strong>; on other architectures build from
-source.</p>
-<p>To run containers the engine needs:</p>
+<p>O requisito do 6.5 <strong>não tem verificação prévia</strong>: um kernel mais antigo falha quando o primeiro rootfs
+de container é montado, não no arranque (o ADR-0037 regista isto como uma escolha deliberada).</p>
+<p>Em kernels Debian mais antigos os user namespaces sem privilégio estão desligados por
+<code>kernel.unprivileged_userns_clone=0</code>; o instalador põe-no a <code>1</code>.</p>
+<h2 id="host-packages">Pacotes do host</h2>
+<p>A fonte de verdade é o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, que é também o
+instalador oficial (é publicado como asset de release). Detecta o gestor de pacotes através de
+<code>/etc/os-release</code> e suporta <strong>apt</strong> (Debian, Ubuntu e derivados), <strong>dnf</strong> (Fedora, RHEL,
+CentOS Stream, Rocky, AlmaLinux), <strong>zypper</strong> (openSUSE, SLES) e <strong>pacman</strong> (Arch e
+derivados). Só existem binários pré-compilados para <strong>x86_64</strong>; noutras arquitecturas compila a partir
+do código-fonte.</p>
+<p>Para correr containers o motor precisa de:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Command</th>
-<th>Package (apt / dnf names)</th>
-<th>Why</th>
+<th>Comando</th>
+<th>Pacote (nomes apt / dnf)</th>
+<th>Porquê</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>slirp4netns</code></td>
 <td><code>slirp4netns</code></td>
-<td>rootless networking and published ports — without it <code>run -p</code> fails</td>
+<td>rede rootless e portas publicadas — sem ele o <code>run -p</code> falha</td>
 </tr>
 <tr>
 <td><code>newuidmap</code> / <code>newgidmap</code></td>
 <td><code>uidmap</code> / <code>shadow-utils</code></td>
-<td>setuid helpers that map more than one uid into the user namespace; without them images with a non-root user fail in <code>chown()</code></td>
+<td>helpers setuid que mapeiam mais do que um uid no user namespace; sem eles as imagens com um utilizador não-root falham no <code>chown()</code></td>
 </tr>
 <tr>
 <td><code>nft</code></td>
 <td><code>nftables</code></td>
-<td>SDN firewall, isolation and port DNAT</td>
+<td>firewall da SDN, isolamento e DNAT de portas</td>
 </tr>
 <tr>
 <td><code>ip</code></td>
 <td><code>iproute2</code> / <code>iproute</code></td>
-<td>veth, bridge and netns plumbing</td>
+<td>ligação de veth, bridge e netns</td>
 </tr>
 <tr>
-<td><code>conntrack</code> (optional)</td>
+<td><code>conntrack</code> (opcional)</td>
 <td><code>conntrack</code> / <code>conntrack-tools</code></td>
-<td>cleaning up connections when a port is unpublished</td>
+<td>limpar ligações quando uma porta deixa de ser publicada</td>
 </tr>
 </tbody>
 </table></div>
-<p>For VMs, <code>qemu-img</code>, <code>cloud-localds</code> (<code>cloud-image-utils</code>), <code>virsh</code> (libvirt) and/or
-Cloud Hypervisor with its firmware — see <a href="09-microvm-setup.html">09</a>. For building VM images,
+<p>Para VMs, <code>qemu-img</code>, <code>cloud-localds</code> (<code>cloud-image-utils</code>), <code>virsh</code> (libvirt) e/ou
+Cloud Hypervisor com o seu firmware — ver <a href="09-microvm-setup.html">09</a>. Para construir imagens de VM,
 <code>libguestfs-tools</code> (<code>install.sh --with-image-build</code>).</p>
-<p>You also need a <strong>subordinate uid/gid range</strong> for your user in <code>/etc/subuid</code> and <code>/etc/subgid</code>;
-without it the user namespace can map only one uid.</p>
-<h3 id="the-quickest-way-to-a-working-host">The quickest way to a working host</h3>
-<p>You do not have to replicate the installer by hand. To install only the host dependencies and
-configuration, keeping the binary you build yourself:</p>
+<p>Precisas também de um <strong>intervalo subordinado de uid/gid</strong> para o teu utilizador em <code>/etc/subuid</code> e
+<code>/etc/subgid</code>; sem ele o user namespace só consegue mapear um uid.</p>
+<h3 id="the-quickest-way-to-a-working-host">O caminho mais rápido para um host a funcionar</h3>
+<p>Não tens de replicar o instalador à mão. Para instalar só as dependências e a configuração do host,
+mantendo o binário que tu próprio compilas:</p>
 <div class="code" data-shell><pre><code class="language-bash">bash scripts/install.sh --no-binary
 </code></pre></div>
-<p>Read the flag list at the top of the script first: some flags change host-wide security settings
-(<code>--low-ports</code> lets any local program bind ports from 80, <code>--with-image-build</code> makes
-<code>/boot/vmlinuz-*</code> world-readable), and <code>--no-tune</code> skips the kernel modules and sysctls, including
-<code>br_netfilter</code>.</p>
-<h3 id="memory-and-disk">Memory and disk</h3>
-<p>There is no fixed minimum. What costs resources is what you run: container images and layers,
-VM disks, and the Rust <code>target/</code> directory itself (debug builds of the whole workspace take
-several gigabytes). Keep an eye on free disk space — kubelets in a local cluster start evicting
-pods on disk pressure, which then looks like an engine problem.</p>
-<h2 id="diagnosing-the-host">Diagnosing the host</h2>
-<p>Build the binary (see <a href="02-build-and-test.html">02</a>) and ask it. The commands below are
-read-only unless you pass <code>--delegate</code>:</p>
+<p>Lê primeiro a lista de flags no topo do script: algumas flags mudam definições de segurança de todo o
+host (<code>--low-ports</code> deixa qualquer programa local ligar-se a portas a partir da 80, <code>--with-image-build</code>
+torna <code>/boot/vmlinuz-*</code> legível por todos), e <code>--no-tune</code> salta os módulos de kernel e os sysctls,
+incluindo o <code>br_netfilter</code>.</p>
+<h3 id="memory-and-disk">Memória e disco</h3>
+<p>Não há um mínimo fixo. O que custa recursos é o que corres: imagens e camadas de containers, discos de
+VM, e o próprio directório <code>target/</code> do Rust (builds de debug do workspace inteiro ocupam vários
+gigabytes). Vigia o espaço livre em disco — os kubelets de um cluster local começam a despejar pods
+sob pressão de disco, o que depois parece um problema do motor.</p>
+<h2 id="diagnosing-the-host">Diagnosticar o host</h2>
+<p>Compila o binário (ver <a href="02-build-and-test.html">02</a>) e pergunta-lhe. Os comandos abaixo são só de
+leitura, a menos que passes <code>--delegate</code>:</p>
 <div class="code" data-shell><pre><code class="language-bash">./target/debug/delonix system doctor          # is every prerequisite met? says how to fix each
 ./target/debug/delonix system info            # rootless?, cgroup delegation, network infra, counts
 ./target/debug/delonix system setup           # diagnose cgroup delegation
 ./target/debug/delonix system resources       # which controllers are delegated, which flags are ignored
 </code></pre></div>
-<p><code>delonix system doctor --strict</code> exits non-zero when a check fails, which is useful in a
-provisioning script. If you run these on a machine that already has a Delonix installation in use,
-isolate the state first (see <a href="02-build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a>).</p>
-<h2 id="known-host-traps">Known host traps</h2>
-<h3 id="ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: AppArmor blocks user namespaces for your dev binary</h3>
-<p>Recent Ubuntu sets <code>kernel.apparmor_restrict_unprivileged_userns=1</code>. A binary without an AppArmor
-profile then cannot create a user namespace, and the engine dies at <code>unshare()</code> with <code>EPERM</code> —
-which reads like an engine bug.</p>
-<p><code>install.sh</code> installs a profile (<code>/etc/apparmor.d/delonix</code>, <code>flags=(unconfined)</code> with <code>userns</code>),
-but that profile is <strong>bound to one path</strong>: <code>&lt;install dir&gt;/delonix</code> (<code>/usr/local/bin/delonix</code> by
-default, <code>~/.local/bin/delonix</code> with <code>--user</code>). A binary you just built at
-<code>target/debug/delonix</code> — or copied to <code>/tmp</code> — is <strong>not</strong> covered.</p>
-<p>Options, from least to most invasive:</p>
+<p>O <code>delonix system doctor --strict</code> sai com código diferente de zero quando uma verificação falha, o que é
+útil num script de provisionamento. Se correres estes comandos numa máquina que já tem uma instalação
+do Delonix em uso, isola primeiro o estado (ver <a href="02-build-and-test.html#isolating-the-engines-state">Isolar o estado do motor</a>).</p>
+<h2 id="known-host-traps">Armadilhas conhecidas do host</h2>
+<h3 id="ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: o AppArmor bloqueia user namespaces para o teu binário de desenvolvimento</h3>
+<p>O Ubuntu recente define <code>kernel.apparmor_restrict_unprivileged_userns=1</code>. Um binário sem perfil
+AppArmor não consegue então criar um user namespace, e o motor morre no <code>unshare()</code> com <code>EPERM</code> —
+o que se lê como um bug do motor.</p>
+<p>O <code>install.sh</code> instala um perfil (<code>/etc/apparmor.d/delonix</code>, <code>flags=(unconfined)</code> com <code>userns</code>),
+mas esse perfil está <strong>preso a um caminho</strong>: <code>&lt;install dir&gt;/delonix</code> (<code>/usr/local/bin/delonix</code> por
+omissão, <code>~/.local/bin/delonix</code> com <code>--user</code>). Um binário que acabaste de compilar em
+<code>target/debug/delonix</code> — ou que copiaste para <code>/tmp</code> — <strong>não</strong> está coberto.</p>
+<p>Opções, da menos para a mais invasiva:</p>
 <ol>
-<li>Add a second profile for your development path (for example your worktree's
-   <code>target/debug/delonix</code>), following the same shape as the one the installer writes, and load it
-   with <code>sudo apparmor_parser -r &lt;file&gt;</code>. This touches nothing that is already running.</li>
-<li>Install your build to the profiled path (<code>sudo install -m 0755 target/debug/delonix /usr/local/bin/</code>)
-   — <strong>only on a machine where no Delonix workload is in use</strong>. The installed binary is what boot
-   units (<code>ExecStart=&lt;exe&gt; container start …</code>) and the servers re-execute, so on a host with live
-   workloads a debug build would silently become the production engine.</li>
-<li>Set <code>kernel.apparmor_restrict_unprivileged_userns=0</code> — this lowers a host-wide boundary; only
-   on a machine you own.</li>
+<li>Acrescenta um segundo perfil para o teu caminho de desenvolvimento (por exemplo o
+   <code>target/debug/delonix</code> do teu worktree), com a mesma forma do que o instalador escreve, e carrega-o
+   com <code>sudo apparmor_parser -r &lt;file&gt;</code>. Isto não toca em nada do que já está a correr.</li>
+<li>Instala o teu build no caminho com perfil (<code>sudo install -m 0755 target/debug/delonix /usr/local/bin/</code>)
+   — <strong>só numa máquina onde nenhum workload do Delonix esteja em uso</strong>. O binário instalado é o que as
+   units de boot (<code>ExecStart=&lt;exe&gt; container start …</code>) e os servidores re-executam, por isso num host
+   com workloads vivos um build de debug tornar-se-ia em silêncio o motor de produção.</li>
+<li>Define <code>kernel.apparmor_restrict_unprivileged_userns=0</code> — isto baixa uma fronteira de todo o host;
+   só numa máquina que é tua.</li>
 </ol>
-<h3 id="cgroup-delegation-limits-are-accepted-and-silently-ignored">cgroup delegation: limits are accepted and silently ignored</h3>
-<p><code>--memory</code>, <code>--cpus</code> and <code>--pids-limit</code> only work if the shell you run the engine from sits in a
-<strong>delegated</strong> cgroup. Without delegation the flags are parsed, accepted and inert: the container
-runs with no limit. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the
-same requirement.</p>
-<p>The common case is an <strong>SSH session</strong>: its <code>session-N.scope</code> is a <em>sibling</em> of
-<code>user@&lt;uid&gt;.service</code>, and moving a process between them requires writing to a cgroup owned by root.
-The per-command fix needs no root:</p>
+<h3 id="cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Delegação de cgroup: os limites são aceites e ignorados em silêncio</h3>
+<p><code>--memory</code>, <code>--cpus</code> e <code>--pids-limit</code> só funcionam se a shell a partir da qual corres o motor estiver
+num cgroup <strong>delegado</strong>. Sem delegação as flags são lidas, aceites e ficam inertes: o container
+corre sem limite. Isto é uma regra do cgroup v2, não uma limitação do Delonix — o Podman rootless tem
+o mesmo requisito.</p>
+<p>O caso comum é uma <strong>sessão SSH</strong>: o seu <code>session-N.scope</code> é <em>irmão</em> do
+<code>user@&lt;uid&gt;.service</code>, e mover um processo entre os dois exige escrever num cgroup que pertence ao root.
+A correcção por comando não precisa de root:</p>
 <div class="code" data-shell><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 </code></pre></div>
-<p>For long-lived workloads, use a systemd <strong>user</strong> unit with <code>Delegate=yes</code>. Some hosts delegate only
-<code>cpu memory pids</code> to user sessions; <code>cpuset</code> and <code>io</code> may never be available rootless, and
-<code>delonix system resources</code> names the flags that will be ignored. <code>delonix system setup --delegate</code>
-writes a system-wide drop-in (needs root, takes effect at the next login) when the <code>cpu</code>
-controller itself is missing.</p>
-<h3 id="a-stale-delonix-on-your-path">A stale <code>delonix</code> on your <code>PATH</code></h3>
-<p>If Delonix is installed on the machine, <code>delonix</code> on your <code>PATH</code> is the installed release, not your
-tree. Always run <code>./target/debug/delonix</code> (or <code>target/release/delonix</code>) when you test a change.
-<code>--version</code> shows the commit and the distance from the last tag
-(<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>), because between releases two builds share the same
-version number.</p>
-<h3 id="other-traps-you-may-hit">Other traps you may hit</h3>
+<p>Para workloads de longa duração, usa uma unit systemd de <strong>utilizador</strong> com <code>Delegate=yes</code>. Alguns
+hosts delegam às sessões de utilizador só <code>cpu memory pids</code>; <code>cpuset</code> e <code>io</code> podem nunca estar
+disponíveis em rootless, e o <code>delonix system resources</code> nomeia as flags que vão ser ignoradas. O
+<code>delonix system setup --delegate</code> escreve um drop-in para todo o sistema (precisa de root, faz efeito
+no próximo login) quando falta o próprio controlador <code>cpu</code>.</p>
+<h3 id="a-stale-delonix-on-your-path">Um <code>delonix</code> antigo no teu <code>PATH</code></h3>
+<p>Se o Delonix estiver instalado na máquina, o <code>delonix</code> do teu <code>PATH</code> é a release instalada, não a tua
+árvore. Corre sempre <code>./target/debug/delonix</code> (ou <code>target/release/delonix</code>) quando testas uma mudança.
+O <code>--version</code> mostra o commit e a distância à última tag
+(<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>), porque entre releases dois builds partilham o mesmo
+número de versão.</p>
+<h3 id="other-traps-you-may-hit">Outras armadilhas que podes encontrar</h3>
 <ul>
-<li><strong>Ports below 1024</strong> fail rootless with <code>slirp_add_hostfwd failed</code>: the port is bound by
-  <code>slirp4netns</code>, an unprivileged process. Use a high port, or opt in with <code>install.sh --low-ports</code>.</li>
-<li><strong>Hosted CI runners</strong> (GitHub-hosted) block unprivileged user namespaces. The chaos workflow
-  detects this and reports <code>skipped</code>, not <code>success</code>; to exercise the live paths you need a real
-  host, a self-hosted runner or a VM.</li>
-<li><strong>VM firmware and image-building traps</strong> (the Cloud Hypervisor firmware choice, an old <code>passt</code>
-  in libguestfs builds, <code>/boot/vmlinuz-*</code> permissions) are covered in <a href="09-microvm-setup.html">09</a>.</li>
+<li><strong>Portas abaixo de 1024</strong> falham em rootless com <code>slirp_add_hostfwd failed</code>: a porta é ligada pelo
+  <code>slirp4netns</code>, um processo sem privilégio. Usa uma porta alta, ou faz opt-in com <code>install.sh --low-ports</code>.</li>
+<li><strong>Runners de CI alojados</strong> (alojados pelo GitHub) bloqueiam user namespaces sem privilégio. O workflow
+  de caos detecta isto e reporta <code>skipped</code>, não <code>success</code>; para exercitar os caminhos ao vivo precisas
+  de um host real, de um runner self-hosted ou de uma VM.</li>
+<li><strong>As armadilhas de firmware de VM e de construção de imagens</strong> (a escolha do firmware do Cloud
+  Hypervisor, um <code>passt</code> antigo nos builds do libguestfs, as permissões de <code>/boot/vmlinuz-*</code>) são
+  tratadas em <a href="09-microvm-setup.html">09</a>.</li>
 </ul>
-<div class="pager"><a href="00-start-here.html"><span>← Anterior</span>0. Start here</a><a class="next" href="02-build-and-test.html"><span>Seguinte →</span>2. Clone, build and test</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/01-environment.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/01-environment.md</code></p></main>
+<div class="pager"><a href="00-start-here.html"><span>← Anterior</span>0. Start here</a><a class="next" href="02-build-and-test.html"><span>Seguinte →</span>2. Clonar, compilar e testar</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/01-environment.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/pt-AO/01-environment.md</code></p></main>
 <aside class="toc"><h5>Nesta página</h5><div class="toc">
 <ul>
 <li><a href="#toolchain">Toolchain</a><ul>
-<li><a href="#protoc-required-to-build">protoc (required to build)</a></li>
-<li><a href="#optional-tools-only-for-specific-gates">Optional tools, only for specific gates</a></li>
+<li><a href="#protoc-required-to-build">protoc (necessário para compilar)</a></li>
+<li><a href="#optional-tools-only-for-specific-gates">Ferramentas opcionais, só para gates específicos</a></li>
 </ul>
 </li>
-<li><a href="#kernel-requirements">Kernel requirements</a></li>
-<li><a href="#host-packages">Host packages</a><ul>
-<li><a href="#the-quickest-way-to-a-working-host">The quickest way to a working host</a></li>
-<li><a href="#memory-and-disk">Memory and disk</a></li>
+<li><a href="#kernel-requirements">Requisitos de kernel</a></li>
+<li><a href="#host-packages">Pacotes do host</a><ul>
+<li><a href="#the-quickest-way-to-a-working-host">O caminho mais rápido para um host a funcionar</a></li>
+<li><a href="#memory-and-disk">Memória e disco</a></li>
 </ul>
 </li>
-<li><a href="#diagnosing-the-host">Diagnosing the host</a></li>
-<li><a href="#known-host-traps">Known host traps</a><ul>
-<li><a href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: AppArmor blocks user namespaces for your dev binary</a></li>
-<li><a href="#cgroup-delegation-limits-are-accepted-and-silently-ignored">cgroup delegation: limits are accepted and silently ignored</a></li>
-<li><a href="#a-stale-delonix-on-your-path">A stale delonix on your PATH</a></li>
-<li><a href="#other-traps-you-may-hit">Other traps you may hit</a></li>
+<li><a href="#diagnosing-the-host">Diagnosticar o host</a></li>
+<li><a href="#known-host-traps">Armadilhas conhecidas do host</a><ul>
+<li><a href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: o AppArmor bloqueia user namespaces para o teu binário de desenvolvimento</a></li>
+<li><a href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Delegação de cgroup: os limites são aceites e ignorados em silêncio</a></li>
+<li><a href="#a-stale-delonix-on-your-path">Um delonix antigo no teu PATH</a></li>
+<li><a href="#other-traps-you-may-hit">Outras armadilhas que podes encontrar</a></li>
 </ul>
 </li>
 </ul>

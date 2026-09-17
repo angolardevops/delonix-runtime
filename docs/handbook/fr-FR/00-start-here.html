@@ -59,19 +59,19 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Guide du contributeur</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Rechercher <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/00-start-here.html">EN · English</option><option value="../pt-AO/00-start-here.html">PT-AO · Português (Angola)</option><option value="../fr-FR/00-start-here.html" selected>FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manuel du contributeur</a>
 <a class="on" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="01-environment.html">1. Préparer votre environnement</a>
+<a class="" href="02-build-and-test.html">2. Cloner, compiler et tester</a>
+<a class="" href="03-rust-primer.html">3. Initiation à Rust pour cette base de code</a>
+<a class="" href="04-cloud-native-primer.html">4. Initiation au cloud native</a>
 <a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="06-crates.html">6. Les crates</a>
+<a class="" href="07-system-design-interview.html">7. Entretien de conception de système — le Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile et VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construire des microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Flux de contribution</a>
+<a class="" href="11-publishing-docs.html">11. Publier la documentation</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
@@ -126,8 +126,10 @@ your toolchain compiles and runs tests — nothing about the host. Expected: a l
 <div class="code" data-shell><pre><code class="language-bash">./target/debug/delonix --version
 ./target/debug/delonix --help
 </code></pre></div>
-<p>Expected: <code>--version</code> prints <code>delonix &lt;version&gt;</code> followed by a <code>commit:</code> line; between releases it
-also says how far the build is from the last tag (<code>+N commits since vX.Y.Z</code>). <code>--help</code> prints
+<p>Expected: <code>--version</code> prints <code>delonix &lt;version&gt;</code> on the first line, a one-line description of the
+engine on the second, and then a line of the form <code>commit: &lt;sha&gt; · built: &lt;date&gt; · &lt;licence&gt;</code>;
+between releases the <code>commit:</code> part also says how far the build is from the last tag
+(<code>+N commits since vX.Y.Z</code>). A short <code>get started:</code> block follows. <code>--help</code> prints
 <code>Usage: delonix [OPTIONS] &lt;COMMAND&gt;</code>, a <code>Commands:</code> list and a <code>COMMAND MAP</code>.</p>
 <p>Always use <code>./target/debug/delonix</code>, never a <code>delonix</code> found on your <code>PATH</code> — that one is an
 installed release and is usually older (<a href="01-environment.html#a-stale-delonix-on-your-path">01</a>).</p>
@@ -166,8 +168,9 @@ exit=4
 <p>What this proves: the <code>state root:</code> line is <strong>your scratch directory</strong> (so you are not touching real
 state), the engine runs rootless, and errors carry a class in the exit code (4 = not found — see
 <a href="03-rust-primer.html#32-errors-one-error-and-exit-codes-derived-from-its-type">03</a>). If
-<code>cgroup2 delegated:</code> says <code>no</code>, resource limits will not work in this session; that is a host
-setting, explained in <a href="01-environment.html#cgroup-delegation-limits-are-accepted-and-silently-ignored">01</a>.</p>
+<code>cgroup2 delegated:</code> says <code>no</code>, <code>container run</code> refuses <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> in this
+session (exit 69) and <code>--cpuset</code>/<code>--io-weight</code> have no effect; that is a host setting, explained in
+<a href="01-environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">01</a>.</p>
 <p>When you are done experimenting with networking later, tear the isolated network infra down with
 the same two variables exported: <code>./target/debug/delonix net netns down</code>.</p>
 <h2 id="your-first-contribution-end-to-end">Your first contribution, end to end</h2>
@@ -245,7 +248,8 @@ change is measured against are in <a href="13-cloud-native-standards.html">13 �
 both before you open the PR, not after the first round of comments.</p>
 <h3 id="8-after-the-merge">8. After the merge</h3>
 <p>Remove the worktree <strong>and</strong> the branch — the branch survives <code>worktree remove</code>:</p>
-<div class="code" data-shell><pre><code class="language-bash">git worktree remove ../.worktrees/delonix-runtime/&lt;task&gt;
+<div class="code" data-shell><pre><code class="language-bash">cd ../../../delonix-runtime    # from the worktree of step 2 back to the clone
+git worktree remove ../.worktrees/delonix-runtime/&lt;task&gt;
 git branch -D &lt;topic&gt;/&lt;task&gt;
 </code></pre></div>
 <h2 id="where-does-my-change-go">Where does my change go?</h2>
@@ -345,7 +349,7 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 <tbody>
 <tr>
 <td><strong>The engine knows no consumer.</strong> No product, platform, control plane, console or agent that uses the engine is named in <code>crates/</code>, <code>bins/</code>, <code>proto/</code> or the manifests, comments included; no tenant, account, plan or billing.</td>
-<td><em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>; enforced by <code>CONSUMER_NAMES</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
+<td><em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. The named consumers are enforced by <code>CONSUMER_NAMES</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (a fixed list of names, matched by regular expression); the ban on tenant, account, plan and billing concepts is not matched by any gate and is checked in review</td>
 </tr>
 <tr>
 <td><strong>Daemonless.</strong> No resident process by default; a new one needs an ADR with evidence of what systemd could not do.</td>
@@ -400,15 +404,23 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
   about an approach) or <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/bug_report.md" target="_blank" rel="noopener">the bug report template</a>.</li>
 <li>A security problem goes through <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener">private vulnerability reporting</a>, not an issue.</li>
 </ul>
-<p>Include what the bug report template asks for, because it is what a maintainer needs to answer
-without a round trip:</p>
+<p>The bug report template asks for:</p>
 <ul>
-<li><code>delonix --version</code> of the binary you ran (the full output, including the <code>commit:</code> line);</li>
-<li>distro and kernel version, rootless or root, and how you built or installed it;</li>
-<li>the exact command or manifest, and whether <code>DELONIX_ROOT</code>/<code>DELONIX_NET_RUNTIME_DIR</code> were set;</li>
-<li>what you expected, and the <strong>full, untrimmed</strong> output of what happened;</li>
-<li>whether it reproduces every time, sometimes, or once;</li>
-<li>what you already read and tried (the page, the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> section, the ADR).</li>
+<li>the output of <code>delonix --version</code>;</li>
+<li>distro and kernel version, rootless or root, and whether you installed with <code>install.sh</code>,
+  downloaded a binary, or built from source;</li>
+<li>the exact command or manifest that triggers it;</li>
+<li>what you expected, and the <strong>full, untrimmed</strong> output of what actually happened;</li>
+<li>whether it reproduces every time, sometimes, or only once;</li>
+<li>anything else that might be relevant.</li>
+</ul>
+<p>This handbook additionally recommends two things the template does not ask, because they save a
+round trip:</p>
+<ul>
+<li>the <strong>whole</strong> <code>--version</code> output of the binary you ran, including the <code>commit:</code> line (between
+  releases every build reports the same version number, and only the commit tells them apart);</li>
+<li>whether <code>DELONIX_ROOT</code>/<code>DELONIX_NET_RUNTIME_DIR</code> were set, and what you already read and tried
+  (the page, the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> section, the ADR).</li>
 </ul>
 <h2 id="progress-checklist">Progress checklist</h2>
 <ul>
@@ -427,7 +439,7 @@ without a round trip:</p>
 <li>[ ] My PR fills every section of the template, including what was <em>not</em> validated.</li>
 <li>[ ] After the merge, I removed my worktree and my branch.</li>
 </ul>
-<div class="pager"><a href="index.html"><span>← Précédent</span>Delonix Runtime — Contributor Handbook</a><a class="next" href="01-environment.html"><span>Suivant →</span>1. Preparing your environment</a></div>
+<div class="pager"><a href="index.html"><span>← Précédent</span>Delonix Runtime — Manuel du contributeur</a><a class="next" href="01-environment.html"><span>Suivant →</span>1. Préparer votre environnement</a></div>
 <p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/00-start-here.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/00-start-here.md</code></p></main>
 <aside class="toc"><h5>Sur cette page</h5><div class="toc">
 <ul>

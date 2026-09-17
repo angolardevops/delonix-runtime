@@ -74,8 +74,10 @@ your toolchain compiles and runs tests — nothing about the host. Expected: a l
 ./target/debug/delonix --help
 ```
 
-Expected: `--version` prints `delonix <version>` followed by a `commit:` line; between releases it
-also says how far the build is from the last tag (`+N commits since vX.Y.Z`). `--help` prints
+Expected: `--version` prints `delonix <version>` on the first line, a one-line description of the
+engine on the second, and then a line of the form `commit: <sha> · built: <date> · <licence>`;
+between releases the `commit:` part also says how far the build is from the last tag
+(`+N commits since vX.Y.Z`). A short `get started:` block follows. `--help` prints
 `Usage: delonix [OPTIONS] <COMMAND>`, a `Commands:` list and a `COMMAND MAP`.
 
 Always use `./target/debug/delonix`, never a `delonix` found on your `PATH` — that one is an
@@ -123,8 +125,9 @@ exit=4
 What this proves: the `state root:` line is **your scratch directory** (so you are not touching real
 state), the engine runs rootless, and errors carry a class in the exit code (4 = not found — see
 [03](03-rust-primer.md#32-errors-one-error-and-exit-codes-derived-from-its-type)). If
-`cgroup2 delegated:` says `no`, resource limits will not work in this session; that is a host
-setting, explained in [01](01-environment.md#cgroup-delegation-limits-are-accepted-and-silently-ignored).
+`cgroup2 delegated:` says `no`, `container run` refuses `-m`/`--cpus`/`--cpu-weight` in this
+session (exit 69) and `--cpuset`/`--io-weight` have no effect; that is a host setting, explained in
+[01](01-environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced).
 
 When you are done experimenting with networking later, tear the isolated network infra down with
 the same two variables exported: `./target/debug/delonix net netns down`.
@@ -225,6 +228,7 @@ both before you open the PR, not after the first round of comments.
 Remove the worktree **and** the branch — the branch survives `worktree remove`:
 
 ```bash
+cd ../../../delonix-runtime    # from the worktree of step 2 back to the clone
 git worktree remove ../.worktrees/delonix-runtime/<task>
 git branch -D <topic>/<task>
 ```
@@ -270,7 +274,7 @@ Each rule is enforced by a gate, a review, or both. The link is where it is writ
 
 | Rule | Source |
 |---|---|
-| **The engine knows no consumer.** No product, platform, control plane, console or agent that uses the engine is named in `crates/`, `bins/`, `proto/` or the manifests, comments included; no tenant, account, plan or billing. | *«Identidade e fronteira do motor»* at the top of [`AGENTS.md`](../../AGENTS.md); enforced by `CONSUMER_NAMES` in `scripts/arch_fitness.py` |
+| **The engine knows no consumer.** No product, platform, control plane, console or agent that uses the engine is named in `crates/`, `bins/`, `proto/` or the manifests, comments included; no tenant, account, plan or billing. | *«Identidade e fronteira do motor»* at the top of [`AGENTS.md`](../../AGENTS.md). The named consumers are enforced by `CONSUMER_NAMES` in `scripts/arch_fitness.py` (a fixed list of names, matched by regular expression); the ban on tenant, account, plan and billing concepts is not matched by any gate and is checked in review |
 | **Daemonless.** No resident process by default; a new one needs an ADR with evidence of what systemd could not do. | [`AGENTS.md`](../../AGENTS.md) (same section); [10 — Architecture rules](10-contributing-workflow.md#architecture-rules-the-gates-enforce) |
 | **Rootless-first.** The normal path runs unprivileged; privilege is an explicit, announced opt-in. A new privilege boundary needs a GO/NO-GO spike and an ADR. | [`AGENTS.md`](../../AGENTS.md); [10 — When to write an ADR](10-contributing-workflow.md#when-to-write-an-adr) |
 | **Dependencies point inward, the directory is the layer, versions live only in the root.** | [ADR-0040](../adr/0040-engine-restructuring-layers-ports-node-contract.md); `scripts/arch_fitness.py` |
@@ -300,15 +304,23 @@ If you are still stuck, **ask** on GitHub:
   about an approach) or [the bug report template](../../.github/ISSUE_TEMPLATE/bug_report.md).
 - A security problem goes through [private vulnerability reporting](../../SECURITY.md), not an issue.
 
-Include what the bug report template asks for, because it is what a maintainer needs to answer
-without a round trip:
+The bug report template asks for:
 
-- `delonix --version` of the binary you ran (the full output, including the `commit:` line);
-- distro and kernel version, rootless or root, and how you built or installed it;
-- the exact command or manifest, and whether `DELONIX_ROOT`/`DELONIX_NET_RUNTIME_DIR` were set;
-- what you expected, and the **full, untrimmed** output of what happened;
-- whether it reproduces every time, sometimes, or once;
-- what you already read and tried (the page, the `AGENTS.md` section, the ADR).
+- the output of `delonix --version`;
+- distro and kernel version, rootless or root, and whether you installed with `install.sh`,
+  downloaded a binary, or built from source;
+- the exact command or manifest that triggers it;
+- what you expected, and the **full, untrimmed** output of what actually happened;
+- whether it reproduces every time, sometimes, or only once;
+- anything else that might be relevant.
+
+This handbook additionally recommends two things the template does not ask, because they save a
+round trip:
+
+- the **whole** `--version` output of the binary you ran, including the `commit:` line (between
+  releases every build reports the same version number, and only the commit tells them apart);
+- whether `DELONIX_ROOT`/`DELONIX_NET_RUNTIME_DIR` were set, and what you already read and tried
+  (the page, the `AGENTS.md` section, the ADR).
 
 ## Progress checklist
 

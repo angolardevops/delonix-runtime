@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>7. System Design Interview — the Delonix Engine · Delonix Runtime — Manual do contribuidor</title>
+<title>7. System Design Interview — o Delonix Engine · Delonix Runtime — Manual do contribuidor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,183 +59,187 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Manual do contribuidor</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Pesquisar <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/07-system-design-interview.html">EN · English</option><option value="../pt-AO/07-system-design-interview.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/07-system-design-interview.html">FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manual do Contribuidor</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
-<a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="on" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="01-environment.html">1. Preparar o teu ambiente</a>
+<a class="" href="02-build-and-test.html">2. Clonar, compilar e testar</a>
+<a class="" href="03-rust-primer.html">3. Introdução ao Rust para esta base de código</a>
+<a class="" href="04-cloud-native-primer.html">4. Introdução ao cloud native</a>
+<a class="" href="05-architecture.html">5. Arquitectura</a>
+<a class="" href="06-crates.html">6. Os crates</a>
+<a class="on" href="07-system-design-interview.html">7. System Design Interview — o Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile e VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construir microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Fluxo de contribuição</a>
+<a class="" href="11-publishing-docs.html">11. Publicar a documentação</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="7-system-design-interview-the-delonix-engine">7. System Design Interview — the Delonix Engine</h1>
+<main><h1 id="7-system-design-interview-the-delonix-engine">7. System Design Interview — o Delonix Engine</h1>
 <blockquote>
-<p><strong>Interviewer:</strong> Design a container and microVM engine for a single Linux node. It must run
-without root by default, without a resident daemon, and it must not know who is calling it.</p>
+<p><strong>Entrevistador:</strong> Desenha um motor de containers e de microVMs para um único nó Linux. Tem de
+correr sem root por omissão, sem um daemon residente, e não pode saber quem o está a chamar.</p>
 </blockquote>
-<p>This page answers that prompt the way a strong candidate would, and then checks every answer
-against what the Delonix Engine actually does. Each deep dive ends with <strong>Where it lives in the
-code</strong>, listing files and symbols that were read for this page. For the structural map (layers,
-crate graph, processes, state paths) read <a href="05-architecture.html">5. Architecture</a> first; this page
-is about <em>why</em> the design is shaped that way.</p>
-<p>Numbers quoted below are <strong>measurements recorded in the repository with their date or release</strong>,
-not timeless facts. Re-measure before relying on one.</p>
+<p>Esta página responde a esse enunciado como um candidato forte responderia, e depois confronta cada
+resposta com o que o Delonix Engine faz de facto. Cada aprofundamento termina com <strong>Onde vive no
+código</strong>, que lista os ficheiros e símbolos lidos para esta página. Para o mapa estrutural (camadas,
+grafo de crates, processos, caminhos de estado) lê primeiro <a href="05-architecture.html">5. Arquitectura</a>;
+esta página é sobre <em>porque</em> é que o desenho tem esta forma.</p>
+<p>Os números citados abaixo são <strong>medições registadas no repositório com a sua data ou release</strong>, não
+factos intemporais. Volta a medir antes de confiares num deles.</p>
 <hr />
-<h2 id="1-requirements">1. Requirements</h2>
+<h2 id="1-requirements">1. Requisitos</h2>
 <blockquote>
-<p><strong>Candidate:</strong> Before drawing boxes I want to pin down what "done" means.</p>
+<p><strong>Candidato:</strong> Antes de desenhar caixas, quero fixar o que significa «feito».</p>
 </blockquote>
-<h3 id="functional">Functional</h3>
+<h3 id="functional">Funcionais</h3>
 <ul>
-<li>Run <strong>containers</strong> from OCI images: pull, unpack, create, start, stop, exec, logs, remove.</li>
-<li>Run <strong>microVMs</strong> from disk images, on more than one hypervisor.</li>
-<li><strong>Networks</strong> between workloads: private bridges, published ports, firewall, DNS names,
-  isolation by namespace.</li>
-<li><strong>Storage</strong>: named volumes, bind mounts, network shares.</li>
-<li><strong>Declarative</strong> operation: a manifest of Kinds, <code>plan</code>, <code>apply</code>, drift detection, prune.</li>
-<li>Serve the <strong>kubelet</strong> through the CRI, so the engine can be a Kubernetes node runtime.</li>
-<li>Expose the same operations to <strong>local programs</strong> (an API, an AI tool protocol), not only a shell.</li>
+<li>Correr <strong>containers</strong> a partir de imagens OCI: pull, descompactar, criar, arrancar, parar, exec,
+  logs, remover.</li>
+<li>Correr <strong>microVMs</strong> a partir de imagens de disco, em mais do que um hypervisor.</li>
+<li><strong>Redes</strong> entre cargas: bridges privadas, portas publicadas, firewall, nomes DNS, isolamento por
+  namespace.</li>
+<li><strong>Armazenamento</strong>: volumes nomeados, bind mounts, partilhas de rede.</li>
+<li>Operação <strong>declarativa</strong>: um manifesto de Kinds, <code>plan</code>, <code>apply</code>, detecção de deriva, poda.</li>
+<li>Servir o <strong>kubelet</strong> através do CRI, para que o motor possa ser o runtime de um nó Kubernetes.</li>
+<li>Expor as mesmas operações a <strong>programas locais</strong> (uma API, um protocolo de ferramentas de IA), e
+  não só a uma shell.</li>
 </ul>
-<h3 id="non-functional">Non-functional</h3>
+<h3 id="non-functional">Não funcionais</h3>
 <ul>
-<li><strong>Rootless-first.</strong> The normal path runs as an unprivileged user; privilege is opt-in and said.</li>
-<li><strong>Daemonless.</strong> No process runs "just in case". Persistence belongs to systemd or to a
-  per-workload process with an owner.</li>
-<li><strong>No consumer knowledge.</strong> No tenant, account, plan or billing; the engine validates its own
-  contract instead of trusting a caller to refuse what it cannot do.</li>
-<li><strong>Observable</strong> through open standards (OpenTelemetry, Prometheus) and an event log.</li>
-<li><strong>Honest failure.</strong> A refused or half-done operation is reported as such, with a reason and a
-  stable exit class — never <code>0</code> over a failure.</li>
-<li><strong>Survives restarts of its own control processes</strong> without disturbing running workloads.</li>
+<li><strong>Rootless-first.</strong> O caminho normal corre como um utilizador sem privilégio; o privilégio é
+  opt-in e dito.</li>
+<li><strong>Daemonless.</strong> Nenhum processo corre «só por via das dúvidas». A persistência pertence ao systemd
+  ou a um processo por carga com dono.</li>
+<li><strong>Nenhum conhecimento do consumidor.</strong> Nenhum inquilino, conta, plano ou faturação; o motor valida
+  o seu próprio contrato em vez de confiar num chamador para recusar o que ele não consegue fazer.</li>
+<li><strong>Observável</strong> através de padrões abertos (OpenTelemetry, Prometheus) e de um registo de eventos.</li>
+<li><strong>Falha honesta.</strong> Uma operação recusada ou feita a meio é reportada como tal, com uma razão e uma
+  classe de saída estável — nunca <code>0</code> por cima de uma falha.</li>
+<li><strong>Sobrevive a reinícios dos seus próprios processos de controlo</strong> sem perturbar as cargas que
+  estão a correr.</li>
 </ul>
 <hr />
-<h2 id="2-background-constraints-what-an-unprivileged-linux-user-may-do">2. Background constraints: what an unprivileged Linux user may do</h2>
+<h2 id="2-background-constraints-what-an-unprivileged-linux-user-may-do">2. Restrições de fundo: o que um utilizador Linux sem privilégio pode fazer</h2>
 <blockquote>
-<p><strong>Candidate:</strong> Rootless changes the design more than any other requirement, so let me list the
-kernel rules I have to live with.</p>
+<p><strong>Candidato:</strong> O rootless muda o desenho mais do que qualquer outro requisito, por isso deixa-me
+listar as regras do kernel com que tenho de viver.</p>
 </blockquote>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>The kernel lets an unprivileged user…</th>
-<th>…but not</th>
-<th>Consequence for the design</th>
+<th>O kernel deixa um utilizador sem privilégio…</th>
+<th>…mas não</th>
+<th>Consequência para o desenho</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>create a <strong>user namespace</strong> and be uid 0 inside it (<code>CLONE_NEWUSER</code>)</td>
-<td>map arbitrary host uids</td>
-<td>a single-uid map unless <code>newuidmap</code>/<code>newgidmap</code> and <code>/etc/subuid</code> grant a range; an image that <code>chown</code>s to uid 101 needs the range</td>
+<td>criar um <strong>user namespace</strong> e ser uid 0 dentro dele (<code>CLONE_NEWUSER</code>)</td>
+<td>mapear uids arbitrários do host</td>
+<td>um mapa de uid único, a menos que <code>newuidmap</code>/<code>newgidmap</code> e <code>/etc/subuid</code> concedam um intervalo; uma imagem que faça <code>chown</code> para o uid 101 precisa do intervalo</td>
 </tr>
 <tr>
-<td>create net, mount, PID, IPC, UTS namespaces <strong>owned by that user namespace</strong>, with <code>CAP_NET_ADMIN</code>/<code>CAP_SYS_ADMIN</code> inside them</td>
-<td>touch the host's initial network namespace</td>
-<td>networking is built <em>inside</em> a namespace the engine owns; reaching the host needs a user-space bridge (<code>slirp4netns</code>)</td>
+<td>criar namespaces de rede, mount, PID, IPC e UTS <strong>pertencentes a esse user namespace</strong>, com <code>CAP_NET_ADMIN</code>/<code>CAP_SYS_ADMIN</code> dentro deles</td>
+<td>mexer no network namespace inicial do host</td>
+<td>a rede é construída <em>dentro</em> de um namespace de que o motor é dono; chegar ao host precisa de uma bridge em user space (<code>slirp4netns</code>)</td>
 </tr>
 <tr>
-<td><code>mount</code> overlayfs, tmpfs, binds <strong>inside its own mount namespace</strong></td>
-<td>mount in the host's view</td>
-<td>the container's own init performs the overlay mount after <code>clone</code></td>
+<td>fazer <code>mount</code> de overlayfs, tmpfs e binds <strong>dentro do seu próprio mount namespace</strong></td>
+<td>montar na vista do host</td>
+<td>o próprio init do container faz o mount do overlay depois do <code>clone</code></td>
 </tr>
 <tr>
-<td>write limits into a <strong>delegated</strong> cgroup v2 subtree</td>
-<td>write cgroups it was not delegated</td>
-<td>limits only apply where systemd delegated them (<code>systemd-run --user --scope -p Delegate=yes</code>)</td>
+<td>escrever limites numa subárvore cgroup v2 <strong>delegada</strong></td>
+<td>escrever em cgroups que não lhe foram delegados</td>
+<td>os limites só se aplicam onde o systemd os delegou (<code>systemd-run --user --scope -p Delegate=yes</code>)</td>
 </tr>
 <tr>
-<td><code>setns</code> into a namespace owned by its own user namespace</td>
-<td><code>setns</code> into a namespace owned by <em>another</em> process's user namespace</td>
-<td>joining a network created elsewhere means <strong>entering that owner's user namespace first</strong></td>
+<td>fazer <code>setns</code> para um namespace pertencente ao seu próprio user namespace</td>
+<td>fazer <code>setns</code> para um namespace pertencente ao user namespace de <em>outro</em> processo</td>
+<td>juntar-se a uma rede criada noutro sítio significa <strong>entrar primeiro no user namespace desse dono</strong></td>
 </tr>
 <tr>
-<td>run <code>clone</code> safely in a <strong>single-threaded</strong> process</td>
-<td>assume <code>clone</code> is safe in a multi-threaded one (<code>clone</code> does not run <code>pthread_atfork</code> handlers)</td>
-<td>servers built on <code>tokio</code> must hand process creation to a fresh process</td>
+<td>correr <code>clone</code> em segurança num processo <strong>com uma só thread</strong></td>
+<td>assumir que <code>clone</code> é seguro num processo com várias threads (o <code>clone</code> não corre os handlers <code>pthread_atfork</code>)</td>
+<td>servidores construídos sobre <code>tokio</code> têm de entregar a criação de processos a um processo novo</td>
 </tr>
 </tbody>
 </table></div>
-<p>Two host policies turn up constantly and look like engine bugs: Ubuntu 23.10+ restricts
-unprivileged user namespaces through AppArmor (a profile is attached to the <em>path</em> of the
-executable that creates the namespace), and a plain SSH session is not a delegated cgroup scope.</p>
+<p>Duas políticas do host aparecem constantemente e parecem bugs do motor: o Ubuntu 23.10+ restringe os
+user namespaces sem privilégio através do AppArmor (um perfil é associado ao <em>caminho</em> do executável
+que cria o namespace), e uma sessão SSH simples não é um scope de cgroup delegado.</p>
 <hr />
 <h2 id="3-api">3. API</h2>
 <blockquote>
-<p><strong>Candidate:</strong> One set of operations, several doors — and one of them is the contract the
-others converge on.</p>
+<p><strong>Candidato:</strong> Um conjunto de operações, várias portas de entrada — e uma delas é o contrato para
+onde as outras convergem.</p>
 </blockquote>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Door</th>
-<th>Encoding</th>
-<th>Who uses it</th>
+<th>Porta de entrada</th>
+<th>Codificação</th>
+<th>Quem a usa</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>CLI <code>delonix</code></td>
-<td>argv, stable exit classes</td>
-<td>operators, scripts</td>
+<td>argv, classes de saída estáveis</td>
+<td>operadores, scripts</td>
 </tr>
 <tr>
-<td>Node contract <code>delonix.node.v1</code></td>
-<td>gRPC <strong>and</strong> HTTP/JSON on the <strong>same</strong> local unix socket</td>
-<td>any local client (design; not served yet)</td>
+<td>Contrato de nó <code>delonix.node.v1</code></td>
+<td>gRPC <strong>e</strong> HTTP/JSON no <strong>mesmo</strong> socket unix local</td>
+<td>qualquer cliente local (desenho; ainda não servido)</td>
 </tr>
 <tr>
 <td>CRI <code>runtime.v1</code></td>
-<td>gRPC on a unix socket</td>
-<td>the kubelet</td>
+<td>gRPC num socket unix</td>
+<td>o kubelet</td>
 </tr>
 <tr>
 <td>MCP</td>
-<td>JSON-RPC over stdio</td>
-<td>a local AI client, one session per process</td>
+<td>JSON-RPC sobre stdio</td>
+<td>um cliente de IA local, uma sessão por processo</td>
 </tr>
 </tbody>
 </table></div>
-<p>Design points of the node contract, all written in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> D4 and
+<p>Pontos de desenho do contrato de nó, todos escritos no
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> D4 e no
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>:</p>
 <ul>
-<li><strong>The <code>.proto</code> files are the source of truth</strong>; the REST mapping comes from <code>google.api.http</code>
-  annotations and the OpenAPI document is generated from them. A CI gate checks format, lint,
-  breaking changes against the last release, that every RPC except the bidirectional streams
-  (<code>Exec</code>, <code>Console</code>) has an HTTP mapping, and that the committed OpenAPI is the generated one.</li>
-<li><strong>Resource-oriented</strong> services (<code>ContainerService</code>, <code>PodService</code>, <code>VirtualMachineService</code>,
+<li><strong>Os ficheiros <code>.proto</code> são a fonte de verdade</strong>; o mapeamento REST vem das anotações
+  <code>google.api.http</code> e o documento OpenAPI é gerado a partir delas. Um gate de CI verifica o formato,
+  o lint, as quebras de compatibilidade face à última release, que cada RPC excepto os streams
+  bidireccionais (<code>Exec</code>, <code>Console</code>) tem um mapeamento HTTP, e que o OpenAPI commitado é o gerado.</li>
+<li>Serviços <strong>orientados a recursos</strong> (<code>ContainerService</code>, <code>PodService</code>, <code>VirtualMachineService</code>,
   <code>NetworkService</code>, <code>VolumeService</code>, <code>ImageService</code>, <code>StackService</code>, <code>NodeService</code>,
-  <code>OperationService</code>), one request message per RPC, identity as explicit <code>namespace</code>/<code>name</code>.</li>
-<li><strong>Long work returns an <code>Operation</code></strong> that is persisted before it is acknowledged, so a
-  restarted server can say <code>Interrupted</code> instead of <code>RUNNING</code> forever.</li>
-<li><strong>Local only.</strong> <code>SO_PEERCRED</code>, same uid, no TCP, no TLS, no identity in the engine —
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> rejected a remote API. Anything off-node puts
-  its own proxy in front.</li>
+  <code>OperationService</code>), uma mensagem de pedido por RPC, identidade explícita como <code>namespace</code>/<code>name</code>.</li>
+<li><strong>O trabalho longo devolve uma <code>Operation</code></strong> que é persistida antes de ser confirmada, para que um
+  servidor reiniciado possa dizer <code>Interrupted</code> em vez de <code>RUNNING</code> para sempre.</li>
+<li><strong>Só local.</strong> <code>SO_PEERCRED</code>, o mesmo uid, sem TCP, sem TLS, sem identidade no motor — o
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> rejeitou uma API remota. Qualquer coisa fora do
+  nó põe o seu próprio proxy à frente.</li>
 </ul>
 <blockquote>
-<p><strong>Interviewer:</strong> Why not just a REST server?</p>
-<p><strong>Candidate:</strong> Because gRPC clients and shell tooling both deserve a first-class encoding, and
-generating both from one file keeps them from drifting. The CLI is not a second-class citizen
-either: its exit classes (<code>delonix-model/src/exitcode.rs</code>) are the <code>DX_*</code> classes ADR-0040 D4
-requires the contract's errors to carry.</p>
+<p><strong>Entrevistador:</strong> Porque não simplesmente um servidor REST?</p>
+<p><strong>Candidato:</strong> Porque os clientes gRPC e as ferramentas de shell merecem ambos uma codificação de
+primeira classe, e gerar as duas a partir de um único ficheiro impede-as de divergir. A CLI também
+não é cidadã de segunda: as suas classes de saída (<code>delonix-model/src/exitcode.rs</code>) são as classes
+<code>DX_*</code> que o ADR-0040 D4 exige que os erros do contrato carreguem.</p>
 </blockquote>
-<p><strong>Where it lives in the code:</strong> <code>proto/delonix/node/v1/{node,compute,infra,operations,common}.proto</code>;
+<p><strong>Onde vive no código:</strong> <code>proto/delonix/node/v1/{node,compute,infra,operations,common}.proto</code>;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/lib.rs</code></a>
 (<code>serve_blocking</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mcp-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/src/main.rs</code></a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>.
-Honest status: no crate references <code>delonix.node.v1</code> yet; local programs use the management API
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>), which ADR-0042 plans to migrate and remove.</p>
+Estado honesto: nenhum crate referencia ainda o <code>delonix.node.v1</code>; os programas locais usam a API de
+gestão (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>), que o ADR-0042 planeia migrar e remover.</p>
 <hr />
-<h2 id="4-high-level-design">4. High-level design</h2>
+<h2 id="4-high-level-design">4. Desenho de alto nível</h2>
 <blockquote>
-<p><strong>Candidate:</strong> I will layer it so the rules of the domain never import the kernel, and I will
-make every long-lived process own exactly one thing.</p>
+<p><strong>Candidato:</strong> Vou organizá-lo em camadas para que as regras do domínio nunca importem o kernel, e
+vou fazer com que cada processo de vida longa seja dono de exactamente uma coisa.</p>
 </blockquote>
 <pre class="mermaid">graph TB
     subgraph IF[&quot;interfaces&quot;]
@@ -261,47 +265,48 @@ make every long-lived process own exactly one thing.</p>
     AD --- STATE
 </pre>
 <ul>
-<li><strong>Layers</strong> (ADR-0040 D1): foundation → contexts → adapters/providers → interfaces → binaries,
-  enforced by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.</li>
-<li><strong>State</strong> is JSON records and content-addressed files under one root, with atomic writes and
-  <code>flock</code> around read-modify-write — no database, because there is no daemon to own one.</li>
-<li><strong>Processes</strong> exist per workload (a supervisor that is the container's parent, the init, a log
-  shim) and per node when networking is used (a <em>pin</em> that only holds namespaces, a restartable
-  <em>control</em> process, one <code>slirp4netns</code> uplink). Nothing else stays up.</li>
+<li><strong>Camadas</strong> (ADR-0040 D1): fundação → contextos → adaptadores/providers → interfaces → binários,
+  impostas por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.</li>
+<li>O <strong>estado</strong> são registos JSON e ficheiros endereçados por conteúdo debaixo de um só root, com
+  escritas atómicas e <code>flock</code> à volta de cada ler-modificar-escrever — sem base de dados, porque não
+  há nenhum daemon para ser dono dela.</li>
+<li>Os <strong>processos</strong> existem por carga (um supervisor que é o pai do container, o init, um shim de
+  logs) e por nó quando a rede é usada (um <em>pin</em> que só segura namespaces, um processo de <em>controlo</em>
+  reiniciável, um uplink <code>slirp4netns</code>). Mais nada fica de pé.</li>
 </ul>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/store.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/store.rs</code></a> (<code>Store::update</code>, <code>JsonStore::update</code>,
 <code>write_atomic</code>); <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code>;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> (<code>run_supervised</code>).</p>
 <hr />
-<h2 id="5-deep-dives">5. Deep dives</h2>
-<h3 id="51-a-rootless-container-run">5.1 A rootless <code>container run</code></h3>
+<h2 id="5-deep-dives">5. Aprofundamentos</h2>
+<h3 id="51-a-rootless-container-run">5.1 Um <code>container run</code> rootless</h3>
 <blockquote>
-<p><strong>Interviewer:</strong> Walk me through <code>run -d -p 8080:80 nginx</code> as an unprivileged user.</p>
-<p><strong>Candidate:</strong> Resolve everything that can fail <em>before</em> creating a process; then create the
-process stopped, configure it from outside, and only release it when it is ready.</p>
+<p><strong>Entrevistador:</strong> Leva-me pelo <code>run -d -p 8080:80 nginx</code> como utilizador sem privilégio.</p>
+<p><strong>Candidato:</strong> Resolver tudo o que pode falhar <em>antes</em> de criar um processo; depois criar o
+processo parado, configurá-lo de fora, e só o libertar quando estiver pronto.</p>
 </blockquote>
 <ol>
-<li><strong>Resolve.</strong> One run specification (<code>RunOpts</code>) comes from every entry — CLI flags, a Pod
-   manifest, the Docker API, the CRI. <code>resolve_run</code> pulls the image if absent, prepares the root
-   filesystem, resolves <code>--user</code> against it, resolves volumes and devices, and validates security
-   options. Every refusal happens here, and a guard removes the prepared directory on any early
-   return.</li>
-<li><strong>Record.</strong> <code>build_record</code> turns the specification into a <code>Container</code> record (pure).</li>
-<li><strong>Choose the parent.</strong> For a detached start the CLI forks a <strong>supervisor</strong> that becomes the
-   container's parent (<code>launch::start</code> → <code>should_supervise</code>). Only the real parent can <code>waitpid</code>,
-   so this is what makes the real exit code and <code>--restart</code> possible without a daemon.</li>
-<li><strong>Clone.</strong> <code>spawn</code> calls <code>clone</code> with new mount, UTS, PID and IPC namespaces, plus user and
-   network namespaces when the container gets its own. The child blocks on a pipe.</li>
-<li><strong>Configure from outside, in a fixed order.</strong> The parent writes the uid/gid maps
-   (<code>write_userns_maps</code>, through <code>newuidmap</code> when a subuid range exists), sets up the cgroup, runs
-   the <code>on_started</code> hook (here: <code>slirp_attach</code> with the <code>-p</code> ports, so the network exists before
-   the entrypoint runs), and only then writes the "go" byte.</li>
-<li><strong>Inside the child.</strong> <code>container_init</code> mounts the overlay (<code>mount_overlay_if_marked</code>), binds
-   volumes, sets up <code>/dev</code>, <code>pivot_root</code>s, masks <code>/proc</code> paths, applies capabilities, seccomp and
-   <code>no_new_privs</code>, and signals <strong>"mounted"</strong> on a second pipe before <code>execvp</code>.</li>
-<li><strong>Publish the record last.</strong> The parent waits for the "mounted" byte (<code>wait_for_mounts</code>),
-   briefly for the exec result, and only then <code>store.save</code>s <code>Running</code>.</li>
+<li><strong>Resolver.</strong> Uma especificação de execução (<code>RunOpts</code>) vem de cada entrada — flags da CLI, um
+   manifesto de Pod, a API Docker, o CRI. O <code>resolve_run</code> faz pull da imagem se estiver ausente,
+   prepara o sistema de ficheiros raiz, resolve o <code>--user</code> contra ele, resolve volumes e
+   dispositivos, e valida as opções de segurança. Todas as recusas acontecem aqui, e uma guarda
+   remove o directório preparado em qualquer retorno antecipado.</li>
+<li><strong>Registar.</strong> O <code>build_record</code> transforma a especificação num registo <code>Container</code> (puro).</li>
+<li><strong>Escolher o pai.</strong> Para um arranque destacado a CLI faz fork de um <strong>supervisor</strong> que se torna o
+   pai do container (<code>launch::start</code> → <code>should_supervise</code>). Só o pai real pode fazer <code>waitpid</code>, por
+   isso é isto que torna possíveis o código de saída real e o <code>--restart</code> sem daemon.</li>
+<li><strong>Clone.</strong> O <code>spawn</code> chama <code>clone</code> com namespaces novos de mount, UTS, PID e IPC, mais user e
+   network namespaces quando o container tem os seus próprios. O filho fica bloqueado num pipe.</li>
+<li><strong>Configurar de fora, por uma ordem fixa.</strong> O pai escreve os mapas de uid/gid
+   (<code>write_userns_maps</code>, através de <code>newuidmap</code> quando existe um intervalo de subuid), prepara o
+   cgroup, corre o hook <code>on_started</code> (aqui: <code>slirp_attach</code> com as portas de <code>-p</code>, para que a rede
+   exista antes de o entrypoint correr), e só então escreve o byte «go».</li>
+<li><strong>Dentro do filho.</strong> O <code>container_init</code> monta o overlay (<code>mount_overlay_if_marked</code>), faz bind dos
+   volumes, prepara o <code>/dev</code>, faz <code>pivot_root</code>, mascara caminhos de <code>/proc</code>, aplica capabilities,
+   seccomp e <code>no_new_privs</code>, e sinaliza <strong>«mounted»</strong> num segundo pipe antes do <code>execvp</code>.</li>
+<li><strong>Publicar o registo em último.</strong> O pai espera pelo byte «mounted» (<code>wait_for_mounts</code>), espera
+   brevemente pelo resultado do exec, e só então faz <code>store.save</code> de <code>Running</code>.</li>
 </ol>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix
@@ -322,68 +327,66 @@ process stopped, configure it from outside, and only release it when it is ready
     I-&gt;&gt;I: execvp
 </pre>
 <blockquote>
-<p><strong>Interviewer:</strong> Why wait for "mounted" before saving the record?</p>
-<p><strong>Candidate:</strong> Because the record is what <em>other</em> processes read to decide they can enter the
-container. Before <code>pivot_root</code>, <code>setns</code> into the child's mount namespace lands in the host's
-filesystem. Measured on 2026-08-28 with a probe that could tell the two filesystems apart: before
-the fix, 5 of 54 <code>exec</code>s issued straight after <code>run -d</code> ran outside the container; after it,
-0 of 54. The
-wait has three outcomes (<code>MountWait::{Ready, InitExited, Unknown}</code>) and a ceiling, so a hung
-mount cannot hang <code>run</code>.</p>
+<p><strong>Entrevistador:</strong> Porquê esperar por «mounted» antes de guardar o registo?</p>
+<p><strong>Candidato:</strong> Porque o registo é o que <em>outros</em> processos lêem para decidir que podem entrar no
+container. Antes do <code>pivot_root</code>, um <code>setns</code> para o mount namespace do filho aterra no sistema de
+ficheiros do host. Medido a 2026-08-28 com uma sonda capaz de distinguir os dois sistemas de
+ficheiros: antes da correcção, 5 de 54 <code>exec</code>s lançados logo a seguir a <code>run -d</code> correram fora do
+container; depois dela, 0 de 54. A
+espera tem três desfechos (<code>MountWait::{Ready, InitExited, Unknown}</code>) e um tecto, por isso um mount
+pendurado não pode pendurar o <code>run</code>.</p>
 </blockquote>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> (<code>resolve_run</code>,
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> (<code>resolve_run</code>,
 <code>build_record</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/launch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/launch.rs</code></a> (<code>start</code>, <code>should_supervise</code>,
 <code>WorkloadRuntime</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a> (<code>HostWorkload</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> (<code>run_supervised</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> (<code>spawn</code>, <code>write_userns_maps</code>, <code>setup_cgroup</code>,
 <code>container_init</code>, <code>setup_rootfs</code>, <code>wait_for_mounts</code>, <code>MountWait</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a> (<code>cmd_run</code>).</p>
-<h3 id="52-networking-pin-control-slirp-nftables">5.2 Networking: pin, control, slirp, nftables</h3>
+<h3 id="52-networking-pin-control-slirp-nftables">5.2 Rede: pin, controlo, slirp, nftables</h3>
 <blockquote>
-<p><strong>Interviewer:</strong> Containers need to talk to each other, be isolated by namespace, and publish
-ports — without <code>CAP_NET_ADMIN</code> on the host.</p>
-<p><strong>Candidate:</strong> Build a private network world inside one namespace the user owns, bridge it to
-the host in user space, and do all filtering there.</p>
+<p><strong>Entrevistador:</strong> Os containers precisam de falar uns com os outros, de ser isolados por namespace
+e de publicar portas — sem <code>CAP_NET_ADMIN</code> no host.</p>
+<p><strong>Candidato:</strong> Construir um mundo de rede privado dentro de um namespace de que o utilizador é dono,
+ligá-lo ao host em user space, e fazer toda a filtragem aí.</p>
 </blockquote>
-<p><strong>Split holding from serving.</strong> A single "holder" process that owned the namespaces <em>and</em> served
-requests would take every workload's network down whenever it restarted. So:</p>
+<p><strong>Separar segurar de servir.</strong> Um único processo «holder» que fosse dono dos namespaces <em>e</em> servisse
+pedidos derrubaria a rede de todas as cargas sempre que reiniciasse. Por isso:</p>
 <ul>
-<li>the <strong>pin</strong> (<code>delonix netns pin</code>) creates the user, network and mount namespaces itself and
-  then only sleeps (<code>pin_main</code>). Its pid is what every <code>nsenter -t &lt;pin&gt;</code> targets, and it never
-  changes;</li>
-<li>the <strong>control</strong> process (<code>delonix netns control</code>, started through <code>nsenter</code> into the pin's
-  namespaces) serves a <code>0600</code> unix socket restricted by <code>SO_PEERCRED</code>, and runs DNS, DHCP and
-  Router Advertisements. It is restartable: <code>ensure_up</code> restarts only it when the pin is alive;</li>
-<li><strong>one <code>slirp4netns</code></strong> attaches <code>tap0</code> to the pin's netns and exposes an API socket for
-  <code>add_hostfwd</code>.</li>
+<li>o <strong>pin</strong> (<code>delonix netns pin</code>) cria ele próprio os namespaces de user, de rede e de mount e depois
+  só dorme (<code>pin_main</code>). O seu pid é o alvo de cada <code>nsenter -t &lt;pin&gt;</code>, e nunca muda;</li>
+<li>o processo de <strong>controlo</strong> (<code>delonix netns control</code>, arrancado através de <code>nsenter</code> para dentro dos
+  namespaces do pin) serve um socket unix <code>0600</code> restringido por <code>SO_PEERCRED</code>, e corre DNS, DHCP e
+  Router Advertisements. É reiniciável: o <code>ensure_up</code> reinicia só ele quando o pin está vivo;</li>
+<li><strong>um <code>slirp4netns</code></strong> liga o <code>tap0</code> à netns do pin e expõe um socket de API para <code>add_hostfwd</code>.</li>
 </ul>
-<p>The pin creates its namespaces <strong>in-process</strong> (the caller writes the id maps through two pipes)
-instead of via <code>unshare(1)</code>, because an AppArmor profile is attached by the path of the executable
-that creates the user namespace, and <code>/usr/bin/unshare</code> is not the engine's.</p>
-<p><strong>Joining a custom network.</strong> A container on <code>--net web</code> cannot <code>setns</code> into a netns owned by the
-pin's user namespace. The CLI therefore asks the control process to create the netns and veth
-(<code>attach …</code>), then <strong>re-executes itself</strong> inside the pin's user and mount namespaces
-(<code>nsenter -t &lt;pin&gt; -U -m -n -- ip netns exec &lt;netns&gt; delonix netns run &lt;spec&gt;</code>); the second pass
-inherits the user and network namespaces instead of creating them.</p>
-<p><strong>Publishing a port</strong> is two steps, both dataplane state rather than process state (which is why
-ports can be added and removed on a running container): <code>add_hostfwd</code> on the single slirp, and a
-DNAT rule inside the pin's netns (<code>publish …</code> on the control socket).</p>
-<p><strong>Filtering with a verdict map.</strong> The ingress table (<code>table ip dlxing</code>) is built so per-container
-policy costs the same no matter how many containers exist:</p>
+<p>O pin cria os seus namespaces <strong>no próprio processo</strong> (o chamador escreve os mapas de ids através de
+dois pipes) em vez de via <code>unshare(1)</code>, porque um perfil AppArmor é associado pelo caminho do
+executável que cria o user namespace, e o <code>/usr/bin/unshare</code> não é o do motor.</p>
+<p><strong>Juntar-se a uma rede custom.</strong> Um container em <code>--net web</code> não consegue fazer <code>setns</code> para uma
+netns pertencente ao user namespace do pin. Por isso a CLI pede ao processo de controlo que crie a
+netns e o veth (<code>attach …</code>), e depois <strong>re-executa-se a si própria</strong> dentro dos namespaces de user e
+de mount do pin (<code>nsenter -t &lt;pin&gt; -U -m -n -- ip netns exec &lt;netns&gt; delonix netns run &lt;spec&gt;</code>); a
+segunda passagem herda os namespaces de user e de rede em vez de os criar.</p>
+<p><strong>Publicar uma porta</strong> são dois passos, ambos estado do dataplane e não estado de processo (é por
+isso que se podem acrescentar e remover portas num container a correr): <code>add_hostfwd</code> no slirp único,
+e uma regra DNAT dentro da netns do pin (<code>publish …</code> no socket de controlo).</p>
+<p><strong>Filtrar com um verdict map.</strong> A tabela de ingress (<code>table ip dlxing</code>) é construída de modo a que a
+política por container custe o mesmo seja qual for o número de containers:</p>
 <div class="code"><pre><code class="language-text">forward priority -20  fwguard   drop 169.254.0.0/16 and 127.0.0.0/8
 forward priority -10  fwdeny    established → accept; bridge pair in @netpair → verdict; bridge↔bridge → drop
 forward priority  -5  fwcont    ip daddr vmap @fwmap ; ip saddr vmap @fwmap
 forward priority   0  forward   policy drop; established; tap0; same-bridge; @netpair
 </code></pre></div>
-<p><code>fwcont</code> has two rules; each container's rules live in its own chain, reached through the <code>fwmap</code>
-verdict map keyed by IP. Traffic <strong>between</strong> networks is dropped pairwise unless a <code>NetworkRoute</code>
-puts the pair in <code>@netpair</code> — a route says the packet <em>may</em> cross, and the per-container chain
-still decides whether it is <em>allowed</em>.</p>
-<p><strong>Isolation by namespace</strong> lives in each container's chain: members of <code>@dlxns&lt;hash&gt;</code> (same
-namespace) are accepted, and <strong>new</strong> connections from any other container address (<code>@dlxall</code>) are
-dropped; replies still flow because the drop matches only <code>ct state new</code>. An explicit ingress
-policy replaces that default. IPv6 in the SDN is refused by default (<code>table ip6</code> with
-<code>policy drop</code>), because every rule above is IPv4.</p>
+<p>O <code>fwcont</code> tem duas regras; as regras de cada container vivem na sua própria chain, alcançada através
+do verdict map <code>fwmap</code> chaveado por IP. O tráfego <strong>entre</strong> redes é descartado par a par, a menos que
+uma <code>NetworkRoute</code> ponha o par em <code>@netpair</code> — uma rota diz que o pacote <em>pode</em> atravessar, e a chain
+por container continua a decidir se é <em>permitido</em>.</p>
+<p>O <strong>isolamento por namespace</strong> vive na chain de cada container: os membros de <code>@dlxns&lt;hash&gt;</code> (mesmo
+namespace) são aceites, e as ligações <strong>novas</strong> vindas de qualquer outro endereço de container
+(<code>@dlxall</code>) são descartadas; as respostas continuam a fluir porque o drop só casa com <code>ct state new</code>.
+Uma política de ingress explícita substitui esse default. O IPv6 na SDN é recusado por omissão
+(<code>table ip6</code> com <code>policy drop</code>), porque todas as regras acima são IPv4.</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix (1st pass)
     participant C as control
@@ -398,14 +401,14 @@ policy replaces that default. IPv6 in the SDN is refused by default (<code>table
     P2-&gt;&gt;P2: launch — inherits user and net namespaces
 </pre>
 <blockquote>
-<p><strong>Interviewer:</strong> The control process serves one connection at a time. Isn't that a bottleneck?</p>
-<p><strong>Candidate:</strong> It is deliberately the serialization point for netns, veth and nftables changes,
-which must not interleave. The risk is clients giving up in the queue: when v0.47.0 was
-prepared, 30 concurrent attaches with a 5-second read ceiling lost 15; with the reply ceiling
-raised (<code>CONTROL_REPLY_TIMEOUT</code>, 30 s) all 30 completed. The per-connection I/O ceiling
-(<code>CONTROL_IO_TIMEOUT</code>) exists so one stuck client cannot freeze the node's control plane.</p>
+<p><strong>Entrevistador:</strong> O processo de controlo serve uma ligação de cada vez. Não é um estrangulamento?</p>
+<p><strong>Candidato:</strong> É deliberadamente o ponto de serialização das mudanças de netns, veth e nftables, que
+não se podem intercalar. O risco são os clientes desistirem na fila: quando a v0.47.0 foi preparada,
+30 attaches concorrentes com um tecto de leitura de 5 segundos perderam 15; com o tecto da resposta
+subido (<code>CONTROL_REPLY_TIMEOUT</code>, 30 s) os 30 concluíram. O tecto de I/O por ligação
+(<code>CONTROL_IO_TIMEOUT</code>) existe para que um cliente preso não congele o plano de controlo do nó.</p>
 </blockquote>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>ensure_up</code>,
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>ensure_up</code>,
 <code>start_pin</code>, <code>pin_main</code>, <code>start_control</code>, <code>control_main</code>, <code>control_loop</code>, <code>start_slirp</code>,
 <code>attach_container</code>, <code>do_attach</code>, <code>publish_port</code>, <code>join_argv</code>, <code>ingress_table_ruleset</code>,
 <code>fw_chain_body</code>, <code>dlxns_set</code>, <code>DLXALL_SET</code>, <code>ingress_v6_refusal_ruleset</code>, <code>CONTROL_IO_TIMEOUT</code>,
@@ -413,71 +416,73 @@ raised (<code>CONTROL_REPLY_TIMEOUT</code>, 30 s) all 30 completed. The per-conn
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a> (<code>HostNetwork</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/network.rs</code></a> (<code>attach_custom_network</code>, <code>wire_network</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a> (<code>reexec_into_netns</code>, <code>run_from_spec</code>).</p>
-<h3 id="53-images-cas-shared-layers-and-the-many-layer-mount">5.3 Images: CAS, shared layers, and the many-layer mount</h3>
+<h3 id="53-images-cas-shared-layers-and-the-many-layer-mount">5.3 Imagens: CAS, camadas partilhadas e o mount de muitas camadas</h3>
 <blockquote>
-<p><strong>Interviewer:</strong> A node runs twenty containers of the same image. What is on disk?</p>
-<p><strong>Candidate:</strong> Blobs once, unpacked layers once, and one small writable directory per container.</p>
+<p><strong>Entrevistador:</strong> Um nó corre vinte containers da mesma imagem. O que está em disco?</p>
+<p><strong>Candidato:</strong> Os blobs uma vez, as camadas descompactadas uma vez, e um pequeno directório gravável
+por container.</p>
 </blockquote>
 <ul>
-<li><strong>CAS.</strong> Blobs are named by their sha256 under <code>blobs/sha256/&lt;hex&gt;</code>; writing an existing digest
-  is a no-op. A pull verifies each blob against the manifest <strong>and</strong> the manifest against the
-  digest the user pinned (<code>verify_manifest_digest</code>) — otherwise a pin would be decorative.</li>
-<li><strong>Resumable downloads.</strong> A blob download retries with <code>Range:</code> from the bytes already held
-  (<code>BLOB_ATTEMPTS</code>), and distinguishes a <code>206</code> at the requested offset (resume), a <code>206</code> elsewhere
-  and a <code>200</code> (restart). The digest check at the end makes stitching safe.</li>
-<li><strong>Shared layers.</strong> <code>prepare_overlay</code> creates <code>upper/</code>, <code>work/</code>, <code>merged/</code> for the container and
-  writes the ordered list of shared layer directories to <code>overlay-lowers</code>. The <strong>container's own
-  init</strong> mounts it, inside its mount namespace, where an unprivileged user is allowed to. The
-  contract is a file on disk rather than a field in memory because the rootless path re-executes
-  the binary and a struct does not cross that boundary.</li>
+<li><strong>CAS.</strong> Os blobs são nomeados pelo seu sha256 em <code>blobs/sha256/&lt;hex&gt;</code>; escrever um digest que já
+  existe é um no-op. Um pull verifica cada blob contra o manifesto <strong>e</strong> o manifesto contra o digest
+  que o utilizador fixou (<code>verify_manifest_digest</code>) — caso contrário um pin seria decorativo.</li>
+<li><strong>Downloads retomáveis.</strong> O download de um blob volta a tentar com <code>Range:</code> a partir dos bytes que
+  já tem (<code>BLOB_ATTEMPTS</code>), e distingue um <code>206</code> no offset pedido (retoma), um <code>206</code> noutro sítio e um
+  <code>200</code> (recomeça). A verificação do digest no fim é o que torna a costura segura.</li>
+<li><strong>Camadas partilhadas.</strong> O <code>prepare_overlay</code> cria <code>upper/</code>, <code>work/</code>, <code>merged/</code> para o container e
+  escreve a lista ordenada dos directórios de camadas partilhadas em <code>overlay-lowers</code>. É o <strong>próprio
+  init do container</strong> que o monta, dentro do seu mount namespace, onde um utilizador sem privilégio
+  tem permissão para o fazer. O contrato é um ficheiro em disco e não um campo em memória porque o
+  caminho rootless re-executa o binário e uma struct não atravessa essa fronteira.</li>
 </ul>
-<p>Back of the envelope, as recorded for v0.59.0: the previous flat copy cost each container a
-  full image tree — on one development host <code>containers/</code> held 47 GiB, most of it identical
-  copies, and each <code>run</code> of a 2.1 GiB image spent about 13 s copying. Sharing layers took that
-  directory to 7.2 GiB.
-- <strong>Many layers.</strong> The classic <code>mount(2)</code> passes <code>lowerdir=a:b:c…</code> as one string and the kernel
-  copies at most a page of it, <strong>truncating silently</strong>. Measured for
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> (validated 2026-09-06): 20 layers (4084 bytes)
-  mounted, 30 (5994 bytes) failed, and a 91-layer builder image needed 9107 bytes. The mount now
-  uses <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code> with one <code>lowerdir+</code> call per layer, so there is
-  no length ceiling.</p>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs</code></a> (<code>Cas::write</code>,
+<p>Contas de guardanapo, tal como registadas para a v0.59.0: a cópia flat anterior custava a cada
+  container uma árvore de imagem completa — num host de desenvolvimento <code>containers/</code> tinha 47 GiB,
+  quase tudo cópias idênticas, e cada <code>run</code> de uma imagem de 2,1 GiB passava cerca de 13 s a copiar.
+  Partilhar as camadas levou esse directório para 7,2 GiB.
+- <strong>Muitas camadas.</strong> O <code>mount(2)</code> clássico passa <code>lowerdir=a:b:c…</code> como uma única string e o kernel
+  copia no máximo uma página dela, <strong>truncando em silêncio</strong>. Medido para o
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> (validado a 2026-09-06): 20 camadas (4084 bytes)
+  montaram, 30 (5994 bytes) falharam, e uma imagem builder de 91 camadas precisava de 9107 bytes. O
+  mount usa agora <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code> com uma chamada <code>lowerdir+</code> por camada,
+  por isso não há tecto de comprimento.</p>
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs</code></a> (<code>Cas::write</code>,
 <code>Cas::has</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a> (<code>blob_with_progress_capped</code>,
 <code>BLOB_ATTEMPTS</code>, <code>parse_content_range</code>, <code>verify_manifest_digest</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/overlay.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/overlay.rs</code></a> (<code>prepare_overlay</code>, <code>LOWERS_FILE</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a> (<code>HostImages</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> (<code>mount_overlay_if_marked</code>, <code>fsopen_overlay</code>).</p>
-<h3 id="54-microvms-one-port-a-registry-and-the-firmware-trap">5.4 microVMs: one port, a registry, and the firmware trap</h3>
+<h3 id="54-microvms-one-port-a-registry-and-the-firmware-trap">5.4 microVMs: uma porta, um registo e a armadilha do firmware</h3>
 <blockquote>
-<p><strong>Interviewer:</strong> Add VMs without building a hypervisor abstraction that leaks everywhere.</p>
-<p><strong>Candidate:</strong> A trait per provider, a registry the composition root fills, and quirks that
-belong to the provider answered by the provider.</p>
+<p><strong>Entrevistador:</strong> Acrescenta VMs sem construir uma abstracção de hypervisor que vaze por todo o
+lado.</p>
+<p><strong>Candidato:</strong> Um trait por provider, um registo que a raiz de composição preenche, e as
+peculiaridades que pertencem ao provider respondidas pelo provider.</p>
 </blockquote>
 <ul>
-<li><strong>Port.</strong> <code>VmBackend</code> has <code>id</code>, <code>available</code>, <code>boot</code>, <code>is_running</code>, <code>ip</code>, <code>stop</code>, and optional
-  operations (<code>pause</code>, <code>snapshot</code>, <code>restore</code>, …) whose default answer is "not supported". Provider
-  facts are methods, not string checks at call sites: <code>ip_is_predicted</code> (Cloud Hypervisor's
-  address is computed from the MAC, not observed), <code>manages_own_storage</code> (a remote node owns its
-  disk), <code>destroy</code> distinct from <code>stop</code> (locally the disk is the engine's; remotely only destroy
-  releases it).</li>
-<li><strong>Registry.</strong> <code>builtin_backends</code> seeds Cloud Hypervisor and libvirt in preference order;
-  <code>register_backend</code> adds more (the Proxmox backend, registered by the CLI's composition root
-  only when configured). A registration carries a factory closure and an <code>auto_selectable</code> flag,
-  so auto-detection never constructs — and therefore never authenticates — a remote backend.
-  Registering does no I/O.</li>
-<li><strong>Networking a VM.</strong> Cloud Hypervisor runs inside the pin's netns and gets a <code>tap</code> on a network
-  bridge through the <code>VmNetwork</code> port, which the SDN implements (<code>HostVmNetwork</code>); <code>delonix-vm</code>
-  does not depend on <code>delonix-sdn</code>. Because the DHCP server is the engine's own and deterministic,
-  the lease is known before the guest boots, which is what lets namespace isolation apply to a
-  VM's address from the first packet — and why "has an IP" is not proof of a booted guest
-  (<code>sdn_reachable</code> asks by ARP from inside the netns).</li>
-<li><strong>Firmware.</strong> The Cloud Hypervisor firmware search prefers EDK2 <code>CLOUDHV.fd</code> over
-  <code>hypervisor-fw</code> (<code>DEFAULT_CH_FIRMWARES</code>, with a test fixing the order).</li>
-<li><strong>cloud-init.</strong> <code>VmConfig</code> carries intent (<code>hostname</code>, user, SSH keys); local backends realize
-  it as a NoCloud ISO whose <code>network-config</code> matches the primary NIC by <strong>MAC</strong>, and a remote
-  backend may realize it natively.</li>
+<li><strong>Porta.</strong> O <code>VmBackend</code> tem <code>id</code>, <code>available</code>, <code>boot</code>, <code>is_running</code>, <code>ip</code>, <code>stop</code>, e operações
+  opcionais (<code>pause</code>, <code>snapshot</code>, <code>restore</code>, …) cuja resposta por omissão é «não suportado». Os
+  factos do provider são métodos, não verificações de strings nos sítios de chamada:
+  <code>ip_is_predicted</code> (o endereço do Cloud Hypervisor é calculado a partir do MAC, não observado),
+  <code>manages_own_storage</code> (um nó remoto é dono do seu disco), <code>destroy</code> distinto de <code>stop</code> (localmente o
+  disco é do motor; remotamente só o destroy o liberta).</li>
+<li><strong>Registo.</strong> O <code>builtin_backends</code> semeia o Cloud Hypervisor e o libvirt por ordem de preferência; o
+  <code>register_backend</code> acrescenta mais (o backend Proxmox, registado pela raiz de composição da CLI só
+  quando configurado). Um registo transporta uma closure factory e uma flag <code>auto_selectable</code>, para
+  que a auto-detecção nunca construa — e portanto nunca autentique — um backend remoto. Registar não
+  faz I/O.</li>
+<li><strong>Rede de uma VM.</strong> O Cloud Hypervisor corre dentro da netns do pin e recebe um <code>tap</code> numa bridge de
+  rede através da porta <code>VmNetwork</code>, que a SDN implementa (<code>HostVmNetwork</code>); o <code>delonix-vm</code> não
+  depende do <code>delonix-sdn</code>. Como o servidor DHCP é do próprio motor e determinístico, o lease é
+  conhecido antes de o convidado arrancar, e é isso que permite que o isolamento de namespace se
+  aplique ao endereço de uma VM desde o primeiro pacote — e é também por isso que «tem um IP» não é
+  prova de um convidado arrancado (o <code>sdn_reachable</code> pergunta por ARP de dentro da netns).</li>
+<li><strong>Firmware.</strong> A procura de firmware do Cloud Hypervisor prefere o EDK2 <code>CLOUDHV.fd</code> ao
+  <code>hypervisor-fw</code> (<code>DEFAULT_CH_FIRMWARES</code>, com um teste que fixa a ordem).</li>
+<li><strong>cloud-init.</strong> O <code>VmConfig</code> transporta intenção (<code>hostname</code>, utilizador, chaves SSH); os backends
+  locais realizam-na como um ISO NoCloud cujo <code>network-config</code> identifica a NIC primária pelo <strong>MAC</strong>,
+  e um backend remoto pode realizá-la de forma nativa.</li>
 </ul>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>VmBackend</code>,
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (<code>VmBackend</code>,
 <code>BackendRegistration</code>, <code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>, <code>auto_detect</code>,
 <code>backend_for</code>, <code>CloudHypervisorBackend</code>, <code>LibvirtBackend</code>, <code>launch_vmm</code>, <code>DEFAULT_CH_FIRMWARES</code>,
 <code>set_network</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a> (<code>generate_seed_iso</code>);
@@ -486,29 +491,29 @@ belong to the provider answered by the provider.</p>
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>sdn_reachable</code>, <code>dhcp_lease_ip</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> (<code>ProxmoxBackend</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> (<code>register_configured</code>).</p>
-<h3 id="55-the-declarative-reconciler-without-a-state-file">5.5 The declarative reconciler, without a state file</h3>
+<h3 id="55-the-declarative-reconciler-without-a-state-file">5.5 O reconciliador declarativo, sem ficheiro de estado</h3>
 <blockquote>
-<p><strong>Interviewer:</strong> <code>apply</code> must converge, detect drift, and prune — Terraform-like — but you said
-no daemon and no database.</p>
-<p><strong>Candidate:</strong> Keep the last applied spec on the resource itself, derive ownership from a label,
-and make planning a pure function.</p>
+<p><strong>Entrevistador:</strong> O <code>apply</code> tem de convergir, detectar deriva e podar — ao estilo do Terraform —
+mas disseste sem daemon e sem base de dados.</p>
+<p><strong>Candidato:</strong> Guardar a última spec aplicada no próprio recurso, derivar a posse de uma label, e
+fazer do planeamento uma função pura.</p>
 </blockquote>
 <ul>
-<li><strong>Pure plan.</strong> <code>reconcile::plan(desired, actual, stack)</code> takes two snapshots and returns
-  <code>Vec&lt;Change&gt;</code>; it never opens a store. That makes the hard cases testable as data.</li>
-<li><strong>Three-way diff.</strong> The last applied field map is stored on the resource
-  (<code>delonix.io/last-applied</code>). A field present on the machine but absent from the manifest is
-  reverted <strong>only if we set it</strong>; otherwise it is left alone — the distinction a two-way diff
-  cannot make.</li>
-<li><strong>Ownership by label</strong> (<code>delonix.io/stack</code>). A resource with no owner is <code>Adopt</code>ed; one owned by
-  another stack is a <code>Conflict</code> and never touched; <code>--prune</code> and <code>destroy</code> only see what carries
-  the label.</li>
-<li><strong>Actions</strong> are <code>Create</code>, <code>Adopt</code>, <code>Update</code> (hot, same PID), <code>Replace</code> (refused unless
-  <code>--replace &lt;Kind&gt;/&lt;name&gt;</code> is given, checked before anything is created), <code>NoOp</code>, <code>Delete</code>,
-  <code>Conflict</code>, <code>NotConverged</code>. <code>plan --detailed-exitcode</code> answers 0/2/1 for a CI drift gate.</li>
-<li><strong>One table of Kind facts</strong> (domain, form, whether it converges, has teardown, is namespaced,
-  how presence is observed) governs the planner, apply order and teardown order, instead of lists
-  kept in sync by hand.</li>
+<li><strong>Plano puro.</strong> O <code>reconcile::plan(desired, actual, stack)</code> recebe dois snapshots e devolve
+  <code>Vec&lt;Change&gt;</code>; nunca abre um store. Isso torna os casos difíceis testáveis como dados.</li>
+<li><strong>Diff de três vias.</strong> O último mapa de campos aplicado é guardado no recurso
+  (<code>delonix.io/last-applied</code>). Um campo presente na máquina mas ausente do manifesto é revertido
+  <strong>só se fomos nós a defini-lo</strong>; caso contrário é deixado em paz — a distinção que um diff de duas
+  vias não consegue fazer.</li>
+<li><strong>Posse por label</strong> (<code>delonix.io/stack</code>). Um recurso sem dono é <code>Adopt</code>ado; um que pertence a outra
+  stack é um <code>Conflict</code> e nunca é tocado; o <code>--prune</code> e o <code>destroy</code> só vêem o que tem a label.</li>
+<li><strong>As acções</strong> são <code>Create</code>, <code>Adopt</code>, <code>Update</code> (a quente, mesmo PID), <code>Replace</code> (recusado a menos
+  que seja dado <code>--replace &lt;Kind&gt;/&lt;name&gt;</code>, verificado antes de qualquer coisa ser criada), <code>NoOp</code>,
+  <code>Delete</code>, <code>Conflict</code>, <code>NotConverged</code>. O <code>plan --detailed-exitcode</code> responde 0/2/1 para um gate de
+  deriva em CI.</li>
+<li><strong>Uma única tabela de factos dos Kinds</strong> (domínio, forma, se converge, se tem teardown, se é
+  namespaced, como é observada a presença) governa o planeador, a ordem de apply e a ordem de
+  teardown, em vez de listas mantidas em sincronia à mão.</li>
 </ul>
 <pre class="mermaid">sequenceDiagram
     participant U as operator
@@ -530,103 +535,103 @@ and make planning a pure function.</p>
         A-&gt;&gt;M: prune — Delete changes in teardown order
     end
 </pre>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a> (<code>plan</code>,
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a> (<code>plan</code>,
 <code>Action</code>, <code>Change</code>, <code>STACK_LABEL</code>, <code>LAST_APPLIED</code>, <code>hot_fields_for</code>, <code>encode_last_applied</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (<code>KindFacts</code>, <code>facts</code>, <code>stack_kinds</code>, <code>converges</code>,
 <code>has_teardown</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a> (<code>apply</code>, <code>apply_docs</code>,
 <code>refuse_unallowed</code>, <code>run_layers</code>, <code>salvage_ownership</code>, <code>converge_and_stamp</code>, <code>prune</code>,
 <code>destroy_one</code>).</p>
 <hr />
-<h2 id="6-trade-offs">6. Trade-offs</h2>
+<h2 id="6-trade-offs">6. Compromissos</h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Decision</th>
-<th>What it buys</th>
-<th>What it costs</th>
+<th>Decisão</th>
+<th>O que compra</th>
+<th>O que custa</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>No daemon</strong>; a supervisor per detached container, systemd for boot persistence</td>
-<td>no single process whose death takes every workload; each process has an obvious owner</td>
-<td>nothing sees a process die unless its own supervisor does; a caller that cannot fork starts unsupervised and the real exit code is lost; orphans need explicit reapers</td>
+<td><strong>Sem daemon</strong>; um supervisor por container destacado, systemd para a persistência no arranque</td>
+<td>nenhum processo único cuja morte leve todas as cargas; cada processo tem um dono óbvio</td>
+<td>nada vê um processo morrer a menos que o seu próprio supervisor o veja; um chamador que não consegue fazer fork arranca sem supervisão e o código de saída real perde-se; os órfãos precisam de ceifadores explícitos</td>
 </tr>
 <tr>
-<td><strong>JSON files + <code>flock</code></strong> instead of a database</td>
-<td>inspectable state, crash-tolerant, no extra dependency, works across CLI/CRI/supervisor processes</td>
-<td>no transactions or queries; the truth about liveness is reconciled on read (<code>reconcile_status</code>, <code>safe_to_signal</code>)</td>
+<td><strong>Ficheiros JSON + <code>flock</code></strong> em vez de uma base de dados</td>
+<td>estado inspeccionável, tolerante a crashes, sem dependência extra, funciona entre os processos da CLI/CRI/supervisor</td>
+<td>sem transacções nem consultas; a verdade sobre a vivacidade é reconciliada na leitura (<code>reconcile_status</code>, <code>safe_to_signal</code>)</td>
 </tr>
 <tr>
-<td><strong>User-space uplink (<code>slirp4netns</code>)</strong> instead of veth pairs in the host</td>
-<td>works with zero host privilege</td>
-<td>extra hop and CPU in user space; a loopback client appears as the slirp gateway (<code>SLIRP_GW</code>) rather than itself</td>
+<td><strong>Uplink em user space (<code>slirp4netns</code>)</strong> em vez de pares veth no host</td>
+<td>funciona com zero privilégio no host</td>
+<td>salto extra e CPU em user space; um cliente de loopback aparece como o gateway do slirp (<code>SLIRP_GW</code>) e não como ele próprio</td>
 </tr>
 <tr>
-<td><strong>Pin/control split</strong></td>
-<td>a control restart moves no wire</td>
-<td>two processes to reason about, and in-place upgrades must still recognize older pins</td>
+<td><strong>Separação pin/controlo</strong></td>
+<td>um reinício do controlo não mexe em nenhum fio</td>
+<td>dois processos sobre os quais raciocinar, e os upgrades in-place continuam a ter de reconhecer pins mais antigos</td>
 </tr>
 <tr>
-<td><strong>Re-exec instead of in-process <code>clone</code> in servers</strong></td>
-<td><code>clone</code> never runs in a multi-threaded process</td>
-<td>a process per operation, and error text crossing a process boundary — the cycle ADR-0040 removes with a launcher</td>
+<td><strong>Re-exec em vez de <code>clone</code> no próprio processo nos servidores</strong></td>
+<td>o <code>clone</code> nunca corre num processo com várias threads</td>
+<td>um processo por operação, e texto de erro a atravessar uma fronteira de processo — o ciclo que o ADR-0040 remove com um launcher</td>
 </tr>
 <tr>
-<td><strong>Overlay mounted by the container's init</strong></td>
-<td>one copy of each layer on disk; unprivileged mount</td>
-<td>a stopped container's merged view needs a helper process to hold the mount (<code>reexec_mapped_hold</code>)</td>
+<td><strong>Overlay montado pelo init do container</strong></td>
+<td>uma cópia de cada camada em disco; mount sem privilégio</td>
+<td>a vista fundida de um container parado precisa de um processo auxiliar que segure o mount (<code>reexec_mapped_hold</code>)</td>
 </tr>
 <tr>
-<td><strong>Verdict map dispatch</strong></td>
-<td>constant per-packet cost as containers grow</td>
-<td>rules are generated text; the generator and the counter reader must share formatting (<code>fw_rule_tail</code>)</td>
+<td><strong>Despacho por verdict map</strong></td>
+<td>custo por pacote constante à medida que os containers crescem</td>
+<td>as regras são texto gerado; o gerador e o leitor de contadores têm de partilhar a formatação (<code>fw_rule_tail</code>)</td>
 </tr>
 <tr>
-<td><strong>3-way diff on the resource</strong></td>
-<td>no state file to lose or diverge</td>
-<td>only fields a Kind can read back can be compared; <code>Secret</code> values are not decrypted for planning</td>
+<td><strong>Diff de 3 vias no recurso</strong></td>
+<td>nenhum ficheiro de estado para perder ou divergir</td>
+<td>só os campos que um Kind consegue ler de volta podem ser comparados; os valores de <code>Secret</code> não são decifrados para planear</td>
 </tr>
 </tbody>
 </table></div>
 <hr />
-<h2 id="7-failure-modes-and-the-limits-of-one-node">7. Failure modes and the limits of one node</h2>
+<h2 id="7-failure-modes-and-the-limits-of-one-node">7. Modos de falha e os limites de um só nó</h2>
 <blockquote>
-<p><strong>Interviewer:</strong> Tell me how it breaks.</p>
+<p><strong>Entrevistador:</strong> Diz-me como é que se parte.</p>
 </blockquote>
 <ul>
-<li><strong>The control process dies.</strong> <code>ensure_up</code> finds the pin alive and restarts only the control
-  plane inside the surviving namespaces; running workloads keep their PIDs and network.</li>
-<li><strong>The pin dies.</strong> The namespaces go with it and cannot be re-entered, so the infra is rebuilt.
-  <code>delonix net netns up</code> finds containers and pod members that were running with a network and
-  restarts them (<code>reconcile_after_respawn</code>; <code>DELONIX_NO_AUTO_RECOVER=1</code> only reports). This is
-  recovery by restart, and it reads the container store only — VMs are not recovered this way.</li>
-<li><strong>An upgrade over an older holder.</strong> A pre-split holder serving a legacy socket path is detected
-  and reported with both paths; it is deliberately <strong>not</strong> killed automatically, because that
-  would drop every workload's network.</li>
-<li><strong><code>apply</code> dies midway.</strong> Apply is fail-fast without rollback. Before creating anything it
-  validates the graph and refuses unauthorized replacements; if a layer fails, what this run
-  created is stamped with ownership (<code>salvage_ownership</code>) so a later <code>destroy</code> or <code>--prune</code> can
-  still reach it, and the failed run is recorded as a revision.</li>
-<li><strong>Leaks without a daemon.</strong> Every lease and reference is released by a normal detach, so anything
-  that dies another way leaks. Measured on 2026-08-25: one network's IPAM file held 391 leases, of
-  which 47 belonged to an existing container. The reapers respect a grace window
-  (<code>REF_MARKER_GRACE</code>) because a container being created holds a lease and a reference before it
-  has a record; the IPAM reaper is two-pass (a lease is only reclaimed if it is still orphaned on a
-  later run, past the window) and <strong>fails closed</strong> — an unreadable store is an error, never
-  "nothing is alive". Liveness counts every container record, the pod netns of pod members and
-  attached reference markers, not only running container ids (<code>cmd/prune.rs::lease_owners</code>,
-  <code>live_ref_owners</code>).</li>
-<li><strong>The mount-wait race</strong> (5.1): closed by publishing the record only after the init reports its
-  mounts; a detached start whose init exits before mounting is an error, not <code>0</code>.</li>
-<li><strong>Limits of a single node.</strong> Each network is a <code>/16</code> inside the pin's netns; every
-  netns/veth/nftables change goes through one serialized control connection; <code>slirp4netns</code>
-  throughput is user-space; and moving a VM to another host (<code>vm migrate</code>) involves real
-  downtime — live migration is a NO-GO as built
+<li><strong>O processo de controlo morre.</strong> O <code>ensure_up</code> encontra o pin vivo e reinicia só o plano de
+  controlo dentro dos namespaces sobreviventes; as cargas a correr mantêm os seus PIDs e a rede.</li>
+<li><strong>O pin morre.</strong> Os namespaces vão com ele e não se consegue voltar a entrar neles, por isso a infra
+  é reconstruída. O <code>delonix net netns up</code> encontra os containers e membros de pod que estavam a correr
+  com rede e reinicia-os (<code>reconcile_after_respawn</code>; <code>DELONIX_NO_AUTO_RECOVER=1</code> só reporta). Isto é
+  recuperação por reinício, e lê só o store de containers — as VMs não são recuperadas desta forma.</li>
+<li><strong>Um upgrade por cima de um holder mais antigo.</strong> Um holder anterior à separação a servir num
+  caminho de socket legado é detectado e reportado com os dois caminhos; deliberadamente <strong>não</strong> é
+  morto automaticamente, porque isso derrubaria a rede de todas as cargas.</li>
+<li><strong>O <code>apply</code> morre a meio.</strong> O apply é fail-fast sem rollback. Antes de criar o que quer que seja
+  valida o grafo e recusa substituições não autorizadas; se uma camada falhar, o que esta execução
+  criou é carimbado com posse (<code>salvage_ownership</code>) para que um <code>destroy</code> ou <code>--prune</code> posterior ainda
+  lhe consiga chegar, e a execução falhada é registada como uma revisão.</li>
+<li><strong>Fugas sem daemon.</strong> Cada lease e referência é libertada por um detach normal, por isso tudo o que
+  morre de outra forma deixa fuga. Medido a 2026-08-25: o ficheiro de IPAM de uma rede tinha 391
+  leases, dos quais 47 pertenciam a um container existente. Os ceifadores respeitam uma janela de
+  graça (<code>REF_MARKER_GRACE</code>) porque um container a ser criado segura um lease e uma referência antes
+  de ter registo; o ceifador de IPAM é de duas passagens (um lease só é reclamado se ainda estiver
+  órfão numa execução posterior, depois da janela) e <strong>falha fechado</strong> — um store ilegível é um erro,
+  nunca «nada está vivo». A vivacidade conta todos os registos de container, a netns de pod dos
+  membros de pod e os marcadores de referência ligados, e não só os ids de containers a correr
+  (<code>cmd/prune.rs::lease_owners</code>, <code>live_ref_owners</code>).</li>
+<li><strong>A corrida da espera pelos mounts</strong> (5.1): fechada publicando o registo só depois de o init
+  reportar os seus mounts; um arranque destacado cujo init sai antes de montar é um erro, não <code>0</code>.</li>
+<li><strong>Limites de um só nó.</strong> Cada rede é um <code>/16</code> dentro da netns do pin; cada mudança de
+  netns/veth/nftables passa por uma única ligação de controlo serializada; o débito do <code>slirp4netns</code>
+  é em user space; e mover uma VM para outro host (<code>vm migrate</code>) implica tempo de indisponibilidade
+  real — a migração ao vivo é um NO-GO tal como está construído
   (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a>).
-  Scheduling across nodes is out of scope by design.</li>
+  O escalonamento entre nós está fora de âmbito por desenho.</li>
 </ul>
-<p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>ensure_up</code>,
+<p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> (<code>ensure_up</code>,
 <code>stale_holder_message</code>, <code>reap_orphan_refs</code>, <code>REF_MARKER_GRACE</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/ipam.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/ipam.rs</code></a> (<code>reap_orphan_leases</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a> (<code>reap_orphan_slirp</code>);
@@ -635,66 +640,67 @@ and make planning a pure function.</p>
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a> (<code>salvage_ownership</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> (<code>reconcile_status</code>, <code>MountWait</code>).</p>
 <hr />
-<h2 id="8-follow-up-questions">8. Follow-up questions</h2>
-<p><strong>Why not add a small daemon for events and restarts?</strong>
-Because every resident process is a failure domain and an attack surface. The event log is an
-append-only file (<code>delonix_runtime_core::events</code>), restarts belong to the per-container
-supervisor, and boot persistence is a systemd unit per workload (<code>delonix system boot</code>). A daemon
-needs its own ADR with evidence of what the alternatives could not do — see
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> for a case where the question came up, and
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a> (<em>Proposed</em>) for continuous reconciliation that
-stays daemonless.</p>
-<p><strong>How does the CRI start a container if the server must not <code>clone</code>?</strong>
-<code>StartContainer</code> builds a typed <code>RunOpts</code>, writes it to a <code>0600</code> file and runs
-<code>delonix __apirun &lt;spec&gt;</code>, which calls the same <code>cmd_run</code> as the CLI. ADR-0040 D5 replaces the
-CLI hop with a launcher executable. Resource policy on the CRI path follows the kubelet
+<h2 id="8-follow-up-questions">8. Perguntas de seguimento</h2>
+<p><strong>Porque não acrescentar um pequeno daemon para eventos e reinícios?</strong>
+Porque cada processo residente é um domínio de falha e uma superfície de ataque. O registo de eventos
+é um ficheiro só de acrescento (<code>delonix_runtime_core::events</code>), os reinícios pertencem ao supervisor
+por container, e a persistência no arranque é uma unit systemd por carga (<code>delonix system boot</code>). Um
+daemon precisa do seu próprio ADR com a evidência do que as alternativas não conseguiram fazer — ver
+o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> para um caso em que a pergunta surgiu, e o
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a> (<em>Proposto</em>) para uma reconciliação contínua que
+se mantém daemonless.</p>
+<p><strong>Como é que o CRI arranca um container se o servidor não pode fazer <code>clone</code>?</strong>
+O <code>StartContainer</code> constrói um <code>RunOpts</code> tipado, escreve-o num ficheiro <code>0600</code> e corre
+<code>delonix __apirun &lt;spec&gt;</code>, que chama o mesmo <code>cmd_run</code> que a CLI. O ADR-0040 D5 substitui o salto pela
+CLI por um executável launcher. A política de recursos no caminho CRI segue o kubelet
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>).</p>
-<p><strong>Why is the management API local-only?</strong>
-Remote access means identity, authorization, certificates and audit of callers the engine has no
-notion of. <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> rejected it; the MCP surface is local
-for the same reason (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>).</p>
-<p><strong>How would you add a new VM provider?</strong>
-A new crate implementing <code>VmBackend</code>, registered at the composition root — no edit to call sites
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>). ADR-0040 D3 moves provider knobs into namespaced
-extensions and quirks into capabilities; OpenStack is gated on a spike
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>).</p>
-<p><strong>How do Services load-balance without a VIP?</strong>
-A <code>Service</code> selects containers by label and the internal DNS returns several <code>A</code> records, rotated
-per query — no new dataplane (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0032-service-kind-dns-round-robin.md" target="_blank" rel="noopener">ADR-0032</a>).</p>
-<p><strong>Why ext4 and not btrfs/zfs under the state root?</strong>
-Overlay over a shared layer cache already removed the duplication; a different filesystem is
-revisited only for a measured need (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>).</p>
-<p><strong>What about macOS and Windows?</strong>
-Not a port — nothing this engine uses exists outside the Linux kernel. The plan is a launcher for
-a Linux guest VM (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0036-macos-windows-support.md" target="_blank" rel="noopener">ADR-0036</a>, <em>Proposed</em>).</p>
-<p><strong>Where is the restructuring going?</strong>
-Four layers, one run specification, provider ports with capabilities, one node contract served on
-a socket-activated server, and a launcher owning every namespace-creating spawn
+<p><strong>Porque é que a API de gestão é só local?</strong>
+O acesso remoto implica identidade, autorização, certificados e auditoria de chamadores de que o motor
+não tem noção. O <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> rejeitou-o; a superfície MCP é
+local pela mesma razão (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>).</p>
+<p><strong>Como acrescentarias um provider de VM novo?</strong>
+Um crate novo que implementa <code>VmBackend</code>, registado na raiz de composição — sem editar os sítios de
+chamada (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>). O ADR-0040 D3 move os botões dos providers
+para extensões com namespace e as peculiaridades para capacidades; o OpenStack está condicionado a um
+spike (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>).</p>
+<p><strong>Como é que os Services balanceiam a carga sem um VIP?</strong>
+Um <code>Service</code> selecciona containers por label e o DNS interno devolve vários registos <code>A</code>, rodados a
+cada consulta — sem dataplane novo (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0032-service-kind-dns-round-robin.md" target="_blank" rel="noopener">ADR-0032</a>).</p>
+<p><strong>Porquê ext4 e não btrfs/zfs debaixo do state root?</strong>
+O overlay sobre uma cache de camadas partilhada já eliminou a duplicação; um sistema de ficheiros
+diferente só é revisitado perante uma necessidade medida
+(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a>).</p>
+<p><strong>E o macOS e o Windows?</strong>
+Não é um port — nada do que este motor usa existe fora do kernel Linux. O plano é um launcher para
+uma VM convidada Linux (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0036-macos-windows-support.md" target="_blank" rel="noopener">ADR-0036</a>, <em>Proposto</em>).</p>
+<p><strong>Para onde vai a reestruturação?</strong>
+Quatro camadas, uma especificação de execução, portas de provider com capacidades, um contrato de nó
+servido num servidor por socket activation, e um launcher dono de cada spawn que cria namespaces
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>,
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>).</p>
-<div class="pager"><a href="06-crates.html"><span>← Anterior</span>6. The crates</a><a class="next" href="08-delonixfile-and-vmfile.html"><span>Seguinte →</span>8. Delonixfile and VMfile</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/07-system-design-interview.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/07-system-design-interview.md</code></p></main>
+<div class="pager"><a href="06-crates.html"><span>← Anterior</span>6. Os crates</a><a class="next" href="08-delonixfile-and-vmfile.html"><span>Seguinte →</span>8. Delonixfile e VMfile</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/07-system-design-interview.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/pt-AO/07-system-design-interview.md</code></p></main>
 <aside class="toc"><h5>Nesta página</h5><div class="toc">
 <ul>
-<li><a href="#1-requirements">1. Requirements</a><ul>
-<li><a href="#functional">Functional</a></li>
-<li><a href="#non-functional">Non-functional</a></li>
+<li><a href="#1-requirements">1. Requisitos</a><ul>
+<li><a href="#functional">Funcionais</a></li>
+<li><a href="#non-functional">Não funcionais</a></li>
 </ul>
 </li>
-<li><a href="#2-background-constraints-what-an-unprivileged-linux-user-may-do">2. Background constraints: what an unprivileged Linux user may do</a></li>
+<li><a href="#2-background-constraints-what-an-unprivileged-linux-user-may-do">2. Restrições de fundo: o que um utilizador Linux sem privilégio pode fazer</a></li>
 <li><a href="#3-api">3. API</a></li>
-<li><a href="#4-high-level-design">4. High-level design</a></li>
-<li><a href="#5-deep-dives">5. Deep dives</a><ul>
-<li><a href="#51-a-rootless-container-run">5.1 A rootless container run</a></li>
-<li><a href="#52-networking-pin-control-slirp-nftables">5.2 Networking: pin, control, slirp, nftables</a></li>
-<li><a href="#53-images-cas-shared-layers-and-the-many-layer-mount">5.3 Images: CAS, shared layers, and the many-layer mount</a></li>
-<li><a href="#54-microvms-one-port-a-registry-and-the-firmware-trap">5.4 microVMs: one port, a registry, and the firmware trap</a></li>
-<li><a href="#55-the-declarative-reconciler-without-a-state-file">5.5 The declarative reconciler, without a state file</a></li>
+<li><a href="#4-high-level-design">4. Desenho de alto nível</a></li>
+<li><a href="#5-deep-dives">5. Aprofundamentos</a><ul>
+<li><a href="#51-a-rootless-container-run">5.1 Um container run rootless</a></li>
+<li><a href="#52-networking-pin-control-slirp-nftables">5.2 Rede: pin, controlo, slirp, nftables</a></li>
+<li><a href="#53-images-cas-shared-layers-and-the-many-layer-mount">5.3 Imagens: CAS, camadas partilhadas e o mount de muitas camadas</a></li>
+<li><a href="#54-microvms-one-port-a-registry-and-the-firmware-trap">5.4 microVMs: uma porta, um registo e a armadilha do firmware</a></li>
+<li><a href="#55-the-declarative-reconciler-without-a-state-file">5.5 O reconciliador declarativo, sem ficheiro de estado</a></li>
 </ul>
 </li>
-<li><a href="#6-trade-offs">6. Trade-offs</a></li>
-<li><a href="#7-failure-modes-and-the-limits-of-one-node">7. Failure modes and the limits of one node</a></li>
-<li><a href="#8-follow-up-questions">8. Follow-up questions</a></li>
+<li><a href="#6-trade-offs">6. Compromissos</a></li>
+<li><a href="#7-failure-modes-and-the-limits-of-one-node">7. Modos de falha e os limites de um só nó</a></li>
+<li><a href="#8-follow-up-questions">8. Perguntas de seguimento</a></li>
 </ul>
 </div>
 </aside></div>

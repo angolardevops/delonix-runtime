@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr-FR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>11. Publishing the documentation · Delonix Runtime — Guide du contributeur</title>
+<title>11. Publier la documentation · Delonix Runtime — Guide du contributeur</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,131 +59,137 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Guide du contributeur</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Rechercher <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/11-publishing-docs.html">EN · English</option><option value="../pt-AO/11-publishing-docs.html">PT-AO · Português (Angola)</option><option value="../fr-FR/11-publishing-docs.html" selected>FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manuel du contributeur</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="01-environment.html">1. Préparer votre environnement</a>
+<a class="" href="02-build-and-test.html">2. Cloner, compiler et tester</a>
+<a class="" href="03-rust-primer.html">3. Initiation à Rust pour cette base de code</a>
+<a class="" href="04-cloud-native-primer.html">4. Initiation au cloud native</a>
 <a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="on" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="06-crates.html">6. Les crates</a>
+<a class="" href="07-system-design-interview.html">7. Entretien de conception de système — le Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile et VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construire des microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Flux de contribution</a>
+<a class="on" href="11-publishing-docs.html">11. Publier la documentation</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="11-publishing-the-documentation">11. Publishing the documentation</h1>
-<p>Documentation in this repository is either <strong>generated from the code</strong> (and then checked by a gate)
-or <strong>written by hand</strong> (and then reviewed). This page explains which is which, how each is
-published, and what you have to do when your change affects documentation.</p>
-<h2 id="where-it-is-published">Where it is published</h2>
-<p>The site is served by <strong>GitHub Pages</strong> from the <code>/docs</code> directory of <code>main</code>, at
-<a href="https://angolardevops.github.io/delonix-runtime/">https://angolardevops.github.io/delonix-runtime/</a>. The Pages source setting itself lives in the
-repository settings, not in the tree; what the tree does contain is <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/.nojekyll" target="_blank" rel="noopener"><code>docs/.nojekyll</code></a>, which turns
-Jekyll off so every file under <code>docs/</code> is served exactly as committed.</p>
-<p>A consequence worth knowing: because Jekyll is off, Markdown files under <code>docs/</code> — including this
-handbook in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> — are <strong>not</strong> rendered to HTML by Pages; they are served as plain files.
-The rendered view of the handbook is GitHub's own Markdown rendering when browsing the repository
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener"><code>docs/dev/README.md</code></a> on github.com), which also renders the Mermaid diagrams. Links between
-handbook pages are relative, so they work in both places.</p>
-<h2 id="who-owns-what">Who owns what</h2>
+<main><h1 id="11-publishing-the-documentation">11. Publier la documentation</h1>
+<p>La documentation de ce dépôt est soit <strong>générée à partir du code</strong> (puis vérifiée par un gate
+(contrôle CI)), soit <strong>écrite à la main</strong> (puis relue). Cette page explique ce qui relève de quoi,
+comment chaque partie est publiée, et ce que vous devez faire lorsque votre modification touche la
+documentation.</p>
+<h2 id="where-it-is-published">Où elle est publiée</h2>
+<p>Le site est servi par <strong>GitHub Pages</strong> depuis le répertoire <code>/docs</code> de <code>main</code>, à l'adresse
+<a href="https://angolardevops.github.io/delonix-runtime/">https://angolardevops.github.io/delonix-runtime/</a>. Le réglage de la source Pages lui-même se trouve
+dans les paramètres du dépôt, et non dans l'arborescence ; ce que l'arborescence contient, en
+revanche, c'est <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/.nojekyll" target="_blank" rel="noopener"><code>docs/.nojekyll</code></a>, qui désactive Jekyll afin que chaque fichier sous <code>docs/</code> soit
+servi exactement tel qu'il a été commité.</p>
+<p>Une conséquence bonne à connaître : Jekyll étant désactivé, les fichiers Markdown sous <code>docs/</code> — y
+compris ce manuel dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> — ne sont <strong>pas</strong> rendus en HTML par Pages ; ils sont servis
+comme des fichiers bruts. La vue rendue du manuel est le rendu Markdown propre à GitHub lorsque
+l'on parcourt le dépôt (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener"><code>docs/dev/README.md</code></a> sur github.com), qui rend aussi les diagrammes Mermaid.
+Les liens entre les pages du manuel sont relatifs, ils fonctionnent donc aux deux endroits.</p>
+<h2 id="who-owns-what">Qui est responsable de quoi</h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Surface</th>
-<th>What it is</th>
-<th>How it stays true</th>
+<th>Ce que c'est</th>
+<th>Comment elle reste exacte</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener"><code>README.rst</code></a></td>
-<td>the project front page</td>
-<td>hand-written, checked by <code>docs_cli_gate.py</code></td>
+<td>la page d'accueil du projet</td>
+<td>écrite à la main, vérifiée par <code>docs_cli_gate.py</code></td>
 </tr>
 <tr>
 <td><code>docs/*.html</code>, <code>docs/comandos/*.html</code></td>
-<td>the user site</td>
-<td><strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> from the binary's <code>--help</code> plus editorial text in the generator; checked by the <code>docs</code> CI job and at release time</td>
+<td>le site utilisateur</td>
+<td><strong>générées</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> à partir du <code>--help</code> du binaire et du texte éditorial présent dans le générateur ; vérifiées par le job CI <code>docs</code> et au moment de la release</td>
 </tr>
 <tr>
 <td><code>docs/releases/v&lt;version&gt;.md</code></td>
-<td>release notes, one per tag</td>
-<td>hand-written in the release commit; published as the GitHub Release body</td>
+<td>les notes de release, une par tag</td>
+<td>écrites à la main dans le commit de release ; publiées comme corps de la GitHub Release</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a></td>
-<td>the per-release feature appendix</td>
-<td><strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a>; never edit by hand</td>
+<td>l'annexe des fonctionnalités par release</td>
+<td><strong>générée</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> à partir de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a> ; ne jamais l'éditer à la main</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a></td>
-<td>C4 architecture diagrams</td>
-<td>hand-written, kept in step with the code; rendered into the site by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a></td>
+<td>les diagrammes d'architecture C4</td>
+<td>écrit à la main, tenu au pas du code ; rendu dans le site par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></td>
-<td>architecture decisions</td>
-<td>one file per decision; accepted ADRs are superseded, never rewritten</td>
+<td>les décisions d'architecture</td>
+<td>un fichier par décision ; les ADR acceptés sont remplacés par un successeur, jamais réécrits</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
-<td>the node API's REST encoding</td>
-<td><strong>generated</strong> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> by <code>scripts/contract_gate.py --update</code></td>
+<td>l'encodage REST de l'API de nœud</td>
+<td><strong>généré</strong> à partir de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> par <code>scripts/contract_gate.py --update</code></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
-<td>this contributor handbook</td>
-<td>generated <strong>facts</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) plus hand-written <strong>narrative</strong></td>
+<td>ce manuel du contributeur</td>
+<td>des <strong>faits</strong> générés (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) et un <strong>récit</strong> écrit à la main</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a></td>
-<td>the short front door for contributors</td>
-<td>hand-written; points into <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
+<td>la courte porte d'entrée des contributeurs</td>
+<td>écrit à la main ; renvoie vers <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="the-user-site-docsgenpy">The user site: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a></h2>
-<p>The reference pages embed the <strong>real</strong> <code>--help</code> of the <code>delonix</code> binary, captured when the generator
-runs, so the site never documents a flag that does not exist. The editorial content (introductions,
-examples, notes) lives in dictionaries inside <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> itself — edit it there, not in the HTML.</p>
+<h2 id="the-user-site-docsgenpy">Le site utilisateur : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a></h2>
+<p>Les pages de référence embarquent le <code>--help</code> <strong>réel</strong> du binaire <code>delonix</code>, capturé lorsque le
+générateur s'exécute, de sorte que le site ne documente jamais une option qui n'existe pas. Le
+contenu éditorial (introductions, exemples, notes) se trouve dans des dictionnaires à l'intérieur de
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> lui-même — modifiez-le là, et non dans le HTML.</p>
 <div class="code" data-shell><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin
 python3 -m pip install markdown     # the generator renders ARCHITECTURE.md
 python3 docs/gen.py                 # uses the tree&#x27;s release binary by default
 git diff --stat -- docs/
 </code></pre></div>
-<p>The generator also accepts the binary path as its first argument. Commit the regenerated files
-together with the CLI change that caused them. Two checks fail if you do not:</p>
+<p>Le générateur accepte aussi le chemin du binaire comme premier argument. Commitez les fichiers
+régénérés avec la modification de la CLI qui les a provoqués. Deux vérifications échouent si vous
+ne le faites pas :</p>
 <ul>
-<li>the <strong><code>docs</code> job</strong> in CI regenerates the site and fails when <code>git diff -- docs/</code> is not empty; the
-  same job validates every <code>examples/*.yaml</code> with <code>stack apply --dry-run</code> and <code>stack validate</code>, and
-  checks the man pages generated by <code>delonix man --dir &lt;dir&gt; --index</code> with <code>groff</code>;</li>
-<li>the <strong>release workflow</strong> repeats the regeneration against the release build before publishing, so
-  a tag whose site is out of date does not ship.</li>
+<li>le <strong>job <code>docs</code></strong> de la CI régénère le site et échoue lorsque <code>git diff -- docs/</code> n'est pas vide ;
+  le même job valide chaque <code>examples/*.yaml</code> avec <code>stack apply --dry-run</code> et <code>stack validate</code>, et
+  vérifie avec <code>groff</code> les pages de manuel générées par <code>delonix man --dir &lt;dir&gt; --index</code> ;</li>
+<li>le <strong>workflow de release</strong> refait la régénération contre le build de release avant de publier,
+  de sorte qu'un tag dont le site n'est pas à jour n'est pas livré.</li>
 </ul>
-<h2 id="the-command-citation-gate-scriptsdocs_cli_gatepy">The command-citation gate: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a></h2>
-<p>Every <code>delonix …</code> command quoted in a code context (<code>&lt;code&gt;</code>, <code>&lt;pre&gt;</code>, Markdown code fences, reST
-literal blocks, YAML comments) in the current documentation must resolve in the command tree of the
-binary built from the tree (read through <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a>). It runs in the <code>cli-surface</code> CI job:</p>
+<h2 id="the-command-citation-gate-scriptsdocs_cli_gatepy">Le gate des citations de commandes : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a></h2>
+<p>Chaque commande <code>delonix …</code> citée dans un contexte de code (<code>&lt;code&gt;</code>, <code>&lt;pre&gt;</code>, blocs de code
+Markdown, blocs littéraux reST, commentaires YAML) dans la documentation actuelle doit se résoudre
+dans l'arbre de commandes du binaire construit à partir de l'arborescence (lu via
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a>). Il s'exécute dans le job CI <code>cli-surface</code> :</p>
 <div class="code" data-shell><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin
 DELONIX_BIN=&quot;$PWD/target/release/delonix&quot; python3 scripts/docs_cli_gate.py
 python3 scripts/docs_cli_gate.py --list      # every citation and where it is
 </code></pre></div>
-<p>It exists because commands were removed in consecutive major releases and several current pages
-kept teaching <code>unrecognized subcommand</code>. Dated historical records — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/discovery" target="_blank" rel="noopener"><code>docs/discovery/</code></a> and the dated audit and measurement reports — are excluded on
-purpose: they must keep quoting the spelling of the version they describe. A citation that is wrong
-on purpose goes into <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_allow.tsv" target="_blank" rel="noopener"><code>scripts/docs_cli_allow.tsv</code></a> with a reason.</p>
-<p>The files it scans are listed in <code>TARGETS</code> at the top of the script. Check that list when you add a
-new documentation directory; a page outside it is not checked.</p>
-<h2 id="the-handbooks-facts-scriptsdev_docspy">The handbook's facts: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a></h2>
-<p>The structural facts in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> — the crates and their layers, the dependency graph, the
-binaries, the pinned toolchain and the CI jobs — are generated from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. In a page they sit
-between markers:</p>
+<p>Il existe parce que des commandes ont été supprimées dans des versions majeures consécutives et que
+plusieurs pages actuelles continuaient d'enseigner <code>unrecognized subcommand</code>. Les archives
+historiques datées — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/discovery" target="_blank" rel="noopener"><code>docs/discovery/</code></a> et les rapports d'audit
+et de mesure datés — sont exclues volontairement : elles doivent continuer à citer l'orthographe de
+la version qu'elles décrivent. Une citation volontairement erronée va dans
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_allow.tsv" target="_blank" rel="noopener"><code>scripts/docs_cli_allow.tsv</code></a> avec une justification.</p>
+<p>Les fichiers qu'il analyse sont listés dans <code>TARGETS</code> en tête du script. Vérifiez cette liste
+lorsque vous ajoutez un nouveau répertoire de documentation ; une page en dehors n'est pas vérifiée.</p>
+<h2 id="the-handbooks-facts-scriptsdev_docspy">Les faits du manuel : <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a></h2>
+<p>Les faits structurels de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> — les crates et leurs couches, le graphe de dépendances, les
+binaires, la toolchain épinglée et les jobs CI — sont générés à partir de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> et <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Dans une page, ils
+se trouvent entre des marqueurs :</p>
 <div class="code"><pre><code class="language-markdown">&lt;!-- dev-docs:begin &lt;key&gt; --&gt;
 …generated, do not edit…
 &lt;!-- dev-docs:end &lt;key&gt; --&gt;
@@ -191,82 +197,84 @@ between markers:</p>
 <div class="code" data-shell><pre><code class="language-bash">python3 scripts/dev_docs.py            # rewrite every generated region
 python3 scripts/dev_docs.py --check    # exit 1 when docs/dev is stale (CI job `arch`)
 </code></pre></div>
-<p>Rules:</p>
+<p>Règles :</p>
 <ul>
-<li><strong>Never edit inside a region.</strong> The next regeneration overwrites it and <code>--check</code> fails in CI. If
-  a fact is wrong, fix its source (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, the <code>LAYERS</code> table in <code>arch_fitness.py</code>, <code>ci.yml</code>)
-  or the generator.</li>
-<li>Text <strong>outside</strong> the markers is never touched, so narrative can surround a generated table.</li>
-<li>A <strong>new region</strong> needs a <code>render_*</code> function, a key in <code>regions()</code> and a marker on a page, in the
-  same commit.</li>
-<li>No numbers that change on every commit (lines, tests, commits) — not in the generator and not in
-  the narrative. A gate that is red on every PR stops being read, and a hand-written count silently
-  becomes false.</li>
+<li><strong>N'éditez jamais l'intérieur d'une région.</strong> La régénération suivante l'écrase et <code>--check</code>
+  échoue en CI. Si un fait est faux, corrigez sa source (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, la table <code>LAYERS</code> dans
+  <code>arch_fitness.py</code>, <code>ci.yml</code>) ou le générateur.</li>
+<li>Le texte <strong>en dehors</strong> des marqueurs n'est jamais touché ; un récit peut donc entourer une table
+  générée.</li>
+<li>Une <strong>nouvelle région</strong> nécessite une fonction <code>render_*</code>, une clé dans <code>regions()</code> et un
+  marqueur dans une page, dans le même commit.</li>
+<li>Aucun nombre qui change à chaque commit (lignes, tests, commits) — ni dans le générateur ni dans
+  le récit. Un gate rouge sur chaque PR cesse d'être lu, et un décompte écrit à la main devient faux
+  sans bruit.</li>
 </ul>
-<p>If your PR adds or moves a crate, changes a dependency between crates, adds a binary, bumps the
-toolchain or changes a CI job, run <code>python3 scripts/dev_docs.py</code> and commit the result with it.</p>
-<h2 id="what-happens-at-release-time">What happens at release time</h2>
-<p>The release workflow (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a>) runs on a pushed <code>v*</code> tag. For documentation
-it:</p>
+<p>Si votre PR ajoute ou déplace un crate, modifie une dépendance entre crates, ajoute un binaire,
+met à jour la toolchain ou modifie un job CI, exécutez <code>python3 scripts/dev_docs.py</code> et commitez le
+résultat avec elle.</p>
+<h2 id="what-happens-at-release-time">Ce qui se passe au moment de la release</h2>
+<p>Le workflow de release (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a>) s'exécute sur un tag <code>v*</code> poussé. Pour la
+documentation, il :</p>
 <ol>
-<li>regenerates the user site against the release build and <strong>fails</strong> if <code>docs/</code> differs;</li>
-<li>publishes the GitHub Release with <code>docs/releases/&lt;tag&gt;.md</code> as its notes (or generated notes when
-   that file does not exist);</li>
-<li>checks out <code>main</code>, runs <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> (the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a> appendix) and
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> (the handbook facts), and commits both to <code>main</code> with <code>[skip ci]</code> when
-   they changed.</li>
+<li>régénère le site utilisateur contre le build de release et <strong>échoue</strong> si <code>docs/</code> diffère ;</li>
+<li>publie la GitHub Release avec <code>docs/releases/&lt;tag&gt;.md</code> comme notes (ou des notes générées lorsque
+   ce fichier n'existe pas) ;</li>
+<li>fait un checkout de <code>main</code>, exécute <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> (l'annexe <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>) et
+   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> (les faits du manuel), puis commite les deux sur <code>main</code> avec <code>[skip ci]</code>
+   lorsqu'ils ont changé.</li>
 </ol>
-<p>The <strong>narrative</strong> of the handbook is not regenerated by CI. After a release has been published and
-validated, a maintainer-run review step reads the changes between the previous and the new tag
-together with the release notes, updates only the handbook pages those changes affect, and opens a
-pull request for it. When nothing structural or procedural changed, the outcome of that review is
-"nothing to update", stated explicitly.</p>
-<h2 id="what-this-means-for-your-pull-request">What this means for your pull request</h2>
+<p>Le <strong>récit</strong> du manuel n'est pas régénéré par la CI. Une fois une release publiée et validée, une
+étape de relecture menée par un mainteneur lit les changements entre le tag précédent et le nouveau
+avec les notes de release, met à jour uniquement les pages du manuel touchées par ces changements,
+et ouvre une pull request pour cela. Lorsque rien de structurel ou de procédural n'a changé, le
+résultat de cette relecture est « rien à mettre à jour », énoncé explicitement.</p>
+<h2 id="what-this-means-for-your-pull-request">Ce que cela implique pour votre pull request</h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Your change</th>
-<th>Also do</th>
+<th>Votre modification</th>
+<th>À faire aussi</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>CLI help, a command, a flag</td>
-<td><code>python3 docs/gen.py</code> (release build) and commit <code>docs/</code>; update <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> if leaves changed; fix any citation <code>docs_cli_gate.py</code> reports</td>
+<td>L'aide de la CLI, une commande, une option</td>
+<td><code>python3 docs/gen.py</code> (build de release) et commitez <code>docs/</code> ; mettez à jour <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> si des feuilles ont changé ; corrigez toute citation signalée par <code>docs_cli_gate.py</code></td>
 </tr>
 <tr>
-<td>A crate, a crate dependency, a binary, the toolchain or a CI job</td>
-<td><code>python3 scripts/dev_docs.py</code> and commit <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
+<td>Un crate, une dépendance entre crates, un binaire, la toolchain ou un job CI</td>
+<td><code>python3 scripts/dev_docs.py</code> et commitez <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
 </tr>
 <tr>
-<td>The node contract in <code>proto/</code></td>
-<td><code>python3 scripts/contract_gate.py --update</code> and commit <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
+<td>Le contrat de nœud dans <code>proto/</code></td>
+<td><code>python3 scripts/contract_gate.py --update</code> et commitez <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
 </tr>
 <tr>
-<td>A structural decision</td>
-<td>an ADR in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> (see <a href="10-contributing-workflow.html#when-to-write-an-adr">10</a>)</td>
+<td>Une décision structurelle</td>
+<td>un ADR dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> (voir <a href="10-contributing-workflow.html#when-to-write-an-adr">10</a>)</td>
 </tr>
 <tr>
-<td>A user-visible feature</td>
-<td>describe it in the PR so it can go into the next release notes</td>
+<td>Une fonctionnalité visible par l'utilisateur</td>
+<td>décrivez-la dans la PR afin qu'elle puisse figurer dans les prochaines notes de release</td>
 </tr>
 <tr>
-<td>How contributors build, test or work</td>
-<td>the relevant page of this handbook</td>
+<td>La manière dont les contributeurs construisent, testent ou travaillent</td>
+<td>la page concernée de ce manuel</td>
 </tr>
 </tbody>
 </table></div>
-<div class="pager"><a href="10-contributing-workflow.html"><span>← Précédent</span>10. Contribution workflow</a><a class="next" href="12-coding-conventions.html"><span>Suivant →</span>12. Coding conventions</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/11-publishing-docs.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/11-publishing-docs.md</code></p></main>
+<div class="pager"><a href="10-contributing-workflow.html"><span>← Précédent</span>10. Flux de contribution</a><a class="next" href="12-coding-conventions.html"><span>Suivant →</span>12. Coding conventions</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/11-publishing-docs.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/fr-FR/11-publishing-docs.md</code></p></main>
 <aside class="toc"><h5>Sur cette page</h5><div class="toc">
 <ul>
-<li><a href="#where-it-is-published">Where it is published</a></li>
-<li><a href="#who-owns-what">Who owns what</a></li>
-<li><a href="#the-user-site-docsgenpy">The user site: docs/gen.py</a></li>
-<li><a href="#the-command-citation-gate-scriptsdocs_cli_gatepy">The command-citation gate: scripts/docs_cli_gate.py</a></li>
-<li><a href="#the-handbooks-facts-scriptsdev_docspy">The handbook's facts: scripts/dev_docs.py</a></li>
-<li><a href="#what-happens-at-release-time">What happens at release time</a></li>
-<li><a href="#what-this-means-for-your-pull-request">What this means for your pull request</a></li>
+<li><a href="#where-it-is-published">Où elle est publiée</a></li>
+<li><a href="#who-owns-what">Qui est responsable de quoi</a></li>
+<li><a href="#the-user-site-docsgenpy">Le site utilisateur : docs/gen.py</a></li>
+<li><a href="#the-command-citation-gate-scriptsdocs_cli_gatepy">Le gate des citations de commandes : scripts/docs_cli_gate.py</a></li>
+<li><a href="#the-handbooks-facts-scriptsdev_docspy">Les faits du manuel : scripts/dev_docs.py</a></li>
+<li><a href="#what-happens-at-release-time">Ce qui se passe au moment de la release</a></li>
+<li><a href="#what-this-means-for-your-pull-request">Ce que cela implique pour votre pull request</a></li>
 </ul>
 </div>
 </aside></div>
