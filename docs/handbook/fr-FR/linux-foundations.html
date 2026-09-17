@@ -210,10 +210,13 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Fondamentaux</p>
 <div class="notice" role="note">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="linux-foundations">Linux foundations</h1>
+<p><strong>Before you read:</strong> <a href="iaas-and-cloud-native.html">IaaS and cloud native</a>, for why a node engine needs these primitives. You need a Linux shell and nothing else.</p>
 <p>Every page after this one assumes you can answer, with a command, questions like "which network
 namespace is this process in?", "why did this limit not apply?" or "who is still holding this pipe
 open?". This page teaches those primitives hands-on, from the perspective of someone who writes
-Linux system code <em>and</em> has to operate it at 3 a.m.</p>
+Linux system code <em>and</em> has to operate it at 3 a.m. By the end you will be able to answer each of
+those questions from a shell, and to predict the failures that later pages describe in the engine's
+terms (a limit that does not apply, a pipe that never reaches EOF, a PID that names another process).</p>
 <p>It does not explain how the engine uses them — that mapping, with files and symbols, is the
 <a href="cloud-native-primer.html">Cloud native primer</a>. Each section here ends with a pointer to the
 matching part of it.</p>
@@ -832,14 +835,15 @@ cat /proc/sys/fs/file-nr /proc/sys/fs/file-max /proc/sys/fs/nr_open
 <li><strong>Never leak a pipe or the caller's stdio into a long-lived child.</strong> Two real incidents are
   recorded in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: the log shim holding other HTTP connections of a
   long-running server open (section <em>«CLI (<code>delonix</code>)»</em>, the <code>delonix serve docker-api</code> entry), and
-  the network pin inheriting the caller's stderr so that <code>out=$(delonix …)</code> never saw EOF — fixed
+  the network pin (the long-lived holder process of the engine's rootless network namespace — the
+  holder pattern shown in <a href="#creating-versus-joining-keeping-a-namespace-alive">Namespaces</a>) inheriting the caller's stderr so that <code>out=$(delonix …)</code> never saw EOF — fixed
   by writing to <code>pin.log</code> (section <em>«A classe «X não é Y» — varredura de 2026-08-05»</em>; code:
   <code>start_pin</code> and <code>pin_log_path</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>).</li>
 <li><strong>Signal a process through a pidfd, not a PID.</strong> A reaped PID can be reused; a pidfd refers to
   one process for its whole life. See <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0027-pidfd-for-killing-exec-children.md" target="_blank" rel="noopener">ADR-0027</a>
   and <code>ChildHandle</code> (<code>open</code>, <code>kill</code>) in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/child_handle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/child_handle.rs</code></a>. Where
   only a stored PID exists, compare the start time first: <code>safe_to_signal</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a>.</li>
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/host.rs</code></a>.</li>
 <li><strong>Bound fds under load.</strong> A server that opens a descriptor per request must close it on every
   path, including errors and timeouts, and must treat <code>EMFILE</code> as back-pressure, not a crash.</li>
 <li><strong>After <code>fork</code> in a multi-threaded process, do only async-signal-safe work</strong> (close fds, <code>dup2</code>,
@@ -983,6 +987,8 @@ bash -c &#x27;exec {w}&gt; &gt;(cat &gt;/dev/null; echo &quot;reader got EOF at 
    closes its copy first and the reader gets EOF at <code>0s</code>. This is the same shape as the pin/stderr
    incident. (Do not drop the <code>exec {w}&gt;&amp;-</code> in the parent: <code>wait</code> also waits for the reader, and a
    reader that never sees EOF makes the command hang.)</p>
+<hr />
+<p><strong>Next:</strong> <a href="cloud-native-primer.html">Cloud native primer</a> — where the engine uses each of these primitives, and the open specifications (OCI, CNI, CRI, KVM) layered on top of them.</p>
 <nav class="pager"><a href="iaas-and-cloud-native.html"><span>← Précédent</span>IaaS and cloud native — where the engine fits</a><a class="next" href="cloud-native-primer.html"><span>Suivant →</span>Initiation au cloud native</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/linux-foundations.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/linux-foundations.md</code></footer>
 </div></main>

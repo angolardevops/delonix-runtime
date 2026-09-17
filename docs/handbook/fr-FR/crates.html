@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a class="on" aria-current="page" href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">14</span><span>Conventions de code</span></a><a href="contributing-workflow.html"><span class="n">15</span><span>Flux de contribution</span></a><a href="publishing-docs.html"><span class="n">16</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">17</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">18</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">19</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Architecture</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/crates.html">Lire la page en anglais</a></span></div><h1 id="the-crates">Les crates</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/crates.html">Lire la page en anglais</a></span></div><h1 id="les-crates">Les crates</h1>
 <p>Cette page est la carte que vous gardez ouverte en lisant le code. Le tableau ci-dessous est
 généré à partir de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> et de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> ; tout ce qui suit est écrit à la
 main, et chaque pointeur (<code>path:symbol</code>) a été lu dans l'arborescence avant d'être consigné.
@@ -237,7 +237,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
   l'API de gestion locale le font pour tout ce qui fork), ou en écrivant une ligne sur une socket de
   contrôle unix (le holder réseau).</li>
 </ul>
-<h2 id="reference-table">Tableau de référence<a class="hanchor" href="#reference-table" aria-label="#">#</a></h2>
+<h2 id="tableau-de-reference">Tableau de référence<a class="hanchor" href="#tableau-de-reference" aria-label="#">#</a></h2>
 <!-- dev-docs:begin crates-table -->
 <div class="tablewrap"><table>
 <thead>
@@ -257,7 +257,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model</code></a></td>
 <td>—</td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-runtime-bin</code>, <code>delonix-runtime-core</code>, <code>delonix-scanner</code>, <code>delonix-state</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 </tr>
 <tr>
 <td><code>delonix-net-rules</code></td>
@@ -268,27 +268,27 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td><code>delonix-sdn</code>, <code>delonix-vm</code></td>
 </tr>
 <tr>
-<td><code>delonix-runtime-core</code></td>
-<td>Foundation</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-runtime-core" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core</code></a></td>
-<td>—</td>
-<td><code>delonix-model</code></td>
-<td><code>delonix-compute</code>, <code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mcp-bin</code>, <code>delonix-mgmt</code>, <code>delonix-mgmt-bin</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
-</tr>
-<tr>
 <td><code>delonix-compute</code></td>
 <td>Contexts</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-compute" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute</code></a></td>
 <td>—</td>
-<td><code>delonix-model</code>, <code>delonix-runtime-core</code></td>
-<td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-model</code>, <code>delonix-node</code></td>
+<td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+</tr>
+<tr>
+<td><code>delonix-node</code></td>
+<td>Contexts</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-node" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node</code></a></td>
+<td>—</td>
+<td><code>delonix-model</code></td>
+<td><code>delonix-compute</code>, <code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mcp-bin</code>, <code>delonix-mgmt</code>, <code>delonix-mgmt-bin</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 </tr>
 <tr>
 <td><code>delonix-security-runtime</code></td>
 <td>Contexts</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-security-runtime" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-security-runtime</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code></td>
+<td><code>delonix-model</code>, <code>delonix-node</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -296,7 +296,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Contexts</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-stack" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code></td>
+<td><code>delonix-model</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -304,7 +304,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -312,7 +312,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code>, <code>delonix-scanner</code></td>
 </tr>
 <tr>
@@ -328,7 +328,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-net-rules</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-net-rules</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -336,7 +336,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state</code></a></td>
 <td>—</td>
-<td><code>delonix-model</code>, <code>delonix-runtime-core</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code></td>
 <td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 </tr>
 <tr>
@@ -352,7 +352,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-net-rules</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-net-rules</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -360,7 +360,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -368,7 +368,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Providers</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code>, <code>delonix-vm</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-vm</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -376,7 +376,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Providers</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code></td>
+<td><code>delonix-model</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -384,7 +384,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Interfaces</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri</code></a></td>
 <td><code>delonix-cri</code></td>
-<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-oci</code>, <code>delonix-runtime-core</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code></td>
 <td>—</td>
 </tr>
 <tr>
@@ -392,7 +392,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Interfaces</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp</code></a></td>
 <td>—</td>
-<td><code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-core</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 <td><code>delonix-mcp-bin</code></td>
 </tr>
 <tr>
@@ -400,7 +400,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Interfaces</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mgmt</code></a></td>
 <td>—</td>
-<td><code>delonix-linux</code>, <code>delonix-oci</code>, <code>delonix-runtime-core</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 <td><code>delonix-mcp</code>, <code>delonix-mgmt-bin</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -408,7 +408,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Binaries</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin</code></a></td>
 <td><code>delonix-mcp</code></td>
-<td><code>delonix-mcp</code>, <code>delonix-runtime-core</code>, <code>delonix-telemetry</code></td>
+<td><code>delonix-mcp</code>, <code>delonix-node</code>, <code>delonix-telemetry</code></td>
 <td>—</td>
 </tr>
 <tr>
@@ -416,7 +416,7 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Binaries</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mgmt-bin" target="_blank" rel="noopener"><code>bins/delonix-mgmt-bin</code></a></td>
 <td><code>delonix-mgmt</code></td>
-<td><code>delonix-mgmt</code>, <code>delonix-runtime-core</code>, <code>delonix-telemetry</code></td>
+<td><code>delonix-mgmt</code>, <code>delonix-node</code>, <code>delonix-telemetry</code></td>
 <td>—</td>
 </tr>
 <tr>
@@ -424,18 +424,18 @@ Lorsqu'une affirmation n'a pas pu être confirmée, elle ne figure pas ici.</p>
 <td>Binaries</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin</code></a></td>
 <td><code>delonix</code></td>
-<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-model</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-core</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 <td>—</td>
 </tr>
 </tbody>
 </table></div>
 <!-- dev-docs:end crates-table -->
 
-<h2 id="foundation">Fondation<a class="hanchor" href="#foundation" aria-label="#">#</a></h2>
+<h2 id="fondation">Fondation<a class="hanchor" href="#fondation" aria-label="#">#</a></h2>
 <p>Les crates de fondation ne portent aucun mécanisme : des types, des règles pures et le format de
 l'état sur disque. Ils ne peuvent dépendre que d'autres crates de fondation. Les fichiers qui contiennent ces
 enregistrements ne sont pas ici : ils sont lus et écrits par l'adaptateur <code>delonix-state</code>.</p>
-<h3 id="delonix-runtime-core"><code>delonix-runtime-core</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-runtime-core" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-runtime-core" aria-label="#">#</a></h3>
+<h3 id="delonix-runtime-core"><code>delonix-runtime-core</code><a class="hanchor" href="#delonix-runtime-core" aria-label="#">#</a></h3>
 <p><strong>Rôle.</strong> Le vocabulaire partagé du moteur : les enregistrements persistés (<code>Container</code>, <code>Vm</code>), leur
 <code>Status</code>, le type d'erreur que renvoie chaque crate (défini dans <code>delonix-model</code> et réexporté ici
 sous le même chemin). Il contient aussi les petites pièces transverses dont plus d'un crate a besoin
@@ -502,37 +502,37 @@ modèle pur des secrets (<code>Secret</code>, <code>valid_name</code>, <code>val
 <tr>
 <td><code>Container</code></td>
 <td>l'enregistrement de container que tout le monde lit et écrit</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Container</code></a></td>
+<td><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Container</code></td>
 </tr>
 <tr>
 <td><code>Vm</code></td>
 <td>l'enregistrement de VM</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Vm</code></a></td>
+<td><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Vm</code></td>
 </tr>
 <tr>
 <td><code>Status</code></td>
 <td>l'état du cycle de vie d'une charge de travail</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Status</code></a></td>
+<td><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Status</code></td>
 </tr>
 <tr>
 <td><code>Error</code>, <code>Result</code></td>
 <td>l'erreur que renvoie chaque crate du moteur, réexportée depuis <code>delonix-model</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>pub use delonix_model::<wbr>{Error, Result}</code>)</td>
+<td><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code> (<code>pub use delonix_model::<wbr>{Error, Result}</code>)</td>
 </tr>
 <tr>
 <td><code>events::emit</code></td>
 <td>ajoute une ligne d'événement</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/events.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>events.<wbr>rs:emit</code></a></td>
+<td><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>events.<wbr>rs:emit</code></td>
 </tr>
 <tr>
 <td><code>dispatch::check_version</code>, <code>dispatch::cli_bin</code></td>
 <td>comment <code>delonix-cri</code>/<code>-mgmt</code>/<code>-mcp</code> refusent une release non concordante et trouvent la CLI <code>delonix</code> à rappeler</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>dispatch.<wbr>rs</code></a></td>
+<td><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>dispatch.<wbr>rs</code></td>
 </tr>
 <tr>
 <td><code>is_alive</code>, <code>proc_starttime</code>, <code>safe_to_signal</code></td>
 <td>vérifications de pid qui résistent au recyclage des pid</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code></td>
 </tr>
 </tbody>
 </table></div>
@@ -702,7 +702,7 @@ ce qui lit un état partagé (l'allocation d'IP lit le registre IPAM ; elle res
 côté et pourquoi.</p>
 <p><strong>Pièges.</strong> Des parties de la documentation du module sont encore en portugais (dette LANG-01) ; le
 code fait référence.</p>
-<h2 id="contexts">Contextes<a class="hanchor" href="#contexts" aria-label="#">#</a></h2>
+<h2 id="contextes">Contextes<a class="hanchor" href="#contextes" aria-label="#">#</a></h2>
 <p>Un contexte possède les décisions d'un domaine et les ports dont ses cas d'usage ont besoin. Aucun
 contexte ne touche au noyau.</p>
 <h3 id="delonix-compute"><code>delonix-compute</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-compute" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-compute" aria-label="#">#</a></h3>
@@ -1029,7 +1029,7 @@ la documentation du crate.</p>
 <code>src/policy.rs</code>.</p>
 <p><strong>Pièges.</strong> Aucun au-delà de la documentation du crate : n'ajoutez pas de capteur en arrière-plan
 ici — la documentation explique pourquoi un contrôle inerte en mode rootless est pire qu'aucun.</p>
-<h2 id="adapters">Adaptateurs<a class="hanchor" href="#adapters" aria-label="#">#</a></h2>
+<h2 id="adaptateurs">Adaptateurs<a class="hanchor" href="#adaptateurs" aria-label="#">#</a></h2>
 <p>Les adaptateurs sont l'endroit où le moteur rencontre le noyau, le disque, les outils de l'hôte et
 les registres distants. Ils dépendent de la fondation et des contextes, jamais les uns des autres
 (les exceptions déclarées sont listées dans <a href="architecture.html">Architecture</a>).</p>
@@ -2157,8 +2157,8 @@ JSON. Il tient un journal d'audit local et un registre de tâches dans le proces
 puis <code>src/risk.rs</code>.</p>
 <p><strong>Pièges.</strong> Les mêmes que pour le CRI : les mutations passent par <code>cli_bin</code>, jamais par
 <code>current_exe()</code> (qui est le serveur lui-même).</p>
-<h2 id="binaries">Binaires<a class="hanchor" href="#binaries" aria-label="#">#</a></h2>
-<h3 id="delonix-runtime-bin-binary-delonix"><code>delonix-runtime-bin</code> (binaire <code>delonix</code>) <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-runtime-bin-binary-delonix" aria-label="#">#</a></h3>
+<h2 id="binaires">Binaires<a class="hanchor" href="#binaires" aria-label="#">#</a></h2>
+<h3 id="delonix-runtime-bin-binaire-delonix"><code>delonix-runtime-bin</code> (binaire <code>delonix</code>) <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-runtime-bin-binaire-delonix" aria-label="#">#</a></h3>
 <p><strong>Rôle.</strong> La CLI et la racine de composition. Il analyse les commandes (<code>clap</code>), traduit chaque point
 d'entrée (options, manifestes, fichiers compose, la tranche de l'API Docker Engine, clusters kind) en
 appels au moteur, relie les adaptateurs aux ports des contextes, charge les manifestes et applique
@@ -2254,7 +2254,7 @@ code. <code>build.rs</code> embarque les modèles de projet.</p>
 <li>Les verbes cachés du binaire du moteur sont reconnus sur l'<code>argv</code> brut avant <code>clap</code> ; renommer une
   commande publique ne les renomme pas.</li>
 </ul>
-<h3 id="delonix-mgmt-bin-binary-delonix-mgmt"><code>delonix-mgmt-bin</code> (binaire <code>delonix-mgmt</code>) <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mgmt-bin" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-mgmt-bin-binary-delonix-mgmt" aria-label="#">#</a></h3>
+<h3 id="delonix-mgmt-bin-binaire-delonix-mgmt"><code>delonix-mgmt-bin</code> (binaire <code>delonix-mgmt</code>) <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mgmt-bin" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-mgmt-bin-binaire-delonix-mgmt" aria-label="#">#</a></h3>
 <p><strong>Rôle.</strong> L'exécutable de l'API de gestion locale. Il vérifie la version de dispatch, lit <code>--addr</code> /
 <code>DELONIX_API_ADDR</code> (par défaut <code>unix:///run/delonix-mgmt.sock</code>) et <code>DELONIX_ROOT</code> (par défaut
 <code>/var/lib/delonix</code>), puis appelle <code>delonix_mgmt::serve_blocking</code>.</p>
@@ -2262,7 +2262,7 @@ code. <code>build.rs</code> embarque les modèles de projet.</p>
 (<code>init</code>). Exécuté par <code>delonix serve api</code>.</p>
 <p><strong>Tests.</strong> Aucun qui lui soit propre.</p>
 <p><strong>Commencer la lecture par.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mgmt-bin/src/main.rs</code></a>.</p>
-<h3 id="delonix-mcp-bin-binary-delonix-mcp"><code>delonix-mcp-bin</code> (binaire <code>delonix-mcp</code>) <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-mcp-bin-binary-delonix-mcp" aria-label="#">#</a></h3>
+<h3 id="delonix-mcp-bin-binaire-delonix-mcp"><code>delonix-mcp-bin</code> (binaire <code>delonix-mcp</code>) <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-mcp-bin-binaire-delonix-mcp" aria-label="#">#</a></h3>
 <p><strong>Rôle.</strong> L'exécutable du serveur MCP. Verbes <code>serve [--transport stdio]</code>, <code>doctor</code>,
 <code>capabilities</code>.</p>
 <p><strong>Communique avec.</strong> <code>delonix-mcp</code> (<code>serve_stdio</code>, <code>doctor_checks</code>, <code>capabilities_table</code>),
@@ -2270,7 +2270,7 @@ code. <code>build.rs</code> embarque les modèles de projet.</p>
 <p><strong>Dépendances externes notables.</strong> <code>tokio</code>.</p>
 <p><strong>Tests.</strong> Aucun qui lui soit propre.</p>
 <p><strong>Commencer la lecture par.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mcp-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/src/main.rs</code></a>.</p>
-<h2 id="how-a-request-crosses-the-crates">Comment une requête traverse les crates<a class="hanchor" href="#how-a-request-crosses-the-crates" aria-label="#">#</a></h2>
+<h2 id="comment-une-requete-traverse-les-crates">Comment une requête traverse les crates<a class="hanchor" href="#comment-une-requete-traverse-les-crates" aria-label="#">#</a></h2>
 <p>Trois flux, chaque flèche retracée jusqu'à un appel dans l'arborescence. Les noms de fonctions sont
 ceux que vous pouvez rechercher avec grep.</p>
 <h3 id="1-delonix-container-run-d-p-808080-nginx">1. <code>delonix container run -d -p 8080:80 nginx</code><a class="hanchor" href="#1-delonix-container-run-d-p-808080-nginx" aria-label="#">#</a></h3>
@@ -2326,7 +2326,7 @@ les ports sont publiés sur le holder par <code>HostNetwork::publish</code>.</p>
   end
   Stk-&gt;&gt;Rec: revision::record
 </pre>
-<h3 id="3-kubelet-delonix-cri-engine">3. kubelet → <code>delonix-cri</code> → moteur<a class="hanchor" href="#3-kubelet-delonix-cri-engine" aria-label="#">#</a></h3>
+<h3 id="3-kubelet-delonix-cri-moteur">3. kubelet → <code>delonix-cri</code> → moteur<a class="hanchor" href="#3-kubelet-delonix-cri-moteur" aria-label="#">#</a></h3>
 <pre class="mermaid">sequenceDiagram
   participant K as kubelet
   participant CRI as delonix-cri (tonic server)
@@ -2356,20 +2356,20 @@ les ports sont publiés sur le holder par <code>HostNetwork::publish</code>.</p>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#reference-table">Tableau de référence</a></li>
-<li><a href="#foundation">Fondation</a><ul>
+<li><a href="#tableau-de-reference">Tableau de référence</a></li>
+<li><a href="#fondation">Fondation</a><ul>
 <li><a href="#delonix-runtime-core">delonix-runtime-core</a></li>
 <li><a href="#delonix-model">delonix-model</a></li>
 <li><a href="#delonix-net-rules">delonix-net-rules</a></li>
 </ul>
 </li>
-<li><a href="#contexts">Contextes</a><ul>
+<li><a href="#contextes">Contextes</a><ul>
 <li><a href="#delonix-compute">delonix-compute</a></li>
 <li><a href="#delonix-stack">delonix-stack</a></li>
 <li><a href="#delonix-security-runtime">delonix-security-runtime</a></li>
 </ul>
 </li>
-<li><a href="#adapters">Adaptateurs</a><ul>
+<li><a href="#adaptateurs">Adaptateurs</a><ul>
 <li><a href="#delonix-linux">delonix-linux</a></li>
 <li><a href="#delonix-oci">delonix-oci</a></li>
 <li><a href="#delonix-sdn">delonix-sdn</a></li>
@@ -2391,16 +2391,16 @@ les ports sont publiés sur le holder par <code>HostNetwork::publish</code>.</p>
 <li><a href="#delonix-mcp">delonix-mcp</a></li>
 </ul>
 </li>
-<li><a href="#binaries">Binaires</a><ul>
-<li><a href="#delonix-runtime-bin-binary-delonix">delonix-runtime-bin (binaire delonix)</a></li>
-<li><a href="#delonix-mgmt-bin-binary-delonix-mgmt">delonix-mgmt-bin (binaire delonix-mgmt)</a></li>
-<li><a href="#delonix-mcp-bin-binary-delonix-mcp">delonix-mcp-bin (binaire delonix-mcp)</a></li>
+<li><a href="#binaires">Binaires</a><ul>
+<li><a href="#delonix-runtime-bin-binaire-delonix">delonix-runtime-bin (binaire delonix)</a></li>
+<li><a href="#delonix-mgmt-bin-binaire-delonix-mgmt">delonix-mgmt-bin (binaire delonix-mgmt)</a></li>
+<li><a href="#delonix-mcp-bin-binaire-delonix-mcp">delonix-mcp-bin (binaire delonix-mcp)</a></li>
 </ul>
 </li>
-<li><a href="#how-a-request-crosses-the-crates">Comment une requête traverse les crates</a><ul>
+<li><a href="#comment-une-requete-traverse-les-crates">Comment une requête traverse les crates</a><ul>
 <li><a href="#1-delonix-container-run-d-p-808080-nginx">1. delonix container run -d -p 8080:80 nginx</a></li>
 <li><a href="#2-delonix-stack-apply-f-manifestyaml">2. delonix stack apply -f manifest.yaml</a></li>
-<li><a href="#3-kubelet-delonix-cri-engine">3. kubelet → delonix-cri → moteur</a></li>
+<li><a href="#3-kubelet-delonix-cri-moteur">3. kubelet → delonix-cri → moteur</a></li>
 </ul>
 </li>
 </ul>

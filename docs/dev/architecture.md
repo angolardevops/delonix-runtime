@@ -1,11 +1,15 @@
 # Architecture
 
+**Before you read:** [Project structure](project-structure.md) (where things are), [IaaS and cloud native](iaas-and-cloud-native.md) (the engine's place and principles) and [Cloud native primer](cloud-native-primer.md) (the mechanisms the figures name).
+
 This page is the map a contributor needs before touching the backend: what the engine is, who
 talks to it, which processes exist at runtime, how the crates are layered and call each other,
 and where state lives on disk. It follows the C4 model in order — **Level 1** system context,
 **Level 2** containers (executables and processes), **Level 3** components (crates), and
 **Level 4** code-level flows as sequences. Every node and arrow in a figure names, in the text
-next to it, the file and symbol it was checked against.
+next to it, the file and symbol it was checked against. After it you can say which process a piece
+of work runs in, which layer a crate belongs to and which dependencies it may take, and where on
+disk its state lives.
 
 The canonical, longer document is [`ARCHITECTURE.md`](../../ARCHITECTURE.md) at the repository
 root; the decisions behind the structure are in [`docs/adr/`](../adr/), above all
@@ -36,13 +40,11 @@ first:
 ## Engine identity and boundaries
 
 The canonical text is the section *«Identidade e fronteira do motor»* at the top of
-[`AGENTS.md`](../../AGENTS.md). In short:
+[`AGENTS.md`](../../AGENTS.md). What the engine is, what it leaves to a control plane, and how each
+cloud native principle appears in the code are the *context*, explained in
+[IaaS and cloud native](iaas-and-cloud-native.md#where-delonix-runtime-fits-and-where-it-deliberately-stops).
+This section keeps only the parts that shape the *structure* below:
 
-- **What it is.** An execution abstraction for **one node**: it runs **containers and microVMs**
-  and manages the networking and storage they need. It is declarative, with its **own Kinds**
-  grouped by `apiVersion` (`core`, `compute`, `networking`, `gateway`, `storage`, `artifact`,
-  `infrastructure` — the table is `crates/contexts/delonix-stack/src/kinds.rs`, and
-  `delonix api-resources` prints it).
 - **Providers sit behind ports.** The Linux kernel, Cloud Hypervisor and libvirt, Proxmox VE
   and the Kubernetes CRI are reached through a trait, never through `if provider == …` spread
   across the code. Today's ports: `VmBackend` (`crates/adapters/delonix-vm/src/lib.rs`) and the
@@ -50,12 +52,13 @@ The canonical text is the section *«Identidade e fronteira do motor»* at the t
   (`ImageStore`, `StorageProvider`, `DeviceResolver`, `RunHost`, `NetworkProvider`,
   `VmNetwork`, `WorkloadRuntime`). An OpenStack backend is designed
   ([ADR-0039](../adr/0039-openstack-vm-backend.md), *Proposed*) but has no crate yet.
-- **Cloud native** — plan / apply / drift, the same operations exposed by several interfaces,
-  observability through OpenTelemetry and Prometheus (`crates/adapters/delonix-telemetry`).
-- **Daemonless** — no resident process by default. What must persist belongs to systemd or to a
-  per-workload process with a clear owner (a container's supervisor, the network pin).
-- **Rootless-first** — the normal path runs as an unprivileged user; privilege is an explicit
-  opt-in (`--privileged`, `vm bridge`).
+- **One set of operations, several interfaces** — the CLI, the CRI, the local management API, MCP
+  and a Docker Engine API slice, with the node contract as the intended single API (see
+  [below](#one-set-of-operations-several-interfaces)); observability goes through
+  `crates/adapters/delonix-telemetry`.
+- **Daemonless and rootless-first decide the process model** — what must persist belongs to systemd
+  or to a per-workload process with a clear owner (a container's supervisor, the network pin), and
+  privilege is an explicit opt-in (`--privileged`, `vm bridge`). Level 2 shows those processes.
 - **Knows no consumer.** No platform, control plane, console or agent is named in `crates/`,
   `bins/`, `proto/` or the manifests, and there is no notion of tenant, account, plan or billing.
   The *namespace* you will see everywhere is the engine's own **isolation** namespace, not a
@@ -1015,3 +1018,7 @@ sequenceDiagram
 | Management API / MCP | `delonix-mgmt/src/lib.rs`, `delonix-mcp/src/lib.rs` |
 | Node contract | `proto/delonix/node/v1/`, `scripts/contract_gate.py`, `docs/api/openapi.yaml` |
 | Architecture rules | `scripts/arch_fitness.py`, ADR-0040 |
+
+---
+
+**Next:** [The crates](crates.md) — one section per crate: what it owns, its main types, where to start reading and the traps it has already paid for.

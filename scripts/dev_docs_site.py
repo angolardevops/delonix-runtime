@@ -371,13 +371,13 @@ def decorate(body: str) -> str:
 
     def dialogue(m: re.Match) -> str:
         inner = m.group(1)
-        starts = [s for s in speaker_p.finditer(inner) if DIALOGUE.get(html.unescape(s.group(1)).replace("\u00a0", " ").strip())]
+        starts = [s for s in speaker_p.finditer(inner) if DIALOGUE.get(html.unescape(s.group(1)).replace("\u00a0", " ").strip().rstrip("：:").strip())]
         if not starts or inner[: starts[0].start()].strip():
             return m.group(0)
         turns = []
         for k, s in enumerate(starts):
             end = starts[k + 1].start() if k + 1 < len(starts) else len(inner)
-            name = html.unescape(s.group(1)).replace("\u00a0", " ").strip()
+            name = html.unescape(s.group(1)).replace("\u00a0", " ").strip().rstrip("：:").strip()
             rest = inner[s.end():end]
             turns.append(f'<blockquote class="say say-{DIALOGUE[name]}"><p><span class="speaker">{html.escape(name)}</span>{rest}</blockquote>')
         return "".join(turns)

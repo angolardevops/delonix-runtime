@@ -1,10 +1,13 @@
 # Preparing your environment
 
+**Before you read:** [Start here](start-here.md#day-0-in-30-minutes) (Day 0) and [Linux foundations](linux-foundations.md) — the host traps below are explained in terms of user namespaces and cgroup delegation.
+
 Delonix Runtime is **Linux-only**: every primitive it uses — namespaces, cgroups v2, nftables,
 `pivot_root`, the new mount API — lives in the Linux kernel. You can *compile* most of the
 workspace and run its pure-logic tests on any Linux box with the toolchain below; to *run*
 containers and exercise the live paths you need a host that satisfies the kernel and package
-requirements in this page.
+requirements in this page. After it your host passes `delonix system info`, and when something
+fails you can tell a host prerequisite from an engine bug.
 
 A lot of what looks like an engine bug on a fresh machine is a host prerequisite. Read the
 [Known host traps](#known-host-traps) section before you open an issue.
@@ -173,9 +176,10 @@ requirement. Without delegation the engine does two different things, depending 
 There is no `--pids-limit` flag; the pids ceiling is a property of the engine's cgroup group, not
 of `container run`.
 
-The common case is an **SSH session**: its `session-N.scope` is a *sibling* of
-`user@<uid>.service`, and moving a process between them requires writing to a cgroup owned by root.
-The per-command fix needs no root:
+The common case is an **SSH session**: its scope sits outside your delegated subtree, and the
+session cannot move itself in — why, with the commands to see it, is in
+[Linux foundations — Delegation to users](linux-foundations.md#delegation-to-users). The
+per-command fix needs no root:
 
 ```bash
 systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
@@ -204,3 +208,7 @@ version number.
   host, a self-hosted runner or a VM.
 - **VM firmware and image-building traps** (the Cloud Hypervisor firmware choice, an old `passt`
   in libguestfs builds, `/boot/vmlinuz-*` permissions) are covered in [Building microVMs](microvm-setup.md).
+
+---
+
+**Next:** [Clone, build and test](build-and-test.md) — building, installing and testing your tree, and every CI gate as a local command.

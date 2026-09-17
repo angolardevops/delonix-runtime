@@ -210,8 +210,10 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Contributing</p>
 <h1 id="coding-conventions">Coding conventions</h1>
+<p><strong>Before you read:</strong> <a href="rust-primer.html">Rust primer</a>, <a href="architecture.html">Architecture</a> and <a href="crates.html">The crates</a> — the rules below refer to layers, ports and crates by name.</p>
 <p>This page tells you how to write code that passes review in this repository, so you don't have
-to guess the rules or make up your own. Every rule below carries a tag and a source:</p>
+to guess the rules or make up your own. After it you can apply the review checklist at the end to
+your own diff before a reviewer does. Every rule below carries a tag and a source:</p>
 <ul>
 <li><strong>Enforced (gate)</strong>: a CI job fails if you break it. The gate is named, so you can run it
   locally (see <a href="build-and-test.html#the-gates-ci-runs">Build and test</a>).</li>
@@ -387,8 +389,9 @@ Err(Error::Invalid(super::po::tf(
 </table></div>
 <p>A crate exists only if it is a bounded context, isolates a heavy or privileged dependency, or is
   a separately installed binary. <strong>No <code>-core</code>, <code>-common</code>, <code>-utils</code> or <code>-types</code> suffixes</strong>
-  (ADR-0040 D2.1 records how a <code>-core</code> crate became "the sink of everything"). Some crates still
-  carry older names: <code>delonix-runtime-core</code>, <code>delonix-proxmox</code>, <code>delonix-truenas</code>,
+  (ADR-0040 D2.1 records how a <code>-core</code> crate became "the sink of everything"; that crate,
+  <code>delonix-runtime-core</code>, was removed in #406). Some crates still
+  carry older names: <code>delonix-proxmox</code>, <code>delonix-truenas</code>,
   <code>delonix-security-runtime</code>. ADR-0040 renames each one in the phase that restructures it, "never
   twice". <strong>Don't rename a crate outside its phase.</strong>
 - <strong>Every crate's path is written once</strong>, in <code>[workspace.dependencies]</code> of the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>.
@@ -503,7 +506,7 @@ cpu_affinity: Option&lt;String&gt;,
   (ADR-0007). The manifest schema is declared <strong>stable</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "O schema dos
   manifestos").
 - <strong>Internal records</strong> (the JSON under the state root) keep Rust's <code>snake_case</code> field names. See
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a> (<code>net_mode</code>, <code>namespace</code>). <strong>Convention
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>net_mode</code>, <code>namespace</code>). <strong>Convention
   (observed)</strong>.</p>
 <h3 id="37-environment-variables">3.7 Environment variables<a class="hanchor" href="#37-environment-variables" aria-label="#">#</a></h3>
 <ul>
@@ -623,9 +626,19 @@ already exist.</p>
 <td>ADR-0040 D1</td>
 </tr>
 <tr>
-<td>A persisted record type (<code>Container</code>, <code>Vm</code>, …)</td>
-<td><code>delonix-runtime-core</code> (foundation) — the leftover of the ADR-0040 P3 split. Add here only what belongs to records, never general helpers</td>
-<td>ADR-0040 D2.1 "no <code>-core</code>"</td>
+<td>A persisted workload record type (<code>Container</code>, <code>Vm</code>, <code>Mount</code>, …)</td>
+<td><code>delonix-compute</code> (context): <code>record.rs</code></td>
+<td>ADR-0040 D2.2; #406</td>
+</tr>
+<tr>
+<td>A plain-data record with no mechanism (<code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>, <code>typestate</code>)</td>
+<td><code>delonix-model</code> (foundation): <code>records.rs</code>, <code>typestate.rs</code></td>
+<td>ADR-0040 P3 (#405)</td>
+</tr>
+<tr>
+<td>A question asked of the host or of a process (<code>now_unix</code>, pid liveness, user namespace, id generation), the event log, the server dispatch rule, <code>SO_PEERCRED</code></td>
+<td><code>delonix-node</code> (context)</td>
+<td>ADR-0040 D2.2; #406</td>
 </tr>
 <tr>
 <td>A pure rule of the secret model (<code>Secret</code>, valid names and keys, env-file parsing)</td>
@@ -789,7 +802,7 @@ pub trait NetworkProvider {
   ADR-0040 P3.
   <strong>Enforced (gate)</strong>: the <code>shared_error_imports</code> ratchet in <code>arch_fitness.py</code> (<code>SHARED_ERROR</code>,
   limited to <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) counts
-  <code>use delonix_runtime_core::{…Error/Result…}</code> or <code>use delonix_model::{…}</code> imports that make the
+  <code>use delonix_model::{…Error/Result…}</code> imports that make the
   shared type the crate's own result type. The shared type may still be named inside a <code>From</code>
   impl. The reference implementation is <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/error.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/error.rs</code></a>:</li>
 </ul>
@@ -935,7 +948,7 @@ let rc = unsafe {
   <code>chmod</code> it, because another user can open it in between. <strong>Decided</strong>: doc comment of
   <code>delonix-state/src/store.rs:write_atomic_mode</code>; AGENTS.md (kubeconfig TOCTOU).
 - <strong>Before signalling a pid read from a file, check that it is still the same process.</strong> Use
-  <code>delonix_runtime_core::safe_to_signal(pid, starttime)</code>, which compares the start time so a
+  <code>delonix_node::safe_to_signal(pid, starttime)</code>, which compares the start time so a
   recycled pid isn't killed. <strong>Decided</strong>: AGENTS.md § "A classe «X não é Y»" (the pid entries).
 - <strong>A process's argv doesn't prove it is ours.</strong> Other state roots of the same user, and other
   tools, run with the same argv. Check a token only we choose: a path derived from our root, or an
@@ -976,7 +989,7 @@ let c = store.update(id_or_name, |c| match f(c) {
 <li><strong>New fields on persisted records take <code>#[serde(default)]</code></strong> (or <code>default = "fn"</code>), so records
   written by older versions still load. The default must describe what old records actually were,
   not a guess. <strong>Decided</strong>: AGENTS.md (for example <code>Vm.namespace</code>, <code>VmImage.cloud_init</code>).
-  <strong>Convention (observed)</strong>: <code>delonix-runtime-core/src/lib.rs</code>, the doc comment on <code>Vm.namespace</code>
+  <strong>Convention (observed)</strong>: <code>delonix-compute/src/record.rs</code>, the doc comment on <code>Vm.namespace</code>
   ("the default is a statement of fact and not a guess").</li>
 <li><strong>Anything needed to rebuild a resource must be persisted, not only used at creation.</strong> When you
   touch a <code>start</code>/<code>restart</code> path, compare field by field what creation uses with what the record
@@ -1062,7 +1075,7 @@ your PR:</p>
 <li><strong>When <code>#[allow(clippy::…)]</code> is acceptable.</strong> It is used (<code>too_many_arguments</code>) without a written
   policy.</li>
 <li><strong>The <code>Result</code> type of today's compute ports.</strong> The ports in
-  <code>delonix-compute/src/ports.rs</code> return <code>delonix_runtime_core::Result</code>, so the adapters that
+  <code>delonix-compute/src/ports.rs</code> return <code>delonix_model::Result</code>, so the adapters that
   implement them (<code>HostWorkload</code>, <code>HostNetwork</code>, …) import the shared result type, and those imports
   count towards <code>shared_error_imports</code>. P3 decides errors per crate. No document says how a port's
   signature changes, and adding such an import in a new file fails the ratchet. If your change
@@ -1113,6 +1126,8 @@ your PR:</p>
 <li>ADR, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> and the generated docs are updated if a boundary moved. →
     <a href="#10-comments-and-documentation">§10</a></li>
 </ol>
+<hr />
+<p><strong>Next:</strong> <a href="contributing-workflow.html">Contribution workflow</a> — how a change is sent: worktrees, version alignment, language rule, ADRs, commits and pull requests.</p>
 <nav class="pager"><a href="microvm-setup.html"><span>← Previous</span>Building microVMs</a><a class="next" href="contributing-workflow.html"><span>Next →</span>Contribution workflow</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/coding-conventions.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/coding-conventions.md</code></footer>
 </div></main>

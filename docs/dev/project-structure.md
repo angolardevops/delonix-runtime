@@ -1,10 +1,13 @@
 # Project structure
 
+**Before you read:** [Clone, build and test](build-and-test.md) — you have a checkout that builds, and know which gates exist.
+
 This page is the map of the repository: what each top-level file and directory is, who changes it
 and when, and which parts are **generated** and must never be edited by hand. Read it after
 [Clone, build and test](build-and-test.md) and before [Architecture](architecture.md) — the
 architecture explains *why* the code is split the way it is; this page tells you *where* things
-are.
+are. After it you can place any path in the repository, say who changes it, and know whether you
+may edit it by hand or must regenerate it.
 
 A CI gate keeps it honest: `python3 scripts/dev_docs.py --check` fails when a tracked top-level
 path (or a second-level directory of `crates/`, `bins/` or `docs/`) is missing from the tables
@@ -196,3 +199,7 @@ Not committed at all: the manpages (`delonix man --dir`, checked with `groff` in
 The rules behind this list, with examples, are in
 [Coding conventions — Structure: where code goes](coding-conventions.md) and
 [The crates](crates.md).
+
+---
+
+**Next:** [Architecture](architecture.md) — why the code is split that way: the layers, the processes at runtime, the crate graph and the state on disk.

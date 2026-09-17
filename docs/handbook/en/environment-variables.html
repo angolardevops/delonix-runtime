@@ -210,9 +210,11 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Reference</p>
 <h1 id="environment-variables-delonix_">Environment variables (<code>DELONIX_*</code>)</h1>
+<p><strong>Before you read:</strong> <a href="build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a> in Clone, build and test.</p>
 <p>This page lists every <code>DELONIX_*</code> name that appears in the engine's code, with where it is read,
 what it changes, and whether you should ever set it. It is a reference: read the section that
-matches what you are doing, not the whole page.</p>
+matches what you are doing, not the whole page. After it you can isolate a run, turn on the
+diagnostics you need, and recognise the variables that lower a security boundary before you set one.</p>
 <h2 id="how-to-read-this-page">How to read this page<a class="hanchor" href="#how-to-read-this-page" aria-label="#">#</a></h2>
 <p>Each row of the variable tables has five columns:</p>
 <ul>
@@ -821,14 +823,14 @@ normal command behave like an internal pass.</p>
 <tbody>
 <tr>
 <td><code>DELONIX_BIN</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>dispatch.<wbr>rs:cli_bin</code></a> (used by <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>dispatch.<wbr>rs:cli_bin</code></a> (used by <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
 <td>The <code>delonix</code> executable a server runs back for lifecycle operations.</td>
 <td>A path. Unset: the <code>delonix</code> next to the server's executable, then <code>delonix</code> on <code>PATH</code>.</td>
 <td>Set by <code>delonix serve …</code> / <code>delonix mcp</code> (<code>cmd/<wbr>serve.<wbr>rs:exec_server</code>) to the running CLI. Setting it by hand is legitimate only when you start a server binary directly and want it to call a specific CLI. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>docs_cli_gate.<wbr>py</code></a> also read a variable of this name to choose the binary they inspect (see <a href="build-and-test.html">Clone, build and test</a>).</td>
 </tr>
 <tr>
 <td><code>DELONIX_DISPATCH_VERSION</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>dispatch.<wbr>rs:check_version</code></a> (in <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>dispatch.<wbr>rs:check_version</code></a> (in <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>)</td>
 <td>The version the server must be; a server from another release refuses to start.</td>
 <td>Set by <code>cmd/<wbr>serve.<wbr>rs:exec_server</code> to the CLI's version.</td>
 <td>A server started directly (for example by a systemd unit) has no expectation and is not checked.</td>
@@ -1058,6 +1060,8 @@ and you never need to set them:</p>
   <code>image vm build</code> writes <strong>inside</strong> a built VM image (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>).
   Read them in the guest with <code>cat /etc/delonix-image-release</code>; no process reads them.</li>
 </ul>
+<hr />
+<p><strong>Next:</strong> <a href="glossary.html">Glossary</a> — the terms you meet in this repository, with their Delonix meaning and where each is explained.</p>
 <nav class="pager"><a href="cloud-native-standards.html"><span>← Previous</span>Cloud native standards, layer by layer</a><a class="next" href="glossary.html"><span>Next →</span>Glossary</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/environment-variables.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/environment-variables.md</code></footer>
 </div></main>

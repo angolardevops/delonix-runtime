@@ -1,5 +1,7 @@
 # Delonixfile and VMfile
 
+**Before you read:** [Clone, build and test](build-and-test.md) (a binary and an isolated state root) and [OCI images, content-addressed storage and overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs) in the Cloud native primer.
+
 Delonix has two build files, and they look alike on purpose: anyone who has written a Dockerfile
 can read both. What they build is different.
 
@@ -9,7 +11,8 @@ can read both. What they build is different.
   mechanism is `qemu-img` + `virt-customize` on a whole disk, built by `delonix image vm build`.
 
 This page describes what the parsers in this repository actually accept — not what Docker accepts.
-Every rule below points at the code that enforces it.
+Every rule below points at the code that enforces it. After it you can write both files, predict
+what each parser accepts or refuses, and find where to change a grammar.
 
 > Examples marked *parse-checked* were run against a binary built from this tree, with
 > `DELONIX_ROOT`, `DELONIX_NET_RUNTIME_DIR` and `TMPDIR` pointed at a scratch directory, up to the
@@ -413,3 +416,7 @@ A full build (`virt-customize`, downloads, compression) was **not executed in th
   documented as such or removed.
 - The Delonixfile parser lives in a library crate (`delonix-oci`), so it must not print; the
   VMfile parser is in the CLI binary. See [Crates](crates.md).
+
+---
+
+**Next:** [Building microVMs](microvm-setup.md) — the host prerequisites, backends, images and day-2 verbs for booting and testing microVMs.

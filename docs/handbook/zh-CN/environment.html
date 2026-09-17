@@ -210,11 +210,13 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">环境与构建</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="preparing-your-environment">Preparing your environment</h1>
+<p><strong>Before you read:</strong> <a href="start-here.html#day-0-in-30-minutes">Start here</a> (Day 0) and <a href="linux-foundations.html">Linux foundations</a> — the host traps below are explained in terms of user namespaces and cgroup delegation.</p>
 <p>Delonix Runtime is <strong>Linux-only</strong>: every primitive it uses — namespaces, cgroups v2, nftables,
 <code>pivot_root</code>, the new mount API — lives in the Linux kernel. You can <em>compile</em> most of the
 workspace and run its pure-logic tests on any Linux box with the toolchain below; to <em>run</em>
 containers and exercise the live paths you need a host that satisfies the kernel and package
-requirements in this page.</p>
+requirements in this page. After it your host passes <code>delonix system info</code>, and when something
+fails you can tell a host prerequisite from an engine bug.</p>
 <p>A lot of what looks like an engine bug on a fresh machine is a host prerequisite. Read the
 <a href="#known-host-traps">Known host traps</a> section before you open an issue.</p>
 <h2 id="toolchain">Toolchain<a class="hanchor" href="#toolchain" aria-label="#">#</a></h2>
@@ -435,9 +437,10 @@ requirement. Without delegation the engine does two different things, depending 
 </ul>
 <p>There is no <code>--pids-limit</code> flag; the pids ceiling is a property of the engine's cgroup group, not
 of <code>container run</code>.</p>
-<p>The common case is an <strong>SSH session</strong>: its <code>session-N.scope</code> is a <em>sibling</em> of
-<code>user@&lt;uid&gt;.service</code>, and moving a process between them requires writing to a cgroup owned by root.
-The per-command fix needs no root:</p>
+<p>The common case is an <strong>SSH session</strong>: its scope sits outside your delegated subtree, and the
+session cannot move itself in — why, with the commands to see it, is in
+<a href="linux-foundations.html#delegation-to-users">Linux foundations — Delegation to users</a>. The
+per-command fix needs no root:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 </code></pre></div>
 <p>For long-lived workloads, use a systemd <strong>user</strong> unit with <code>Delegate=yes</code>. Some hosts delegate only
@@ -461,6 +464,8 @@ version number.</p>
 <li><strong>VM firmware and image-building traps</strong> (the Cloud Hypervisor firmware choice, an old <code>passt</code>
   in libguestfs builds, <code>/boot/vmlinuz-*</code> permissions) are covered in <a href="microvm-setup.html">Building microVMs</a>.</li>
 </ul>
+<hr />
+<p><strong>Next:</strong> <a href="build-and-test.html">Clone, build and test</a> — building, installing and testing your tree, and every CI gate as a local command.</p>
 <nav class="pager"><a href="rust-primer.html"><span>← 上一页</span>Rust primer for this codebase</a><a class="next" href="build-and-test.html"><span>下一页 →</span>Clone, build and test</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/environment.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/environment.md</code></footer>
 </div></main>

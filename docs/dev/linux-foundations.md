@@ -1,9 +1,13 @@
 # Linux foundations
 
+**Before you read:** [IaaS and cloud native](iaas-and-cloud-native.md), for why a node engine needs these primitives. You need a Linux shell and nothing else.
+
 Every page after this one assumes you can answer, with a command, questions like "which network
 namespace is this process in?", "why did this limit not apply?" or "who is still holding this pipe
 open?". This page teaches those primitives hands-on, from the perspective of someone who writes
-Linux system code *and* has to operate it at 3 a.m.
+Linux system code *and* has to operate it at 3 a.m. By the end you will be able to answer each of
+those questions from a shell, and to predict the failures that later pages describe in the engine's
+terms (a limit that does not apply, a pipe that never reaches EOF, a PID that names another process).
 
 It does not explain how the engine uses them — that mapping, with files and symbols, is the
 [Cloud native primer](cloud-native-primer.md). Each section here ends with a pointer to the
@@ -719,7 +723,8 @@ cat /proc/sys/fs/file-nr /proc/sys/fs/file-max /proc/sys/fs/nr_open
 - **Never leak a pipe or the caller's stdio into a long-lived child.** Two real incidents are
   recorded in [`AGENTS.md`](../../AGENTS.md): the log shim holding other HTTP connections of a
   long-running server open (section *«CLI (`delonix`)»*, the `delonix serve docker-api` entry), and
-  the network pin inheriting the caller's stderr so that `out=$(delonix …)` never saw EOF — fixed
+  the network pin (the long-lived holder process of the engine's rootless network namespace — the
+  holder pattern shown in [Namespaces](#creating-versus-joining-keeping-a-namespace-alive)) inheriting the caller's stderr so that `out=$(delonix …)` never saw EOF — fixed
   by writing to `pin.log` (section *«A classe «X não é Y» — varredura de 2026-08-05»*; code:
   `start_pin` and `pin_log_path` in `crates/adapters/delonix-sdn/src/infra.rs`).
 - **Signal a process through a pidfd, not a PID.** A reaped PID can be reused; a pidfd refers to
@@ -894,3 +899,7 @@ Do these in your scratch directory, as your normal user.
    closes its copy first and the reader gets EOF at `0s`. This is the same shape as the pin/stderr
    incident. (Do not drop the `exec {w}>&-` in the parent: `wait` also waits for the reader, and a
    reader that never sees EOF makes the command hang.)
+
+---
+
+**Next:** [Cloud native primer](cloud-native-primer.md) — where the engine uses each of these primitives, and the open specifications (OCI, CNI, CRI, KVM) layered on top of them.

@@ -210,10 +210,12 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">架构</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="the-crates">The crates</h1>
+<p><strong>Before you read:</strong> <a href="architecture.html">Architecture</a>, above all <a href="architecture.html#layers-and-the-allowed-direction">Layers and the allowed direction</a>.</p>
 <p>This page is the map you keep open while reading the code. The table below is
 generated from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>; everything after it is
 written by hand, and every pointer (<code>path:symbol</code>) was read in the tree before it
-was written down. Where a claim could not be confirmed it is not here.</p>
+was written down. Where a claim could not be confirmed it is not here. After it you can find the
+crate that owns a change, the files to read first in it, and the traps it has already paid for.</p>
 <p>How to use it:</p>
 <ul>
 <li>Find the crate that owns what you want to change (layer first, see
@@ -257,7 +259,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model</code></a></td>
 <td>—</td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-runtime-bin</code>, <code>delonix-runtime-core</code>, <code>delonix-scanner</code>, <code>delonix-state</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 </tr>
 <tr>
 <td><code>delonix-net-rules</code></td>
@@ -268,27 +270,27 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td><code>delonix-sdn</code>, <code>delonix-vm</code></td>
 </tr>
 <tr>
-<td><code>delonix-runtime-core</code></td>
-<td>Foundation</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-runtime-core" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core</code></a></td>
-<td>—</td>
-<td><code>delonix-model</code></td>
-<td><code>delonix-compute</code>, <code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mcp-bin</code>, <code>delonix-mgmt</code>, <code>delonix-mgmt-bin</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
-</tr>
-<tr>
 <td><code>delonix-compute</code></td>
 <td>Contexts</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-compute" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute</code></a></td>
 <td>—</td>
-<td><code>delonix-model</code>, <code>delonix-runtime-core</code></td>
-<td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-model</code>, <code>delonix-node</code></td>
+<td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+</tr>
+<tr>
+<td><code>delonix-node</code></td>
+<td>Contexts</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-node" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node</code></a></td>
+<td>—</td>
+<td><code>delonix-model</code></td>
+<td><code>delonix-compute</code>, <code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mcp-bin</code>, <code>delonix-mgmt</code>, <code>delonix-mgmt-bin</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 </tr>
 <tr>
 <td><code>delonix-security-runtime</code></td>
 <td>Contexts</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-security-runtime" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-security-runtime</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code></td>
+<td><code>delonix-model</code>, <code>delonix-node</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -296,7 +298,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Contexts</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-stack" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code></td>
+<td><code>delonix-model</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -304,7 +306,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -312,7 +314,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code>, <code>delonix-scanner</code></td>
 </tr>
 <tr>
@@ -328,7 +330,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-net-rules</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-net-rules</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -336,7 +338,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state</code></a></td>
 <td>—</td>
-<td><code>delonix-model</code>, <code>delonix-runtime-core</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code></td>
 <td><code>delonix-cri</code>, <code>delonix-linux</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-oci</code>, <code>delonix-runtime-bin</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 </tr>
 <tr>
@@ -352,7 +354,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-net-rules</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-net-rules</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -360,7 +362,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Adapters</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume</code></a></td>
 <td>—</td>
-<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-runtime-core</code>, <code>delonix-state</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-state</code></td>
 <td><code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -368,7 +370,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Providers</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code>, <code>delonix-vm</code></td>
+<td><code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-vm</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -376,7 +378,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Providers</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas</code></a></td>
 <td>—</td>
-<td><code>delonix-runtime-core</code></td>
+<td><code>delonix-model</code></td>
 <td><code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -384,7 +386,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Interfaces</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri</code></a></td>
 <td><code>delonix-cri</code></td>
-<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-oci</code>, <code>delonix-runtime-core</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code></td>
 <td>—</td>
 </tr>
 <tr>
@@ -392,7 +394,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Interfaces</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp</code></a></td>
 <td>—</td>
-<td><code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-runtime-core</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 <td><code>delonix-mcp-bin</code></td>
 </tr>
 <tr>
@@ -400,7 +402,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Interfaces</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mgmt</code></a></td>
 <td>—</td>
-<td><code>delonix-linux</code>, <code>delonix-oci</code>, <code>delonix-runtime-core</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 <td><code>delonix-mcp</code>, <code>delonix-mgmt-bin</code>, <code>delonix-runtime-bin</code></td>
 </tr>
 <tr>
@@ -408,7 +410,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Binaries</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin</code></a></td>
 <td><code>delonix-mcp</code></td>
-<td><code>delonix-mcp</code>, <code>delonix-runtime-core</code>, <code>delonix-telemetry</code></td>
+<td><code>delonix-mcp</code>, <code>delonix-node</code>, <code>delonix-telemetry</code></td>
 <td>—</td>
 </tr>
 <tr>
@@ -416,7 +418,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Binaries</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mgmt-bin" target="_blank" rel="noopener"><code>bins/delonix-mgmt-bin</code></a></td>
 <td><code>delonix-mgmt</code></td>
-<td><code>delonix-mgmt</code>, <code>delonix-runtime-core</code>, <code>delonix-telemetry</code></td>
+<td><code>delonix-mgmt</code>, <code>delonix-node</code>, <code>delonix-telemetry</code></td>
 <td>—</td>
 </tr>
 <tr>
@@ -424,7 +426,7 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <td>Binaries</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin</code></a></td>
 <td><code>delonix</code></td>
-<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-model</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-runtime-core</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
+<td><code>delonix-compute</code>, <code>delonix-linux</code>, <code>delonix-mgmt</code>, <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-oci</code>, <code>delonix-proxmox</code>, <code>delonix-scanner</code>, <code>delonix-sdn</code>, <code>delonix-security-runtime</code>, <code>delonix-stack</code>, <code>delonix-state</code>, <code>delonix-telemetry</code>, <code>delonix-truenas</code>, <code>delonix-vm</code>, <code>delonix-volume</code></td>
 <td>—</td>
 </tr>
 </tbody>
@@ -432,145 +434,10 @@ was written down. Where a claim could not be confirmed it is not here.</p>
 <!-- dev-docs:end crates-table -->
 
 <h2 id="foundation">Foundation<a class="hanchor" href="#foundation" aria-label="#">#</a></h2>
-<p>Foundation crates carry no mechanism: types, pure rules and the on-disk state
-format. They may depend only on other foundation crates. The files that hold those
-records are not here: they are read and written by the <code>delonix-state</code> adapter.</p>
-<h3 id="delonix-runtime-core"><code>delonix-runtime-core</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-runtime-core" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-runtime-core" aria-label="#">#</a></h3>
-<p><strong>Purpose.</strong> The shared vocabulary of the engine: the persisted records
-<code>Container</code> and <code>Vm</code> and the types they are made of (<code>Mount</code>, health, cgroup parent,
-extra networks and disks). Two groups of items that every crate still imports from here
-are <strong>defined in <code>delonix-model</code></strong> and re-exported with their old paths: the error type
-(<code>Error</code>, <code>Result</code>) and, since #405, the plain-data records (<code>Status</code>,
-<code>ContainerFw</code>/<code>FwRule</code> and their validators, <code>default_namespace</code>, <code>typestate</code>). It also holds the small
-cross-cutting pieces that more than one crate needs and that would otherwise be
-copied: the <code>SO_PEERCRED</code> check for local sockets, the append-only event log, and
-the rule a server binary follows when <code>delonix</code> runs it. It does <strong>not</strong> create
-processes, mount, or configure the network, and it has no notion of tenant, plan or
-billing (its crate doc says so, and the rest of the workspace relies on it).</p>
-<p>The stores (<code>Store</code>, <code>JsonStore&lt;T&gt;</code>), the atomic-write helpers and the encrypted
-secret store (<code>SecretStore</code>, <code>CredVault</code>) <strong>left this crate</strong> for <code>delonix-state</code>
-(ADR-0040 P3); the pure secret model (<code>Secret</code>, <code>valid_name</code>, <code>valid_env_key</code>,
-<code>parse_env_file</code>) went to <code>delonix-model</code>. Nothing about them is re-exported here
-any more, so a call site that used <code>delonix_runtime_core::Store</code> now imports
-<code>delonix_state::Store</code>. The only re-exports in <code>src/lib.rs</code> are from <code>delonix-model</code>:
-<code>records::{default_namespace, fw_port_ok, fw_proto_ok, fw_src_ok, ContainerFw, FwRule, Status}</code>
-and <code>{typestate, Error, Result}</code> (#405). New code may import either path; the
-definitions are in <code>delonix-model</code>.</p>
-<p><strong>Key modules</strong></p>
-<div class="tablewrap"><table>
-<thead>
-<tr>
-<th>Module</th>
-<th>Responsibility</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>lib.rs</code></td>
-<td><code>Container</code>, <code>Vm</code>, <code>Mount</code>, health config, cgroup-parent parsing (<code>KubeCgroupParent</code>), <code>generate_id</code>, <code>now_unix</code>, pid liveness helpers; re-exports <code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>, <code>default_namespace</code> from <code>delonix-model</code></td>
-</tr>
-<tr>
-<td><code>events</code></td>
-<td>append-only <code>events.jsonl</code> event log (<code>emit</code>, <code>read</code>)</td>
-</tr>
-<tr>
-<td><code>dispatch</code></td>
-<td>version check and CLI resolution for server binaries run by <code>delonix</code></td>
-</tr>
-<tr>
-<td><code>peer_cred</code></td>
-<td><code>peer_uid</code> from <code>SO_PEERCRED</code></td>
-</tr>
-<tr>
-<td><code>typestate</code></td>
-<td>re-export of <code>delonix_model::<wbr>typestate</code> (moved in #405)</td>
-</tr>
-<tr>
-<td><code>virt</code></td>
-<td>virtualization/virtio detection from <code>/sys</code> and <code>/proc</code></td>
-</tr>
-<tr>
-<td><code>workload_net</code></td>
-<td>the workload IPv4 range, defined once</td>
-</tr>
-</tbody>
-</table></div>
-<p><strong>Main public API</strong></p>
-<div class="tablewrap"><table>
-<thead>
-<tr>
-<th>Item</th>
-<th>What it is</th>
-<th>Where</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>Container</code></td>
-<td>the container record everything reads and writes</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Container</code></a></td>
-</tr>
-<tr>
-<td><code>Vm</code></td>
-<td>the VM record</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Vm</code></a></td>
-</tr>
-<tr>
-<td><code>Status</code></td>
-<td>lifecycle state of a workload, re-exported</td>
-<td>defined in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs:Status</code></a></td>
-</tr>
-<tr>
-<td><code>Error</code>, <code>Result</code></td>
-<td>the error every engine crate returns, re-exported from <code>delonix-model</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>pub use delonix_model::<wbr>{Error, Result}</code>)</td>
-</tr>
-<tr>
-<td><code>events::emit</code></td>
-<td>append one event line</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/events.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>events.<wbr>rs:emit</code></a></td>
-</tr>
-<tr>
-<td><code>dispatch::check_version</code>, <code>dispatch::cli_bin</code></td>
-<td>how <code>delonix-cri</code>/<code>-mgmt</code>/<code>-mcp</code> refuse a mismatched release and find the <code>delonix</code> CLI to run back</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>dispatch.<wbr>rs</code></a></td>
-</tr>
-<tr>
-<td><code>is_alive</code>, <code>proc_starttime</code>, <code>safe_to_signal</code></td>
-<td>pid checks that survive pid recycling</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
-</tr>
-</tbody>
-</table></div>
-<p><strong>Talks to.</strong> <code>delonix-model</code> only, for the <code>Error</code>/<code>Result</code>, the plain-data records
-and the typestate it re-exports. No subprocesses: detection reads <code>/sys</code> and <code>/proc</code>
-directly.</p>
-<p><strong>Notable external dependencies.</strong> <code>serde</code>/<code>serde_json</code> (the record types derive
-them), <code>thiserror</code>, <code>libc</code>. The encryption dependencies (<code>chacha20poly1305</code>,
-<code>getrandom</code>) moved with the secret store to <code>delonix-state</code>.</p>
-<p><strong>Tests.</strong> Inline <code>#[cfg(test)]</code> modules in the source files; no <code>tests/</code> directory.</p>
-<p><strong>Start reading at.</strong> <code>src/lib.rs</code> (the <code>Container</code> and <code>Vm</code> structs), then
-<code>src/dispatch.rs</code>. For how the records are stored, see <code>delonix-state</code>.</p>
-<p><strong>Gotchas.</strong></p>
-<ul>
-<li><code>Container.userns</code> says whether the container <strong>created</strong> its own user
-  namespace, not whether it runs in a different one. Workloads that join the
-  network holder's user namespace have <code>userns = false</code> and are still in a
-  different user namespace than the caller. <code>mount_live</code> in <code>delonix-linux</code>
-  records this and always opens the <code>user</code> namespace instead of trusting the field
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs:mount_live</code></a>).</li>
-<li><code>Container.ip</code> is the address on the <strong>primary</strong> network only; a multi-homed
-  container has more (see the <code>NetPlan</code> doc comment in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> and <code>apply_firewall_all</code>, which exists
-  because firewalling only the primary IP was bypassable).</li>
-<li>The crate description in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> still says it holds <code>Status</code>, the "Secret
-  Manager" and the "Store", and the crate doc in <code>src/lib.rs</code> still says "shared
-  types, state and errors". Both predate #404 and #405; the module list is the
-  reference.</li>
-<li><code>Container::cgroup()</code> is the static root-mode path. For a running rootless
-  container the real cgroup is read from <code>/proc/&lt;pid&gt;/cgroup</code> by
-  <code>delonix_linux::live_cgroup</code>.</li>
-</ul>
+<p>Foundation crates carry no mechanism: pure types and rules. They may depend only on
+other foundation crates. The persisted <code>Container</code> and <code>Vm</code> records are not here
+(they belong to <code>delonix-compute</code>), and the files that hold records are read and
+written by the <code>delonix-state</code> adapter.</p>
 <h3 id="delonix-model"><code>delonix-model</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-model" aria-label="#">#</a></h3>
 <p><strong>Purpose.</strong> The part of the model any layer can name without depending on a
 mechanism: the engine's shared <code>Error</code> type with the stable <code>DX_*</code> code of each
@@ -580,9 +447,8 @@ secret is and what a valid name and key look like), and — since #405 — the r
 that are plain data: a workload's <code>Status</code>, the per-container firewall
 (<code>ContainerFw</code>, <code>FwRule</code> and the pure validators <code>fw_proto_ok</code>, <code>fw_port_ok</code>,
 <code>fw_src_ok</code>), <code>default_namespace</code>, and the compile-time lifecycle <code>typestate</code>. Pure —
-no I/O, no process state (crate doc). The <code>Container</code> and <code>Vm</code> records stay in
-<code>delonix-runtime-core</code>, which re-exports everything above under the old paths; the
-files that store records are in <code>delonix-state</code>.</p>
+no I/O, no process state (crate doc). The <code>Container</code> and <code>Vm</code> records that use these
+types are in <code>delonix-compute</code>; the files that store records are in <code>delonix-state</code>.</p>
 <p><strong>Key modules</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -614,7 +480,7 @@ files that store records are in <code>delonix-state</code>.</p>
 </tr>
 <tr>
 <td><code>records</code></td>
-<td><code>Status</code> (<code>from_wait</code>, <code>is_terminal</code>, <code>exit_code</code>), <code>ContainerFw</code>/<code>FwRule</code>, <code>fw_proto_ok</code>/<code>fw_port_ok</code>/<code>fw_src_ok</code>, <code>default_namespace</code> (moved from <code>delonix-runtime-core</code> in #405)</td>
+<td><code>Status</code> (<code>from_wait</code>, <code>is_terminal</code>, <code>exit_code</code>), <code>ContainerFw</code>/<code>FwRule</code>, <code>fw_proto_ok</code>/<code>fw_port_ok</code>/<code>fw_src_ok</code>, <code>default_namespace</code> (moved here in #405)</td>
 </tr>
 <tr>
 <td><code>typestate</code></td>
@@ -674,9 +540,8 @@ files that store records are in <code>delonix-state</code>.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> No other engine crate: it is a root of the graph, and
-<code>delonix-runtime-core</code> depends on it and re-exports its error and records (the
-dependency used to point the other way). The CLI re-exports <code>exitcode</code> and <code>names</code> as
+<p><strong>Talks to.</strong> No other engine crate: it is a root of the graph, and every other
+engine crate that returns the shared error imports it from here. The CLI re-exports <code>exitcode</code> and <code>names</code> as
 <code>cmd::exitcode</code> and <code>cmd::names</code>
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a>), so older call sites did not change.</p>
 <p><strong>Notable external dependencies.</strong> <code>thiserror</code> (the <code>Error</code> derive), <code>serde_json</code>
@@ -690,10 +555,9 @@ then <code>src/records.rs</code>, then <code>src/names.rs</code>.</p>
 <ul>
 <li>The <code>match</code> in <code>for_error</code> is exhaustive on purpose: a new <code>Error</code> variant must
   be classified here or the build fails.</li>
-<li>Several import paths reach the same type: <code>delonix_model::records::FwRule</code>,
-  <code>delonix_runtime_core::FwRule</code> (re-export) and <code>delonix_sdn::FwRule</code> (a re-export
-  of the <code>-core</code> one, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>). They are one type,
-  so all compile; <code>grep</code> for every path when you look for callers.</li>
+<li>Two import paths reach the same type: <code>delonix_model::records::FwRule</code> and
+  <code>delonix_sdn::FwRule</code> (a re-export, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>). They
+  are one type, so both compile; <code>grep</code> for both paths when you look for callers.</li>
 </ul>
 <h3 id="delonix-net-rules"><code>delonix-net-rules</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-net-rules" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-net-rules" aria-label="#">#</a></h3>
 <p><strong>Purpose.</strong> Network rules that can be computed without touching the kernel:
@@ -749,13 +613,17 @@ stays in <code>delonix-sdn</code>).</p>
 code is the reference.</p>
 <h2 id="contexts">Contexts<a class="hanchor" href="#contexts" aria-label="#">#</a></h2>
 <p>A context owns a domain's decisions and the ports its use cases need. No context
-touches the kernel.</p>
+mounts, spawns or configures the network; <code>delonix-node</code> is the one that reads the
+host directly (<code>/proc</code>, <code>/sys</code>, <code>kill(pid, 0)</code>, <code>SO_PEERCRED</code>).</p>
 <h3 id="delonix-compute"><code>delonix-compute</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-compute" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-compute" aria-label="#">#</a></h3>
-<p><strong>Purpose.</strong> The Compute context (<code>compute.delonix.io</code>): the run specification
-every entry point translates into (<code>RunOpts</code>), and the <code>container run</code> use case as
-pure steps over ports — preflight, resolve, build the record, wire the network,
-start. It also holds the Pod specification types and their translation to
-<code>RunOpts</code>. It does <strong>not</strong> spawn processes, pull images or configure networks; it
+<p><strong>Purpose.</strong> The Compute context (<code>compute.delonix.io</code>): the records the engine
+persists for a container and a VM (<code>Container</code>, <code>Vm</code>, and what they carry — <code>Mount</code>,
+health checks, cgroup placement, extra networks, disks and NICs), the run
+specification every entry point translates into (<code>RunOpts</code>), and the <code>container run</code>
+use case as pure steps over ports — preflight, resolve, build the record, wire the
+network, start. It also holds the Pod specification types and their translation to
+<code>RunOpts</code>, and the workload IPv4 range. The records came here from the removed
+<code>delonix-runtime-core</code> (#406). It does <strong>not</strong> spawn processes, pull images or configure networks; it
 calls traits that adapters implement.</p>
 <p><strong>Key modules</strong></p>
 <div class="tablewrap"><table>
@@ -766,6 +634,14 @@ calls traits that adapters implement.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>record</code> (private, re-exported at the crate root)</td>
+<td><code>Container</code>, <code>Vm</code>, <code>Mount</code>, <code>HealthConfig</code>/<code>Health</code>/<code>HealthState</code>, <code>CgroupParent</code>, <code>KubeCgroupParent</code>/<code>KubeCgroupDriver</code>, <code>ExtraNet</code>, the VM types (<code>CpuTopology</code>, <code>ExtraDisk</code>, <code>ExtraNic</code>, <code>VmVolume</code>, <code>VmBootSpec</code>), <code>DELONIX_SLICE</code>, <code>safe_cgroup_segment</code></td>
+</tr>
+<tr>
+<td><code>workload_net</code></td>
+<td>the workload IPv4 range (<code>is_workload_ipv4</code>), defined once</td>
+</tr>
 <tr>
 <td><code>run_opts</code></td>
 <td><code>RunOpts</code>, the one run specification</td>
@@ -810,6 +686,26 @@ calls traits that adapters implement.</p>
 </tr>
 </thead>
 <tbody>
+<tr>
+<td><code>Container</code></td>
+<td>the container record everything reads and writes</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs:Container</code></a></td>
+</tr>
+<tr>
+<td><code>Vm</code></td>
+<td>the VM record</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs:Vm</code></a></td>
+</tr>
+<tr>
+<td><code>KubeCgroupParent::parse</code></td>
+<td>validation of the cgroup parent the kubelet sends</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs:KubeCgroupParent</code></a></td>
+</tr>
+<tr>
+<td><code>DELONIX_SLICE</code></td>
+<td>the root-mode cgroup slice</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs:DELONIX_SLICE</code></a></td>
+</tr>
 <tr>
 <td><code>RunOpts</code></td>
 <td>the run specification</td>
@@ -857,8 +753,9 @@ calls traits that adapters implement.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> Only <code>delonix-runtime-core</code>, by direct call. Everything else arrives
-through its ports, implemented in adapters:</p>
+<p><strong>Talks to.</strong> Only <code>delonix-model</code> and <code>delonix-node</code> (<code>safe_to_signal</code> for the
+records, <code>generate_id</code> in tests), by direct call. Everything else arrives through its
+ports, implemented in adapters:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -903,15 +800,133 @@ schema cannot drift from the types).</p>
 <p><strong>Tests.</strong> Inline unit tests with fake port implementations (<code>FakeNet</code>,
 <code>FakeRuntime</code>, <code>Fake</code> in <code>network.rs</code>, <code>launch.rs</code>, <code>run.rs</code>) — the use case is
 tested without a kernel.</p>
-<p><strong>Start reading at.</strong> <code>src/ports.rs</code>, then <code>src/run.rs</code>, then <code>src/launch.rs</code>.</p>
+<p><strong>Start reading at.</strong> <code>src/record.rs</code> (the <code>Container</code> and <code>Vm</code> structs), then
+<code>src/ports.rs</code>, then <code>src/run.rs</code>, then <code>src/launch.rs</code>.</p>
 <p><strong>Gotchas.</strong></p>
 <ul>
-<li>Two items named <code>ImageStore</code> exist: the port trait
+<li><code>Container.userns</code> says whether the container <strong>created</strong> its own user
+  namespace, not whether it runs in a different one. Workloads that join the
+  network holder's user namespace have <code>userns = false</code> and are still in a
+  different user namespace than the caller. <code>mount_live</code> in <code>delonix-linux</code>
+  records this and always opens the <code>user</code> namespace instead of trusting the field
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs:mount_live</code></a>).</li>
+<li><code>Container.ip</code> is the address on the <strong>primary</strong> network only; a multi-homed
+  container has more (see the <code>NetPlan</code> doc comment in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> and <code>apply_firewall_all</code>, which exists
+  because firewalling only the primary IP was bypassable).</li>
+<li><code>Container::cgroup()</code> is the static root-mode path. For a running rootless
+  container the real cgroup is read from <code>/proc/&lt;pid&gt;/cgroup</code> by
+  <code>delonix_linux::live_cgroup</code>.</li>
+<li>
+<p><code>record.rs</code> is the leftover of a large split: its module doc still says the records
+  "came out of <code>delonix-runtime-core</code>", and the crate doc in <code>src/lib.rs</code> still
+  describes the crate as holding only the run specification. The module list above
+  is the reference.</p>
+</li>
+<li>
+<p>Two items named <code>ImageStore</code> exist: the port trait
   <code>delonix_compute::ports::ImageStore</code> and the concrete store
   <code>delonix_oci::ImageStore</code> (a struct). <code>HostImages</code> adapts the second to the
-  first. Import paths matter.</li>
+  first. Import paths matter.</p>
+</li>
 <li><code>wire_network</code> must run <strong>before</strong> <code>launch::start</code>; its module doc records that a
   supervised <code>-d</code> otherwise missed the network settings.</li>
+</ul>
+<h3 id="delonix-node"><code>delonix-node</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-node" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-node" aria-label="#">#</a></h3>
+<p><strong>Purpose.</strong> The node context (crate doc, ADR-0040 D2.2): the node's own concerns
+that more than one crate needs and would otherwise copy — the append-only event log,
+the virtualisation and host checks, the <code>SO_PEERCRED</code> check for local sockets, the
+rule a server binary follows when <code>delonix</code> runs it, and the questions asked of the
+host and of processes (the clock, the user namespace, pid liveness, a fresh id). It
+came out of the removed <code>delonix-runtime-core</code> (#406). It does <strong>not</strong> create
+processes, mount, or configure the network, and holds no workload record.</p>
+<p><strong>Key modules</strong></p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Module</th>
+<th>Responsibility</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>host</code> (private, re-exported at the crate root)</td>
+<td><code>now_unix</code>, <code>in_initial_userns</code>, <code>initial_uid_map</code>, <code>is_rootless</code>, <code>fmt_local_ts</code>, <code>is_alive</code>, <code>proc_starttime</code>, <code>safe_to_signal</code>, <code>generate_id</code>, <code>self_bin</code></td>
+</tr>
+<tr>
+<td><code>events</code></td>
+<td>append-only <code>events.jsonl</code> event log (<code>emit</code>, <code>read</code>, <code>read_from</code>, <code>size</code>)</td>
+</tr>
+<tr>
+<td><code>dispatch</code></td>
+<td>version check and CLI resolution for server binaries run by <code>delonix</code> (<code>DELONIX_DISPATCH_VERSION</code>, <code>DELONIX_BIN</code>)</td>
+</tr>
+<tr>
+<td><code>peer_cred</code></td>
+<td><code>peer_uid</code> from <code>SO_PEERCRED</code></td>
+</tr>
+<tr>
+<td><code>virt</code></td>
+<td>virtualization/virtio detection from <code>/sys</code> and <code>/proc</code> (<code>detect</code>, <code>blk_scheduler</code>, <code>set_blk_scheduler_none</code>)</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Main public API</strong></p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Item</th>
+<th>What it is</th>
+<th>Where</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>events::emit</code></td>
+<td>append one event line</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/events.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>events.<wbr>rs:emit</code></a></td>
+</tr>
+<tr>
+<td><code>dispatch::check_version</code>, <code>dispatch::cli_bin</code></td>
+<td>how <code>delonix-cri</code>/<code>-mgmt</code>/<code>-mcp</code> refuse a mismatched release and find the <code>delonix</code> CLI to run back</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>dispatch.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><code>is_alive</code>, <code>proc_starttime</code>, <code>safe_to_signal</code></td>
+<td>pid checks that survive pid recycling</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>host.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><code>in_initial_userns</code>, <code>is_rootless</code></td>
+<td>whether uid 0 here is the host's root</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>host.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><code>generate_id</code>, <code>now_unix</code></td>
+<td>a 16-hex-digit id, seconds since the epoch</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>host.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><code>peer_cred::peer_uid</code></td>
+<td>the uid on the other end of a unix socket</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs:peer_uid</code></a></td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Talks to.</strong> <code>delonix-model</code> only (per <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>). No subprocesses: detection
+reads <code>/sys</code> and <code>/proc</code> directly, and <code>is_alive</code> uses <code>kill(pid, 0)</code>.</p>
+<p><strong>Notable external dependencies.</strong> <code>serde</code>/<code>serde_json</code> (the event lines), <code>libc</code>.</p>
+<p><strong>Tests.</strong> Inline <code>#[cfg(test)]</code> modules in <code>events.rs</code>, <code>peer_cred.rs</code> and
+<code>virt.rs</code>; no <code>tests/</code> directory.</p>
+<p><strong>Start reading at.</strong> <code>src/lib.rs</code> (the re-exports), then <code>src/host.rs</code>, then
+<code>src/dispatch.rs</code>.</p>
+<p><strong>Gotchas.</strong></p>
+<ul>
+<li><code>geteuid() == 0</code> is not "root on the host": use <code>in_initial_userns</code> (its doc
+  comment records two places that took the root path inside a nested user namespace).</li>
+<li>In <code>src/host.rs</code> the rustdoc of <code>is_alive</code> begins with a paragraph about the <code>Vm</code>
+  record, left behind by the split; the one-line sentence after it is the function's
+  real documentation.</li>
 </ul>
 <h3 id="delonix-stack"><code>delonix-stack</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-stack" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-stack" aria-label="#">#</a></h3>
 <p><strong>Purpose.</strong> The Stack context (<code>core.delonix.io</code>): the table of Kinds and their
@@ -983,7 +998,7 @@ each Kind stay in the CLI.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code> only. The CLI re-exports <code>kinds</code>, <code>reconcile</code>
+<p><strong>Talks to.</strong> <code>delonix-model</code> only. The CLI re-exports <code>kinds</code>, <code>reconcile</code>
 and <code>revision</code> as <code>cmd::kinds</code> etc. (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a>).</p>
 <p><strong>Notable external dependencies.</strong> <code>serde</code>, <code>serde_json</code>.</p>
 <p><strong>Tests.</strong> Inline unit tests (plans as data).</p>
@@ -1066,7 +1081,7 @@ by design), and no tenant, project or environment field anywhere.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code> (<code>events</code>, <code>now_unix</code>). Consumed by the CLI
+<p><strong>Talks to.</strong> <code>delonix-model</code> and <code>delonix-node</code> (<code>events</code>, <code>now_unix</code>). Consumed by the CLI
 through <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/policy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/policy.rs</code></a>, which <code>cmd_run</code> calls before
 any image is resolved.</p>
 <p><strong>Notable external dependencies.</strong> <code>serde</code>, <code>serde_json</code>.</p>
@@ -1190,7 +1205,7 @@ caller.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code>, <code>delonix-compute</code> and <code>delonix-state</code> (<code>Store</code>,
+<p><strong>Talks to.</strong> <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-compute</code> and <code>delonix-state</code> (<code>Store</code>,
 <code>SecretStore</code>, <code>write_private_temp</code>; a declared layering exception removed in ADR-0040 P4), by direct call.
 Syscalls through <code>nix</code>, <code>libc</code> and <code>rustix</code>. Host tools it runs: <code>busctl</code> (systemd
 scopes for the kubelet cgroup parent), <code>apparmor_parser</code>, <code>ldconfig</code>,
@@ -1326,7 +1341,7 @@ containers; a build runs its steps through the CLI.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code>, <code>delonix-compute</code> (it implements the
+<p><strong>Talks to.</strong> <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-compute</code> (it implements the
 <code>ImageStore</code> port), and <code>delonix-state</code> (<code>write_atomic_mode</code>; a declared layering
 exception removed in ADR-0040 P4). Registries over HTTPS with a blocking <code>reqwest</code> client. No host
 subprocesses in its source.</p>
@@ -1452,8 +1467,8 @@ execution, WireGuard overlay, and optional eBPF flow accounting. It re-exports
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code>, <code>delonix-net-rules</code>, <code>delonix-compute</code>
-(ports), <code>delonix-state</code> (<code>write_atomic</code>, <code>write_private_temp</code>; a declared layering
+<p><strong>Talks to.</strong> <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-net-rules</code>, <code>delonix-compute</code>
+(ports, <code>workload_net</code>), <code>delonix-state</code> (<code>write_atomic</code>, <code>write_private_temp</code>; a declared layering
 exception removed in ADR-0040 P4). Host tools: <code>ip</code>, <code>nft</code>, <code>nsenter</code>, <code>slirp4netns</code>, <code>conntrack</code>, <code>wg</code>, CNI
 plugin binaries. The holder is started by re-executing the engine binary
 (<code>netns pin</code>, <code>netns control</code>, intercepted in the CLI's <code>main</code> before argument
@@ -1556,7 +1571,7 @@ provider credentials.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code>, <code>delonix-compute</code> (the <code>VmNetwork</code> port),
+<p><strong>Talks to.</strong> <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-compute</code> (the <code>Vm</code> record, the <code>VmNetwork</code> port),
 <code>delonix-net-rules</code>, <code>delonix-state</code> (<code>JsonStore&lt;Vm&gt;</code>, <code>write_atomic</code>; a declared
 layering exception removed in ADR-0040 P4). Host tools: <code>cloud-hypervisor</code> (and its HTTP API on a unix
 socket, e.g. <code>PUT /api/v1/vm.pause</code>), <code>virsh</code>, <code>qemu-img</code>, <code>cloud-localds</code>, <code>sh</code>.
@@ -1621,7 +1636,7 @@ NAS dataset (that is <code>delonix-truenas</code>).</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code>, <code>delonix-compute</code>, <code>delonix-model</code>, <code>delonix-state</code>
+<p><strong>Talks to.</strong> <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-compute</code>, <code>delonix-state</code>
 (<code>write_atomic</code>; a declared layering exception removed in ADR-0040 P4). Host tools: <code>mount</code>,
 <code>umount</code>, <code>losetup</code>. Removal of trees owned by mapped uids is injected by the
 caller (<code>remove_with</code> takes an <code>rmtree</code> closure; the CLI passes
@@ -1699,8 +1714,8 @@ layering exception (see <a href="architecture.html">Architecture</a>) — and <c
 <h3 id="delonix-telemetry"><code>delonix-telemetry</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener">源码</a><a class="hanchor" href="#delonix-telemetry" aria-label="#">#</a></h3>
 <p><strong>Purpose.</strong> Observability for the engine's binaries: structured <code>tracing</code>
 logging, optional OpenTelemetry span export over OTLP, and the shared Prometheus
-registry the servers expose. It left <code>delonix-runtime-core</code> so that a crate needing
-a <code>Container</code> type does not compile an OTLP client (crate doc).</p>
+registry the servers expose. It was split out of the former <code>delonix-runtime-core</code>
+so that a crate needing a <code>Container</code> type does not compile an OTLP client (crate doc).</p>
 <p><strong>Key modules</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -1755,9 +1770,9 @@ servers deliver reliably (module doc of <code>telemetry.rs</code>).</p>
 <p><strong>Purpose.</strong> The engine's persisted state (crate doc, ADR-0040 D2.3): one JSON file
 per record behind an exclusive <code>flock</code>, the atomic-write helpers every adapter uses
 for its own files, and the secret vault encrypted at rest. It came out of
-<code>delonix-runtime-core</code> in #404: the record <strong>types</strong> stay in the foundation
-(<code>Container</code>, <code>Vm</code> in <code>delonix-runtime-core</code>; since #405 <code>Status</code> and the firewall
-records in <code>delonix-model</code>), the files that hold them live here. It does not decide anything about a
+the former <code>delonix-runtime-core</code> in #404: the record <strong>types</strong> live elsewhere
+(<code>Container</code>, <code>Vm</code> in <code>delonix-compute</code>; <code>Status</code> and the firewall records in
+<code>delonix-model</code>), the files that hold them live here. It does not decide anything about a
 workload; it loads, saves and locks.</p>
 <p><strong>Key modules</strong></p>
 <div class="tablewrap"><table>
@@ -1833,10 +1848,9 @@ workload; it loads, saves and locks.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code> (the <code>Container</code> type the <code>Store</code> holds, and
-<code>default_namespace</code>, which is defined in <code>delonix-model</code> and reached through the
-<code>-core</code> re-export in <code>store.rs</code>) and <code>delonix-model</code> (the error class its errors
-convert into, and the secret model). No subprocesses and no network: only the filesystem.
+<p><strong>Talks to.</strong> <code>delonix-compute</code> (the <code>Container</code> type the <code>Store</code> holds),
+<code>delonix-model</code> (<code>default_namespace</code>, the error class its errors convert into, and
+the secret model) and <code>delonix-node</code> (<code>generate_id</code>, in tests). No subprocesses and no network: only the filesystem.
 Callers, all by direct call: <code>delonix-linux</code> (<code>Store</code>, <code>SecretStore</code>,
 <code>write_private_temp</code>), <code>delonix-vm</code> (<code>JsonStore</code>, <code>write_atomic</code>), <code>delonix-sdn</code>
 (<code>write_atomic</code>, <code>write_private_temp</code>), <code>delonix-oci</code> (<code>write_atomic_mode</code>),
@@ -1922,7 +1936,7 @@ round trip).</p>
 </tbody>
 </table></div>
 <p><strong>Talks to.</strong> <code>delonix-vm</code> (the trait and <code>register_backend</code>; a declared layering
-exception) and <code>delonix-runtime-core</code>. The node over HTTPS with blocking <code>reqwest</code>.
+exception), <code>delonix-compute</code> (the <code>Vm</code> record) and <code>delonix-model</code>. The node over HTTPS with blocking <code>reqwest</code>.
 The CLI registers it from environment configuration at startup
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_configured</code></a>).</p>
 <p><strong>Notable external dependencies.</strong> <code>reqwest</code> (blocking, rustls), <code>serde</code>,
@@ -1973,7 +1987,7 @@ same path as a hand-made share.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-runtime-core</code> only; the appliance over HTTPS. Used by
+<p><strong>Talks to.</strong> <code>delonix-model</code> only; the appliance over HTTPS. Used by
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/provision.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/provision.rs</code></a>.</p>
 <p><strong>Notable external dependencies.</strong> <code>reqwest</code> (blocking, rustls), <code>serde</code>,
 <code>serde_json</code>.</p>
@@ -2143,7 +2157,7 @@ of ADR-0040/0041 rather than these routes.</p>
 </tbody>
 </table></div>
 <p><strong>Talks to.</strong> Direct calls into <code>delonix-state</code> (<code>Store</code>, <code>SecretStore</code>),
-<code>delonix-runtime-core</code>, <code>delonix-volume</code>, <code>delonix-oci</code>, <code>delonix-scanner</code>, <code>delonix-vm</code>, <code>delonix-sdn</code>
+<code>delonix-model</code>, <code>delonix-node</code> (<code>peer_cred</code>, <code>dispatch</code>), <code>delonix-compute</code> (<code>Container</code>), <code>delonix-volume</code>, <code>delonix-oci</code>, <code>delonix-scanner</code>, <code>delonix-vm</code>, <code>delonix-sdn</code>
 (<code>infra</code>, <code>NetworkStore</code>), <code>delonix-linux</code>, <code>delonix-telemetry</code>. Mutations: the
 <code>delonix</code> CLI as a subprocess (<code>run_cli</code>).</p>
 <p><strong>Notable external dependencies.</strong> <code>axum</code>, <code>tokio</code>, <code>hyper</code>, <code>hyper-util</code>,
@@ -2212,7 +2226,7 @@ JSON text. It keeps a local audit log and an in-process task registry.</p>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> Direct calls for reads: <code>delonix-state</code> (<code>Store</code>), <code>delonix-runtime-core</code>, <code>delonix-vm</code>,
+<p><strong>Talks to.</strong> Direct calls for reads: <code>delonix-state</code> (<code>Store</code>), <code>delonix-model</code>, <code>delonix-node</code>, <code>delonix-compute</code>, <code>delonix-vm</code>,
 <code>delonix-volume</code>, <code>delonix-sdn</code>, <code>delonix-linux</code> (<code>resource_advice</code>), and
 <code>delonix-mgmt</code> (<code>dashstats</code>, a declared layering exception). Mutations run the
 <code>delonix</code> CLI (<code>run_cli_blocking</code>, via <code>dispatch::cli_bin</code>).</p>
@@ -2326,7 +2340,7 @@ architecture matches the code. <code>build.rs</code> embeds the project template
 version, reads <code>--addr</code> / <code>DELONIX_API_ADDR</code> (default
 <code>unix:///run/delonix-mgmt.sock</code>) and <code>DELONIX_ROOT</code> (default <code>/var/lib/delonix</code>),
 then calls <code>delonix_mgmt::serve_blocking</code>.</p>
-<p><strong>Talks to.</strong> <code>delonix-mgmt</code>, <code>delonix-runtime-core</code> (<code>dispatch</code>),
+<p><strong>Talks to.</strong> <code>delonix-mgmt</code>, <code>delonix-node</code> (<code>dispatch</code>),
 <code>delonix-telemetry</code> (<code>init</code>). Run by <code>delonix serve api</code>.</p>
 <p><strong>Tests.</strong> None of its own.</p>
 <p><strong>Start reading at.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mgmt-bin/src/main.rs</code></a>.</p>
@@ -2334,11 +2348,27 @@ then calls <code>delonix_mgmt::serve_blocking</code>.</p>
 <p><strong>Purpose.</strong> The executable of the MCP server. Verbs <code>serve [--transport stdio]</code>,
 <code>doctor</code>, <code>capabilities</code>.</p>
 <p><strong>Talks to.</strong> <code>delonix-mcp</code> (<code>serve_stdio</code>, <code>doctor_checks</code>,
-<code>capabilities_table</code>), <code>delonix-runtime-core</code> (<code>dispatch</code>), <code>delonix-telemetry</code>.
+<code>capabilities_table</code>), <code>delonix-node</code> (<code>dispatch</code>), <code>delonix-telemetry</code>.
 Run by <code>delonix mcp &lt;verb&gt;</code>.</p>
 <p><strong>Notable external dependencies.</strong> <code>tokio</code>.</p>
 <p><strong>Tests.</strong> None of its own.</p>
 <p><strong>Start reading at.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mcp-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/src/main.rs</code></a>.</p>
+<h2 id="removed-crates">Removed crates<a class="hanchor" href="#removed-crates" aria-label="#">#</a></h2>
+<ul>
+<li><strong><code>delonix-runtime-core</code></strong> (foundation) was removed in #406, the gate of ADR-0040 P3.
+  It used to hold the shared records and every small cross-cutting helper. Its
+  contents went to the layer the ADR gives each one:
+  <a href="#delonix-model"><code>delonix-model</code></a> received <code>Error</code>/<code>Result</code>, <code>Status</code>,
+  <code>ContainerFw</code>/<code>FwRule</code>, <code>default_namespace</code>, <code>typestate</code> and the secret model
+  (#397, #405); <a href="#delonix-state"><code>delonix-state</code></a> the stores, the atomic writes and the
+  secret vault (#404); <a href="#delonix-telemetry"><code>delonix-telemetry</code></a> logging, spans and
+  metrics; <a href="#delonix-compute"><code>delonix-compute</code></a> the <code>Container</code> and <code>Vm</code> records with
+  what they carry, <code>DELONIX_SLICE</code> and <code>workload_net</code>; and the new context
+  <a href="#delonix-node"><code>delonix-node</code></a> the event log, <code>virt</code>, <code>peer_cred</code>, <code>dispatch</code> and the
+  host/process helpers (<code>now_unix</code>, <code>safe_to_signal</code>, <code>generate_id</code>, …). There are no
+  re-exports under the old paths: an old <code>delonix_runtime_core::X</code> import is rewritten
+  to the crate that now defines <code>X</code>.</li>
+</ul>
 <h2 id="how-a-request-crosses-the-crates">How a request crosses the crates<a class="hanchor" href="#how-a-request-crosses-the-crates" aria-label="#">#</a></h2>
 <p>Three flows, each arrow traced to a call in the tree. Function names are the ones
 you can grep for.</p>
@@ -2433,6 +2463,8 @@ holder by <code>HostNetwork::publish</code>.</p>
   K-&gt;&gt;CRI: ContainerStatus
   CRI-&gt;&gt;Store: load_reconciled (Store::open, reconcile_status)
 </pre>
+<hr />
+<p><strong>Next:</strong> <a href="system-design-interview.html">System Design Interview — the Delonix Engine</a> — the same engine argued from requirements, with the trade-offs and failure modes behind each design choice.</p>
 <nav class="pager"><a href="architecture.html"><span>← 上一页</span>Architecture</a><a class="next" href="system-design-interview.html"><span>下一页 →</span>System Design Interview — the Delonix Engine</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/crates.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/crates.md</code></footer>
 </div></main>
@@ -2440,13 +2472,13 @@ holder by <code>HostNetwork::publish</code>.</p>
 <ul>
 <li><a href="#reference-table">Reference table</a></li>
 <li><a href="#foundation">Foundation</a><ul>
-<li><a href="#delonix-runtime-core">delonix-runtime-core</a></li>
 <li><a href="#delonix-model">delonix-model</a></li>
 <li><a href="#delonix-net-rules">delonix-net-rules</a></li>
 </ul>
 </li>
 <li><a href="#contexts">Contexts</a><ul>
 <li><a href="#delonix-compute">delonix-compute</a></li>
+<li><a href="#delonix-node">delonix-node</a></li>
 <li><a href="#delonix-stack">delonix-stack</a></li>
 <li><a href="#delonix-security-runtime">delonix-security-runtime</a></li>
 </ul>
@@ -2479,6 +2511,7 @@ holder by <code>HostNetwork::publish</code>.</p>
 <li><a href="#delonix-mcp-bin-binary-delonix-mcp">delonix-mcp-bin (binary delonix-mcp)</a></li>
 </ul>
 </li>
+<li><a href="#removed-crates">Removed crates</a></li>
 <li><a href="#how-a-request-crosses-the-crates">How a request crosses the crates</a><ul>
 <li><a href="#1-delonix-container-run-d-p-808080-nginx">1. delonix container run -d -p 8080:80 nginx</a></li>
 <li><a href="#2-delonix-stack-apply-f-manifestyaml">2. delonix stack apply -f manifest.yaml</a></li>

@@ -210,9 +210,12 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Foundations</p>
 <h1 id="rust-primer-for-this-codebase">Rust primer for this codebase</h1>
+<p><strong>Before you read:</strong> <a href="cloud-native-primer.html">Cloud native primer</a>, whose vocabulary the examples use, and basic Rust (<a href="https://doc.rust-lang.org/book/">The Rust Programming Language</a>, chapters 1–10).</p>
 <p>This is not a Rust tutorial. It is the subset of Rust you need to <em>read this repository</em>,
 with each idea pinned to a file you can open. If a concept is new to you, the "Read more"
-links go to the official source; come back here to see how the engine uses it.</p>
+links go to the official source; come back here to see how the engine uses it. After it you can
+open any crate in the workspace and follow its error types, its traits, its <code>unsafe</code> blocks and its
+tests without stopping at the language.</p>
 <p>Paths are relative to the repository root. Symbols are named so you can <code>grep</code> for them —
 line numbers are deliberately left out, because they move with every PR.</p>
 <p>The pinned toolchain is in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> (a fixed <code>channel</code>, plus <code>rustfmt</code> and
@@ -226,10 +229,12 @@ and one <a class="src" href="https://github.com/angolardevops/delonix-runtime/bl
    <code>[workspace.dependencies]</code> table listing both the engine's own crates (by <code>path</code>) and every
    third-party crate (by <code>version</code>). A member never writes a version; it writes:</li>
 </ol>
-<div class="code"><div class="code-head"><span class="lang">toml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-toml"># crates/foundation/delonix-runtime-core/Cargo.toml
+<div class="code"><div class="code-head"><span class="lang">toml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-toml"># crates/contexts/delonix-node/Cargo.toml
 [dependencies]
+delonix-model = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }
+serde_json = { workspace = true }
+libc = { workspace = true }
 </code></pre></div>
 <p>A member may add <code>features = [...]</code>, and that is all. <code>default-features = false</code> lives in
    the root because a member cannot turn off defaults the workspace turned on.
@@ -240,8 +245,9 @@ thiserror = { workspace = true }
 <p><strong>The directory is the layer.</strong> Crates live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
    <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a> and binaries in <code>bins/</code>
    (ADR-0040). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> refuses a crate whose directory does not match its
-   declared layer, and a dependency that points against the allowed direction. See
-   <a href="architecture.html">Architecture</a> for the layer rules.</p>
+   declared layer, and a dependency that points against the allowed direction. The layer rules
+   are taught later in the course, in
+   <a href="architecture.html#layers-and-the-allowed-direction">Architecture — Layers and the allowed direction</a>.</p>
 </li>
 <li>
 <p><strong>Lints are inherited.</strong> The root declares <code>[workspace.lints.clippy]</code> with
@@ -251,7 +257,8 @@ thiserror = { workspace = true }
 </ol>
 <p>The root also sets <code>[workspace.package]</code> (the shared <code>version</code>, <code>edition</code>, <code>license</code>), which
 members consume as <code>version.workspace = true</code>. The version is not decoration: see
-<a href="build-and-test.html">Build and test</a> for the version gate.</p>
+<a href="contributing-workflow.html#version-alignment">Version alignment</a> for the rule and
+<a href="build-and-test.html#the-gates-ci-runs">The gates CI runs</a> for the version gate.</p>
 <p><strong>Read more:</strong> Cargo Book —
 <a href="https://doc.rust-lang.org/cargo/reference/workspaces.html">Workspaces</a>,
 <a href="https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table"><code>[workspace.dependencies]</code></a>,
@@ -259,11 +266,11 @@ members consume as <code>version.workspace = true</code>. The version is not dec
 <a href="https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file"><code>rust-toolchain.toml</code></a>.</p>
 <hr />
 <h2 id="32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 Errors: one <code>Error</code>, and exit codes derived from its type<a class="hanchor" href="#32-errors-one-error-and-exit-codes-derived-from-its-type" aria-label="#">#</a></h2>
-<p>Almost every fallible function in the engine returns <code>delonix_runtime_core::Result&lt;T&gt;</code>, an alias
+<p>Almost every fallible function in the engine returns <code>delonix_model::Result&lt;T&gt;</code>, an alias
 over the shared enum defined in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a>. The enum lives in the
-pure foundation crate <code>delonix-model</code>; <code>delonix-runtime-core</code> re-exports <code>Error</code> and <code>Result</code>
-(<code>pub use delonix_model::{Error, Result};</code>), so the <code>delonix_runtime_core::</code> path most call sites
-use still works. It is built with
+pure foundation crate <code>delonix-model</code>, which every other engine crate may depend on. Some adapters
+define their own error and convert it into this one (§5.2 of
+<a href="coding-conventions.html">Coding conventions</a>). It is built with
 <a href="https://docs.rs/thiserror"><code>thiserror</code></a>: <code>#[derive(Error)]</code> generates <code>Display</code> from the
 <code>#[error("...")]</code> attribute, and <code>#[from]</code> generates <code>From</code> impls so <code>?</code> converts a lower-level
 error automatically:</p>
@@ -363,7 +370,7 @@ std docs — <a href="https://doc.rust-lang.org/std/sync/struct.OnceLock.html"><
 <tr>
 <td><a href="https://docs.rs/libc"><code>libc</code></a></td>
 <td>Raw calls <code>nix</code> does not wrap, or where the exact struct matters</td>
-<td><code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a> (<code>peer_uid</code>); <code>libc::flock</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a></td>
+<td><code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a> (<code>peer_uid</code>); <code>libc::flock</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a></td>
 </tr>
 <tr>
 <td><a href="https://docs.rs/rustix"><code>rustix</code></a></td>
@@ -374,7 +381,7 @@ std docs — <a href="https://doc.rust-lang.org/std/sync/struct.OnceLock.html"><
 </table></div>
 <p><strong>Every <code>unsafe</code> block states why it is sound</strong>, next to it (the workspace lint enforces the
 comment's presence; reviewers enforce its truth):</p>
-<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-runtime-core/src/peer_cred.rs
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-node/src/peer_cred.rs
 // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
 let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
 </code></pre></div>
@@ -433,8 +440,9 @@ pub cloud_init: Option&lt;bool&gt;,
 </code></pre></div>
 <p>Here <code>None</code> (every record written before the field existed) is read as "yes"; a plain <code>bool</code>
 would have defaulted to <code>false</code> and silently changed behaviour for old images. You will see the
-same reasoning on <code>Mount::propagation</code> and <code>Mount::optional</code> in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a> (<code>#[serde(default, skip_serializing_if = "Option::is_none")]</code>).</p>
+same reasoning in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>: <code>Mount::propagation</code> is an
+<code>Option</code> (<code>#[serde(default, skip_serializing_if = "Option::is_none")]</code>), and <code>Mount::optional</code> is
+a plain <code>bool</code> with <code>#[serde(default)]</code>, because <code>false</code> is what every older record meant.</p>
 <p><strong>Manifests.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> parses multi-document YAML with
 <code>serde_yaml::Deserializer::from_str(text)</code> into <code>ManifestDoc</code>, whose <code>spec</code> stays a raw
 <code>serde_yaml::Value</code> until the owning Kind deserializes it into its typed spec.</p>
@@ -523,7 +531,7 @@ follow from it:</p>
 <code>Arc&lt;std::sync::RwLock&lt;Arc&lt;Vec&lt;Route&gt;&gt;&gt;&gt;</code> holds the proxy's hot-swappable route table
 (<code>SharedRoutes</code> in <code>cmd/ingress_proxy.rs</code>), and the dashboard shares its slow sample through an
 <code>Arc&lt;Mutex&lt;...&gt;&gt;</code> (<code>cmd/dash.rs</code>).</p>
-<p>A related idea you will meet in <code>crates/foundation/delonix-runtime-core/src/typestate.rs</code>: the
+<p>A related idea you will meet in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a>: the
 <strong>typestate</strong> pattern, where lifecycle states are types and illegal transitions do not compile
 (its doc tests include <code>compile_fail</code> examples).</p>
 <p><strong>Read more:</strong> The Rust Book —
@@ -595,6 +603,8 @@ The full list and how to run each one locally is in <a href="build-and-test.html
 <p><strong>Read more:</strong> <a href="https://doc.rust-lang.org/clippy/">Clippy</a>,
 <a href="https://rust-lang.github.io/rustfmt/">rustfmt</a>,
 <a href="https://embarkstudios.github.io/cargo-deny/">cargo-deny</a>.</p>
+<hr />
+<p><strong>Next:</strong> <a href="environment.html">Preparing your environment</a> — a host that can build the tree and run the live paths, and the host traps that look like engine bugs.</p>
 <nav class="pager"><a href="cloud-native-primer.html"><span>← Previous</span>Cloud native primer</a><a class="next" href="environment.html"><span>Next →</span>Preparing your environment</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/rust-primer.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/rust-primer.md</code></footer>
 </div></main>

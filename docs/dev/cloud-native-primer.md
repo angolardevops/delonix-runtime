@@ -1,9 +1,20 @@
 # Cloud native primer
 
+**Before you read:** [Linux foundations](linux-foundations.md) (namespaces, cgroups v2, file descriptors) and [IaaS and cloud native](iaas-and-cloud-native.md) (what the engine is responsible for).
+
 The engine is a thin, careful layer over Linux kernel features and a handful of open
 specifications. This page gives you just enough of each concept to read the code, and says
-**where it lives** in this repository. For depth, follow the official links — they are better
-than any summary here.
+**where it lives** in this repository. After it you can take any mechanism — a namespace, a
+cgroup limit, an image layer, a firewall chain, a VM boot, a manifest apply — and name the file and
+symbol that implements it. For depth, follow the official links — they are better than any summary
+here.
+
+Concepts are taught once in this handbook. The kernel primitives (namespaces, user namespaces,
+cgroups v2) are taught hands-on in [Linux foundations](linux-foundations.md), so sections 4.1 and
+4.2 only recap them and map them to the code. What each open standard *requires*, and how far the
+engine conforms, is in [Cloud native standards](cloud-native-standards.md), later in the course.
+Paths name crates (`crates/<layer>/<crate>`); the layers are explained in
+[Architecture](architecture.md), and for now a path simply says where the code is.
 
 Each section has three parts: the concept, **In Delonix** (files and symbols you can `grep`),
 and **Read more**. Paths are relative to the repository root.
@@ -16,18 +27,15 @@ or Podman appear only where they help explain a design choice.
 
 ## 4.1 Linux namespaces and rootless operation
 
-A **namespace** gives a process its own view of one kind of global resource. A container is,
-at its core, a process started in a fresh set of them: **mount** (its own filesystem tree),
-**PID** (its own process numbering, with itself as PID 1), **network** (its own interfaces and
-routes), **IPC**, **UTS** (hostname), **cgroup** (its own view of the cgroup tree) and **user**.
-
-The **user namespace** is what makes rootless containers possible. Inside it, a process can be
-uid 0 with full capabilities *over resources owned by that namespace*, while on the host it is an
-ordinary user. The mapping between inside and outside uids is written to
-`/proc/<pid>/uid_map` and `gid_map`. An unprivileged user can map only its own uid; mapping a
-*range* requires the setuid helpers `newuidmap`/`newgidmap`, which check `/etc/subuid` and
-`/etc/subgid`. Some distributions additionally restrict unprivileged user namespaces through
-AppArmor — see [Environment](environment.md) for the practical consequences.
+**Recap.** A container is a process started in a fresh set of namespaces (mount, PID, network,
+IPC, UTS, cgroup, user). The **user namespace** is what makes it rootless: inside, the process is
+uid 0 over resources that namespace owns; outside, it is an ordinary user. An unprivileged user can
+map only its own uid; a *range* needs `newuidmap`/`newgidmap` and `/etc/subuid`. Both are taught,
+with commands to type, in [Linux foundations — Namespaces](linux-foundations.md#namespaces) and
+[User namespaces and uid mapping](linux-foundations.md#user-namespaces-and-uid-mapping). Some
+distributions additionally restrict unprivileged user namespaces through AppArmor — see
+[Environment](environment.md#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary)
+for the practical consequences.
 
 **In Delonix**
 
@@ -53,16 +61,14 @@ AppArmor — see [Environment](environment.md) for the practical consequences.
 
 ## 4.2 cgroups v2 and delegation
 
-**Control groups** limit and account for resources (memory, CPU, PIDs, I/O) for a set of
-processes. cgroup v2 is a single tree mounted at `/sys/fs/cgroup`; a directory is a group, and
-files like `memory.max`, `cpu.max`, `pids.max` and `memory.events` are its interface. A
-controller is available to a child only if the parent lists it in `cgroup.subtree_control`.
-
-An unprivileged user can manage a subtree only if it has been **delegated** to them. On systemd
-hosts, `user@<uid>.service` typically delegates some controllers, and
-`systemd-run --user --scope -p Delegate=yes` creates a delegated scope on demand. A process in an
-SSH session scope usually sits *outside* the delegated subtree, and the "no internal processes"
-rule prevents moving it in — so limits can silently not apply there. The engine is v2-only.
+**Recap.** cgroup v2 is one tree at `/sys/fs/cgroup` whose files (`memory.max`, `cpu.max`,
+`pids.max`, `memory.events`) limit and account for a group of processes. An unprivileged user can
+only write a subtree systemd has **delegated** to them, and a shell in an SSH session scope sits
+outside it — so limits can silently not apply there. The tree, the "no internal processes" rule and
+delegation are taught hands-on in [Linux foundations — cgroups v2](linux-foundations.md#cgroups-v2);
+the delegation contract as a standard, and the engine's conformance, are in
+[Cloud native standards — 13.15](cloud-native-standards.md#1315-linux-cgroup-v2-and-systemd-delegation).
+The engine is v2-only.
 
 **In Delonix**
 
@@ -288,6 +294,9 @@ state** and act to converge. `kubectl apply` adds a **three-way diff**: it store
 applied configuration on the object, so it can tell "you removed this field from your file"
 (revert it) from "someone set this field by hand" (leave it alone).
 
+The principle, and what it asks of you when you add a Kind, are in
+[IaaS and cloud native — Declarative and convergent](iaas-and-cloud-native.md#declarative-and-convergent).
+
 **In Delonix**
 
 - The engine has its own Kinds in API groups (`delonix api-resources` lists them). Facts about
@@ -348,4 +357,9 @@ and exits, state is files under the state root guarded by `flock` (see
 exists per detached container, the network holder exists only while something needs it, and boot
 persistence is systemd units (`bins/delonix-runtime-bin/src/cmd/boot.rs`). The consequences —
 good and bad — are discussed in [Architecture](architecture.md) and
-[System design interview](system-design-interview.md).
+[System design interview](system-design-interview.md). The principle itself, and the rule that a new
+daemon needs an ADR, are in [IaaS and cloud native — Daemonless](iaas-and-cloud-native.md#daemonless).
+
+---
+
+**Next:** [Rust primer for this codebase](rust-primer.md) — the Rust this codebase is written in — workspace, errors, traits as ports, `unsafe`, serde, clap, concurrency and tests — pinned to real files.

@@ -210,6 +210,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Architecture</p>
 <h1 id="system-design-interview-the-delonix-engine">System Design Interview — the Delonix Engine</h1>
+<p><strong>Before you read:</strong> <a href="architecture.html">Architecture</a> and <a href="crates.html">The crates</a> — this page argues <em>why</em> the structure they describe is shaped that way.</p>
 <blockquote class="say say-interviewer"><p><span class="speaker">Interviewer</span>Design a container and microVM engine for a single Linux node. It must run
 without root by default, without a resident daemon, and it must not know who is calling it.</p>
 </blockquote>
@@ -217,7 +218,9 @@ without root by default, without a resident daemon, and it must not know who is 
 against what the Delonix Engine actually does. Each deep dive ends with <strong>Where it lives in the
 code</strong>, listing files and symbols that were read for this page. For the structural map (layers,
 crate graph, processes, state paths) read <a href="architecture.html">Architecture</a> first; this page
-is about <em>why</em> the design is shaped that way.</p>
+is about <em>why</em> the design is shaped that way. After it you can defend — or challenge with
+evidence — the engine's main design choices: rootless process creation, the network holder, shared
+image layers, the VM port and the reconciler without a state file.</p>
 <p>Numbers quoted below are <strong>measurements recorded in the repository with their date or release</strong>,
 not timeless facts. Re-measure before relying on one.</p>
 <hr />
@@ -295,7 +298,9 @@ kernel rules I have to live with.</p>
 </table></div>
 <p>Two host policies turn up constantly and look like engine bugs: Ubuntu 23.10+ restricts
 unprivileged user namespaces through AppArmor (a profile is attached to the <em>path</em> of the
-executable that creates the namespace), and a plain SSH session is not a delegated cgroup scope.</p>
+executable that creates the namespace), and a plain SSH session is not a delegated cgroup scope.
+Each row of the table is a primitive taught hands-on in <a href="linux-foundations.html">Linux foundations</a>;
+the two host policies are in <a href="environment.html#known-host-traps">Preparing your environment — Known host traps</a>.</p>
 <hr />
 <h2 id="3-api">3. API<a class="hanchor" href="#3-api" aria-label="#">#</a></h2>
 <blockquote class="say say-candidate"><p><span class="speaker">Candidate</span>One set of operations, several doors — and one of them is the contract the
@@ -367,7 +372,8 @@ make every long-lived process own exactly one thing.</p>
 <p><strong>Legend</strong> — white box with red border: engine building block · outlined region: a layer ·
 cylinder, blue: state on disk · solid arrow: call or data flow, labelled.</p>
 </blockquote>
-<p>The domain's rules never import the kernel, and one adapter owns every file under the state root.</p>
+<p>The domain's rules never mount, spawn or configure the network, and one adapter owns every file
+under the state root.</p>
 <pre class="mermaid">flowchart TB
   subgraph IF[&quot;interfaces — parse a request, present a result&quot;]
     CLI[&quot;CLI&lt;br/&gt;&lt;small&gt;delonix&lt;/small&gt;&quot;]
@@ -375,9 +381,10 @@ cylinder, blue: state on disk · solid arrow: call or data flow, labelled.</p>
     API[&quot;local API server&lt;br/&gt;&lt;small&gt;delonix-mgmt&lt;/small&gt;&quot;]
     MCP[&quot;MCP server&lt;br/&gt;&lt;small&gt;delonix-mcp&lt;/small&gt;&quot;]
   end
-  subgraph CX[&quot;contexts — use cases and ports, no kernel&quot;]
-    COMPUTE[&quot;compute&lt;br/&gt;&lt;small&gt;RunOpts, resolve_run, launch, ports&lt;/small&gt;&quot;]
+  subgraph CX[&quot;contexts — use cases, ports and records&quot;]
+    COMPUTE[&quot;compute&lt;br/&gt;&lt;small&gt;Container, Vm, RunOpts, resolve_run, launch, ports&lt;/small&gt;&quot;]
     STACK[&quot;stack&lt;br/&gt;&lt;small&gt;Kind table, 3-way plan&lt;/small&gt;&quot;]
+    NODE[&quot;node&lt;br/&gt;&lt;small&gt;event log, pid and host checks, server dispatch&lt;/small&gt;&quot;]
   end
   subgraph AD[&quot;adapters and providers — implement ports&quot;]
     LINUX[&quot;kernel&lt;br/&gt;&lt;small&gt;clone, mounts, cgroups, seccomp&lt;/small&gt;&quot;]
@@ -391,7 +398,7 @@ cylinder, blue: state on disk · solid arrow: call or data flow, labelled.</p>
   AD --&gt;|&quot;implement ports&quot;| CX
   IF --&gt;|&quot;call directly, today&quot;| AD
   STA --&gt;|&quot;flock, temp file + rename&quot;| FILES
-  class CLI,CRI,API,MCP,COMPUTE,STACK,LINUX,SDN,OCI,VMS,STA block
+  class CLI,CRI,API,MCP,COMPUTE,STACK,NODE,LINUX,SDN,OCI,VMS,STA block
   class FILES store
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
@@ -404,8 +411,8 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
   enforced by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.</li>
 <li><strong>State</strong> is JSON records and content-addressed files under one root, with atomic writes and
   <code>flock</code> around read-modify-write — no database, because there is no daemon to own one. The
-  record <em>types</em> are foundation types (<code>Container</code>/<code>Vm</code> in <code>delonix-runtime-core</code>; <code>Status</code> and the
-  firewall records in <code>delonix-model</code>); the <em>files</em> are opened only through the <code>delonix-state</code>
+  record <em>types</em> are defined apart from them (<code>Container</code>/<code>Vm</code> in the <code>delonix-compute</code> context; <code>Status</code>
+  and the firewall records in the <code>delonix-model</code> foundation crate); the <em>files</em> are opened only through the <code>delonix-state</code>
   adapter.</li>
 <li><strong>Processes</strong> exist per workload (a supervisor that is the container's parent, the init, a log
   shim) and per node when networking is used (a <em>pin</em> that only holds namespaces, a restartable
@@ -413,7 +420,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </ul>
 <p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> (<code>Store::update</code>, <code>JsonStore::update</code>,
-<code>write_atomic</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a> (<code>Container</code>, <code>Vm</code>);
+<code>write_atomic</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>Container</code>, <code>Vm</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a> (<code>Status</code>, <code>ContainerFw</code>, <code>FwRule</code>); <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code>;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> (<code>run_supervised</code>).</p>
 <hr />
@@ -785,7 +792,7 @@ and make planning a pure function.</p>
 <h2 id="8-follow-up-questions">8. Follow-up questions<a class="hanchor" href="#8-follow-up-questions" aria-label="#">#</a></h2>
 <p><strong>Why not add a small daemon for events and restarts?</strong>
 Because every resident process is a failure domain and an attack surface. The event log is an
-append-only file (<code>delonix_runtime_core::events</code>), restarts belong to the per-container
+append-only file (<code>delonix_node::events</code>), restarts belong to the per-container
 supervisor, and boot persistence is a systemd unit per workload (<code>delonix system boot</code>). A daemon
 needs its own ADR with evidence of what the alternatives could not do — see
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0034-csi-daemon-conflict.md" target="_blank" rel="noopener">ADR-0034</a> for a case where the question came up, and
@@ -819,6 +826,8 @@ Four layers, one run specification, provider ports with capabilities, one node c
 a socket-activated server, and a launcher owning every namespace-creating spawn
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>,
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>).</p>
+<hr />
+<p><strong>Next:</strong> <a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a> — the two build grammars — Delonixfile for OCI images and VMfile for bootable disks — as the parsers accept them.</p>
 <nav class="pager"><a href="crates.html"><span>← Previous</span>The crates</a><a class="next" href="delonixfile-and-vmfile.html"><span>Next →</span>Delonixfile and VMfile</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/system-design-interview.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/system-design-interview.md</code></footer>
 </div></main>

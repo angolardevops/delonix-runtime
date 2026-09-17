@@ -1,8 +1,12 @@
 # Contribution workflow
 
+**Before you read:** [Clone, build and test](build-and-test.md#the-gates-ci-runs) (the gates) and [Coding conventions](coding-conventions.md) (what reviewers check).
+
 This page is the "how we work" part of the handbook: where to make changes, which rules the gates
 enforce and why, when a change needs a written decision first, and how to send it. The gates
-themselves, and how to run them, are in [Clone, build and test](build-and-test.md).
+themselves, and how to run them, are in [Clone, build and test](build-and-test.md). After it you
+can take a change from an issue to a merged pull request without breaking a gate or another
+session's work.
 
 For anything non-trivial — a new command, a new manifest Kind, a change to namespace or cgroup
 setup, a new backend — open an issue first and agree on the approach. It saves a rewrite.
@@ -195,3 +199,7 @@ seccomp handling, or path handling driven by user or manifest input. These get e
 If you found a **vulnerability** rather than a bug — privilege escalation, namespace escape, command
 injection, path traversal — do not open a public issue or PR. Follow [`SECURITY.md`](../../SECURITY.md)
 (GitHub Private Vulnerability Reporting).
+
+---
+
+**Next:** [Publishing the documentation](publishing-docs.md) — how the site and this handbook are generated, gated and published, and what your PR must regenerate.

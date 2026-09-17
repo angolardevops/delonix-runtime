@@ -1,5 +1,7 @@
 # System Design Interview — the Delonix Engine
 
+**Before you read:** [Architecture](architecture.md) and [The crates](crates.md) — this page argues *why* the structure they describe is shaped that way.
+
 > **Interviewer:** Design a container and microVM engine for a single Linux node. It must run
 > without root by default, without a resident daemon, and it must not know who is calling it.
 
@@ -7,7 +9,9 @@ This page answers that prompt the way a strong candidate would, and then checks 
 against what the Delonix Engine actually does. Each deep dive ends with **Where it lives in the
 code**, listing files and symbols that were read for this page. For the structural map (layers,
 crate graph, processes, state paths) read [Architecture](architecture.md) first; this page
-is about *why* the design is shaped that way.
+is about *why* the design is shaped that way. After it you can defend — or challenge with
+evidence — the engine's main design choices: rootless process creation, the network holder, shared
+image layers, the VM port and the reconciler without a state file.
 
 Numbers quoted below are **measurements recorded in the repository with their date or release**,
 not timeless facts. Re-measure before relying on one.
@@ -60,6 +64,8 @@ not timeless facts. Re-measure before relying on one.
 Two host policies turn up constantly and look like engine bugs: Ubuntu 23.10+ restricts
 unprivileged user namespaces through AppArmor (a profile is attached to the *path* of the
 executable that creates the namespace), and a plain SSH session is not a delegated cgroup scope.
+Each row of the table is a primitive taught hands-on in [Linux foundations](linux-foundations.md);
+the two host policies are in [Preparing your environment — Known host traps](environment.md#known-host-traps).
 
 ---
 
@@ -575,3 +581,7 @@ Four layers, one run specification, provider ports with capabilities, one node c
 a socket-activated server, and a launcher owning every namespace-creating spawn
 ([ADR-0040](../adr/0040-engine-restructuring-layers-ports-node-contract.md),
 [ADR-0042](../adr/0042-one-engine-api-maturity-and-docs.md)).
+
+---
+
+**Next:** [Delonixfile and VMfile](delonixfile-and-vmfile.md) — the two build grammars — Delonixfile for OCI images and VMfile for bootable disks — as the parsers accept them.

@@ -210,10 +210,19 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">基础</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="cloud-native-primer">Cloud native primer</h1>
+<p><strong>Before you read:</strong> <a href="linux-foundations.html">Linux foundations</a> (namespaces, cgroups v2, file descriptors) and <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> (what the engine is responsible for).</p>
 <p>The engine is a thin, careful layer over Linux kernel features and a handful of open
 specifications. This page gives you just enough of each concept to read the code, and says
-<strong>where it lives</strong> in this repository. For depth, follow the official links — they are better
-than any summary here.</p>
+<strong>where it lives</strong> in this repository. After it you can take any mechanism — a namespace, a
+cgroup limit, an image layer, a firewall chain, a VM boot, a manifest apply — and name the file and
+symbol that implements it. For depth, follow the official links — they are better than any summary
+here.</p>
+<p>Concepts are taught once in this handbook. The kernel primitives (namespaces, user namespaces,
+cgroups v2) are taught hands-on in <a href="linux-foundations.html">Linux foundations</a>, so sections 4.1 and
+4.2 only recap them and map them to the code. What each open standard <em>requires</em>, and how far the
+engine conforms, is in <a href="cloud-native-standards.html">Cloud native standards</a>, later in the course.
+Paths name crates (<code>crates/&lt;layer&gt;/&lt;crate&gt;</code>); the layers are explained in
+<a href="architecture.html">Architecture</a>, and for now a path simply says where the code is.</p>
 <p>Each section has three parts: the concept, <strong>In Delonix</strong> (files and symbols you can <code>grep</code>),
 and <strong>Read more</strong>. Paths are relative to the repository root.</p>
 <p>For orientation in the wider ecosystem, the <a href="https://landscape.cncf.io/">CNCF Landscape</a> and the
@@ -221,17 +230,15 @@ and <strong>Read more</strong>. Paths are relative to the repository root.</p>
 or Podman appear only where they help explain a design choice.</p>
 <hr />
 <h2 id="41-linux-namespaces-and-rootless-operation">4.1 Linux namespaces and rootless operation<a class="hanchor" href="#41-linux-namespaces-and-rootless-operation" aria-label="#">#</a></h2>
-<p>A <strong>namespace</strong> gives a process its own view of one kind of global resource. A container is,
-at its core, a process started in a fresh set of them: <strong>mount</strong> (its own filesystem tree),
-<strong>PID</strong> (its own process numbering, with itself as PID 1), <strong>network</strong> (its own interfaces and
-routes), <strong>IPC</strong>, <strong>UTS</strong> (hostname), <strong>cgroup</strong> (its own view of the cgroup tree) and <strong>user</strong>.</p>
-<p>The <strong>user namespace</strong> is what makes rootless containers possible. Inside it, a process can be
-uid 0 with full capabilities <em>over resources owned by that namespace</em>, while on the host it is an
-ordinary user. The mapping between inside and outside uids is written to
-<code>/proc/&lt;pid&gt;/uid_map</code> and <code>gid_map</code>. An unprivileged user can map only its own uid; mapping a
-<em>range</em> requires the setuid helpers <code>newuidmap</code>/<code>newgidmap</code>, which check <code>/etc/subuid</code> and
-<code>/etc/subgid</code>. Some distributions additionally restrict unprivileged user namespaces through
-AppArmor — see <a href="environment.html">Environment</a> for the practical consequences.</p>
+<p><strong>Recap.</strong> A container is a process started in a fresh set of namespaces (mount, PID, network,
+IPC, UTS, cgroup, user). The <strong>user namespace</strong> is what makes it rootless: inside, the process is
+uid 0 over resources that namespace owns; outside, it is an ordinary user. An unprivileged user can
+map only its own uid; a <em>range</em> needs <code>newuidmap</code>/<code>newgidmap</code> and <code>/etc/subuid</code>. Both are taught,
+with commands to type, in <a href="linux-foundations.html#namespaces">Linux foundations — Namespaces</a> and
+<a href="linux-foundations.html#user-namespaces-and-uid-mapping">User namespaces and uid mapping</a>. Some
+distributions additionally restrict unprivileged user namespaces through AppArmor — see
+<a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Environment</a>
+for the practical consequences.</p>
 <p><strong>In Delonix</strong></p>
 <ul>
 <li><code>fn spawn</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> builds the <code>CloneFlags</code>
@@ -253,18 +260,17 @@ AppArmor — see <a href="environment.html">Environment</a> for the practical co
 <a href="https://man7.org/linux/man-pages/man2/pivot_root.2.html"><code>pivot_root(2)</code></a>.</p>
 <hr />
 <h2 id="42-cgroups-v2-and-delegation">4.2 cgroups v2 and delegation<a class="hanchor" href="#42-cgroups-v2-and-delegation" aria-label="#">#</a></h2>
-<p><strong>Control groups</strong> limit and account for resources (memory, CPU, PIDs, I/O) for a set of
-processes. cgroup v2 is a single tree mounted at <code>/sys/fs/cgroup</code>; a directory is a group, and
-files like <code>memory.max</code>, <code>cpu.max</code>, <code>pids.max</code> and <code>memory.events</code> are its interface. A
-controller is available to a child only if the parent lists it in <code>cgroup.subtree_control</code>.</p>
-<p>An unprivileged user can manage a subtree only if it has been <strong>delegated</strong> to them. On systemd
-hosts, <code>user@&lt;uid&gt;.service</code> typically delegates some controllers, and
-<code>systemd-run --user --scope -p Delegate=yes</code> creates a delegated scope on demand. A process in an
-SSH session scope usually sits <em>outside</em> the delegated subtree, and the "no internal processes"
-rule prevents moving it in — so limits can silently not apply there. The engine is v2-only.</p>
+<p><strong>Recap.</strong> cgroup v2 is one tree at <code>/sys/fs/cgroup</code> whose files (<code>memory.max</code>, <code>cpu.max</code>,
+<code>pids.max</code>, <code>memory.events</code>) limit and account for a group of processes. An unprivileged user can
+only write a subtree systemd has <strong>delegated</strong> to them, and a shell in an SSH session scope sits
+outside it — so limits can silently not apply there. The tree, the "no internal processes" rule and
+delegation are taught hands-on in <a href="linux-foundations.html#cgroups-v2">Linux foundations — cgroups v2</a>;
+the delegation contract as a standard, and the engine's conformance, are in
+<a href="cloud-native-standards.html#1315-linux-cgroup-v2-and-systemd-delegation">Cloud native standards — 13.15</a>.
+The engine is v2-only.</p>
 <p><strong>In Delonix</strong></p>
 <ul>
-<li>Root mode places containers under <code>delonix_runtime_core::DELONIX_SLICE</code>
+<li>Root mode places containers under <code>delonix_compute::DELONIX_SLICE</code>
   (<code>/sys/fs/cgroup/delonix.slice</code>).</li>
 <li>Rootless mode finds the user's service cgroup and creates leaves under
   <code>&lt;user@uid.service&gt;/dlx-containers</code> — see <code>user_service_base</code> and <code>try_delegated_base</code> in
@@ -274,7 +280,7 @@ rule prevents moving it in — so limits can silently not apply there. The engin
   <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>; how the CRI follows the kubelet's cgroup
   hierarchy is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>, with the kubelet's
   parent validated by <code>KubeCgroupParent::parse</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a>.</li>
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>.</li>
 </ul>
 <p><strong>Read more:</strong> <a href="https://docs.kernel.org/admin-guide/cgroup-v2.html">Linux kernel — Control Group v2</a>,
 <a href="https://systemd.io/CGROUP_DELEGATION/">systemd — Control Group APIs and Delegation</a>,
@@ -458,6 +464,8 @@ from <strong>cloud-init</strong>, which reads a datasource. The <strong>NoCloud<
 state</strong> and act to converge. <code>kubectl apply</code> adds a <strong>three-way diff</strong>: it stores the last
 applied configuration on the object, so it can tell "you removed this field from your file"
 (revert it) from "someone set this field by hand" (leave it alone).</p>
+<p>The principle, and what it asks of you when you add a Kind, are in
+<a href="iaas-and-cloud-native.html#declarative-and-convergent">IaaS and cloud native — Declarative and convergent</a>.</p>
 <p><strong>In Delonix</strong></p>
 <ul>
 <li>The engine has its own Kinds in API groups (<code>delonix api-resources</code> lists them). Facts about
@@ -511,7 +519,10 @@ and exits, state is files under the state root guarded by <code>flock</code> (se
 exists per detached container, the network holder exists only while something needs it, and boot
 persistence is systemd units (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>). The consequences —
 good and bad — are discussed in <a href="architecture.html">Architecture</a> and
-<a href="system-design-interview.html">System design interview</a>.</p>
+<a href="system-design-interview.html">System design interview</a>. The principle itself, and the rule that a new
+daemon needs an ADR, are in <a href="iaas-and-cloud-native.html#daemonless">IaaS and cloud native — Daemonless</a>.</p>
+<hr />
+<p><strong>Next:</strong> <a href="rust-primer.html">Rust primer for this codebase</a> — the Rust this codebase is written in — workspace, errors, traits as ports, <code>unsafe</code>, serde, clap, concurrency and tests — pinned to real files.</p>
 <nav class="pager"><a href="linux-foundations.html"><span>← 上一页</span>Linux foundations</a><a class="next" href="rust-primer.html"><span>下一页 →</span>Rust primer for this codebase</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/cloud-native-primer.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/cloud-native-primer.md</code></footer>
 </div></main>

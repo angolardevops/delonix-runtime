@@ -210,6 +210,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">镜像与 microVM</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="delonixfile-and-vmfile">Delonixfile and VMfile</h1>
+<p><strong>Before you read:</strong> <a href="build-and-test.html">Clone, build and test</a> (a binary and an isolated state root) and <a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">OCI images, content-addressed storage and overlayfs</a> in the Cloud native primer.</p>
 <p>Delonix has two build files, and they look alike on purpose: anyone who has written a Dockerfile
 can read both. What they build is different.</p>
 <ul>
@@ -219,7 +220,8 @@ can read both. What they build is different.</p>
   mechanism is <code>qemu-img</code> + <code>virt-customize</code> on a whole disk, built by <code>delonix image vm build</code>.</li>
 </ul>
 <p>This page describes what the parsers in this repository actually accept — not what Docker accepts.
-Every rule below points at the code that enforces it.</p>
+Every rule below points at the code that enforces it. After it you can write both files, predict
+what each parser accepts or refuses, and find where to change a grammar.</p>
 <blockquote>
 <p>Examples marked <em>parse-checked</em> were run against a binary built from this tree, with
 <code>DELONIX_ROOT</code>, <code>DELONIX_NET_RUNTIME_DIR</code> and <code>TMPDIR</code> pointed at a scratch directory, up to the
@@ -859,6 +861,8 @@ VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cl
 <li>The Delonixfile parser lives in a library crate (<code>delonix-oci</code>), so it must not print; the
   VMfile parser is in the CLI binary. See <a href="crates.html">Crates</a>.</li>
 </ul>
+<hr />
+<p><strong>Next:</strong> <a href="microvm-setup.html">Building microVMs</a> — the host prerequisites, backends, images and day-2 verbs for booting and testing microVMs.</p>
 <nav class="pager"><a href="system-design-interview.html"><span>← 上一页</span>System Design Interview — the Delonix Engine</a><a class="next" href="microvm-setup.html"><span>下一页 →</span>Building microVMs</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/delonixfile-and-vmfile.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/delonixfile-and-vmfile.md</code></footer>
 </div></main>

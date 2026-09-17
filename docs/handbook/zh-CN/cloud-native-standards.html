@@ -210,6 +210,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">参考</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="cloud-native-standards-layer-by-layer">Cloud native standards, layer by layer</h1>
+<p><strong>Before you read:</strong> <a href="cloud-native-primer.html">Cloud native primer</a> (how the engine uses each mechanism) and <a href="architecture.html">Architecture</a> (the crates named below). This is a reference page: read the section of the standard you touch.</p>
 <p>A container and microVM engine is not one specification. It is a stack of layers, and most
 layers have an open standard: some from the <strong>OCI</strong> (Open Container Initiative), some from
 Kubernetes SIGs and the <strong>CNCF</strong> (Cloud Native Computing Foundation), some from the Linux kernel,
@@ -217,9 +218,13 @@ and a few that are de-facto interfaces with no standards body behind them.</p>
 <p>This page is organised <strong>by standard and by layer</strong>. For each one it answers four questions: what
 the standard is, what it requires of an implementation, how Delonix implements it today (crate,
 file, symbol), and what the evidence says about conformance, gaps included. If you search for
-"OCI, CRI, CNI, CSI, CDI", this is the page.</p>
-<p>Read <a href="cloud-native-primer.html">Cloud native primer</a> first if namespaces, cgroups, overlayfs
-or the kubelet are new to you. This page assumes those basics and does not repeat them.</p>
+"OCI, CRI, CNI, CSI, CDI", this is the page. After reading the section you need, you can say
+what a standard asks, where the engine meets it, and what conformance evidence exists — with its
+date and version.</p>
+<p>Read <a href="linux-foundations.html">Linux foundations</a> and <a href="cloud-native-primer.html">Cloud native primer</a>
+first if namespaces, cgroups, overlayfs or the kubelet are new to you. This page assumes those
+basics and does not repeat them: the primitive is taught in the first, how the engine uses it in the
+second, and the standard and its conformance here.</p>
 <p>Three rules for reading this page:</p>
 <ul>
 <li><strong>"Compatible" never appears without a number, a date and a version.</strong> A conformance claim
@@ -428,7 +433,7 @@ exec/attach/port-forward, stats) and an <code>ImageService</code>. The kubelet c
   kubelet killed pods in a loop.</li>
 <li><strong>Kubelet resource model</strong>: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>. The
   kubelet's <code>cgroup_parent</code> is validated by <code>KubeCgroupParent::parse</code>
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a>) and consumed in
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>) and consumed in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a>; <code>delonix-linux</code> has <code>transient_scope_argv</code> for
   placing a container in a systemd scope under a pod slice.</li>
 <li><strong>Capability ceiling</strong>: <code>CapCeiling</code> (<code>src/cap_ceiling.rs</code>), configured by
@@ -482,8 +487,9 @@ operations passed in <code>CNI_COMMAND</code> with the configuration on stdin.</
 <p><strong>How Delonix implements it.</strong> Two network providers exist, and CNI is one of them:</p>
 <ul>
 <li><strong>Native SDN</strong> (the default for containers): the rootless holder netns, bridge, IPAM, nftables
-  firewall — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a> (see <a href="cloud-native-primer.html">4.5</a> and
-  <a href="architecture.html">Architecture</a>).</li>
+  firewall — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a> (see
+  <a href="cloud-native-primer.html#45-container-networking">Cloud native primer 4.5</a> and
+  <a href="architecture.html#rootless-network-infrastructure">Architecture</a>).</li>
 <li><strong>CNI protocol layer</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a>, pure and testable.
   <code>list_conf_files</code>, <code>parse_config</code>, <code>load_default</code>, <code>resolve_plugin</code>, <code>add</code> (chains
   <code>prevResult</code>), <code>del</code>, <code>plugin_dirs</code> (from <code>CNI_PATH</code>), <code>readiness</code> (config parses <strong>and</strong> every
@@ -802,11 +808,12 @@ which part of the tree. Every container runtime depends on both.</p>
 <p><strong>What an implementation must do.</strong> Write limits only in a subtree delegated to it, respect the
 "no internal processes" rule, and never assume that a controller listed at the root is available
 to the calling session.</p>
-<p><strong>How Delonix implements it.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>:</p>
+<p><strong>How Delonix implements it.</strong> Where containers are placed (root mode under <code>delonix.slice</code>,
+rootless under <code>user@&lt;uid&gt;.service/dlx-containers</code>) is in
+<a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">Cloud native primer 4.2</a>; the tree and the
+delegation rule themselves are in <a href="linux-foundations.html#cgroups-v2">Linux foundations</a>. What matters
+for the contract, in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>:</p>
 <ul>
-<li>Root mode: leaves under <code>delonix.slice</code> (<code>DELONIX_SLICE</code> in <code>delonix-runtime-core</code>).</li>
-<li>Rootless: <code>user_service_base</code> and <code>try_delegated_base</code> place containers under
-  <code>user@&lt;uid&gt;.service/dlx-containers</code>.</li>
 <li><code>cgroup_limits_apply</code> answers "will limits apply here?" without starting a container. Rootless,
   it probes the process's <em>current</em> cgroup (<code>delegated_base_usable</code>), not the host's root cgroup;
   root, it probes <code>delonix.slice</code> and creates it if missing (<code>root_slice_writable</code>).</li>
@@ -979,6 +986,8 @@ check the claim, not a promise.</p>
 <p>When you change one of these components, update its row and its section in the same pull request.
 If you re-run a conformance suite, replace the number, the date and the version together, and
 update the source document (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a> for the CRI) first.</p>
+<hr />
+<p><strong>Next:</strong> <a href="environment-variables.html">Environment variables (<code>DELONIX_*</code>)</a> — every <code>DELONIX_*</code> variable the code reads, its default, and which ones lower a boundary.</p>
 <nav class="pager"><a href="publishing-docs.html"><span>← 上一页</span>Publishing the documentation</a><a class="next" href="environment-variables.html"><span>下一页 →</span>Environment variables (DELONIX_*)</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/cloud-native-standards.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/cloud-native-standards.md</code></footer>
 </div></main>

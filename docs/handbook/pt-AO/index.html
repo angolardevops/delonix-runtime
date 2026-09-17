@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a class="on" aria-current="page" href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">14</span><span>Convenções de código</span></a><a href="contributing-workflow.html"><span class="n">15</span><span>Fluxo de contribuição</span></a><a href="publishing-docs.html"><span class="n">16</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">17</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">18</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">19</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Visão geral</p>
-<h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Manual do Contribuidor</h1>
+<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/index.html">Ler a página em inglês</a></span></div><h1 id="delonix-runtime-manual-do-contribuidor">Delonix Runtime — Manual do Contribuidor</h1>
 <p>Este manual é para quem quer <strong>mudar o motor</strong>: clonaste o repositório hoje e queres enviar um
 primeiro pull request sem partir o teu host nem o motor. Se só queres <em>usar</em> o Delonix, começa
 antes pelo <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> e pelo
@@ -218,7 +218,7 @@ antes pelo <a href="https://github.com/angolardevops/delonix-runtime/blob/main/R
 <p>O workspace tem <strong>22 crates</strong> e produz <strong>4 binários</strong> (<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>).</p>
 <!-- dev-docs:end crate-count -->
 
-<h2 id="what-the-engine-is-and-what-it-is-not">O que o motor é — e o que não é<a class="hanchor" href="#what-the-engine-is-and-what-it-is-not" aria-label="#">#</a></h2>
+<h2 id="o-que-o-motor-e-e-o-que-nao-e">O que o motor é — e o que não é<a class="hanchor" href="#o-que-o-motor-e-e-o-que-nao-e" aria-label="#">#</a></h2>
 <p>O Delonix Runtime é uma abstracção de execução para <strong>um nó</strong>: corre <strong>containers e microVMs</strong>
 e gere a rede e o armazenamento de que eles precisam. É declarativo (Kinds próprios, agrupados por
 <code>apiVersion</code> — ver <code>delonix api-resources</code>), e fala com os providers (o kernel Linux, libvirt,
@@ -236,7 +236,7 @@ Cloud Hypervisor, Proxmox VE, o CRI do Kubernetes) só através de portas, nunca
 quem o chama, e não tem noção de inquilino, conta, plano ou facturação. Um requisito vindo de um
 consumidor entra como uma capacidade genérica do motor, ou não entra. O texto canónico é a
 secção <em>«Identidade e fronteira do motor»</em> no topo do <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>.</p>
-<h2 id="two-halves-generated-facts-and-narrative">Duas metades: factos gerados e narrativa<a class="hanchor" href="#two-halves-generated-facts-and-narrative" aria-label="#">#</a></h2>
+<h2 id="duas-metades-factos-gerados-e-narrativa">Duas metades: factos gerados e narrativa<a class="hanchor" href="#duas-metades-factos-gerados-e-narrativa" aria-label="#">#</a></h2>
 <p>As páginas deste manual misturam dois tipos de conteúdo:</p>
 <ul>
 <li><strong>Factos</strong> — que crates existem, a sua camada, quem depende de quem, os binários, a toolchain
@@ -248,7 +248,7 @@ secção <em>«Identidade e fronteira do motor»</em> no topo do <a href="https:
 <li><strong>Narrativa</strong> — porque é que as coisas são como são, como funcionam os fluxos, como contribuir. É
   escrita à mão e revista depois de cada release. Ver <a href="publishing-docs.html">Publicar a documentação</a>.</li>
 </ul>
-<h2 id="reading-paths">Percursos de leitura<a class="hanchor" href="#reading-paths" aria-label="#">#</a></h2>
+<h2 id="percursos-de-leitura">Percursos de leitura<a class="hanchor" href="#percursos-de-leitura" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -283,7 +283,7 @@ secção <em>«Identidade e fronteira do motor»</em> no topo do <a href="https:
 </tr>
 </tbody>
 </table></div>
-<h2 id="pages">Páginas<a class="hanchor" href="#pages" aria-label="#">#</a></h2>
+<h2 id="paginas">Páginas<a class="hanchor" href="#paginas" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -383,10 +383,10 @@ secção <em>«Identidade e fronteira do motor»</em> no topo do <a href="https:
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>
-<li><a href="#what-the-engine-is-and-what-it-is-not">O que o motor é — e o que não é</a></li>
-<li><a href="#two-halves-generated-facts-and-narrative">Duas metades: factos gerados e narrativa</a></li>
-<li><a href="#reading-paths">Percursos de leitura</a></li>
-<li><a href="#pages">Páginas</a></li>
+<li><a href="#o-que-o-motor-e-e-o-que-nao-e">O que o motor é — e o que não é</a></li>
+<li><a href="#duas-metades-factos-gerados-e-narrativa">Duas metades: factos gerados e narrativa</a></li>
+<li><a href="#percursos-de-leitura">Percursos de leitura</a></li>
+<li><a href="#paginas">Páginas</a></li>
 </ul>
 </div>
 </aside>

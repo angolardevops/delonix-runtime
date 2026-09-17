@@ -1,7 +1,11 @@
 # Building microVMs
 
+**Before you read:** [Preparing your environment](environment.md), [Clone, build and test](build-and-test.md), the [virtualization section of the Cloud native primer](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), and Part 2 of [Delonixfile and VMfile](delonixfile-and-vmfile.md#part-2-vmfile).
+
 This page takes a contributor from a bare Linux host to building, booting and testing VMs with
-Delonix, and shows where the code lives when something needs changing. It assumes you have
+Delonix, and shows where the code lives when something needs changing. After it you can prepare a
+host for Cloud Hypervisor and libvirt, predict which backend a VM gets, and test a VM change through
+the CLI. It assumes you have
 already read [Preparing your environment](environment.md) and can build the tree
 ([Clone, build and test](build-and-test.md)).
 
@@ -484,3 +488,7 @@ Read [ADR-0008](../adr/0008-proxmox-vm-backend.md) first; it is the template. In
   libvirt screenshot answers in seconds what hypotheses take hours to find — and validate with the
   command a user would type, not the flags that are convenient for debugging (`--vnc` once masked a
   boot failure that only happened without a video device).
+
+---
+
+**Next:** [Coding conventions](coding-conventions.md) — how code in this repository must be written, each rule tagged with the gate or decision behind it.
