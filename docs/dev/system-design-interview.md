@@ -112,42 +112,59 @@ Honest status: no crate references `delonix.node.v1` yet; local programs use the
 > **Candidate:** I will layer it so the rules of the domain never import the kernel, and I will
 > make every long-lived process own exactly one thing.
 
+> **Legend** — white box with red border: engine building block · outlined region: a layer ·
+> cylinder, blue: state on disk · solid arrow: call or data flow, labelled.
+
+The domain's rules never import the kernel, and one adapter owns every file under the state root.
+
 ```mermaid
-graph TB
-    subgraph IF["interfaces"]
-        CLI["CLI"]
-        CRI["CRI server"]
-        API["local API server"]
-        MCP["MCP server"]
-    end
-    subgraph CX["contexts — use cases and ports"]
-        COMPUTE["compute: RunOpts, resolve_run, launch, ports"]
-        STACK["stack: Kind table, 3-way plan"]
-    end
-    subgraph AD["adapters and providers — implement ports"]
-        LINUX["kernel: clone, mounts, cgroups, seccomp"]
-        SDN["SDN: pin, control, nftables, slirp"]
-        OCI["OCI: registry, CAS, layers"]
-        VMS["VM backends: Cloud Hypervisor, libvirt, Proxmox"]
-    end
-    STATE[("files under one state root")]
-    IF --> CX
-    AD -. implements .-> CX
-    IF --> AD
-    AD --- STATE
+flowchart TB
+  subgraph IF["interfaces — parse a request, present a result"]
+    CLI["CLI<br/><small>delonix</small>"]
+    CRI["CRI server<br/><small>delonix-cri</small>"]
+    API["local API server<br/><small>delonix-mgmt</small>"]
+    MCP["MCP server<br/><small>delonix-mcp</small>"]
+  end
+  subgraph CX["contexts — use cases and ports, no kernel"]
+    COMPUTE["compute<br/><small>RunOpts, resolve_run, launch, ports</small>"]
+    STACK["stack<br/><small>Kind table, 3-way plan</small>"]
+  end
+  subgraph AD["adapters and providers — implement ports"]
+    LINUX["kernel<br/><small>clone, mounts, cgroups, seccomp</small>"]
+    SDN["SDN<br/><small>pin, control, nftables, slirp</small>"]
+    OCI["OCI<br/><small>registry, CAS, layers</small>"]
+    VMS["VM backends<br/><small>Cloud Hypervisor, libvirt, Proxmox</small>"]
+    STA["state<br/><small>stores, atomic writes, secret vault</small>"]
+  end
+  FILES[("files under one state root")]
+  IF -->|"call use cases"| CX
+  AD -->|"implement ports"| CX
+  IF -->|"call directly, today"| AD
+  STA -->|"flock, temp file + rename"| FILES
+  class CLI,CRI,API,MCP,COMPUTE,STACK,LINUX,SDN,OCI,VMS,STA block
+  class FILES store
+classDef person fill:#191513,stroke:#191513,color:#ffffff
+classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
+classDef block fill:#ffffff,stroke:#cc2823,color:#191513
+classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
+classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 ```
 
 - **Layers** (ADR-0040 D1): foundation → contexts → adapters/providers → interfaces → binaries,
   enforced by `scripts/arch_fitness.py`.
 - **State** is JSON records and content-addressed files under one root, with atomic writes and
-  `flock` around read-modify-write — no database, because there is no daemon to own one.
+  `flock` around read-modify-write — no database, because there is no daemon to own one. The
+  record *types* are foundation types (`Container`/`Vm` in `delonix-runtime-core`; `Status` and the
+  firewall records in `delonix-model`); the *files* are opened only through the `delonix-state`
+  adapter.
 - **Processes** exist per workload (a supervisor that is the container's parent, the init, a log
   shim) and per node when networking is used (a *pin* that only holds namespaces, a restartable
   *control* process, one `slirp4netns` uplink). Nothing else stays up.
 
 **Where it lives in the code:** `scripts/arch_fitness.py` (`LAYERS`, `ALLOWED`);
 `crates/adapters/delonix-state/src/store.rs` (`Store::update`, `JsonStore::update`,
-`write_atomic`); `crates/contexts/delonix-compute/src/{ports,launch}.rs`;
+`write_atomic`); `crates/foundation/delonix-runtime-core/src/lib.rs` (`Container`, `Vm`);
+`crates/foundation/delonix-model/src/records.rs` (`Status`, `ContainerFw`, `FwRule`); `crates/contexts/delonix-compute/src/{ports,launch}.rs`;
 `crates/adapters/delonix-linux/src/supervise.rs` (`run_supervised`).
 
 ---
@@ -181,6 +198,10 @@ graph TB
    `no_new_privs`, and signals **"mounted"** on a second pipe before `execvp`.
 7. **Publish the record last.** The parent waits for the "mounted" byte (`wait_for_mounts`),
    briefly for the exec result, and only then `store.save`s `Running`.
+
+> **Legend** — participants are processes; solid arrows are calls, socket lines, forks or clones (the label says which); dashed arrows are replies or bytes sent back; a self-arrow is work inside that process; notes mark state or waits.
+
+The child is created blocked, configured from outside, and the record is saved only after the child reports its mounts.
 
 ```mermaid
 sequenceDiagram
@@ -274,6 +295,10 @@ namespace) are accepted, and **new** connections from any other container addres
 dropped; replies still flow because the drop matches only `ct state new`. An explicit ingress
 policy replaces that default. IPv6 in the SDN is refused by default (`table ip6` with
 `policy drop`), because every rule above is IPv4.
+
+> **Legend** — participants are processes; solid arrows are calls, socket lines, forks or clones (the label says which); dashed arrows are replies or bytes sent back; a self-arrow is work inside that process; notes mark state or waits.
+
+Joining a custom network is one control-socket line plus a re-exec into the pin's namespaces; publishing a port is two dataplane writes.
 
 ```mermaid
 sequenceDiagram
@@ -406,6 +431,10 @@ sequenceDiagram
 - **One table of Kind facts** (domain, form, whether it converges, has teardown, is namespaced,
   how presence is observed) governs the planner, apply order and teardown order, instead of lists
   kept in sync by hand.
+
+> **Legend** — participants are the operator, the `stack apply` command, the pure planner and the stores and dataplane it acts on; solid arrows are calls; dashed arrows are replies; `alt` and `opt` boxes are the failure branch and the optional prune.
+
+Nothing is created before the plan is checked, and a failure mid-apply is stamped rather than rolled back.
 
 ```mermaid
 sequenceDiagram

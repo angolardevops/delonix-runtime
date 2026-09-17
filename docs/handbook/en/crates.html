@@ -206,7 +206,7 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="cloud-native-primer.html"><span class="n">02</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">03</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">Set up &amp; build</div><a href="environment.html"><span class="n">04</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">05</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="architecture.html"><span class="n">06</span><span>Architecture</span></a><a class="on" aria-current="page" href="crates.html"><span class="n">07</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">08</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">09</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">10</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="coding-conventions.html"><span class="n">11</span><span>Coding conventions</span></a><a href="contributing-workflow.html"><span class="n">12</span><span>Contribution workflow</span></a><a href="publishing-docs.html"><span class="n">13</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="cloud-native-standards.html"><span class="n">14</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">15</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">16</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">Set up &amp; build</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a class="on" aria-current="page" href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="coding-conventions.html"><span class="n">14</span><span>Coding conventions</span></a><a href="contributing-workflow.html"><span class="n">15</span><span>Contribution workflow</span></a><a href="publishing-docs.html"><span class="n">16</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="cloud-native-standards.html"><span class="n">17</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">18</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">19</span><span>Glossary</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Architecture</p>
 <h1 id="the-crates">The crates</h1>
@@ -437,8 +437,11 @@ format. They may depend only on other foundation crates. The files that hold tho
 records are not here: they are read and written by the <code>delonix-state</code> adapter.</p>
 <h3 id="delonix-runtime-core"><code>delonix-runtime-core</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-runtime-core" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-runtime-core" aria-label="#">#</a></h3>
 <p><strong>Purpose.</strong> The shared vocabulary of the engine: the persisted records
-(<code>Container</code>, <code>Vm</code>), their <code>Status</code>, and the error type every crate returns (defined in
-<code>delonix-model</code> and re-exported here with the same path). It also holds the small
+<code>Container</code> and <code>Vm</code> and the types they are made of (<code>Mount</code>, health, cgroup parent,
+extra networks and disks). Two groups of items that every crate still imports from here
+are <strong>defined in <code>delonix-model</code></strong> and re-exported with their old paths: the error type
+(<code>Error</code>, <code>Result</code>) and, since #405, the plain-data records (<code>Status</code>,
+<code>ContainerFw</code>/<code>FwRule</code> and their validators, <code>default_namespace</code>, <code>typestate</code>). It also holds the small
 cross-cutting pieces that more than one crate needs and that would otherwise be
 copied: the <code>SO_PEERCRED</code> check for local sockets, the append-only event log, and
 the rule a server binary follows when <code>delonix</code> runs it. It does <strong>not</strong> create
@@ -448,8 +451,11 @@ billing (its crate doc says so, and the rest of the workspace relies on it).</p>
 secret store (<code>SecretStore</code>, <code>CredVault</code>) <strong>left this crate</strong> for <code>delonix-state</code>
 (ADR-0040 P3); the pure secret model (<code>Secret</code>, <code>valid_name</code>, <code>valid_env_key</code>,
 <code>parse_env_file</code>) went to <code>delonix-model</code>. Nothing about them is re-exported here
-any more: <code>src/lib.rs</code> re-exports only <code>delonix_model::{Error, Result}</code>, so a call
-site that used <code>delonix_runtime_core::Store</code> now imports <code>delonix_state::Store</code>.</p>
+any more, so a call site that used <code>delonix_runtime_core::Store</code> now imports
+<code>delonix_state::Store</code>. The only re-exports in <code>src/lib.rs</code> are from <code>delonix-model</code>:
+<code>records::{default_namespace, fw_port_ok, fw_proto_ok, fw_src_ok, ContainerFw, FwRule, Status}</code>
+and <code>{typestate, Error, Result}</code> (#405). New code may import either path; the
+definitions are in <code>delonix-model</code>.</p>
 <p><strong>Key modules</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -461,7 +467,7 @@ site that used <code>delonix_runtime_core::Store</code> now imports <code>deloni
 <tbody>
 <tr>
 <td><code>lib.rs</code></td>
-<td><code>Container</code>, <code>Vm</code>, <code>Status</code>, <code>Mount</code>, <code>ContainerFw</code>/<code>FwRule</code>, health config, cgroup-parent parsing, <code>generate_id</code>, pid liveness helpers</td>
+<td><code>Container</code>, <code>Vm</code>, <code>Mount</code>, health config, cgroup-parent parsing (<code>KubeCgroupParent</code>), <code>generate_id</code>, <code>now_unix</code>, pid liveness helpers; re-exports <code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>, <code>default_namespace</code> from <code>delonix-model</code></td>
 </tr>
 <tr>
 <td><code>events</code></td>
@@ -477,7 +483,7 @@ site that used <code>delonix_runtime_core::Store</code> now imports <code>deloni
 </tr>
 <tr>
 <td><code>typestate</code></td>
-<td>compile-time lifecycle phases (<code>Phase&lt;Created/<wbr>Running/<wbr>Stopped&gt;</code>)</td>
+<td>re-export of <code>delonix_model::<wbr>typestate</code> (moved in #405)</td>
 </tr>
 <tr>
 <td><code>virt</code></td>
@@ -511,8 +517,8 @@ site that used <code>delonix_runtime_core::Store</code> now imports <code>deloni
 </tr>
 <tr>
 <td><code>Status</code></td>
-<td>lifecycle state of a workload</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs:Status</code></a></td>
+<td>lifecycle state of a workload, re-exported</td>
+<td>defined in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs:Status</code></a></td>
 </tr>
 <tr>
 <td><code>Error</code>, <code>Result</code></td>
@@ -536,8 +542,9 @@ site that used <code>delonix_runtime_core::Store</code> now imports <code>deloni
 </tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> <code>delonix-model</code> only, for the <code>Error</code>/<code>Result</code> it re-exports. No
-subprocesses: detection reads <code>/sys</code> and <code>/proc</code> directly.</p>
+<p><strong>Talks to.</strong> <code>delonix-model</code> only, for the <code>Error</code>/<code>Result</code>, the plain-data records
+and the typestate it re-exports. No subprocesses: detection reads <code>/sys</code> and <code>/proc</code>
+directly.</p>
 <p><strong>Notable external dependencies.</strong> <code>serde</code>/<code>serde_json</code> (the record types derive
 them), <code>thiserror</code>, <code>libc</code>. The encryption dependencies (<code>chacha20poly1305</code>,
 <code>getrandom</code>) moved with the secret store to <code>delonix-state</code>.</p>
@@ -556,10 +563,10 @@ them), <code>thiserror</code>, <code>libc</code>. The encryption dependencies (<
   container has more (see the <code>NetPlan</code> doc comment in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> and <code>apply_firewall_all</code>, which exists
   because firewalling only the primary IP was bypassable).</li>
-<li>The crate description in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> still says it holds the "Secret Manager"
-  and the "Store", and the crate doc in <code>src/lib.rs</code> still says "shared types,
-  state and errors". Both predate the move to <code>delonix-state</code>; the module list is
-  the reference.</li>
+<li>The crate description in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> still says it holds <code>Status</code>, the "Secret
+  Manager" and the "Store", and the crate doc in <code>src/lib.rs</code> still says "shared
+  types, state and errors". Both predate #404 and #405; the module list is the
+  reference.</li>
 <li><code>Container::cgroup()</code> is the static root-mode path. For a running rootless
   container the real cgroup is read from <code>/proc/&lt;pid&gt;/cgroup</code> by
   <code>delonix_linux::live_cgroup</code>.</li>
@@ -568,10 +575,14 @@ them), <code>thiserror</code>, <code>libc</code>. The encryption dependencies (<
 <p><strong>Purpose.</strong> The part of the model any layer can name without depending on a
 mechanism: the engine's shared <code>Error</code> type with the stable <code>DX_*</code> code of each
 variant, the generated workload names, and the mapping from an <code>Error</code> to a process
-exit code, the numbered <code>DX-CDNN</code> code dictionary, and the secret model (what a
-secret is and what a valid name and key look like). Pure — no I/O, no process state
-(crate doc). It does not hold records; those are in <code>delonix-runtime-core</code>, and the
-files that store them are in <code>delonix-state</code>.</p>
+exit code, the numbered <code>DX-CDNN</code> code dictionary, the secret model (what a
+secret is and what a valid name and key look like), and — since #405 — the records
+that are plain data: a workload's <code>Status</code>, the per-container firewall
+(<code>ContainerFw</code>, <code>FwRule</code> and the pure validators <code>fw_proto_ok</code>, <code>fw_port_ok</code>,
+<code>fw_src_ok</code>), <code>default_namespace</code>, and the compile-time lifecycle <code>typestate</code>. Pure —
+no I/O, no process state (crate doc). The <code>Container</code> and <code>Vm</code> records stay in
+<code>delonix-runtime-core</code>, which re-exports everything above under the old paths; the
+files that store records are in <code>delonix-state</code>.</p>
 <p><strong>Key modules</strong></p>
 <div class="tablewrap"><table>
 <thead>
@@ -600,6 +611,14 @@ files that store them are in <code>delonix-state</code>.</p>
 <tr>
 <td><code>secret</code></td>
 <td><code>Secret</code> and the pure rules <code>valid_name</code>, <code>valid_env_key</code>, <code>parse_env_file</code>; the encrypted store is <code>delonix-state</code></td>
+</tr>
+<tr>
+<td><code>records</code></td>
+<td><code>Status</code> (<code>from_wait</code>, <code>is_terminal</code>, <code>exit_code</code>), <code>ContainerFw</code>/<code>FwRule</code>, <code>fw_proto_ok</code>/<code>fw_port_ok</code>/<code>fw_src_ok</code>, <code>default_namespace</code> (moved from <code>delonix-runtime-core</code> in #405)</td>
+</tr>
+<tr>
+<td><code>typestate</code></td>
+<td>compile-time lifecycle phases <code>Phase&lt;Created/<wbr>Running/<wbr>Stopped&gt;</code>; illegal transitions do not compile (moved in #405)</td>
 </tr>
 </tbody>
 </table></div>
@@ -638,20 +657,44 @@ files that store them are in <code>delonix-state</code>.</p>
 <td>the secret record and the <code>KEY=value</code> file parser, used by <code>delonix-compute</code> without depending on an adapter</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/secret.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>secret.<wbr>rs</code></a></td>
 </tr>
+<tr>
+<td><code>records::Status</code></td>
+<td>lifecycle state of a workload</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs:Status</code></a></td>
+</tr>
+<tr>
+<td><code>records::ContainerFw</code>, <code>records::FwRule</code></td>
+<td>the persisted per-container firewall; <code>delonix-sdn</code> applies it with nftables</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs</code></a></td>
+</tr>
+<tr>
+<td><code>typestate::Phase</code></td>
+<td>typed lifecycle phases</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>typestate.<wbr>rs:Phase</code></a></td>
+</tr>
 </tbody>
 </table></div>
-<p><strong>Talks to.</strong> No other engine crate: it is now a root of the graph, and
-<code>delonix-runtime-core</code> depends on it (the dependency used to point the other way). The CLI
-re-exports both modules as <code>cmd::exitcode</code> and <code>cmd::names</code>
+<p><strong>Talks to.</strong> No other engine crate: it is a root of the graph, and
+<code>delonix-runtime-core</code> depends on it and re-exports its error and records (the
+dependency used to point the other way). The CLI re-exports <code>exitcode</code> and <code>names</code> as
+<code>cmd::exitcode</code> and <code>cmd::names</code>
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a>), so older call sites did not change.</p>
 <p><strong>Notable external dependencies.</strong> <code>thiserror</code> (the <code>Error</code> derive), <code>serde_json</code>
 (the <code>Error::Json</code> variant wraps <code>serde_json::Error</code>) and <code>serde</code> (the <code>Secret</code>
 derive).</p>
-<p><strong>Tests.</strong> Inline unit tests.</p>
+<p><strong>Tests.</strong> Inline unit tests (<code>codes</code>, <code>error</code>, <code>exitcode</code>, <code>names</code>, <code>typestate</code>)
+and a doc-test in <code>src/typestate.rs</code>.</p>
 <p><strong>Start reading at.</strong> <code>src/exitcode.rs</code> (its module doc explains why classes exist),
-then <code>src/names.rs</code>.</p>
-<p><strong>Gotchas.</strong> The <code>match</code> in <code>for_error</code> is exhaustive on purpose: a new <code>Error</code>
-variant must be classified here or the build fails.</p>
+then <code>src/records.rs</code>, then <code>src/names.rs</code>.</p>
+<p><strong>Gotchas.</strong></p>
+<ul>
+<li>The <code>match</code> in <code>for_error</code> is exhaustive on purpose: a new <code>Error</code> variant must
+  be classified here or the build fails.</li>
+<li>Several import paths reach the same type: <code>delonix_model::records::FwRule</code>,
+  <code>delonix_runtime_core::FwRule</code> (re-export) and <code>delonix_sdn::FwRule</code> (a re-export
+  of the <code>-core</code> one, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>). They are one type,
+  so all compile; <code>grep</code> for every path when you look for callers.</li>
+</ul>
 <h3 id="delonix-net-rules"><code>delonix-net-rules</code> <a class="crate-src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-net-rules" target="_blank" rel="noopener">Source</a><a class="hanchor" href="#delonix-net-rules" aria-label="#">#</a></h3>
 <p><strong>Purpose.</strong> Network rules that can be computed without touching the kernel:
 bridge names, IP derivation inside a prefix, the <code>Cidr</code> value type, label
@@ -1712,8 +1755,9 @@ servers deliver reliably (module doc of <code>telemetry.rs</code>).</p>
 <p><strong>Purpose.</strong> The engine's persisted state (crate doc, ADR-0040 D2.3): one JSON file
 per record behind an exclusive <code>flock</code>, the atomic-write helpers every adapter uses
 for its own files, and the secret vault encrypted at rest. It came out of
-<code>delonix-runtime-core</code>: the record <strong>types</strong> (<code>Container</code>, <code>Vm</code>) stay in the
-foundation, the files that hold them live here. It does not decide anything about a
+<code>delonix-runtime-core</code> in #404: the record <strong>types</strong> stay in the foundation
+(<code>Container</code>, <code>Vm</code> in <code>delonix-runtime-core</code>; since #405 <code>Status</code> and the firewall
+records in <code>delonix-model</code>), the files that hold them live here. It does not decide anything about a
 workload; it loads, saves and locks.</p>
 <p><strong>Key modules</strong></p>
 <div class="tablewrap"><table>
@@ -1790,8 +1834,9 @@ workload; it loads, saves and locks.</p>
 </tbody>
 </table></div>
 <p><strong>Talks to.</strong> <code>delonix-runtime-core</code> (the <code>Container</code> type the <code>Store</code> holds, and
-<code>default_namespace</code>) and <code>delonix-model</code> (the error class its errors convert into,
-and the secret model). No subprocesses and no network: only the filesystem.
+<code>default_namespace</code>, which is defined in <code>delonix-model</code> and reached through the
+<code>-core</code> re-export in <code>store.rs</code>) and <code>delonix-model</code> (the error class its errors
+convert into, and the secret model). No subprocesses and no network: only the filesystem.
 Callers, all by direct call: <code>delonix-linux</code> (<code>Store</code>, <code>SecretStore</code>,
 <code>write_private_temp</code>), <code>delonix-vm</code> (<code>JsonStore</code>, <code>write_atomic</code>), <code>delonix-sdn</code>
 (<code>write_atomic</code>, <code>write_private_temp</code>), <code>delonix-oci</code> (<code>write_atomic_mode</code>),
@@ -2303,6 +2348,10 @@ you can grep for.</p>
 pass attaches through the holder and re-executes into the network namespace
 (<code>attach_custom_network</code>, <code>reexec_into_netns</code>), and ports are published on the
 holder by <code>HostNetwork::publish</code>.</p>
+<blockquote>
+<p><strong>Legend</strong> — participants are crates (with the module or type that plays the part), the operator or kubelet, and host tools; solid arrows are calls or messages, labelled with the function; dashed arrows are replies; a self-arrow is work inside that participant; <code>loop</code>, <code>alt</code> and <code>opt</code> boxes are repetition, exclusive branches and optional steps.</p>
+</blockquote>
+<p>The policy and the pure decisions run first; only then does the Linux adapter fork, clone and start the container's own <code>slirp4netns</code>.</p>
 <pre class="mermaid">sequenceDiagram
   actor Op as Operator
   participant CLI as delonix (cmd/container.rs)
@@ -2329,6 +2378,10 @@ holder by <code>HostNetwork::publish</code>.</p>
   CLI--&gt;&gt;Op: container id
 </pre>
 <h3 id="2-delonix-stack-apply-f-manifestyaml">2. <code>delonix stack apply -f manifest.yaml</code><a class="hanchor" href="#2-delonix-stack-apply-f-manifestyaml" aria-label="#">#</a></h3>
+<blockquote>
+<p><strong>Legend</strong> — participants are crates (with the module or type that plays the part), the operator or kubelet, and host tools; solid arrows are calls or messages, labelled with the function; dashed arrows are replies; a self-arrow is work inside that participant; <code>loop</code>, <code>alt</code> and <code>opt</code> boxes are repetition, exclusive branches and optional steps.</p>
+</blockquote>
+<p>Planning is one pure call into <code>delonix-stack</code>; everything that touches a resource stays in the CLI's per-Kind code and the adapters it calls.</p>
 <pre class="mermaid">sequenceDiagram
   actor Op as Operator
   participant Stk as delonix (cmd/stack.rs)
@@ -2352,6 +2405,10 @@ holder by <code>HostNetwork::publish</code>.</p>
   Stk-&gt;&gt;Rec: revision::record
 </pre>
 <h3 id="3-kubelet-delonix-cri-engine">3. kubelet → <code>delonix-cri</code> → engine<a class="hanchor" href="#3-kubelet-delonix-cri-engine" aria-label="#">#</a></h3>
+<blockquote>
+<p><strong>Legend</strong> — participants are crates (with the module or type that plays the part), the operator or kubelet, and host tools; solid arrows are calls or messages, labelled with the function; dashed arrows are replies; a self-arrow is work inside that participant; <code>loop</code>, <code>alt</code> and <code>opt</code> boxes are repetition, exclusive branches and optional steps.</p>
+</blockquote>
+<p>The CRI server pulls images and attaches networks in-process, but every container start crosses into a fresh <code>delonix</code> process.</p>
 <pre class="mermaid">sequenceDiagram
   participant K as kubelet
   participant CRI as delonix-cri (tonic server)
@@ -2483,7 +2540,10 @@ holder by <code>HostNetwork::publish</code>.</p>
     if (!window.mermaid || !diagrams.length) return;
     diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
     mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
-      fontFamily:getComputedStyle(document.body).fontFamily});
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
     mermaid.run({nodes: diagrams});
   }
   renderMermaid();
