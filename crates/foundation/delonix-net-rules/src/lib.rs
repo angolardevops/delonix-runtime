@@ -3,7 +3,7 @@
 //! `delonix-net-RULES`, not `-model`: these are RULES — functions and one value
 //! type — not a typed domain model of a network.
 //!
-//! Part of what `delonix-net` was called for was no mechanism at all: deriving
+//! Part of what `delonix-sdn` was called for was no mechanism at all: deriving
 //! the name of a bridge, assigning an IP inside a prefix, reading `10mbit` as
 //! bits per second, deciding whether an IP fits in a subnet. They are
 //! deterministic functions, with no I/O and no privilege.
@@ -15,7 +15,7 @@
 //! implementations that one day will not.
 //!
 //! Por isso não é uma API: é um crate partilhado, SEM DEPENDÊNCIAS, que os dois
-//! lados compilam. O `delonix-net` re-exporta tudo o que está aqui, portanto
+//! lados compilam. O `delonix-sdn` re-exporta tudo o que está aqui, portanto
 //! nenhum consumidor existente teve de mudar.
 //!
 //! O `Cidr` vive aqui, e é ele que faz este crate valer a pena. Foi desenhado
@@ -61,7 +61,7 @@ pub fn parse_overlay_peer(s: &str) -> (String, Option<(String, String)>) {
 }
 
 /// 32-bit FNV-1a hash (to derive a network's subnet/bridge from its name).
-/// Público porque o `delonix-net` o re-exporta internamente. Não faz parte da
+/// Público porque o `delonix-sdn` o re-exporta internamente. Não faz parte da
 /// superfície que interessa a quem consome este crate — é o detalhe de que o
 /// [`bridge_name`] depende.
 pub fn fnv32(s: &str) -> u32 {
@@ -234,7 +234,7 @@ impl Cidr {
 
     /// Formata um `u32` como endereço com pontos.
     ///
-    /// Pública porque o `ipam` do `delonix-net` a usa para escrever o candidato
+    /// Pública porque o `ipam` do `delonix-sdn` a usa para escrever o candidato
     /// que acabou de calcular — era `pub(crate)` quando o `Cidr` vivia lá, e a
     /// mudança de crate transformou isso num erro de compilação, não numa
     /// decisão. Fica exposta com o mesmo âmbito de sempre: um detalhe de
@@ -394,7 +394,7 @@ pub fn service_vip(key: &str) -> String {
 /// selector (ADR-0024, still unimplemented) is meant to reuse the exact same
 /// function rather than grow a second, divergence-prone `matchLabels` reader.
 /// Lives here — not in `delonix-runtime-bin`, where both Kinds' CLI code lives
-/// — because `delonix-net::infra::build_dns_index` (which computes a
+/// — because `delonix-sdn::infra::build_dns_index` (which computes a
 /// `Service`'s live membership) cannot depend on the bin crate.
 ///
 /// An EMPTY `match_labels` selects NOTHING, deliberately fail-closed: a

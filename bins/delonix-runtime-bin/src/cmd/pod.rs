@@ -22,8 +22,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use delonix_net::infra;
 use delonix_runtime_core::{Container, Error, Result, Status};
+use delonix_sdn::infra;
 
 use super::container::{self, PodSpec};
 use super::manifest::{self, ManifestDoc};

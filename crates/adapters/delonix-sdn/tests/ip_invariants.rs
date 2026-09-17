@@ -14,8 +14,8 @@ proptest! {
     /// containers depende disto (reconciliação, DNS estável).
     #[test]
     fn alloc_ip_in_is_deterministic(prefix in "10\\.[0-9]{1,2}", id in hex_id()) {
-        let a = delonix_net::alloc_ip_in(&prefix, &id);
-        let b = delonix_net::alloc_ip_in(&prefix, &id);
+        let a = delonix_sdn::alloc_ip_in(&prefix, &id);
+        let b = delonix_sdn::alloc_ip_in(&prefix, &id);
         prop_assert_eq!(a, b);
     }
 
@@ -23,7 +23,7 @@ proptest! {
     /// (broadcast) — está sempre em `[2, 254]`. Evita colisões com infra de rede.
     #[test]
     fn alloc_ip_in_last_octet_is_a_valid_host(prefix in "10\\.[0-9]{1,2}", id in hex_id()) {
-        let ip = delonix_net::alloc_ip_in(&prefix, &id);
+        let ip = delonix_sdn::alloc_ip_in(&prefix, &id);
         let last: u32 = ip.rsplit('.').next().unwrap().parse().unwrap();
         prop_assert!((2..=254).contains(&last), "octeto inválido em {ip}");
         prop_assert!(ip.starts_with(&format!("{prefix}.")), "{ip} fora do prefixo {prefix}");
@@ -36,7 +36,7 @@ proptest! {
         b in 0u8..=255, c in 0u8..=255, plen in 8u32..=30, id in hex_id(),
     ) {
         let subnet = format!("10.{b}.{c}.0/{plen}");
-        let ip = delonix_net::alloc_ip_cidr(&subnet, &id)
+        let ip = delonix_sdn::alloc_ip_cidr(&subnet, &id)
             .expect("subnet /8../30 com hosts deve alocar");
 
         // Reconstrói rede/broadcast a partir da subnet e confirma a pertença.

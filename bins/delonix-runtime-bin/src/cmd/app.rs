@@ -27,10 +27,10 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use delonix_net::NetworkStore;
 use delonix_oci::{buildpack::CnbPlan, detect, ImageStore};
 use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{Error, Result, Store};
+use delonix_sdn::NetworkStore;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

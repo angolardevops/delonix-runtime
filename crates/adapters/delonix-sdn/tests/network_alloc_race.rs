@@ -31,7 +31,7 @@ fn raiz() -> &'static std::path::PathBuf {
 }
 
 /// Cria `n` redes em paralelo e devolve os `NetDef` resultantes.
-fn criar_em_paralelo(prefixo_do_nome: &str, n: usize) -> Vec<delonix_net::infra::NetDef> {
+fn criar_em_paralelo(prefixo_do_nome: &str, n: usize) -> Vec<delonix_sdn::infra::NetDef> {
     raiz();
     let barreira = std::sync::Arc::new(std::sync::Barrier::new(n));
     let mut hs = Vec::with_capacity(n);
@@ -42,7 +42,7 @@ fn criar_em_paralelo(prefixo_do_nome: &str, n: usize) -> Vec<delonix_net::infra:
             // Todas as threads largam ao mesmo tempo — sem isto, arrancarem em
             // fila esconde a corrida que o teste existe para apanhar.
             b.wait();
-            delonix_net::infra::network_create(&nome)
+            delonix_sdn::infra::network_create(&nome)
         }));
     }
     hs.into_iter()
@@ -70,7 +70,7 @@ fn criacoes_concorrentes_nao_partilham_o_mesmo_16() {
 
     // E o que ficou em disco tem de concordar com o que foi devolvido: uma
     // escrita a pisar outra dá prefixos únicos na memória e duplicados no disco.
-    let em_disco: Vec<_> = delonix_net::infra::network_list()
+    let em_disco: Vec<_> = delonix_sdn::infra::network_list()
         .into_iter()
         .filter(|d| d.name.starts_with("corrida-"))
         .collect();
@@ -99,7 +99,7 @@ fn o_mesmo_nome_em_paralelo_converge_numa_so_rede() {
             let b = barreira.clone();
             std::thread::spawn(move || {
                 b.wait();
-                delonix_net::infra::network_create("mesmo-nome")
+                delonix_sdn::infra::network_create("mesmo-nome")
             })
         })
         .collect();
@@ -125,7 +125,7 @@ fn o_mesmo_nome_em_paralelo_converge_numa_so_rede() {
     );
 
     assert_eq!(
-        delonix_net::infra::network_list()
+        delonix_sdn::infra::network_list()
             .iter()
             .filter(|d| d.name == "mesmo-nome")
             .count(),

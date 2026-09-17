@@ -495,7 +495,7 @@ fn run() -> Result<()> {
     cmd::vmbackends::register_configured();
     // The VM engine attaches a Cloud Hypervisor guest through this port instead of
     // reaching into the SDN itself (ADR-0040 P3).
-    delonix_vm::set_network(Box::new(delonix_net::vm_network::HostVmNetwork));
+    delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork));
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),
@@ -683,17 +683,17 @@ fn main() {
     // refuses a process that already has a second thread (an OTLP exporter).
     let raw: Vec<String> = std::env::args().collect();
     if raw.len() == 3 && raw[1] == "netns" && raw[2] == "pin" {
-        delonix_net::infra::pin_main(); // never returns
+        delonix_sdn::infra::pin_main(); // never returns
     }
     delonix_telemetry::telemetry::init();
     // Hidden re-exec of the netns holder (`delonix netns holder`, invoked by
-    // `delonix-net::infra::start_holder` itself via `unshare` — never by the
+    // `delonix-sdn::infra::start_holder` itself via `unshare` — never by the
     // user). It has to be intercepted BEFORE clap parses (it's not a public
     // subcommand) — without this, `--net <custom-network>` always fails with
     // "timeout waiting for the netns holder" (the re-exec falls into the normal
     // parser and is rejected as an unknown subcommand).
     if raw.len() == 3 && raw[1] == "netns" && raw[2] == "control" {
-        delonix_net::infra::control_main(); // never returns
+        delonix_sdn::infra::control_main(); // never returns
     }
     // Hidden re-exec of the 2nd step of `--net <network>` (see
     // `container::reexec_into_netns`): we already run INSIDE the holder's

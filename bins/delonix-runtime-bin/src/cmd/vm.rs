@@ -2650,7 +2650,7 @@ fn wait_for_boot(base: &std::path::Path, name: &str, timeout: std::time::Duratio
                     // Sliced rather than handed the whole remaining budget so
                     // the spinner keeps turning and the outer deadline stays
                     // the one in charge.
-                    match delonix_net::infra::sdn_reachable(
+                    match delonix_sdn::infra::sdn_reachable(
                         &vm.network,
                         &ip,
                         &vm.mac,
@@ -2848,7 +2848,7 @@ fn cmd_ssh(
 /// to the target — under the SSH user's own home, not a shared world-writable
 /// directory, but random anyway rather than derived from a pid: this base has
 /// already found a pid-derived temp name to be guessable enough to matter
-/// (`delonix-net::bpf::stage_object`'s CVE-class fix), and there is no reason
+/// (`delonix-sdn::bpf::stage_object`'s CVE-class fix), and there is no reason
 /// to reintroduce that shape for a new writer.
 fn random_suffix() -> String {
     let mut buf = [0u8; 4];
@@ -4265,7 +4265,7 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
     /// The intermediate filename `vm migrate` writes on the target must not
     /// be guessable — a predictable name under a real home directory is a
     /// smaller version of the same class this codebase already found and
-    /// fixed once (`delonix-net::bpf::stage_object`'s pid-derived path).
+    /// fixed once (`delonix-sdn::bpf::stage_object`'s pid-derived path).
     /// Fixed length (hex of 4 random bytes) and non-empty are the two
     /// properties worth locking down; true randomness needs a live RNG this
     /// test does not try to second-guess.

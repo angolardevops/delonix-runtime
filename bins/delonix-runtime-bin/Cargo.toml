@@ -54,7 +54,7 @@ rcgen = { workspace = true, features = ["ring", "pem"] }
 # nao acrescenta nada a arvore de dependencias do repo publico.
 tar = { workspace = true }
 flate2 = { workspace = true }
-delonix-net = { workspace = true }
+delonix-sdn = { workspace = true }
 clap = { workspace = true }
 clap_complete = { workspace = true, features = ["unstable-dynamic"] }
 serde = { workspace = true }

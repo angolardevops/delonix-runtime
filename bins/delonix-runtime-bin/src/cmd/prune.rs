@@ -230,7 +230,7 @@ pub(crate) fn lease_owners(store: &Store) -> Result<std::collections::HashMap<St
         .collect();
     Ok(lease_owners_from(
         &containers,
-        &delonix_net::infra::attached_refs(),
+        &delonix_sdn::infra::attached_refs(),
     ))
 }
 
@@ -325,7 +325,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     // `reap_orphan_hostfwds` (see the history of the reaper that deleted live
     // ports).
     let mut out = ContainerSweep {
-        slirps: delonix_net::reap_orphan_slirp(),
+        slirps: delonix_sdn::reap_orphan_slirp(),
         ..Default::default()
     };
 
@@ -386,7 +386,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
             .map(|c| (c.id.clone(), c.pod.clone(), c.is_live()))
             .collect::<Vec<_>>(),
     );
-    for id in delonix_net::infra::attached_refs() {
+    for id in delonix_sdn::infra::attached_refs() {
         // A `vm-<name>` ref is checked against the VM store instead of being
         // assumed alive. Assuming made it IMMORTAL: nothing on the system ever
         // freed it, so the ref-count never reached zero, the infra was never torn
@@ -412,7 +412,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
             }
         }
     }
-    out.refs = delonix_net::infra::reap_orphan_refs(&live_refs);
+    out.refs = delonix_sdn::infra::reap_orphan_refs(&live_refs);
 
     // 3) orphan container DIRECTORIES — the big space reclaimer.
     //
@@ -464,13 +464,13 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
             .filter(|c| c.is_live())
             .flat_map(|c| c.ports.iter())
             .filter_map(|p| {
-                delonix_net::parse_publish(p)
+                delonix_sdn::parse_publish(p)
                     .ok()
                     .and_then(|(hp, _, _)| hp.parse::<u32>().ok())
             })
             .collect();
-        out.ports = delonix_net::infra::reap_orphan_hostfwds(
-            delonix_net::infra::AuthoritativeLivePorts::new(&live_ports),
+        out.ports = delonix_sdn::infra::reap_orphan_hostfwds(
+            delonix_sdn::infra::AuthoritativeLivePorts::new(&live_ports),
         );
     }
 
@@ -598,7 +598,7 @@ impl PrunePlan {
 /// # What this deliberately does NOT predict
 ///
 /// The three network reapers — orphan slirps, orphan ingress refs, orphan
-/// hostfwds — compute and act in one call inside `delonix-net`, and separating
+/// hostfwds — compute and act in one call inside `delonix-sdn`, and separating
 /// them would mean changing that crate's API. They are absent from the plan on
 /// purpose, and the omission costs nothing for the question this exists to
 /// answer: **not one of them frees a byte of disk.** Everything that reclaims
@@ -716,10 +716,10 @@ pub(crate) fn image_is_doomed(
 pub(crate) fn sweep_networks(store: &Store) -> Result<usize> {
     let doomed = doomed_networks(store)?;
     let mut n = 0usize;
-    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+    if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
         for name in doomed {
             let _ = nstore.remove(&name);
-            delonix_net::infra::network_remove(&name);
+            delonix_sdn::infra::network_remove(&name);
             n += 1;
         }
     }
@@ -735,7 +735,7 @@ pub(crate) fn doomed_networks(store: &Store) -> Result<Vec<String>> {
         .filter_map(|c| c.network.clone())
         .collect();
     let mut out = Vec::new();
-    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+    if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
         if let Ok(nets) = nstore.list() {
             for net in nets {
                 if net.name.starts_with("dlx-") && !attached.contains(&net.name) {

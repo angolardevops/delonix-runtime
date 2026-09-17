@@ -10,7 +10,7 @@
 //! ([`delonix_runtime_core::Vm`], persisted in `<base>/vms/<name>.json`) records the backend
 //! that started it, in order to reconcile liveness/shutdown with the right backend.
 //!
-//! Networking: Cloud Hypervisor reuses the `delonix-net` *plumbing*
+//! Networking: Cloud Hypervisor reuses the `delonix-sdn` *plumbing*
 //! (`infra::vm_attach` creates a `tap` on the ingress bridge + DHCP). libvirt runs
 //! QEMU under `libvirtd` (host netns), so it uses, in the MVP, **user-mode networking**
 //! (SLIRP/passt: egress without a `tap`); integration with the ingress bridge (inbound
@@ -1464,7 +1464,7 @@ impl VmBackend for CloudHypervisorBackend {
     }
 
     /// Computed from the MAC, and available before the guest has booted — see
-    /// `delonix_net::infra::dhcp_lease_ip`, and [`VmBackend::ip_is_predicted`] for why
+    /// `delonix_sdn::infra::dhcp_lease_ip`, and [`VmBackend::ip_is_predicted`] for why
     /// anyone waiting on a boot needs to be told.
     fn ip_is_predicted(&self) -> bool {
         true
@@ -1784,7 +1784,7 @@ pub fn serial_log_path(base: &Path, name: &str) -> std::path::PathBuf {
 /// crate — ADR-0008 keeps `delonix-vm` free of network dependencies, and a
 /// REMOTE backend gets its own crate instead (`delonix-proxmox`) — so this is
 /// the smallest thing that talks the one endpoint these two verbs need, over
-/// `UnixStream`, the same primitive `delonix-net`'s `slirp_api` already uses
+/// `UnixStream`, the same primitive `delonix-sdn`'s `slirp_api` already uses
 /// for a different (line-delimited JSON) protocol.
 fn ch_api_put(sock: &str, path: &str) -> Result<()> {
     let (status_line, _) = ch_api_call(sock, "PUT", path, Duration::from_secs(10))?;

@@ -20,7 +20,7 @@ fn import_iptables_conta_sem_aplicar() {
     )
     .unwrap();
 
-    let r = delonix_net::infra::import_iptables(&f).expect("devia analisar");
+    let r = delonix_sdn::infra::import_iptables(&f).expect("devia analisar");
     assert!(r.contains("1 tabela"), "contagem de tabelas: {r}");
     assert!(r.contains("2 cadeia"), "contagem de cadeias: {r}");
     assert!(r.contains("1 regra"), "contagem de regras: {r}");
@@ -34,7 +34,7 @@ fn import_iptables_conta_sem_aplicar() {
 /// levam quem migra a decisões opostas.
 #[test]
 fn import_iptables_recusa_ficheiro_ausente() {
-    let e = delonix_net::infra::import_iptables(std::path::Path::new("/nao/existe/save.txt"))
+    let e = delonix_sdn::infra::import_iptables(std::path::Path::new("/nao/existe/save.txt"))
         .expect_err("devia falhar");
     let t = e.to_string();
     assert!(
@@ -55,7 +55,7 @@ fn attach_on_ip_recusa_endereco_fora_da_rede() {
     std::fs::create_dir_all(&d).unwrap();
     std::env::set_var("DELONIX_ROOT", &d);
 
-    let net = delonix_net::infra::network_create("rede-teste").expect("cria rede");
+    let net = delonix_sdn::infra::network_create("rede-teste").expect("cria rede");
     let fora = "10.99.0.5";
     assert!(
         !fora.starts_with(&net.prefix),
@@ -63,7 +63,7 @@ fn attach_on_ip_recusa_endereco_fora_da_rede() {
         net.prefix
     );
 
-    let e = delonix_net::infra::attach_container_on_ip("abc123", "rede-teste", fora, "")
+    let e = delonix_sdn::infra::attach_container_on_ip("abc123", "rede-teste", fora, "")
         .expect_err("devia recusar um IP de outra rede");
     let t = e.to_string();
     assert!(t.contains(fora), "o erro devia nomear o IP: {t}");

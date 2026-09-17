@@ -73,7 +73,7 @@ Legend: **✅ Exists** (real, wired) · **🟡 Partial** (seed present, not firs
 | **`kind: Workload` unified model** (`spec.type: container\|vm\|microvm`) | ⛔ | The stated product North Star. Absent today. **This is the correct Phase-1 target** — a thin declarative object + dispatcher over the existing container/vm paths, zero new backend. Needs a design ADR for the schema first. |
 | **HA / survive control-plane loss** | ✅ (partial) | Already largely true *by architecture*: the runtime is daemonless and control-plane-independent — workloads keep running when the mgmt API is down. "Survive host restart" (auto-restore workloads) overlaps the Recovery Engine. |
 | **Multi-Tenant / Cloud-Native platform / independent Control Plane / multi-node scheduler** | 🚧 | Explicitly **out of bounds**. This repo is a node runtime, not an orchestrator or a multi-tenant platform. These are `delonix-paas`. |
-| **90 % coverage · fuzz · bench** | ⛔ (infra) | Only `proptest` (in `delonix-net`) exists. No criterion/cargo-fuzz. A coverage/fuzz/bench initiative is real, in-bounds work — see the `delonix-testing` skill and `qa-runtime`/`performance-engineer` agents. (90 % is a goal to *approach*, not a gate to assert.) |
+| **90 % coverage · fuzz · bench** | ⛔ (infra) | Only `proptest` (in `delonix-sdn`) exists. No criterion/cargo-fuzz. A coverage/fuzz/bench initiative is real, in-bounds work — see the `delonix-testing` skill and `qa-runtime`/`performance-engineer` agents. (90 % is a goal to *approach*, not a gate to assert.) |
 
 ## 5. Recommended sequencing (incremental, constitution-respecting)
 
