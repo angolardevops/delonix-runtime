@@ -100,12 +100,12 @@
 //!
 //! # Why the match is exhaustive
 //!
-//! No `_ =>` arm on purpose. A variant added to `delonix_runtime_core::Error`
+//! No `_ =>` arm on purpose. A variant added to [`crate::Error`]
 //! tomorrow stops the build here and forces someone to decide, which is the
 //! opposite of what a catch-all does: quietly file the new class under
 //! «generic» and never tell anyone.
 
-use delonix_runtime_core::Error;
+use crate::Error;
 
 /// Any failure without a class of its own. The historical behaviour, and what
 /// every path returned before this module existed.
