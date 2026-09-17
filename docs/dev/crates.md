@@ -496,6 +496,7 @@ containers; a build runs its steps through the CLI.
 | `sign` | `sign_image`, `verify_signature` (ECDSA P-256) |
 | `buildpack`, `detect`, `internal_registry` | CNB plan, language detection, throwaway registry |
 | `rootfs_user` | `--user` resolution against a rootfs |
+| `error` | the crate's own `Error`, one dictionary number per failing group (ADR-0043), converted into `delonix_model::Error` |
 
 **Main public API**
 
@@ -509,10 +510,11 @@ containers; a build runs its steps through the CLI.
 | `Cas` | blob store | `crates/adapters/delonix-oci/src/cas.rs:Cas` |
 | `verify_signature` | cosign-style verification | `crates/adapters/delonix-oci/src/sign.rs:verify_signature` |
 
-**Talks to.** `delonix-model`, `delonix-node`, `delonix-compute` (it implements the
-`ImageStore` port), and `delonix-state` (`write_atomic_mode`; a declared layering
-exception removed in ADR-0040 P4). Registries over HTTPS with a blocking `reqwest` client. No host
-subprocesses in its source.
+**Talks to.** `delonix-model`, into whose `Error` its own errors convert
+(`src/error.rs`, `impl From<Error> for delonix_model::Error`, ADR-0043); `delonix-node`;
+`delonix-compute` (it implements the `ImageStore` port); and `delonix-state`
+(`write_atomic_mode`; a declared layering exception removed in ADR-0040 P4). Registries over
+HTTPS with a blocking `reqwest` client. No host subprocesses in its source.
 
 **Notable external dependencies.** `reqwest` (blocking, rustls), `oci-spec`
 (canonical OCI image types), `sha2`, `tar`, `flate2`, `zstd`, `base64`, `ring`
