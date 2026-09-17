@@ -209,7 +209,8 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a class="on" aria-current="page" href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">15</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Architecture</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/system-design-interview.html">Lire la page en anglais</a></span></div><h1 id="system-design-interview-the-delonix-engine">Entretien de conception de système — le Delonix Engine</h1>
+<h1 id="system-design-interview-the-delonix-engine">Entretien de conception de système — le Delonix Engine</h1>
+<p><strong>Avant de lire :</strong> <a href="architecture.html">Architecture</a> et <a href="crates.html">Les crates</a> — cette page défend <em>pourquoi</em> la structure qu'elles décrivent a cette forme.</p>
 <blockquote class="say say-interviewer"><p><span class="speaker">Recruteur</span>Concevez un moteur de containers et de microVMs pour un seul nœud Linux. Il doit
 fonctionner sans root par défaut, sans daemon résident, et il ne doit pas savoir qui l'appelle.</p>
 </blockquote>
@@ -217,7 +218,7 @@ fonctionner sans root par défaut, sans daemon résident, et il ne doit pas savo
 que fait réellement le Delonix Engine. Chaque analyse approfondie se termine par <strong>Où cela se trouve
 dans le code</strong>, qui liste les fichiers et les symboles lus pour cette page. Pour la carte structurelle
 (couches, graphe des crates, processus, chemins d'état), lisez d'abord
-<a href="architecture.html">Architecture</a> ; cette page traite de <em>pourquoi</em> la conception a cette forme.</p>
+<a href="architecture.html">Architecture</a> ; cette page traite de <em>pourquoi</em> la conception a cette forme. Après elle, vous pouvez défendre — ou contester avec preuve à l'appui — les principaux choix de conception du moteur : la création de processus rootless, le holder réseau, les couches d'image partagées, le port de VM et le réconciliateur sans fichier d'état.</p>
 <p>Les chiffres cités ci-dessous sont des <strong>mesures consignées dans le dépôt avec leur date ou leur
 release</strong>, et non des faits intemporels. Mesurez à nouveau avant de vous appuyer sur l'un d'eux.</p>
 <hr />
@@ -302,7 +303,8 @@ lister les règles du noyau avec lesquelles je dois vivre.</p>
 </table></div>
 <p>Deux politiques d'hôte reviennent constamment et ressemblent à des bugs du moteur : Ubuntu 23.10+
 restreint les user namespaces non privilégiés via AppArmor (un profil est attaché au <em>chemin</em> de
-l'exécutable qui crée le namespace), et une simple session SSH n'est pas un scope cgroup délégué.</p>
+l'exécutable qui crée le namespace), et une simple session SSH n'est pas un scope cgroup délégué.
+Chaque ligne du tableau est un primitif enseigné pas à pas dans <a href="linux-foundations.html">Fondations Linux</a> ; les deux politiques d'hôte se trouvent dans <a href="environment.html#known-host-traps">Préparer votre environnement — Pièges d'hôte connus</a>.</p>
 <hr />
 <h2 id="3-api">3. API<a class="hanchor" href="#3-api" aria-label="#">#</a></h2>
 <blockquote class="say say-candidate"><p><span class="speaker">Candidat</span>Un seul ensemble d'opérations, plusieurs portes — et l'une d'elles est le contrat
@@ -375,36 +377,52 @@ supprimer.</p>
 <h2 id="4-high-level-design">4. Conception de haut niveau<a class="hanchor" href="#4-high-level-design" aria-label="#">#</a></h2>
 <blockquote class="say say-candidate"><p><span class="speaker">Candidat</span>Je vais l'organiser en couches pour que les règles du domaine n'importent jamais le
 noyau, et je vais faire en sorte que chaque processus de longue durée possède exactement une chose.</p>
+<p><strong>Légende</strong> — boîte blanche à bordure rouge : bloc de construction du moteur · région délimitée :
+une couche · cylindre, bleu : état sur disque · flèche pleine : appel ou flux de données, étiqueté.</p>
 </blockquote>
-<pre class="mermaid">graph TB
-    subgraph IF[&quot;interfaces&quot;]
-        CLI[&quot;CLI&quot;]
-        CRI[&quot;CRI server&quot;]
-        API[&quot;local API server&quot;]
-        MCP[&quot;MCP server&quot;]
-    end
-    subgraph CX[&quot;contexts — use cases and ports&quot;]
-        COMPUTE[&quot;compute: RunOpts, resolve_run, launch, ports&quot;]
-        STACK[&quot;stack: Kind table, 3-way plan&quot;]
-    end
-    subgraph AD[&quot;adapters and providers — implement ports&quot;]
-        LINUX[&quot;kernel: clone, mounts, cgroups, seccomp&quot;]
-        SDN[&quot;SDN: pin, control, nftables, slirp&quot;]
-        OCI[&quot;OCI: registry, CAS, layers&quot;]
-        VMS[&quot;VM backends: Cloud Hypervisor, libvirt, Proxmox&quot;]
-    end
-    STATE[(&quot;files under one state root&quot;)]
-    IF --&gt; CX
-    AD -. implements .-&gt; CX
-    IF --&gt; AD
-    AD --- STATE
+<p>Les règles du domaine ne montent, ne lancent ni ne configurent jamais le réseau, et un seul adaptateur
+possède tous les fichiers sous la racine d'état.</p>
+<pre class="mermaid">flowchart TB
+  subgraph IF[&quot;interfaces — parse a request, present a result&quot;]
+    CLI[&quot;CLI&lt;br/&gt;&lt;small&gt;delonix&lt;/small&gt;&quot;]
+    CRI[&quot;CRI server&lt;br/&gt;&lt;small&gt;delonix-cri&lt;/small&gt;&quot;]
+    API[&quot;local API server&lt;br/&gt;&lt;small&gt;delonix-mgmt&lt;/small&gt;&quot;]
+    MCP[&quot;MCP server&lt;br/&gt;&lt;small&gt;delonix-mcp&lt;/small&gt;&quot;]
+  end
+  subgraph CX[&quot;contexts — use cases, ports and records&quot;]
+    COMPUTE[&quot;compute&lt;br/&gt;&lt;small&gt;Container, Vm, RunOpts, resolve_run, launch, ports&lt;/small&gt;&quot;]
+    STACK[&quot;stack&lt;br/&gt;&lt;small&gt;Kind table, 3-way plan&lt;/small&gt;&quot;]
+    NODE[&quot;node&lt;br/&gt;&lt;small&gt;event log, pid and host checks, server dispatch&lt;/small&gt;&quot;]
+  end
+  subgraph AD[&quot;adapters and providers — implement ports&quot;]
+    LINUX[&quot;kernel&lt;br/&gt;&lt;small&gt;clone, mounts, cgroups, seccomp&lt;/small&gt;&quot;]
+    SDN[&quot;SDN&lt;br/&gt;&lt;small&gt;pin, control, nftables, slirp&lt;/small&gt;&quot;]
+    OCI[&quot;OCI&lt;br/&gt;&lt;small&gt;registry, CAS, layers&lt;/small&gt;&quot;]
+    VMS[&quot;VM backends&lt;br/&gt;&lt;small&gt;Cloud Hypervisor, libvirt, Proxmox&lt;/small&gt;&quot;]
+    STA[&quot;state&lt;br/&gt;&lt;small&gt;stores, atomic writes, secret vault&lt;/small&gt;&quot;]
+  end
+  FILES[(&quot;files under one state root&quot;)]
+  IF --&gt;|&quot;call use cases&quot;| CX
+  AD --&gt;|&quot;implement ports&quot;| CX
+  IF --&gt;|&quot;call directly, today&quot;| AD
+  STA --&gt;|&quot;flock, temp file + rename&quot;| FILES
+  class CLI,CRI,API,MCP,COMPUTE,STACK,NODE,LINUX,SDN,OCI,VMS,STA block
+  class FILES store
+classDef person fill:#191513,stroke:#191513,color:#ffffff
+classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
+classDef block fill:#ffffff,stroke:#cc2823,color:#191513
+classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
+classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
 <ul>
 <li><strong>Couches</strong> (ADR-0040 D1) : fondation → contextes → adaptateurs/providers → interfaces → binaires,
   imposées par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.</li>
 <li><strong>L'état</strong> consiste en enregistrements JSON et en fichiers adressés par contenu sous une seule
   racine, avec des écritures atomiques et un <code>flock</code> autour des lectures-modifications-écritures — pas
-  de base de données, car il n'y a pas de daemon pour en posséder une.</li>
+  de base de données, car il n'y a pas de daemon pour en posséder une. Les <em>types</em> d'enregistrement
+  sont définis à part d'eux (<code>Container</code>/<code>Vm</code> dans le contexte <code>delonix-compute</code> ; <code>Status</code> et les
+  enregistrements de pare-feu dans le crate de fondation <code>delonix-model</code>) ; les <em>fichiers</em> ne sont
+  ouverts que par l'adaptateur <code>delonix-state</code>.</li>
 <li><strong>Les processus</strong> existent par charge de travail (un superviseur qui est le parent du container,
   l'init, un shim de logs) et par nœud lorsque le réseau est utilisé (un <em>pin</em> qui ne fait que tenir
   les namespaces, un processus de <em>contrôle</em> redémarrable, un uplink <code>slirp4netns</code>). Rien d'autre ne
@@ -412,7 +430,8 @@ noyau, et je vais faire en sorte que chaque processus de longue durée possède 
 </ul>
 <p><strong>Où cela se trouve dans le code :</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>) ;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> (<code>Store::update</code>, <code>JsonStore::update</code>,
-<code>write_atomic</code>) ; <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code> ;
+<code>write_atomic</code>) ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>Container</code>, <code>Vm</code>) ;
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a> (<code>Status</code>, <code>ContainerFw</code>, <code>FwRule</code>) ; <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code> ;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> (<code>run_supervised</code>).</p>
 <hr />
 <h2 id="5-deep-dives">5. Analyses approfondies<a class="hanchor" href="#5-deep-dives" aria-label="#">#</a></h2>
@@ -445,6 +464,10 @@ processus à l'arrêt, le configurer de l'extérieur, et ne le libérer que lors
 <li><strong>Publier l'enregistrement en dernier.</strong> Le parent attend l'octet « mounted » (<code>wait_for_mounts</code>),
    brièvement le résultat de l'exec, et ne fait qu'ensuite le <code>store.save</code> de <code>Running</code>.</li>
 </ol>
+<blockquote>
+<p><strong>Légende</strong> — les participants sont des processus ; les flèches pleines sont des appels, des lignes de socket, des forks ou des clones (l'étiquette précise lequel) ; les flèches en pointillés sont des réponses ou des octets renvoyés ; une auto-flèche est un travail interne à ce processus ; les notes marquent un état ou une attente.</p>
+</blockquote>
+<p>L'enfant est créé bloqué, configuré de l'extérieur, et l'enregistrement n'est sauvegardé qu'après que l'enfant a signalé ses montages.</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix
     participant SV as supervisor
@@ -527,6 +550,10 @@ adresse de container (<code>@dlxall</code>) sont rejetées ; les réponses pass
 correspond qu'à <code>ct state new</code>. Une politique d'ingress explicite remplace ce comportement par
 défaut. L'IPv6 dans le SDN est refusé par défaut (<code>table ip6</code> avec <code>policy drop</code>), car toutes les
 règles ci-dessus sont IPv4.</p>
+<blockquote>
+<p><strong>Légende</strong> — les participants sont des processus ; les flèches pleines sont des appels, des lignes de socket, des forks ou des clones (l'étiquette précise lequel) ; les flèches en pointillés sont des réponses ou des octets renvoyés ; une auto-flèche est un travail interne à ce processus ; les notes marquent un état ou une attente.</p>
+</blockquote>
+<p>Rejoindre un réseau personnalisé est une ligne sur la socket de contrôle plus une ré-exécution dans les namespaces du pin ; publier un port, ce sont deux écritures dans le dataplane.</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix (1st pass)
     participant C as control
@@ -655,6 +682,10 @@ propriété d'un label, et faire de la planification une fonction pure.</p>
   namespacé, comment sa présence est observée) gouverne le planificateur, l'ordre d'application et
   l'ordre de teardown, au lieu de listes tenues synchronisées à la main.</li>
 </ul>
+<blockquote>
+<p><strong>Légende</strong> — les participants sont l'opérateur, la commande <code>stack apply</code>, le planificateur pur et les stores et le dataplane sur lesquels il agit ; les flèches pleines sont des appels ; les flèches en pointillés sont des réponses ; les encadrés <code>alt</code> et <code>opt</code> sont la branche d'échec et la purge optionnelle.</p>
+</blockquote>
+<p>Rien n'est créé avant que le plan ne soit vérifié, et un échec en cours d'application est marqué plutôt qu'annulé.</p>
 <pre class="mermaid">sequenceDiagram
     participant U as operator
     participant A as stack apply
@@ -826,6 +857,8 @@ seul contrat de nœud servi sur un serveur à socket activation, et un lanceur q
 lancement créant des namespaces
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>,
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>).</p>
+<hr />
+<p><strong>Suivant :</strong> <a href="delonixfile-and-vmfile.html">Delonixfile et VMfile</a> — les deux grammaires de build — Delonixfile pour les images OCI et VMfile pour les disques amorçables — telles que les analyseurs les acceptent.</p>
 <nav class="pager"><a href="crates.html"><span>← Précédent</span>Les crates</a><a class="next" href="delonixfile-and-vmfile.html"><span>Suivant →</span>Delonixfile et VMfile</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/system-design-interview.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/system-design-interview.md</code></footer>
 </div></main>

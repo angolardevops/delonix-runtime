@@ -1,5 +1,8 @@
-<!-- translated-from: system-design-interview.md sha256:bfd271752cdd492aaae69b15c607340620c6f409a64f4a8ec7fd97b582bdca71 -->
+<!-- translated-from: system-design-interview.md sha256:521f8c297a328d828b08609f1c7800883ddc9f0b15dfe38970650e270ad31535 -->
 # System Design Interview — o Delonix Engine
+
+**Antes de leres:** [Arquitectura](architecture.md) e [As crates](crates.md) — esta página defende
+*porque* é que a estrutura que elas descrevem tem esta forma.
 
 > **Entrevistador:** Desenha um motor de containers e de microVMs para um único nó Linux. Tem de
 > correr sem root por omissão, sem um daemon residente, e não pode saber quem o está a chamar.
@@ -8,7 +11,10 @@ Esta página responde a esse enunciado como um candidato forte responderia, e de
 resposta com o que o Delonix Engine faz de facto. Cada aprofundamento termina com **Onde vive no
 código**, que lista os ficheiros e símbolos lidos para esta página. Para o mapa estrutural (camadas,
 grafo de crates, processos, caminhos de estado) lê primeiro [Arquitectura](architecture.md);
-esta página é sobre *porque* é que o desenho tem esta forma.
+esta página é sobre *porque* é que o desenho tem esta forma. Depois dela consegues defender — ou
+desafiar com evidência — as principais escolhas de desenho do motor: criação de processos rootless,
+o holder de rede, camadas de imagem partilhadas, a porta de VM e o reconciliador sem ficheiro de
+estado.
 
 Os números citados abaixo são **medições registadas no repositório com a sua data ou release**, não
 factos intemporais. Volta a medir antes de confiares num deles.
@@ -65,6 +71,9 @@ factos intemporais. Volta a medir antes de confiares num deles.
 Duas políticas do host aparecem constantemente e parecem bugs do motor: o Ubuntu 23.10+ restringe os
 user namespaces sem privilégio através do AppArmor (um perfil é associado ao *caminho* do executável
 que cria o namespace), e uma sessão SSH simples não é um scope de cgroup delegado.
+Cada linha da tabela é um primitivo ensinado à mão em [Fundações de Linux](linux-foundations.md);
+as duas políticas do host estão em
+[Preparar o teu ambiente — Armadilhas conhecidas do host](environment.md#known-host-traps).
 
 ---
 
@@ -117,43 +126,62 @@ gestão (`crates/interfaces/delonix-mgmt`), que o ADR-0042 planeia migrar e remo
 > **Candidato:** Vou organizá-lo em camadas para que as regras do domínio nunca importem o kernel, e
 > vou fazer com que cada processo de vida longa seja dono de exactamente uma coisa.
 
+> **Legenda** — caixa branca com borda vermelha: bloco de construção do motor · região delineada:
+> uma camada · cilindro, azul: estado em disco · seta sólida: chamada ou fluxo de dados, com
+> etiqueta.
+
+As regras do domínio nunca montam, arrancam nem configuram a rede, e um adaptador é dono de todos os
+ficheiros debaixo do state root.
+
 ```mermaid
-graph TB
-    subgraph IF["interfaces"]
-        CLI["CLI"]
-        CRI["CRI server"]
-        API["local API server"]
-        MCP["MCP server"]
-    end
-    subgraph CX["contexts — use cases and ports"]
-        COMPUTE["compute: RunOpts, resolve_run, launch, ports"]
-        STACK["stack: Kind table, 3-way plan"]
-    end
-    subgraph AD["adapters and providers — implement ports"]
-        LINUX["kernel: clone, mounts, cgroups, seccomp"]
-        SDN["SDN: pin, control, nftables, slirp"]
-        OCI["OCI: registry, CAS, layers"]
-        VMS["VM backends: Cloud Hypervisor, libvirt, Proxmox"]
-    end
-    STATE[("files under one state root")]
-    IF --> CX
-    AD -. implements .-> CX
-    IF --> AD
-    AD --- STATE
+flowchart TB
+  subgraph IF["interfaces — parse a request, present a result"]
+    CLI["CLI<br/><small>delonix</small>"]
+    CRI["CRI server<br/><small>delonix-cri</small>"]
+    API["local API server<br/><small>delonix-mgmt</small>"]
+    MCP["MCP server<br/><small>delonix-mcp</small>"]
+  end
+  subgraph CX["contexts — use cases, ports and records"]
+    COMPUTE["compute<br/><small>Container, Vm, RunOpts, resolve_run, launch, ports</small>"]
+    STACK["stack<br/><small>Kind table, 3-way plan</small>"]
+    NODE["node<br/><small>event log, pid and host checks, server dispatch</small>"]
+  end
+  subgraph AD["adapters and providers — implement ports"]
+    LINUX["kernel<br/><small>clone, mounts, cgroups, seccomp</small>"]
+    SDN["SDN<br/><small>pin, control, nftables, slirp</small>"]
+    OCI["OCI<br/><small>registry, CAS, layers</small>"]
+    VMS["VM backends<br/><small>Cloud Hypervisor, libvirt, Proxmox</small>"]
+    STA["state<br/><small>stores, atomic writes, secret vault</small>"]
+  end
+  FILES[("files under one state root")]
+  IF -->|"call use cases"| CX
+  AD -->|"implement ports"| CX
+  IF -->|"call directly, today"| AD
+  STA -->|"flock, temp file + rename"| FILES
+  class CLI,CRI,API,MCP,COMPUTE,STACK,NODE,LINUX,SDN,OCI,VMS,STA block
+  class FILES store
+classDef person fill:#191513,stroke:#191513,color:#ffffff
+classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
+classDef block fill:#ffffff,stroke:#cc2823,color:#191513
+classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
+classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 ```
 
 - **Camadas** (ADR-0040 D1): fundação → contextos → adaptadores/providers → interfaces → binários,
   impostas por `scripts/arch_fitness.py`.
 - O **estado** são registos JSON e ficheiros endereçados por conteúdo debaixo de um só root, com
   escritas atómicas e `flock` à volta de cada ler-modificar-escrever — sem base de dados, porque não
-  há nenhum daemon para ser dono dela.
+  há nenhum daemon para ser dono dela. Os *tipos* de registo são definidos à parte deles
+  (`Container`/`Vm` no contexto `delonix-compute`; `Status` e os registos de firewall no crate de
+  fundação `delonix-model`); os *ficheiros* só são abertos através do adaptador `delonix-state`.
 - Os **processos** existem por carga (um supervisor que é o pai do container, o init, um shim de
   logs) e por nó quando a rede é usada (um *pin* que só segura namespaces, um processo de *controlo*
   reiniciável, um uplink `slirp4netns`). Mais nada fica de pé.
 
 **Onde vive no código:** `scripts/arch_fitness.py` (`LAYERS`, `ALLOWED`);
 `crates/adapters/delonix-state/src/store.rs` (`Store::update`, `JsonStore::update`,
-`write_atomic`); `crates/contexts/delonix-compute/src/{ports,launch}.rs`;
+`write_atomic`); `crates/contexts/delonix-compute/src/record.rs` (`Container`, `Vm`);
+`crates/foundation/delonix-model/src/records.rs` (`Status`, `ContainerFw`, `FwRule`); `crates/contexts/delonix-compute/src/{ports,launch}.rs`;
 `crates/adapters/delonix-linux/src/supervise.rs` (`run_supervised`).
 
 ---
@@ -187,6 +215,13 @@ graph TB
    seccomp e `no_new_privs`, e sinaliza **«mounted»** num segundo pipe antes do `execvp`.
 7. **Publicar o registo em último.** O pai espera pelo byte «mounted» (`wait_for_mounts`), espera
    brevemente pelo resultado do exec, e só então faz `store.save` de `Running`.
+
+> **Legenda** — os participantes são processos; as setas sólidas são chamadas, linhas de socket,
+> forks ou clones (a etiqueta diz qual); as setas tracejadas são respostas ou bytes devolvidos; uma
+> auto-seta é trabalho dentro desse processo; as notas marcam estado ou esperas.
+
+O filho é criado bloqueado, configurado de fora, e o registo só é guardado depois de o filho
+reportar os seus mounts.
 
 ```mermaid
 sequenceDiagram
@@ -278,6 +313,13 @@ namespace) são aceites, e as ligações **novas** vindas de qualquer outro ende
 (`@dlxall`) são descartadas; as respostas continuam a fluir porque o drop só casa com `ct state new`.
 Uma política de ingress explícita substitui esse default. O IPv6 na SDN é recusado por omissão
 (`table ip6` com `policy drop`), porque todas as regras acima são IPv4.
+
+> **Legenda** — os participantes são processos; as setas sólidas são chamadas, linhas de socket,
+> forks ou clones (a etiqueta diz qual); as setas tracejadas são respostas ou bytes devolvidos; uma
+> auto-seta é trabalho dentro desse processo; as notas marcam estado ou esperas.
+
+Juntar-se a uma rede custom é uma linha no socket de controlo mais um re-exec para dentro dos
+namespaces do pin; publicar uma porta são duas escritas no dataplane.
 
 ```mermaid
 sequenceDiagram
@@ -412,6 +454,13 @@ sequenceDiagram
 - **Uma única tabela de factos dos Kinds** (domínio, forma, se converge, se tem teardown, se é
   namespaced, como é observada a presença) governa o planeador, a ordem de apply e a ordem de
   teardown, em vez de listas mantidas em sincronia à mão.
+
+> **Legenda** — os participantes são o operador, o comando `stack apply`, o planeador puro e os
+> stores e o dataplane sobre os quais actua; as setas sólidas são chamadas; as setas tracejadas são
+> respostas; as caixas `alt` e `opt` são o ramo de falha e a poda opcional.
+
+Nada é criado antes de o plano ser verificado, e uma falha a meio do apply é carimbada em vez de
+revertida.
 
 ```mermaid
 sequenceDiagram
@@ -551,3 +600,8 @@ Quatro camadas, uma especificação de execução, portas de provider com capaci
 servido num servidor por socket activation, e um launcher dono de cada spawn que cria namespaces
 ([ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md),
 [ADR-0042](../../adr/0042-one-engine-api-maturity-and-docs.md)).
+
+---
+
+**Seguinte:** [Delonixfile e VMfile](delonixfile-and-vmfile.md) — as duas gramáticas de build —
+Delonixfile para imagens OCI e VMfile para discos arrancáveis — tal como os analisadores as aceitam.
