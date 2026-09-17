@@ -25,9 +25,9 @@ Every rule below points at the code that enforces it.
 
 | Concern | File | Symbol |
 |---|---|---|
-| Grammar (parser) | `crates/adapters/delonix-image/src/build.rs` | `parse_dockerfile_with_args`, `parse_run_flags`, `parse_secret_mount`, `resolve_target_stage` |
+| Grammar (parser) | `crates/adapters/delonix-oci/src/build.rs` | `parse_dockerfile_with_args`, `parse_run_flags`, `parse_secret_mount`, `resolve_target_stage` |
 | Build orchestration | `bins/delonix-runtime-bin/src/cmd/build.rs` | `run`, `build_from_spec`, `build_one_stage`, `default_build_file` |
-| Image commit | `crates/adapters/delonix-image/src/build.rs` | `ImageStore::commit_flat_rootfs` (rootless), `commit_upper` + `build_image` (root) |
+| Image commit | `crates/adapters/delonix-oci/src/build.rs` | `ImageStore::commit_flat_rootfs` (rootless), `commit_upper` + `build_image` (root) |
 | Project templates | `bins/delonix-runtime-bin/templates/<name>/Delonixfile` | rendered by `delonix init` / `stack init` |
 
 ### File lookup
@@ -84,7 +84,9 @@ Parser behaviour worth knowing (read in the code, not a design promise):
 ### Multi-stage, `COPY --from` and `--target`
 
 Each stage (the final one included) gets its **own working container and rootfs**
-(`build_one_stage`). Intermediate stages stay on disk until the whole build ends, so:
+(`build_one_stage`). The working container (`sleep infinity` over the stage's rootfs) is created
+by `ensure_container` through the same `WorkloadRuntime` that `container run` and `start` use
+(`container::with_host_workload`), so a build cannot drift from a container's spawn specification. Intermediate stages stay on disk until the whole build ends, so:
 
 - `COPY --from=<name-or-index> <src> <dst>` reads straight out of that stage's rootfs
   (`resolve_copy_source`, `copy_into_rootfs`).
@@ -409,5 +411,5 @@ A full build (`virt-customize`, downloads, compression) was **not executed in th
 - If an instruction is parsed but not yet wired to an effect (as `SCAN`, `CPUS`/`MEMORY`/`SECURITY`
   and VMfile `LABEL` are today), say so here; a field the user writes and the engine ignores must be
   documented as such or removed.
-- The Delonixfile parser lives in a library crate (`delonix-image`), so it must not print; the
+- The Delonixfile parser lives in a library crate (`delonix-oci`), so it must not print; the
   VMfile parser is in the CLI binary. See [06 — Crates](06-crates.md).

@@ -148,7 +148,7 @@ graph TB
 **Where it lives in the code:** `scripts/arch_fitness.py` (`LAYERS`, `ALLOWED`);
 `crates/foundation/delonix-runtime-core/src/store.rs` (`Store::update`, `JsonStore::update`,
 `write_atomic`); `crates/contexts/delonix-compute/src/{ports,launch}.rs`;
-`crates/adapters/delonix-runtime/src/supervise.rs` (`run_supervised`).
+`crates/adapters/delonix-linux/src/supervise.rs` (`run_supervised`).
 
 ---
 
@@ -214,9 +214,9 @@ sequenceDiagram
 
 **Where it lives in the code:** `crates/contexts/delonix-compute/src/run.rs` (`resolve_run`,
 `build_record`); `crates/contexts/delonix-compute/src/launch.rs` (`start`, `should_supervise`,
-`WorkloadRuntime`); `crates/adapters/delonix-runtime/src/workload.rs` (`HostWorkload`);
-`crates/adapters/delonix-runtime/src/supervise.rs` (`run_supervised`);
-`crates/adapters/delonix-runtime/src/lib.rs` (`spawn`, `write_userns_maps`, `setup_cgroup`,
+`WorkloadRuntime`); `crates/adapters/delonix-linux/src/workload.rs` (`HostWorkload`);
+`crates/adapters/delonix-linux/src/supervise.rs` (`run_supervised`);
+`crates/adapters/delonix-linux/src/lib.rs` (`spawn`, `write_userns_maps`, `setup_cgroup`,
 `container_init`, `setup_rootfs`, `wait_for_mounts`, `MountWait`);
 `bins/delonix-runtime-bin/src/cmd/container.rs` (`cmd_run`).
 
@@ -298,12 +298,12 @@ sequenceDiagram
 > raised (`CONTROL_REPLY_TIMEOUT`, 30 s) all 30 completed. The per-connection I/O ceiling
 > (`CONTROL_IO_TIMEOUT`) exists so one stuck client cannot freeze the node's control plane.
 
-**Where it lives in the code:** `crates/adapters/delonix-net/src/infra.rs` (`ensure_up`,
+**Where it lives in the code:** `crates/adapters/delonix-sdn/src/infra.rs` (`ensure_up`,
 `start_pin`, `pin_main`, `start_control`, `control_main`, `control_loop`, `start_slirp`,
 `attach_container`, `do_attach`, `publish_port`, `join_argv`, `ingress_table_ruleset`,
 `fw_chain_body`, `dlxns_set`, `DLXALL_SET`, `ingress_v6_refusal_ruleset`, `CONTROL_IO_TIMEOUT`,
-`CONTROL_REPLY_TIMEOUT`); `crates/adapters/delonix-net/src/pin_userns.rs`;
-`crates/adapters/delonix-net/src/run_network.rs` (`HostNetwork`);
+`CONTROL_REPLY_TIMEOUT`); `crates/adapters/delonix-sdn/src/pin_userns.rs`;
+`crates/adapters/delonix-sdn/src/run_network.rs` (`HostNetwork`);
 `crates/contexts/delonix-compute/src/network.rs` (`attach_custom_network`, `wire_network`);
 `bins/delonix-runtime-bin/src/cmd/container.rs` (`reexec_into_netns`, `run_from_spec`).
 
@@ -336,12 +336,12 @@ sequenceDiagram
   uses `fsopen`/`fsconfig`/`fsmount`/`move_mount` with one `lowerdir+` call per layer, so there is
   no length ceiling.
 
-**Where it lives in the code:** `crates/adapters/delonix-image/src/cas.rs` (`Cas::write`,
-`Cas::has`); `crates/adapters/delonix-image/src/registry.rs` (`blob_with_progress_capped`,
+**Where it lives in the code:** `crates/adapters/delonix-oci/src/cas.rs` (`Cas::write`,
+`Cas::has`); `crates/adapters/delonix-oci/src/registry.rs` (`blob_with_progress_capped`,
 `BLOB_ATTEMPTS`, `parse_content_range`, `verify_manifest_digest`);
-`crates/adapters/delonix-image/src/overlay.rs` (`prepare_overlay`, `LOWERS_FILE`);
-`crates/adapters/delonix-image/src/run_images.rs` (`HostImages`);
-`crates/adapters/delonix-runtime/src/lib.rs` (`mount_overlay_if_marked`, `fsopen_overlay`).
+`crates/adapters/delonix-oci/src/overlay.rs` (`prepare_overlay`, `LOWERS_FILE`);
+`crates/adapters/delonix-oci/src/run_images.rs` (`HostImages`);
+`crates/adapters/delonix-linux/src/lib.rs` (`mount_overlay_if_marked`, `fsopen_overlay`).
 
 ### 5.4 microVMs: one port, a registry, and the firmware trap
 
@@ -363,7 +363,7 @@ sequenceDiagram
   Registering does no I/O.
 - **Networking a VM.** Cloud Hypervisor runs inside the pin's netns and gets a `tap` on a network
   bridge through the `VmNetwork` port, which the SDN implements (`HostVmNetwork`); `delonix-vm`
-  does not depend on `delonix-net`. Because the DHCP server is the engine's own and deterministic,
+  does not depend on `delonix-sdn`. Because the DHCP server is the engine's own and deterministic,
   the lease is known before the guest boots, which is what lets namespace isolation apply to a
   VM's address from the first packet — and why "has an IP" is not proof of a booted guest
   (`sdn_reachable` asks by ARP from inside the netns).
@@ -378,8 +378,8 @@ sequenceDiagram
 `backend_for`, `CloudHypervisorBackend`, `LibvirtBackend`, `launch_vmm`, `DEFAULT_CH_FIRMWARES`,
 `set_network`); `crates/adapters/delonix-vm/src/cloudinit.rs` (`generate_seed_iso`);
 `crates/contexts/delonix-compute/src/ports.rs` (`VmNetwork`);
-`crates/adapters/delonix-net/src/vm_network.rs` (`HostVmNetwork`);
-`crates/adapters/delonix-net/src/infra.rs` (`sdn_reachable`, `dhcp_lease_ip`);
+`crates/adapters/delonix-sdn/src/vm_network.rs` (`HostVmNetwork`);
+`crates/adapters/delonix-sdn/src/infra.rs` (`sdn_reachable`, `dhcp_lease_ip`);
 `crates/providers/delonix-proxmox/src/lib.rs` (`ProxmoxBackend`);
 `bins/delonix-runtime-bin/src/cmd/vmbackends.rs` (`register_configured`).
 
@@ -488,14 +488,14 @@ sequenceDiagram
   ([ADR-0031](../adr/0031-live-vm-migration-no-go.md)).
   Scheduling across nodes is out of scope by design.
 
-**Where it lives in the code:** `crates/adapters/delonix-net/src/infra.rs` (`ensure_up`,
+**Where it lives in the code:** `crates/adapters/delonix-sdn/src/infra.rs` (`ensure_up`,
 `stale_holder_message`, `reap_orphan_refs`, `REF_MARKER_GRACE`);
-`crates/adapters/delonix-net/src/ipam.rs` (`reap_orphan_leases`);
-`crates/adapters/delonix-net/src/lib.rs` (`reap_orphan_slirp`);
+`crates/adapters/delonix-sdn/src/ipam.rs` (`reap_orphan_leases`);
+`crates/adapters/delonix-sdn/src/lib.rs` (`reap_orphan_slirp`);
 `bins/delonix-runtime-bin/src/cmd/netns.rs` (`reconcile_after_respawn`, `is_reattach_candidate`);
 `bins/delonix-runtime-bin/src/cmd/prune.rs` (`lease_owners`, `live_ref_owners`);
 `bins/delonix-runtime-bin/src/cmd/stack.rs` (`salvage_ownership`);
-`crates/adapters/delonix-runtime/src/lib.rs` (`reconcile_status`, `MountWait`).
+`crates/adapters/delonix-linux/src/lib.rs` (`reconcile_status`, `MountWait`).
 
 ---
 

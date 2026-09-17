@@ -31,7 +31,7 @@ AppArmor — see [1. Environment](01-environment.md) for the practical consequen
 
 **In Delonix**
 
-- `fn spawn` in `crates/adapters/delonix-runtime/src/lib.rs` builds the `CloneFlags`
+- `fn spawn` in `crates/adapters/delonix-linux/src/lib.rs` builds the `CloneFlags`
   (`CLONE_NEWNS`, `CLONE_NEWPID`, `CLONE_NEWNET`, `CLONE_NEWUSER`, …) and calls `nix::sched::clone`.
   IPC/UTS sharing between pod members is handled by `setns` in `container_init`.
 - `write_userns_maps` in the same file writes the maps from the parent: a single-uid map
@@ -70,7 +70,7 @@ rule prevents moving it in — so limits can silently not apply there. The engin
   (`/sys/fs/cgroup/delonix.slice`).
 - Rootless mode finds the user's service cgroup and creates leaves under
   `<user@uid.service>/dlx-containers` — see `user_service_base` and `try_delegated_base` in
-  `crates/adapters/delonix-runtime/src/lib.rs`. `cgroup_limits_apply` answers "will limits apply
+  `crates/adapters/delonix-linux/src/lib.rs`. `cgroup_limits_apply` answers "will limits apply
   on this host?" without starting a container.
 - The design decision about the intermediate level is
   [ADR-0015](../adr/0015-intermediate-cgroup-level.md); how the CRI follows the kubelet's cgroup
@@ -100,8 +100,8 @@ fail with `ENOSYS` to force libc back to the filterable `clone`.
 **In Delonix**
 
 - Capabilities: `KEPT_CAPS` and `resolve_cap_keep` in
-  `crates/adapters/delonix-runtime/src/capabilities.rs`; `drop_capabilities` in `lib.rs`.
-- seccomp: `apply_seccomp` in `crates/adapters/delonix-runtime/src/lib.rs` (built with the
+  `crates/adapters/delonix-linux/src/capabilities.rs`; `drop_capabilities` in `lib.rs`.
+- seccomp: `apply_seccomp` in `crates/adapters/delonix-linux/src/lib.rs` (built with the
   [`seccompiler`](https://docs.rs/seccompiler) crate, including the `clone3` → `ENOSYS`
   pre-filter); custom JSON profiles are parsed and compiled in `seccomp_profile.rs` (`parse`,
   `compile`).
@@ -140,14 +140,14 @@ where changes are copied up, and a `workdir`. Many containers can share the same
 
 **In Delonix**
 
-- Registry client (distribution spec): `crates/adapters/delonix-image/src/registry.rs` —
+- Registry client (distribution spec): `crates/adapters/delonix-oci/src/registry.rs` —
   `pull_from_registry*` functions, the `ACCEPT_MANIFEST` media types, and
   `verify_manifest_digest`. Types come from the [`oci-spec`](https://docs.rs/oci-spec) crate.
-- Content-addressed blob store: `Cas` in `crates/adapters/delonix-image/src/cas.rs`.
+- Content-addressed blob store: `Cas` in `crates/adapters/delonix-oci/src/cas.rs`.
 - Writing an OCI image layout archive: `write_oci_archive` in `save.rs`.
 - Overlay preparation: `ImageStore::prepare_overlay` in `overlay.rs` writes an `overlay-lowers`
   marker (`LOWERS_FILE`); the mount itself happens inside the container's user and mount
-  namespaces in `mount_overlay_if_marked` (`crates/adapters/delonix-runtime/src/lib.rs`), using
+  namespaces in `mount_overlay_if_marked` (`crates/adapters/delonix-linux/src/lib.rs`), using
   the new mount API — see [ADR-0016](../adr/0016-filesystem-under-the-state-root.md) and
   [ADR-0037](../adr/0037-overlay-mount-new-api.md).
 - The engine runs containers itself rather than handing an OCI runtime bundle to runc/crun.
@@ -182,12 +182,12 @@ Linux networking building blocks:
 - Rootless networking cannot create interfaces on the host, so the engine keeps a long-lived
   **holder** network namespace: a minimal *pin* process owns the namespaces, and a restartable
   *control* process serves a Unix socket. See `start_pin`, `start_control` and `ensure_up` in
-  `crates/adapters/delonix-net/src/infra.rs`.
+  `crates/adapters/delonix-sdn/src/infra.rs`.
 - Attaching a workload: `attach_container` (IPAM + control command) and `do_attach` (veth into the
   bridge, inside the holder). Bridge names come from `bridge_name` in the dependency-free
   `crates/foundation/delonix-net-rules/src/lib.rs`.
 - Outbound and port forwarding: `slirp_attach` and `slirp_add_hostfwd` in
-  `crates/adapters/delonix-net/src/lib.rs` (which spawn `slirp4netns`); in-holder publishing in
+  `crates/adapters/delonix-sdn/src/lib.rs` (which spawn `slirp4netns`); in-holder publishing in
   `publish_port`/`do_publish` (`infra.rs`).
 - Firewall: `table ip dlxing` with base chains `fwguard`, `fwdeny`, `fwcont` and the `fwmap`
   verdict map (`FWMAP`), generated in `infra.rs` (`do_firewall`, `apply_firewall_all`,
@@ -195,9 +195,9 @@ Linux networking building blocks:
 - Internal DNS (`<name>.<namespace>.delonix.internal`): `dns_server_main`, `handle_dns`,
   `dns_resolve_for`, `dns_resolve_multi_for` in `infra.rs`.
 - Overlay networks: `set_vxlan` (`infra.rs`) and the WireGuard helpers in
-  `crates/adapters/delonix-net/src/wg.rs`, orchestrated by `realize_overlay` in
+  `crates/adapters/delonix-sdn/src/wg.rs`, orchestrated by `realize_overlay` in
   `bins/delonix-runtime-bin/src/cmd/network.rs`.
-- CNI: `crates/adapters/delonix-net/src/cni.rs` — `add`, `del`, `readiness`,
+- CNI: `crates/adapters/delonix-sdn/src/cni.rs` — `add`, `del`, `readiness`,
   `attach_named_netns`. Rootless use is opt-in (`enabled_conf` checks `DELONIX_CNI=1`); the root
   CRI path uses the node's CNI chain (`root_cni_readiness` in
   `crates/interfaces/delonix-cri/src/runtime_svc.rs`).
@@ -268,7 +268,7 @@ from **cloud-init**, which reads a datasource. The **NoCloud** datasource is a s
 - libvirt domain XML: `libvirt_domain_xml`.
 - NoCloud seed generation: `generate_seed_iso` in `bins/delonix-runtime-bin/src/cmd/vm.rs`.
 - VMs on the rootless SDN get a DHCP lease derived from their MAC: `dhcp_lease_ip` in
-  `crates/adapters/delonix-net/src/infra.rs`.
+  `crates/adapters/delonix-sdn/src/infra.rs`.
 - Practical setup and known host pitfalls: [9. MicroVM setup](09-microvm-setup.md).
 
 **Read more:** [kernel — KVM](https://docs.kernel.org/virt/kvm/index.html),

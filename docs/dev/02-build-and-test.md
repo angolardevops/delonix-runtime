@@ -45,7 +45,7 @@ Two practical notes:
 
 ```bash
 cargo test --workspace                       # the whole suite
-cargo test -p delonix-net                    # one crate
+cargo test -p delonix-sdn                    # one crate
 cargo test -p delonix-stack -- reconcile       # tests whose path contains "reconcile"
 cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_vezes
 ```
@@ -130,7 +130,7 @@ host running live workloads this ended with the real root rebuilding its network
 restarting real containers.
 
 The engine now derives a suffix from a non-default `DELONIX_ROOT` for the runtime directory
-(`runtime_dir`/`root_suffix` in `crates/adapters/delonix-net/src/infra.rs`), which closes that
+(`runtime_dir`/`root_suffix` in `crates/adapters/delonix-sdn/src/infra.rs`), which closes that
 collision for the common case. Keep exporting both anyway: it makes the isolation explicit, keeps
 the socket path short and under your control, and it is what `scripts/e2e.sh` and
 `scripts/chaos.sh` do (e2e fills in whichever variable you did not export).

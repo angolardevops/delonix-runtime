@@ -102,7 +102,7 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   OpenAPI document `docs/api/openapi.yaml` is generated from it, and `scripts/contract_gate.py`
   guards both. **Nothing serves the contract yet** — no crate references `delonix.node.v1`
   ([ADR-0042](../adr/0042-one-engine-api-maturity-and-docs.md) D1 says the same).
-- **P2 has started.** `delonix-model` (generated names, exit classes), `delonix-stack` (Kind
+- **P2 has started.** `delonix-model` (the shared `Error` and its `DX_*` codes, generated names, exit classes), `delonix-stack` (Kind
   table, 3-way reconciler, revisions) and `delonix-compute` (the one run specification `RunOpts`,
   `resolve_run`, `build_record`, the network and launch use cases) exist. Most application logic
   still lives in `bins/delonix-runtime-bin/src/cmd/`.
@@ -110,7 +110,10 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   `HostVolumes`, `HostDevices`, `HostRuntime`, `HostNetwork`, `HostWorkload`, `HostVmNetwork`),
   telemetry left the foundation for `delonix-telemetry`, `delonix-vm` reaches the SDN only
   through the `VmNetwork` port, and the CRI, management API and MCP servers became their own
-  executables. `delonix-runtime-core` still exists and still carries the stores.
+  executables. Four adapters carry their ADR-0040 names: `delonix-scanner` (was `delonix-scan`),
+  `delonix-oci` (was `delonix-image`), `delonix-sdn` (was `delonix-net`) and `delonix-linux` (was
+  `delonix-runtime`, the container engine crate). `delonix-runtime-core` still exists and still
+  carries the stores, but the shared `Error` moved down to `delonix-model` and is re-exported.
 - **P4–P7 have not started.** The remaining exceptions in the table above name those phases.
 
 The crate graph, as `Cargo.toml` declares it:
@@ -290,18 +293,18 @@ graph TB
 | `delonix-mgmt` | `bins/delonix-mgmt-bin/src/main.rs` → `delonix_mgmt::serve_blocking` | a service; `delonix serve api` `exec`s it |
 | `delonix-mcp` | `bins/delonix-mcp-bin/src/main.rs` → `delonix_mcp::serve_stdio` | one AI-client session (a child process on stdio); `delonix mcp` `exec`s it |
 | Docker API slice | `cmd/serve.rs` → `cmd::dockerapi::run`, **inside** the `delonix` process | while `delonix serve docker-api` runs |
-| supervisor | `delonix_runtime::supervise::run_supervised`, chosen by `delonix_compute::launch::start` for every detached start the caller can fork for | the container's life; it is the real parent, so it collects the exit status and applies `--restart` |
-| container init | `delonix_runtime::spawn` → `clone` → `container_init` | the container |
+| supervisor | `delonix_linux::supervise::run_supervised`, chosen by `delonix_compute::launch::start` for every detached start the caller can fork for | the container's life; it is the real parent, so it collects the exit status and applies `--restart` |
+| container init | `delonix_linux::spawn` → `clone` → `container_init` | the container |
 | log shim | `fork` inside `spawn`, running `log_shim` | the container |
-| per-container `slirp4netns` | `delonix_net::slirp_attach`, called as the `on_started` hook | the container's netns; orphans reaped by `reap_orphan_slirp` |
-| pin | `infra::start_pin` spawns `delonix netns pin`; `infra::pin_main` creates the user, net and mount namespaces in-process (`crates/adapters/delonix-net/src/pin_userns.rs`) and sleeps | the infra; its pid is `ingress/holder.pid` and it never changes |
+| per-container `slirp4netns` | `delonix_sdn::slirp_attach`, called as the `on_started` hook | the container's netns; orphans reaped by `reap_orphan_slirp` |
+| pin | `infra::start_pin` spawns `delonix netns pin`; `infra::pin_main` creates the user, net and mount namespaces in-process (`crates/adapters/delonix-sdn/src/pin_userns.rs`) and sleeps | the infra; its pid is `ingress/holder.pid` and it never changes |
 | control | `infra::start_control` (`nsenter -t <pin> -U -m -n -- delonix netns control`) → `infra::control_main` | restartable; serves the control socket, DNS (`dns_server_main`), Router Advertisements (`ra_sender_main`) and per-bridge DHCP (`dhcp_serve`) |
 | single `slirp4netns` | `infra::start_slirp` (`tap0` into the pin's netns, `--api-socket`) | the infra |
 | L7 ingress proxy | `cmd/ingress_proxy.rs::spawn_proxy` through `infra::infra_join_argv` | while an `HTTPRoute`/`Ingress` or an `--expose` route exists; reloads routes on `SIGHUP` |
 | `cloud-hypervisor` | `delonix_vm::launch_vmm`, run through the infra join argv | the VM |
 | libvirt domain | `LibvirtBackend` driving `virsh` | the VM (the domain lives in libvirt) |
 
-`ensure_up` (`crates/adapters/delonix-net/src/infra.rs`) is the only function that brings the
+`ensure_up` (`crates/adapters/delonix-sdn/src/infra.rs`) is the only function that brings the
 network infra up, under a per-root file lock, and it distinguishes three cases: pin and control
 alive (nothing to do); pin alive and control gone (restart **only** the control plane — no wire
 moves); pin gone (tear down and rebuild).
@@ -343,14 +346,14 @@ There is no database. State is files under one **state root**:
 | Path under the root | What | Code |
 |---|---|---|
 | `containers/<id>.json` | one JSON record per container | `delonix_runtime_core::Store` (`store.rs`) |
-| `containers/<id>/{upper,work,merged}` + `overlay-lowers` | the container's writable layer and the list of shared image layers it mounts | `ImageStore::prepare_overlay` (`delonix-image/src/overlay.rs`) |
+| `containers/<id>/{upper,work,merged}` + `overlay-lowers` | the container's writable layer and the list of shared image layers it mounts | `ImageStore::prepare_overlay` (`delonix-oci/src/overlay.rs`) |
 | `images/<id>.json`, `layers/<hex>/`, `blobs/sha256/<hex>` | image metadata, unpacked layers shared by every container, content-addressed blobs | `ImageStore::open` (`image.rs`), `Cas` (`cas.rs`) |
 | `volumes/<name>/_data`, `volumes/.ns/<ns>/` | named volumes, namespace-scoped volumes | `VolumeStore` (`delonix-volume/src/lib.rs`) |
 | `vms/` | VM records (`JsonStore`) and per-VM files | `delonix-vm` |
 | `vm-images/` | VM images (`.qcow2` + `.json`) | `cmd/vmimage.rs::VmImageStore` |
 | `secrets/` | encrypted secrets | `SecretStore` (`delonix-runtime-core/src/secret.rs`) |
-| `ingress/` | pidfiles (`holder.pid` is the pin), `refs/` markers, network and route definitions, logs | `delonix-net/src/infra.rs` |
-| `ipam/` | per-prefix address leases | `delonix-net/src/ipam.rs` |
+| `ingress/` | pidfiles (`holder.pid` is the pin), `refs/` markers, network and route definitions, logs | `delonix-sdn/src/infra.rs` |
+| `ipam/` | per-prefix address leases | `delonix-sdn/src/ipam.rs` |
 | `cri/{sandboxes,containers}/` | the CRI's own records | `delonix-cri/src/runtime_svc/lifecycle.rs` (`sb_dir`, `ct_dir`) |
 | `clusters/` | kubeconfigs, keys and PKI of clusters | `cmd/cluster.rs` |
 | `events.jsonl` | append-only event log | `delonix_runtime_core::events` |
@@ -363,18 +366,18 @@ network infra has its own `FileLock` around `ensure_up`, `teardown`, `acquire`, 
 reapers.
 
 Because nothing resident watches processes, a record saying `Running` can be stale. Readers
-reconcile: `delonix_runtime::reconcile_status` checks the pid together with its start time
+reconcile: `delonix_linux::reconcile_status` checks the pid together with its start time
 (`delonix_runtime_core::safe_to_signal`) so a recycled pid is never mistaken for the container.
 
 ## How the crates communicate
 
 1. **Direct Rust calls, along the layer direction.** The normal case. For example `cmd_run`
    (`cmd/container.rs`) calls `delonix_compute::run::resolve_run` with the adapters
-   `delonix_image::run_images::HostImages`, `delonix_volume::HostVolumes`,
-   `delonix_runtime::cdi::HostDevices` and `delonix_runtime::run_host::HostRuntime`, then
+   `delonix_oci::run_images::HostImages`, `delonix_volume::HostVolumes`,
+   `delonix_linux::cdi::HostDevices` and `delonix_linux::run_host::HostRuntime`, then
    `delonix_compute::network::{attach_custom_network, wire_network}` with
-   `delonix_net::run_network::HostNetwork`, then `delonix_compute::launch::start` with
-   `delonix_runtime::workload::HostWorkload`.
+   `delonix_sdn::run_network::HostNetwork`, then `delonix_compute::launch::start` with
+   `delonix_linux::workload::HostWorkload`.
 2. **Registration at the composition root.** `run()` in `bins/delonix-runtime-bin/src/main.rs`
    registers configured remote VM backends (`cmd::vmbackends::register_configured` →
    `delonix_vm::register_backend`) and the SDN implementation of the VM network port
@@ -389,7 +392,7 @@ reconcile: `delonix_runtime::reconcile_status` checks the pid together with its 
      container can join a named netns there, so `reexec_into_netns` runs
      `nsenter … ip netns exec <netns> delonix netns run <spec>`.
    - Work on files owned by mapped subuids needs a process inside a mapped user namespace
-     (`delonix_runtime::reexec_mapped`, `reexec_mapped_hold`, `remove_tree_mapped` → the
+     (`delonix_linux::reexec_mapped`, `reexec_mapped_hold`, `remove_tree_mapped` → the
      `__rmtree`/`__ovlhold`/… entry points).
    - The servers still build some CLI invocations (`delonix-mgmt`, `delonix-mcp`'s
      `run_cli_blocking`, the CRI's `delonix()` helper), resolving the CLI through
@@ -403,12 +406,12 @@ reconcile: `delonix_runtime::reconcile_status` checks the pid together with its 
    uid (`SO_PEERCRED`) and serves one connection at a time, so netns/veth/nftables operations
    never interleave.
 5. **Subprocesses to host tools**, in adapters: `ip`, `nft`, `nsenter`, `slirp4netns`
-   (`delonix-net`), `newuidmap`/`newgidmap` (`delonix-runtime`, `pin_userns`), `qemu-img`,
+   (`delonix-sdn`), `newuidmap`/`newgidmap` (`delonix-linux`, `pin_userns`), `qemu-img`,
    `virsh`, `cloud-localds` (`delonix-vm`), `busctl` for systemd transient scopes
-   (`delonix-runtime`), `ssh`/`scp` (`cmd/remote.rs`).
+   (`delonix-linux`), `ssh`/`scp` (`cmd/remote.rs`).
 6. **HTTP to a remote management system lives only in providers.** `delonix-proxmox` and
    `delonix-truenas` depend on `reqwest` for that. Two adapters also speak HTTP, for other reasons:
-   `delonix-image` has its own OCI registry client (`src/registry.rs`, `reqwest` in its
+   `delonix-oci` has its own OCI registry client (`src/registry.rs`, `reqwest` in its
    `Cargo.toml`), and `delonix-telemetry` exports OTLP over HTTP. No context crate does.
 
 ## Two flows, as sequences
@@ -422,7 +425,7 @@ the functions it reaches.
 sequenceDiagram
     participant U as operator
     participant P1 as delonix (1st pass)
-    participant N as delonix-net infra
+    participant N as delonix-sdn infra
     participant C as control process
     participant S as single slirp4netns
     participant P2 as delonix netns run (2nd pass)
@@ -465,7 +468,7 @@ sequenceDiagram
     participant K as kubelet
     participant R as delonix-cri
     participant D as delonix (child process)
-    participant N as delonix-net
+    participant N as delonix-sdn
     participant ST as state root
 
     K->>R: RunPodSandbox
@@ -532,9 +535,9 @@ sequenceDiagram
 |---|---|
 | CLI entry and hidden re-exec entry points | `bins/delonix-runtime-bin/src/main.rs` (`main`, `run`) |
 | `container run` end to end | `cmd/container.rs::cmd_run`, then `delonix-compute/src/{run,network,launch}.rs` |
-| Process creation, namespaces, rootfs, seccomp, cgroups | `delonix-runtime/src/lib.rs` (`spawn`, `container_init`, `setup_rootfs`, `setup_cgroup`), `supervise.rs`, `launch_spec.rs` |
-| Rootless networking | `delonix-net/src/infra.rs` (`ensure_up`, `control_main`, `attach_container`, `publish_port`, `ingress_table_ruleset`, `fw_chain_body`), `pin_userns.rs`, `ipam.rs` |
-| Images | `delonix-image/src/{registry,cas,image,overlay,build}.rs` |
+| Process creation, namespaces, rootfs, seccomp, cgroups | `delonix-linux/src/lib.rs` (`spawn`, `container_init`, `setup_rootfs`, `setup_cgroup`), `supervise.rs`, `launch_spec.rs` |
+| Rootless networking | `delonix-sdn/src/infra.rs` (`ensure_up`, `control_main`, `attach_container`, `publish_port`, `ingress_table_ruleset`, `fw_chain_body`), `pin_userns.rs`, `ipam.rs` |
+| Images | `delonix-oci/src/{registry,cas,image,overlay,build}.rs` |
 | VMs | `delonix-vm/src/lib.rs` (`VmBackend`, `builtin_backends`, `register_backend`, `select_backend`), `cloudinit.rs`; `cmd/vm.rs`, `cmd/vmimage.rs` |
 | Declarative apply | `delonix-stack/src/{kinds,reconcile}.rs`; `cmd/stack.rs`, `cmd/manifest.rs` |
 | CRI | `delonix-cri/src/lib.rs::serve_blocking`, `runtime_svc.rs`, `runtime_svc/lifecycle.rs` |

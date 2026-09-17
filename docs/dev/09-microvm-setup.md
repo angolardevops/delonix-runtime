@@ -307,7 +307,7 @@ The published images set no password on any account (see `--root-password` above
 **`--wait` and the predicted IP.** On libvirt the IP comes from a real DHCP lease, so having one is
 evidence the guest booted. On Cloud Hypervisor the IP is **computed from the MAC** before the guest
 runs (`ip_is_predicted`), so `--wait` also probes the address by ARP from inside the network holder
-(`delonix_net::infra::sdn_reachable`) until `--boot-timeout` (default 120 s). Three outcomes: up;
+(`delonix_sdn::infra::sdn_reachable`) until `--boot-timeout` (default 120 s). Three outcomes: up;
 "which could not be verified from here" (the probe could not be asked); "is running but never
 answered … computed from the MAC, not observed". Use `vm console` to see why.
 
