@@ -11,15 +11,35 @@ use delonix_model::codes::{self, Code};
 use delonix_runtime_core::{Error, Result};
 
 /// One entry, `kubectl describe` style.
-pub fn explain(number: u16) -> Result<()> {
+pub fn explain(number: u16, json: bool) -> Result<()> {
     let Some(c) = codes::lookup(number) else {
         return Err(Error::NotFound(tf(
             "code {code} (the dictionary: `delonix explain codes`)",
             &[("code", &codes::label(number))],
         )));
     };
-    describe(c).print();
+    if json {
+        println!("{}", serde_json::to_string_pretty(&entry_json(c))?);
+    } else {
+        describe(c).print();
+    }
     Ok(())
+}
+
+/// One entry as JSON, its texts in the chosen language. The shape the generated
+/// documentation page reads, and a script's way to look a code up.
+fn entry_json(c: &Code) -> serde_json::Value {
+    serde_json::json!({
+        "code": c.label(),
+        "number": c.number,
+        "id": c.id,
+        "class": t(c.class.name()),
+        "domain": t(c.domain.name()),
+        "exit": c.exit,
+        "message": t(c.message),
+        "meaning": t(c.meaning),
+        "remedy": t(c.remedy),
+    })
 }
 
 fn describe(c: &Code) -> Describe {
@@ -41,7 +61,12 @@ fn describe(c: &Code) -> Describe {
 }
 
 /// The whole dictionary, one line per code.
-pub fn list() -> Result<()> {
+pub fn list(json: bool) -> Result<()> {
+    if json {
+        let all: Vec<_> = codes::CATALOG.iter().map(entry_json).collect();
+        println!("{}", serde_json::to_string_pretty(&all)?);
+        return Ok(());
+    }
     let mut table = Table::new(&[t("CODE"), t("CLASS"), t("DOMAIN"), t("EXIT"), t("MESSAGE")]);
     for c in codes::CATALOG {
         table.row(vec![

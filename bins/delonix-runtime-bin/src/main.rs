@@ -176,6 +176,9 @@ enum Cmd {
     Explain {
         /// `<Kind>[.field[.field…]]`, a code (`DX-4501`), or `codes`.
         path: String,
+        /// With a code or `codes`: print JSON, in the chosen language.
+        #[arg(long)]
+        json: bool,
     },
     /// Every Kind this engine serves: plural, shortnames, apiVersion and form.
     ///
@@ -509,7 +512,7 @@ fn run() -> Result<()> {
         Cmd::Volume { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
-        Cmd::Explain { path } => cmd::schema::explain(&path),
+        Cmd::Explain { path, json } => cmd::schema::explain(&path, json),
         Cmd::ApiResources { output } => cmd::resource::api_resources(output),
         Cmd::Apply {
             file,
@@ -828,7 +831,7 @@ fn main() {
         // engine-crate message verbatim even under `--l18n=pt`. A message
         // without a matching `pt.po` entry still degrades to the original text
         // (same graceful fallback `t_dyn` already guarantees everywhere else).
-        cmd::output::error(&cmd::po::t_dyn(&e.to_string()));
+        cmd::output::engine_error(&e);
         // The class of the failure, not just "it failed" (see `cmd::exitcode`):
         // «no such resource» (4) and «exists but is not running» (3) used to be
         // the same 1 as a syscall dying halfway through, so the only way to tell
