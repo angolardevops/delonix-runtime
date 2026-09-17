@@ -2925,7 +2925,9 @@ e2e_serve_up() {  # $1=subcomando  $2=socket  → ecoa o pid, ou vazio
   setsid "$BIN" serve "$sub" --addr "unix://$sock" >>"$SRVLOG" 2>&1 &
   local i
   for i in $(seq 1 60); do [ -S "$sock" ] && break; sleep 0.2; done
-  pgrep -f "serve $sub --addr unix://$sock" | head -1
+  # Pelo DONO do socket, não pelo cmdline: `serve cri` executa o `delonix-cri`, e
+  # o cmdline passa a ser o dele.
+  ss -xlpnH 2>/dev/null | grep -F "$sock" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
 }
 
 for spec in "api:/v1/dash" "docker-api:/_ping"; do
@@ -3000,8 +3002,27 @@ for i in $(seq 1 40); do kill -0 "$CRIPID" 2>/dev/null || break; sleep 0.2; done
 check "serve cri morre com SIGTERM" ok bash -c "! kill -0 '$CRIPID' 2>/dev/null"
 rm -f "$CRISOCK"
 
+# `delonix serve cri` executa o binário próprio do CRI (ADR-0040 D2.4 emendado): o
+# utilizador só conhece `delonix`, e o servidor não vive dentro dele. O `exec`
+# mantém o pid, por isso é o `delonix-cri` que se vê ao fim do socket.
+CRISOCK2="/tmp/dlx-srv-cri2-$PFX.sock"
+CRIPID2="$(e2e_serve_up cri "$CRISOCK2")"
+check "serve cri corre o executável delonix-cri" ok bash -c \
+  "[ -n '$CRIPID2' ] && [ \"\$(basename \"\$(readlink /proc/$CRIPID2/exe)\")\" = delonix-cri ]"
+[ -n "$CRIPID2" ] && kill "$CRIPID2" 2>/dev/null
+for i in $(seq 1 40); do kill -0 "$CRIPID2" 2>/dev/null || break; sleep 0.2; done
+rm -f "$CRISOCK2"
+# Sem o binário ao lado nem no PATH: recusa com a classe «indisponível» e diz
+# como instalar, em vez de um `No such file or directory` sem sujeito.
+LONE="$OUT/lone-$PFX"; mkdir -p "$LONE"; cp "$BIN" "$LONE/delonix"
+check "serve cri sem o delonix-cri instalado sai com 69" 69 \
+  env PATH=/usr/bin:/bin "$LONE/delonix" serve cri --addr "unix:///tmp/dlx-lone-$PFX.sock"
+check "e diz como instalar" ok bash -c \
+  "env PATH=/usr/bin:/bin '$LONE/delonix' serve cri --addr 'unix:///tmp/dlx-lone-$PFX.sock' 2>&1 | grep -q 'with-cri'"
+rm -rf "$LONE"
+
 check "nenhum servidor desta corrida ficou para trás" ok bash -c \
-  "! pgrep -f 'serve (cri|api|docker-api) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
+  "! pgrep -f '(serve (cri|api|docker-api)|delonix-cri) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
 
 section "compose — o que é recusado, e se a recusa dispara"
 

@@ -795,6 +795,12 @@ como se fosse um comando principal por engano. Pedido explícito: agrupamento **
 - **`delonix serve <x>`** (`cmd/serve.rs`) agrupa os três "serve um protocolo num socket unix":
   `cri` (antigo `delonix cri`), `api` (antigo `delonix api`), `docker-api` (antigo `delonix
   docker-api`).
+  **Desde a P3k (ADR-0040 D2.4 emendado), `serve cri` não tem servidor dentro do `delonix`**:
+  faz `exec` do binário `delonix-cri` (o que está ao lado do `delonix` primeiro, depois o
+  `PATH`), com o `DELONIX_ROOT` do utilizador e a versão esperada. O utilizador só conhece
+  `delonix`; um `delonix-cri` de outra release recusa arrancar; sem ele instalado a saída é
+  69 e diz `install.sh --with-cri`. `api`, `docker-api` e `mcp` seguem o mesmo caminho em
+  fatias próprias.
 - **`delonix cluster kube generate`** — o antigo `delonix kube generate` dobrou para dentro de
   `cluster` (`ClusterCmd::Kube`), por ser outra faceta do mesmo grupo "Kubernetes" que `cluster
   apply`/`cluster kubeadm` já ocupam.

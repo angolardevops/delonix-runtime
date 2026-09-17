@@ -199,9 +199,27 @@ exists twice. The CLI links the servers and the servers exec the CLI back.
 | `delonix-sdn` | `delonix-netns-holder` | `delonix netns pin` / `control` |
 | `delonix-linux` | `delonix-launcher` | the nine `__*` re-execs and the container init |
 
-- **Clean cut, no alias** for `delonix serve …` and `delonix mcp`: they are declared not
+- ~~**Clean cut, no alias** for `delonix serve …` and `delonix mcp`: they are declared not
   stable in `cli-stability.md`, and the systemd units call the binaries directly. Keeping
-  an exec shortcut would put back a second door to the same server.
+  an exec shortcut would put back a second door to the same server.~~
+- **Amended 2026-09-17 — `delonix` stays the one door.** The owner's objection: a user
+  should only ever need to know `delonix`, and a split that made them learn
+  `delonix-cri`, `delonix-node-api`, `delonix-mcp` and `delonix-docker-api` moves the
+  restructuring's cost onto the person it is not for. So each server still becomes its own
+  executable — the architectural goal, **no binary links another interface's server**, is
+  unchanged — and `delonix serve <x>` / `delonix mcp` **`exec` the sibling binary**, the
+  way `git lfs` runs `git-lfs`. It is not the "second door" the original bullet refused:
+  there is one server, in one executable; `delonix` holds no server code and only finds
+  and runs it. Three rules make the shortcut safe rather than a new failure mode:
+  - the sibling next to `delonix` wins over the `PATH`;
+  - `delonix` tells it the version it must be (`DELONIX_DISPATCH_VERSION`) and a server
+    from another release refuses to start — a server from before this rule cannot check,
+    so the flags also travel as the environment variables it reads;
+  - a missing server exits `69` (unavailable) naming the install step, never a bare
+    `No such file or directory`.
+  `exec`, not a child process: the server takes the pid, so units, signals and `kill`
+  reach it. Units may keep calling the binary directly. First slice: `delonix serve cri`
+  → `delonix-cri` (which already existed as a duplicate `[[bin]]`).
 - **`delonix-launcher` owns every spawn that creates namespaces.** It is the
   `ProcessLauncher` adapter of D5: it receives a typed spec over an inherited fd, never an
   argv built by another program. The CLI, the CRI and the node API stop creating user
