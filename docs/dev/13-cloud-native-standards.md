@@ -681,10 +681,15 @@ to the calling session.
 - Under the kubelet, `transient_scope_argv` builds the `StartTransientUnit` call for a delegated
   scope under a pod slice (ADR-0038).
 
-**Conformance status / gaps.** Limits are inert in a plain SSH session scope; the remedy is
-`systemd-run --user --scope -p Delegate=yes` (measured 2026-08-04 per `AGENTS.md`). `cpuset` and
-`io` are usually not delegated to user sessions on stock Ubuntu. See
-[1. Environment](01-environment.md) and [ADR-0015](../adr/0015-intermediate-cgroup-level.md).
+**Conformance status / gaps.** A plain SSH session scope is not delegated; the remedy is
+`systemd-run --user --scope -p Delegate=yes` (measured 2026-08-04 per `AGENTS.md`). Without
+delegation `container run` refuses `-m`/`--cpus`/`--cpu-weight` with exit 69
+(`preflight_resource_limits` in `bins/delonix-runtime-bin/src/cmd/container.rs`;
+`DELONIX_ALLOW_UNENFORCED_LIMITS=1` runs unenforced, with a warning). That probe covers only the
+`memory`/`cpu`/`pids` base: `--cpuset`, `--io-weight` and the `--device-*-bps`/`--device-*-iops`
+flags are still accepted best-effort, and `cpuset` and `io` are usually not delegated to user
+sessions on stock Ubuntu — so those can be accepted without effect. See
+[1. Environment](01-environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) and [ADR-0015](../adr/0015-intermediate-cgroup-level.md).
 
 **Where to start reading.** `cgroup_limits_apply` → `user_service_base` → `try_delegated_base` →
 `transient_scope_argv`, all in `crates/adapters/delonix-linux/src/lib.rs`.

@@ -679,10 +679,15 @@ to the calling session.</p>
 <li>Under the kubelet, <code>transient_scope_argv</code> builds the <code>StartTransientUnit</code> call for a delegated
   scope under a pod slice (ADR-0038).</li>
 </ul>
-<p><strong>Conformance status / gaps.</strong> Limits are inert in a plain SSH session scope; the remedy is
-<code>systemd-run --user --scope -p Delegate=yes</code> (measured 2026-08-04 per <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). <code>cpuset</code> and
-<code>io</code> are usually not delegated to user sessions on stock Ubuntu. See
-<a href="01-environment.html">1. Environment</a> and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>.</p>
+<p><strong>Conformance status / gaps.</strong> A plain SSH session scope is not delegated; the remedy is
+<code>systemd-run --user --scope -p Delegate=yes</code> (measured 2026-08-04 per <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>). Without
+delegation <code>container run</code> refuses <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> with exit 69
+(<code>preflight_resource_limits</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>;
+<code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> runs unenforced, with a warning). That probe covers only the
+<code>memory</code>/<code>cpu</code>/<code>pids</code> base: <code>--cpuset</code>, <code>--io-weight</code> and the <code>--device-*-bps</code>/<code>--device-*-iops</code>
+flags are still accepted best-effort, and <code>cpuset</code> and <code>io</code> are usually not delegated to user
+sessions on stock Ubuntu — so those can be accepted without effect. See
+<a href="01-environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">1. Environment</a> and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>.</p>
 <p><strong>Where to start reading.</strong> <code>cgroup_limits_apply</code> → <code>user_service_base</code> → <code>try_delegated_base</code> →
 <code>transient_scope_argv</code>, all in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.</p>
 <hr />

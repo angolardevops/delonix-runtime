@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr-FR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>10. Contribution workflow · Delonix Runtime — Guide du contributeur</title>
+<title>10. Flux de contribution · Delonix Runtime — Guide du contributeur</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,130 +59,141 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Guide du contributeur</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Rechercher <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/10-contributing-workflow.html">EN · English</option><option value="../pt-AO/10-contributing-workflow.html">PT-AO · Português (Angola)</option><option value="../fr-FR/10-contributing-workflow.html" selected>FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manuel du contributeur</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="01-environment.html">1. Préparer votre environnement</a>
+<a class="" href="02-build-and-test.html">2. Cloner, compiler et tester</a>
+<a class="" href="03-rust-primer.html">3. Initiation à Rust pour cette base de code</a>
+<a class="" href="04-cloud-native-primer.html">4. Initiation au cloud native</a>
 <a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="on" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="06-crates.html">6. Les crates</a>
+<a class="" href="07-system-design-interview.html">7. Entretien de conception de système — le Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile et VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construire des microVMs</a>
+<a class="on" href="10-contributing-workflow.html">10. Flux de contribution</a>
+<a class="" href="11-publishing-docs.html">11. Publier la documentation</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="10-contribution-workflow">10. Contribution workflow</h1>
-<p>This page is the "how we work" part of the handbook: where to make changes, which rules the gates
-enforce and why, when a change needs a written decision first, and how to send it. The gates
-themselves, and how to run them, are in <a href="02-build-and-test.html">02 — Clone, build and test</a>.</p>
-<p>For anything non-trivial — a new command, a new manifest Kind, a change to namespace or cgroup
-setup, a new backend — open an issue first and agree on the approach. It saves a rewrite.</p>
-<h2 id="start-from-the-latest-tag-not-from-memory">Start from the latest tag, not from memory</h2>
-<p>Before you write code:</p>
+<main><h1 id="10-contribution-workflow">10. Flux de contribution</h1>
+<p>Cette page est la partie « comment nous travaillons » du manuel : où apporter les modifications,
+quelles règles les gates (contrôles CI) imposent et pourquoi, quand une modification exige d'abord
+une décision écrite, et comment l'envoyer. Les gates eux-mêmes, et la manière de les exécuter, sont
+décrits dans <a href="02-build-and-test.html">02 — Cloner, construire et tester</a>.</p>
+<p>Pour tout ce qui n'est pas trivial — une nouvelle commande, un nouveau Kind de manifeste, une
+modification de la mise en place des namespaces ou des cgroups, un nouveau backend — ouvrez d'abord
+une issue et mettez-vous d'accord sur l'approche. Cela évite une réécriture.</p>
+<h2 id="start-from-the-latest-tag-not-from-memory">Partez du dernier tag, pas de votre mémoire</h2>
+<p>Avant d'écrire du code :</p>
 <div class="code" data-shell><pre><code class="language-bash">git fetch --tags origin
 git describe --tags --abbrev=0 origin/main          # the newest release
 git log --oneline &quot;$(git describe --tags --abbrev=0 origin/main)&quot;..origin/main | wc -l   # how far main is past it
 git log --oneline -- &lt;path you will touch&gt;          # what was already decided, fixed or removed there
 </code></pre></div>
-<p>Reading the history of the area you touch is not ceremony: a lot of this codebase is a record of
-things that were tried, measured and changed. What was already decided or removed is not redone
-out of unawareness. The long-form record lives in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (organised by
-area) and in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a>.</p>
-<h2 id="one-worktree-per-task">One worktree per task</h2>
-<p>Several people and tools often work on the same clone at the same time. Editing in a shared
-checkout has already cost real work here: edits absorbed into someone else's commit, <code>HEAD</code>
-switching branches in the middle of a task, and a green <code>cargo test</code> on a dirty tree that did not
-prove <code>HEAD</code> compiled. So every task gets its own git worktree and branch, created from
-<code>origin/main</code>:</p>
+<p>Lire l'historique de la zone que vous touchez n'est pas une cérémonie : une grande partie de ce code
+est la trace de choses qui ont été essayées, mesurées et modifiées. Ce qui a déjà été décidé ou
+supprimé n'est pas refait par méconnaissance. L'historique détaillé se trouve dans
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (organisé par domaine) et dans <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a>.</p>
+<h2 id="one-worktree-per-task">Un worktree par tâche</h2>
+<p>Plusieurs personnes et outils travaillent souvent sur le même clone en même temps. Éditer dans un
+checkout partagé a déjà coûté du vrai travail ici : des modifications absorbées dans le commit de
+quelqu'un d'autre, <code>HEAD</code> qui change de branch au milieu d'une tâche, et un <code>cargo test</code> vert sur une
+arborescence sale qui ne prouvait pas que <code>HEAD</code> compilait. Chaque tâche reçoit donc son propre
+worktree git et sa propre branch, créés à partir de <code>origin/main</code> :</p>
 <div class="code" data-shell><pre><code class="language-bash">git fetch origin
 git worktree add -b &lt;topic&gt;/&lt;task&gt; &lt;workspace&gt;/.worktrees/delonix-runtime/&lt;task&gt; origin/main
 cd &lt;workspace&gt;/.worktrees/delonix-runtime/&lt;task&gt;
 </code></pre></div>
 <ul>
-<li><strong>Never put a worktree in <code>/tmp</code>.</strong> Many systems empty <code>/tmp</code> on boot; a reboot mid-task takes the
-  uncommitted work, and can leave half-written objects in the shared <code>.git</code>. Use a persistent
-  directory outside the repository (the convention here is a <code>.worktrees/</code> directory next to the
-  repositories), so no <code>grep -r</code>, <code>docker build</code> context or gate script picks it up.</li>
-<li><strong>Commit and push early</strong>, at every step that passes its checks. A persistent worktree survives a
-  reboot; a pushed branch survives everything else.</li>
-<li><strong>Stage files by name</strong>: <code>git add &lt;file&gt; &lt;file&gt;</code>, never <code>git add -A</code>, <code>-u</code> or <code>.</code>. Check
-  <code>git branch --show-current</code> and recognise every entry of <code>git status --short</code> as yours before
-  committing.</li>
-<li><strong>Never <code>git checkout -- &lt;path&gt;</code></strong> in a tree someone else may be using: it reverts to <code>HEAD</code>
-  without a stash and destroys their uncommitted work.</li>
-<li><strong>Rebase, do not merge</strong>, when your push is rejected for divergence: <code>git pull --rebase</code>. The
-  history is linear.</li>
-<li><strong>When the task is done, remove both</strong> the worktree and the branch — the branch survives
-  <code>worktree remove</code>, and that is how stale branches pile up:</li>
+<li><strong>Ne placez jamais un worktree dans <code>/tmp</code>.</strong> De nombreux systèmes vident <code>/tmp</code> au démarrage ; un
+  redémarrage en cours de tâche emporte le travail non commité, et peut laisser des objets à moitié
+  écrits dans le <code>.git</code> partagé. Utilisez un répertoire persistant en dehors du dépôt (la convention
+  ici est un répertoire <code>.worktrees/</code> à côté des dépôts), afin qu'aucun <code>grep -r</code>, contexte de
+  <code>docker build</code> ou script de gate ne le prenne en compte.</li>
+<li><strong>Commitez et poussez tôt</strong>, à chaque étape qui passe ses vérifications. Un worktree persistant
+  survit à un redémarrage ; une branch poussée survit à tout le reste.</li>
+<li><strong>Indexez les fichiers par nom</strong> : <code>git add &lt;file&gt; &lt;file&gt;</code>, jamais <code>git add -A</code>, <code>-u</code> ou <code>.</code>.
+  Vérifiez <code>git branch --show-current</code> et reconnaissez chaque entrée de <code>git status --short</code> comme
+  la vôtre avant de commiter.</li>
+<li><strong>Jamais de <code>git checkout -- &lt;path&gt;</code></strong> dans une arborescence que quelqu'un d'autre peut utiliser :
+  cela revient à <code>HEAD</code> sans stash et détruit son travail non commité.</li>
+<li><strong>Faites un rebase, pas un merge</strong>, lorsque votre push est refusé pour divergence :
+  <code>git pull --rebase</code>. L'historique est linéaire.</li>
+<li><strong>Lorsque la tâche est terminée, supprimez les deux</strong>, le worktree et la branch — la branch
+  survit à <code>worktree remove</code>, et c'est ainsi que les branches obsolètes s'accumulent :</li>
 </ul>
 <div class="code" data-shell><pre><code class="language-bash">git worktree remove &lt;path&gt;
 git branch -D &lt;topic&gt;/&lt;task&gt;
 git worktree list
 </code></pre></div>
-<h2 id="version-alignment">Version alignment</h2>
-<p>The <code>version</code> in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> is load-bearing: it selects which release <code>delonix-cri</code> is
-downloaded from, it is reported as the Docker API <code>ServerVersion</code>, it is recorded in every backup,
-and the release workflow compares it with the built binary. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (CI job
-<code>version</code>) allows exactly two states:</p>
+<h2 id="version-alignment">Alignement de version</h2>
+<p>La <code>version</code> du <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> racine est porteuse de sens : elle détermine depuis quelle release
+<code>delonix-cri</code> est téléchargé, elle est renvoyée comme <code>ServerVersion</code> de l'API Docker, elle est
+enregistrée dans chaque sauvegarde, et le workflow de release la compare au binaire construit.
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (job CI <code>version</code>) n'autorise exactement que deux états :</p>
 <ol>
-<li><strong>Equal to the newest tag the commit contains</strong> — all ordinary work. Do not bump the version in
-   a feature PR, and do not use a <code>-dev</code> suffix (it would send the <code>delonix-cri</code> download to a
-   release that does not exist).</li>
-<li><strong>Greater, only in the release commit</strong>, together with <code>docs/releases/v&lt;version&gt;.md</code>.</li>
+<li><strong>Égale au tag le plus récent que contient le commit</strong> — tout le travail ordinaire. Ne modifiez
+   pas la version dans une PR de fonctionnalité, et n'utilisez pas de suffixe <code>-dev</code> (il enverrait le
+   téléchargement de <code>delonix-cri</code> vers une release qui n'existe pas).</li>
+<li><strong>Supérieure, uniquement dans le commit de release</strong>, accompagnée de
+   <code>docs/releases/v&lt;version&gt;.md</code>.</li>
 </ol>
-<p>It also fails a branch that <strong>does not contain the newest tag</strong>: the branch started before that
-release, and merging it as-is would undo what the release published. Rebase onto <code>origin/main</code>.</p>
-<p>Between releases, <code>delonix --version</code> tells builds apart by commit and distance
-(<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>), because two builds with the same version number are
-not the same build.</p>
-<h2 id="language-english-in-the-code-lang-01">Language: English in the code (LANG-01)</h2>
-<p>Identifiers, comments and user-facing messages are written in <strong>English</strong>. Portuguese reaches the
-operator only through the translation catalogue:</p>
+<p>Il fait aussi échouer une branch qui <strong>ne contient pas le tag le plus récent</strong> : la branch a démarré
+avant cette release, et la fusionner telle quelle déferait ce que la release a publié. Faites un
+rebase sur <code>origin/main</code>.</p>
+<p>Entre deux releases, <code>delonix --version</code> distingue les builds par commit et par distance
+(<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>), car deux builds portant le même numéro de version ne
+sont pas le même build.</p>
+<h2 id="language-english-in-the-code-lang-01">Langue : l'anglais dans le code (LANG-01)</h2>
+<p>Les identifiants, les commentaires et les messages destinés à l'utilisateur sont écrits en
+<strong>anglais</strong>. Le portugais n'atteint l'opérateur qu'à travers le catalogue de traduction :</p>
 <ul>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> — <code>po::t("…")</code> for fixed strings, <code>po::tf("… {name} …",
-  &amp;[("name", value)])</code> for interpolated ones (named placeholders, because a translation may reorder
-  them). CLI <code>--help</code> text is translated at runtime by <code>po::translate_help</code>.</li>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> — the Portuguese entries, embedded in the binary and
-  selected with <code>--l18n pt</code> or <code>DELONIX_L18N=pt</code>.</li>
+<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> — <code>po::t("…")</code> pour les chaînes fixes, <code>po::tf("… {name} …",
+  &amp;[("name", value)])</code> pour les chaînes interpolées (espaces réservés nommés, car une traduction peut
+  les réordonner). Le texte <code>--help</code> de la CLI est traduit à l'exécution par <code>po::translate_help</code>.</li>
+<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> — les entrées portugaises, embarquées dans le binaire et
+  sélectionnées avec <code>--l18n pt</code> ou <code>DELONIX_L18N=pt</code>.</li>
 </ul>
-<p>A missing catalogue entry degrades to English; a Portuguese string written directly in the code is a
-bug. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (CI job <code>lang</code>) counts the Portuguese still left in identifiers,
-comments and messages against <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a>. It is a <strong>ratchet</strong>, not a ceiling: it
-fails when a count rises (new Portuguese entered) <strong>and</strong> when it falls without the baseline being
-lowered. When you translate something, run <code>python3 scripts/lang_ratchet.py --update</code> and commit the
-new baseline <strong>in the same commit</strong> as the translation. Tests in the CLI crate also check that
-command help has a Portuguese entry — add one when you add a command or flag.</p>
-<h2 id="architecture-rules-the-gates-enforce">Architecture rules the gates enforce</h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (CI job <code>arch</code>) enforces the structure decided in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>. The layer of each crate
-and the allowed direction are listed in <a href="05-architecture.html">05 — Architecture</a>. What it means for
-a change:</p>
+<p>Une entrée manquante dans le catalogue se replie sur l'anglais ; une chaîne portugaise écrite
+directement dans le code est un bug. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (job CI <code>lang</code>) compte le portugais
+qui subsiste dans les identifiants, les commentaires et les messages par rapport à
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a>. C'est un <strong>ratchet (cliquet)</strong>, pas un plafond : il échoue lorsqu'un
+décompte augmente (du nouveau portugais est entré) <strong>et</strong> lorsqu'il diminue sans que la ligne de base
+ait été abaissée. Lorsque vous traduisez quelque chose, exécutez
+<code>python3 scripts/lang_ratchet.py --update</code> et commitez la nouvelle ligne de base <strong>dans le même
+commit</strong> que la traduction. Des tests du crate de la CLI vérifient aussi que l'aide des commandes a
+une entrée portugaise — ajoutez-en une lorsque vous ajoutez une commande ou une option.</p>
+<h2 id="architecture-rules-the-gates-enforce">Les règles d'architecture imposées par les gates</h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (job CI <code>arch</code>) impose la structure décidée dans
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>. La couche de chaque
+crate et la direction autorisée sont listées dans <a href="05-architecture.html">05 — Architecture</a>. Ce que
+cela implique pour une modification :</p>
 <ul>
-<li><strong>The engine knows no consumer.</strong> No name of any product, platform, control plane, console or
-  agent that uses the engine — nor tenant, account, plan or billing — in <code>crates/</code>, <code>bins/</code>,
-  <code>proto/</code> or the manifests, comments included. A requirement that comes from a consumer is written
-  as the generic capability it is, in the engine's own vocabulary, and only enters if it makes sense
-  for any client. History that needs external names lives in <code>docs/</code>, never in code.</li>
-<li><strong>Dependencies point inward.</strong> Foundation depends only on foundation; contexts do not depend on
-  adapters; adapters and providers do not depend on interfaces; a binary composes <strong>one</strong> interface.</li>
-<li><strong>The directory is the layer.</strong> A crate lives under <code>crates/&lt;layer&gt;/</code> matching its entry in the
-  <code>LAYERS</code> table. A new crate enters <code>LAYERS</code> and the right directory in the same commit.</li>
-<li><strong>Dependency versions live only in the root</strong> <code>[workspace.dependencies]</code>; a member crate writes
-  <code>{ workspace = true, features = [...] }</code> and nothing else.</li>
-<li><strong>Exceptions name the phase that removes them.</strong> An exception without a phase fails, and so does
-  an exception that no longer applies.</li>
-<li><strong>Debt ratchets</strong> — for example <code>self_exec_sites</code> (a library re-running the engine's own binary
-  instead of calling a function), <code>library_prints</code> (<code>println!</code>/<code>eprintln!</code> in a library crate —
-  libraries emit <code>tracing</code>, interfaces print), <code>env_writes</code> (<code>env::set_var</code>/<code>remove_var</code>) and
-  <code>shared_error_imports</code> (an adapter or provider using the shared <code>Error</code> as its own instead of a
-  crate error that converts into it). The current list is generated:</li>
+<li><strong>Le moteur ne connaît aucun consommateur.</strong> Aucun nom de produit, de plateforme, de control plane,
+  de console ou d'agent qui utilise le moteur — ni tenant, compte, plan ou facturation — dans
+  <code>crates/</code>, <code>bins/</code>, <code>proto/</code> ou les manifestes, commentaires compris. Une exigence qui vient d'un
+  consommateur s'écrit comme la capacité générique qu'elle est, dans le vocabulaire propre du moteur,
+  et n'entre que si elle a du sens pour n'importe quel client. L'historique qui a besoin de noms
+  externes vit dans <code>docs/</code>, jamais dans le code.</li>
+<li><strong>Les dépendances pointent vers l'intérieur.</strong> La fondation ne dépend que de la fondation ; les
+  contextes ne dépendent pas des adaptateurs ; les adaptateurs et les providers ne dépendent pas des
+  interfaces ; un binaire compose <strong>une seule</strong> interface.</li>
+<li><strong>Le répertoire est la couche.</strong> Un crate vit sous <code>crates/&lt;layer&gt;/</code>, conformément à son entrée
+  dans la table <code>LAYERS</code>. Un nouveau crate entre dans <code>LAYERS</code> et dans le bon répertoire dans le même
+  commit.</li>
+<li><strong>Les versions des dépendances ne vivent qu'à la racine</strong>, dans <code>[workspace.dependencies]</code> ; un
+  crate membre écrit <code>{ workspace = true, features = [...] }</code> et rien d'autre.</li>
+<li><strong>Les exceptions nomment la phase qui les supprime.</strong> Une exception sans phase échoue, tout comme
+  une exception qui ne s'applique plus.</li>
+<li><strong>Ratchets de dette</strong> — par exemple <code>self_exec_sites</code> (une bibliothèque qui ré-exécute le binaire
+  du moteur au lieu d'appeler une fonction), <code>library_prints</code> (<code>println!</code>/<code>eprintln!</code> dans un crate
+  de bibliothèque — les bibliothèques émettent du <code>tracing</code>, les interfaces affichent), <code>env_writes</code>
+  (<code>env::set_var</code>/<code>remove_var</code>) et <code>shared_error_imports</code> (un adaptateur ou un provider qui utilise
+  l'<code>Error</code> partagée comme la sienne au lieu d'une erreur de crate qui se convertit en elle). La
+  liste actuelle est générée :</li>
 </ul>
 <!-- dev-docs:begin ratchets -->
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> keeps <strong>4 debt ratchets</strong> (baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>):</p>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> maintient <strong>4 cliquets de dette</strong> (référence dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>) :</p>
 <ul>
 <li><code>self_exec_sites</code></li>
 <li><code>library_prints</code></li>
@@ -190,76 +201,84 @@ a change:</p>
 <li><code>shared_error_imports</code></li>
 </ul>
 <!-- dev-docs:end ratchets -->
-<p>Same semantics as the language ratchet (<code>--list</code>, <code>--update</code>).</p>
-<p>Beyond what the gate can see, three principles decide reviews: <strong>daemonless</strong> (a new resident
-process needs an ADR with evidence of what systemd units, timers or socket activation could not
-do), <strong>rootless-first</strong> (privilege is an explicit, announced opt-in, never a silent default), and
-<strong>no silent failure</strong> (a flag that is accepted and ignored is worse than a flag that does not exist
-— refuse it with a clear error instead).</p>
-<h2 id="when-to-write-an-adr">When to write an ADR</h2>
-<p>Write an Architecture Decision Record in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> <strong>before</strong> the code when a change moves a
-structural boundary, for example:</p>
+<p>Même sémantique que le ratchet de langue (<code>--list</code>, <code>--update</code>).</p>
+<p>Au-delà de ce que le gate peut voir, trois principes décident des revues : <strong>daemonless</strong> (un
+nouveau processus résident exige un ADR qui démontre ce que les units systemd, les timers ou la
+socket activation n'ont pas pu faire), <strong>rootless-first</strong> (le privilège est un opt-in explicite et
+annoncé, jamais un défaut silencieux), et <strong>aucun échec silencieux</strong> (une option acceptée puis
+ignorée est pire qu'une option qui n'existe pas — refusez-la plutôt avec une erreur claire).</p>
+<h2 id="when-to-write-an-adr">Quand écrire un ADR</h2>
+<p>Écrivez un Architecture Decision Record dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> <strong>avant</strong> le code lorsqu'une modification
+déplace une frontière structurelle, par exemple :</p>
 <ul>
-<li>a new backend or provider (a hypervisor, a storage system), or a new port;</li>
-<li>a new external dependency in an engine crate, or a new daemon or resident process;</li>
-<li>a new privilege boundary — which also needs a GO/NO-GO spike first;</li>
-<li>a change to the node contract, the manifest schema's stability, or the layer structure.</li>
+<li>un nouveau backend ou provider (un hyperviseur, un système de stockage), ou un nouveau port ;</li>
+<li>une nouvelle dépendance externe dans un crate du moteur, ou un nouveau daemon ou processus
+  résident ;</li>
+<li>une nouvelle frontière de privilège — qui exige aussi d'abord un spike GO/NO-GO ;</li>
+<li>une modification du contrat de nœud, de la stabilité du schéma de manifeste ou de la structure en
+  couches.</li>
 </ul>
-<p>A routine feature inside an existing boundary does not need one. Format and the current list are in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>: one file per decision, <code>NNNN-title.md</code>, in English.
-<strong>Accepted ADRs are never rewritten</strong> — a new ADR supersedes them.</p>
-<h2 id="adding-or-changing-a-cli-command">Adding or changing a CLI command</h2>
+<p>Une fonctionnalité de routine à l'intérieur d'une frontière existante n'en a pas besoin. Le format
+et la liste actuelle se trouvent dans <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> : un fichier par
+décision, <code>NNNN-title.md</code>, en anglais. <strong>Les ADR acceptés ne sont jamais réécrits</strong> — un nouvel ADR
+les remplace.</p>
+<h2 id="adding-or-changing-a-cli-command">Ajouter ou modifier une commande de la CLI</h2>
 <ul>
-<li><strong>Wire every entry point.</strong> Several commands are reachable by more than one path (for example
-  <code>delonix vm pull</code> and <code>delonix image vm pull</code>). Change all of them, then check each one with the
-  binary you built — including shell completion, because the <code>clap</code> declaration you edited may
-  not be the one the user's path parses. The completion engine can be probed directly;
-  <code>_CLAP_COMPLETE_INDEX</code> is the position of the word being completed:</li>
+<li><strong>Câblez chaque point d'entrée.</strong> Plusieurs commandes sont accessibles par plus d'un chemin (par
+  exemple <code>delonix vm pull</code> et <code>delonix image vm pull</code>). Modifiez-les tous, puis vérifiez chacun avec
+  le binaire que vous avez construit — y compris la complétion du shell, car la déclaration <code>clap</code>
+  que vous avez éditée n'est peut-être pas celle que le chemin de l'utilisateur analyse. Le moteur
+  de complétion peut être sondé directement ; <code>_CLAP_COMPLETE_INDEX</code> est la position du mot en cours
+  de complétion :</li>
 </ul>
 <div class="code" data-shell><pre><code class="language-bash">COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix image vm &#x27;&#x27;
 </code></pre></div>
 <ul>
-<li><strong>Validate against the binary</strong>, not the source: <code>./target/debug/delonix &lt;group&gt; &lt;command&gt; --help</code>
-  and a real run with the state roots isolated (see <a href="02-build-and-test.html#isolating-the-engines-state">02</a>).</li>
-<li><strong>Update the CLI baseline</strong> (<code>scripts/cli-tree.sh --update</code>) in the same commit when you add or
-  remove a leaf, and regenerate the site (<code>python3 docs/gen.py</code> with a release build) when help text
-  changes.</li>
-<li><strong>Unit-test every new pure function</strong> — parsers, validators, argument builders. This codebase has
-  a long record of real bugs caught exactly there.</li>
-<li><strong>Classify errors.</strong> Exit codes carry a class (not found, conflict, …) decided in one place from
-  the error type; return the right <code>Error</code> variant rather than a generic one.</li>
+<li><strong>Validez contre le binaire</strong>, pas contre la source : <code>./target/debug/delonix &lt;group&gt; &lt;command&gt; --help</code>
+  et une exécution réelle avec les racines d'état isolées (voir <a href="02-build-and-test.html#isolating-the-engines-state">02</a>).</li>
+<li><strong>Mettez à jour la ligne de base de la CLI</strong> (<code>scripts/cli-tree.sh --update</code>) dans le même commit
+  lorsque vous ajoutez ou supprimez une feuille, et régénérez le site (<code>python3 docs/gen.py</code> avec un
+  build de release) lorsque le texte d'aide change.</li>
+<li><strong>Testez unitairement chaque nouvelle fonction pure</strong> — parseurs, validateurs, constructeurs
+  d'arguments. Ce code a un long historique de vrais bugs attrapés exactement là.</li>
+<li><strong>Classez les erreurs.</strong> Les codes de sortie portent une classe (introuvable, conflit, …) décidée
+  en un seul endroit à partir du type d'erreur ; renvoyez la bonne variante d'<code>Error</code> plutôt qu'une
+  variante générique.</li>
 </ul>
-<h2 id="commits-and-pull-requests">Commits and pull requests</h2>
+<h2 id="commits-and-pull-requests">Commits et pull requests</h2>
 <ul>
-<li>One logical change per commit; say <strong>why</strong> in the message — the diff already shows what.</li>
-<li>Reference the issue when there is one.</li>
-<li>Open the PR against <code>main</code> and fill in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener">the template</a>:
-  what you ran, and for runtime, namespace, cgroup or network code, what you ran <strong>live</strong> on a real
-  host, with the command and its output.</li>
-<li>"It compiles" and "the command returned 0" do not close a change. Say what was proved and, just
-  as explicitly, what was not validated and why.</li>
-<li>Every change is reviewed by the code owners listed in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a>.</li>
+<li>Une modification logique par commit ; dites <strong>pourquoi</strong> dans le message — le diff montre déjà
+  quoi.</li>
+<li>Référencez l'issue lorsqu'il y en a une.</li>
+<li>Ouvrez la PR contre <code>main</code> et remplissez <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener">le modèle</a> :
+  ce que vous avez exécuté et, pour le code du runtime, des namespaces, des cgroups ou du réseau, ce
+  que vous avez exécuté <strong>en conditions réelles</strong> sur un vrai hôte, avec la commande et sa sortie.</li>
+<li>« Ça compile » et « la commande a renvoyé 0 » ne clôturent pas une modification. Dites ce qui a été
+  prouvé et, tout aussi explicitement, ce qui n'a pas été validé et pourquoi.</li>
+<li>Chaque modification est relue par les code owners listés dans
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a>.</li>
 </ul>
-<h2 id="security-sensitive-changes">Security-sensitive changes</h2>
-<p>Call it out explicitly in the PR when a change crosses a privilege or namespace boundary: user
-namespace mapping, the network holder or its control socket, <code>setns</code>/<code>unshare</code>, capability or
-seccomp handling, or path handling driven by user or manifest input. These get extra review.</p>
-<p>If you found a <strong>vulnerability</strong> rather than a bug — privilege escalation, namespace escape, command
-injection, path traversal — do not open a public issue or PR. Follow <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
-(GitHub Private Vulnerability Reporting).</p>
-<div class="pager"><a href="09-microvm-setup.html"><span>← Précédent</span>9. Building microVMs</a><a class="next" href="11-publishing-docs.html"><span>Suivant →</span>11. Publishing the documentation</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/10-contributing-workflow.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/10-contributing-workflow.md</code></p></main>
+<h2 id="security-sensitive-changes">Modifications sensibles pour la sécurité</h2>
+<p>Signalez-le explicitement dans la PR lorsqu'une modification franchit une frontière de privilège ou
+de namespace : le mappage du user namespace, le holder réseau ou sa socket de contrôle,
+<code>setns</code>/<code>unshare</code>, la gestion des capabilities ou de seccomp, ou la gestion de chemins pilotée par
+une entrée utilisateur ou de manifeste. Celles-ci font l'objet d'une revue supplémentaire.</p>
+<p>Si vous avez trouvé une <strong>vulnérabilité</strong> plutôt qu'un bug — élévation de privilège, évasion de
+namespace, injection de commandes, traversée de chemin — n'ouvrez pas d'issue ni de PR publique.
+Suivez <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a> (GitHub Private Vulnerability Reporting).</p>
+<div class="pager"><a href="09-microvm-setup.html"><span>← Précédent</span>9. Construire des microVMs</a><a class="next" href="11-publishing-docs.html"><span>Suivant →</span>11. Publier la documentation</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/10-contributing-workflow.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/fr-FR/10-contributing-workflow.md</code></p></main>
 <aside class="toc"><h5>Sur cette page</h5><div class="toc">
 <ul>
-<li><a href="#start-from-the-latest-tag-not-from-memory">Start from the latest tag, not from memory</a></li>
-<li><a href="#one-worktree-per-task">One worktree per task</a></li>
-<li><a href="#version-alignment">Version alignment</a></li>
-<li><a href="#language-english-in-the-code-lang-01">Language: English in the code (LANG-01)</a></li>
-<li><a href="#architecture-rules-the-gates-enforce">Architecture rules the gates enforce</a></li>
-<li><a href="#when-to-write-an-adr">When to write an ADR</a></li>
-<li><a href="#adding-or-changing-a-cli-command">Adding or changing a CLI command</a></li>
-<li><a href="#commits-and-pull-requests">Commits and pull requests</a></li>
-<li><a href="#security-sensitive-changes">Security-sensitive changes</a></li>
+<li><a href="#start-from-the-latest-tag-not-from-memory">Partez du dernier tag, pas de votre mémoire</a></li>
+<li><a href="#one-worktree-per-task">Un worktree par tâche</a></li>
+<li><a href="#version-alignment">Alignement de version</a></li>
+<li><a href="#language-english-in-the-code-lang-01">Langue : l'anglais dans le code (LANG-01)</a></li>
+<li><a href="#architecture-rules-the-gates-enforce">Les règles d'architecture imposées par les gates</a></li>
+<li><a href="#when-to-write-an-adr">Quand écrire un ADR</a></li>
+<li><a href="#adding-or-changing-a-cli-command">Ajouter ou modifier une commande de la CLI</a></li>
+<li><a href="#commits-and-pull-requests">Commits et pull requests</a></li>
+<li><a href="#security-sensitive-changes">Modifications sensibles pour la sécurité</a></li>
 </ul>
 </div>
 </aside></div>

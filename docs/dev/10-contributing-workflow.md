@@ -131,7 +131,7 @@ a change:
 - `env_writes`
 - `shared_error_imports`
 <!-- dev-docs:end ratchets -->
- Same semantics as the language ratchet (`--list`, `--update`).
+Same semantics as the language ratchet (`--list`, `--update`).
 
 Beyond what the gate can see, three principles decide reviews: **daemonless** (a new resident
 process needs an ADR with evidence of what systemd units, timers or socket activation could not

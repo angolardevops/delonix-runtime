@@ -285,11 +285,22 @@ default, <code>~/.local/bin/delonix</code> with <code>--user</code>). A binary y
 <li>Set <code>kernel.apparmor_restrict_unprivileged_userns=0</code> — this lowers a host-wide boundary; only
    on a machine you own.</li>
 </ol>
-<h3 id="cgroup-delegation-limits-are-accepted-and-silently-ignored">cgroup delegation: limits are accepted and silently ignored</h3>
-<p><code>--memory</code>, <code>--cpus</code> and <code>--pids-limit</code> only work if the shell you run the engine from sits in a
-<strong>delegated</strong> cgroup. Without delegation the flags are parsed, accepted and inert: the container
-runs with no limit. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the
-same requirement.</p>
+<h3 id="cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation: some limits are refused, others are not enforced</h3>
+<p>Resource limits only reach the kernel if the shell you run the engine from sits in a <strong>delegated</strong>
+cgroup. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the same
+requirement. Without delegation the engine does two different things, depending on the flag:</p>
+<ul>
+<li><code>-m</code>/<code>--memory</code>, <code>-c</code>/<code>--cpus</code> and <code>--cpu-weight</code>: <code>container run</code> <strong>refuses</strong> before creating
+  anything, with an error that names the fix, and exits <strong>69</strong> (<code>Error::Unavailable</code>, the
+  <code>EX_UNAVAILABLE</code> class — <code>preflight_resource_limits</code> in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> runs the
+  container anyway, unlimited, with a warning.</li>
+<li><code>--cpuset</code>, <code>--io-weight</code> and the <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/
+  <code>--device-write-iops</code> family are <strong>not</strong> checked by that probe: they are accepted and applied
+  best-effort, so without the <code>cpuset</code>/<code>io</code> controllers they have no effect and nothing fails.</li>
+</ul>
+<p>There is no <code>--pids-limit</code> flag; the pids ceiling is a property of the engine's cgroup group, not
+of <code>container run</code>.</p>
 <p>The common case is an <strong>SSH session</strong>: its <code>session-N.scope</code> is a <em>sibling</em> of
 <code>user@&lt;uid&gt;.service</code>, and moving a process between them requires writing to a cgroup owned by root.
 The per-command fix needs no root:</p>
@@ -334,7 +345,7 @@ version number.</p>
 <li><a href="#diagnosing-the-host">Diagnosing the host</a></li>
 <li><a href="#known-host-traps">Known host traps</a><ul>
 <li><a href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: AppArmor blocks user namespaces for your dev binary</a></li>
-<li><a href="#cgroup-delegation-limits-are-accepted-and-silently-ignored">cgroup delegation: limits are accepted and silently ignored</a></li>
+<li><a href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation: some limits are refused, others are not enforced</a></li>
 <li><a href="#a-stale-delonix-on-your-path">A stale delonix on your PATH</a></li>
 <li><a href="#other-traps-you-may-hit">Other traps you may hit</a></li>
 </ul>

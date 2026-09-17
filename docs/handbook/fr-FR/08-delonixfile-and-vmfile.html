@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr-FR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>8. Delonixfile and VMfile · Delonix Runtime — Guide du contributeur</title>
+<title>8. Delonixfile et VMfile · Delonix Runtime — Guide du contributeur</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,277 +59,291 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Guide du contributeur</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Rechercher <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/08-delonixfile-and-vmfile.html">EN · English</option><option value="../pt-AO/08-delonixfile-and-vmfile.html">PT-AO · Português (Angola)</option><option value="../fr-FR/08-delonixfile-and-vmfile.html" selected>FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manuel du contributeur</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="01-environment.html">1. Préparer votre environnement</a>
+<a class="" href="02-build-and-test.html">2. Cloner, compiler et tester</a>
+<a class="" href="03-rust-primer.html">3. Initiation à Rust pour cette base de code</a>
+<a class="" href="04-cloud-native-primer.html">4. Initiation au cloud native</a>
 <a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="on" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="06-crates.html">6. Les crates</a>
+<a class="" href="07-system-design-interview.html">7. Entretien de conception de système — le Delonix Engine</a>
+<a class="on" href="08-delonixfile-and-vmfile.html">8. Delonixfile et VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construire des microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Flux de contribution</a>
+<a class="" href="11-publishing-docs.html">11. Publier la documentation</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="8-delonixfile-and-vmfile">8. Delonixfile and VMfile</h1>
-<p>Delonix has two build files, and they look alike on purpose: anyone who has written a Dockerfile
-can read both. What they build is different.</p>
+<main><h1 id="8-delonixfile-and-vmfile">8. Delonixfile et VMfile</h1>
+<p>Delonix a deux fichiers de build, et ils se ressemblent volontairement : quiconque a écrit un
+Dockerfile peut lire les deux. Ce qu'ils construisent est différent.</p>
 <ul>
-<li>A <strong>Delonixfile</strong> builds an <strong>OCI container image</strong> (layers of a filesystem). It is a Dockerfile
-  grammar with a few Delonix instructions on top, built by <code>delonix build</code>.</li>
-<li>A <strong>VMfile</strong> builds a <strong>bootable qcow2 disk</strong> for a VM. It borrows the Dockerfile <em>shape</em>, but the
-  mechanism is <code>qemu-img</code> + <code>virt-customize</code> on a whole disk, built by <code>delonix image vm build</code>.</li>
+<li>Un <strong>Delonixfile</strong> construit une <strong>image de container OCI</strong> (des couches d'un système de fichiers).
+  C'est une grammaire Dockerfile enrichie de quelques instructions Delonix, construite par
+  <code>delonix build</code>.</li>
+<li>Un <strong>VMfile</strong> construit un <strong>disque qcow2 amorçable</strong> pour une VM. Il emprunte la <em>forme</em> du
+  Dockerfile, mais le mécanisme est <code>qemu-img</code> + <code>virt-customize</code> sur un disque entier, construit par
+  <code>delonix image vm build</code>.</li>
 </ul>
-<p>This page describes what the parsers in this repository actually accept — not what Docker accepts.
-Every rule below points at the code that enforces it.</p>
+<p>Cette page décrit ce que les parseurs de ce dépôt acceptent réellement — et non ce que Docker
+accepte. Chaque règle ci-dessous renvoie au code qui l'impose.</p>
 <blockquote>
-<p>Examples marked <em>parse-checked</em> were run against a binary built from this tree, with
-<code>DELONIX_ROOT</code>, <code>DELONIX_NET_RUNTIME_DIR</code> and <code>TMPDIR</code> pointed at a scratch directory, up to the
-point where the build would start pulling images or downloading base disks. Full builds were
-<strong>not executed in this review</strong> (they need registry/network access and, for VMs, libguestfs and
-several GB of RAM and disk).</p>
+<p>Les exemples marqués <em>parse-checked</em> ont été exécutés contre un binaire construit à partir de
+cette arborescence, avec <code>DELONIX_ROOT</code>, <code>DELONIX_NET_RUNTIME_DIR</code> et <code>TMPDIR</code> pointant vers un
+répertoire jetable, jusqu'au moment où le build commencerait à récupérer des images ou à
+télécharger des disques de base. Les builds complets n'ont <strong>pas été exécutés lors de cette
+relecture</strong> (ils nécessitent un accès au registre/au réseau et, pour les VMs, libguestfs ainsi que
+plusieurs Go de RAM et de disque).</p>
 </blockquote>
 <hr />
-<h2 id="part-1-delonixfile">Part 1 — Delonixfile</h2>
-<h3 id="where-the-code-lives">Where the code lives</h3>
+<h2 id="part-1-delonixfile">Partie 1 — Delonixfile</h2>
+<h3 id="where-the-code-lives">Où se trouve le code</h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Concern</th>
-<th>File</th>
-<th>Symbol</th>
+<th>Aspect</th>
+<th>Fichier</th>
+<th>Symbole</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Grammar (parser)</td>
+<td>Grammaire (parseur)</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/build.rs</code></a></td>
 <td><code>parse_dockerfile_with_args</code>, <code>parse_run_flags</code>, <code>parse_secret_mount</code>, <code>resolve_target_stage</code></td>
 </tr>
 <tr>
-<td>Build orchestration</td>
+<td>Orchestration du build</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/build.rs</code></a></td>
 <td><code>run</code>, <code>build_from_spec</code>, <code>build_one_stage</code>, <code>default_build_file</code></td>
 </tr>
 <tr>
-<td>Image commit</td>
+<td>Commit de l'image</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/build.rs</code></a></td>
 <td><code>ImageStore::commit_flat_rootfs</code> (rootless), <code>commit_upper</code> + <code>build_image</code> (root)</td>
 </tr>
 <tr>
-<td>Project templates</td>
+<td>Modèles de projet</td>
 <td><code>bins/delonix-runtime-bin/templates/&lt;name&gt;/Delonixfile</code></td>
-<td>rendered by <code>delonix init</code> / <code>stack init</code></td>
+<td>rendus par <code>delonix init</code> / <code>stack init</code></td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="file-lookup">File lookup</h3>
-<p><code>delonix build [CONTEXT]</code> without <code>-f</code> calls <code>default_build_file</code> (<code>cmd/build.rs</code>): it uses
-<code>&lt;context&gt;/Delonixfile</code> if it exists, otherwise <code>&lt;context&gt;/Dockerfile</code>. <strong>The grammar is the same
-for both names</strong> — the Delonix instructions below are accepted in a file called <code>Dockerfile</code> too.
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> is just the name that is discovered first. <code>-t/--tag</code> is required.</p>
+<h3 id="file-lookup">Recherche du fichier</h3>
+<p><code>delonix build [CONTEXT]</code> sans <code>-f</code> appelle <code>default_build_file</code> (<code>cmd/build.rs</code>) : il utilise
+<code>&lt;context&gt;/Delonixfile</code> s'il existe, sinon <code>&lt;context&gt;/Dockerfile</code>. <strong>La grammaire est la même pour
+les deux noms</strong> — les instructions Delonix ci-dessous sont aussi acceptées dans un fichier nommé
+<code>Dockerfile</code>. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> est simplement le nom découvert en premier. <code>-t/--tag</code> est obligatoire.</p>
 <div class="code" data-shell><pre><code class="language-bash">delonix build -t myapp:dev .                 # Delonixfile, else Dockerfile
 delonix build -t myapp:dev -f build/Other .  # explicit file
 </code></pre></div>
-<h3 id="instructions-the-parser-accepts">Instructions the parser accepts</h3>
-<p><code>parse_dockerfile_with_args</code> is <strong>fail-closed</strong>: an instruction it does not know is an error with
-the line number, and any instruction except <code>ARG</code> before the first <code>FROM</code> is an error. Lines ending
-in <code>\</code> are joined; lines starting with <code>#</code> are comments. Instruction names are case-insensitive.</p>
+<h3 id="instructions-the-parser-accepts">Instructions acceptées par le parseur</h3>
+<p><code>parse_dockerfile_with_args</code> <strong>échoue de manière fermée</strong> : une instruction qu'il ne connaît pas est
+une erreur avec le numéro de ligne, et toute instruction autre que <code>ARG</code> avant le premier <code>FROM</code> est
+une erreur. Les lignes terminées par <code>\</code> sont jointes ; les lignes commençant par <code>#</code> sont des
+commentaires. Les noms d'instructions ne sont pas sensibles à la casse.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Instruction</th>
-<th>What happens</th>
-<th>Notes</th>
+<th>Ce qui se passe</th>
+<th>Remarques</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>ARG NAME[=default]</code></td>
-<td>Declares a build variable; <code>${NAME}</code>/<code>$NAME</code> is substituted in every later line</td>
-<td>Allowed before <code>FROM</code> (to parameterize it). <code>--build-arg NAME=VALUE</code> overrides only a declared <code>ARG</code>. Simplification: args live in <strong>one</strong> scope for the whole file, not per stage. No <code>${NAME:-default}</code> forms (<code>substitute_vars</code>).</td>
+<td>Déclare une variable de build ; <code>${NAME}</code>/<code>$NAME</code> est substitué dans toutes les lignes suivantes</td>
+<td>Autorisé avant <code>FROM</code> (pour le paramétrer). <code>--build-arg NAME=VALUE</code> ne surcharge qu'un <code>ARG</code> déclaré. Simplification : les arguments vivent dans <strong>une seule</strong> portée pour tout le fichier, et non par étape. Pas de formes <code>${NAME:-default}</code> (<code>substitute_vars</code>).</td>
 </tr>
 <tr>
 <td><code>FROM &lt;image&gt; [AS &lt;name&gt;]</code></td>
-<td>Opens a stage</td>
-<td>A later stage may also say <code>FROM &lt;earlier-stage&gt;</code> (see multi-stage).</td>
+<td>Ouvre une étape</td>
+<td>Une étape ultérieure peut aussi écrire <code>FROM &lt;earlier-stage&gt;</code> (voir multi-étapes).</td>
 </tr>
 <tr>
 <td><code>RUN &lt;shell&gt;</code></td>
-<td>Runs in a working container via <code>exec</code></td>
-<td>Only <code>--mount=type=secret,...</code> is accepted as a flag (below).</td>
+<td>S'exécute dans un container de travail via <code>exec</code></td>
+<td>Seul <code>--mount=type=secret,...</code> est accepté comme option (voir plus bas).</td>
 </tr>
 <tr>
 <td><code>COPY [--from=&lt;stage&gt;] &lt;src&gt; &lt;dst&gt;</code></td>
-<td>Writes into the stage's rootfs on disk</td>
-<td>Confined to the context/rootfs (<code>safe_join</code>, <code>confine_to</code>): <code>..</code>, absolute escapes and symlinks that leave the base are refused.</td>
+<td>Écrit dans le rootfs de l'étape sur disque</td>
+<td>Confiné au contexte/rootfs (<code>safe_join</code>, <code>confine_to</code>) : <code>..</code>, les évasions absolues et les liens symboliques qui sortent de la base sont refusés.</td>
 </tr>
 <tr>
 <td><code>ADD</code></td>
-<td><strong>Same as <code>COPY</code></strong></td>
-<td>No URL download, no automatic archive extraction.</td>
+<td><strong>Identique à <code>COPY</code></strong></td>
+<td>Pas de téléchargement d'URL, pas d'extraction automatique d'archive.</td>
 </tr>
 <tr>
-<td><code>ENV K=V [K2="v 2" …]</code> or <code>ENV K V</code></td>
-<td>Affects later <code>RUN</code>s; final stage's <code>ENV</code> goes into the image config</td>
-<td>Values are expanded against earlier <code>ENV</code>s (<code>expand_env_value</code>).</td>
+<td><code>ENV K=V [K2="v 2" …]</code> ou <code>ENV K V</code></td>
+<td>Affecte les <code>RUN</code> suivants ; l'<code>ENV</code> de l'étape finale va dans la configuration de l'image</td>
+<td>Les valeurs sont développées à partir des <code>ENV</code> précédents (<code>expand_env_value</code>).</td>
 </tr>
 <tr>
 <td><code>WORKDIR &lt;dir&gt;</code></td>
-<td>Working dir of later <code>RUN</code>s; final value goes into the image config</td>
+<td>Répertoire de travail des <code>RUN</code> suivants ; la valeur finale va dans la configuration de l'image</td>
 <td></td>
 </tr>
 <tr>
 <td><code>USER &lt;name|uid[:gid]&gt;</code></td>
-<td>Recorded in the image config</td>
-<td>Empty → inherits the base image's.</td>
+<td>Enregistré dans la configuration de l'image</td>
+<td>Vide → hérite de celui de l'image de base.</td>
 </tr>
 <tr>
 <td><code>CMD</code>, <code>ENTRYPOINT</code></td>
-<td>Recorded in the image config</td>
-<td>Exec (JSON) and shell forms.</td>
+<td>Enregistrés dans la configuration de l'image</td>
+<td>Formes exec (JSON) et shell.</td>
 </tr>
 <tr>
 <td><code>HEALTHCHECK [opts] CMD &lt;cmd&gt;</code> / <code>HEALTHCHECK NONE</code></td>
-<td>The part after <code>CMD</code> is stored as the image's health command</td>
-<td>Options before <code>CMD</code> are ignored. Used by <code>delonix container healthcheck &lt;id&gt;</code> and by compose's <code>depends_on: condition: service_healthy</code>.</td>
+<td>La partie après <code>CMD</code> est stockée comme commande de santé de l'image</td>
+<td>Les options avant <code>CMD</code> sont ignorées. Utilisé par <code>delonix container healthcheck &lt;id&gt;</code> et par <code>depends_on: condition: service_healthy</code> de compose.</td>
 </tr>
 <tr>
 <td><code>LABEL</code>, <code>EXPOSE</code>, <code>MAINTAINER</code>, <code>VOLUME</code>, <code>STOPSIGNAL</code>, <code>SHELL</code>, <code>ONBUILD</code></td>
-<td><strong>Accepted and ignored</strong></td>
-<td>Metadata only; no build effect.</td>
+<td><strong>Acceptées et ignorées</strong></td>
+<td>Métadonnées uniquement ; aucun effet sur le build.</td>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Delonix extensions</strong> (parsed into <code>Dockerfile</code> fields in the same file):</p>
+<p><strong>Extensions Delonix</strong> (analysées dans des champs de <code>Dockerfile</code> du même fichier) :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Instruction</th>
-<th>Parsed into</th>
-<th>Effect in this tree</th>
+<th>Analysée dans</th>
+<th>Effet dans cette arborescence</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>SCAN fail-on=&lt;sev&gt;</code></td>
-<td><code>scan_fail_on</code> (default <code>high</code> if no <code>fail-on=</code>)</td>
-<td><strong>Parsed but not enforced by <code>delonix build</code></strong> — no caller reads the field. Gate images explicitly with <code>delonix image scan --fail-on &lt;sev&gt; &lt;image&gt;</code>.</td>
+<td><code>scan_fail_on</code> (<code>high</code> par défaut en l'absence de <code>fail-on=</code>)</td>
+<td><strong>Analysée mais non imposée par <code>delonix build</code></strong> — aucun appelant ne lit le champ. Contrôlez explicitement les images avec <code>delonix image scan --fail-on &lt;sev&gt; &lt;image&gt;</code>.</td>
 </tr>
 <tr>
 <td><code>CPUS &lt;n&gt;</code></td>
 <td><code>cpus</code></td>
-<td>Written to the image config (non-standard <code>Cpus</code> key); inherited from the base if absent. No run-time consumer was found in this review.</td>
+<td>Écrit dans la configuration de l'image (clé non standard <code>Cpus</code>) ; hérité de la base en cas d'absence. Aucun consommateur à l'exécution n'a été trouvé lors de cette relecture.</td>
 </tr>
 <tr>
 <td><code>MEMORY &lt;n&gt;</code></td>
 <td><code>memory</code></td>
-<td>Same as <code>CPUS</code> (<code>Memory</code> key).</td>
+<td>Identique à <code>CPUS</code> (clé <code>Memory</code>).</td>
 </tr>
 <tr>
 <td><code>SECURITY &lt;opt&gt;...</code></td>
 <td><code>security</code></td>
-<td>Same as <code>CPUS</code> (<code>Security</code> key).</td>
+<td>Identique à <code>CPUS</code> (clé <code>Security</code>).</td>
 </tr>
 </tbody>
 </table></div>
-<p>Treat <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> as <em>recorded intent</em>; set real limits at run time
-(<code>container run -m/--cpus</code>, or <code>resources</code> in a manifest). If you wire them up, update this table.</p>
-<p>Parser behaviour worth knowing (read in the code, not a design promise):</p>
+<p>Considérez <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> comme une <em>intention enregistrée</em> ; définissez les vraies
+limites à l'exécution (<code>container run -m/--cpus</code>, ou <code>resources</code> dans un manifeste). Si vous les
+câblez, mettez à jour ce tableau.</p>
+<p>Comportements du parseur bons à connaître (lus dans le code, pas une promesse de conception) :</p>
 <ul>
-<li><code>COPY a b c /dst</code> keeps only the <strong>first</strong> source and the <strong>last</strong> argument; middle sources are
-  dropped silently.</li>
-<li><code>COPY --chown=…</code>/<code>--chmod=…</code> are not recognized; the flag token would be taken as the source path.</li>
-<li><code>RUN --network=…</code>, <code>RUN --security=…</code> and any other <code>RUN --&lt;flag&gt;</code> are refused.</li>
+<li><code>COPY a b c /dst</code> ne conserve que la <strong>première</strong> source et le <strong>dernier</strong> argument ; les sources
+  intermédiaires sont abandonnées silencieusement.</li>
+<li><code>COPY --chown=…</code>/<code>--chmod=…</code> ne sont pas reconnus ; le jeton de l'option serait pris comme chemin
+  source.</li>
+<li><code>RUN --network=…</code>, <code>RUN --security=…</code> et toute autre option <code>RUN --&lt;flag&gt;</code> sont refusés.</li>
 </ul>
-<h3 id="multi-stage-copy-from-and-target">Multi-stage, <code>COPY --from</code> and <code>--target</code></h3>
-<p>Each stage (the final one included) gets its <strong>own working container and rootfs</strong>
-(<code>build_one_stage</code>). The working container (<code>sleep infinity</code> over the stage's rootfs) is created
-by <code>ensure_container</code> through the same <code>WorkloadRuntime</code> that <code>container run</code> and <code>start</code> use
-(<code>container::with_host_workload</code>), so a build cannot drift from a container's spawn specification. Intermediate stages stay on disk until the whole build ends, so:</p>
+<h3 id="multi-stage-copy-from-and-target">Multi-étapes, <code>COPY --from</code> et <code>--target</code></h3>
+<p>Chaque étape (y compris la finale) reçoit son <strong>propre container de travail et son propre rootfs</strong>
+(<code>build_one_stage</code>). Le container de travail (<code>sleep infinity</code> au-dessus du rootfs de l'étape) est
+créé par <code>ensure_container</code> à travers le même <code>WorkloadRuntime</code> que celui qu'utilisent
+<code>container run</code> et <code>start</code> (<code>container::with_host_workload</code>), de sorte qu'un build ne peut pas
+diverger de la spécification de lancement d'un container. Les étapes intermédiaires restent sur
+disque jusqu'à la fin du build complet, donc :</p>
 <ul>
-<li><code>COPY --from=&lt;name-or-index&gt; &lt;src&gt; &lt;dst&gt;</code> reads straight out of that stage's rootfs
+<li><code>COPY --from=&lt;name-or-index&gt; &lt;src&gt; &lt;dst&gt;</code> lit directement dans le rootfs de cette étape
   (<code>resolve_copy_source</code>, <code>copy_into_rootfs</code>).</li>
-<li><code>FROM &lt;earlier-stage&gt;</code> clones that stage's rootfs with <code>cp -a --reflink=auto</code>
-  (<code>clone_rootfs</code>) — <code>cp -a</code> so symlinks such as <code>/bin -&gt; usr/bin</code> stay symlinks.</li>
-<li><code>--target &lt;name-or-index&gt;</code> (<code>resolve_target_stage</code>) stops at that stage and packages it; later
-  stages are not built. An unknown name is refused and the error lists the stages that exist.
-  With <code>--target</code> on an intermediate stage, <code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code>/<code>WORKDIR</code>/<code>HEALTHCHECK</code>
-  come from <strong>that</strong> stage, not from the file's final stage.</li>
+<li><code>FROM &lt;earlier-stage&gt;</code> clone le rootfs de cette étape avec <code>cp -a --reflink=auto</code>
+  (<code>clone_rootfs</code>) — <code>cp -a</code> afin que les liens symboliques comme <code>/bin -&gt; usr/bin</code> restent des liens
+  symboliques.</li>
+<li><code>--target &lt;name-or-index&gt;</code> (<code>resolve_target_stage</code>) s'arrête à cette étape et l'empaquette ; les
+  étapes ultérieures ne sont pas construites. Un nom inconnu est refusé et l'erreur liste les étapes
+  existantes. Avec <code>--target</code> sur une étape intermédiaire,
+  <code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code>/<code>WORKDIR</code>/<code>HEALTHCHECK</code> proviennent de <strong>cette</strong> étape, et non de
+  l'étape finale du fichier.</li>
 </ul>
-<p>Two root-mode (overlay) restrictions, both refused up front with a clear message: the final stage
-cannot be <code>FROM &lt;earlier-stage&gt;</code> (the OCI commit needs a real base image for lineage), and
-<code>--target</code> on an intermediate stage is refused. Rootless has neither restriction.</p>
-<h3 id="build-secrets">Build secrets</h3>
+<p>Deux restrictions du mode root (overlay), toutes deux refusées d'emblée avec un message clair :
+l'étape finale ne peut pas être <code>FROM &lt;earlier-stage&gt;</code> (le commit OCI a besoin d'une vraie image de
+base pour la filiation), et <code>--target</code> sur une étape intermédiaire est refusé. Le mode rootless n'a
+aucune de ces restrictions.</p>
+<h3 id="build-secrets">Secrets de build</h3>
 <div class="code" data-shell><pre><code class="language-bash">delonix build -t app:dev --secret id=npmrc,src=$HOME/.npmrc .
 </code></pre></div>
 <div class="code"><pre><code class="language-dockerfile">RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
 </code></pre></div>
 <ul>
-<li><code>--secret id=&lt;name&gt;,src=&lt;path&gt;</code> is repeatable; a malformed entry or a missing <code>src</code> file is a hard
-  error (<code>parse_build_secrets</code>).</li>
-<li>In the file: <code>--mount=type=secret,id=&lt;name&gt;[,target=&lt;path&gt;][,required=true|false]</code>. <code>target</code>
-  defaults to <code>/run/secrets/&lt;id&gt;</code>; <code>required</code> defaults to <code>false</code> (a missing optional secret is
-  skipped, like Docker).</li>
-<li><code>type=ssh</code>, <code>type=cache</code> and <code>type=bind</code> are <strong>refused</strong> (<code>parse_secret_mount</code>).</li>
-<li>The secret is bind-mounted live (<code>mount_run_secrets</code>) inside the working container's mount
-  namespace only for that one <code>RUN</code>, then unmounted — the host-side view of the rootfs that the
-  commit and the layer cache read never contains it. The secret material is also not hashed into
-  the cache key.</li>
+<li><code>--secret id=&lt;name&gt;,src=&lt;path&gt;</code> est répétable ; une entrée mal formée ou un fichier <code>src</code> manquant
+  est une erreur bloquante (<code>parse_build_secrets</code>).</li>
+<li>Dans le fichier : <code>--mount=type=secret,id=&lt;name&gt;[,target=&lt;path&gt;][,required=true|false]</code>. <code>target</code>
+  vaut par défaut <code>/run/secrets/&lt;id&gt;</code> ; <code>required</code> vaut par défaut <code>false</code> (un secret optionnel
+  manquant est ignoré, comme dans Docker).</li>
+<li><code>type=ssh</code>, <code>type=cache</code> et <code>type=bind</code> sont <strong>refusés</strong> (<code>parse_secret_mount</code>).</li>
+<li>Le secret est monté en bind à chaud (<code>mount_run_secrets</code>) dans le mount namespace du container de
+  travail uniquement pour ce <code>RUN</code>, puis démonté — la vue côté hôte du rootfs que lisent le commit et
+  le cache de couches ne le contient jamais. Le contenu du secret n'entre pas non plus dans le hash de
+  la clé de cache.</li>
 </ul>
-<h3 id="-platform-and-binfmt"><code>--platform</code> and binfmt</h3>
-<p><code>--platform linux/&lt;arch&gt;</code> (<code>parse_platform</code>: only <code>linux/</code> is accepted) resolves the base image
-for that architecture and stamps the arch into the result. <strong>Running</strong> a foreign-arch <code>RUN</code> needs
-the host's own <code>binfmt_misc</code> + <code>qemu-user-static</code> registration, which Delonix does not manage.
-<code>build_from_spec</code> checks <code>/proc/sys/fs/binfmt_misc/qemu-&lt;arch&gt;</code> before building and refuses with
-the interpreter name if it is missing or disabled.</p>
-<h3 id="rootless-vs-root-and-the-layer-cache">Rootless vs root, and the layer cache</h3>
+<h3 id="-platform-and-binfmt"><code>--platform</code> et binfmt</h3>
+<p><code>--platform linux/&lt;arch&gt;</code> (<code>parse_platform</code> : seul <code>linux/</code> est accepté) résout l'image de base pour
+cette architecture et appose l'architecture sur le résultat. <strong>Exécuter</strong> un <code>RUN</code> d'une architecture
+étrangère nécessite l'enregistrement <code>binfmt_misc</code> + <code>qemu-user-static</code> propre à l'hôte, que Delonix
+ne gère pas. <code>build_from_spec</code> vérifie <code>/proc/sys/fs/binfmt_misc/qemu-&lt;arch&gt;</code> avant de construire et
+refuse en nommant l'interpréteur s'il est absent ou désactivé.</p>
+<h3 id="rootless-vs-root-and-the-layer-cache">Rootless ou root, et le cache de couches</h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th></th>
-<th>Rootless (normal path)</th>
+<th>Rootless (chemin normal)</th>
 <th>Root</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Rootfs of a stage</td>
-<td>flat directory (<code>prepare_rootfs_flat</code>)</td>
+<td>Rootfs d'une étape</td>
+<td>répertoire à plat (<code>prepare_rootfs_flat</code>)</td>
 <td>overlay</td>
 </tr>
 <tr>
 <td>Commit</td>
-<td><code>commit_flat_rootfs</code> — one squashed layer on top of the base's layers</td>
-<td><code>commit_upper</code> (tar of the upperdir) + <code>build_image</code></td>
+<td><code>commit_flat_rootfs</code> — une couche écrasée au-dessus des couches de la base</td>
+<td><code>commit_upper</code> (tar de l'upperdir) + <code>build_image</code></td>
 </tr>
 <tr>
-<td>Layer cache</td>
-<td><strong>yes</strong></td>
-<td><strong>never</strong></td>
+<td>Cache de couches</td>
+<td><strong>oui</strong></td>
+<td><strong>jamais</strong></td>
 </tr>
 </tbody>
 </table></div>
-<p>The cache (<code>&lt;DELONIX_ROOT&gt;/build-cache/&lt;hash&gt;/rootfs</code>, <code>--no-cache</code> to bypass) is a rolling hash
-chain, one link per instruction. <code>RUN</code>/<code>COPY</code> snapshot the full rootfs after running; <code>ENV</code>/<code>WORKDIR</code>
-fold into the chain without a snapshot. A <code>COPY</code> link hashes the <strong>bytes</strong> being copied, so a changed
-file invalidates everything after it. On a hit, the cached snapshot is cloned into a fresh
-container's rootfs — never synced onto a live one (that corrupted the <code>/proc</code>/<code>/sys</code>/<code>/dev</code> mounts
-and was abandoned). Trade-offs stated in the module doc: full-rootfs snapshots, not per-layer diffs
-(mitigated by <code>--reflink=auto</code>), and <strong>no cache GC</strong> — <code>build-cache/</code> only grows.</p>
-<p>Because every <code>RUN</code> executes in a real container, the host prerequisites of
-<a href="01-environment.html">01 — Preparing your environment</a> (user namespaces, subuid/subgid, AppArmor on
-Ubuntu) apply to builds too.</p>
-<h3 id="worked-example-a-template">Worked example: a template</h3>
-<p><code>delonix init -t &lt;template&gt; [DIR]</code> (or <code>delonix stack init --template &lt;template&gt;</code>) renders
-<code>bins/delonix-runtime-bin/templates/&lt;template&gt;/</code>, replacing <code>__NAME__</code>, <code>__PORT__</code> and
-<code>__TEMPLATE_VERSION__</code> (the <code>version=</code> default in <code>template.meta</code>, or <code>-v/--template-version</code>).
-In an empty directory it writes the full project; in a non-empty one it only adds the Delonix glue
-(Delonixfile, manifest, CI files). Generated in a scratch directory from <code>httpd</code> (<em>run</em>):</p>
+<p>Le cache (<code>&lt;DELONIX_ROOT&gt;/build-cache/&lt;hash&gt;/rootfs</code>, <code>--no-cache</code> pour le contourner) est une chaîne
+de hash glissante, un maillon par instruction. <code>RUN</code>/<code>COPY</code> prennent un instantané du rootfs complet
+après exécution ; <code>ENV</code>/<code>WORKDIR</code> s'intègrent à la chaîne sans instantané. Un maillon <code>COPY</code> hache
+les <strong>octets</strong> copiés, de sorte qu'un fichier modifié invalide tout ce qui suit. En cas de
+correspondance, l'instantané en cache est cloné dans le rootfs d'un container neuf — jamais
+synchronisé sur un container vivant (cela corrompait les montages <code>/proc</code>/<code>/sys</code>/<code>/dev</code> et a été
+abandonné). Compromis énoncés dans la documentation du module : instantanés du rootfs complet, et non
+des différences par couche (atténué par <code>--reflink=auto</code>), et <strong>aucun GC du cache</strong> — <code>build-cache/</code>
+ne fait que croître.</p>
+<p>Comme chaque <code>RUN</code> s'exécute dans un vrai container, les prérequis d'hôte de
+<a href="01-environment.html">01 — Préparer votre environnement</a> (user namespaces, subuid/subgid, AppArmor sur
+Ubuntu) s'appliquent aussi aux builds.</p>
+<h3 id="worked-example-a-template">Exemple détaillé : un modèle</h3>
+<p><code>delonix init -t &lt;template&gt; [DIR]</code> (ou <code>delonix stack init --template &lt;template&gt;</code>) rend
+<code>bins/delonix-runtime-bin/templates/&lt;template&gt;/</code>, en remplaçant <code>__NAME__</code>, <code>__PORT__</code> et
+<code>__TEMPLATE_VERSION__</code> (la valeur par défaut <code>version=</code> de <code>template.meta</code>, ou
+<code>-v/--template-version</code>). Dans un répertoire vide, il écrit le projet complet ; dans un répertoire
+non vide, il n'ajoute que la colle Delonix (Delonixfile, manifeste, fichiers de CI). Généré dans un
+répertoire jetable à partir de <code>httpd</code> (<em>exécuté</em>) :</p>
 <div class="code" data-shell><pre><code class="language-bash">$ delonix init -t httpd web
 detected an empty directory → stack init --template httpd
   created: web/.dockerignore
@@ -347,10 +361,10 @@ EXPOSE 8080
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
 CMD [&quot;httpd-foreground&quot;]
 </code></pre></div>
-<p>The generated <code>delonix-manifest.yaml</code> passes <code>delonix manifest validate</code> (<em>run</em>). <code>--up</code> would build,
-<code>stack apply</code> and wait for health — not executed here.</p>
-<p>A multi-stage file using most of the grammar, <em>parse-checked</em> (the <code>--target nosuch</code> error proves
-the file parsed and lists its stages, before any pull):</p>
+<p>Le <code>delonix-manifest.yaml</code> généré passe <code>delonix manifest validate</code> (<em>exécuté</em>). <code>--up</code> construirait,
+ferait un <code>stack apply</code> et attendrait l'état de santé — non exécuté ici.</p>
+<p>Un fichier multi-étapes utilisant l'essentiel de la grammaire, <em>parse-checked</em> (l'erreur
+<code>--target nosuch</code> prouve que le fichier a été analysé et liste ses étapes, avant tout pull) :</p>
 <div class="code"><pre><code class="language-dockerfile">ARG GO_VERSION=1.23
 FROM golang:${GO_VERSION}-alpine AS builder
 WORKDIR /src
@@ -372,205 +386,213 @@ error invalid argument: RUN --mount=type=cache: só type=secret é suportado (ss
 $ delonix build -t d --platform windows/amd64 .
 error invalid argument: --platform &#x27;windows/amd64&#x27;: only &#x27;linux/&lt;arch&gt;&#x27; is supported (this engine does not run another OS)
 </code></pre></div>
-<p>(Some parser errors are still in Portuguese; they count as LANG-01 debt — see
-<a href="10-contributing-workflow.html">10 — Contributing workflow</a>.)</p>
-<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">The repository's own <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> is not built by <code>delonix</code></h3>
-<p>The <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> at the repository root packages the <code>delonix</code> CLI into a container image. It is
-built with <strong>Docker or Podman</strong> (<code>docker build -f Delonixfile …</code>, or <code>make image</code>), not with
-<code>delonix build</code>: it uses <code># syntax=docker/dockerfile:1</code> and <code>RUN --mount=type=cache</code>, which
-<code>delonix build</code> refuses. Do not use it as an example of the Delonix grammar; use the templates.</p>
+<p>(Certaines erreurs du parseur sont encore en portugais ; elles comptent comme dette LANG-01 — voir
+<a href="10-contributing-workflow.html">10 — Flux de contribution</a>.)</p>
+<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> du dépôt lui-même n'est pas construit par <code>delonix</code></h3>
+<p>Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> à la racine du dépôt empaquette la CLI <code>delonix</code> dans une image de container. Il est
+construit avec <strong>Docker ou Podman</strong> (<code>docker build -f Delonixfile …</code>, ou <code>make image</code>), et non avec
+<code>delonix build</code> : il utilise <code># syntax=docker/dockerfile:1</code> et <code>RUN --mount=type=cache</code>, que
+<code>delonix build</code> refuse. Ne l'utilisez pas comme exemple de la grammaire Delonix ; utilisez les
+modèles.</p>
 <hr />
-<h2 id="part-2-vmfile">Part 2 — VMfile</h2>
-<h3 id="where-the-code-lives_1">Where the code lives</h3>
+<h2 id="part-2-vmfile">Partie 2 — VMfile</h2>
+<h3 id="where-the-code-lives_1">Où se trouve le code</h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Concern</th>
-<th>File</th>
-<th>Symbol</th>
+<th>Aspect</th>
+<th>Fichier</th>
+<th>Symbole</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Grammar, scaffold, builder</td>
+<td>Grammaire, scaffold, constructeur</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmfile.rs</code></a></td>
 <td><code>parse</code>, <code>classify_base</code>, <code>resolve_base</code>, <code>stage_ops</code>, <code>build</code>, <code>finalize</code>, <code>scaffold</code></td>
 </tr>
 <tr>
-<td>CLI entry, golden recipe</td>
+<td>Point d'entrée CLI, recette dorée</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a></td>
 <td><code>VmImageCmd::Build</code>, <code>VmImageStore</code>, <code>VmImage</code>, <code>customize_args</code>, <code>tool_failure_hint</code></td>
 </tr>
 <tr>
-<td>Declarative build</td>
+<td>Build déclaratif</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vm.rs</code></a></td>
-<td><code>VmBuildSpec</code> (<code>spec.build</code> of <code>kind: VirtualMachine</code>)</td>
+<td><code>VmBuildSpec</code> (<code>spec.build</code> de <code>kind: VirtualMachine</code>)</td>
 </tr>
 </tbody>
 </table></div>
 <h3 id="scaffold">Scaffold</h3>
 <div class="code" data-shell><pre><code class="language-bash">delonix vm init --vmfile [DIR] [--name &lt;n&gt;]   # or: delonix image vm init &lt;name&gt; [-d DIR]
 </code></pre></div>
-<p>Both write <code>VMfile</code> and <code>cloud-init/user-data.yaml</code> (<em>run</em> in a scratch directory). The scaffold is
-meant to be a working recipe, and the <code>parseia_o_scaffold_que_escrevemos</code> test keeps it parseable.
-Two things to correct by hand in the "Next:" hint it prints: the flag is <code>vm create --disk</code>, not
-<code>--disk-image</code>; and see the <code>CLOUDINIT</code> note below about the file name.</p>
-<h3 id="building">Building</h3>
+<p>Les deux écrivent <code>VMfile</code> et <code>cloud-init/user-data.yaml</code> (<em>exécuté</em> dans un répertoire jetable). Le
+scaffold est censé être une recette fonctionnelle, et le test <code>parseia_o_scaffold_que_escrevemos</code> le
+garde analysable. Deux choses sont à corriger à la main dans l'indication « Next: » qu'il affiche :
+l'option est <code>vm create --disk</code>, et non <code>--disk-image</code> ; et voyez la remarque sur <code>CLOUDINIT</code>
+ci-dessous à propos du nom de fichier.</p>
+<h3 id="building">Construire</h3>
 <div class="code" data-shell><pre><code class="language-bash">delonix image vm build -t web:1.0 [-f VMfile] [--network] [--no-compress] [CONTEXT]
 </code></pre></div>
-<p>There is no <code>delonix vm build</code>; the build lives under <code>image vm</code>. Without <code>-f</code>, a <code>VMfile</code> in the
-context is picked up automatically (like a <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> beating a <code>Dockerfile</code>); with no <code>VMfile</code>,
-the same command runs the built-in golden recipe instead (see <a href="09-microvm-setup.html">09</a>). The
-golden-recipe flags (<code>--k8s-version</code>, <code>--extra-package</code>, <code>--extra-run</code>, <code>--offline</code>, <code>--no-k8s</code>,
-<code>--cri-bin</code>, <code>--delonix-bin</code>) are <strong>refused</strong> with a VMfile, and <code>--network</code> is refused without one.</p>
+<p>Il n'existe pas de <code>delonix vm build</code> ; le build se trouve sous <code>image vm</code>. Sans <code>-f</code>, un <code>VMfile</code>
+présent dans le contexte est pris automatiquement (comme un <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> l'emporte sur un
+<code>Dockerfile</code>) ; sans <code>VMfile</code>, la même commande exécute à la place la recette dorée intégrée (voir
+<a href="09-microvm-setup.html">09</a>). Les options de la recette dorée (<code>--k8s-version</code>, <code>--extra-package</code>,
+<code>--extra-run</code>, <code>--offline</code>, <code>--no-k8s</code>, <code>--cri-bin</code>, <code>--delonix-bin</code>) sont <strong>refusées</strong> avec un
+VMfile, et <code>--network</code> est refusé sans VMfile.</p>
 <h3 id="instructions">Instructions</h3>
-<p><code>parse</code> is fail-closed: an unknown instruction is an error naming the supported set. Only <code>FROM</code>
-may come first. <code>\</code> continuations are joined; a <code>#</code> starts a comment only at the start of a line
-(so <code>RUN sed 's/#x/y/'</code> is not mangled).</p>
+<p><code>parse</code> échoue de manière fermée : une instruction inconnue est une erreur qui nomme l'ensemble
+supporté. Seul <code>FROM</code> peut venir en premier. Les continuations <code>\</code> sont jointes ; un <code>#</code> ne commence
+un commentaire qu'en début de ligne (ainsi <code>RUN sed 's/#x/y/'</code> n'est pas altéré).</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Instruction</th>
-<th>Scope</th>
-<th>Effect (<code>stage_ops</code> → <code>virt-customize</code>)</th>
+<th>Portée</th>
+<th>Effet (<code>stage_ops</code> → <code>virt-customize</code>)</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>FROM &lt;ref&gt; [AS &lt;name&gt;]</code></td>
-<td>opens a stage</td>
-<td>See <em>What <code>FROM</code> accepts</em>. <code>as</code> is case-insensitive.</td>
+<td>ouvre une étape</td>
+<td>Voir <em>Ce que <code>FROM</code> accepte</em>. <code>as</code> n'est pas sensible à la casse.</td>
 </tr>
 <tr>
 <td><code>RUN &lt;shell&gt;</code></td>
-<td>step</td>
-<td><code>--run-command</code> inside the guest; <strong>offline</strong> unless <code>--network</code>.</td>
+<td>étape de travail</td>
+<td><code>--run-command</code> dans l'invité ; <strong>hors ligne</strong> sauf avec <code>--network</code>.</td>
 </tr>
 <tr>
 <td><code>COPY &lt;src&gt; &lt;dst&gt;</code></td>
-<td>step</td>
-<td>Copy-in from the build context; <code>src</code> confined to the context (<code>build::safe_join</code>). Exactly two arguments.</td>
+<td>étape de travail</td>
+<td>Copie depuis le contexte de build ; <code>src</code> confiné au contexte (<code>build::safe_join</code>). Exactement deux arguments.</td>
 </tr>
 <tr>
 <td><code>COPY --from=&lt;stage&gt; &lt;src&gt; &lt;dst&gt;</code></td>
-<td>step</td>
-<td><code>virt-copy-out</code> from that stage's disk to a host staging dir, then copy-in. The stage must be <strong>named and declared earlier</strong> — checked at parse time.</td>
+<td>étape de travail</td>
+<td><code>virt-copy-out</code> depuis le disque de cette étape vers un répertoire intermédiaire de l'hôte, puis copie. L'étape doit être <strong>nommée et déclarée plus haut</strong> — vérifié à l'analyse.</td>
 </tr>
 <tr>
 <td><code>ENV KEY=value</code></td>
-<td>step</td>
-<td>Appends <code>KEY=value</code> to <code>/etc/environment</code> (a VM has no image config). One pair per line; the key and value are passed to a shell <strong>unquoted</strong>, so avoid spaces and shell metacharacters.</td>
+<td>étape de travail</td>
+<td>Ajoute <code>KEY=value</code> à <code>/etc/environment</code> (une VM n'a pas de configuration d'image). Une paire par ligne ; la clé et la valeur sont passées à un shell <strong>sans guillemets</strong>, évitez donc les espaces et les métacaractères du shell.</td>
 </tr>
 <tr>
 <td><code>USER &lt;name&gt;</code></td>
-<td>step</td>
-<td><code>useradd -m -s /bin/bash &lt;name&gt;</code> if the account does not exist.</td>
+<td>étape de travail</td>
+<td><code>useradd -m -s /bin/bash &lt;name&gt;</code> si le compte n'existe pas.</td>
 </tr>
 <tr>
 <td><code>PASSWORD &lt;user&gt;:&lt;password&gt;</code></td>
-<td>step</td>
-<td>Sets that account's password. It is baked into every copy of the image.</td>
+<td>étape de travail</td>
+<td>Définit le mot de passe de ce compte. Il est intégré à chaque copie de l'image.</td>
 </tr>
 <tr>
 <td><code>ROOTPASSWORD &lt;password&gt;</code></td>
-<td>step</td>
-<td>Sets root's password. Same caveat.</td>
+<td>étape de travail</td>
+<td>Définit le mot de passe de root. Même mise en garde.</td>
 </tr>
 <tr>
 <td><code>SSHKEY &lt;user&gt; &lt;path-or-key&gt;</code></td>
-<td>step</td>
-<td>Appends to <code>/home/&lt;user&gt;/.ssh/authorized_keys</code> (<code>~/</code> is expanded). The value must be a readable file or a key starting with <code>ssh-</code>/<code>ecdsa-</code>. The account must exist (create it with <code>USER</code> first).</td>
+<td>étape de travail</td>
+<td>Ajoute à <code>/home/&lt;user&gt;/.ssh/authorized_keys</code> (<code>~/</code> est développé). La valeur doit être un fichier lisible ou une clé commençant par <code>ssh-</code>/<code>ecdsa-</code>. Le compte doit exister (créez-le d'abord avec <code>USER</code>).</td>
 </tr>
 <tr>
 <td><code>CLOUDINIT &lt;path&gt;</code></td>
-<td>step</td>
-<td>Copies that file (context-confined) into <code>/etc/cloud/cloud.cfg.d/</code>, <strong>keeping its file name</strong>. cloud-init only loads files ending in <code>.cfg</code> from that directory, so name it e.g. <code>99-myimage.cfg</code> — the scaffold's <code>user-data.yaml</code> name is not picked up as written (not executed in this review; from the code path and cloud-init's documented behaviour). <code>vm create</code> still adds its own per-instance NoCloud seed on top.</td>
+<td>étape de travail</td>
+<td>Copie ce fichier (confiné au contexte) dans <code>/etc/cloud/cloud.cfg.d/</code>, <strong>en conservant son nom de fichier</strong>. cloud-init ne charge depuis ce répertoire que les fichiers se terminant par <code>.cfg</code> ; nommez-le donc p. ex. <code>99-myimage.cfg</code> — le nom <code>user-data.yaml</code> du scaffold n'est pas pris en compte tel quel (non exécuté lors de cette relecture ; d'après le chemin du code et le comportement documenté de cloud-init). <code>vm create</code> ajoute quand même par-dessus son propre seed NoCloud par instance.</td>
 </tr>
 <tr>
 <td><code>SIZE &lt;n&gt;G</code></td>
-<td>stage property</td>
-<td><code>qemu-img resize</code> <strong>before</strong> any step runs — growing after a <code>RUN</code> filled the disk would be too late, which is why it is not a step.</td>
+<td>propriété de l'étape</td>
+<td><code>qemu-img resize</code> <strong>avant</strong> l'exécution de toute étape de travail — agrandir après qu'un <code>RUN</code> a rempli le disque serait trop tard, c'est pourquoi ce n'est pas une étape de travail.</td>
 </tr>
 <tr>
 <td><code>HOSTNAME &lt;name&gt;</code></td>
-<td>stage property</td>
-<td>Writes <code>/etc/hostname</code> (first op of the stage).</td>
+<td>propriété de l'étape</td>
+<td>Écrit <code>/etc/hostname</code> (première opération de l'étape).</td>
 </tr>
 <tr>
 <td><code>VCPUS &lt;n&gt;</code></td>
 <td>image</td>
-<td>Recorded as <code>default_vcpus</code>.</td>
+<td>Enregistré comme <code>default_vcpus</code>.</td>
 </tr>
 <tr>
 <td><code>MEMORY &lt;n&gt;</code></td>
 <td>image</td>
-<td>Recorded as <code>default_memory</code>.</td>
+<td>Enregistré comme <code>default_memory</code>.</td>
 </tr>
 <tr>
 <td><code>HYPERVISOR &lt;backend&gt;</code></td>
 <td>image</td>
-<td>Validated and canonicalized by <code>delonix_vm::valid_backend_name</code> (<code>ch</code> → <code>cloud-hypervisor</code>); recorded as <code>default_backend</code>.</td>
+<td>Validé et canonisé par <code>delonix_vm::valid_backend_name</code> (<code>ch</code> → <code>cloud-hypervisor</code>) ; enregistré comme <code>default_backend</code>.</td>
 </tr>
 <tr>
 <td><code>LABEL k=v</code></td>
 <td>image</td>
-<td><strong>Parsed but not recorded</strong> in the image metadata in this tree.</td>
+<td><strong>Analysé mais non enregistré</strong> dans les métadonnées de l'image dans cette arborescence.</td>
 </tr>
 </tbody>
 </table></div>
-<p>There is no <code>CMD</code>/<code>ENTRYPOINT</code>: a VM boots an init. <code>CLOUDINIT</code> is the closest equivalent.</p>
-<h3 id="what-from-accepts">What <code>FROM</code> accepts</h3>
-<p><code>classify_base</code> is pure and decides the kind of reference:</p>
+<p>Il n'y a ni <code>CMD</code> ni <code>ENTRYPOINT</code> : une VM démarre un init. <code>CLOUDINIT</code> est l'équivalent le plus
+proche.</p>
+<h3 id="what-from-accepts">Ce que <code>FROM</code> accepte</h3>
+<p><code>classify_base</code> est pure et décide du type de référence :</p>
 <ol>
-<li><strong>A named earlier stage</strong> — wins over everything (<code>resolve_base</code>).</li>
-<li><strong><code>ubuntu:&lt;rel&gt;</code>, <code>debian:&lt;rel&gt;</code>, <code>rocky:&lt;rel&gt;</code>, <code>fedora:&lt;rel&gt;</code></strong> — first the project's own
-   base image for that distro/release (local copy, then the official registry —
-   <code>vmimage::official_distro_base</code>); if there is none, the distro's own cloud image, downloaded and
-   verified against the publisher's checksum file (<code>vmimage::download_base</code>).</li>
-<li><strong><code>http://</code> / <code>https://</code> URL</strong> — downloaded; verified against <code>&lt;url&gt;.sha256</code> when the publisher
-   offers one, otherwise trusted on TLS alone and the build says so.</li>
-<li><strong>Anything else</strong> — a VM image already in the local store (<code>delonix image vm ls</code>). Any other
-   <code>name:tag</code> is treated as a local tag, not as an unknown distro.</li>
+<li><strong>Une étape antérieure nommée</strong> — l'emporte sur tout le reste (<code>resolve_base</code>).</li>
+<li><strong><code>ubuntu:&lt;rel&gt;</code>, <code>debian:&lt;rel&gt;</code>, <code>rocky:&lt;rel&gt;</code>, <code>fedora:&lt;rel&gt;</code></strong> — d'abord l'image de base propre
+   au projet pour cette distribution/release (copie locale, puis registre officiel —
+   <code>vmimage::official_distro_base</code>) ; s'il n'y en a pas, la cloud image de la distribution elle-même,
+   téléchargée et vérifiée contre le fichier de sommes de contrôle de l'éditeur
+   (<code>vmimage::download_base</code>).</li>
+<li><strong>URL <code>http://</code> / <code>https://</code></strong> — téléchargée ; vérifiée contre <code>&lt;url&gt;.sha256</code> lorsque l'éditeur en
+   propose un, sinon considérée fiable sur la seule base de TLS, et le build le signale.</li>
+<li><strong>Tout le reste</strong> — une image VM déjà présente dans le store local (<code>delonix image vm ls</code>). Tout
+   autre <code>name:tag</code> est traité comme un tag local, et non comme une distribution inconnue.</li>
 </ol>
-<h3 id="what-a-stage-is-and-where-the-result-lands">What a stage is, and where the result lands</h3>
-<p>A stage is a <strong>whole disk</strong>, not a layer (<code>build</code>):</p>
+<h3 id="what-a-stage-is-and-where-the-result-lands">Ce qu'est une étape, et où arrive le résultat</h3>
+<p>Une étape est un <strong>disque entier</strong>, pas une couche (<code>build</code>) :</p>
 <ol>
-<li>The base is <strong>flattened</strong> into <code>&lt;work&gt;/&lt;stage&gt;.qcow2</code> with <code>qemu-img convert</code> (no backing file,
-   so the artefact never depends on the base still being present).</li>
-<li><code>SIZE</code> is applied, then all steps run in one <code>virt-customize</code> call (<code>--no-network</code> unless
-   <code>--network</code>). <code>vmimage::customize_args</code> always appends an SELinux relabel as the last command
-   (and turns off libguestfs's own deferred relabel), so SELinux guests do not boot with unlabeled
-   files.</li>
-<li>Named stages are kept for <code>COPY --from</code>; unnamed ones are not addressable. Only the <strong>last</strong>
-   stage becomes an image.</li>
-<li>Unless <code>--no-compress</code>: <code>virt-sparsify --in-place</code> (best effort), then
-   <code>qemu-img convert -c -o compression_type=zstd</code>. zstd because the image becomes the read-only
-   backing file of every VM created from it, so decompression speed is a runtime property.</li>
-<li>The qcow2 is moved to <code>VmImageStore::qcow2_path(tag)</code> under <code>&lt;DELONIX_ROOT&gt;/vm-images/</code>, and a
-   <code>VmImage</code> metadata record is saved next to it.</li>
+<li>La base est <strong>aplatie</strong> dans <code>&lt;work&gt;/&lt;stage&gt;.qcow2</code> avec <code>qemu-img convert</code> (pas de backing file,
+   de sorte que l'artefact ne dépend jamais de la présence continue de la base).</li>
+<li><code>SIZE</code> est appliqué, puis toutes les étapes de travail s'exécutent en un seul appel à
+   <code>virt-customize</code> (<code>--no-network</code> sauf avec <code>--network</code>). <code>vmimage::customize_args</code> ajoute toujours
+   un réétiquetage SELinux comme dernière commande (et désactive le réétiquetage différé propre à
+   libguestfs), afin que les invités SELinux ne démarrent pas avec des fichiers non étiquetés.</li>
+<li>Les étapes nommées sont conservées pour <code>COPY --from</code> ; les étapes anonymes ne sont pas
+   adressables. Seule la <strong>dernière</strong> étape devient une image.</li>
+<li>Sauf avec <code>--no-compress</code> : <code>virt-sparsify --in-place</code> (au mieux), puis
+   <code>qemu-img convert -c -o compression_type=zstd</code>. zstd parce que l'image devient le backing file en
+   lecture seule de chaque VM créée à partir d'elle ; la vitesse de décompression est donc une
+   propriété d'exécution.</li>
+<li>Le qcow2 est déplacé vers <code>VmImageStore::qcow2_path(tag)</code> sous <code>&lt;DELONIX_ROOT&gt;/vm-images/</code>, et un
+   enregistrement de métadonnées <code>VmImage</code> est sauvegardé à côté.</li>
 </ol>
-<p>Recorded metadata: <code>digest</code> and <code>size</code>; <code>default_vcpus</code>/<code>default_memory</code>/<code>default_backend</code> from the
-file; <code>cloud_init: true</code>; <code>built_by: "delonix &lt;version&gt;"</code>; <code>distro</code> and <code>kernel_version</code>
-<strong>inherited</strong> only when the final <code>FROM</code> is a local image (a URL gives nothing to inherit, and the
-code refuses to guess).</p>
-<p><code>vm create</code> applies the recorded defaults only where the caller did not decide: <code>--vcpus</code>/<code>--memory</code>
-flags win over <code>VCPUS</code>/<code>MEMORY</code>; for the backend, <code>--backend</code> &gt; the image's <code>HYPERVISOR</code> &gt;
-<code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; auto-detection (<code>resolve_vm_defaults</code> in <code>cmd/vm.rs</code>,
-and <code>delonix_vm::create_with</code>).</p>
-<p><strong>Offline by default, and why.</strong> A <code>RUN</code> that reaches the internet produces a different image
-depending on when it ran. <code>--network</code> is opt-in because the most common thing a VMfile wants is to
-install a package. With <code>--network</code>, libguestfs's appliance gets its network from <code>passt</code>, which has
-host traps documented in <a href="09-microvm-setup.html#troubleshooting">09</a>.</p>
-<p><strong>Scratch space.</strong> The work directory is created under <code>std::env::temp_dir()</code>
-(<code>delonix-vmfile-&lt;pid&gt;</code>), i.e. <code>$TMPDIR</code> or <code>/tmp</code>, and holds one full flattened disk per stage. Point
-<code>TMPDIR</code> at a filesystem with room — <code>/tmp</code> is often a small tmpfs and is emptied on reboot. A build
-that fails leaves that directory behind (observed during this review); remove it by hand.</p>
-<h3 id="declarative-build">Declarative build</h3>
-<p><code>kind: VirtualMachine</code> can build its own disk with <code>spec.build</code> (<code>VmBuildSpec</code>): <code>context</code> (relative
-to the <strong>manifest's</strong> directory), <code>file</code> (default <code>&lt;context&gt;/VMfile</code>), <code>tag</code> (default
-<code>&lt;metadata.name&gt;:latest</code>), <code>compress</code>, <code>network</code>. <code>apply</code> calls the same <code>vmfile::build</code>. <code>disk</code> and
-<code>build</code> are mutually exclusive.</p>
-<h3 id="worked-example-parse-checked">Worked example (parse-checked)</h3>
+<p>Métadonnées enregistrées : <code>digest</code> et <code>size</code> ; <code>default_vcpus</code>/<code>default_memory</code>/<code>default_backend</code>
+issus du fichier ; <code>cloud_init: true</code> ; <code>built_by: "delonix &lt;version&gt;"</code> ; <code>distro</code> et
+<code>kernel_version</code> <strong>hérités</strong> uniquement lorsque le <code>FROM</code> final est une image locale (une URL ne donne
+rien à hériter, et le code refuse de deviner).</p>
+<p><code>vm create</code> applique les valeurs par défaut enregistrées uniquement là où l'appelant n'a pas décidé :
+les options <code>--vcpus</code>/<code>--memory</code> l'emportent sur <code>VCPUS</code>/<code>MEMORY</code> ; pour le backend, <code>--backend</code> &gt;
+le <code>HYPERVISOR</code> de l'image &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; auto-détection
+(<code>resolve_vm_defaults</code> dans <code>cmd/vm.rs</code>, et <code>delonix_vm::create_with</code>).</p>
+<p><strong>Hors ligne par défaut, et pourquoi.</strong> Un <code>RUN</code> qui accède à Internet produit une image différente
+selon le moment où il s'est exécuté. <code>--network</code> est opt-in, car la chose la plus courante que veut
+un VMfile est d'installer un paquet. Avec <code>--network</code>, l'appliance de libguestfs obtient son réseau
+de <code>passt</code>, qui comporte des pièges côté hôte documentés dans
+<a href="09-microvm-setup.html#6-troubleshooting">09</a>.</p>
+<p><strong>Espace de travail.</strong> Le répertoire de travail est créé sous <code>std::env::temp_dir()</code>
+(<code>delonix-vmfile-&lt;pid&gt;</code>), c'est-à-dire <code>$TMPDIR</code> ou <code>/tmp</code>, et contient un disque complet aplati par
+étape. Faites pointer <code>TMPDIR</code> vers un système de fichiers qui a de la place — <code>/tmp</code> est souvent un
+petit tmpfs et est vidé au redémarrage. Un build qui échoue laisse ce répertoire derrière lui
+(observé lors de cette relecture) ; supprimez-le à la main.</p>
+<h3 id="declarative-build">Build déclaratif</h3>
+<p><code>kind: VirtualMachine</code> peut construire son propre disque avec <code>spec.build</code> (<code>VmBuildSpec</code>) :
+<code>context</code> (relatif au répertoire du <strong>manifeste</strong>), <code>file</code> (par défaut <code>&lt;context&gt;/VMfile</code>), <code>tag</code> (par
+défaut <code>&lt;metadata.name&gt;:latest</code>), <code>compress</code>, <code>network</code>. <code>apply</code> appelle le même <code>vmfile::build</code>.
+<code>disk</code> et <code>build</code> sont mutuellement exclusifs.</p>
+<h3 id="worked-example-parse-checked">Exemple détaillé (parse-checked)</h3>
 <div class="code"><pre><code class="language-dockerfile">FROM my-base:1.0 AS builder
 RUN make -C /src
 
@@ -585,21 +607,22 @@ MEMORY 2G
 HYPERVISOR ch
 LABEL org.opencontainers.image.title=web
 </code></pre></div>
-<p>With no image called <code>my-base:1.0</code> in the scratch store, the file parses and the build stops at
-base resolution — before any disk work:</p>
+<p>Sans image nommée <code>my-base:1.0</code> dans le store jetable, le fichier est analysé et le build s'arrête à
+la résolution de la base — avant tout travail sur disque :</p>
 <div class="code"><pre><code class="language-text">$ delonix image vm build -t web:1.0 .
 [1/2] builder: FROM my-base:1.0
 error invalid argument: FROM my-base:1.0: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm ls`
 </code></pre></div>
-<p>And the parser's refusals:</p>
+<p>Et les refus du parseur :</p>
 <div class="code"><pre><code class="language-text">VMfile:2: unknown instruction &#x27;CMD&#x27; — supported: FROM RUN COPY ENV USER PASSWORD ROOTPASSWORD CLOUDINIT SSHKEY SIZE HOSTNAME VCPUS MEMORY HYPERVISOR LABEL
 VMfile:2: no earlier stage named &#x27;nope&#x27;
 VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
 --offline belong to the built-in golden recipe and mean nothing with a VMfile — the VMfile describes all of that itself
 </code></pre></div>
-<p>A full build (<code>virt-customize</code>, downloads, compression) was <strong>not executed in this review</strong>.</p>
+<p>Un build complet (<code>virt-customize</code>, téléchargements, compression) n'a <strong>pas été exécuté lors de cette
+relecture</strong>.</p>
 <hr />
-<h2 id="comparison">Comparison</h2>
+<h2 id="comparison">Comparaison</h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -611,149 +634,151 @@ VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cl
 </thead>
 <tbody>
 <tr>
-<td>Output</td>
-<td>OCI image</td>
-<td>OCI image (pushable, pullable by Docker)</td>
-<td>bootable qcow2 + <code>VmImage</code> metadata</td>
+<td>Sortie</td>
+<td>image OCI</td>
+<td>image OCI (poussable, récupérable par Docker)</td>
+<td>qcow2 amorçable + métadonnées <code>VmImage</code></td>
 </tr>
 <tr>
-<td>Unit of a stage</td>
-<td>filesystem layers</td>
-<td>a working container + rootfs</td>
-<td>a whole flattened disk</td>
+<td>Unité d'une étape</td>
+<td>couches de système de fichiers</td>
+<td>un container de travail + rootfs</td>
+<td>un disque entier aplati</td>
 </tr>
 <tr>
 <td><code>FROM</code></td>
 <td>image</td>
-<td>image or earlier stage</td>
-<td>distro:release, URL, local VM image, or earlier stage</td>
+<td>image ou étape antérieure</td>
+<td>distro:release, URL, image VM locale, ou étape antérieure</td>
 </tr>
 <tr>
-<td><code>RUN</code> executes in</td>
-<td>build container</td>
-<td>working container via <code>exec</code> (rootless userns)</td>
-<td>guest, via <code>virt-customize</code> (offline by default)</td>
+<td><code>RUN</code> s'exécute dans</td>
+<td>le container de build</td>
+<td>le container de travail via <code>exec</code> (userns rootless)</td>
+<td>l'invité, via <code>virt-customize</code> (hors ligne par défaut)</td>
 </tr>
 <tr>
 <td><code>COPY --from</code></td>
-<td>yes</td>
-<td>yes (name or index)</td>
-<td>yes (named, earlier stages only; <code>virt-copy-out</code>)</td>
+<td>oui</td>
+<td>oui (nom ou index)</td>
+<td>oui (étapes nommées et antérieures uniquement ; <code>virt-copy-out</code>)</td>
 </tr>
 <tr>
-<td><code>COPY</code> flags <code>--chown/--chmod</code></td>
-<td>yes</td>
-<td>no</td>
-<td>no</td>
+<td>Options <code>--chown/--chmod</code> de <code>COPY</code></td>
+<td>oui</td>
+<td>non</td>
+<td>non</td>
 </tr>
 <tr>
-<td><code>ADD</code> URL / archive extraction</td>
-<td>yes</td>
-<td>no (<code>ADD</code> = <code>COPY</code>)</td>
-<td>no <code>ADD</code></td>
+<td><code>ADD</code> URL / extraction d'archive</td>
+<td>oui</td>
+<td>non (<code>ADD</code> = <code>COPY</code>)</td>
+<td>pas d'<code>ADD</code></td>
 </tr>
 <tr>
 <td><code>RUN --mount</code></td>
 <td>secret, ssh, cache, bind, tmpfs</td>
-<td><code>type=secret</code> only</td>
-<td>none</td>
+<td><code>type=secret</code> uniquement</td>
+<td>aucun</td>
 </tr>
 <tr>
 <td><code>--target</code></td>
-<td>yes</td>
-<td>yes</td>
-<td>no</td>
+<td>oui</td>
+<td>oui</td>
+<td>non</td>
 </tr>
 <tr>
 <td><code>--platform</code></td>
-<td>yes</td>
-<td><code>linux/&lt;arch&gt;</code>, host binfmt required</td>
-<td>no (images stay amd64 — <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>)</td>
+<td>oui</td>
+<td><code>linux/&lt;arch&gt;</code>, binfmt de l'hôte requis</td>
+<td>non (les images restent amd64 — <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>)</td>
 </tr>
 <tr>
-<td>Layer cache</td>
-<td>yes</td>
-<td>rootless only, no GC</td>
-<td>none</td>
+<td>Cache de couches</td>
+<td>oui</td>
+<td>rootless uniquement, sans GC</td>
+<td>aucun</td>
 </tr>
 <tr>
 <td><code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code></td>
-<td>image config</td>
-<td>image config</td>
-<td>no <code>CMD</code>; <code>USER</code> creates an account; <code>ENV</code> → <code>/etc/environment</code></td>
+<td>configuration de l'image</td>
+<td>configuration de l'image</td>
+<td>pas de <code>CMD</code> ; <code>USER</code> crée un compte ; <code>ENV</code> → <code>/etc/environment</code></td>
 </tr>
 <tr>
-<td>Resource hints</td>
+<td>Indications de ressources</td>
 <td>—</td>
-<td><code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> recorded, not applied</td>
-<td><code>VCPUS</code>/<code>MEMORY</code>/<code>HYPERVISOR</code> applied by <code>vm create</code> as defaults</td>
+<td><code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> enregistrées, non appliquées</td>
+<td><code>VCPUS</code>/<code>MEMORY</code>/<code>HYPERVISOR</code> appliquées par <code>vm create</code> comme valeurs par défaut</td>
 </tr>
 <tr>
-<td>Vulnerability gate</td>
+<td>Contrôle des vulnérabilités</td>
 <td>—</td>
-<td><code>SCAN</code> parsed, not enforced (use <code>image scan --fail-on</code>)</td>
+<td><code>SCAN</code> analysé, non imposé (utilisez <code>image scan --fail-on</code>)</td>
 <td>—</td>
 </tr>
 <tr>
-<td>Accounts / keys / passwords</td>
+<td>Comptes / clés / mots de passe</td>
 <td>—</td>
 <td>—</td>
 <td><code>USER</code>, <code>SSHKEY</code>, <code>PASSWORD</code>, <code>ROOTPASSWORD</code></td>
 </tr>
 <tr>
-<td>Disk size</td>
+<td>Taille du disque</td>
 <td>—</td>
 <td>—</td>
-<td><code>SIZE</code> (before any step)</td>
+<td><code>SIZE</code> (avant toute étape de travail)</td>
 </tr>
 <tr>
-<td>Unknown instruction</td>
-<td>error</td>
-<td>error</td>
-<td>error</td>
+<td>Instruction inconnue</td>
+<td>erreur</td>
+<td>erreur</td>
+<td>erreur</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="if-you-change-a-grammar">If you change a grammar</h2>
+<h2 id="if-you-change-a-grammar">Si vous modifiez une grammaire</h2>
 <ul>
-<li>Keep both parsers <strong>fail-closed</strong>: an unknown instruction is an error, never a skipped line.</li>
-<li>A new instruction lands with a unit test in the parser's <code>mod tests</code>, a row in this page, and — if
-  the scaffold uses it — the scaffold test still passing.</li>
-<li>If an instruction is parsed but not yet wired to an effect (as <code>SCAN</code>, <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code>
-  and VMfile <code>LABEL</code> are today), say so here; a field the user writes and the engine ignores must be
-  documented as such or removed.</li>
-<li>The Delonixfile parser lives in a library crate (<code>delonix-oci</code>), so it must not print; the
-  VMfile parser is in the CLI binary. See <a href="06-crates.html">06 — Crates</a>.</li>
+<li>Gardez les deux parseurs <strong>fermés en cas d'échec</strong> : une instruction inconnue est une erreur, jamais
+  une ligne ignorée.</li>
+<li>Une nouvelle instruction arrive avec un test unitaire dans le <code>mod tests</code> du parseur, une ligne
+  dans cette page et — si le scaffold l'utilise — le test du scaffold qui passe toujours.</li>
+<li>Si une instruction est analysée mais pas encore câblée à un effet (comme <code>SCAN</code>,
+  <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> et le <code>LABEL</code> du VMfile aujourd'hui), dites-le ici ; un champ que
+  l'utilisateur écrit et que le moteur ignore doit être documenté comme tel ou supprimé.</li>
+<li>Le parseur du Delonixfile vit dans un crate de bibliothèque (<code>delonix-oci</code>), il ne doit donc pas
+  afficher ; le parseur du VMfile se trouve dans le binaire de la CLI. Voir
+  <a href="06-crates.html">06 — Crates</a>.</li>
 </ul>
-<div class="pager"><a href="07-system-design-interview.html"><span>← Précédent</span>7. System Design Interview — the Delonix Engine</a><a class="next" href="09-microvm-setup.html"><span>Suivant →</span>9. Building microVMs</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/08-delonixfile-and-vmfile.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/08-delonixfile-and-vmfile.md</code></p></main>
+<div class="pager"><a href="07-system-design-interview.html"><span>← Précédent</span>7. Entretien de conception de système — le Delonix Engine</a><a class="next" href="09-microvm-setup.html"><span>Suivant →</span>9. Construire des microVMs</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/08-delonixfile-and-vmfile.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/fr-FR/08-delonixfile-and-vmfile.md</code></p></main>
 <aside class="toc"><h5>Sur cette page</h5><div class="toc">
 <ul>
-<li><a href="#part-1-delonixfile">Part 1 — Delonixfile</a><ul>
-<li><a href="#where-the-code-lives">Where the code lives</a></li>
-<li><a href="#file-lookup">File lookup</a></li>
-<li><a href="#instructions-the-parser-accepts">Instructions the parser accepts</a></li>
-<li><a href="#multi-stage-copy-from-and-target">Multi-stage, COPY --from and --target</a></li>
-<li><a href="#build-secrets">Build secrets</a></li>
-<li><a href="#-platform-and-binfmt">--platform and binfmt</a></li>
-<li><a href="#rootless-vs-root-and-the-layer-cache">Rootless vs root, and the layer cache</a></li>
-<li><a href="#worked-example-a-template">Worked example: a template</a></li>
-<li><a href="#the-repositorys-own-delonixfile-is-not-built-by-delonix">The repository's own Delonixfile is not built by delonix</a></li>
+<li><a href="#part-1-delonixfile">Partie 1 — Delonixfile</a><ul>
+<li><a href="#where-the-code-lives">Où se trouve le code</a></li>
+<li><a href="#file-lookup">Recherche du fichier</a></li>
+<li><a href="#instructions-the-parser-accepts">Instructions acceptées par le parseur</a></li>
+<li><a href="#multi-stage-copy-from-and-target">Multi-étapes, COPY --from et --target</a></li>
+<li><a href="#build-secrets">Secrets de build</a></li>
+<li><a href="#-platform-and-binfmt">--platform et binfmt</a></li>
+<li><a href="#rootless-vs-root-and-the-layer-cache">Rootless ou root, et le cache de couches</a></li>
+<li><a href="#worked-example-a-template">Exemple détaillé : un modèle</a></li>
+<li><a href="#the-repositorys-own-delonixfile-is-not-built-by-delonix">Le Delonixfile du dépôt lui-même n'est pas construit par delonix</a></li>
 </ul>
 </li>
-<li><a href="#part-2-vmfile">Part 2 — VMfile</a><ul>
-<li><a href="#where-the-code-lives_1">Where the code lives</a></li>
+<li><a href="#part-2-vmfile">Partie 2 — VMfile</a><ul>
+<li><a href="#where-the-code-lives_1">Où se trouve le code</a></li>
 <li><a href="#scaffold">Scaffold</a></li>
-<li><a href="#building">Building</a></li>
+<li><a href="#building">Construire</a></li>
 <li><a href="#instructions">Instructions</a></li>
-<li><a href="#what-from-accepts">What FROM accepts</a></li>
-<li><a href="#what-a-stage-is-and-where-the-result-lands">What a stage is, and where the result lands</a></li>
-<li><a href="#declarative-build">Declarative build</a></li>
-<li><a href="#worked-example-parse-checked">Worked example (parse-checked)</a></li>
+<li><a href="#what-from-accepts">Ce que FROM accepte</a></li>
+<li><a href="#what-a-stage-is-and-where-the-result-lands">Ce qu'est une étape, et où arrive le résultat</a></li>
+<li><a href="#declarative-build">Build déclaratif</a></li>
+<li><a href="#worked-example-parse-checked">Exemple détaillé (parse-checked)</a></li>
 </ul>
 </li>
-<li><a href="#comparison">Comparison</a></li>
-<li><a href="#if-you-change-a-grammar">If you change a grammar</a></li>
+<li><a href="#comparison">Comparaison</a></li>
+<li><a href="#if-you-change-a-grammar">Si vous modifiez une grammaire</a></li>
 </ul>
 </div>
 </aside></div>

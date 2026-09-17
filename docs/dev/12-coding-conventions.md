@@ -5,8 +5,12 @@ to guess the rules or make up your own. Every rule below carries a tag and a sou
 
 - **Enforced (gate)**: a CI job fails if you break it. The gate is named, so you can run it
   locally (see [02 — Build and test](02-build-and-test.md#the-gates-ci-runs)).
-- **Decided (ADR/AGENTS.md)**: an Architecture Decision Record in `docs/adr/` or a section of
-  `AGENTS.md` settles it. No gate checks it yet, so review does.
+- **Decided (ADR/AGENTS.md)**: an **Accepted** Architecture Decision Record in `docs/adr/` or a
+  section of `AGENTS.md` settles it. No gate checks it yet, so review does.
+- **Proposed (ADR, not yet decided)**: the only written source is an ADR whose status is still
+  **Proposed** (see the status column of [`docs/adr/README.md`](../adr/README.md)). It is the
+  direction the code is moving in, and review applies it, but it can still change; when the ADR is
+  accepted or rejected, the tag changes with it.
 - **Convention (observed)**: the code does it consistently and nothing wrote it down. The
   examples are real `path:symbol` references. Copy them.
 
@@ -27,8 +31,8 @@ what each crate holds in [06 — Crates](06-crates.md), the Rust idioms in
 |---|---|---|
 | **rustfmt** | Formatting. **No config file**: there is no `rustfmt.toml` or `.rustfmt.toml` at the root, so the defaults apply. | **Enforced (gate)**: CI job `fmt` runs `cargo fmt --all --check` (`.github/workflows/ci.yml`). `CONTRIBUTING.md` § Style: "`cargo fmt` defaults, no custom config". |
 | **clippy** | Every clippy lint **and every rustc warning** fails the build, tests included (`--all-targets`). No `clippy.toml`, so the lint defaults apply. | **Enforced (gate)**: CI job `clippy` runs `cargo clippy --workspace --all-targets --locked -- -D warnings`. |
-| **`[workspace.lints]`** | The root `Cargo.toml` declares exactly one workspace lint: `[workspace.lints.clippy] undocumented_unsafe_blocks = "deny"`. Every member manifest has `[lints] workspace = true`. | **Enforced (gate)**: clippy. Decided by ADR-0040 phase P0 ("`[workspace.lints]` (`undocumented_unsafe_blocks = deny`)"). |
-| **cargo-deny** | RUSTSEC advisories (an ignored one needs a written reason), yanked crates, permissive licences only (no GPL/AGPL), crates.io as the only registry, no git sources. Duplicate versions and wildcards only warn. | **Enforced (gate)**: CI job `deny` with `deny.toml`. |
+| **`[workspace.lints]`** | The root `Cargo.toml` declares exactly one workspace lint: `[workspace.lints.clippy] undocumented_unsafe_blocks = "deny"`. Every member manifest has `[lints] workspace = true`. | **Enforced (gate)**: clippy. It was introduced by phase P0 of ADR-0040 ("`[workspace.lints]` (`undocumented_unsafe_blocks = deny`)"), an ADR that is still **Proposed**; the gate holds regardless. |
+| **cargo-deny** | RUSTSEC advisories and yanked crates, permissive licences only (no GPL/AGPL), crates.io as the only registry, no git sources. The `[bans]` section of `deny.toml` (duplicate versions and wildcards, set to warn) is **not** evaluated in CI. | **Enforced (gate)**: CI job `deny` runs `check advisories licenses sources` with `deny.toml`. **Convention (observed)**: every ignored advisory in `deny.toml` carries a comment with its reason — no gate checks that the comment exists. |
 | **`scripts/lang_ratchet.py`** | Portuguese in identifiers, comments and user-facing strings (LANG-01, see [§2](#2-language-of-the-code)). | **Enforced (gate)**: CI job `lang`, baseline in `scripts/lang_baseline.json`. |
 | **`scripts/arch_fitness.py`** | Layer direction, crate directory = layer, versions only in the root, consumer names, and four debt ratchets (see [§4](#4-structure-where-code-goes) and [§5](#5-internal-api-and-boundaries)). | **Enforced (gate)**: CI job `arch`, baseline in `scripts/arch_baseline.json`. |
 | **`scripts/contract_gate.py`** | The node contract under `proto/delonix/node/v1` (see [§5.4](#54-the-node-contract)). | **Enforced (gate)**: CI job `contract`. |
@@ -96,7 +100,8 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
     Portuguese ("num apply falhado"). A `num` identifier therefore counts as Portuguese debt and
     fails the gate. Use `count` or `number`.
   - Adding a word to the lexicon **raises** the count and fails the gate. Lower the baseline in the
-    same commit. The lexicon never takes homographs (`data`, `base`, `no`, `nas`…).
+    same commit. Homographs (`data`, `base`, `no`, `nas`…) are excluded unless a measurement shows they catch
+    real Portuguese; `num` is the recorded exception (AGENTS.md § LANG-01).
 
 ---
 
@@ -109,7 +114,8 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
   directory must match the crate's entry in the `LAYERS` table. **Enforced (gate)**:
   `scripts/arch_fitness.py` `misplaced()` / `LAYER_DIR`. A new crate goes into `LAYERS` **and** the
   right directory in the same commit.
-- **Target naming convention for new or restructured crates.** **Decided**: ADR-0040 D2.1.
+- **Target naming convention for new or restructured crates.** **Proposed (ADR, not yet
+  decided)**: ADR-0040 D2.1.
 
   | Role | Name |
   |---|---|
@@ -126,8 +132,9 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
   `delonix-security-runtime`. ADR-0040 renames each one in the phase that restructures it, "never
   twice". **Don't rename a crate outside its phase.**
 - **Every crate's path is written once**, in `[workspace.dependencies]` of the root `Cargo.toml`.
-  Members depend on each other with `{ workspace = true }`. **Decided**: ADR-0040 P0, comment at the
-  top of `[workspace.dependencies]`.
+  Members depend on each other with `{ workspace = true }`. **Decided**: AGENTS.md § "A direcção
+  das dependências é um portão (ADR-0040, fase P0)", and the comment at the top of
+  `[workspace.dependencies]`.
 
 ### 3.2 Modules and files
 
@@ -144,8 +151,8 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
 
 ### 3.3 Types, traits, functions, constants
 
-- **Ports are named after the capability, not the technology.** **Decided**: ADR-0040 D3 lists the
-  ports: `WorkloadRuntime`, `SandboxProvider`, `VmProvider`, `NetworkProvider`, `StorageProvider`,
+- **Ports are named after the capability, not the technology.** **Proposed (ADR, not yet
+  decided)**: ADR-0040 D3 lists the ports: `WorkloadRuntime`, `SandboxProvider`, `VmProvider`, `NetworkProvider`, `StorageProvider`,
   `ImageRegistry`, `ImageStore`, … The ones that exist today are in
   `crates/contexts/delonix-compute/src/ports.rs` (`ImageStore`, `StorageProvider`, `DeviceResolver`,
   `RunHost`, `VmNetwork`, `NetworkProvider`) and `.../launch.rs` (`WorkloadRuntime`). The older
@@ -210,16 +217,18 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
 
 - **Kinds are `UpperCamelCase` nouns** in one of the published groups
   `core`, `compute`, `networking`, `gateway`, `storage`, `artifact`, `infrastructure`
-  (`<group>.delonix.io/v1alpha1`). **Decided**: ADR-0020; AGENTS.md § "Identidade e fronteira do
-  motor" and § "Os Kinds ganham grupos". Each Kind is **one row** in
+  (`<group>.delonix.io/v1alpha1`). **Decided**: AGENTS.md § "Identidade e fronteira do
+  motor" and § "Os Kinds ganham grupos" (ADR-0020, which introduced the groups, is still
+  **Proposed**). Each Kind is **one row** in
   `crates/contexts/delonix-stack/src/kinds.rs` (`KindFacts`: `kind`, `plural`, `short`,
   `api_version`, `domain`, `form`, `in_stack`, `converges`, …). `delonix api-resources` prints that
   table. Adding a Kind also touches tables that nothing derives from `kinds.rs` (`hot_fields`,
   `NAMESPACE_SOURCES`, `TYPED_KINDS`, the generated schema). The tests fail until each one is done.
   **Enforced (gate)**: AGENTS.md § "`kind: Service`" lists which test caught each table.
 - **A renamed Kind keeps its old name as a silent, case-insensitive alias.** A **merge** warns,
-  because its meaning changed. **Decided**: `cmd/manifest.rs:KIND_ALIASES` and its comment,
-  ADR-0020.
+  because its meaning changed. **Decided**: AGENTS.md § "Os Kinds ganham grupos e nomes
+  definitivos" ("Alias silencioso, não depreciação"); implemented in
+  `cmd/manifest.rs:KIND_ALIASES`. ADR-0020 is still **Proposed**.
 - **Manifest fields are `camelCase`.** If a field had a `snake_case` spelling before, that spelling
   stays accepted as a `serde` `alias`. **Convention (observed)**, per field rather than
   `rename_all`:
@@ -246,7 +255,10 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
   `DELONIX_LOG_FORMAT`, `DELONIX_CRI_CAP_CEILING`. **Convention (observed)** across `crates/` and
   `bins/`.
 - **For telemetry, read the standard `OTEL_*` variables**, not a new `DELONIX_*` alias.
-  **Decided**: ADR-0040 D6.
+  **Proposed (ADR, not yet decided)**: ADR-0040 D6. This is the target, not today's code:
+  `crates/adapters/delonix-telemetry/src/telemetry.rs` reads `DELONIX_OTLP_ENDPOINT` for the OTLP
+  exporter, and from the standard set only `OTEL_SERVICE_NAME`. Don't add a new `DELONIX_*`
+  telemetry variable, and don't remove `DELONIX_OTLP_ENDPOINT` outside the phase that migrates it.
 - **An escape hatch that weakens a safety default is loud and explicit.** It is off unless set to
   `1`, and it warns: `DELONIX_ENABLE_IPV6=1`, `DELONIX_ALLOW_LINK_LOCAL=1`. **Decided**: AGENTS.md §
   "Bloco 0 do plano 33 (v0.37.1)".
@@ -294,14 +306,17 @@ More structural rules, each **Enforced (gate)** by `scripts/arch_fitness.py`:
 - **Foundation and contexts stay pure of heavy dependencies.** `tokio`, `axum`, `hyper`, `tonic`,
   `reqwest`, `clap`, `ratatui`, `serde_yaml`, `rmcp`, OpenTelemetry and `prometheus-client` are
   refused there (`HEAVY`).
-- **A binary composes exactly one interface.** Enforced in `rule_failures()` (ADR-0040 D2.4).
+- **A binary composes exactly one interface.** Enforced in `rule_failures()` (introduced by
+  ADR-0040 D2.4, still **Proposed**; also written in AGENTS.md § "A direcção das dependências é um
+  portão").
 - **Dependency versions live only in the root `[workspace.dependencies]`.** A member writes
   `{ workspace = true, features = [...] }` and nothing else. `default-features = false` stays in the
   root, because a member cannot turn off what the root turns on (`inline_versions()`).
 - **Libraries don't print.** The `library_prints` ratchet counts `println!`/`eprintln!`/`print!`
   outside `bins/`. Emit `tracing` instead (for example `tracing::warn!` in
   `crates/adapters/delonix-sdn/src/lib.rs`) and let the interface present the output.
-  **Decided**: ADR-0040 D6.
+  **Decided**: AGENTS.md § "A direcção das dependências é um portão (ADR-0040, fase P0)" ("Uma
+  biblioteca não escreve para o terminal; emite `tracing`").
 - **Libraries don't re-run the engine's own binary.** The `self_exec_sites` ratchet counts
   `current_exe()`, `cli_bin()` and `delonix_bin()` outside `bins/`. Call a function or a use case
   instead. `Command::new("ip")`, `nft`, `qemu-img` and `ssh` are **not** counted, because running
@@ -313,7 +328,9 @@ More structural rules, each **Enforced (gate)** by `scripts/arch_fitness.py`:
 ### 4.2 "My change is X → it goes in Y"
 
 This table uses the crates as they exist today. Check [06](06-crates.md) for each crate's contents
-before you add to it.
+before you add to it. Where the source column cites ADR-0040 or ADR-0026, the tag is **Proposed
+(ADR, not yet decided)**: both ADRs are still Proposed, even though the crates they describe
+already exist.
 
 | Your change | Crate (layer) | Source |
 |---|---|---|
@@ -339,9 +356,9 @@ before you add to it.
 ### 4.3 Pure core, I/O at the edges
 
 - **Decisions are pure functions over data you have already read.** They take no store, run no
-  command and need no privilege, so a test can call them with plain values. **Decided**: ADR-0040
-  D1 (a context's `domain/` has "no I/O, no `tokio`, `libc`, `nix`, `std::fs`"). **Convention
-  (observed)**: `delonix-stack/src/reconcile.rs` ("decides it WITHOUT touching the machine"),
+  command and need no privilege, so a test can call them with plain values. **Proposed (ADR, not yet
+  decided)**: ADR-0040 D1 (a context's `domain/` has "no I/O, no `tokio`, `libc`, `nix`,
+  `std::fs`"). **Convention (observed)**: `delonix-stack/src/reconcile.rs` ("decides it WITHOUT touching the machine"),
   `cmd/vm.rs:resolve_vm_defaults`, `delonix-sdn/src/infra.rs:vmtap_line`,
   `delonix-oci/src/registry.rs:parse_content_range`.
 
@@ -363,7 +380,7 @@ before you add to it.
   temporary directory. **Decided**: AGENTS.md § "O manifesto de VM resolvia a imagem de outra
   maneira que a CLI".
 - **One rule, one owner.** When two call sites need the same derivation, extract one function and
-  call it from both. A second copy drifts. Examples: `delonix_net::bridge_name` (the bridge name
+  call it from both. A second copy drifts. Examples: `delonix_net_rules::bridge_name`, re-exported by `delonix-sdn` (the bridge name
   had two formulas and printed a device that did not exist), `infra::dhcp_lease_ip`,
   `effective_entrypoints`. **Decided**: AGENTS.md § "`delonix network`", § "Isolamento de
   namespace", § "Reverse-proxy L7".
@@ -375,8 +392,10 @@ before you add to it.
 ### 5.1 Ports and adapters
 
 - **A new backend implements a port. It is never an `if provider == …` somewhere else.**
-  **Decided**: AGENTS.md § "Identidade e fronteira do motor"; ADR-0040 D3 rule 3 ("No string
-  matching on provider names outside the composition root"). D3 plans a fitness test for this, but
+  **Decided**: AGENTS.md § "Identidade e fronteira do motor" ("Um provider novo entra como
+  implementação de uma porta, nunca como um `if provider == …`"). ADR-0040 D3 rule 3 ("No string
+  matching on provider names outside the composition root") restates it and is still **Proposed**.
+  D3 plans a fitness test for this, but
   **it does not exist yet in `arch_fitness.py`**, so review enforces it for now.
 - **Backend-specific knowledge lives on the backend.** For example,
   `VmBackend::ip_is_predicted()` answers whether a VM's IP was predicted, instead of the call site
@@ -409,7 +428,8 @@ before you add to it.
 ### 5.2 Errors per crate (ADR-0040 P3)
 
 - **An adapter or provider defines its own `Error` and converts it into the shared class**
-  (`delonix_model::Error`), which carries the `DX_*` code. **Decided**: ADR-0040 P3.
+  (`delonix_model::Error`), which carries the `DX_*` code. **Proposed (ADR, not yet decided)**:
+  ADR-0040 P3.
   **Enforced (gate)**: the `shared_error_imports` ratchet in `arch_fitness.py` (`SHARED_ERROR`,
   limited to `crates/adapters/` and `crates/providers/`) counts
   `use delonix_runtime_core::{…Error/Result…}` or `use delonix_model::{…}` imports that make the
@@ -442,7 +462,7 @@ before you add to it.
 - **`pub` in a library crate is a promise to other crates.** Removing a public item is a breaking
   change for library users, even with zero callers in this workspace. rustc's `dead_code` lint
   doesn't see unused `pub` items, so when you delete one, count the orphaned public items by hand.
-  **Decided**: AGENTS.md § "`delonix_net::Net` foi APAGADO".
+  **Decided**: AGENTS.md § "`delonix_sdn::Net` foi APAGADO — e é breaking para quem usa a biblioteca".
 
 ### 5.4 The node contract
 
@@ -450,8 +470,8 @@ before you add to it.
 `docs/api/openapi.yaml` is generated from it. **Never edit the OpenAPI file by hand.**
 **Enforced (gate)**: `scripts/contract_gate.py` runs `buf format`, `buf lint`, `buf breaking`
 against the last tag that contains `proto/`, checks the HTTP mapping of every RPC, and checks that
-the OpenAPI file equals the generated one. **Decided**: AGENTS.md § "O contrato de nó é um portão";
-ADR-0040 D4.
+the OpenAPI file equals the generated one. **Decided**: AGENTS.md § "O contrato de nó é um portão"
+(which cites ADR-0040 P1; ADR-0040 D4 is still **Proposed**).
 
 - **One request message per RPC**, named `<Rpc>Request`. **Enforced (gate)**: `buf lint`
   `RPC_REQUEST_STANDARD_NAME` (see `buf.yaml`). A shared request lets a field meant for one method
@@ -471,9 +491,14 @@ ADR-0040 D4.
 
 The engine doesn't know who uses it. No name of a platform, control plane, console or agent, and
 no notion of tenant, account, plan or billing, may appear in `crates/`, `bins/`, `proto/`, the root
-`Cargo.toml` or the `Makefile`, **comments included**. **Enforced (gate)**:
-`scripts/arch_fitness.py` `consumer_mentions()` with the `CONSUMER_NAMES` pattern. **Decided**:
-AGENTS.md § "Identidade e fronteira do motor". If a consumer needs something, write it as a generic
+`Cargo.toml` or the `Makefile`, **comments included**.
+
+- **Consumer names.** **Enforced (gate)**: `scripts/arch_fitness.py` `consumer_mentions()` matches
+  the `CONSUMER_NAMES` regular expression, a fixed list of names, in those paths. A name that is
+  not on the list is not caught.
+- **Tenant, account, plan and billing concepts.** **Decided**: AGENTS.md § "Identidade e fronteira
+  do motor". No gate matches them; review checks it.
+ If a consumer needs something, write it as a generic
 capability in the engine's own vocabulary (Kinds and resources), and add it only if it makes sense
 for any client. The engine validates its own contract and never trusts a caller to refuse what it
 doesn't support.
@@ -639,8 +664,12 @@ doesn't support.
   window. **Convention (observed)**: `store.rs:jsonstore_update_concorrente_nao_perde_escritas`.
 - **Prefer properties over sampled timing.** When a race can only be sampled, generate load and
   repeat. **Decided**: AGENTS.md § "Um `exec` logo a seguir ao `run -d` corria no HOST".
-- **Never write counts into docs or comments** (tests, lines, checks). They are stale after the
-  next PR. **Decided**: `scripts/dev_docs.py` docstring.
+- **Generated regions carry no volatile counts** (lines, tests, commits). **Decided**:
+  `scripts/dev_docs.py` docstring ("Deliberately NOT generated: line counts, test counts, commit
+  counts"). A **hand-written measurement** cites the measured value together with the date it was
+  measured, never a running total. **Decided**: AGENTS.md § "A bateria mede o `--help` de tudo e
+  EXECUTA um quarto" ("Cita-se a fracção medida e a data, nunca o total"). Whether counts may appear
+  in prose or code comments at all is **not decided** — follow the surrounding text.
 
 ---
 
@@ -686,11 +715,11 @@ your PR:
   count towards `shared_error_imports`. P3 decides errors per crate. No document says how a port's
   signature changes, and adding such an import in a new file fails the ratchet. If your change
   needs one, raise it in the PR. Don't work around the regex.
-- **Crate names during the transition.** ADR-0040 D2 fixes the target names, but a brand-new crate
+- **Crate names during the transition.** ADR-0040 D2 (still Proposed) sets the target names, but a brand-new crate
   that lands before its context exists (for example a second provider before the
   `delonix-provider-*` renames) has no written rule. Ask in the issue first.
 - **Required doc comments.** There is no `missing_docs` lint, only the observed habit.
-- **The fitness test for provider-name matching** (ADR-0040 D3 rule 3) is decided but not yet
+- **The fitness test for provider-name matching** (ADR-0040 D3 rule 3) is proposed but not yet
   implemented.
 
 ---
@@ -725,8 +754,8 @@ Before you open the PR, go through the list:
     [§7](#7-unsafe-syscalls-and-processes)
 12. Record mutations go through `update`, and new record fields have `#[serde(default)]`. →
     [§8](#8-state-and-concurrency)
-13. Tests use isolated roots, the regression test fails with the fix reverted, and no counts are
-    written into docs. → [§9](#9-tests)
+13. Tests use isolated roots, the regression test fails with the fix reverted, and a measured
+    number carries its date. → [§9](#9-tests)
 14. CLI changes: all entry points are wired, verbs are Docker-aligned, cuts have no aliases, and
     the CLI baseline is updated. → [§3.5](#35-cli-commands-and-flags)
 15. Kinds and manifest fields: a row in `kinds.rs`, `camelCase` fields with old spellings as

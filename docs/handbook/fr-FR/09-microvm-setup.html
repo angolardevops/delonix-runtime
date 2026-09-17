@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr-FR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>9. Building microVMs · Delonix Runtime — Guide du contributeur</title>
+<title>9. Construire des microVMs · Delonix Runtime — Guide du contributeur</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,227 +59,243 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Guide du contributeur</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Rechercher <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/09-microvm-setup.html">EN · English</option><option value="../pt-AO/09-microvm-setup.html">PT-AO · Português (Angola)</option><option value="../fr-FR/09-microvm-setup.html" selected>FR-FR · Français</option></select></div>
-<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="index.html">Delonix Runtime — Manuel du contributeur</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="01-environment.html">1. Préparer votre environnement</a>
+<a class="" href="02-build-and-test.html">2. Cloner, compiler et tester</a>
+<a class="" href="03-rust-primer.html">3. Initiation à Rust pour cette base de code</a>
+<a class="" href="04-cloud-native-primer.html">4. Initiation au cloud native</a>
 <a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="on" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="06-crates.html">6. Les crates</a>
+<a class="" href="07-system-design-interview.html">7. Entretien de conception de système — le Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile et VMfile</a>
+<a class="on" href="09-microvm-setup.html">9. Construire des microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Flux de contribution</a>
+<a class="" href="11-publishing-docs.html">11. Publier la documentation</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="9-building-microvms">9. Building microVMs</h1>
-<p>This page takes a contributor from a bare Linux host to building, booting and testing VMs with
-Delonix, and shows where the code lives when something needs changing. It assumes you have
-already read <a href="01-environment.html">01 — Preparing your environment</a> and can build the tree
-(<a href="02-build-and-test.html">02</a>).</p>
+<main><h1 id="9-building-microvms">9. Construire des microVMs</h1>
+<p>Cette page mène un contributeur d'un hôte Linux nu jusqu'à la construction, au démarrage et au test
+de VMs avec Delonix, et montre où se trouve le code lorsqu'il faut modifier quelque chose. Elle
+suppose que vous avez déjà lu <a href="01-environment.html">01 — Préparer votre environnement</a> et que vous
+savez construire l'arborescence (<a href="02-build-and-test.html">02</a>).</p>
 <blockquote>
-<p><strong>What was verified for this page.</strong> Every command and flag below was checked against
-<code>delonix &lt;group&gt; --help</code> of a binary built from this tree, and the read-only / configuration
-commands (<code>vm ls</code>, <code>vm reach</code>, <code>vm default-backend</code>, <code>image vm ls</code>, <code>manifest validate</code>,
-<code>stack apply --dry-run</code>, the backend-selection errors) were <strong>run</strong> with <code>DELONIX_ROOT</code> and
-<code>DELONIX_NET_RUNTIME_DIR</code> pointed at a scratch directory. <strong>Booting a VM, building an image and
-pulling from the registry were not executed in this review</strong> — behaviour for those comes from
-the code, the ADRs and the scripted tests referenced below.</p>
+<p><strong>Ce qui a été vérifié pour cette page.</strong> Chaque commande et chaque option ci-dessous ont été
+vérifiées contre <code>delonix &lt;group&gt; --help</code> d'un binaire construit à partir de cette arborescence,
+et les commandes en lecture seule / de configuration (<code>vm ls</code>, <code>vm reach</code>, <code>vm default-backend</code>,
+<code>image vm ls</code>, <code>manifest validate</code>, <code>stack apply --dry-run</code>, les erreurs de sélection du backend)
+ont été <strong>exécutées</strong> avec <code>DELONIX_ROOT</code> et <code>DELONIX_NET_RUNTIME_DIR</code> pointant vers un répertoire
+jetable. <strong>Le démarrage d'une VM, la construction d'une image et le pull depuis le registre n'ont
+pas été exécutés lors de cette relecture</strong> — le comportement de ces opérations provient du code,
+des ADR et des tests scriptés référencés ci-dessous.</p>
 </blockquote>
-<p>Always use the binary you built (<code>./target/debug/delonix</code>), not one on your <code>PATH</code>, and always
-isolate <strong>both</strong> state roots while experimenting — see <a href="#isolation-first">Isolation</a>.</p>
+<p>Utilisez toujours le binaire que vous avez construit (<code>./target/debug/delonix</code>), et non celui de
+votre <code>PATH</code>, et isolez toujours <strong>les deux</strong> racines d'état pendant vos expérimentations — voir
+<a href="#isolation-first">Isolation</a>.</p>
 <hr />
-<h2 id="1-host-prerequisites">1. Host prerequisites</h2>
+<h2 id="1-host-prerequisites">1. Prérequis de l'hôte</h2>
 <h3 id="kvm">KVM</h3>
-<p>Both local backends need hardware virtualization:</p>
+<p>Les deux backends locaux ont besoin de la virtualisation matérielle :</p>
 <div class="code" data-shell><pre><code class="language-bash">ls -l /dev/kvm            # must exist; missing = VT-x/AMD-V off in firmware, or no nested virt
 id -nG | tr &#x27; &#x27; &#x27;\n&#x27; | grep -x kvm   # your user must be in the kvm group
 </code></pre></div>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (default, i.e. without <code>--no-vm</code>) adds you to the <code>kvm</code> and <code>libvirt</code> groups
-and warns when <code>/dev/kvm</code> is missing. Group changes need a new login session.</p>
-<h3 id="cloud-hypervisor-and-its-firmware">Cloud Hypervisor and its firmware</h3>
-<p>The backend is available when <code>cloud-hypervisor</code> is on <code>PATH</code>
-(<code>CloudHypervisorBackend::available</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>). Where the
-distribution does not package it, the installer downloads the <strong>static</strong> upstream binary to
-<code>/usr/local/bin/cloud-hypervisor</code>, pinned to a version <strong>and</strong> a SHA-256 in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>.</p>
-<p>To boot a cloud image without <code>--kernel</code>, CH needs UEFI firmware. <code>default_ch_firmware</code> uses
-<code>$DELONIX_HYPERVISOR_FW</code> if set, otherwise the first file that exists in <code>DEFAULT_CH_FIRMWARES</code>:</p>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (par défaut, c'est-à-dire sans <code>--no-vm</code>) vous ajoute aux groupes <code>kvm</code> et
+<code>libvirt</code> et avertit lorsque <code>/dev/kvm</code> est absent. Les changements de groupe nécessitent une
+nouvelle session.</p>
+<h3 id="cloud-hypervisor-and-its-firmware">Cloud Hypervisor et son firmware</h3>
+<p>Le backend est disponible lorsque <code>cloud-hypervisor</code> est dans le <code>PATH</code>
+(<code>CloudHypervisorBackend::available</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>). Lorsque la
+distribution ne le fournit pas en paquet, l'installateur télécharge le binaire <strong>statique</strong> amont
+dans <code>/usr/local/bin/cloud-hypervisor</code>, épinglé à une version <strong>et</strong> à un SHA-256 dans
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>.</p>
+<p>Pour démarrer une cloud image sans <code>--kernel</code>, CH a besoin d'un firmware UEFI.
+<code>default_ch_firmware</code> utilise <code>$DELONIX_HYPERVISOR_FW</code> s'il est défini, sinon le premier fichier
+existant de <code>DEFAULT_CH_FIRMWARES</code> :</p>
 <div class="code"><pre><code class="language-text">/usr/local/share/delonix/CLOUDHV.fd       ← EDK2 build from cloud-hypervisor/edk2 (preferred)
 /usr/share/delonix/CLOUDHV.fd
 /usr/local/share/delonix/hypervisor-fw    ← rust-hypervisor-firmware (fallback)
 /usr/share/delonix/hypervisor-fw
 </code></pre></div>
-<p><strong>The order matters.</strong> Measured and recorded in the constant's doc comment: under
-<code>rust-hypervisor-fw</code> none of the images this project builds boot in CH; with EDK2 <code>CLOUDHV.fd</code> they
-do. <code>hypervisor-fw</code> stays as a fallback for hosts that only have it. The installer fetches both
-(each pinned by tag and SHA-256). The unit test <code>o_edk2_vem_antes_do_hypervisor_fw_na_procura_de_firmware</code>
-guards the order.</p>
+<p><strong>L'ordre compte.</strong> Mesuré et consigné dans le commentaire de documentation de la constante : sous
+<code>rust-hypervisor-fw</code>, aucune des images construites par ce projet ne démarre dans CH ; avec EDK2
+<code>CLOUDHV.fd</code>, elles démarrent. <code>hypervisor-fw</code> reste un repli pour les hôtes qui n'ont que lui.
+L'installateur récupère les deux (chacun épinglé par tag et SHA-256). Le test unitaire
+<code>o_edk2_vem_antes_do_hypervisor_fw_na_procura_de_firmware</code> protège cet ordre.</p>
 <h3 id="libvirt-qemu">libvirt / QEMU</h3>
-<p>The libvirt backend is available when both <code>virsh</code> and <code>qemu-system-x86_64</code> are on <code>PATH</code>
-(<code>LibvirtBackend::available</code>). The installer installs QEMU and a libvirt daemon package and
-enables <code>libvirtd</code> (socket-activated where supported).</p>
-<p>Which libvirt connection is used matters more than it looks (<code>libvirt_uri_for</code>):</p>
+<p>Le backend libvirt est disponible lorsque <code>virsh</code> et <code>qemu-system-x86_64</code> sont tous deux dans le
+<code>PATH</code> (<code>LibvirtBackend::available</code>). L'installateur installe QEMU et un paquet de daemon libvirt,
+et active <code>libvirtd</code> (par socket activation lorsque c'est pris en charge).</p>
+<p>La connexion libvirt utilisée compte plus qu'il n'y paraît (<code>libvirt_uri_for</code>) :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Situation</th>
-<th>Connection</th>
-<th>Consequence</th>
+<th>Connexion</th>
+<th>Conséquence</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>--net-mode nat</code> or <code>bridge</code></td>
+<td><code>--net-mode nat</code> ou <code>bridge</code></td>
 <td><code>qemu:///system</code></td>
-<td>reachable IP; needs the <code>libvirt</code> group (or root)</td>
+<td>IP joignable ; nécessite le groupe <code>libvirt</code> (ou root)</td>
 </tr>
 <tr>
-<td>no <code>--net-mode</code>, system connection usable</td>
-<td><code>qemu:///system</code>, <strong><code>nat</code> chosen automatically</strong></td>
-<td>IP by DHCP from the libvirt network (<code>virbr0</code>)</td>
+<td>pas de <code>--net-mode</code>, connexion système utilisable</td>
+<td><code>qemu:///system</code>, <strong><code>nat</code> choisi automatiquement</strong></td>
+<td>IP par DHCP depuis le réseau libvirt (<code>virbr0</code>)</td>
 </tr>
 <tr>
-<td>no <code>--net-mode</code>, system connection <strong>not</strong> usable, rootless</td>
-<td><code>qemu:///session</code>, user-mode</td>
-<td><strong>no visible or reachable IP</strong>; <code>vm create</code> warns</td>
+<td>pas de <code>--net-mode</code>, connexion système <strong>non</strong> utilisable, rootless</td>
+<td><code>qemu:///session</code>, mode utilisateur</td>
+<td><strong>aucune IP visible ni joignable</strong> ; <code>vm create</code> avertit</td>
 </tr>
 </tbody>
 </table></div>
-<p>On <code>qemu:///system</code> QEMU runs as the libvirt service user, which cannot read a disk under a 0700
-home. For a rootless caller the domain XML gets a static DAC <code>seclabel</code> pinning QEMU to your
-uid/gid with <code>relabel='no'</code>, so your own overlay boots without being chowned away.</p>
-<h3 id="tools-the-vm-code-shells-out-to">Tools the VM code shells out to</h3>
+<p>Sur <code>qemu:///system</code>, QEMU s'exécute sous l'utilisateur du service libvirt, qui ne peut pas lire un
+disque situé sous un home en 0700. Pour un appelant rootless, le XML du domaine reçoit un
+<code>seclabel</code> DAC statique qui épingle QEMU à votre uid/gid avec <code>relabel='no'</code>, de sorte que votre
+propre overlay démarre sans que son propriétaire soit changé.</p>
+<h3 id="tools-the-vm-code-shells-out-to">Outils que le code VM invoque</h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Tool</th>
-<th>Package (Debian / Fedora)</th>
-<th>Used by</th>
+<th>Outil</th>
+<th>Paquet (Debian / Fedora)</th>
+<th>Utilisé par</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>qemu-img</code></td>
 <td><code>qemu-utils</code> / <code>qemu-img</code></td>
-<td>per-VM overlays, <code>vm convert</code>, snapshots on CH, image builds</td>
+<td>overlays par VM, <code>vm convert</code>, snapshots sur CH, construction d'images</td>
 </tr>
 <tr>
 <td><code>cloud-localds</code></td>
 <td><code>cloud-image-utils</code> / <code>cloud-utils</code></td>
-<td>NoCloud seed ISO — generated on <strong>every</strong> <code>vm create</code> of a cloud-init image unless <code>--seed</code> is given (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a>)</td>
+<td>ISO de seed NoCloud — générée à <strong>chaque</strong> <code>vm create</code> d'une image cloud-init sauf si <code>--seed</code> est fourni (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a>)</td>
 </tr>
 <tr>
 <td><code>virsh</code></td>
 <td><code>libvirt-clients</code> / <code>libvirt-client</code></td>
-<td>libvirt backend</td>
+<td>backend libvirt</td>
 </tr>
 <tr>
 <td><code>virt-customize</code>, <code>virt-sparsify</code>, <code>virt-copy-out</code></td>
 <td><code>libguestfs-tools</code> / <code>guestfs-tools</code></td>
-<td><code>image vm build</code> only</td>
+<td><code>image vm build</code> uniquement</td>
 </tr>
 </tbody>
 </table></div>
-<p><code>vmimage::tool_package</code> maps a missing binary to its package, so a missing tool is reported by
-name rather than as a bare <code>No such file or directory</code>.</p>
-<h3 id="only-for-building-images-with-image-build">Only for building images: <code>--with-image-build</code></h3>
-<p><code>image vm build</code> runs <code>virt-customize</code>, which builds a small appliance with supermin. Three host
-problems break it in ways that do not look like host problems; <code>scripts/install.sh --with-image-build</code>
-handles them, and <code>tool_failure_hint</code> (<code>cmd/vmimage.rs</code>) names them when a build fails:</p>
+<p><code>vmimage::tool_package</code> associe un binaire manquant à son paquet, de sorte qu'un outil manquant est
+signalé par son nom plutôt que par un simple <code>No such file or directory</code>.</p>
+<h3 id="only-for-building-images-with-image-build">Uniquement pour construire des images : <code>--with-image-build</code></h3>
+<p><code>image vm build</code> exécute <code>virt-customize</code>, qui construit une petite appliance avec supermin. Trois
+problèmes d'hôte la cassent d'une manière qui ne ressemble pas à des problèmes d'hôte ;
+<code>scripts/install.sh --with-image-build</code> les traite, et <code>tool_failure_hint</code> (<code>cmd/vmimage.rs</code>) les
+nomme lorsqu'un build échoue :</p>
 <ol>
-<li><strong>No DHCP client on the host.</strong> supermin <em>copies</em> host packages into the appliance; without
-   <code>isc-dhcp-client</code> the appliance has no network and the build dies on
-   <code>Temporary failure resolving …</code>. The installer installs it.</li>
-<li><strong><code>/boot/vmlinuz-*</code> is 0600</strong> (Debian/Ubuntu). supermin copies the host kernel and fails with
-   <code>Permission denied</code>. The installer runs <code>chmod 0644 /boot/vmlinuz-*</code> — this <strong>lowers a host
-   security boundary</strong> (any local user can read the kernel image), so it is opt-in and prints how to
-   revert (<code>sudo chmod 0600 /boot/vmlinuz-*</code>). The failure hint also shows how to make it survive
-   kernel updates.</li>
-<li><strong>passt</strong>, only with <code>image vm build --network</code>. libguestfs gives the appliance a network through
-   passt. Its AppArmor profile (Debian/Ubuntu) forbids the runtime directory libguestfs uses, and the
-   passt packaged in Ubuntu 24.04 starts but never hands out a lease — <code>dhclient</code> waits ~300 s and the
-   build continues <strong>without</strong> network, failing later on a package mirror. Remedies:</li>
+<li><strong>Aucun client DHCP sur l'hôte.</strong> supermin <em>copie</em> les paquets de l'hôte dans l'appliance ; sans
+   <code>isc-dhcp-client</code>, l'appliance n'a pas de réseau et le build meurt sur
+   <code>Temporary failure resolving …</code>. L'installateur l'installe.</li>
+<li><strong><code>/boot/vmlinuz-*</code> est en 0600</strong> (Debian/Ubuntu). supermin copie le noyau de l'hôte et échoue
+   avec <code>Permission denied</code>. L'installateur exécute <code>chmod 0644 /boot/vmlinuz-*</code> — cela <strong>abaisse
+   une frontière de sécurité de l'hôte</strong> (tout utilisateur local peut lire l'image du noyau) ; c'est
+   donc opt-in, et l'installateur affiche comment revenir en arrière
+   (<code>sudo chmod 0600 /boot/vmlinuz-*</code>). L'indication d'échec montre aussi comment faire survivre ce
+   réglage aux mises à jour du noyau.</li>
+<li><strong>passt</strong>, uniquement avec <code>image vm build --network</code>. libguestfs donne un réseau à l'appliance
+   via passt. Son profil AppArmor (Debian/Ubuntu) interdit le répertoire d'exécution qu'utilise
+   libguestfs, et le passt fourni dans Ubuntu 24.04 démarre mais ne distribue jamais de bail —
+   <code>dhclient</code> attend ~300 s et le build continue <strong>sans</strong> réseau, pour échouer plus tard sur un miroir
+   de paquets. Remèdes :</li>
 </ol>
 <div class="code" data-shell><pre><code class="language-bash">mkdir -p /tmp/delonix-run &amp;&amp; chmod 700 /tmp/delonix-run
 XDG_RUNTIME_DIR=/tmp/delonix-run ./target/debug/delonix image vm build --network …
 </code></pre></div>
-<p>and, if it still fails, a current passt <strong>first on <code>PATH</code></strong> (the installer builds one into
-   <code>/usr/local/bin</code>). Do not "disable" passt with a failing stub: libguestfs then uses the stub and
-   dies on it.</p>
-<p>The golden recipe's <code>--offline</code> mode avoids trap 3 entirely: it fetches and verifies packages on the
-host and runs the guest with <code>--no-network</code>.</p>
-<h3 id="isolation-first">Isolation first</h3>
-<p>This machine may run other workloads. Before any <code>vm</code> command beyond <code>--help</code>:</p>
+<p>et, si cela échoue encore, un passt récent <strong>en premier dans le <code>PATH</code></strong> (l'installateur en
+   construit un dans <code>/usr/local/bin</code>). Ne « désactivez » pas passt avec un stub qui échoue :
+   libguestfs utilise alors le stub et meurt dessus.</p>
+<p>Le mode <code>--offline</code> de la recette dorée évite entièrement le piège 3 : il récupère et vérifie les
+paquets sur l'hôte et exécute l'invité avec <code>--no-network</code>.</p>
+<h3 id="isolation-first">L'isolation d'abord</h3>
+<p>Cette machine peut exécuter d'autres charges de travail. Avant toute commande <code>vm</code> allant au-delà de
+<code>--help</code> :</p>
 <div class="code" data-shell><pre><code class="language-bash">export DELONIX_ROOT=$HOME/dlx-dev/root
 export DELONIX_NET_RUNTIME_DIR=/tmp/dlx-dev-run     # keep it SHORT (AF_UNIX sun_path is 108 bytes)
 export TMPDIR=$HOME/dlx-dev/tmp                     # VMfile builds put whole disks here
 mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot; &quot;$TMPDIR&quot;
 </code></pre></div>
-<p>Both roots, always: isolating only <code>DELONIX_ROOT</code> leaves the network sockets shared with the real
-state and has restarted real workloads before (see <a href="02-build-and-test.html">02</a>). A Cloud Hypervisor
-VM also refuses up front when <code>&lt;root&gt;/vms/&lt;name&gt;.sock</code> would not fit in <code>sun_path</code>
-(<code>ch_socket_paths_fit</code>), so avoid very deep <code>DELONIX_ROOT</code> paths.</p>
+<p>Les deux racines, toujours : isoler uniquement <code>DELONIX_ROOT</code> laisse les sockets réseau partagées
+avec l'état réel, et cela a déjà redémarré de vraies charges de travail (voir
+<a href="02-build-and-test.html">02</a>). Une VM Cloud Hypervisor refuse aussi d'emblée lorsque
+<code>&lt;root&gt;/vms/&lt;name&gt;.sock</code> ne tiendrait pas dans <code>sun_path</code> (<code>ch_socket_paths_fit</code>) ; évitez donc les
+chemins <code>DELONIX_ROOT</code> très profonds.</p>
 <hr />
-<h2 id="2-backends-and-how-one-is-chosen">2. Backends and how one is chosen</h2>
-<h3 id="the-port-and-the-registry">The port and the registry</h3>
-<p><code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) is the port every hypervisor implements:
-<code>id</code>, <code>available</code>, <code>boot</code>, <code>is_running</code>, <code>ip</code>, <code>stop</code>, plus defaulted methods (<code>destroy</code>, <code>pause</code>,
-<code>unpause</code>, <code>resume</code>, <code>snapshot</code>/<code>restore</code>/<code>snapshots</code>/<code>delete_snapshot</code>, <code>preserve_snapshots</code>,
-<code>ip_is_predicted</code>, <code>manages_own_storage</code>, <code>auto_selectable</code>, <code>disk_health</code>). A default that cannot
-be honoured <strong>fails closed</strong> with a message, never a silent no-op.</p>
-<p>Backends live in a registry (<code>BACKENDS</code>), not a <code>match</code>:</p>
+<h2 id="2-backends-and-how-one-is-chosen">2. Les backends et comment l'un d'eux est choisi</h2>
+<h3 id="the-port-and-the-registry">Le port et le registre</h3>
+<p><code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) est le port que chaque hyperviseur
+implémente : <code>id</code>, <code>available</code>, <code>boot</code>, <code>is_running</code>, <code>ip</code>, <code>stop</code>, plus des méthodes avec
+implémentation par défaut (<code>destroy</code>, <code>pause</code>, <code>unpause</code>, <code>resume</code>,
+<code>snapshot</code>/<code>restore</code>/<code>snapshots</code>/<code>delete_snapshot</code>, <code>preserve_snapshots</code>, <code>ip_is_predicted</code>,
+<code>manages_own_storage</code>, <code>auto_selectable</code>, <code>disk_health</code>). Une implémentation par défaut qui ne peut
+pas être honorée <strong>échoue de manière fermée</strong> avec un message, jamais par un no-op silencieux.</p>
+<p>Les backends vivent dans un registre (<code>BACKENDS</code>), et non dans un <code>match</code> :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Backend</th>
 <th>Crate</th>
-<th>Aliases</th>
-<th>Auto-selectable</th>
+<th>Alias</th>
+<th>Sélection automatique</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>cloud-hypervisor</code></td>
-<td><code>delonix-vm</code> (built in)</td>
+<td><code>delonix-vm</code> (intégré)</td>
 <td><code>ch</code>, <code>cloudhypervisor</code></td>
-<td>yes</td>
+<td>oui</td>
 </tr>
 <tr>
 <td><code>libvirt</code></td>
-<td><code>delonix-vm</code> (built in)</td>
+<td><code>delonix-vm</code> (intégré)</td>
 <td><code>kvm</code>, <code>qemu</code></td>
-<td>yes</td>
+<td>oui</td>
 </tr>
 <tr>
 <td><code>proxmox</code></td>
-<td><code>delonix-proxmox</code> (registered by the CLI)</td>
+<td><code>delonix-proxmox</code> (enregistré par la CLI)</td>
 <td>—</td>
-<td><strong>no</strong> — selected by name only</td>
+<td><strong>non</strong> — sélectionné par nom uniquement</td>
 </tr>
 </tbody>
 </table></div>
-<p><code>register_backend</code> refuses an id/alias that belongs to another backend, and refuses
-<code>auto_selectable: true</code> for anything that is not built in: auto-detection asks every candidate
-<code>available()</code>, and a remote backend can only answer that over the network. Registering does no I/O;
-the factory runs the first time the backend is selected. <code>backend_for</code> on an existing VM resolves the
-recorded backend and an unknown name is an <strong>error</strong> (it used to fall back to CH).</p>
-<h3 id="selection-precedence-for-a-new-vm">Selection precedence for a new VM</h3>
-<p>From <code>delonix_vm::create_with</code> and <code>resolve_vm_defaults</code> (<code>cmd/vm.rs</code>), first match wins:</p>
+<p><code>register_backend</code> refuse un id/alias qui appartient à un autre backend, et refuse
+<code>auto_selectable: true</code> pour tout ce qui n'est pas intégré : l'auto-détection interroge
+<code>available()</code> de chaque candidat, et un backend distant ne peut y répondre que par le réseau.
+L'enregistrement ne fait aucune I/O ; la factory s'exécute la première fois que le backend est
+sélectionné. <code>backend_for</code> sur une VM existante résout le backend enregistré, et un nom inconnu est
+une <strong>erreur</strong> (auparavant, il retombait sur CH).</p>
+<h3 id="selection-precedence-for-a-new-vm">Ordre de priorité de la sélection pour une nouvelle VM</h3>
+<p>D'après <code>delonix_vm::create_with</code> et <code>resolve_vm_defaults</code> (<code>cmd/vm.rs</code>), la première
+correspondance l'emporte :</p>
 <ol>
-<li><code>--backend</code> (or <code>backend:</code> in the manifest).</li>
-<li>The image's <code>HYPERVISOR</code> (recorded by a VMfile build), when <code>--disk</code> names a local image.</li>
-<li><code>DELONIX_VM_BACKEND</code> (session-wide).</li>
-<li><code>delonix vm default-backend --set &lt;backend&gt;</code> (machine-wide, stored in
+<li><code>--backend</code> (ou <code>backend:</code> dans le manifeste).</li>
+<li>Le <code>HYPERVISOR</code> de l'image (enregistré par un build de VMfile), lorsque <code>--disk</code> désigne une
+   image locale.</li>
+<li><code>DELONIX_VM_BACKEND</code> (pour toute la session).</li>
+<li><code>delonix vm default-backend --set &lt;backend&gt;</code> (pour toute la machine, stocké dans
    <code>&lt;DELONIX_ROOT&gt;/vm-default-backend</code>).</li>
-<li>Capability heuristic: <code>volumes</code> present ⇒ <code>libvirt</code> (only libvirt does virtio-9p); a cloud image
-   with no <code>--kernel</code> ⇒ <code>libvirt</code> <strong>if libvirt is available</strong>; otherwise auto-detection — the first
-   auto-selectable registered backend that is installed (CH, then libvirt).</li>
+<li>Heuristique de capacités : <code>volumes</code> présents ⇒ <code>libvirt</code> (seul libvirt fait du virtio-9p) ; une
+   cloud image sans <code>--kernel</code> ⇒ <code>libvirt</code> <strong>si libvirt est disponible</strong> ; sinon auto-détection — le
+   premier backend enregistré sélectionnable automatiquement qui est installé (CH, puis libvirt).</li>
 </ol>
-<p>So on a host with both hypervisors, a plain <code>vm create</code> of a cloud image lands on <strong>libvirt</strong>; pass
-<code>--backend cloud-hypervisor</code> (or set a default) to get a microVM on the SDN.</p>
+<p>Ainsi, sur un hôte doté des deux hyperviseurs, un simple <code>vm create</code> d'une cloud image aboutit sur
+<strong>libvirt</strong> ; passez <code>--backend cloud-hypervisor</code> (ou définissez un défaut) pour obtenir une microVM
+sur le SDN.</p>
 <div class="code"><pre><code class="language-text">$ delonix vm default-backend
 none (auto-detection: cloud-hypervisor if installed, else libvirt)
 $ delonix vm default-backend --set ch
@@ -289,88 +305,88 @@ error invalid argument: unknown VM backend: &#x27;bogus&#x27; (use &#x27;cloud-h
 $ delonix vm default-backend --clear
 default backend cleared (falls back to auto-detection)
 </code></pre></div>
-<h3 id="proxmox-ve-remote">Proxmox VE (remote)</h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a> registers the Proxmox backend
-at startup when configured through the environment (a misconfiguration is a warning, never fatal
-for unrelated commands):</p>
+<h3 id="proxmox-ve-remote">Proxmox VE (distant)</h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs::register_configured</code></a> enregistre le backend Proxmox
+au démarrage lorsqu'il est configuré par l'environnement (une mauvaise configuration est un
+avertissement, jamais une erreur fatale pour des commandes sans rapport) :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Variable</th>
-<th>Meaning</th>
+<th>Signification</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>DELONIX_PROXMOX_URL</code></td>
-<td>API base URL, e.g. <code>https://pve.example:8006</code>. Unset = backend not registered.</td>
+<td>URL de base de l'API, p. ex. <code>https://pve.example:8006</code>. Non définie = backend non enregistré.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_NODE</code></td>
-<td>Required. The one node this backend addresses (as <code>GET /nodes</code> names it).</td>
+<td>Obligatoire. Le nœud unique auquel s'adresse ce backend (tel que <code>GET /nodes</code> le nomme).</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_SECRET</code></td>
-<td>Preferred credential: name of a <code>kind: Secret</code> with <code>tokenId</code>+<code>tokenSecret</code> (or <code>username</code>+<code>password</code>).</td>
+<td>Identifiant préféré : nom d'un <code>kind: Secret</code> avec <code>tokenId</code>+<code>tokenSecret</code> (ou <code>username</code>+<code>password</code>).</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TOKEN_ID</code> + <code>DELONIX_PROXMOX_TOKEN</code></td>
-<td>API token from the environment.</td>
+<td>Jeton d'API depuis l'environnement.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_USER</code> + <code>DELONIX_PROXMOX_PASSWORD</code></td>
-<td>Password login (ticket, re-authenticated on 401).</td>
+<td>Connexion par mot de passe (ticket, réauthentifié sur 401).</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_INSECURE_TLS</code></td>
-<td><code>1</code>/<code>true</code>/<code>yes</code> to skip certificate verification. Opt-in, never a fallback.</td>
+<td><code>1</code>/<code>true</code>/<code>yes</code> pour ignorer la vérification du certificat. Opt-in, jamais un repli.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_BRIDGE</code></td>
-<td>Default bridge on the node (a per-VM <code>bridge</code> wins).</td>
+<td>Bridge par défaut sur le nœud (un <code>bridge</code> par VM l'emporte).</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_VLAN</code></td>
-<td>Default VLAN tag, 1–4094; out of range is an error, not a silently untagged NIC.</td>
+<td>Tag VLAN par défaut, 1–4094 ; hors plage, c'est une erreur, et non une NIC silencieusement sans tag.</td>
 </tr>
 </tbody>
 </table></div>
-<p>Without configuration, <code>--backend proxmox</code> answers that the backend "is not available in this build"
-and says what to set (<em>run</em>). The backend owns its storage (<code>manages_own_storage</code>), so no local
-overlay or NoCloud seed is made; <code>--hostname</code>/<code>--ssh-key</code> go to the node's cloud-init, and
-<code>--user-data</code> is refused. Design and limits: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. An
-OpenStack backend is <strong>proposed only</strong> (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>); there is no
-code for it.</p>
+<p>Sans configuration, <code>--backend proxmox</code> répond que le backend « is not available in this build » et
+indique ce qu'il faut définir (<em>exécuté</em>). Le backend possède son propre stockage
+(<code>manages_own_storage</code>), donc aucun overlay local ni seed NoCloud n'est créé ; <code>--hostname</code>/<code>--ssh-key</code>
+vont au cloud-init du nœud, et <code>--user-data</code> est refusé. Conception et limites :
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. Un backend OpenStack est <strong>seulement proposé</strong>
+(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>) ; il n'existe aucun code pour lui.</p>
 <hr />
 <h2 id="3-images">3. Images</h2>
-<p>VM images live in <code>VmImageStore</code> (<code>cmd/vmimage.rs</code>) under <code>&lt;DELONIX_ROOT&gt;/vm-images/</code>: one qcow2 plus
-a JSON metadata record (<code>VmImage</code>) per image. <code>delonix image vm ls</code> lists them with <code>TYPE</code>
-(cloud-init / appliance) and <code>DEFAULTS</code> (recorded vCPU/memory).</p>
-<h3 id="official-images">Official images</h3>
-<p><code>OFFICIAL_REPOS</code> in <code>cmd/vmimage.rs</code>:</p>
+<p>Les images VM vivent dans <code>VmImageStore</code> (<code>cmd/vmimage.rs</code>) sous <code>&lt;DELONIX_ROOT&gt;/vm-images/</code> : un
+qcow2 plus un enregistrement de métadonnées JSON (<code>VmImage</code>) par image. <code>delonix image vm ls</code> les
+liste avec <code>TYPE</code> (cloud-init / appliance) et <code>DEFAULTS</code> (vCPU/mémoire enregistrés).</p>
+<h3 id="official-images">Images officielles</h3>
+<p><code>OFFICIAL_REPOS</code> dans <code>cmd/vmimage.rs</code> :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Key</th>
-<th>Repository</th>
-<th>Content</th>
+<th>Clé</th>
+<th>Dépôt</th>
+<th>Contenu</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>k8s</code></td>
 <td><code>ghcr.io/angolardevops/delonix-vm-k8s</code></td>
-<td>Kubernetes node (kubeadm/kubelet/kubectl + <code>delonix-cri</code>)</td>
+<td>nœud Kubernetes (kubeadm/kubelet/kubectl + <code>delonix-cri</code>)</td>
 </tr>
 <tr>
 <td><code>base</code></td>
 <td><code>ghcr.io/angolardevops/delonix-vm-base</code></td>
-<td>base OS with the <code>delonix</code> engine, no Kubernetes (e.g. <code>ubuntu-24.04</code>)</td>
+<td>OS de base avec le moteur <code>delonix</code>, sans Kubernetes (p. ex. <code>ubuntu-24.04</code>)</td>
 </tr>
 <tr>
 <td><code>appliances</code></td>
 <td><code>ghcr.io/angolardevops/delonix-vm-appliances</code></td>
-<td>vendor appliances, no cloud-init</td>
+<td>appliances de fournisseurs, sans cloud-init</td>
 </tr>
 </tbody>
 </table></div>
@@ -380,153 +396,159 @@ delonix vm pull                      # the official Kubernetes golden
 delonix vm pull --no-k8s             # the official base image
 delonix vm pull &lt;oci-ref&gt; --name &lt;local-name&gt;
 </code></pre></div>
-<p>Images are single-blob OCI artifacts; the pull verifies the manifest and blob digests and restores
-the metadata from manifest annotations. The same verbs exist as <code>delonix image vm pull/ls-remote/push</code>.
-<strong>Note:</strong> <code>vm create</code> with no <code>--disk</code> and no local image downloads the official golden image, so it
-needs network.</p>
-<h3 id="building-the-golden-recipe">Building the golden recipe</h3>
-<p><code>delonix image vm build -t &lt;tag&gt;</code> with no <code>VMfile</code> in the context runs the built-in recipe:</p>
+<p>Les images sont des artefacts OCI à blob unique ; le pull vérifie les digests du manifeste et du
+blob, et restaure les métadonnées à partir des annotations du manifeste. Les mêmes verbes existent
+sous la forme <code>delonix image vm pull/ls-remote/push</code>. <strong>Remarque :</strong> <code>vm create</code> sans <code>--disk</code> et
+sans image locale télécharge l'image dorée officielle ; il a donc besoin du réseau.</p>
+<h3 id="building-the-golden-recipe">Construire la recette dorée</h3>
+<p><code>delonix image vm build -t &lt;tag&gt;</code> sans <code>VMfile</code> dans le contexte exécute la recette intégrée :</p>
 <div class="code" data-shell><pre><code class="language-bash"># Kubernetes node, packages fetched and verified on the HOST, guest offline
 delonix image vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
 # no Kubernetes: just the engine, rootless-ready
 delonix image vm build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm
 </code></pre></div>
-<p>Relevant flags (check <code>image vm build --help</code> for defaults): <code>--distro ubuntu|debian|rocky|fedora</code>,
-<code>--ubuntu-release</code>, <code>--debian-release</code>, <code>--rocky-release</code>, <code>--fedora-release</code> (release <strong>and</strong> build,
-e.g. <code>42-1.1</code>), <code>--k8s-version</code>, <code>--offline</code>, <code>--no-k8s</code>, <code>--extra-package</code>, <code>--extra-run</code>,
-<code>--cri-bin</code>, <code>--delonix-bin</code>, <code>--root-password</code> (without it no account has a password),
-<code>--node-exporter[=&lt;addr&gt;]</code>, <code>--no-compress</code>. Your own recipe is a <code>VMfile</code> — see
-<a href="08-delonixfile-and-vmfile.html">08 — Delonixfile and VMfile</a>. Image builds are amd64 only
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>).</p>
-<h3 id="converting-and-importing">Converting and importing</h3>
+<p>Options pertinentes (consultez <code>image vm build --help</code> pour les valeurs par défaut) :
+<code>--distro ubuntu|debian|rocky|fedora</code>, <code>--ubuntu-release</code>, <code>--debian-release</code>, <code>--rocky-release</code>,
+<code>--fedora-release</code> (release <strong>et</strong> build, p. ex. <code>42-1.1</code>), <code>--k8s-version</code>, <code>--offline</code>,
+<code>--no-k8s</code>, <code>--extra-package</code>, <code>--extra-run</code>, <code>--cri-bin</code>, <code>--delonix-bin</code>, <code>--root-password</code> (sans
+elle, aucun compte n'a de mot de passe), <code>--node-exporter[=&lt;addr&gt;]</code>, <code>--no-compress</code>. Votre propre
+recette est un <code>VMfile</code> — voir <a href="08-delonixfile-and-vmfile.html">08 — Delonixfile et VMfile</a>. Les
+builds d'images sont uniquement amd64 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>).</p>
+<h3 id="converting-and-importing">Convertir et importer</h3>
 <div class="code" data-shell><pre><code class="language-bash">delonix vm convert &lt;image-or-path&gt; --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
 delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 2G
 </code></pre></div>
-<p><code>vm convert</code> flattens (no backing chain); <code>--compress</code> is accepted only for <code>qcow2</code> and <code>vmdk</code>.
-<code>import --appliance</code> records <code>cloud_init: false</code>: <code>vm create</code> then attaches <strong>no</strong> seed and refuses
-<code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code> by name, because the guest would never read them. Appliance
-build scripts live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>.</p>
+<p><code>vm convert</code> aplatit (aucune chaîne de backing) ; <code>--compress</code> n'est accepté que pour <code>qcow2</code> et
+<code>vmdk</code>. <code>import --appliance</code> enregistre <code>cloud_init: false</code> : <code>vm create</code> n'attache alors <strong>aucun</strong>
+seed et refuse <code>--hostname</code>/<code>--ssh-key</code>/<code>--user-data</code> en les nommant, car l'invité ne les lirait
+jamais. Les scripts de construction d'appliances se trouvent dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>.</p>
 <hr />
-<h2 id="4-create-and-run">4. Create and run</h2>
+<h2 id="4-create-and-run">4. Créer et exécuter</h2>
 <h3 id="vm-create"><code>vm create</code></h3>
 <div class="code" data-shell><pre><code class="language-bash">delonix vm create dev --disk delonix-vm-base:ubuntu-24.04 \
   --backend cloud-hypervisor --vcpus 2 --memory 2G \
   --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait
 </code></pre></div>
-<p>What happens (<code>cmd/vm.rs</code> → <code>delonix_vm::create_with</code>):</p>
+<p>Ce qui se passe (<code>cmd/vm.rs</code> → <code>delonix_vm::create_with</code>) :</p>
 <ol>
-<li><strong>Node policy</strong> is enforced before any image is resolved (<code>policy::enforce</code>).</li>
-<li><strong>Disk resolution</strong> (<code>resolve_image_ref</code>): <code>--url-img</code> wins (downloaded, cached, verified against
-   <code>&lt;url&gt;.sha256</code> when offered); else <code>--disk</code> is looked up as a local image name, then as a path to a
-   stored image's qcow2; else it is used as a plain path; with no <code>--disk</code>, the single local golden
-   image, or the official one is pulled.</li>
-<li><strong>Defaults</strong> from the image metadata fill <code>--vcpus</code>/<code>--memory</code>/<code>--backend</code> only where unset.</li>
-<li><strong>Seed</strong>: a NoCloud ISO (network config by MAC, hostname, keys) is generated unless <code>--seed</code> is
-   given, the image is an appliance, or the backend is remote. <code>--user-data</code> replaces the generated
-   user-data.</li>
-<li><strong>Backend</strong> chosen (section 2); an admission check refuses when the host lacks RAM;
-   <code>--namespace</code> other than <code>default</code> is refused on libvirt (the VM lives on <code>virbr0</code>, outside the
-   Delonix SDN).</li>
-<li><strong>Overlay</strong>: <code>&lt;root&gt;/vms/&lt;name&gt;.qcow2</code>, a thin qcow2 over the base (<code>prepare_local_overlay</code>);
-   <code>--disk-size &lt;GiB&gt;</code> grows it and cannot be smaller than the base.</li>
-<li><strong>Boot</strong>: the backend's <code>boot</code>. <code>create</code> is idempotent: an existing, running VM is returned as is.</li>
+<li>La <strong>politique du nœud</strong> est imposée avant la résolution de toute image (<code>policy::enforce</code>).</li>
+<li><strong>Résolution du disque</strong> (<code>resolve_image_ref</code>) : <code>--url-img</code> l'emporte (téléchargé, mis en cache,
+   vérifié contre <code>&lt;url&gt;.sha256</code> lorsqu'il est proposé) ; sinon <code>--disk</code> est recherché comme nom
+   d'image locale, puis comme chemin vers le qcow2 d'une image stockée ; sinon il est utilisé comme
+   simple chemin ; sans <code>--disk</code>, c'est l'unique image dorée locale, ou l'image officielle est
+   récupérée par pull.</li>
+<li>Les <strong>valeurs par défaut</strong> issues des métadonnées de l'image complètent
+   <code>--vcpus</code>/<code>--memory</code>/<code>--backend</code> uniquement là où ils ne sont pas définis.</li>
+<li><strong>Seed</strong> : une ISO NoCloud (configuration réseau par MAC, hostname, clés) est générée, sauf si
+   <code>--seed</code> est fourni, si l'image est une appliance ou si le backend est distant. <code>--user-data</code>
+   remplace le user-data généré.</li>
+<li><strong>Backend</strong> choisi (section 2) ; une vérification d'admission refuse lorsque l'hôte manque de
+   RAM ; un <code>--namespace</code> autre que <code>default</code> est refusé sur libvirt (la VM vit sur <code>virbr0</code>, en
+   dehors du SDN Delonix).</li>
+<li><strong>Overlay</strong> : <code>&lt;root&gt;/vms/&lt;name&gt;.qcow2</code>, un qcow2 mince au-dessus de la base
+   (<code>prepare_local_overlay</code>) ; <code>--disk-size &lt;GiB&gt;</code> l'agrandit et ne peut pas être inférieur à la
+   base.</li>
+<li><strong>Démarrage</strong> : le <code>boot</code> du backend. <code>create</code> est idempotent : une VM existante et en cours
+   d'exécution est renvoyée telle quelle.</li>
 </ol>
-<p>The published images set no password on any account (see <code>--root-password</code> above), so pass
-<code>--ssh-key</code> if you want to log in over SSH.</p>
-<p><strong><code>--wait</code> and the predicted IP.</strong> On libvirt the IP comes from a real DHCP lease, so having one is
-evidence the guest booted. On Cloud Hypervisor the IP is <strong>computed from the MAC</strong> before the guest
-runs (<code>ip_is_predicted</code>), so <code>--wait</code> also probes the address by ARP from inside the network holder
-(<code>delonix_sdn::infra::sdn_reachable</code>) until <code>--boot-timeout</code> (default 120 s). Three outcomes: up;
-"which could not be verified from here" (the probe could not be asked); "is running but never
-answered … computed from the MAC, not observed". Use <code>vm console</code> to see why.</p>
-<h3 id="day-2-verbs">Day-2 verbs</h3>
+<p>Les images publiées ne définissent de mot de passe sur aucun compte (voir <code>--root-password</code>
+ci-dessus) ; passez donc <code>--ssh-key</code> si vous voulez vous connecter en SSH.</p>
+<p><strong><code>--wait</code> et l'IP prédite.</strong> Sur libvirt, l'IP provient d'un vrai bail DHCP ; en avoir une prouve
+donc que l'invité a démarré. Sur Cloud Hypervisor, l'IP est <strong>calculée à partir de la MAC</strong> avant
+que l'invité ne s'exécute (<code>ip_is_predicted</code>) ; <code>--wait</code> sonde donc aussi l'adresse par ARP depuis
+l'intérieur du holder réseau (<code>delonix_sdn::infra::sdn_reachable</code>) jusqu'à <code>--boot-timeout</code> (120 s
+par défaut). Trois issues : démarrée ; « which could not be verified from here » (la sonde n'a pas
+pu être lancée) ; « is running but never answered … computed from the MAC, not observed ». Utilisez
+<code>vm console</code> pour voir pourquoi.</p>
+<h3 id="day-2-verbs">Verbes du quotidien (day-2)</h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Command</th>
-<th>Notes</th>
+<th>Commande</th>
+<th>Remarques</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>delonix vm ls [--namespace &lt;ns&gt;] [--ports] [-o json]</code></td>
-<td>lists VMs</td>
+<td>liste les VMs</td>
 </tr>
 <tr>
 <td><code>delonix describe vm &lt;name&gt;</code> / <code>delonix delete vm &lt;name&gt;</code></td>
-<td>there is no <code>vm describe</code>/<code>vm rm</code>; the generic verbs replace them</td>
+<td>il n'existe ni <code>vm describe</code> ni <code>vm rm</code> ; les verbes génériques les remplacent</td>
 </tr>
 <tr>
 <td><code>delonix vm console &lt;name&gt; [-e ^X]</code></td>
-<td>serial console; detach with <code>Ctrl-]</code> by default (<code>$DELONIX_CONSOLE_ESCAPE</code>). libvirt: <code>virsh console</code> as a child process; CH: the console socket <code>&lt;root&gt;/vms/&lt;name&gt;.console</code></td>
+<td>console série ; détachement avec <code>Ctrl-]</code> par défaut (<code>$DELONIX_CONSOLE_ESCAPE</code>). libvirt : <code>virsh console</code> comme processus enfant ; CH : la socket de console <code>&lt;root&gt;/vms/&lt;name&gt;.console</code></td>
 </tr>
 <tr>
 <td><code>delonix vm ssh &lt;name|ip&gt; [-l user] [-i key] [-- cmd]</code></td>
-<td>IP from the record; default user <code>delonix</code> on cloud-init images, <code>root</code> on appliances</td>
+<td>IP issue de l'enregistrement ; utilisateur par défaut <code>delonix</code> sur les images cloud-init, <code>root</code> sur les appliances</td>
 </tr>
 <tr>
 <td><code>delonix vm vnc &lt;name&gt;</code></td>
-<td>only for libvirt VMs created with <code>--vnc</code> (CH has no display)</td>
+<td>uniquement pour les VMs libvirt créées avec <code>--vnc</code> (CH n'a pas d'affichage)</td>
 </tr>
 <tr>
 <td><code>delonix vm stop &lt;name&gt;</code></td>
-<td>keeps disk, record and snapshots. libvirt: the domain is undefined (snapshot metadata is preserved first)</td>
+<td>conserve le disque, l'enregistrement et les snapshots. libvirt : le domaine est supprimé de la définition (undefine) (les métadonnées des snapshots sont préservées d'abord)</td>
 </tr>
 <tr>
 <td><code>delonix vm start &lt;name&gt;</code> / <code>restart &lt;name&gt;</code></td>
-<td>rebuild the boot from the record and reuse the overlay; <code>start</code> on a running VM is a no-op, <code>restart</code> always reboots</td>
+<td>reconstruisent le démarrage à partir de l'enregistrement et réutilisent l'overlay ; <code>start</code> sur une VM en cours d'exécution est un no-op, <code>restart</code> redémarre toujours</td>
 </tr>
 <tr>
 <td><code>delonix vm pause</code> / <code>unpause &lt;name&gt;</code></td>
-<td>suspend vCPUs, memory kept in RAM; CH and libvirt</td>
+<td>suspendent les vCPUs, la mémoire est conservée en RAM ; CH et libvirt</td>
 </tr>
 <tr>
 <td><code>delonix vm migrate &lt;name&gt; --host &lt;h&gt; --network &lt;n&gt;</code></td>
-<td>stop-copy-start over SSH to another host; real downtime (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a> explains why live migration is out of scope)</td>
+<td>stop-copy-start par SSH vers un autre hôte ; interruption réelle (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0031-live-vm-migration-no-go.md" target="_blank" rel="noopener">ADR-0031</a> explique pourquoi la migration à chaud est hors périmètre)</td>
 </tr>
 <tr>
 <td><code>delonix vm prune</code></td>
-<td>reclaims state no VM record accounts for</td>
+<td>récupère l'état dont aucun enregistrement de VM ne rend compte</td>
 </tr>
 </tbody>
 </table></div>
 <h3 id="snapshots">Snapshots</h3>
-<p><code>delonix vm snapshot create|ls|rm|restore &lt;vm&gt; [&lt;snapshot&gt;]</code>:</p>
+<p><code>delonix vm snapshot create|ls|rm|restore &lt;vm&gt; [&lt;snapshot&gt;]</code> :</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Backend</th>
-<th>Running VM</th>
-<th>Stopped VM</th>
+<th>VM en cours d'exécution</th>
+<th>VM arrêtée</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>libvirt</td>
-<td><code>create</code> is a system checkpoint (memory + disk)</td>
-<td>disk-only; the four verbs define the domain just for the command</td>
+<td><code>create</code> est un checkpoint système (mémoire + disque)</td>
+<td>disque uniquement ; les quatre verbes définissent le domaine juste le temps de la commande</td>
 </tr>
 <tr>
 <td>cloud-hypervisor</td>
-<td><code>ls</code> only (<code>qemu-img info -U</code>); <code>create</code>/<code>restore</code>/<code>rm</code> <strong>refused</strong> — the running VMM locks the disk and CH has no live disk-snapshot API</td>
-<td>all four, via <code>qemu-img snapshot</code></td>
+<td><code>ls</code> uniquement (<code>qemu-img info -U</code>) ; <code>create</code>/<code>restore</code>/<code>rm</code> <strong>refusés</strong> — le VMM en cours d'exécution verrouille le disque et CH n'a pas d'API de snapshot disque à chaud</td>
+<td>les quatre, via <code>qemu-img snapshot</code></td>
 </tr>
 <tr>
 <td>proxmox</td>
-<td><code>create</code> (with VM state), <code>ls</code>, <code>restore</code></td>
-<td>same; <code>rm</code> not implemented (fails closed)</td>
+<td><code>create</code> (avec l'état de la VM), <code>ls</code>, <code>restore</code></td>
+<td>idem ; <code>rm</code> non implémenté (échoue de manière fermée)</td>
 </tr>
 </tbody>
 </table></div>
-<p>libvirt snapshots survive <code>vm stop</code>/<code>vm start</code>: <code>undefine --snapshots-metadata</code> removes only
-libvirt's bookkeeping, so <code>preserve_snapshots</code> dumps each snapshot's XML to
-<code>&lt;root&gt;/vms/&lt;vm&gt;/snapshots/</code> before stopping and <code>boot</code> redefines them (rewriting the domain uuid,
-which changes on every define).</p>
-<h3 id="declarative">Declarative</h3>
-<p><code>kind: VirtualMachine</code> (<code>compute.delonix.io/v1alpha1</code>) mirrors <code>vm create</code>; a full annotated example is
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/vm.yaml" target="_blank" rel="noopener"><code>examples/vm.yaml</code></a>. <code>kind: Workload</code> with <code>type: microvm</code> lowers to a <code>VirtualMachine</code> with the backend
-<strong>forced</strong> to <code>cloud-hypervisor</code>; asking for another backend is an error
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>). Both <em>run</em> in a scratch root:</p>
+<p>Les snapshots libvirt survivent à <code>vm stop</code>/<code>vm start</code> : <code>undefine --snapshots-metadata</code> ne supprime
+que la comptabilité de libvirt ; <code>preserve_snapshots</code> exporte donc le XML de chaque snapshot dans
+<code>&lt;root&gt;/vms/&lt;vm&gt;/snapshots/</code> avant l'arrêt, et <code>boot</code> les redéfinit (en réécrivant l'uuid du
+domaine, qui change à chaque définition).</p>
+<h3 id="declarative">Déclaratif</h3>
+<p><code>kind: VirtualMachine</code> (<code>compute.delonix.io/v1alpha1</code>) reflète <code>vm create</code> ; un exemple complet et
+annoté se trouve dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/vm.yaml" target="_blank" rel="noopener"><code>examples/vm.yaml</code></a>. <code>kind: Workload</code> avec <code>type: microvm</code> se réduit à une
+<code>VirtualMachine</code> dont le backend est <strong>forcé</strong> à <code>cloud-hypervisor</code> ; demander un autre backend est
+une erreur (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0006-workload-type-microvm.md" target="_blank" rel="noopener">ADR-0006</a>). Les deux ont été <em>exécutés</em> dans une
+racine jetable :</p>
 <div class="code"><pre><code class="language-yaml">apiVersion: compute.delonix.io/v1alpha1
 kind: VirtualMachine
 metadata: { name: dev }
@@ -550,9 +572,9 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
   backend: null
   backend: cloud-hypervisor
 </code></pre></div>
-<p>Apply with <code>delonix vm apply -f vm.yaml</code> or <code>delonix stack apply -f vm.yaml</code> (not executed here).</p>
+<p>Appliquez avec <code>delonix vm apply -f vm.yaml</code> ou <code>delonix stack apply -f vm.yaml</code> (non exécuté ici).</p>
 <hr />
-<h2 id="5-networking-for-vms">5. Networking for VMs</h2>
+<h2 id="5-networking-for-vms">5. Réseau pour les VMs</h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -563,169 +585,169 @@ $ delonix stack apply -f vm.yaml --dry-run | grep backend
 </thead>
 <tbody>
 <tr>
-<td>Where the NIC lives</td>
-<td>a tap on a Delonix network (<code>--network</code>, default <code>ingress</code>) <strong>inside the network holder</strong> — the same SDN as containers</td>
-<td><code>virbr0</code> (nat) or a host bridge, in the host's network namespace</td>
+<td>Où vit la NIC</td>
+<td>un tap sur un réseau Delonix (<code>--network</code>, par défaut <code>ingress</code>) <strong>à l'intérieur du holder réseau</strong> — le même SDN que les containers</td>
+<td><code>virbr0</code> (nat) ou un bridge de l'hôte, dans le namespace réseau de l'hôte</td>
 </tr>
 <tr>
 <td>IP</td>
-<td>leased by the holder's DHCP, deterministic from the MAC</td>
-<td>libvirt DHCP; <code>--ip</code> reserves one (nat only)</td>
+<td>bail du DHCP du holder, déterministe à partir de la MAC</td>
+<td>DHCP de libvirt ; <code>--ip</code> en réserve une (nat uniquement)</td>
 </tr>
 <tr>
-<td>Namespace isolation</td>
-<td>yes (<code>--namespace</code>)</td>
-<td>refused</td>
+<td>Isolation par namespace</td>
+<td>oui (<code>--namespace</code>)</td>
+<td>refusée</td>
 </tr>
 <tr>
-<td>VM ↔ container by IP</td>
-<td>direct</td>
-<td>container → VM works through the host; VM → container needs a published port or <code>vm bridge</code></td>
+<td>VM ↔ container par IP</td>
+<td>directe</td>
+<td>container → VM fonctionne via l'hôte ; VM → container nécessite un port publié ou <code>vm bridge</code></td>
 </tr>
 </tbody>
 </table></div>
-<p><strong><code>vm reach</code></strong> (read-only, no privilege) lists the libvirt gateways and, for each port published by a
-running container, whether a VM can reach it. A port published on the default <code>127.0.0.1</code> is
-invisible to VMs; the command prints the exact re-publish, e.g.
-<code>DELONIX_PUBLISH_ADDR=&lt;gateway&gt; delonix net ingress publish &lt;c&gt; &lt;port&gt;</code> — reachable from VMs on that
-network, not from the external LAN.</p>
-<p><strong><code>vm bridge &lt;network&gt; [--vm-subnet &lt;cidr&gt;] [--apply]</code></strong> is <strong>experimental and needs root</strong>: a veth
-from the host into the holder plus routes, giving libvirt VMs direct IP reachability to one container
-network. Without <code>--apply</code> it only prints the plan. <code>vm unbridge &lt;network&gt;</code> tears it down (also a
-dry-run without <code>--apply</code>). This is the one deliberate exception to rootless in the VM code
-(<code>cmd/vmbridge.rs</code>).</p>
+<p><strong><code>vm reach</code></strong> (lecture seule, sans privilège) liste les passerelles libvirt et, pour chaque port
+publié par un container en cours d'exécution, indique si une VM peut l'atteindre. Un port publié sur
+le <code>127.0.0.1</code> par défaut est invisible pour les VMs ; la commande affiche la republication exacte,
+p. ex. <code>DELONIX_PUBLISH_ADDR=&lt;gateway&gt; delonix net ingress publish &lt;c&gt; &lt;port&gt;</code> — joignable depuis les
+VMs de ce réseau, pas depuis le LAN externe.</p>
+<p><strong><code>vm bridge &lt;network&gt; [--vm-subnet &lt;cidr&gt;] [--apply]</code></strong> est <strong>expérimental et nécessite root</strong> : une
+veth de l'hôte vers le holder plus des routes, qui donne aux VMs libvirt une joignabilité IP directe
+vers un réseau de containers. Sans <code>--apply</code>, la commande n'affiche que le plan.
+<code>vm unbridge &lt;network&gt;</code> le démonte (également en dry-run sans <code>--apply</code>). C'est la seule exception
+délibérée au rootless dans le code VM (<code>cmd/vmbridge.rs</code>).</p>
 <hr />
-<h2 id="6-troubleshooting">6. Troubleshooting</h2>
+<h2 id="6-troubleshooting">6. Dépannage</h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Symptom</th>
+<th>Symptôme</th>
 <th>Cause</th>
-<th>Fix</th>
+<th>Correctif</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>/dev/kvm does not exist</code> / VM fails to start</td>
-<td>virtualization disabled, or no nested virt</td>
-<td>enable VT-x/AMD-V; in a VM, enable nested virtualization</td>
+<td><code>/dev/kvm does not exist</code> / la VM ne démarre pas</td>
+<td>virtualisation désactivée, ou pas de virtualisation imbriquée</td>
+<td>activez VT-x/AMD-V ; dans une VM, activez la virtualisation imbriquée</td>
 </tr>
 <tr>
 <td><code>no VM backend available</code></td>
-<td>neither <code>cloud-hypervisor</code> nor <code>virsh</code>+<code>qemu-system-x86_64</code> on <code>PATH</code></td>
-<td>install one; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> does</td>
+<td>ni <code>cloud-hypervisor</code> ni <code>virsh</code>+<code>qemu-system-x86_64</code> dans le <code>PATH</code></td>
+<td>installez-en un ; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> le fait</td>
 </tr>
 <tr>
-<td>CH VM "running" but never answers; overlay stays tiny</td>
-<td>firmware cannot boot the image (e.g. only <code>hypervisor-fw</code> installed)</td>
-<td>install EDK2 <code>CLOUDHV.fd</code> to <code>/usr/local/share/delonix/</code>, or set <code>DELONIX_HYPERVISOR_FW</code>, or use <code>--backend libvirt</code></td>
+<td>VM CH « en cours d'exécution » mais ne répond jamais ; l'overlay reste minuscule</td>
+<td>le firmware ne peut pas démarrer l'image (p. ex. seul <code>hypervisor-fw</code> est installé)</td>
+<td>installez EDK2 <code>CLOUDHV.fd</code> dans <code>/usr/local/share/delonix/</code>, ou définissez <code>DELONIX_HYPERVISOR_FW</code>, ou utilisez <code>--backend libvirt</code></td>
 </tr>
 <tr>
-<td><code>vm ls</code> shows no IP on a libvirt VM</td>
-<td>fell back to <code>qemu:///session</code> user-mode</td>
-<td>join the <code>libvirt</code> group and re-login, or <code>--net-mode nat</code></td>
+<td><code>vm ls</code> n'affiche aucune IP pour une VM libvirt</td>
+<td>repli sur <code>qemu:///session</code> en mode utilisateur</td>
+<td>rejoignez le groupe <code>libvirt</code> et reconnectez-vous, ou <code>--net-mode nat</code></td>
 </tr>
 <tr>
 <td><code>warning: cannot reach qemu:///system for NAT networking</code></td>
-<td>not in the <code>libvirt</code> group</td>
-<td><code>sudo usermod -aG libvirt $USER</code>, new session</td>
+<td>pas dans le groupe <code>libvirt</code></td>
+<td><code>sudo usermod -aG libvirt $USER</code>, nouvelle session</td>
 </tr>
 <tr>
-<td><code>vm console</code> on libvirt: "Active console session exists"</td>
-<td>a previous session died uncleanly</td>
-<td>current code passes <code>--force</code> to <code>virsh console</code>; update your binary</td>
+<td><code>vm console</code> sur libvirt : « Active console session exists »</td>
+<td>une session précédente est morte de manière non propre</td>
+<td>le code actuel passe <code>--force</code> à <code>virsh console</code> ; mettez à jour votre binaire</td>
 </tr>
 <tr>
-<td>CH VM refused before boot mentioning the socket path</td>
-<td><code>&lt;root&gt;/vms/&lt;name&gt;.sock</code> exceeds 108 bytes</td>
-<td>shorter <code>DELONIX_ROOT</code> or VM name</td>
+<td>VM CH refusée avant le démarrage en mentionnant le chemin de la socket</td>
+<td><code>&lt;root&gt;/vms/&lt;name&gt;.sock</code> dépasse 108 octets</td>
+<td><code>DELONIX_ROOT</code> ou nom de VM plus court</td>
 </tr>
 <tr>
 <td><code>namespace '…' is not enforceable on the 'libvirt' backend</code></td>
-<td>libvirt VMs are outside the SDN</td>
-<td><code>--backend cloud-hypervisor</code>, or drop <code>--namespace</code></td>
+<td>les VMs libvirt sont en dehors du SDN</td>
+<td><code>--backend cloud-hypervisor</code>, ou retirez <code>--namespace</code></td>
 </tr>
 <tr>
-<td><code>vm snapshot create</code> refused on a running CH VM</td>
-<td>CH has no live disk snapshot</td>
-<td><code>vm stop</code> first, or use libvirt</td>
+<td><code>vm snapshot create</code> refusé sur une VM CH en cours d'exécution</td>
+<td>CH n'a pas de snapshot disque à chaud</td>
+<td><code>vm stop</code> d'abord, ou utilisez libvirt</td>
 </tr>
 <tr>
-<td><code>--hostname</code>/<code>--ssh-key</code> refused</td>
-<td>the image is an appliance (<code>cloud_init: false</code>)</td>
-<td>configure the appliance through its own console/UI</td>
+<td><code>--hostname</code>/<code>--ssh-key</code> refusés</td>
+<td>l'image est une appliance (<code>cloud_init: false</code>)</td>
+<td>configurez l'appliance via sa propre console/interface</td>
 </tr>
 <tr>
 <td><code>cloud-localds not found</code></td>
-<td>missing <code>cloud-image-utils</code></td>
-<td>install it (needed for every cloud-init <code>vm create</code>)</td>
+<td><code>cloud-image-utils</code> manquant</td>
+<td>installez-le (nécessaire pour chaque <code>vm create</code> cloud-init)</td>
 </tr>
 <tr>
-<td><code>image vm build</code>: <code>cp: cannot open '/boot/vmlinuz-…'</code></td>
-<td>host kernel is 0600</td>
-<td><code>install.sh --with-image-build</code>, or <code>sudo chmod 0644 /boot/vmlinuz-*</code> (lowers a boundary)</td>
+<td><code>image vm build</code> : <code>cp: cannot open '/boot/vmlinuz-…'</code></td>
+<td>le noyau de l'hôte est en 0600</td>
+<td><code>install.sh --with-image-build</code>, ou <code>sudo chmod 0644 /boot/vmlinuz-*</code> (abaisse une frontière)</td>
 </tr>
 <tr>
-<td><code>image vm build</code>: <code>Temporary failure resolving …</code></td>
-<td>appliance has no network: missing host DHCP client, or passt</td>
-<td>install <code>isc-dhcp-client</code>; for <code>--network</code> use <code>XDG_RUNTIME_DIR=/tmp/delonix-run</code> and a current passt first on <code>PATH</code>; or build <code>--offline</code></td>
+<td><code>image vm build</code> : <code>Temporary failure resolving …</code></td>
+<td>l'appliance n'a pas de réseau : client DHCP de l'hôte manquant, ou passt</td>
+<td>installez <code>isc-dhcp-client</code> ; pour <code>--network</code>, utilisez <code>XDG_RUNTIME_DIR=/tmp/delonix-run</code> et un passt récent en premier dans le <code>PATH</code> ; ou construisez avec <code>--offline</code></td>
 </tr>
 <tr>
-<td>a step pauses ~300 s, then package installs fail</td>
-<td>passt never leased; <code>dhclient</code> timed out</td>
-<td>same as above</td>
+<td>une étape se met en pause ~300 s, puis les installations de paquets échouent</td>
+<td>passt n'a jamais distribué de bail ; <code>dhclient</code> a expiré</td>
+<td>comme ci-dessus</td>
 </tr>
 <tr>
 <td><code>--offline belong to the built-in golden recipe …</code></td>
-<td>golden-recipe flag used with a VMfile</td>
-<td>remove it; the VMfile describes the build</td>
+<td>option de la recette dorée utilisée avec un VMfile</td>
+<td>retirez-la ; le VMfile décrit le build</td>
 </tr>
 <tr>
 <td><code>`--network` is for VMfile builds</code></td>
-<td><code>--network</code> without a VMfile</td>
-<td>use <code>--offline</code> for the golden recipe</td>
+<td><code>--network</code> sans VMfile</td>
+<td>utilisez <code>--offline</code> pour la recette dorée</td>
 </tr>
 <tr>
-<td>VMfile build fills <code>/tmp</code></td>
-<td>each stage is a full flattened disk under <code>$TMPDIR</code></td>
-<td>set <code>TMPDIR</code> to a large filesystem; remove leftover <code>delonix-vmfile-*</code> dirs after failures</td>
+<td>le build d'un VMfile remplit <code>/tmp</code></td>
+<td>chaque étape est un disque complet aplati sous <code>$TMPDIR</code></td>
+<td>définissez <code>TMPDIR</code> sur un système de fichiers volumineux ; supprimez les répertoires <code>delonix-vmfile-*</code> restants après des échecs</td>
 </tr>
 <tr>
 <td><code>VM backend 'proxmox' is not available in this build</code></td>
-<td>the backend is not configured</td>
-<td>set the <code>DELONIX_PROXMOX_*</code> variables (section 2)</td>
+<td>le backend n'est pas configuré</td>
+<td>définissez les variables <code>DELONIX_PROXMOX_*</code> (section 2)</td>
 </tr>
 </tbody>
 </table></div>
 <hr />
-<h2 id="7-for-contributors">7. For contributors</h2>
-<h3 id="where-the-code-lives">Where the code lives</h3>
+<h2 id="7-for-contributors">7. Pour les contributeurs</h2>
+<h3 id="where-the-code-lives">Où se trouve le code</h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Area</th>
-<th>Path</th>
+<th>Domaine</th>
+<th>Chemin</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Port, registry, CH and libvirt backends, <code>create_with</code>, snapshots, firmware lookup</td>
+<td>Port, registre, backends CH et libvirt, <code>create_with</code>, snapshots, recherche du firmware</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a></td>
 </tr>
 <tr>
-<td>NoCloud seed generation</td>
+<td>Génération du seed NoCloud</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/cloudinit.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/cloudinit.rs</code></a></td>
 </tr>
 <tr>
-<td>Proxmox backend</td>
+<td>Backend Proxmox</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/</code></a></td>
 </tr>
 <tr>
-<td><code>vm</code> CLI, <code>kind: VirtualMachine</code>, <code>vm reach</code></td>
+<td>CLI <code>vm</code>, <code>kind: VirtualMachine</code>, <code>vm reach</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vm.rs</code></a></td>
 </tr>
 <tr>
-<td>Image store, golden recipe, pull/push/import/convert, failure hints</td>
+<td>Store d'images, recette dorée, pull/push/import/convert, indications d'échec</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a></td>
 </tr>
 <tr>
@@ -733,7 +755,7 @@ dry-run without <code>--apply</code>). This is the one deliberate exception to r
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmfile.rs</code></a></td>
 </tr>
 <tr>
-<td>Backend registration from the environment</td>
+<td>Enregistrement des backends depuis l'environnement</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a></td>
 </tr>
 <tr>
@@ -741,93 +763,98 @@ dry-run without <code>--apply</code>). This is the one deliberate exception to r
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbridge.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbridge.rs</code></a></td>
 </tr>
 <tr>
-<td><code>kind: Workload</code> lowering</td>
+<td>Réduction de <code>kind: Workload</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/workload.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/workload.rs</code></a></td>
 </tr>
 <tr>
-<td>Appliance builds</td>
+<td>Construction d'appliances</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a></td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="adding-a-backend">Adding a backend</h3>
-<p>Read <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> first; it is the template. In short:</p>
+<h3 id="adding-a-backend">Ajouter un backend</h3>
+<p>Lisez d'abord <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> ; c'est le modèle. En résumé :</p>
 <ul>
-<li>Implement <code>VmBackend</code> in <strong>its own crate</strong> if it talks to a remote API (the engine crate stays free
-  of HTTP clients), placed in the directory of its layer and listed in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>
-  (see <a href="05-architecture.html">05 — Architecture</a>).</li>
-<li>Register it with <code>register_backend</code> from the process that knows its configuration, with
-  <code>auto_selectable: false</code> unless it is a local, zero-configuration backend built into <code>delonix-vm</code>.</li>
-<li>Override <code>manages_own_storage</code>, <code>destroy</code>, <code>resume</code> and <code>ip_is_predicted</code> deliberately: for a remote
-  backend <code>stop</code> and <code>destroy</code> are <strong>not</strong> the same operation, and <code>boot</code> on a stopped VM must not
-  create a second one.</li>
-<li>Leave unsupported verbs on their fail-closed defaults; refuse unsupported <code>VmConfig</code> fields by name
-  before creating anything.</li>
-<li>Do not publish a backend that has never been seen booting a VM. New backends and hypervisor
-  boundaries go through an ADR (<a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener">docs/adr/</a>).</li>
+<li>Implémentez <code>VmBackend</code> dans <strong>son propre crate</strong> s'il parle à une API distante (le crate du moteur
+  reste exempt de clients HTTP), placé dans le répertoire de sa couche et listé dans
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (voir <a href="05-architecture.html">05 — Architecture</a>).</li>
+<li>Enregistrez-le avec <code>register_backend</code> depuis le processus qui connaît sa configuration, avec
+  <code>auto_selectable: false</code>, sauf s'il s'agit d'un backend local, sans configuration, intégré à
+  <code>delonix-vm</code>.</li>
+<li>Surchargez délibérément <code>manages_own_storage</code>, <code>destroy</code>, <code>resume</code> et <code>ip_is_predicted</code> : pour un
+  backend distant, <code>stop</code> et <code>destroy</code> ne sont <strong>pas</strong> la même opération, et <code>boot</code> sur une VM
+  arrêtée ne doit pas en créer une seconde.</li>
+<li>Laissez les verbes non pris en charge sur leurs implémentations par défaut qui échouent de manière
+  fermée ; refusez par leur nom les champs de <code>VmConfig</code> non pris en charge avant de créer quoi que ce
+  soit.</li>
+<li>Ne publiez pas un backend qu'on n'a jamais vu démarrer une VM. Les nouveaux backends et les
+  nouvelles frontières d'hyperviseur passent par un ADR (<a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener">docs/adr/</a>).</li>
 </ul>
-<h3 id="testing">Testing</h3>
+<h3 id="testing">Tests</h3>
 <ul>
-<li><strong>Pure unit tests</strong> — argv and XML builders are pure functions so they test without a hypervisor:
-  e.g. <code>libvirt_snapshot_argv_uses_flags_not_positional</code>, <code>snapshot_xml_with_uuid</code>,
-  <code>libvirt_domain_xml</code>, the firmware-order test above, the registry and <code>auto_detect</code> tests, and the
-  parser/scaffold tests in <code>cmd/vmfile.rs</code>. Run <code>cargo test -p delonix-vm</code> and
-  <code>cargo test -p delonix-runtime-bin vmfile</code> (see <a href="02-build-and-test.html">02</a> for <code>protoc</code> and the
-  target directory).</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a></strong> — the <code>vm</code> sections run without a hypervisor (listing, refusals) and, when
-  available, exercise snapshots across stop/start on libvirt (needs <code>virsh</code>, <code>qemu-img</code> and a usable
-  <code>qemu:///system</code>) and on Cloud Hypervisor. It isolates both state roots by default; the CH section
-  refuses to run if only <code>DELONIX_ROOT</code> is isolated. Sections without their hypervisor are reported
-  as skipped, not passed.</li>
-<li><strong>Proxmox live test</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/tests/live.rs</code></a> creates and destroys one
-  VM against a real node and is skipped unless <code>DELONIX_PROXMOX_TEST_URL</code> (plus <code>_NODE</code>, <code>_USER</code>,
-  <code>_PASS</code>) is set: <code>cargo test -p delonix-proxmox --test live -- --nocapture</code>. Use a disposable node.</li>
-<li><strong>Provider lifecycle</strong> — when changing <code>delonix-vm</code> or a provider, prove the whole lifecycle
-  (create, stop, start, snapshot, destroy) <strong>through the <code>delonix</code> CLI only</strong>, observing the
-  hypervisor read-only (<code>virsh -r</code>, API <code>GET</code>s), never repairing it by hand between steps.</li>
-<li><strong>Look, do not guess.</strong> When a guest does not come up, the serial console (<code>vm console</code>) or a
-  libvirt screenshot answers in seconds what hypotheses take hours to find — and validate with the
-  command a user would type, not the flags that are convenient for debugging (<code>--vnc</code> once masked a
-  boot failure that only happened without a video device).</li>
+<li><strong>Tests unitaires purs</strong> — les constructeurs d'argv et de XML sont des fonctions pures, ils se
+  testent donc sans hyperviseur : p. ex. <code>libvirt_snapshot_argv_uses_flags_not_positional</code>,
+  <code>snapshot_xml_with_uuid</code>, <code>libvirt_domain_xml</code>, le test de l'ordre des firmwares ci-dessus, les
+  tests du registre et de <code>auto_detect</code>, et les tests de parseur/scaffold dans <code>cmd/vmfile.rs</code>.
+  Exécutez <code>cargo test -p delonix-vm</code> et <code>cargo test -p delonix-runtime-bin vmfile</code> (voir
+  <a href="02-build-and-test.html">02</a> pour <code>protoc</code> et le répertoire cible).</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a></strong> — les sections <code>vm</code> s'exécutent sans hyperviseur (listage, refus) et, lorsque
+  c'est disponible, exercent les snapshots à travers stop/start sur libvirt (nécessite <code>virsh</code>,
+  <code>qemu-img</code> et un <code>qemu:///system</code> utilisable) et sur Cloud Hypervisor. Le script isole les deux
+  racines d'état par défaut ; la section CH refuse de s'exécuter si seule <code>DELONIX_ROOT</code> est isolée.
+  Les sections dont l'hyperviseur est absent sont signalées comme ignorées, et non comme réussies.</li>
+<li><strong>Test en conditions réelles Proxmox</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/tests/live.rs</code></a> crée et
+  détruit une VM contre un vrai nœud et est ignoré sauf si <code>DELONIX_PROXMOX_TEST_URL</code> (ainsi que
+  <code>_NODE</code>, <code>_USER</code>, <code>_PASS</code>) est défini : <code>cargo test -p delonix-proxmox --test live -- --nocapture</code>.
+  Utilisez un nœud jetable.</li>
+<li><strong>Cycle de vie des providers</strong> — lorsque vous modifiez <code>delonix-vm</code> ou un provider, prouvez le cycle
+  de vie complet (create, stop, start, snapshot, destroy) <strong>uniquement à travers la CLI <code>delonix</code></strong>,
+  en observant l'hyperviseur en lecture seule (<code>virsh -r</code>, <code>GET</code> d'API), sans jamais le réparer à la
+  main entre les étapes.</li>
+<li><strong>Regardez, ne devinez pas.</strong> Lorsqu'un invité ne démarre pas, la console série (<code>vm console</code>) ou
+  une capture d'écran libvirt répond en quelques secondes à ce que des hypothèses mettent des heures
+  à trouver — et validez avec la commande qu'un utilisateur taperait, et non avec les options
+  pratiques pour le débogage (<code>--vnc</code> a un jour masqué un échec de démarrage qui ne se produisait
+  que sans périphérique vidéo).</li>
 </ul>
-<div class="pager"><a href="08-delonixfile-and-vmfile.html"><span>← Précédent</span>8. Delonixfile and VMfile</a><a class="next" href="10-contributing-workflow.html"><span>Suivant →</span>10. Contribution workflow</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/09-microvm-setup.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/09-microvm-setup.md</code></p></main>
+<div class="pager"><a href="08-delonixfile-and-vmfile.html"><span>← Précédent</span>8. Delonixfile et VMfile</a><a class="next" href="10-contributing-workflow.html"><span>Suivant →</span>10. Flux de contribution</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/09-microvm-setup.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/fr-FR/09-microvm-setup.md</code></p></main>
 <aside class="toc"><h5>Sur cette page</h5><div class="toc">
 <ul>
-<li><a href="#1-host-prerequisites">1. Host prerequisites</a><ul>
+<li><a href="#1-host-prerequisites">1. Prérequis de l'hôte</a><ul>
 <li><a href="#kvm">KVM</a></li>
-<li><a href="#cloud-hypervisor-and-its-firmware">Cloud Hypervisor and its firmware</a></li>
+<li><a href="#cloud-hypervisor-and-its-firmware">Cloud Hypervisor et son firmware</a></li>
 <li><a href="#libvirt-qemu">libvirt / QEMU</a></li>
-<li><a href="#tools-the-vm-code-shells-out-to">Tools the VM code shells out to</a></li>
-<li><a href="#only-for-building-images-with-image-build">Only for building images: --with-image-build</a></li>
-<li><a href="#isolation-first">Isolation first</a></li>
+<li><a href="#tools-the-vm-code-shells-out-to">Outils que le code VM invoque</a></li>
+<li><a href="#only-for-building-images-with-image-build">Uniquement pour construire des images : --with-image-build</a></li>
+<li><a href="#isolation-first">L'isolation d'abord</a></li>
 </ul>
 </li>
-<li><a href="#2-backends-and-how-one-is-chosen">2. Backends and how one is chosen</a><ul>
-<li><a href="#the-port-and-the-registry">The port and the registry</a></li>
-<li><a href="#selection-precedence-for-a-new-vm">Selection precedence for a new VM</a></li>
-<li><a href="#proxmox-ve-remote">Proxmox VE (remote)</a></li>
+<li><a href="#2-backends-and-how-one-is-chosen">2. Les backends et comment l'un d'eux est choisi</a><ul>
+<li><a href="#the-port-and-the-registry">Le port et le registre</a></li>
+<li><a href="#selection-precedence-for-a-new-vm">Ordre de priorité de la sélection pour une nouvelle VM</a></li>
+<li><a href="#proxmox-ve-remote">Proxmox VE (distant)</a></li>
 </ul>
 </li>
 <li><a href="#3-images">3. Images</a><ul>
-<li><a href="#official-images">Official images</a></li>
-<li><a href="#building-the-golden-recipe">Building the golden recipe</a></li>
-<li><a href="#converting-and-importing">Converting and importing</a></li>
+<li><a href="#official-images">Images officielles</a></li>
+<li><a href="#building-the-golden-recipe">Construire la recette dorée</a></li>
+<li><a href="#converting-and-importing">Convertir et importer</a></li>
 </ul>
 </li>
-<li><a href="#4-create-and-run">4. Create and run</a><ul>
+<li><a href="#4-create-and-run">4. Créer et exécuter</a><ul>
 <li><a href="#vm-create">vm create</a></li>
-<li><a href="#day-2-verbs">Day-2 verbs</a></li>
+<li><a href="#day-2-verbs">Verbes du quotidien (day-2)</a></li>
 <li><a href="#snapshots">Snapshots</a></li>
-<li><a href="#declarative">Declarative</a></li>
+<li><a href="#declarative">Déclaratif</a></li>
 </ul>
 </li>
-<li><a href="#5-networking-for-vms">5. Networking for VMs</a></li>
-<li><a href="#6-troubleshooting">6. Troubleshooting</a></li>
-<li><a href="#7-for-contributors">7. For contributors</a><ul>
-<li><a href="#where-the-code-lives">Where the code lives</a></li>
-<li><a href="#adding-a-backend">Adding a backend</a></li>
-<li><a href="#testing">Testing</a></li>
+<li><a href="#5-networking-for-vms">5. Réseau pour les VMs</a></li>
+<li><a href="#6-troubleshooting">6. Dépannage</a></li>
+<li><a href="#7-for-contributors">7. Pour les contributeurs</a><ul>
+<li><a href="#where-the-code-lives">Où se trouve le code</a></li>
+<li><a href="#adding-a-backend">Ajouter un backend</a></li>
+<li><a href="#testing">Tests</a></li>
 </ul>
 </li>
 </ul>

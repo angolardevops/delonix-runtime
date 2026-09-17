@@ -81,8 +81,12 @@ to guess the rules or make up your own. Every rule below carries a tag and a sou
 <ul>
 <li><strong>Enforced (gate)</strong>: a CI job fails if you break it. The gate is named, so you can run it
   locally (see <a href="02-build-and-test.html#the-gates-ci-runs">02 — Build and test</a>).</li>
-<li><strong>Decided (ADR/AGENTS.md)</strong>: an Architecture Decision Record in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> or a section of
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> settles it. No gate checks it yet, so review does.</li>
+<li><strong>Decided (ADR/AGENTS.md)</strong>: an <strong>Accepted</strong> Architecture Decision Record in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> or a
+  section of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> settles it. No gate checks it yet, so review does.</li>
+<li><strong>Proposed (ADR, not yet decided)</strong>: the only written source is an ADR whose status is still
+  <strong>Proposed</strong> (see the status column of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>). It is the
+  direction the code is moving in, and review applies it, but it can still change; when the ADR is
+  accepted or rejected, the tag changes with it.</li>
 <li><strong>Convention (observed)</strong>: the code does it consistently and nothing wrote it down. The
   examples are real <code>path:symbol</code> references. Copy them.</li>
 </ul>
@@ -117,12 +121,12 @@ what each crate holds in <a href="06-crates.html">06 — Crates</a>, the Rust id
 <tr>
 <td><strong><code>[workspace.lints]</code></strong></td>
 <td>The root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> declares exactly one workspace lint: <code>[workspace.lints.clippy] undocumented_unsafe_blocks = "deny"</code>. Every member manifest has <code>[lints] workspace = true</code>.</td>
-<td><strong>Enforced (gate)</strong>: clippy. Decided by ADR-0040 phase P0 ("<code>[workspace.lints]</code> (<code>undocumented_unsafe_blocks = deny</code>)").</td>
+<td><strong>Enforced (gate)</strong>: clippy. It was introduced by phase P0 of ADR-0040 ("<code>[workspace.lints]</code> (<code>undocumented_unsafe_blocks = deny</code>)"), an ADR that is still <strong>Proposed</strong>; the gate holds regardless.</td>
 </tr>
 <tr>
 <td><strong>cargo-deny</strong></td>
-<td>RUSTSEC advisories (an ignored one needs a written reason), yanked crates, permissive licences only (no GPL/AGPL), crates.io as the only registry, no git sources. Duplicate versions and wildcards only warn.</td>
-<td><strong>Enforced (gate)</strong>: CI job <code>deny</code> with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>.</td>
+<td>RUSTSEC advisories and yanked crates, permissive licences only (no GPL/AGPL), crates.io as the only registry, no git sources. The <code>[bans]</code> section of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> (duplicate versions and wildcards, set to warn) is <strong>not</strong> evaluated in CI.</td>
+<td><strong>Enforced (gate)</strong>: CI job <code>deny</code> runs <code>check advisories licenses sources</code> with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>. <strong>Convention (observed)</strong>: every ignored advisory in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> carries a comment with its reason — no gate checks that the comment exists.</td>
 </tr>
 <tr>
 <td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></strong></td>
@@ -202,7 +206,8 @@ Err(Error::Invalid(super::po::tf(
     Portuguese ("num apply falhado"). A <code>num</code> identifier therefore counts as Portuguese debt and
     fails the gate. Use <code>count</code> or <code>number</code>.</li>
 <li>Adding a word to the lexicon <strong>raises</strong> the count and fails the gate. Lower the baseline in the
-    same commit. The lexicon never takes homographs (<code>data</code>, <code>base</code>, <code>no</code>, <code>nas</code>…).</li>
+    same commit. Homographs (<code>data</code>, <code>base</code>, <code>no</code>, <code>nas</code>…) are excluded unless a measurement shows they catch
+    real Portuguese; <code>num</code> is the recorded exception (AGENTS.md § LANG-01).</li>
 </ul>
 <hr />
 <h2 id="3-naming">3. Naming</h2>
@@ -213,7 +218,8 @@ Err(Error::Invalid(super::po::tf(
   directory must match the crate's entry in the <code>LAYERS</code> table. <strong>Enforced (gate)</strong>:
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>misplaced()</code> / <code>LAYER_DIR</code>. A new crate goes into <code>LAYERS</code> <strong>and</strong> the
   right directory in the same commit.</li>
-<li><strong>Target naming convention for new or restructured crates.</strong> <strong>Decided</strong>: ADR-0040 D2.1.</li>
+<li><strong>Target naming convention for new or restructured crates.</strong> <strong>Proposed (ADR, not yet
+  decided)</strong>: ADR-0040 D2.1.</li>
 </ul>
 <div class="tablewrap"><table>
 <thead>
@@ -252,8 +258,9 @@ Err(Error::Invalid(super::po::tf(
   <code>delonix-security-runtime</code>. ADR-0040 renames each one in the phase that restructures it, "never
   twice". <strong>Don't rename a crate outside its phase.</strong>
 - <strong>Every crate's path is written once</strong>, in <code>[workspace.dependencies]</code> of the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>.
-  Members depend on each other with <code>{ workspace = true }</code>. <strong>Decided</strong>: ADR-0040 P0, comment at the
-  top of <code>[workspace.dependencies]</code>.</p>
+  Members depend on each other with <code>{ workspace = true }</code>. <strong>Decided</strong>: AGENTS.md § "A direcção
+  das dependências é um portão (ADR-0040, fase P0)", and the comment at the top of
+  <code>[workspace.dependencies]</code>.</p>
 <h3 id="32-modules-and-files">3.2 Modules and files</h3>
 <ul>
 <li><strong>CLI command groups</strong>: one module per group in <code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code>,
@@ -269,8 +276,8 @@ Err(Error::Invalid(super::po::tf(
 </ul>
 <h3 id="33-types-traits-functions-constants">3.3 Types, traits, functions, constants</h3>
 <ul>
-<li><strong>Ports are named after the capability, not the technology.</strong> <strong>Decided</strong>: ADR-0040 D3 lists the
-  ports: <code>WorkloadRuntime</code>, <code>SandboxProvider</code>, <code>VmProvider</code>, <code>NetworkProvider</code>, <code>StorageProvider</code>,
+<li><strong>Ports are named after the capability, not the technology.</strong> <strong>Proposed (ADR, not yet
+  decided)</strong>: ADR-0040 D3 lists the ports: <code>WorkloadRuntime</code>, <code>SandboxProvider</code>, <code>VmProvider</code>, <code>NetworkProvider</code>, <code>StorageProvider</code>,
   <code>ImageRegistry</code>, <code>ImageStore</code>, … The ones that exist today are in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>,
   <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>) and <code>.../launch.rs</code> (<code>WorkloadRuntime</code>). The older
@@ -335,16 +342,18 @@ Err(Error::Invalid(super::po::tf(
 <ul>
 <li><strong>Kinds are <code>UpperCamelCase</code> nouns</strong> in one of the published groups
   <code>core</code>, <code>compute</code>, <code>networking</code>, <code>gateway</code>, <code>storage</code>, <code>artifact</code>, <code>infrastructure</code>
-  (<code>&lt;group&gt;.delonix.io/v1alpha1</code>). <strong>Decided</strong>: ADR-0020; AGENTS.md § "Identidade e fronteira do
-  motor" and § "Os Kinds ganham grupos". Each Kind is <strong>one row</strong> in
+  (<code>&lt;group&gt;.delonix.io/v1alpha1</code>). <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira do
+  motor" and § "Os Kinds ganham grupos" (ADR-0020, which introduced the groups, is still
+  <strong>Proposed</strong>). Each Kind is <strong>one row</strong> in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (<code>KindFacts</code>: <code>kind</code>, <code>plural</code>, <code>short</code>,
   <code>api_version</code>, <code>domain</code>, <code>form</code>, <code>in_stack</code>, <code>converges</code>, …). <code>delonix api-resources</code> prints that
   table. Adding a Kind also touches tables that nothing derives from <code>kinds.rs</code> (<code>hot_fields</code>,
   <code>NAMESPACE_SOURCES</code>, <code>TYPED_KINDS</code>, the generated schema). The tests fail until each one is done.
   <strong>Enforced (gate)</strong>: AGENTS.md § "<code>kind: Service</code>" lists which test caught each table.</li>
 <li><strong>A renamed Kind keeps its old name as a silent, case-insensitive alias.</strong> A <strong>merge</strong> warns,
-  because its meaning changed. <strong>Decided</strong>: <code>cmd/manifest.rs:KIND_ALIASES</code> and its comment,
-  ADR-0020.</li>
+  because its meaning changed. <strong>Decided</strong>: AGENTS.md § "Os Kinds ganham grupos e nomes
+  definitivos" ("Alias silencioso, não depreciação"); implemented in
+  <code>cmd/manifest.rs:KIND_ALIASES</code>. ADR-0020 is still <strong>Proposed</strong>.</li>
 <li><strong>Manifest fields are <code>camelCase</code>.</strong> If a field had a <code>snake_case</code> spelling before, that spelling
   stays accepted as a <code>serde</code> <code>alias</code>. <strong>Convention (observed)</strong>, per field rather than
   <code>rename_all</code>:</li>
@@ -368,7 +377,10 @@ cpu_affinity: Option&lt;String&gt;,
   <code>DELONIX_LOG_FORMAT</code>, <code>DELONIX_CRI_CAP_CEILING</code>. <strong>Convention (observed)</strong> across <code>crates/</code> and
   <code>bins/</code>.</li>
 <li><strong>For telemetry, read the standard <code>OTEL_*</code> variables</strong>, not a new <code>DELONIX_*</code> alias.
-  <strong>Decided</strong>: ADR-0040 D6.</li>
+  <strong>Proposed (ADR, not yet decided)</strong>: ADR-0040 D6. This is the target, not today's code:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> reads <code>DELONIX_OTLP_ENDPOINT</code> for the OTLP
+  exporter, and from the standard set only <code>OTEL_SERVICE_NAME</code>. Don't add a new <code>DELONIX_*</code>
+  telemetry variable, and don't remove <code>DELONIX_OTLP_ENDPOINT</code> outside the phase that migrates it.</li>
 <li><strong>An escape hatch that weakens a safety default is loud and explicit.</strong> It is off unless set to
   <code>1</code>, and it warns: <code>DELONIX_ENABLE_IPV6=1</code>, <code>DELONIX_ALLOW_LINK_LOCAL=1</code>. <strong>Decided</strong>: AGENTS.md §
   "Bloco 0 do plano 33 (v0.37.1)".</li>
@@ -433,14 +445,17 @@ table and current exceptions are in <a href="05-architecture.html#layers-and-the
 <li><strong>Foundation and contexts stay pure of heavy dependencies.</strong> <code>tokio</code>, <code>axum</code>, <code>hyper</code>, <code>tonic</code>,
   <code>reqwest</code>, <code>clap</code>, <code>ratatui</code>, <code>serde_yaml</code>, <code>rmcp</code>, OpenTelemetry and <code>prometheus-client</code> are
   refused there (<code>HEAVY</code>).</li>
-<li><strong>A binary composes exactly one interface.</strong> Enforced in <code>rule_failures()</code> (ADR-0040 D2.4).</li>
+<li><strong>A binary composes exactly one interface.</strong> Enforced in <code>rule_failures()</code> (introduced by
+  ADR-0040 D2.4, still <strong>Proposed</strong>; also written in AGENTS.md § "A direcção das dependências é um
+  portão").</li>
 <li><strong>Dependency versions live only in the root <code>[workspace.dependencies]</code>.</strong> A member writes
   <code>{ workspace = true, features = [...] }</code> and nothing else. <code>default-features = false</code> stays in the
   root, because a member cannot turn off what the root turns on (<code>inline_versions()</code>).</li>
 <li><strong>Libraries don't print.</strong> The <code>library_prints</code> ratchet counts <code>println!</code>/<code>eprintln!</code>/<code>print!</code>
   outside <code>bins/</code>. Emit <code>tracing</code> instead (for example <code>tracing::warn!</code> in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>) and let the interface present the output.
-  <strong>Decided</strong>: ADR-0040 D6.</li>
+  <strong>Decided</strong>: AGENTS.md § "A direcção das dependências é um portão (ADR-0040, fase P0)" ("Uma
+  biblioteca não escreve para o terminal; emite <code>tracing</code>").</li>
 <li><strong>Libraries don't re-run the engine's own binary.</strong> The <code>self_exec_sites</code> ratchet counts
   <code>current_exe()</code>, <code>cli_bin()</code> and <code>delonix_bin()</code> outside <code>bins/</code>. Call a function or a use case
   instead. <code>Command::new("ip")</code>, <code>nft</code>, <code>qemu-img</code> and <code>ssh</code> are <strong>not</strong> counted, because running
@@ -451,7 +466,9 @@ table and current exceptions are in <a href="05-architecture.html#layers-and-the
 </ul>
 <h3 id="42-my-change-is-x-it-goes-in-y">4.2 "My change is X → it goes in Y"</h3>
 <p>This table uses the crates as they exist today. Check <a href="06-crates.html">06</a> for each crate's contents
-before you add to it.</p>
+before you add to it. Where the source column cites ADR-0040 or ADR-0026, the tag is <strong>Proposed
+(ADR, not yet decided)</strong>: both ADRs are still Proposed, even though the crates they describe
+already exist.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -556,9 +573,9 @@ before you add to it.</p>
 <h3 id="43-pure-core-io-at-the-edges">4.3 Pure core, I/O at the edges</h3>
 <ul>
 <li><strong>Decisions are pure functions over data you have already read.</strong> They take no store, run no
-  command and need no privilege, so a test can call them with plain values. <strong>Decided</strong>: ADR-0040
-  D1 (a context's <code>domain/</code> has "no I/O, no <code>tokio</code>, <code>libc</code>, <code>nix</code>, <code>std::fs</code>"). <strong>Convention
-  (observed)</strong>: <code>delonix-stack/src/reconcile.rs</code> ("decides it WITHOUT touching the machine"),
+  command and need no privilege, so a test can call them with plain values. <strong>Proposed (ADR, not yet
+  decided)</strong>: ADR-0040 D1 (a context's <code>domain/</code> has "no I/O, no <code>tokio</code>, <code>libc</code>, <code>nix</code>,
+  <code>std::fs</code>"). <strong>Convention (observed)</strong>: <code>delonix-stack/src/reconcile.rs</code> ("decides it WITHOUT touching the machine"),
   <code>cmd/vm.rs:resolve_vm_defaults</code>, <code>delonix-sdn/src/infra.rs:vmtap_line</code>,
   <code>delonix-oci/src/registry.rs:parse_content_range</code>.</li>
 </ul>
@@ -579,7 +596,7 @@ fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
   temporary directory. <strong>Decided</strong>: AGENTS.md § "O manifesto de VM resolvia a imagem de outra
   maneira que a CLI".</li>
 <li><strong>One rule, one owner.</strong> When two call sites need the same derivation, extract one function and
-  call it from both. A second copy drifts. Examples: <code>delonix_net::bridge_name</code> (the bridge name
+  call it from both. A second copy drifts. Examples: <code>delonix_net_rules::bridge_name</code>, re-exported by <code>delonix-sdn</code> (the bridge name
   had two formulas and printed a device that did not exist), <code>infra::dhcp_lease_ip</code>,
   <code>effective_entrypoints</code>. <strong>Decided</strong>: AGENTS.md § "<code>delonix network</code>", § "Isolamento de
   namespace", § "Reverse-proxy L7".</li>
@@ -589,8 +606,10 @@ fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
 <h3 id="51-ports-and-adapters">5.1 Ports and adapters</h3>
 <ul>
 <li><strong>A new backend implements a port. It is never an <code>if provider == …</code> somewhere else.</strong>
-  <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira do motor"; ADR-0040 D3 rule 3 ("No string
-  matching on provider names outside the composition root"). D3 plans a fitness test for this, but
+  <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira do motor" ("Um provider novo entra como
+  implementação de uma porta, nunca como um <code>if provider == …</code>"). ADR-0040 D3 rule 3 ("No string
+  matching on provider names outside the composition root") restates it and is still <strong>Proposed</strong>.
+  D3 plans a fitness test for this, but
   <strong>it does not exist yet in <code>arch_fitness.py</code></strong>, so review enforces it for now.</li>
 <li><strong>Backend-specific knowledge lives on the backend.</strong> For example,
   <code>VmBackend::ip_is_predicted()</code> answers whether a VM's IP was predicted, instead of the call site
@@ -622,7 +641,8 @@ pub trait NetworkProvider {
 <h3 id="52-errors-per-crate-adr-0040-p3">5.2 Errors per crate (ADR-0040 P3)</h3>
 <ul>
 <li><strong>An adapter or provider defines its own <code>Error</code> and converts it into the shared class</strong>
-  (<code>delonix_model::Error</code>), which carries the <code>DX_*</code> code. <strong>Decided</strong>: ADR-0040 P3.
+  (<code>delonix_model::Error</code>), which carries the <code>DX_*</code> code. <strong>Proposed (ADR, not yet decided)</strong>:
+  ADR-0040 P3.
   <strong>Enforced (gate)</strong>: the <code>shared_error_imports</code> ratchet in <code>arch_fitness.py</code> (<code>SHARED_ERROR</code>,
   limited to <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) counts
   <code>use delonix_runtime_core::{…Error/Result…}</code> or <code>use delonix_model::{…}</code> imports that make the
@@ -652,15 +672,15 @@ pub trait NetworkProvider {
 <li><strong><code>pub</code> in a library crate is a promise to other crates.</strong> Removing a public item is a breaking
   change for library users, even with zero callers in this workspace. rustc's <code>dead_code</code> lint
   doesn't see unused <code>pub</code> items, so when you delete one, count the orphaned public items by hand.
-  <strong>Decided</strong>: AGENTS.md § "<code>delonix_net::Net</code> foi APAGADO".</li>
+  <strong>Decided</strong>: AGENTS.md § "<code>delonix_sdn::Net</code> foi APAGADO — e é breaking para quem usa a biblioteca".</li>
 </ul>
 <h3 id="54-the-node-contract">5.4 The node contract</h3>
 <p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is the source of truth for both the gRPC and the HTTP/JSON encodings.
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is generated from it. <strong>Never edit the OpenAPI file by hand.</strong>
 <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> runs <code>buf format</code>, <code>buf lint</code>, <code>buf breaking</code>
 against the last tag that contains <code>proto/</code>, checks the HTTP mapping of every RPC, and checks that
-the OpenAPI file equals the generated one. <strong>Decided</strong>: AGENTS.md § "O contrato de nó é um portão";
-ADR-0040 D4.</p>
+the OpenAPI file equals the generated one. <strong>Decided</strong>: AGENTS.md § "O contrato de nó é um portão"
+(which cites ADR-0040 P1; ADR-0040 D4 is still <strong>Proposed</strong>).</p>
 <ul>
 <li><strong>One request message per RPC</strong>, named <code>&lt;Rpc&gt;Request</code>. <strong>Enforced (gate)</strong>: <code>buf lint</code>
   <code>RPC_REQUEST_STANDARD_NAME</code> (see <code>buf.yaml</code>). A shared request lets a field meant for one method
@@ -679,12 +699,18 @@ ADR-0040 D4.</p>
 <h3 id="55-the-engine-knows-no-consumer">5.5 The engine knows no consumer</h3>
 <p>The engine doesn't know who uses it. No name of a platform, control plane, console or agent, and
 no notion of tenant, account, plan or billing, may appear in <code>crates/</code>, <code>bins/</code>, <code>proto/</code>, the root
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> or the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a>, <strong>comments included</strong>. <strong>Enforced (gate)</strong>:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>consumer_mentions()</code> with the <code>CONSUMER_NAMES</code> pattern. <strong>Decided</strong>:
-AGENTS.md § "Identidade e fronteira do motor". If a consumer needs something, write it as a generic
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> or the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a>, <strong>comments included</strong>.</p>
+<ul>
+<li><strong>Consumer names.</strong> <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>consumer_mentions()</code> matches
+  the <code>CONSUMER_NAMES</code> regular expression, a fixed list of names, in those paths. A name that is
+  not on the list is not caught.</li>
+<li><strong>Tenant, account, plan and billing concepts.</strong> <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira
+  do motor". No gate matches them; review checks it.
+ If a consumer needs something, write it as a generic
 capability in the engine's own vocabulary (Kinds and resources), and add it only if it makes sense
 for any client. The engine validates its own contract and never trusts a caller to refuse what it
-doesn't support.</p>
+doesn't support.</li>
+</ul>
 <hr />
 <h2 id="6-error-handling-and-messages">6. Error handling and messages</h2>
 <ul>
@@ -837,8 +863,12 @@ let c = store.update(id_or_name, |c| match f(c) {
   window. <strong>Convention (observed)</strong>: <code>store.rs:jsonstore_update_concorrente_nao_perde_escritas</code>.</li>
 <li><strong>Prefer properties over sampled timing.</strong> When a race can only be sampled, generate load and
   repeat. <strong>Decided</strong>: AGENTS.md § "Um <code>exec</code> logo a seguir ao <code>run -d</code> corria no HOST".</li>
-<li><strong>Never write counts into docs or comments</strong> (tests, lines, checks). They are stale after the
-  next PR. <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> docstring.</li>
+<li><strong>Generated regions carry no volatile counts</strong> (lines, tests, commits). <strong>Decided</strong>:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> docstring ("Deliberately NOT generated: line counts, test counts, commit
+  counts"). A <strong>hand-written measurement</strong> cites the measured value together with the date it was
+  measured, never a running total. <strong>Decided</strong>: AGENTS.md § "A bateria mede o <code>--help</code> de tudo e
+  EXECUTA um quarto" ("Cita-se a fracção medida e a data, nunca o total"). Whether counts may appear
+  in prose or code comments at all is <strong>not decided</strong> — follow the surrounding text.</li>
 </ul>
 <hr />
 <h2 id="10-comments-and-documentation">10. Comments and documentation</h2>
@@ -881,11 +911,11 @@ your PR:</p>
   count towards <code>shared_error_imports</code>. P3 decides errors per crate. No document says how a port's
   signature changes, and adding such an import in a new file fails the ratchet. If your change
   needs one, raise it in the PR. Don't work around the regex.</li>
-<li><strong>Crate names during the transition.</strong> ADR-0040 D2 fixes the target names, but a brand-new crate
+<li><strong>Crate names during the transition.</strong> ADR-0040 D2 (still Proposed) sets the target names, but a brand-new crate
   that lands before its context exists (for example a second provider before the
   <code>delonix-provider-*</code> renames) has no written rule. Ask in the issue first.</li>
 <li><strong>Required doc comments.</strong> There is no <code>missing_docs</code> lint, only the observed habit.</li>
-<li><strong>The fitness test for provider-name matching</strong> (ADR-0040 D3 rule 3) is decided but not yet
+<li><strong>The fitness test for provider-name matching</strong> (ADR-0040 D3 rule 3) is proposed but not yet
   implemented.</li>
 </ul>
 <hr />
@@ -918,8 +948,8 @@ your PR:</p>
     <a href="#7-unsafe-syscalls-and-processes">§7</a></li>
 <li>Record mutations go through <code>update</code>, and new record fields have <code>#[serde(default)]</code>. →
     <a href="#8-state-and-concurrency">§8</a></li>
-<li>Tests use isolated roots, the regression test fails with the fix reverted, and no counts are
-    written into docs. → <a href="#9-tests">§9</a></li>
+<li>Tests use isolated roots, the regression test fails with the fix reverted, and a measured
+    number carries its date. → <a href="#9-tests">§9</a></li>
 <li>CLI changes: all entry points are wired, verbs are Docker-aligned, cuts have no aliases, and
     the CLI baseline is updated. → <a href="#35-cli-commands-and-flags">§3.5</a></li>
 <li>Kinds and manifest fields: a row in <code>kinds.rs</code>, <code>camelCase</code> fields with old spellings as

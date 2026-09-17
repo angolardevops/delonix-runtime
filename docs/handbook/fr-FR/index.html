@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="fr-FR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Delonix Runtime — Contributor Handbook · Delonix Runtime — Guide du contributeur</title>
+<title>Delonix Runtime — Manuel du contributeur · Delonix Runtime — Guide du contributeur</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -59,88 +59,88 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Guide du contributeur</div>
 <div class="tools"><button class="searchbtn" type="button">🔍 Rechercher <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/index.html">EN · English</option><option value="../pt-AO/index.html">PT-AO · Português (Angola)</option><option value="../fr-FR/index.html" selected>FR-FR · Français</option></select></div>
-<a class="on" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="on" href="index.html">Delonix Runtime — Manuel du contributeur</a>
 <a class="" href="00-start-here.html">0. Start here</a>
-<a class="" href="01-environment.html">1. Preparing your environment</a>
-<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
-<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
-<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="01-environment.html">1. Préparer votre environnement</a>
+<a class="" href="02-build-and-test.html">2. Cloner, compiler et tester</a>
+<a class="" href="03-rust-primer.html">3. Initiation à Rust pour cette base de code</a>
+<a class="" href="04-cloud-native-primer.html">4. Initiation au cloud native</a>
 <a class="" href="05-architecture.html">5. Architecture</a>
-<a class="" href="06-crates.html">6. The crates</a>
-<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
-<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
-<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
-<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
-<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="06-crates.html">6. Les crates</a>
+<a class="" href="07-system-design-interview.html">7. Entretien de conception de système — le Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile et VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Construire des microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Flux de contribution</a>
+<a class="" href="11-publishing-docs.html">11. Publier la documentation</a>
 <a class="" href="12-coding-conventions.html">12. Coding conventions</a>
 <a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
 <a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Contributor Handbook</h1>
-<p>This handbook is for people who want to <strong>change the engine</strong>: you cloned the repository today and
-want to send a first pull request without breaking your host or the engine. If you only want to
-<em>use</em> Delonix, start with the <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> and the
-<a href="https://angolardevops.github.io/delonix-runtime/">user documentation site</a> instead.</p>
+<main><h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Manuel du contributeur</h1>
+<p>Ce manuel s’adresse aux personnes qui veulent <strong>modifier le moteur</strong> : vous avez cloné le dépôt
+aujourd’hui et vous voulez envoyer une première pull request sans casser votre hôte ni le moteur. Si vous voulez seulement
+<em>utiliser</em> Delonix, commencez plutôt par le <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> et le
+<a href="https://angolardevops.github.io/delonix-runtime/">site de documentation utilisateur</a>.</p>
 <!-- dev-docs:begin crate-count -->
-<p>The workspace has <strong>21 crates</strong> and ships <strong>4 binaries</strong> (<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>).</p>
+<p>Le workspace compte <strong>21 crates</strong> et livre <strong>4 binaires</strong> (<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>).</p>
 <!-- dev-docs:end crate-count -->
 
-<h2 id="what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not</h2>
-<p>Delonix Runtime is an execution abstraction for <strong>one node</strong>: it runs <strong>containers and microVMs</strong>
-and manages the networking and storage they need. It is declarative (its own Kinds, grouped by
-<code>apiVersion</code> — see <code>delonix api-resources</code>), and it talks to providers (the Linux kernel, libvirt,
-Cloud Hypervisor, Proxmox VE, the Kubernetes CRI) only through ports, never through
-<code>if provider == …</code> branches spread across the code.</p>
-<p>Three principles shape almost every review comment you will get:</p>
+<h2 id="what-the-engine-is-and-what-it-is-not">Ce qu’est le moteur — et ce qu’il n’est pas</h2>
+<p>Delonix Runtime est une abstraction d’exécution pour <strong>un nœud</strong> : il exécute des <strong>containers et des microVM</strong>
+et gère le réseau et le stockage dont ils ont besoin. Il est déclaratif (ses propres Kinds, regroupés par
+<code>apiVersion</code> — voir <code>delonix api-resources</code>), et il ne parle aux providers (le noyau Linux, libvirt,
+Cloud Hypervisor, Proxmox VE, le CRI de Kubernetes) qu’à travers des ports, jamais à travers
+des branches <code>if provider == …</code> dispersées dans le code.</p>
+<p>Trois principes façonnent presque tous les commentaires de revue que vous recevrez :</p>
 <ul>
-<li><strong>Cloud native</strong> — plan / apply / drift, API-first (the CLI, the node API, the CRI and the MCP
-  server expose the same operations), observable through open standards.</li>
-<li><strong>Daemonless</strong> — no resident process by default. What must persist belongs to systemd or to a
-  per-workload process with a clear owner. A new daemon needs an ADR.</li>
-<li><strong>Rootless-first</strong> — the normal path runs without root; privilege is an explicit opt-in.</li>
+<li><strong>Cloud native</strong> — plan / apply / dérive, API-first (la CLI, l’API de nœud, le CRI et le serveur
+  MCP exposent les mêmes opérations), observable au moyen de standards ouverts.</li>
+<li><strong>Daemonless</strong> — aucun processus résident par défaut. Ce qui doit persister appartient à systemd ou à un
+  processus par workload avec un propriétaire clair. Un nouveau daemon exige un ADR.</li>
+<li><strong>Rootless-first</strong> — le chemin normal s’exécute sans root ; le privilège est un opt-in explicite.</li>
 </ul>
-<p>And one boundary that is enforced by a CI gate: <strong>the engine knows no consumer.</strong> It does not know
-who calls it, and it has no notion of tenant, account, plan or billing. A requirement coming from a
-consumer enters as a generic engine capability, or it does not enter. The canonical text is the
-section <em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>.</p>
-<h2 id="two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative</h2>
-<p>Pages in this handbook mix two kinds of content:</p>
+<p>Et une frontière imposée par un gate (contrôle CI) : <strong>le moteur ne connaît aucun consommateur.</strong> Il ne sait pas
+qui l’appelle, et il n’a aucune notion de locataire, de compte, d’offre ou de facturation. Une exigence venant d’un
+consommateur entre sous la forme d’une capacité générique du moteur, ou elle n’entre pas. Le texte canonique est la
+section <em>«Identidade e fronteira do motor»</em> en tête de <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>.</p>
+<h2 id="two-halves-generated-facts-and-narrative">Deux moitiés : faits générés et récit</h2>
+<p>Les pages de ce manuel mélangent deux types de contenu :</p>
 <ul>
-<li><strong>Facts</strong> — which crates exist, their layer, who depends on whom, the binaries, the pinned
-  toolchain, the CI jobs. They live between <code>&lt;!-- dev-docs:begin &lt;key&gt; --&gt;</code> and
-  <code>&lt;!-- dev-docs:end &lt;key&gt; --&gt;</code> markers and are <strong>generated</strong> by <code>python3 scripts/dev_docs.py</code>
-  from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> and
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Never edit them by hand — CI runs <code>dev_docs.py --check</code> and fails.
-  If a fact is wrong, fix the source or the generator.</li>
-<li><strong>Narrative</strong> — why things are the way they are, how flows work, how to contribute. It is
-  written by hand and reviewed after each release. See <a href="11-publishing-docs.html">11 — Publishing the docs</a>.</li>
+<li><strong>Faits</strong> — quels crates existent, leur couche, qui dépend de qui, les binaires, la
+  toolchain épinglée, les jobs de CI. Ils vivent entre les marqueurs <code>&lt;!-- dev-docs:begin &lt;key&gt; --&gt;</code> et
+  <code>&lt;!-- dev-docs:end &lt;key&gt; --&gt;</code> et sont <strong>générés</strong> par <code>python3 scripts/dev_docs.py</code>
+  à partir de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> et
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Ne les modifiez jamais à la main — la CI exécute <code>dev_docs.py --check</code> et échoue.
+  Si un fait est faux, corrigez la source ou le générateur.</li>
+<li><strong>Récit</strong> — pourquoi les choses sont ainsi, comment les flux fonctionnent, comment contribuer. Il est
+  écrit à la main et relu après chaque release. Voir <a href="11-publishing-docs.html">11 — Publier la documentation</a>.</li>
 </ul>
-<h2 id="reading-paths">Reading paths</h2>
+<h2 id="reading-paths">Parcours de lecture</h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>If you want to…</th>
-<th>Read, in order</th>
+<th>Si vous voulez…</th>
+<th>Lisez, dans l’ordre</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Start from zero, with no one to ask</strong></td>
-<td><a href="00-start-here.html">00</a> (keep <a href="14-glossary.html">14</a> open) → the path below that matches your change</td>
+<td><strong>Partir de zéro, sans personne à qui demander</strong></td>
+<td><a href="00-start-here.html">00</a> (gardez <a href="14-glossary.html">14</a> ouvert) → le parcours ci-dessous qui correspond à votre modification</td>
 </tr>
 <tr>
-<td><strong>Send a first PR</strong> (a CLI fix, a docs fix, a small feature)</td>
-<td><a href="00-start-here.html">00</a> → <a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="10-contributing-workflow.html">10</a> → <a href="12-coding-conventions.html">12</a> → <a href="06-crates.html">06</a> for the crate you touch</td>
+<td><strong>Envoyer une première PR</strong> (un correctif de CLI, un correctif de doc, une petite fonctionnalité)</td>
+<td><a href="00-start-here.html">00</a> → <a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="10-contributing-workflow.html">10</a> → <a href="12-coding-conventions.html">12</a> → <a href="06-crates.html">06</a> pour le crate que vous touchez</td>
 </tr>
 <tr>
-<td><strong>Understand the engine in depth</strong></td>
+<td><strong>Comprendre le moteur en profondeur</strong></td>
 <td><a href="03-rust-primer.html">03</a> → <a href="04-cloud-native-primer.html">04</a> → <a href="13-cloud-native-standards.html">13</a> → <a href="05-architecture.html">05</a> → <a href="06-crates.html">06</a> → <a href="07-system-design-interview.html">07</a></td>
 </tr>
 <tr>
-<td><strong>Work on VMs or VM images</strong></td>
-<td><a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="08-delonixfile-and-vmfile.html">08</a> → <a href="09-microvm-setup.html">09</a> → the <code>delonix-vm</code> section of <a href="06-crates.html">06</a></td>
+<td><strong>Travailler sur les VM ou les images de VM</strong></td>
+<td><a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="08-delonixfile-and-vmfile.html">08</a> → <a href="09-microvm-setup.html">09</a> → la section <code>delonix-vm</code> de <a href="06-crates.html">06</a></td>
 </tr>
 <tr>
-<td><strong>Change how documentation is produced</strong></td>
+<td><strong>Changer la façon dont la documentation est produite</strong></td>
 <td><a href="11-publishing-docs.html">11</a></td>
 </tr>
 </tbody>
@@ -151,97 +151,97 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
 <tr>
 <th>#</th>
 <th>Page</th>
-<th>What it answers</th>
+<th>Ce à quoi elle répond</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>00</td>
-<td><a href="00-start-here.html">Start here</a></td>
-<td>Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck</td>
+<td><a href="00-start-here.html">Commencer ici</a></td>
+<td>Vérification de la configuration au jour 0, votre première contribution de bout en bout, où va une modification, les règles et leurs sources, que faire quand vous êtes bloqué</td>
 </tr>
 <tr>
 <td>01</td>
-<td><a href="01-environment.html">Preparing your environment</a></td>
-<td>What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs</td>
+<td><a href="01-environment.html">Préparer votre environnement</a></td>
+<td>Ce dont le noyau et l’hôte ont besoin, la toolchain épinglée, et les pièges de l’hôte qui ressemblent à des bugs du moteur</td>
 </tr>
 <tr>
 <td>02</td>
-<td><a href="02-build-and-test.html">Clone, build and test</a></td>
-<td>Building, running tests, every CI gate as a local command, E2E and chaos with isolation</td>
+<td><a href="02-build-and-test.html">Cloner, compiler et tester</a></td>
+<td>Compiler, exécuter les tests, chaque gate de CI comme commande locale, E2E et chaos avec isolation</td>
 </tr>
 <tr>
 <td>03</td>
-<td><a href="03-rust-primer.html">Rust primer</a></td>
-<td>The Rust this codebase actually uses</td>
+<td><a href="03-rust-primer.html">Initiation à Rust</a></td>
+<td>Le Rust que cette base de code utilise réellement</td>
 </tr>
 <tr>
 <td>04</td>
-<td><a href="04-cloud-native-primer.html">Cloud native primer</a></td>
-<td>Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — and where each appears in the engine</td>
+<td><a href="04-cloud-native-primer.html">Initiation au cloud native</a></td>
+<td>Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — et où chacun apparaît dans le moteur</td>
 </tr>
 <tr>
 <td>05</td>
 <td><a href="05-architecture.html">Architecture</a></td>
-<td>Layers, the crate graph, control and data paths, state on disk</td>
+<td>Couches, le graphe des crates, chemins de contrôle et de données, état sur disque</td>
 </tr>
 <tr>
 <td>06</td>
-<td><a href="06-crates.html">The crates</a></td>
-<td>One block per crate: responsibility, main types, where to start reading</td>
+<td><a href="06-crates.html">Les crates</a></td>
+<td>Un bloc par crate : responsabilité, types principaux, par où commencer la lecture</td>
 </tr>
 <tr>
 <td>07</td>
 <td><a href="07-system-design-interview.html">System Design Interview</a></td>
-<td>The engine designed as an interview answer, then compared with what was built</td>
+<td>Le moteur conçu comme une réponse d’entretien, puis comparé à ce qui a été construit</td>
 </tr>
 <tr>
 <td>08</td>
-<td><a href="08-delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
-<td>The build file grammars and how they differ from a Dockerfile</td>
+<td><a href="08-delonixfile-and-vmfile.html">Delonixfile et VMfile</a></td>
+<td>Les grammaires des fichiers de build et en quoi elles diffèrent d’un Dockerfile</td>
 </tr>
 <tr>
 <td>09</td>
-<td><a href="09-microvm-setup.html">Building microVMs</a></td>
-<td>KVM, Cloud Hypervisor and firmware, libvirt, VM images</td>
+<td><a href="09-microvm-setup.html">Construire des microVM</a></td>
+<td>KVM, Cloud Hypervisor et firmware, libvirt, images de VM</td>
 </tr>
 <tr>
 <td>10</td>
-<td><a href="10-contributing-workflow.html">Contribution workflow</a></td>
-<td>Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs</td>
+<td><a href="10-contributing-workflow.html">Flux de contribution</a></td>
+<td>Worktrees, versions, règle de langue, règles d’architecture, ADR, commits et PR</td>
 </tr>
 <tr>
 <td>11</td>
-<td><a href="11-publishing-docs.html">Publishing the documentation</a></td>
-<td>How the site and this handbook are generated, gated and published</td>
+<td><a href="11-publishing-docs.html">Publier la documentation</a></td>
+<td>Comment le site et ce manuel sont générés, contrôlés et publiés</td>
 </tr>
 <tr>
 <td>12</td>
-<td><a href="12-coding-conventions.html">Coding conventions</a></td>
-<td>How code in this repository is written, and the checklist reviewers apply</td>
+<td><a href="12-coding-conventions.html">Conventions de code</a></td>
+<td>Comment le code de ce dépôt est écrit, et la liste de contrôle qu’appliquent les relecteurs</td>
 </tr>
 <tr>
 <td>13</td>
-<td><a href="13-cloud-native-standards.html">Cloud native standards</a></td>
-<td>The cloud-native standards a change is measured against</td>
+<td><a href="13-cloud-native-standards.html">Standards cloud native</a></td>
+<td>Les standards cloud native à l’aune desquels une modification est mesurée</td>
 </tr>
 <tr>
 <td>14</td>
-<td><a href="14-glossary.html">Glossary</a></td>
-<td>The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more</td>
+<td><a href="14-glossary.html">Glossaire</a></td>
+<td>Les termes du moteur et du cloud native que vous rencontrez ici, avec leur sens dans Delonix et où en lire davantage</td>
 </tr>
 </tbody>
 </table></div>
-<p>Other references you will be pointed to: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (C4 diagrams),
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (architecture decisions), <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
-(private vulnerability reports) and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (the short front door).</p>
+<p>Autres références vers lesquelles on vous renverra : <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (diagrammes C4),
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (décisions d’architecture), <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
+(signalements privés de vulnérabilités) et <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (la courte porte d’entrée).</p>
 <div class="pager"><a class="next" href="00-start-here.html"><span>Suivant →</span>0. Start here</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/README.md</code></p></main>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/README.md" target="_blank" rel="noopener">Modifier cette page</a> · <code>docs/dev/fr-FR/README.md</code></p></main>
 <aside class="toc"><h5>Sur cette page</h5><div class="toc">
 <ul>
-<li><a href="#what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not</a></li>
-<li><a href="#two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative</a></li>
-<li><a href="#reading-paths">Reading paths</a></li>
+<li><a href="#what-the-engine-is-and-what-it-is-not">Ce qu’est le moteur — et ce qu’il n’est pas</a></li>
+<li><a href="#two-halves-generated-facts-and-narrative">Deux moitiés : faits générés et récit</a></li>
+<li><a href="#reading-paths">Parcours de lecture</a></li>
 <li><a href="#pages">Pages</a></li>
 </ul>
 </div>

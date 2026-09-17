@@ -155,12 +155,23 @@ Options, from least to most invasive:
 3. Set `kernel.apparmor_restrict_unprivileged_userns=0` — this lowers a host-wide boundary; only
    on a machine you own.
 
-### cgroup delegation: limits are accepted and silently ignored
+### cgroup delegation: some limits are refused, others are not enforced
 
-`--memory`, `--cpus` and `--pids-limit` only work if the shell you run the engine from sits in a
-**delegated** cgroup. Without delegation the flags are parsed, accepted and inert: the container
-runs with no limit. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the
-same requirement.
+Resource limits only reach the kernel if the shell you run the engine from sits in a **delegated**
+cgroup. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the same
+requirement. Without delegation the engine does two different things, depending on the flag:
+
+- `-m`/`--memory`, `-c`/`--cpus` and `--cpu-weight`: `container run` **refuses** before creating
+  anything, with an error that names the fix, and exits **69** (`Error::Unavailable`, the
+  `EX_UNAVAILABLE` class — `preflight_resource_limits` in
+  `bins/delonix-runtime-bin/src/cmd/container.rs`). `DELONIX_ALLOW_UNENFORCED_LIMITS=1` runs the
+  container anyway, unlimited, with a warning.
+- `--cpuset`, `--io-weight` and the `--device-read-bps`/`--device-write-bps`/`--device-read-iops`/
+  `--device-write-iops` family are **not** checked by that probe: they are accepted and applied
+  best-effort, so without the `cpuset`/`io` controllers they have no effect and nothing fails.
+
+There is no `--pids-limit` flag; the pids ceiling is a property of the engine's cgroup group, not
+of `container run`.
 
 The common case is an **SSH session**: its `session-N.scope` is a *sibling* of
 `user@<uid>.service`, and moving a process between them requires writing to a cgroup owned by root.
