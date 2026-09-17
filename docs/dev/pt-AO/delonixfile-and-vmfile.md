@@ -1,5 +1,9 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:3066b1b50b9e105648b68ed159d939e8980db0aefc4e8e1b6bf789fd29b309b3 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:f63e73d420c6754687d52f97013a60eaff3547f38bc24b47ee559d3910182f24 -->
 # Delonixfile e VMfile
+
+**Antes de leres:** [Clonar, construir e testar](build-and-test.md) (um binário e um state root
+isolado) e [Imagens OCI, armazenamento endereçado por conteúdo e overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs)
+no Manual de cloud native.
 
 O Delonix tem dois ficheiros de build, e são parecidos de propósito: quem já escreveu um Dockerfile
 consegue ler os dois. O que constroem é diferente.
@@ -12,7 +16,8 @@ consegue ler os dois. O que constroem é diferente.
   `delonix image vm build`.
 
 Esta página descreve o que os parsers deste repositório aceitam de facto — não o que o Docker
-aceita. Cada regra abaixo aponta para o código que a impõe.
+aceita. Cada regra abaixo aponta para o código que a impõe. Depois dela consegues escrever os dois
+ficheiros, prever o que cada parser aceita ou recusa, e encontrar onde mudar uma gramática.
 
 > Os exemplos marcados como *verificados pelo parser* foram corridos contra um binário construído a
 > partir desta árvore, com `DELONIX_ROOT`, `DELONIX_NET_RUNTIME_DIR` e `TMPDIR` apontados para um
@@ -427,3 +432,8 @@ Um build completo (`virt-customize`, downloads, compressão) **não foi executad
   motor ignora tem de ser documentado como tal ou removido.
 - O parser do Delonixfile vive num crate de biblioteca (`delonix-oci`), por isso não pode imprimir; o
   parser do VMfile está no binário da CLI. Ver [Crates](crates.md).
+
+---
+
+**Seguinte:** [Construir microVMs](microvm-setup.md) — os pré-requisitos do host, os backends, as
+imagens e os verbos de dia-2 para arrancar e testar microVMs.

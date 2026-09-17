@@ -1,5 +1,7 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:3066b1b50b9e105648b68ed159d939e8980db0aefc4e8e1b6bf789fd29b309b3 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:f63e73d420c6754687d52f97013a60eaff3547f38bc24b47ee559d3910182f24 -->
 # Delonixfile et VMfile
+
+**Avant de lire :** [Cloner, construire et tester](build-and-test.md) (un binaire et une racine d'état isolée) et [Images OCI, stockage adressé par contenu et overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs) dans le manuel de cloud native.
 
 Delonix a deux fichiers de build, et ils se ressemblent volontairement : quiconque a écrit un
 Dockerfile peut lire les deux. Ce qu'ils construisent est différent.
@@ -12,7 +14,7 @@ Dockerfile peut lire les deux. Ce qu'ils construisent est différent.
   `delonix image vm build`.
 
 Cette page décrit ce que les parseurs de ce dépôt acceptent réellement — et non ce que Docker
-accepte. Chaque règle ci-dessous renvoie au code qui l'impose.
+accepte. Chaque règle ci-dessous renvoie au code qui l'impose. Après elle, vous pouvez écrire les deux fichiers, prévoir ce que chaque parseur accepte ou refuse, et trouver où modifier une grammaire.
 
 > Les exemples marqués *parse-checked* ont été exécutés contre un binaire construit à partir de
 > cette arborescence, avec `DELONIX_ROOT`, `DELONIX_NET_RUNTIME_DIR` et `TMPDIR` pointant vers un
@@ -439,3 +441,7 @@ relecture**.
 - Le parseur du Delonixfile vit dans un crate de bibliothèque (`delonix-oci`), il ne doit donc pas
   afficher ; le parseur du VMfile se trouve dans le binaire de la CLI. Voir
   [Crates](crates.md).
+
+---
+
+**Suivant :** [Construire des microVMs](microvm-setup.md) — les prérequis d'hôte, les backends, les images et les verbes de jour 2 pour amorcer et tester des microVMs.
