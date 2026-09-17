@@ -23,7 +23,7 @@
 
 use super::po;
 use super::util::state_root;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// Reads the process-wide backend configuration and registers what is there.
 ///

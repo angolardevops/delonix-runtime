@@ -52,7 +52,7 @@ pub struct TaskRegistry {
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
 
-use delonix_runtime_core::now_unix;
+use delonix_node::now_unix;
 
 impl TaskRegistry {
     /// Runs `work` on a blocking thread and tracks it under a new task id.

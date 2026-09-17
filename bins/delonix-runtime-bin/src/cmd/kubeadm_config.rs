@@ -9,7 +9,7 @@
 //! dependency, used elsewhere for manifest round-tripping) — no
 //! `kubeadm-types` crate exists or is added for this.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::Serialize;
 
 const KUBEADM_API_VERSION: &str = "kubeadm.k8s.io/v1beta3";

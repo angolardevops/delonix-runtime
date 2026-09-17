@@ -6,7 +6,7 @@
 //! the interface that owns the terminal renders it in the operator's language.
 
 use crate::{Notice, RunOpts};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 /// The member's position in `spec.containers`, recorded at create time on each

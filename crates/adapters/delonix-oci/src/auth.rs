@@ -4,7 +4,7 @@
 
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

@@ -21,7 +21,7 @@
 //! holder), so the registry lives in the host's `base_root`, like the `NetDef`s.
 
 use crate::infra::{base_root, REF_MARKER_GRACE};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 

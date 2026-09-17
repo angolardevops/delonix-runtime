@@ -6,7 +6,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-delonix-runtime-core = { workspace = true }
+delonix-compute = { workspace = true }
+delonix-model = { workspace = true }
 delonix-vm = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

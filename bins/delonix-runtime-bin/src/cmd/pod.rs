@@ -22,7 +22,9 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use clap::Subcommand;
-use delonix_runtime_core::{Container, Error, Result, Status};
+use delonix_compute::Container;
+use delonix_model::records::Status;
+use delonix_model::{Error, Result};
 use delonix_sdn::infra;
 
 use super::container::{self, PodSpec};
@@ -440,7 +442,7 @@ pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) {
     if ns == "default" {
         return; // `default` is the open SDN — same contract as containers
     }
-    let fw = delonix_runtime_core::ContainerFw {
+    let fw = delonix_model::records::ContainerFw {
         enabled: true,
         namespace: ns.to_string(),
         ..Default::default()

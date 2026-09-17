@@ -4,7 +4,7 @@
 //!
 //! Guardrail #1 of this repo is *daemonless by design*, so a security event
 //! does not get a pipeline of its own. It maps onto the append-only log the
-//! engine already has (`delonix_runtime_core::events`, `<root>/events.jsonl`),
+//! engine already has (`delonix_node::events`, `<root>/events.jsonl`),
 //! under `kind = "security"`. The file IS the bus; a reader tails it.
 //!
 //! # No tenant
@@ -143,7 +143,7 @@ impl SecurityEvent {
     /// the module doc for why that is a stated limitation and not a design
     /// choice made here.
     pub fn emit(&self, root: &Path) {
-        delonix_runtime_core::events::emit(
+        delonix_node::events::emit(
             root,
             EVENT_KIND,
             &self.rule,
@@ -207,7 +207,7 @@ fn truncate_on_boundary(s: &str, max: usize) -> (&str, bool) {
     (&s[..end], true)
 }
 
-use delonix_runtime_core::now_unix;
+use delonix_node::now_unix;
 
 /// Every rule this crate can emit an event for. Exists so a test can prove the
 /// set is complete, and so an operator can build an alert list without reading

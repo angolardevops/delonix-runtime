@@ -44,7 +44,7 @@
 //! the collection — otherwise a typo in a `delete` becomes every pod.
 
 use super::kinds::{self, KindFacts};
-use delonix_runtime_core::Error;
+use delonix_model::Error;
 
 /// Resolves one token to exactly one Kind, or says why it could not.
 pub(crate) fn resolve_kind(token: &str) -> Result<&'static KindFacts, Error> {

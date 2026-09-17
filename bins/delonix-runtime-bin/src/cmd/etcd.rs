@@ -13,7 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 use super::cluster::valid_endpoint;
 use super::pki::{self, LeafMaterial};

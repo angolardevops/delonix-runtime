@@ -24,9 +24,9 @@ pub mod workload;
 pub mod workload_view;
 
 use capabilities::{all_caps_mask, resolve_cap_keep};
-use delonix_runtime_core::{
-    Container, Error, KubeCgroupDriver, KubeCgroupParent, Mount, Result, Status,
-};
+use delonix_compute::{Container, KubeCgroupDriver, KubeCgroupParent, Mount};
+use delonix_model::records::Status;
+use delonix_model::{Error, Result};
 use delonix_state::Store;
 
 /// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
@@ -81,10 +81,10 @@ fn syserr(context: &'static str) -> impl Fn(nix::Error) -> Error {
 }
 
 // `is_alive`, `proc_starttime` e `safe_to_signal` vivem agora no
-// `delonix-runtime-core`, ao lado do campo `pid_starttime` que existem para
+// `delonix-node`, junto das perguntas ao host, com o `pid_starttime` que existem para
 // guardar — e para o `delonix-vm` os poder usar sem uma SEGUNDA cópia da regra
 // de reciclagem de PID. Re-exportadas: nenhum chamador deste crate muda.
-pub use delonix_runtime_core::{is_alive, proc_starttime, safe_to_signal};
+pub use delonix_node::{is_alive, proc_starttime, safe_to_signal};
 
 /// Short, stable reason code for WHY `safe_to_signal` failed — the two cases it
 /// collapses into one bool. Precondition: only meaningful when `safe_to_signal(pid,
@@ -146,7 +146,7 @@ fn died_of_oom(status: &Status, before: Option<u64>, after: Option<u64>) -> bool
     }
 }
 
-use delonix_runtime_core::now_unix;
+use delonix_node::now_unix;
 
 fn wait_to_code(status: WaitStatus) -> i32 {
     match status {
@@ -1993,7 +1993,7 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     // `newuidmap` validates the requested range against `/etc/subuid` for the
     // REAL uid, so inside a nested user namespace it refuses whatever we ask —
     // skip it there rather than burn a failed exec on every container start.
-    let nested = !delonix_runtime_core::in_initial_userns();
+    let nested = !delonix_node::in_initial_userns();
     if want_range && euid != 0 && !nested && have_subid_helpers() {
         // Do NOT write `setgroups=deny` here. It is only MANDATORY when a non-root
         // writes the `gid_map` BY HAND (see the branch below) — the kernel requires it to
@@ -2025,7 +2025,7 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     // Third place in this workspace where `geteuid()` was mistaken for "real
     // root" (after `is_rootless` and `delonix-sdn::runtime_dir`). Same predicate,
     // same fix: map the single uid we actually hold.
-    let (uid_map, gid_map) = if euid == 0 && delonix_runtime_core::in_initial_userns() {
+    let (uid_map, gid_map) = if euid == 0 && delonix_node::in_initial_userns() {
         let m = format!("0 {USERNS_UID_BASE} {USERNS_RANGE}\n");
         (m.clone(), m)
     } else {
@@ -2079,7 +2079,7 @@ fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
 
 /// `true` if the engine runs without root privileges (*rootless* mode, A13).
 pub fn is_rootless() -> bool {
-    delonix_runtime_core::is_rootless()
+    delonix_node::is_rootless()
 }
 
 /// Removes a file tree that may contain **subuid** files (chowned
@@ -3956,7 +3956,7 @@ pub fn cgroup_limits_apply() -> bool {
         return current_cgroup_v2()
             .is_some_and(|cur| delegated_base_usable(std::path::Path::new(&cur)));
     }
-    root_slice_writable(std::path::Path::new(delonix_runtime_core::DELONIX_SLICE))
+    root_slice_writable(std::path::Path::new(delonix_compute::DELONIX_SLICE))
 }
 
 /// Root mode: can the engine create a container cgroup under `slice`?
@@ -4045,7 +4045,7 @@ fn delegated_base_usable(base: &std::path::Path) -> bool {
 /// in.
 fn slice_path_from(rootless: bool, current_cgroup: Option<&str>) -> Option<String> {
     if !rootless {
-        return Some(delonix_runtime_core::DELONIX_SLICE.to_string());
+        return Some(delonix_compute::DELONIX_SLICE.to_string());
     }
     user_service_base(current_cgroup?)
 }
@@ -4208,7 +4208,7 @@ pub fn enforceable_controllers() -> (Option<String>, Vec<String>) {
     let base = if is_rootless() {
         current_cgroup_v2().and_then(|cur| user_service_base(&cur))
     } else {
-        Some(delonix_runtime_core::DELONIX_SLICE.to_string())
+        Some(delonix_compute::DELONIX_SLICE.to_string())
     };
     let Some(base) = base else {
         return (None, Vec::new());
@@ -4505,7 +4505,7 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     let group = c
         .cgroup_parent
         .as_ref()
-        .and_then(|g| delonix_runtime_core::safe_cgroup_segment(&g.name).map(|n| n.to_string()));
+        .and_then(|g| delonix_compute::safe_cgroup_segment(&g.name).map(|n| n.to_string()));
     let parent = match &group {
         Some(g) => format!("{base}/{g}"),
         None => base.to_string(),
@@ -4691,7 +4691,7 @@ fn abandon_leaf(leaf: &str) {
     let _ = std::fs::remove_dir(leaf);
 }
 
-/// Writes the GROUP's aggregate ceiling (see [`delonix_runtime_core::CgroupParent`]).
+/// Writes the GROUP's aggregate ceiling (see [`delonix_compute::CgroupParent`]).
 ///
 /// `memory.swap.max = 0` travels WITH the memory ceiling, and that pairing is the whole
 /// point: measured on a host with 2 GiB of swap, a group capped at 64 MiB let a single
@@ -4703,7 +4703,7 @@ fn abandon_leaf(leaf: &str) {
 /// Best-effort by design: a group ceiling that cannot be written must not stop the
 /// container from starting — but it is also why the caller cannot TRUST the ceiling
 /// without reading it back (`memory.max` on the group).
-fn apply_group_ceiling(parent: &str, gp: &delonix_runtime_core::CgroupParent) {
+fn apply_group_ceiling(parent: &str, gp: &delonix_compute::CgroupParent) {
     if let Some(m) = &gp.memory_max {
         let _ = std::fs::write(format!("{parent}/memory.max"), m);
         let _ = std::fs::write(format!("{parent}/memory.swap.max"), swap_max_value());
@@ -9745,7 +9745,7 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
     /// `euid 0` is not proof of real root, and this is the parse that decides.
     #[test]
     fn initial_uid_map_reconhece_so_a_namespace_inicial() {
-        use delonix_runtime_core as super_;
+        use delonix_node as super_;
         // A namespace inicial: mapa identidade sobre o intervalo inteiro.
         assert!(super_::initial_uid_map(
             "         0          0 4294967295\n"
@@ -10034,7 +10034,7 @@ mod root_slice_probe_tests {
 #[cfg(test)]
 mod incarnation_tests {
     use super::describes_incarnation;
-    use delonix_runtime_core::Container;
+    use delonix_compute::Container;
 
     #[test]
     fn a_supervisor_only_buries_the_incarnation_it_waited_on() {

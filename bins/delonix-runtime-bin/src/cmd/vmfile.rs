@@ -27,7 +27,7 @@
 
 use std::path::PathBuf;
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// One build step of a stage.
 #[derive(Debug, Clone, PartialEq, Eq)]

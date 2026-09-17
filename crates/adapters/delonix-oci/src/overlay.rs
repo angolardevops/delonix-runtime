@@ -3,7 +3,7 @@
 
 use crate::cas::strip;
 use crate::image::{Image, ImageStore};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use std::path::{Path, PathBuf};
 
@@ -411,7 +411,7 @@ impl ImageStore {
     /// IS the invoking uid on the host, and the files already read as `root` to the
     /// container. That is also what lets one extracted layer serve every container.
     pub fn prepare_container_rootfs(&self, img: &Image, id: &str) -> Result<PathBuf> {
-        if delonix_runtime_core::is_rootless() {
+        if delonix_node::is_rootless() {
             // Does not mount — an unprivileged `mount(2)` on the host is EPERM. The
             // mount happens inside the clone, where we own the user namespace.
             self.prepare_overlay(img, id)

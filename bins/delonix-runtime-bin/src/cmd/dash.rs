@@ -17,7 +17,8 @@ use std::collections::{HashMap, VecDeque};
 use std::io::IsTerminal;
 use std::time::{Duration, Instant};
 
-use delonix_runtime_core::{Result, Status};
+use delonix_model::records::Status;
+use delonix_model::Result;
 use serde::Serialize;
 
 use super::po;
@@ -265,7 +266,7 @@ impl DashData {
         // subprocess spawns this dashboard forks every second (libvirt
         // backend: several `virsh` calls per VM per `status`). Redundant
         // work only, `list`'s result is already fully reconciled.
-        let vms: Vec<delonix_runtime_core::Vm> = delonix_vm::list(root).unwrap_or_default();
+        let vms: Vec<delonix_compute::Vm> = delonix_vm::list(root).unwrap_or_default();
         let vm_running = vms.iter().filter(|v| v.status == Status::Running).count();
 
         // --- networks / volumes / images / secrets ---
@@ -536,7 +537,7 @@ impl DashData {
 /// already-reconciled states — split out to be testable without stores.
 fn derive_problems(
     containers: &[(String, Status, String, Option<u64>)],
-    vms: &[delonix_runtime_core::Vm],
+    vms: &[delonix_compute::Vm],
 ) -> Vec<Problem> {
     let mut out = Vec::new();
     for (name, st, _, _) in containers {
@@ -729,7 +730,7 @@ pub fn run(scope: DashScope, once: bool, json: bool) -> Result<()> {
     if json {
         let data = DashData::collect(scope)?;
         let out = serde_json::to_string_pretty(&data)
-            .map_err(|e| delonix_runtime_core::Error::Invalid(format!("dash --json: {e}")))?;
+            .map_err(|e| delonix_model::Error::Invalid(format!("dash --json: {e}")))?;
         println!("{out}");
         return Ok(());
     }
@@ -1259,8 +1260,8 @@ mod tui {
         });
     }
 
-    fn io_err(e: std::io::Error) -> delonix_runtime_core::Error {
-        delonix_runtime_core::Error::Invalid(format!("dash TUI: {e}"))
+    fn io_err(e: std::io::Error) -> delonix_model::Error {
+        delonix_model::Error::Invalid(format!("dash TUI: {e}"))
     }
 
     const ORANGE: Color = Color::Rgb(255, 140, 0);

@@ -195,8 +195,8 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 **O directório é a camada** (fecho da P0, ADR-0040 D2.5):
 
 ```
-crates/foundation/   delonix-runtime-core, delonix-net-rules
-crates/contexts/     delonix-security-runtime
+crates/foundation/   delonix-model, delonix-net-rules
+crates/contexts/     delonix-stack, delonix-compute, delonix-node, delonix-security-runtime
 crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
@@ -803,7 +803,7 @@ como se fosse um comando principal por engano. Pedido explícito: agrupamento **
   instalado por omissão), e o `serve api` na P3m (`delonix-mgmt`); o `docker-api` vive no
   próprio binário (`cmd/dockerapi.rs`) e sai quando a CLI for biblioteca. Um
   servidor que corre a CLI de volta (as mutações do MCP, o ciclo de vida do CRI) usa
-  `delonix_runtime_core::dispatch::cli_bin` e NUNCA o próprio executável: o `delonix` passa
+  `delonix_node::dispatch::cli_bin` e NUNCA o próprio executável: o `delonix` passa
   `DELONIX_BIN` com o seu caminho.
 - **`delonix cluster kube generate`** — o antigo `delonix kube generate` dobrou para dentro de
   `cluster` (`ClusterCmd::Kube`), por ser outra faceta do mesmo grupo "Kubernetes" que `cluster
@@ -6322,7 +6322,7 @@ antes de qualquer commit:
    crate `delonix-*` que não esteja listado no `Cargo.toml` raiz.
 2. **Sem noção de tenant, licença, faturação ou consola.** Se uma mudança precisar de saber
    «quem é o cliente» ou «que plano tem», essa lógica pertence a quem consome o motor.
-3. **`Secret`/`SecretStore`/`CredVault`** (`delonix-runtime-core::secret`/`cred_vault`) são o
+3. **`Secret`/`SecretStore`/`CredVault`** (`delonix-state::secret`/`cred_vault`) são o
    gestor de segredos do motor (`--secret`/`--secret-files`, ao estilo Docker) — não um cofre
    de credenciais de plataforma.
 4. **`delonix-sdn` inclui WireGuard** (`wg.rs`): cifra o transporte VXLAN entre nós, é SDN
@@ -6333,7 +6333,7 @@ antes de qualquer commit:
 
 | Crate | Responsabilidade |
 |---|---|
-| `delonix-runtime-core` | o que ainda falta distribuir pelos contextos: `Container`, `Vm`, `Mount`, as consultas ao host e ao processo, `events`, `dispatch`, `peer_cred`, `virt` — re-exporta com os caminhos antigos o que já saiu para o `delonix-model` e para o `delonix-state` |
+| `delonix-node` | contexto do nó (ADR-0040 D2.2): o registo de eventos (`events`), as verificações do host (`virt`), as credenciais do peer num socket local (`peer_cred`), o contrato de dispatch entre o `delonix` e os servidores irmãos (`dispatch`) e as perguntas ao host e aos processos (`now_unix`, `is_rootless`, `proc_starttime`, `safe_to_signal`, `generate_id`…). Com o `delonix-compute` e o `delonix-model`, recebeu o que o `delonix-runtime-core` tinha — esse crate deixou de existir (gate da P3) |
 | `delonix-state` | estado persistido (ADR-0040 P3): `Store`/`JsonStore` com `flock`, escrita atómica e o cofre de segredos cifrado em repouso (`SecretStore`/`CredVault`); erros próprios com número no dicionário (DX-4101, DX-18xx, DX-9003/9004). O modelo puro do segredo (`Secret`, validação de nomes, `.env`) ficou no `delonix-model` |
 | `delonix-telemetry` | observabilidade: logging estruturado (`tracing`), spans OpenTelemetry/OTLP e as métricas Prometheus partilhadas pelo CRI e pela `mgmt`. Saiu do `delonix-runtime-core` na P3 do ADR-0040: a fundação não carrega um exportador, e todo o crate que só precisava de um `Container` compilava um cliente OTLP |
 | `delonix-linux` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |

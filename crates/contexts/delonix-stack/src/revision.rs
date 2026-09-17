@@ -19,7 +19,7 @@
 //!
 //! # Why not the event log
 //!
-//! `delonix-runtime-core::events` was the first idea and reading it ruled it
+//! The node event log (`delonix_node::events`) was the first idea and reading it ruled it
 //! out: its fields are short on purpose (atomicity without a lock comes from
 //! every append staying under `PIPE_BUF`, and a manifest does not fit), and its
 //! rotation keeps a single generation — its own doc-comment says «history is not
@@ -28,12 +28,12 @@
 //! # Why `O_EXCL` and not a lock
 //!
 //! Two applies of the same stack in parallel must not both claim `0007`. The
-//! `FileLock` the stores use is private to `delonix-runtime-core::store`, and a
+//! `FileLock` the stores use is private to `delonix-state`, and a
 //! second copy of it here would be a second thing to get right. `create_new`
 //! (`O_EXCL`) already gives the exclusion: the kernel refuses the second
 //! creator, who then tries the next number. Same idiom as `write_private_temp`.
 
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -253,9 +253,7 @@ pub fn list(root: &Path, stack: &str) -> Vec<Revision> {
 pub fn manifest_of(root: &Path, stack: &str, number: u32) -> Result<String> {
     let p = dir(root, stack).join(format!("{number:04}.yaml"));
     std::fs::read_to_string(&p).map_err(|e| {
-        delonix_runtime_core::Error::not_found_or_io(e, || {
-            format!("revision {number} of stack '{stack}'")
-        })
+        delonix_model::Error::not_found_or_io(e, || format!("revision {number} of stack '{stack}'"))
     })
 }
 

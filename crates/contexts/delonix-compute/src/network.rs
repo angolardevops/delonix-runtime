@@ -10,7 +10,8 @@
 //! opposite) and a refusal undoes the attach instead of leaving a running
 //! container behind an error.
 
-use delonix_runtime_core::{Container, Result};
+use crate::Container;
+use delonix_model::Result;
 
 use crate::ports::NetworkProvider;
 use crate::{Notice, RunOpts};
@@ -110,7 +111,8 @@ pub fn wire_network<N: NetworkProvider>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use delonix_runtime_core::{ContainerFw, Error};
+    use delonix_model::records::ContainerFw;
+    use delonix_model::Error;
     use std::cell::RefCell;
 
     #[derive(Default)]

@@ -734,9 +734,10 @@ name = "delonix-compute"
 version = "3.1.0"
 dependencies = [
  "delonix-model",
- "delonix-runtime-core",
+ "delonix-node",
  "schemars",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -746,8 +747,9 @@ dependencies = [
  "axum",
  "delonix-compute",
  "delonix-linux",
+ "delonix-model",
+ "delonix-node",
  "delonix-oci",
- "delonix-runtime-core",
  "delonix-sdn",
  "delonix-state",
  "delonix-telemetry",
@@ -772,7 +774,8 @@ name = "delonix-linux"
 version = "3.1.0"
 dependencies = [
  "delonix-compute",
- "delonix-runtime-core",
+ "delonix-model",
+ "delonix-node",
  "delonix-state",
  "libc",
  "nix",
@@ -787,9 +790,11 @@ dependencies = [
 name = "delonix-mcp"
 version = "3.1.0"
 dependencies = [
+ "delonix-compute",
  "delonix-linux",
  "delonix-mgmt",
- "delonix-runtime-core",
+ "delonix-model",
+ "delonix-node",
  "delonix-sdn",
  "delonix-state",
  "delonix-vm",
@@ -809,7 +814,7 @@ name = "delonix-mcp-bin"
 version = "3.1.0"
 dependencies = [
  "delonix-mcp",
- "delonix-runtime-core",
+ "delonix-node",
  "delonix-telemetry",
  "serde_json",
  "tokio",
@@ -820,9 +825,11 @@ name = "delonix-mgmt"
 version = "0.1.0"
 dependencies = [
  "axum",
+ "delonix-compute",
  "delonix-linux",
+ "delonix-model",
+ "delonix-node",
  "delonix-oci",
- "delonix-runtime-core",
  "delonix-scanner",
  "delonix-sdn",
  "delonix-state",
@@ -845,7 +852,7 @@ name = "delonix-mgmt-bin"
 version = "3.1.0"
 dependencies = [
  "delonix-mgmt",
- "delonix-runtime-core",
+ "delonix-node",
  "delonix-telemetry",
 ]
 
@@ -863,13 +870,24 @@ name = "delonix-net-rules"
 version = "3.1.0"
 
 [[package]]
+name = "delonix-node"
+version = "3.1.0"
+dependencies = [
+ "delonix-model",
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "delonix-oci"
 version = "3.1.0"
 dependencies = [
  "base64",
  "criterion",
  "delonix-compute",
- "delonix-runtime-core",
+ "delonix-model",
+ "delonix-node",
  "delonix-state",
  "flate2",
  "nix",
@@ -890,7 +908,8 @@ dependencies = [
 name = "delonix-proxmox"
 version = "3.1.0"
 dependencies = [
- "delonix-runtime-core",
+ "delonix-compute",
+ "delonix-model",
  "delonix-vm",
  "reqwest 0.12.28",
  "serde",
@@ -909,9 +928,9 @@ dependencies = [
  "delonix-linux",
  "delonix-mgmt",
  "delonix-model",
+ "delonix-node",
  "delonix-oci",
  "delonix-proxmox",
- "delonix-runtime-core",
  "delonix-scanner",
  "delonix-sdn",
  "delonix-security-runtime",
@@ -942,17 +961,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "delonix-runtime-core"
-version = "3.1.0"
-dependencies = [
- "delonix-model",
- "libc",
- "serde",
- "serde_json",
- "thiserror 2.0.19",
-]
-
-[[package]]
 name = "delonix-scanner"
 version = "3.1.0"
 dependencies = [
@@ -970,8 +978,9 @@ name = "delonix-sdn"
 version = "3.1.0"
 dependencies = [
  "delonix-compute",
+ "delonix-model",
  "delonix-net-rules",
- "delonix-runtime-core",
+ "delonix-node",
  "delonix-state",
  "libc",
  "proptest",
@@ -984,7 +993,8 @@ dependencies = [
 name = "delonix-security-runtime"
 version = "3.1.0"
 dependencies = [
- "delonix-runtime-core",
+ "delonix-model",
+ "delonix-node",
  "serde",
  "serde_json",
 ]
@@ -993,7 +1003,7 @@ dependencies = [
 name = "delonix-stack"
 version = "3.1.0"
 dependencies = [
- "delonix-runtime-core",
+ "delonix-model",
  "serde",
  "serde_json",
 ]
@@ -1003,8 +1013,9 @@ name = "delonix-state"
 version = "3.1.0"
 dependencies = [
  "chacha20poly1305",
+ "delonix-compute",
  "delonix-model",
- "delonix-runtime-core",
+ "delonix-node",
  "getrandom 0.2.17",
  "libc",
  "serde",
@@ -1029,7 +1040,7 @@ dependencies = [
 name = "delonix-truenas"
 version = "3.1.0"
 dependencies = [
- "delonix-runtime-core",
+ "delonix-model",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
@@ -1040,8 +1051,9 @@ name = "delonix-vm"
 version = "3.1.0"
 dependencies = [
  "delonix-compute",
+ "delonix-model",
  "delonix-net-rules",
- "delonix-runtime-core",
+ "delonix-node",
  "delonix-state",
  "libc",
  "tracing",
@@ -1053,7 +1065,7 @@ version = "3.1.0"
 dependencies = [
  "delonix-compute",
  "delonix-model",
- "delonix-runtime-core",
+ "delonix-node",
  "delonix-state",
  "serde",
  "serde_json",

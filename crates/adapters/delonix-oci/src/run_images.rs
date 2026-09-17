@@ -7,7 +7,7 @@
 use crate::rootfs_user::{resolve_user, UserLookupError};
 use crate::{Image, ImageStore};
 use delonix_compute::ports::ImageConfig;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::path::{Path, PathBuf};
 
 /// Unpacks a rootfs, showing whatever progress the caller wants around it.
@@ -43,7 +43,7 @@ impl delonix_compute::ports::ImageStore for HostImages<'_> {
         // The re-exec's second pass reuses the rootfs the first pass prepared: a
         // full extraction again over a populated tree costs full price (measured).
         let prepare = || self.store.prepare_container_rootfs(img, id);
-        let path = if second_pass && delonix_runtime_core::is_rootless() {
+        let path = if second_pass && delonix_node::is_rootless() {
             match self.store.existing_rootfs_path(id) {
                 Some(p) => p,
                 None => prepare()?,

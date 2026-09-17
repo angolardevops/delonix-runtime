@@ -50,8 +50,8 @@
 
 use std::collections::HashSet;
 
+use delonix_model::Result;
 use delonix_oci::ImageStore;
-use delonix_runtime_core::Result;
 use delonix_state::Store;
 use delonix_volume::VolumeStore;
 
@@ -166,9 +166,7 @@ pub(crate) fn confirm(
     // SAFETY: `isatty` takes an integer fd and has no preconditions.
     let tty = unsafe { libc::isatty(libc::STDIN_FILENO) } == 1;
     if !tty {
-        return Err(delonix_runtime_core::Error::Invalid(
-            unattended_error.into(),
-        ));
+        return Err(delonix_model::Error::Invalid(unattended_error.into()));
     }
     if let Some(p) = preview {
         println!("{p}");
@@ -358,7 +356,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     /// store does not know is not alive either — the VM was removed and its ref
     /// outlived it.
     fn vm_is_alive(name: &str) -> bool {
-        let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+        let st: delonix_state::JsonStore<delonix_compute::Vm> =
             match delonix_state::JsonStore::open(super::util::state_root().join("vms")) {
                 Ok(s) => s,
                 // Cannot tell → do NOT reap. Freeing the ref of a live VM cuts its
@@ -366,7 +364,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
                 Err(_) => return true,
             };
         match st.load(name) {
-            Ok(vm) => matches!(vm.status, delonix_runtime_core::Status::Running) && vm.is_live(),
+            Ok(vm) => matches!(vm.status, delonix_model::records::Status::Running) && vm.is_live(),
             Err(_) => false,
         }
     }
@@ -429,7 +427,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
 
     // 4) orphan EMPTY cgroups in delonix.slice.
     let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
-    if let Ok(rd) = std::fs::read_dir(delonix_runtime_core::DELONIX_SLICE) {
+    if let Ok(rd) = std::fs::read_dir(delonix_compute::DELONIX_SLICE) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             // `remove_dir` (not `_all`): only removes if EMPTY — a cgroup with
@@ -658,7 +656,7 @@ pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<Prun
     // B — empty `delonix-*` cgroups. `read_dir` on an empty directory is the
     // same test `remove_dir` makes, without making it.
     let live_cg: HashSet<String> = live_ids.iter().map(|id| format!("delonix-{id}")).collect();
-    if let Ok(rd) = std::fs::read_dir(delonix_runtime_core::DELONIX_SLICE) {
+    if let Ok(rd) = std::fs::read_dir(delonix_compute::DELONIX_SLICE) {
         for e in rd.flatten() {
             let name = e.file_name().to_string_lossy().into_owned();
             if name.starts_with("delonix-")
@@ -1073,7 +1071,7 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
                             "volume '{name}' could not be removed: {err}",
                             &[
                                 ("name", &v.qualified()),
-                                ("err", &delonix_runtime_core::Error::from(e).to_string())
+                                ("err", &delonix_model::Error::from(e).to_string())
                             ],
                         )
                     );
@@ -1089,7 +1087,7 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
                 // The owner goes in the trail (reaper rule 5: leave a trace).
                 // "volume `data` removed by prune" is not answerable a week
                 // later; "whose `data`" is the whole question.
-                delonix_runtime_core::events::emit(
+                delonix_node::events::emit(
                     &super::util::state_root(),
                     "volume",
                     "remove",
@@ -1107,7 +1105,7 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
                         "volume '{name}' could not be removed: {err}",
                         &[
                             ("name", &v.qualified()),
-                            ("err", &delonix_runtime_core::Error::from(e).to_string())
+                            ("err", &delonix_model::Error::from(e).to_string())
                         ],
                     )
                 );
@@ -1312,7 +1310,7 @@ pub(crate) fn sweep_vms(base: &std::path::Path, stopped: bool) -> Result<VmSweep
 
     if stopped {
         for vm in vms {
-            if !matches!(vm.status, delonix_runtime_core::Status::Running) {
+            if !matches!(vm.status, delonix_model::records::Status::Running) {
                 let sz = measure(&dir.join(format!("{}.qcow2", vm.name)));
                 if delonix_vm::remove(base, &vm.name).is_ok() {
                     out.vms += 1;

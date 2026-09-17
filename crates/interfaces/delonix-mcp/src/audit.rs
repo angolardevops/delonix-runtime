@@ -74,7 +74,7 @@ impl AuditLog {
     }
 }
 
-pub use delonix_runtime_core::now_unix;
+pub use delonix_node::now_unix;
 
 /// Digest of the call's arguments, for audit correlation — never the arguments
 /// themselves, so a secret accidentally passed as a tool argument cannot leak

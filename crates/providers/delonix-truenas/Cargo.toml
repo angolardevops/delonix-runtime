@@ -6,7 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-delonix-runtime-core = { workspace = true }
+delonix-model = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 # Same client, same feature set, same TLS stack as `delonix-oci`'s registry

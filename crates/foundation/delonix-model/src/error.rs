@@ -1,9 +1,8 @@
 //! The error type shared by the whole Delonix Engine, and the `DX_*` code of each
 //! class (ADR-0040 D2.1: the foundation owns the codes every context maps to).
 //!
-//! It lives in the pure model so that the model no longer depends on
-//! `delonix-runtime-core`: the dependency now points down, and `-core` re-exports it
-//! with the same path, so no caller changed.
+//! It lives in the pure model, the bottom of the dependency graph, so every layer
+//! names the same type.
 
 use thiserror::Error;
 

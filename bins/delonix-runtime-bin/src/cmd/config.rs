@@ -18,7 +18,7 @@
 
 use std::path::{Path, PathBuf};
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 use super::output::OutputFormat;
 

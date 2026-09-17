@@ -522,7 +522,7 @@ ls/describe/stop/rm``, which routes by name across containers and VMs.
 Architecture
 ============
 
-Ten crates, one binary, no residing process:
+Twenty-two crates in five layers (ADR-0040), one ``delonix`` command, no residing process:
 
 .. list-table::
    :header-rows: 1
@@ -530,26 +530,56 @@ Ten crates, one binary, no residing process:
 
    * - Crate
      - Responsibility
-   * - ``delonix-runtime-core``
-     - Shared types: ``Container``, ``Vm``, ``Status`` (6-state).
+   * - **Foundation — pure, no mechanism**
+     -
+   * - ``delonix-model``
+     - The shared model: the error type and the ``DX-CDNN`` code dictionary, ``Status``, firewall rules, the secret model, typestate, generated names, exit classes.
+   * - ``delonix-net-rules``
+     - Pure network rules with zero dependencies: CIDRs, bridge names, IPAM inside a prefix, rate parsing.
+   * - **Contexts — use cases and ports**
+     -
+   * - ``delonix-compute``
+     - Containers, pods and VMs: the one run specification, the ``Container``/``Vm`` records, the compute ports.
+   * - ``delonix-stack``
+     - Manifests: the Kind table, the three-way reconciler, conditions and revisions.
+   * - ``delonix-node``
+     - The node: the event log, host checks, local-socket peer credentials, the dispatch contract, host/process queries.
+   * - ``delonix-security-runtime``
+     - Security decisions: policy, the single admission point for containers and VMs, events, score, redaction.
+   * - **Adapters — one technology each**
+     -
+   * - ``delonix-linux``
+     - The container runtime on the Linux kernel: namespaces, cgroups v2, mounts, capabilities, seccomp, exec, reconcile.
+   * - ``delonix-sdn``
+     - Rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall, internal DNS, DHCP, WireGuard overlay, CNI client.
+   * - ``delonix-oci``
+     - OCI images: pull (digest-verified), CAS, layers, build, export, buildpacks, signatures, internal registry.
    * - ``delonix-state``
      - Persisted state: ``Store``/``JsonStore`` behind ``flock``, atomic writes, the encrypted secret vault.
-   * - ``delonix-linux`` / ``delonix-runtime-bin``
-     - The runtime (clone/namespaces/cgroups, create/stop/exec, reconcile) + the ``delonix`` CLI.
-   * - ``delonix-sdn``
-     - Rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall, internal DNS, WireGuard overlay, and the eBPF flow datapath.
-   * - ``delonix-oci``
-     - OCI images: pull (digest-verified), build, export, buildpacks, signatures, internal registry.
    * - ``delonix-vm``
      - Declarative microVMs (``VmBackend``: Cloud Hypervisor / libvirt), cloud-init.
    * - ``delonix-volume``
      - Named volumes, bind mounts, quotas, network drivers (NFS/CIFS/WebDAV).
-   * - ``delonix-cri``
-     - CRI ``runtime.v1`` server — the kubelet talks to Delonix.
-   * - ``delonix-mgmt``
-     - Management API (HTTP+JSON over a unix socket) for external control-planes, plus the shared Prometheus registry and OpenTelemetry spans.
    * - ``delonix-scanner``
      - SBOM + CVE scanning (``image scan`` and scan-on-pull enforcement).
+   * - ``delonix-telemetry``
+     - Structured logging, OpenTelemetry spans and the shared Prometheus registry.
+   * - **Providers — remote management APIs**
+     -
+   * - ``delonix-proxmox``
+     - A ``VmBackend`` against one Proxmox VE node's API.
+   * - ``delonix-truenas``
+     - Dataset, quota and share provisioning on a TrueNAS appliance.
+   * - **Interfaces and binaries**
+     -
+   * - ``delonix-cri``
+     - CRI ``runtime.v1`` server — the kubelet talks to Delonix (``delonix-cri`` binary).
+   * - ``delonix-mgmt``
+     - Local management API (HTTP+JSON over a unix socket); ``delonix-mgmt`` binary, run by ``delonix serve api``.
+   * - ``delonix-mcp``
+     - Model Context Protocol server; ``delonix-mcp`` binary, run by ``delonix mcp``.
+   * - ``delonix-runtime-bin`` / ``delonix-mcp-bin`` / ``delonix-mgmt-bin``
+     - The ``delonix`` CLI — the one door; it runs the servers as sibling binaries.
 
 See the `architecture page
 <https://angolardevops.github.io/delonix-runtime/arquitectura.html>`_ and the

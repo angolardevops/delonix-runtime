@@ -12,7 +12,7 @@
 
 use std::path::Path;
 
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 
 /// What the directory looks like, and the evidence for saying so.
 #[derive(Debug, Clone, PartialEq)]

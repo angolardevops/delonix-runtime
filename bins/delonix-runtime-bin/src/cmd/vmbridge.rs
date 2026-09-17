@@ -25,7 +25,7 @@
 use std::path::Path;
 use std::process::Command;
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_sdn::infra;
 
 use super::output;

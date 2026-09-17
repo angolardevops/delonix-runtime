@@ -8,7 +8,7 @@
 use super::output::{Describe, Table};
 use super::po::{t, tf};
 use delonix_model::codes::{self, Code};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// One entry, `kubectl describe` style.
 pub fn explain(number: u16, json: bool) -> Result<()> {

@@ -204,7 +204,7 @@
             }
           ],
           "default": null,
-          "description": "Intermediate cgroup shared by a GROUP of containers, with its own aggregate\nceiling — the only way to bound what N containers hold TOGETHER (see\n`delonix_runtime_core::CgroupParent`)."
+          "description": "Intermediate cgroup shared by a GROUP of containers, with its own aggregate\nceiling — the only way to bound what N containers hold TOGETHER (see\n`delonix_compute::CgroupParent`)."
         },
         "command": {
           "default": [],
@@ -1940,7 +1940,7 @@
       "type": "object"
     },
     "SpecCgroupParent": {
-      "description": "`spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,\nwhich comes from `metadata.name`). **`detach` defaults to `true`** (unlike the\nCLI, where the default is `false`): an `apply`/`stack apply` run in the\nforeground would block waiting for the process to exit — dangerous for a\ndeclarative command. Pass `detach: false` explicitly in the YAML if you want\nthe synchronous behavior of the interactive `run`.\nManifest mirror of [`delonix_runtime_core::CgroupParent`].\n\nIt exists here, and not in `delonix-runtime-core`, for two reasons: the core crate\nstays free of `schemars` (the manifest schema is a concern of this binary, not of\nthe domain types), and the manifest speaks camelCase (`memoryMax`) while the\npersisted `Container` keeps its own field names. One conversion at the boundary is\ncheaper than either a new dependency in core or a rename that breaks stored records.",
+      "description": "`spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,\nwhich comes from `metadata.name`). **`detach` defaults to `true`** (unlike the\nCLI, where the default is `false`): an `apply`/`stack apply` run in the\nforeground would block waiting for the process to exit — dangerous for a\ndeclarative command. Pass `detach: false` explicitly in the YAML if you want\nthe synchronous behavior of the interactive `run`.\nManifest mirror of [`delonix_compute::CgroupParent`].\n\nIt exists here, and not next to the `Container` record in `delonix-compute`, for two\nreasons: the record stays free of `schemars` (the manifest schema is a concern of this binary, not of\nthe domain types), and the manifest speaks camelCase (`memoryMax`) while the\npersisted `Container` keeps its own field names. One conversion at the boundary is\ncheaper than either a new dependency on the record or a rename that breaks stored records.",
       "properties": {
         "cpus": {
           "description": "Aggregate CPU in cores.",

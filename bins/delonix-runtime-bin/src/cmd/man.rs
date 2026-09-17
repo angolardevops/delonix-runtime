@@ -28,7 +28,7 @@
 use std::io::Write;
 use std::path::PathBuf;
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 use super::manual;
 use super::po;

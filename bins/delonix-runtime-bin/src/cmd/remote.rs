@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 #[derive(Debug, Clone)]
 pub struct SshTarget {
