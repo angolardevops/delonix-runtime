@@ -705,12 +705,12 @@ no notion of tenant, account, plan or billing, may appear in <code>crates/</code
   the <code>CONSUMER_NAMES</code> regular expression, a fixed list of names, in those paths. A name that is
   not on the list is not caught.</li>
 <li><strong>Tenant, account, plan and billing concepts.</strong> <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira
-  do motor". No gate matches them; review checks it.
- If a consumer needs something, write it as a generic
+  do motor". No gate matches them; review checks it.</li>
+</ul>
+<p>If a consumer needs something, write it as a generic
 capability in the engine's own vocabulary (Kinds and resources), and add it only if it makes sense
 for any client. The engine validates its own contract and never trusts a caller to refuse what it
-doesn't support.</li>
-</ul>
+doesn't support.</p>
 <hr />
 <h2 id="6-error-handling-and-messages">6. Error handling and messages</h2>
 <ul>

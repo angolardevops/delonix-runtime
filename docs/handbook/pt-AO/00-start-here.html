@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>0. Start here · Delonix Runtime — Manual do contribuidor</title>
+<title>0. Começa aqui · Delonix Runtime — Manual do contribuidor</title>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
@@ -60,7 +60,7 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <div class="tools"><button class="searchbtn" type="button">🔍 Pesquisar <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/00-start-here.html">EN · English</option><option value="../pt-AO/00-start-here.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/00-start-here.html">FR-FR · Français</option></select></div>
 <a class="" href="index.html">Delonix Runtime — Manual do Contribuidor</a>
-<a class="on" href="00-start-here.html">0. Start here</a>
+<a class="on" href="00-start-here.html">0. Começa aqui</a>
 <a class="" href="01-environment.html">1. Preparar o teu ambiente</a>
 <a class="" href="02-build-and-test.html">2. Clonar, compilar e testar</a>
 <a class="" href="03-rust-primer.html">3. Introdução ao Rust para esta base de código</a>
@@ -72,70 +72,70 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <a class="" href="09-microvm-setup.html">9. Construir microVMs</a>
 <a class="" href="10-contributing-workflow.html">10. Fluxo de contribuição</a>
 <a class="" href="11-publishing-docs.html">11. Publicar a documentação</a>
-<a class="" href="12-coding-conventions.html">12. Coding conventions</a>
-<a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
-<a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="0-start-here">0. Start here</h1>
-<p>This page takes you from "I just cloned the repository" to "my first pull request is under review",
-one step at a time. Every step says what to do, what you should see, and which page explains the
-details. Every rule on this page links to where it is written down — if a rule is not linked, it is
-not a rule.</p>
-<p>If a word here is new to you, look it up in the <a href="14-glossary.html">glossary</a>.</p>
-<h2 id="day-0-in-30-minutes">Day 0 in 30 minutes</h2>
-<h3 id="what-delonix-is-5-minutes">What Delonix is (5 minutes)</h3>
-<p>Delonix Runtime is an engine that runs <strong>containers and microVMs on one node</strong>, together with the
-networking and storage they need. It is:</p>
+<a class="" href="12-coding-conventions.html">12. Convenções de código</a>
+<a class="" href="13-cloud-native-standards.html">13. Padrões cloud native, camada a camada</a>
+<a class="" href="14-glossary.html">14. Glossário</a></nav>
+<main><h1 id="0-start-here">0. Começa aqui</h1>
+<p>Esta página leva-te de «acabei de clonar o repositório» a «o meu primeiro pull request está em
+revisão», um passo de cada vez. Cada passo diz o que fazer, o que deves ver, e que página explica os
+detalhes. Cada regra desta página tem um link para o sítio onde está escrita — se uma regra não tem
+link, não é uma regra.</p>
+<p>Se uma palavra daqui for nova para ti, procura-a no <a href="14-glossary.html">glossário</a>.</p>
+<h2 id="day-0-in-30-minutes">Dia 0 em 30 minutos</h2>
+<h3 id="what-delonix-is-5-minutes">O que é o Delonix (5 minutos)</h3>
+<p>O Delonix Runtime é um motor que corre <strong>containers e microVMs num nó</strong>, a par da rede e do
+armazenamento de que eles precisam. É:</p>
 <ul>
-<li><strong>declarative</strong> — you describe resources with its own Kinds (<code>delonix api-resources</code> lists them)
-  and the engine plans and applies the difference;</li>
-<li><strong>daemonless</strong> — no background service is required; each command is a process that does its work
-  and exits;</li>
-<li><strong>rootless-first</strong> — the normal path runs as your own unprivileged user.</li>
+<li><strong>declarativo</strong> — descreves recursos com os seus Kinds próprios (<code>delonix api-resources</code> lista-os)
+  e o motor planeia e aplica a diferença;</li>
+<li><strong>daemonless</strong> — não é preciso nenhum serviço em segundo plano; cada comando é um processo que faz
+  o seu trabalho e sai;</li>
+<li><strong>rootless-first</strong> — o caminho normal corre com o teu próprio utilizador sem privilégios.</li>
 </ul>
-<p>It does <strong>not</strong> know who uses it: no platform, tenant, account or billing concept exists in the
-code. Read <a href="05-architecture.html#engine-identity-and-boundaries">05 — Architecture</a> for the full
-picture; for now, those four sentences are enough.</p>
-<h3 id="what-you-need-10-minutes">What you need (10 minutes)</h3>
-<p>A Linux host with cgroup v2 and unprivileged user namespaces, the pinned Rust toolchain from
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>, and <code>protoc</code> on your <code>PATH</code>. The full list, and the host traps that look like
-engine bugs, are in <a href="01-environment.html">01 — Preparing your environment</a>. Read at least its
-<a href="01-environment.html#known-host-traps">Known host traps</a> section before step 5 below.</p>
-<h3 id="five-commands-that-prove-your-setup-works-15-minutes">Five commands that prove your setup works (15 minutes)</h3>
-<p>Run these from the root of your checkout. If one of them does not give the shape shown, stop and
-fix it before going further — every later step depends on it.</p>
-<p><strong>1. Clone, with the tags.</strong></p>
+<p><strong>Não</strong> sabe quem o usa: não existe no código nenhum conceito de plataforma, inquilino, conta ou
+facturação. Lê <a href="05-architecture.html#engine-identity-and-boundaries">05 — Arquitectura</a> para o quadro
+completo; por agora, estas quatro frases chegam.</p>
+<h3 id="what-you-need-10-minutes">O que precisas (10 minutos)</h3>
+<p>Um host Linux com cgroup v2 e user namespaces sem privilégios, a toolchain de Rust fixada no
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>, e o <code>protoc</code> no teu <code>PATH</code>. A lista completa, e as armadilhas do host que
+parecem bugs do motor, estão em <a href="01-environment.html">01 — Preparar o teu ambiente</a>. Lê pelo menos a
+secção <a href="01-environment.html#known-host-traps">Armadilhas conhecidas do host</a> antes do passo 5 abaixo.</p>
+<h3 id="five-commands-that-prove-your-setup-works-15-minutes">Cinco comandos que provam que o teu ambiente funciona (15 minutos)</h3>
+<p>Corre-os a partir da raiz da tua checkout. Se algum deles não der a forma mostrada, pára e
+corrige-o antes de avançar — todos os passos seguintes dependem dele.</p>
+<p><strong>1. Clonar, com as tags.</strong></p>
 <div class="code" data-shell><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
 cd delonix-runtime
 git fetch --tags origin
 git describe --tags --abbrev=0        # prints the newest release, e.g. vX.Y.Z
 </code></pre></div>
-<p>The tags matter: the version gate and the contract gate compare your branch with them
+<p>As tags importam: o gate de versão e o gate de contrato comparam o teu branch com elas
 (<a href="02-build-and-test.html#clone">02</a>).</p>
-<p><strong>2. Build the CLI.</strong></p>
+<p><strong>2. Compilar a CLI.</strong></p>
 <div class="code" data-shell><pre><code class="language-bash">cargo build -p delonix-runtime-bin
 </code></pre></div>
-<p>Expected: <code>Finished</code> on the last line and a binary at <code>target/debug/delonix</code>. If it stops with a
-message about <code>protoc</code>, install it (<a href="01-environment.html#protoc-required-to-build">01</a>).</p>
-<p><strong>3. Run the tests of a small, pure crate.</strong></p>
+<p>Esperado: <code>Finished</code> na última linha e um binário em <code>target/debug/delonix</code>. Se parar com uma
+mensagem sobre o <code>protoc</code>, instala-o (<a href="01-environment.html#protoc-required-to-build">01</a>).</p>
+<p><strong>3. Correr os testes de um crate pequeno e puro.</strong></p>
 <div class="code" data-shell><pre><code class="language-bash">cargo test -p delonix-net-rules
 </code></pre></div>
-<p><code>delonix-net-rules</code> has no dependencies at all (see its <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), so this only proves that
-your toolchain compiles and runs tests — nothing about the host. Expected: a line of the form
+<p>O <code>delonix-net-rules</code> não tem dependência nenhuma (vê o seu <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), por isso isto só prova
+que a tua toolchain compila e corre testes — nada sobre o host. Esperado: uma linha da forma
 <code>test result: ok. N passed; 0 failed</code>.</p>
-<p><strong>4. Run the binary you just built.</strong></p>
+<p><strong>4. Correr o binário que acabaste de compilar.</strong></p>
 <div class="code" data-shell><pre><code class="language-bash">./target/debug/delonix --version
 ./target/debug/delonix --help
 </code></pre></div>
-<p>Expected: <code>--version</code> prints <code>delonix &lt;version&gt;</code> on the first line, a one-line description of the
-engine on the second, and then a line of the form <code>commit: &lt;sha&gt; · built: &lt;date&gt; · &lt;licence&gt;</code>;
-between releases the <code>commit:</code> part also says how far the build is from the last tag
-(<code>+N commits since vX.Y.Z</code>). A short <code>get started:</code> block follows. <code>--help</code> prints
-<code>Usage: delonix [OPTIONS] &lt;COMMAND&gt;</code>, a <code>Commands:</code> list and a <code>COMMAND MAP</code>.</p>
-<p>Always use <code>./target/debug/delonix</code>, never a <code>delonix</code> found on your <code>PATH</code> — that one is an
-installed release and is usually older (<a href="01-environment.html#a-stale-delonix-on-your-path">01</a>).</p>
-<p><strong>5. Run one real command, fully isolated.</strong></p>
-<p>Anything beyond <code>--help</code> reads and writes engine state. Point <strong>both</strong> state variables at scratch
-directories first — half isolation is worse than none
+<p>Esperado: <code>--version</code> imprime <code>delonix &lt;version&gt;</code> na primeira linha, uma descrição do motor numa
+linha na segunda, e depois uma linha da forma <code>commit: &lt;sha&gt; · built: &lt;date&gt; · &lt;licence&gt;</code>; entre
+releases a parte <code>commit:</code> diz também a que distância o build está da última tag
+(<code>+N commits since vX.Y.Z</code>). Segue-se um bloco curto <code>get started:</code>. <code>--help</code> imprime
+<code>Usage: delonix [OPTIONS] &lt;COMMAND&gt;</code>, uma lista <code>Commands:</code> e um <code>COMMAND MAP</code>.</p>
+<p>Usa sempre <code>./target/debug/delonix</code>, nunca um <code>delonix</code> encontrado no teu <code>PATH</code> — esse é uma
+release instalada e normalmente é mais antigo (<a href="01-environment.html#a-stale-delonix-on-your-path">01</a>).</p>
+<p><strong>5. Correr um comando real, totalmente isolado.</strong></p>
+<p>Tudo o que vá além do <code>--help</code> lê e escreve estado do motor. Aponta <strong>as duas</strong> variáveis de estado
+para directórios de rascunho primeiro — meia isolação é pior que nenhuma
 (<a href="02-build-and-test.html#isolating-the-engines-state">02</a>):</p>
 <div class="code" data-shell><pre><code class="language-bash">export DELONIX_ROOT=$HOME/scratch/dlx/root
 export DELONIX_NET_RUNTIME_DIR=/tmp/dlx-run      # keep it short: it holds unix sockets
@@ -147,7 +147,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 ./target/debug/delonix volume inspect does-not-exist; echo &quot;exit=$?&quot;
 ./target/debug/delonix volume rm hello
 </code></pre></div>
-<p>Expected shapes:</p>
+<p>Formas esperadas:</p>
 <div class="code"><pre><code class="language-text">$ delonix system info
 Delonix Engine &lt;version&gt;
   state root:         &lt;your $DELONIX_ROOT&gt;
@@ -165,55 +165,59 @@ $ delonix volume inspect does-not-exist; echo &quot;exit=$?&quot;
 error no such volume does-not-exist
 exit=4
 </code></pre></div>
-<p>What this proves: the <code>state root:</code> line is <strong>your scratch directory</strong> (so you are not touching real
-state), the engine runs rootless, and errors carry a class in the exit code (4 = not found — see
-<a href="03-rust-primer.html#32-errors-one-error-and-exit-codes-derived-from-its-type">03</a>). If
-<code>cgroup2 delegated:</code> says <code>no</code>, <code>container run</code> refuses <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> in this
-session (exit 69) and <code>--cpuset</code>/<code>--io-weight</code> have no effect; that is a host setting, explained in
+<p>O que isto prova: a linha <code>state root:</code> é <strong>o teu directório de rascunho</strong> (por isso não estás a
+tocar em estado real), o motor corre rootless, e os erros levam uma classe no código de saída
+(4 = não existe — ver
+<a href="03-rust-primer.html#32-errors-one-error-and-exit-codes-derived-from-its-type">03</a>). Se
+<code>cgroup2 delegated:</code> disser <code>no</code>, o <code>container run</code> recusa <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> nesta
+sessão (saída 69) e <code>--cpuset</code>/<code>--io-weight</code> não têm efeito; isso é uma configuração do host,
+explicada em
 <a href="01-environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">01</a>.</p>
-<p>When you are done experimenting with networking later, tear the isolated network infra down with
-the same two variables exported: <code>./target/debug/delonix net netns down</code>.</p>
-<h2 id="your-first-contribution-end-to-end">Your first contribution, end to end</h2>
-<h3 id="1-pick-something">1. Pick something</h3>
+<p>Quando acabares de experimentar com a rede mais tarde, desmonta a infra de rede isolada com as
+mesmas duas variáveis exportadas: <code>./target/debug/delonix net netns down</code>.</p>
+<h2 id="your-first-contribution-end-to-end">A tua primeira contribuição, de ponta a ponta</h2>
+<h3 id="1-pick-something">1. Escolhe alguma coisa</h3>
 <ul>
-<li>Look at open issues labelled <strong><code>good first issue</code></strong> or <strong><code>documentation</code></strong> on GitHub. Comment on
-  the issue before starting, so two people do not do the same work.</li>
-<li>For anything non-trivial — a new command, a new manifest Kind, a change to namespace or cgroup
-  setup, a new backend — open an issue first and agree on the approach
-  (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>, <a href="10-contributing-workflow.html">10</a>).</li>
-<li>Check open pull requests so you do not duplicate work already in flight.</li>
+<li>Procura issues abertas com a etiqueta <strong><code>good first issue</code></strong> ou <strong><code>documentation</code></strong> no GitHub.
+  Comenta na issue antes de começar, para duas pessoas não fazerem o mesmo trabalho.</li>
+<li>Para tudo o que não seja trivial — um comando novo, um Kind de manifesto novo, uma mudança na
+  configuração de namespaces ou cgroups, um backend novo — abre primeiro uma issue e acorda a
+  abordagem (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>, <a href="10-contributing-workflow.html">10</a>).</li>
+<li>Vê os pull requests abertos, para não duplicares trabalho que já está em curso.</li>
 </ul>
-<p>Good first areas, because they are pure code with unit tests and no host privileges: a parser or
-validator in the CLI crate, an error message that does not say what to do, a missing Portuguese
-entry in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, or a page of this handbook that is wrong.</p>
-<h3 id="2-open-a-worktree-from-originmain">2. Open a worktree from <code>origin/main</code></h3>
-<p>One task, one worktree, one branch — never edit a shared checkout, never put the worktree in <code>/tmp</code>
-(<a href="10-contributing-workflow.html#one-worktree-per-task">10 — One worktree per task</a>):</p>
+<p>Boas primeiras áreas, porque são código puro com testes unitários e sem privilégios de host: um
+parser ou validador no crate da CLI, uma mensagem de erro que não diz o que fazer, uma entrada em
+português em falta em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, ou uma página deste manual que esteja
+errada.</p>
+<h3 id="2-open-a-worktree-from-originmain">2. Abre um worktree a partir de <code>origin/main</code></h3>
+<p>Uma tarefa, um worktree, um branch — nunca edites uma checkout partilhada, nunca ponhas o worktree
+em <code>/tmp</code> (<a href="10-contributing-workflow.html#one-worktree-per-task">10 — Um worktree por tarefa</a>):</p>
 <div class="code" data-shell><pre><code class="language-bash">git fetch --tags origin
 git worktree add -b &lt;topic&gt;/&lt;task&gt; ../.worktrees/delonix-runtime/&lt;task&gt; origin/main
 cd ../.worktrees/delonix-runtime/&lt;task&gt;
 git log --oneline -- &lt;path you will touch&gt;      # what was already decided or fixed there
 </code></pre></div>
-<p>Reading the history of the area first is part of the job: a lot of this code records things that
-were tried, measured and changed (<a href="10-contributing-workflow.html#start-from-the-latest-tag-not-from-memory">10 — Start from the latest tag</a>).</p>
-<h3 id="3-find-where-the-change-goes">3. Find where the change goes</h3>
-<p>Use the decision tree in <a href="#where-does-my-change-go">Where does my change go?</a> below, then read the
-section of <a href="06-crates.html">06 — The crates</a> for that crate.</p>
-<h3 id="4-write-the-test-first">4. Write the test first</h3>
+<p>Ler primeiro o histórico da área faz parte do trabalho: muito deste código regista coisas que foram
+tentadas, medidas e mudadas (<a href="10-contributing-workflow.html#start-from-the-latest-tag-not-from-memory">10 — Parte da tag mais recente</a>).</p>
+<h3 id="3-find-where-the-change-goes">3. Descobre onde vai a mudança</h3>
+<p>Usa a árvore de decisão em <a href="#where-does-my-change-go">Onde vai a minha mudança?</a> abaixo, e depois lê
+a secção de <a href="06-crates.html">06 — Os crates</a> para esse crate.</p>
+<h3 id="4-write-the-test-first">4. Escreve o teste primeiro</h3>
 <ul>
-<li>A new pure function (parser, validator, argument builder, plan) gets a unit test in the same file,
-  under <code>#[cfg(test)] mod tests</code>. A test never touches the real state root: pass it a temporary
-  directory — see <a href="03-rust-primer.html#39-tests">03 — Tests</a>.</li>
-<li>A bug fix gets a test that <strong>fails without the fix</strong>. Revert your fix once, run the test, see it
-  fail, then restore the fix. A test that passes either way proves nothing.</li>
-<li>A change to namespaces, cgroups, the network holder or VM boot also needs a <strong>live</strong> run with the
-  state isolated, because unit tests cannot reach those paths
-  (<a href="02-build-and-test.html#run-the-tests">02 — Run the tests</a>).</li>
+<li>Uma função pura nova (parser, validador, construtor de argumentos, plano) leva um teste unitário
+  no mesmo ficheiro, dentro de <code>#[cfg(test)] mod tests</code>. Um teste nunca toca no state root real:
+  passa-lhe um directório temporário — ver <a href="03-rust-primer.html#39-tests">03 — Testes</a>.</li>
+<li>Uma correcção de bug leva um teste que <strong>falha sem a correcção</strong>. Reverte a tua correcção uma vez,
+  corre o teste, vê-o falhar, e depois repõe a correcção. Um teste que passa de qualquer maneira não
+  prova nada.</li>
+<li>Uma mudança em namespaces, cgroups, no holder de rede ou no arranque de VMs precisa também de uma
+  execução <strong>ao vivo</strong> com o estado isolado, porque os testes unitários não alcançam esses caminhos
+  (<a href="02-build-and-test.html#run-the-tests">02 — Correr os testes</a>).</li>
 </ul>
-<h3 id="5-run-the-local-gates">5. Run the local gates</h3>
-<p>Every CI job has a local command, listed in
-<a href="02-build-and-test.html#the-gates-ci-runs">02 — The gates CI runs</a>. At minimum, before asking for
-review:</p>
+<h3 id="5-run-the-local-gates">5. Corre os gates locais</h3>
+<p>Cada job de CI tem um comando local, listado em
+<a href="02-build-and-test.html#the-gates-ci-runs">02 — Os gates que a CI corre</a>. No mínimo, antes de pedir
+revisão:</p>
 <div class="code" data-shell><pre><code class="language-bash">cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked --no-fail-fast
@@ -222,37 +226,40 @@ python3 scripts/arch_fitness.py
 python3 scripts/dev_docs.py --check
 python3 scripts/version_gate.py
 </code></pre></div>
-<p>Add the ones that match what you touched (the CLI surface gates if you added a command, the contract
-gate if you touched <code>proto/</code>, the docs generator if help text changed) — the table in 02 says which.</p>
-<h3 id="6-write-the-pull-request">6. Write the pull request</h3>
-<p>Open it against <code>main</code> and fill in every section of
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener"><code>.github/PULL_REQUEST_TEMPLATE.md</code></a>. The template has four
-parts, and reviewers read all of them:</p>
+<p>Acrescenta os que correspondem ao que tocaste (os gates da superfície da CLI se acrescentaste um
+comando, o gate de contrato se tocaste em <code>proto/</code>, o gerador da documentação se o texto de ajuda
+mudou) — a tabela da 02 diz quais.</p>
+<h3 id="6-write-the-pull-request">6. Escreve o pull request</h3>
+<p>Abre-o contra <code>main</code> e preenche todas as secções de
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener"><code>.github/PULL_REQUEST_TEMPLATE.md</code></a>. O modelo tem quatro
+partes, e os revisores lêem todas:</p>
 <ul>
-<li><strong>What does this change do, and why?</strong> — the <em>why</em>; the diff already shows the <em>what</em>.</li>
-<li><strong>How was this tested?</strong> — the gates you ran, and for runtime/namespace/cgroup/network code, the
-  command you ran <strong>live</strong> and its output.</li>
-<li><strong>Checklist</strong> — build/clippy/fmt/test clean; new user-facing strings in English wrapped in
-  <code>po::t</code>/<code>po::tf</code> with a Portuguese entry in <code>pt.po</code>; every entry point of a command wired; unit
-  tests for new pure functions; privilege boundaries called out.</li>
-<li><strong>Does this cross a privilege or namespace boundary?</strong> — user namespace mapping, the holder netns,
-  the control socket, <code>setns</code>/<code>unshare</code>, or path handling driven by user or manifest input. If you
-  are not sure, say so.</li>
+<li><strong>What does this change do, and why?</strong> — o <em>porquê</em>; o diff já mostra o <em>quê</em>.</li>
+<li><strong>How was this tested?</strong> — os gates que correste e, para código de runtime/namespace/cgroup/rede,
+  o comando que correste <strong>ao vivo</strong> e a sua saída.</li>
+<li><strong>Checklist</strong> — build/clippy/fmt/test limpos; strings novas visíveis ao utilizador em inglês,
+  envolvidas em <code>po::t</code>/<code>po::tf</code>, com uma entrada em português no <code>pt.po</code>; todos os pontos de
+  entrada de um comando ligados; testes unitários para as funções puras novas; fronteiras de
+  privilégio assinaladas.</li>
+<li><strong>Does this cross a privilege or namespace boundary?</strong> — mapeamento do user namespace, a netns do
+  holder, o socket de controlo, <code>setns</code>/<code>unshare</code>, ou tratamento de caminhos conduzido por input do
+  utilizador ou de um manifesto. Se não tiveres a certeza, di-lo.</li>
 </ul>
-<p>Say what was proved <strong>and</strong> what was not validated, and why
-(<a href="10-contributing-workflow.html#commits-and-pull-requests">10 — Commits and pull requests</a>).</p>
-<h3 id="7-what-reviewers-check">7. What reviewers check</h3>
-<p>The code owners in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a> review every change. The review
-checklist is in <a href="12-coding-conventions.html">12 — Coding conventions</a>; the cloud-native standards a
-change is measured against are in <a href="13-cloud-native-standards.html">13 — Cloud native standards</a>. Read
-both before you open the PR, not after the first round of comments.</p>
-<h3 id="8-after-the-merge">8. After the merge</h3>
-<p>Remove the worktree <strong>and</strong> the branch — the branch survives <code>worktree remove</code>:</p>
+<p>Diz o que ficou provado <strong>e</strong> o que não foi validado, e porquê
+(<a href="10-contributing-workflow.html#commits-and-pull-requests">10 — Commits e pull requests</a>).</p>
+<h3 id="7-what-reviewers-check">7. O que os revisores verificam</h3>
+<p>Os code owners em <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a> revêem todas as mudanças. A
+checklist de revisão está em <a href="12-coding-conventions.html">12 — Convenções de código</a>; os padrões cloud
+native contra os quais uma mudança é medida estão em
+<a href="13-cloud-native-standards.html">13 — Padrões cloud native</a>. Lê as duas antes de abrires o PR, não
+depois da primeira ronda de comentários.</p>
+<h3 id="8-after-the-merge">8. Depois do merge</h3>
+<p>Remove o worktree <strong>e</strong> o branch — o branch sobrevive ao <code>worktree remove</code>:</p>
 <div class="code" data-shell><pre><code class="language-bash">cd ../../../delonix-runtime    # from the worktree of step 2 back to the clone
 git worktree remove ../.worktrees/delonix-runtime/&lt;task&gt;
 git branch -D &lt;topic&gt;/&lt;task&gt;
 </code></pre></div>
-<h2 id="where-does-my-change-go">Where does my change go?</h2>
+<h2 id="where-does-my-change-go">Onde vai a minha mudança?</h2>
 <pre class="mermaid">flowchart TD
     Q{What are you changing?}
     Q --&gt;|a boundary: new daemon, new privilege,&lt;br/&gt;new provider or port, layer structure,&lt;br/&gt;node contract, schema stability| ADR[Write an ADR first&lt;br/&gt;docs/adr/]
@@ -272,198 +279,198 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Change</th>
-<th>Where it goes (checked in the tree)</th>
-<th>Read</th>
-<th>Rule and its source</th>
+<th>Mudança</th>
+<th>Onde vai (confirmado na árvore)</th>
+<th>Ler</th>
+<th>Regra e a sua fonte</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>New CLI flag or subcommand</strong></td>
-<td><code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code> (one module per group); strings through <code>cmd/po.rs</code> with Portuguese in <code>data/pt.po</code>; manual text in <code>cmd/manual_entries.rs</code>; leaf list in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> (<code>scripts/cli-tree.sh --update</code>). Pure validation of a run belongs in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/preflight.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/preflight.rs</code></a></td>
-<td><a href="10-contributing-workflow.html#adding-or-changing-a-cli-command">10 — Adding or changing a CLI command</a>, <a href="03-rust-primer.html#36-the-cli-clap-derive-and-translated-output">03 — The CLI</a></td>
-<td>LANG-01 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>); CLI surface gate (<code>scripts/cli-tree.sh --gate</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a>); wire every entry point (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>)</td>
+<td><strong>Flag ou subcomando novo da CLI</strong></td>
+<td><code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code> (um módulo por grupo); strings através de <code>cmd/po.rs</code>, com o português em <code>data/pt.po</code>; texto do manual em <code>cmd/manual_entries.rs</code>; lista de folhas em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> (<code>scripts/cli-tree.sh --update</code>). A validação pura de uma execução pertence a <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/preflight.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/preflight.rs</code></a></td>
+<td><a href="10-contributing-workflow.html#adding-or-changing-a-cli-command">10 — Acrescentar ou mudar um comando da CLI</a>, <a href="03-rust-primer.html#36-the-cli-clap-derive-and-translated-output">03 — A CLI</a></td>
+<td>LANG-01 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>); gate da superfície da CLI (<code>scripts/cli-tree.sh --gate</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a>); ligar todos os pontos de entrada (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>)</td>
 </tr>
 <tr>
-<td><strong>New Kind, or a field on one</strong></td>
-<td>The Kind's facts: <code>FACTS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>. Its spec type and apply: <code>bins/delonix-runtime-bin/src/cmd/&lt;kind&gt;.rs</code>. Live-updatable fields: <code>hot_fields</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>. The schema: <code>TYPED_KINDS</code> in <code>cmd/schema.rs</code>, and the published <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a> (<code>delonix manifest schema</code>)</td>
-<td><a href="04-cloud-native-primer.html#48-declarative-reconciliation">04 — Declarative reconciliation</a>, <a href="06-crates.html#delonix-stack">06 — <code>delonix-stack</code></a></td>
-<td>Open an issue first (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>); the schema is generated from the code (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>); tests in <code>kinds.rs</code> and <code>schema.rs</code> fail when a table is left out</td>
+<td><strong>Kind novo, ou um campo de um Kind</strong></td>
+<td>Os factos do Kind: <code>FACTS</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>. O seu tipo de spec e o apply: <code>bins/delonix-runtime-bin/src/cmd/&lt;kind&gt;.rs</code>. Campos actualizáveis a quente: <code>hot_fields</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>. O schema: <code>TYPED_KINDS</code> em <code>cmd/schema.rs</code>, e o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a> publicado (<code>delonix manifest schema</code>)</td>
+<td><a href="04-cloud-native-primer.html#48-declarative-reconciliation">04 — Reconciliação declarativa</a>, <a href="06-crates.html#delonix-stack">06 — <code>delonix-stack</code></a></td>
+<td>Abre primeiro uma issue (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>); o schema é gerado a partir do código (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>); os testes em <code>kinds.rs</code> e <code>schema.rs</code> falham quando uma tabela fica esquecida</td>
 </tr>
 <tr>
-<td><strong>Network behaviour</strong></td>
-<td>Pure rules with no I/O: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>. Dataplane (holder, control socket, nftables, IPAM, CNI): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn/src" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/</code></a> (<code>infra.rs</code>, <code>ipam.rs</code>, <code>cni.rs</code>). The network step of <code>container run</code>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/network.rs</code></a>. CLI: <code>cmd/network.rs</code>, <code>cmd/net.rs</code>, <code>cmd/firewall.rs</code></td>
-<td><a href="04-cloud-native-primer.html#45-container-networking">04 — Container networking</a>, <a href="06-crates.html#delonix-sdn">06 — <code>delonix-sdn</code></a></td>
-<td>Rootless-first and no silent failure (<a href="10-contributing-workflow.html#architecture-rules-the-gates-enforce">10 — Architecture rules</a>); flag the privilege boundary in the PR (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>)</td>
+<td><strong>Comportamento de rede</strong></td>
+<td>Regras puras sem I/O: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>. Dataplane (holder, socket de controlo, nftables, IPAM, CNI): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn/src" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/</code></a> (<code>infra.rs</code>, <code>ipam.rs</code>, <code>cni.rs</code>). O passo de rede do <code>container run</code>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/network.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/network.rs</code></a>. CLI: <code>cmd/network.rs</code>, <code>cmd/net.rs</code>, <code>cmd/firewall.rs</code></td>
+<td><a href="04-cloud-native-primer.html#45-container-networking">04 — Rede de containers</a>, <a href="06-crates.html#delonix-sdn">06 — <code>delonix-sdn</code></a></td>
+<td>Rootless-first e nenhuma falha silenciosa (<a href="10-contributing-workflow.html#architecture-rules-the-gates-enforce">10 — Regras de arquitectura</a>); assinala a fronteira de privilégio no PR (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>)</td>
 </tr>
 <tr>
-<td><strong>Images, registry, build</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/src" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/</code></a> (<code>registry.rs</code>, <code>build.rs</code>, <code>cas.rs</code>, <code>overlay.rs</code>); CLI in <code>cmd/build.rs</code>, <code>cmd/image.rs</code></td>
-<td><a href="08-delonixfile-and-vmfile.html">08 — Delonixfile and VMfile</a>, <a href="06-crates.html#delonix-oci">06 — <code>delonix-oci</code></a></td>
-<td>Downloads are verified by digest (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>, supply-chain scope)</td>
+<td><strong>Imagens, registo, build</strong></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/src" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/</code></a> (<code>registry.rs</code>, <code>build.rs</code>, <code>cas.rs</code>, <code>overlay.rs</code>); CLI em <code>cmd/build.rs</code>, <code>cmd/image.rs</code></td>
+<td><a href="08-delonixfile-and-vmfile.html">08 — Delonixfile e VMfile</a>, <a href="06-crates.html#delonix-oci">06 — <code>delonix-oci</code></a></td>
+<td>Os downloads são verificados por digest (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>, âmbito da cadeia de fornecimento)</td>
 </tr>
 <tr>
-<td><strong>VM behaviour on this node</strong></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (the <code>VmBackend</code> trait and the backend registry), <code>cloudinit.rs</code>; CLI in <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
-<td><a href="09-microvm-setup.html">09 — Building microVMs</a>, <a href="03-rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">03 — Traits as ports</a></td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (backends are registrable)</td>
+<td><strong>Comportamento de VMs neste nó</strong></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> (o trait <code>VmBackend</code> e o registo de backends), <code>cloudinit.rs</code>; CLI em <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code>, <code>cmd/vmfile.rs</code></td>
+<td><a href="09-microvm-setup.html">09 — Construir microVMs</a>, <a href="03-rust-primer.html#33-traits-as-ports-vmbackend-and-the-backend-registry">03 — Traits como portas</a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> (os backends são registáveis)</td>
 </tr>
 <tr>
-<td><strong>A new VM backend or storage provider behind a remote API</strong></td>
-<td>A new crate under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, implementing a port; registered at the composition root (<code>cmd/vmbackends.rs</code>)</td>
-<td><a href="06-crates.html#providers">06 — Providers</a>, <a href="05-architecture.html#layers-and-the-allowed-direction">05 — Layers</a></td>
-<td>ADR first (<a href="10-contributing-workflow.html#when-to-write-an-adr">10 — When to write an ADR</a>); <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
+<td><strong>Um backend de VM ou provider de armazenamento novo, atrás de uma API remota</strong></td>
+<td>Um crate novo em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, a implementar uma porta; registado na raiz de composição (<code>cmd/vmbackends.rs</code>)</td>
+<td><a href="06-crates.html#providers">06 — Providers</a>, <a href="05-architecture.html#layers-and-the-allowed-direction">05 — Camadas</a></td>
+<td>Primeiro um ADR (<a href="10-contributing-workflow.html#when-to-write-an-adr">10 — Quando escrever um ADR</a>); <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a></td>
 </tr>
 <tr>
-<td><strong>CRI (what the kubelet talks to)</strong></td>
+<td><strong>CRI (aquilo com que o kubelet fala)</strong></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri/src" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/</code></a> (<code>runtime_svc.rs</code>, <code>runtime_svc/lifecycle.rs</code>, <code>streaming.rs</code>)</td>
 <td><a href="04-cloud-native-primer.html#46-kubernetes-cri-kubelet-kubeadm-and-kind">04 — Kubernetes</a>, <a href="06-crates.html#delonix-cri">06 — <code>delonix-cri</code></a></td>
 <td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a></td>
 </tr>
 <tr>
-<td><strong>A new crate</strong></td>
-<td>An entry in <code>LAYERS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, a directory under <code>crates/&lt;layer&gt;/</code>, and its path in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> <code>[workspace.dependencies]</code> — all in the same commit</td>
-<td><a href="05-architecture.html#layers-and-the-allowed-direction">05 — Layers</a></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (directory = layer, versions only in the root)</td>
+<td><strong>Um crate novo</strong></td>
+<td>Uma entrada em <code>LAYERS</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, um directório em <code>crates/&lt;layer&gt;/</code>, e o seu caminho no <code>[workspace.dependencies]</code> do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz — tudo no mesmo commit</td>
+<td><a href="05-architecture.html#layers-and-the-allowed-direction">05 — Camadas</a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (directório = camada, versões só na raiz)</td>
 </tr>
 <tr>
-<td><strong>A decision that moves a boundary</strong></td>
-<td><code>docs/adr/NNNN-title.md</code>, before the code</td>
-<td><a href="10-contributing-workflow.html#when-to-write-an-adr">10 — When to write an ADR</a></td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>; accepted ADRs are superseded, never rewritten</td>
+<td><strong>Uma decisão que muda uma fronteira</strong></td>
+<td><code>docs/adr/NNNN-title.md</code>, antes do código</td>
+<td><a href="10-contributing-workflow.html#when-to-write-an-adr">10 — Quando escrever um ADR</a></td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>; os ADRs aceites são sucedidos, nunca reescritos</td>
 </tr>
 </tbody>
 </table></div>
-<p>If your change does not fit any row, ask in the issue before writing code (see
-<a href="#when-you-are-stuck">When you are stuck</a>).</p>
-<h2 id="rules-you-must-not-break">Rules you must not break</h2>
-<p>Each rule is enforced by a gate, a review, or both. The link is where it is written.</p>
+<p>Se a tua mudança não encaixa em nenhuma linha, pergunta na issue antes de escrever código (ver
+<a href="#when-you-are-stuck">Quando estás preso</a>).</p>
+<h2 id="rules-you-must-not-break">Regras que não podes quebrar</h2>
+<p>Cada regra é imposta por um gate, por uma revisão, ou pelos dois. O link é o sítio onde está escrita.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Rule</th>
-<th>Source</th>
+<th>Regra</th>
+<th>Fonte</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>The engine knows no consumer.</strong> No product, platform, control plane, console or agent that uses the engine is named in <code>crates/</code>, <code>bins/</code>, <code>proto/</code> or the manifests, comments included; no tenant, account, plan or billing.</td>
-<td><em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. The named consumers are enforced by <code>CONSUMER_NAMES</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (a fixed list of names, matched by regular expression); the ban on tenant, account, plan and billing concepts is not matched by any gate and is checked in review</td>
+<td><strong>O motor não conhece nenhum consumidor.</strong> Nenhum produto, plataforma, control plane, consola ou agente que use o motor é nomeado em <code>crates/</code>, <code>bins/</code>, <code>proto/</code> ou nos manifestos, comentários incluídos; nenhum inquilino, conta, plano ou facturação.</td>
+<td><em>«Identidade e fronteira do motor»</em> no topo do <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. Os consumidores nomeados são impostos por <code>CONSUMER_NAMES</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (uma lista fixa de nomes, casada por expressão regular); a proibição dos conceitos de inquilino, conta, plano e facturação não é casada por nenhum gate e é verificada em revisão</td>
 </tr>
 <tr>
-<td><strong>Daemonless.</strong> No resident process by default; a new one needs an ADR with evidence of what systemd could not do.</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (same section); <a href="10-contributing-workflow.html#architecture-rules-the-gates-enforce">10 — Architecture rules</a></td>
+<td><strong>Daemonless.</strong> Nenhum processo residente por omissão; um novo precisa de um ADR com a evidência do que o systemd não conseguiu fazer.</td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (a mesma secção); <a href="10-contributing-workflow.html#architecture-rules-the-gates-enforce">10 — Regras de arquitectura</a></td>
 </tr>
 <tr>
-<td><strong>Rootless-first.</strong> The normal path runs unprivileged; privilege is an explicit, announced opt-in. A new privilege boundary needs a GO/NO-GO spike and an ADR.</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>; <a href="10-contributing-workflow.html#when-to-write-an-adr">10 — When to write an ADR</a></td>
+<td><strong>Rootless-first.</strong> O caminho normal corre sem privilégios; o privilégio é um opt-in explícito e anunciado. Uma fronteira de privilégio nova precisa de um spike GO/NO-GO e de um ADR.</td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>; <a href="10-contributing-workflow.html#when-to-write-an-adr">10 — Quando escrever um ADR</a></td>
 </tr>
 <tr>
-<td><strong>Dependencies point inward, the directory is the layer, versions live only in the root.</strong></td>
+<td><strong>As dependências apontam para dentro, o directório é a camada, as versões vivem só na raiz.</strong></td>
 <td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
 </tr>
 <tr>
-<td><strong>LANG-01: code is English.</strong> Identifiers, comments and messages in English; Portuguese only through <code>pt.po</code>.</td>
-<td><a href="10-contributing-workflow.html#language-english-in-the-code-lang-01">10 — Language</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></td>
+<td><strong>LANG-01: o código é em inglês.</strong> Identificadores, comentários e mensagens em inglês; português só através do <code>pt.po</code>.</td>
+<td><a href="10-contributing-workflow.html#language-english-in-the-code-lang-01">10 — Língua</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></td>
 </tr>
 <tr>
-<td><strong>Version alignment.</strong> Do not change <code>version</code> in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> in a feature PR; your branch must contain the newest tag.</td>
-<td><a href="10-contributing-workflow.html#version-alignment">10 — Version alignment</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
+<td><strong>Alinhamento da versão.</strong> Não mudes a <code>version</code> do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz num PR de feature; o teu branch tem de conter a tag mais recente.</td>
+<td><a href="10-contributing-workflow.html#version-alignment">10 — Alinhamento da versão</a>; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
 </tr>
 <tr>
-<td><strong>One worktree per task</strong>, outside <code>/tmp</code>, stage files by name, remove worktree and branch at the end.</td>
-<td><a href="10-contributing-workflow.html#one-worktree-per-task">10 — One worktree per task</a></td>
+<td><strong>Um worktree por tarefa</strong>, fora de <code>/tmp</code>, ficheiros adicionados pelo nome, worktree e branch removidos no fim.</td>
+<td><a href="10-contributing-workflow.html#one-worktree-per-task">10 — Um worktree por tarefa</a></td>
 </tr>
 <tr>
-<td><strong>Never run the engine, the E2E battery or the chaos harness against real state.</strong> Export both <code>DELONIX_ROOT</code> and <code>DELONIX_NET_RUNTIME_DIR</code>; do not set <code>E2E_SHARED_STATE=1</code> unless you are diagnosing your own host.</td>
-<td><a href="02-build-and-test.html#isolating-the-engines-state">02 — Isolating the engine's state</a>, <a href="02-build-and-test.html#end-to-end-battery-scriptse2esh">E2E</a>, <a href="02-build-and-test.html#chaos-harness-scriptschaossh">chaos</a></td>
+<td><strong>Nunca corras o motor, a bateria E2E ou o arnês de caos contra estado real.</strong> Exporta tanto <code>DELONIX_ROOT</code> como <code>DELONIX_NET_RUNTIME_DIR</code>; não definas <code>E2E_SHARED_STATE=1</code> a não ser que estejas a diagnosticar o teu próprio host.</td>
+<td><a href="02-build-and-test.html#isolating-the-engines-state">02 — Isolar o estado do motor</a>, <a href="02-build-and-test.html#end-to-end-battery-scriptse2esh">E2E</a>, <a href="02-build-and-test.html#chaos-harness-scriptschaossh">caos</a></td>
 </tr>
 <tr>
-<td><strong>Security-sensitive changes are called out</strong>, and vulnerabilities are reported privately, never in a public issue or PR.</td>
-<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>; <a href="10-contributing-workflow.html#security-sensitive-changes">10 — Security-sensitive changes</a></td>
+<td><strong>As mudanças sensíveis para a segurança são assinaladas</strong>, e as vulnerabilidades são reportadas em privado, nunca numa issue ou PR público.</td>
+<td><a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>; <a href="10-contributing-workflow.html#security-sensitive-changes">10 — Mudanças sensíveis para a segurança</a></td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="when-you-are-stuck">When you are stuck</h2>
-<p>Look in this order — each step is cheaper than the next:</p>
+<h2 id="when-you-are-stuck">Quando estás preso</h2>
+<p>Procura por esta ordem — cada passo é mais barato do que o seguinte:</p>
 <ol>
-<li><strong>This handbook.</strong> The <a href="index.html">README</a> has the page list; the <a href="14-glossary.html">glossary</a>
-   explains the vocabulary.</li>
-<li><strong><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a></strong>, organised by area. It is long and partly historical (and
-   partly in Portuguese): use it to learn <em>where</em> to look, then confirm in the code.</li>
-<li><strong>The ADR index</strong>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> — the decision behind a structure,
-   and what was rejected.</li>
-<li><strong>The history of the file</strong>: <code>git log --oneline -- &lt;path&gt;</code> and <code>git log -p -S '&lt;symbol&gt;'</code>. Commit
-   messages here explain why.</li>
+<li><strong>Este manual.</strong> O <a href="index.html">README</a> tem a lista de páginas; o <a href="14-glossary.html">glossário</a>
+   explica o vocabulário.</li>
+<li><strong><a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a></strong>, organizado por área. É longo e em parte histórico (e em
+   parte em português): usa-o para saber <em>onde</em> procurar, e depois confirma no código.</li>
+<li><strong>O índice de ADRs</strong>, <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> — a decisão por trás de uma
+   estrutura, e o que foi rejeitado.</li>
+<li><strong>O histórico do ficheiro</strong>: <code>git log --oneline -- &lt;path&gt;</code> e <code>git log -p -S '&lt;symbol&gt;'</code>. As
+   mensagens de commit aqui explicam o porquê.</li>
 </ol>
-<p>If you are still stuck, <strong>ask</strong> on GitHub:</p>
+<p>Se continuares preso, <strong>pergunta</strong> no GitHub:</p>
 <ul>
-<li>Comment on the issue you are working on, or open a new one with
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/feature_request.md" target="_blank" rel="noopener">the feature request template</a> (for questions
-  about an approach) or <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/bug_report.md" target="_blank" rel="noopener">the bug report template</a>.</li>
-<li>A security problem goes through <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener">private vulnerability reporting</a>, not an issue.</li>
+<li>Comenta na issue em que estás a trabalhar, ou abre uma nova com
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/feature_request.md" target="_blank" rel="noopener">o modelo de pedido de funcionalidade</a> (para
+  perguntas sobre uma abordagem) ou <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/ISSUE_TEMPLATE/bug_report.md" target="_blank" rel="noopener">o modelo de relato de bug</a>.</li>
+<li>Um problema de segurança segue pelo <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener">relato privado de vulnerabilidades</a>,
+  não por uma issue.</li>
 </ul>
-<p>The bug report template asks for:</p>
+<p>O modelo de relato de bug pede:</p>
 <ul>
-<li>the output of <code>delonix --version</code>;</li>
-<li>distro and kernel version, rootless or root, and whether you installed with <code>install.sh</code>,
-  downloaded a binary, or built from source;</li>
-<li>the exact command or manifest that triggers it;</li>
-<li>what you expected, and the <strong>full, untrimmed</strong> output of what actually happened;</li>
-<li>whether it reproduces every time, sometimes, or only once;</li>
-<li>anything else that might be relevant.</li>
+<li>a saída de <code>delonix --version</code>;</li>
+<li>a distro e a versão do kernel, rootless ou root, e se instalaste com o <code>install.sh</code>,
+  descarregaste um binário, ou compilaste a partir do código-fonte;</li>
+<li>o comando ou manifesto exacto que o provoca;</li>
+<li>o que esperavas, e a saída <strong>completa, sem cortes</strong> do que aconteceu de facto;</li>
+<li>se reproduz sempre, às vezes, ou só uma vez;</li>
+<li>qualquer outra coisa que possa ser relevante.</li>
 </ul>
-<p>This handbook additionally recommends two things the template does not ask, because they save a
-round trip:</p>
+<p>Este manual recomenda ainda duas coisas que o modelo não pede, porque poupam uma ida e volta:</p>
 <ul>
-<li>the <strong>whole</strong> <code>--version</code> output of the binary you ran, including the <code>commit:</code> line (between
-  releases every build reports the same version number, and only the commit tells them apart);</li>
-<li>whether <code>DELONIX_ROOT</code>/<code>DELONIX_NET_RUNTIME_DIR</code> were set, and what you already read and tried
-  (the page, the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> section, the ADR).</li>
+<li>a saída <strong>inteira</strong> do <code>--version</code> do binário que correste, incluindo a linha <code>commit:</code> (entre
+  releases todos os builds reportam o mesmo número de versão, e só o commit os distingue);</li>
+<li>se <code>DELONIX_ROOT</code>/<code>DELONIX_NET_RUNTIME_DIR</code> estavam definidas, e o que já leste e tentaste
+  (a página, a secção do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, o ADR).</li>
 </ul>
-<h2 id="progress-checklist">Progress checklist</h2>
+<h2 id="progress-checklist">Checklist de progresso</h2>
 <ul>
-<li>[ ] I read what Delonix is and the four principles (<a href="05-architecture.html#engine-identity-and-boundaries">05</a>).</li>
-<li>[ ] My host meets <a href="01-environment.html">01</a>, and I read the known host traps.</li>
-<li>[ ] <code>cargo build -p delonix-runtime-bin</code> finishes.</li>
-<li>[ ] <code>cargo test -p delonix-net-rules</code> reports <code>test result: ok</code>.</li>
-<li>[ ] <code>./target/debug/delonix --help</code> works, and I stopped using the <code>delonix</code> on my <code>PATH</code>.</li>
-<li>[ ] <code>delonix system info</code> shows my scratch <code>DELONIX_ROOT</code> as the state root.</li>
-<li>[ ] I picked an issue and commented on it (or opened one for a non-trivial change).</li>
-<li>[ ] I work in my own worktree created from <code>origin/main</code>.</li>
-<li>[ ] I found where the change goes and read that crate's section in <a href="06-crates.html">06</a>.</li>
-<li>[ ] I wrote a test that fails without my change.</li>
-<li>[ ] The local gates from <a href="02-build-and-test.html#the-gates-ci-runs">02</a> pass.</li>
-<li>[ ] I read <a href="12-coding-conventions.html">12</a> and <a href="13-cloud-native-standards.html">13</a>.</li>
-<li>[ ] My PR fills every section of the template, including what was <em>not</em> validated.</li>
-<li>[ ] After the merge, I removed my worktree and my branch.</li>
+<li>[ ] Li o que é o Delonix e os quatro princípios (<a href="05-architecture.html#engine-identity-and-boundaries">05</a>).</li>
+<li>[ ] O meu host cumpre a <a href="01-environment.html">01</a>, e li as armadilhas conhecidas do host.</li>
+<li>[ ] <code>cargo build -p delonix-runtime-bin</code> termina.</li>
+<li>[ ] <code>cargo test -p delonix-net-rules</code> reporta <code>test result: ok</code>.</li>
+<li>[ ] <code>./target/debug/delonix --help</code> funciona, e deixei de usar o <code>delonix</code> do meu <code>PATH</code>.</li>
+<li>[ ] <code>delonix system info</code> mostra o meu <code>DELONIX_ROOT</code> de rascunho como state root.</li>
+<li>[ ] Escolhi uma issue e comentei nela (ou abri uma para uma mudança não trivial).</li>
+<li>[ ] Trabalho no meu próprio worktree, criado a partir de <code>origin/main</code>.</li>
+<li>[ ] Descobri onde vai a mudança e li a secção desse crate na <a href="06-crates.html">06</a>.</li>
+<li>[ ] Escrevi um teste que falha sem a minha mudança.</li>
+<li>[ ] Os gates locais da <a href="02-build-and-test.html#the-gates-ci-runs">02</a> passam.</li>
+<li>[ ] Li a <a href="12-coding-conventions.html">12</a> e a <a href="13-cloud-native-standards.html">13</a>.</li>
+<li>[ ] O meu PR preenche todas as secções do modelo, incluindo o que <em>não</em> foi validado.</li>
+<li>[ ] Depois do merge, removi o meu worktree e o meu branch.</li>
 </ul>
 <div class="pager"><a href="index.html"><span>← Anterior</span>Delonix Runtime — Manual do Contribuidor</a><a class="next" href="01-environment.html"><span>Seguinte →</span>1. Preparar o teu ambiente</a></div>
-<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/00-start-here.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/00-start-here.md</code></p></main>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/00-start-here.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/pt-AO/00-start-here.md</code></p></main>
 <aside class="toc"><h5>Nesta página</h5><div class="toc">
 <ul>
-<li><a href="#day-0-in-30-minutes">Day 0 in 30 minutes</a><ul>
-<li><a href="#what-delonix-is-5-minutes">What Delonix is (5 minutes)</a></li>
-<li><a href="#what-you-need-10-minutes">What you need (10 minutes)</a></li>
-<li><a href="#five-commands-that-prove-your-setup-works-15-minutes">Five commands that prove your setup works (15 minutes)</a></li>
+<li><a href="#day-0-in-30-minutes">Dia 0 em 30 minutos</a><ul>
+<li><a href="#what-delonix-is-5-minutes">O que é o Delonix (5 minutos)</a></li>
+<li><a href="#what-you-need-10-minutes">O que precisas (10 minutos)</a></li>
+<li><a href="#five-commands-that-prove-your-setup-works-15-minutes">Cinco comandos que provam que o teu ambiente funciona (15 minutos)</a></li>
 </ul>
 </li>
-<li><a href="#your-first-contribution-end-to-end">Your first contribution, end to end</a><ul>
-<li><a href="#1-pick-something">1. Pick something</a></li>
-<li><a href="#2-open-a-worktree-from-originmain">2. Open a worktree from origin/main</a></li>
-<li><a href="#3-find-where-the-change-goes">3. Find where the change goes</a></li>
-<li><a href="#4-write-the-test-first">4. Write the test first</a></li>
-<li><a href="#5-run-the-local-gates">5. Run the local gates</a></li>
-<li><a href="#6-write-the-pull-request">6. Write the pull request</a></li>
-<li><a href="#7-what-reviewers-check">7. What reviewers check</a></li>
-<li><a href="#8-after-the-merge">8. After the merge</a></li>
+<li><a href="#your-first-contribution-end-to-end">A tua primeira contribuição, de ponta a ponta</a><ul>
+<li><a href="#1-pick-something">1. Escolhe alguma coisa</a></li>
+<li><a href="#2-open-a-worktree-from-originmain">2. Abre um worktree a partir de origin/main</a></li>
+<li><a href="#3-find-where-the-change-goes">3. Descobre onde vai a mudança</a></li>
+<li><a href="#4-write-the-test-first">4. Escreve o teste primeiro</a></li>
+<li><a href="#5-run-the-local-gates">5. Corre os gates locais</a></li>
+<li><a href="#6-write-the-pull-request">6. Escreve o pull request</a></li>
+<li><a href="#7-what-reviewers-check">7. O que os revisores verificam</a></li>
+<li><a href="#8-after-the-merge">8. Depois do merge</a></li>
 </ul>
 </li>
-<li><a href="#where-does-my-change-go">Where does my change go?</a></li>
-<li><a href="#rules-you-must-not-break">Rules you must not break</a></li>
-<li><a href="#when-you-are-stuck">When you are stuck</a></li>
-<li><a href="#progress-checklist">Progress checklist</a></li>
+<li><a href="#where-does-my-change-go">Onde vai a minha mudança?</a></li>
+<li><a href="#rules-you-must-not-break">Regras que não podes quebrar</a></li>
+<li><a href="#when-you-are-stuck">Quando estás preso</a></li>
+<li><a href="#progress-checklist">Checklist de progresso</a></li>
 </ul>
 </div>
 </aside></div>
