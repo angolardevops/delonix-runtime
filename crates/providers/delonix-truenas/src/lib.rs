@@ -36,7 +36,9 @@
 //!    left pointing at a path that no longer exists is a working export serving
 //!    whatever gets created there next.
 
-use delonix_model::{Error, Result};
+mod error;
+
+pub use error::{Error, Result};
 use serde::Deserialize;
 use std::time::{Duration, Instant};
 
@@ -231,7 +233,7 @@ impl Client {
             .danger_accept_invalid_certs(target.insecure_tls)
             .build()
             .map_err(|e| {
-                Error::Invalid(format!("truenas: could not build the HTTP client: {e}"))
+                Error::ClientBuild(format!("truenas: could not build the HTTP client: {e}"))
             })?;
         validate_target_url(&target.base_url, true)?;
         let me = Self {
@@ -243,7 +245,7 @@ impl Client {
         let info: SystemInfo = me.get("/system/info")?;
         let major = info.version.split('.').next().unwrap_or("").to_string();
         if major != SUPPORTED_MAJOR {
-            return Err(Error::Invalid(format!(
+            return Err(Error::UnsupportedVersion(format!(
                 "truenas {} at {} is not supported: this build speaks the {}.x REST API. \
                  The surface moves between majors — `/pool/dataset/permission` became \
                  `/filesystem/setperm`, for one — so provisioning against an untested major \
@@ -283,7 +285,7 @@ impl Client {
         let resp = self
             .authed(rb)
             .send()
-            .map_err(|e| Error::Invalid(format!("truenas: request failed: {e}")))?;
+            .map_err(|e| Error::Request(format!("truenas: request failed: {e}")))?;
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
         if !status.is_success() {
@@ -293,7 +295,7 @@ impl Client {
             } else {
                 format!(": {}", truncate_chars(detail, 400))
             };
-            return Err(Error::Invalid(format!(
+            return Err(Error::HttpStatus(format!(
                 "truenas: {} returned HTTP {}{detail}",
                 self.base, status
             )));
@@ -326,7 +328,7 @@ impl Client {
         loop {
             let jobs: Vec<Job> = self.get(&format!("/core/get_jobs?id={id}"))?;
             let job = jobs.into_iter().next().ok_or_else(|| {
-                Error::Invalid(format!(
+                Error::JobVanished(format!(
                     "truenas: job {id} vanished before it finished — the appliance no longer \
                      reports it, so whether the work happened is unknown"
                 ))
@@ -340,7 +342,7 @@ impl Client {
                         .and_then(|e| e.as_str().map(str::to_string))
                         .or_else(|| job.error.as_ref().map(|e| e.to_string()))
                         .unwrap_or_else(|| "no reason given".into());
-                    return Err(Error::Invalid(format!(
+                    return Err(Error::JobFailed(format!(
                         "truenas: job {id} {}: {}",
                         job.state.to_lowercase(),
                         why.trim()
@@ -349,7 +351,7 @@ impl Client {
                 _ => {}
             }
             if Instant::now() >= deadline {
-                return Err(Error::Invalid(format!(
+                return Err(Error::JobTimeout(format!(
                     "truenas: job {id} was still '{}' after {}s — giving up. It may still be \
                      running on the appliance; nothing here was rolled back",
                     job.state,
@@ -366,14 +368,14 @@ impl Client {
         let resp = self
             .authed(self.http.get(self.url(&path)))
             .send()
-            .map_err(|e| Error::Invalid(format!("truenas: request failed: {e}")))?;
+            .map_err(|e| Error::Request(format!("truenas: request failed: {e}")))?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
             return Ok(None);
         }
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
         if !status.is_success() {
-            return Err(Error::Invalid(format!(
+            return Err(Error::HttpStatus(format!(
                 "truenas: reading dataset '{dataset}' returned HTTP {status}: {}",
                 body.trim()
             )));
@@ -423,7 +425,7 @@ impl Client {
         };
 
         let mountpoint = ds.mountpoint.clone().ok_or_else(|| {
-            Error::Invalid(format!(
+            Error::NoMountpoint(format!(
                 "truenas: dataset '{}' reports no mountpoint — it cannot be shared or mounted",
                 ds.id
             ))
@@ -437,7 +439,7 @@ impl Client {
         // enforces; a value it clamped or ignored has to surface as the truth,
         // not as the number that was asked for.
         let fresh = self.get_dataset(&spec.dataset)?.ok_or_else(|| {
-            Error::Invalid(format!(
+            Error::Inconsistent(format!(
                 "truenas: dataset '{}' was not there when read back immediately after \
                  provisioning it",
                 spec.dataset
@@ -572,7 +574,7 @@ impl Client {
                 .json(&serde_json::json!({ "recursive": recursive })),
         )?;
         if self.get_dataset(dataset)?.is_some() {
-            return Err(Error::Invalid(format!(
+            return Err(Error::Inconsistent(format!(
                 "truenas: dataset '{dataset}' is still there after the delete reported success"
             )));
         }
@@ -605,7 +607,7 @@ fn truncate_chars(s: &str, max: usize) -> &str {
 
 fn parse_json<T: for<'de> Deserialize<'de>>(body: &str, path: &str) -> Result<T> {
     serde_json::from_str(body).map_err(|e| {
-        Error::Invalid(format!(
+        Error::Decode(format!(
             "truenas: could not read the answer from {path}: {e} (body starts: {})",
             truncate_chars(body, 160)
         ))
@@ -630,7 +632,7 @@ pub fn validate_quota(quota: Option<u64>) -> Result<()> {
         None => Ok(()),
         Some(0) => Ok(()), // the appliance's own spelling of "no quota"
         Some(q) if q >= MIN_QUOTA_BYTES => Ok(()),
-        Some(q) => Err(Error::Invalid(format!(
+        Some(q) => Err(Error::QuotaTooSmall(format!(
             "quota of {q} bytes is below the {} TrueNAS enforces as its minimum \
              ({} GiB) — ask for at least that, or drop the quota to leave it unlimited",
             MIN_QUOTA_BYTES,
@@ -656,31 +658,31 @@ pub fn validate_quota(quota: Option<u64>) -> Result<()> {
 ///   classic way to make a URL read as one host while reaching another.
 pub fn validate_target_url(url: &str, has_credential: bool) -> Result<()> {
     let (scheme, rest) = url.split_once("://").ok_or_else(|| {
-        Error::Invalid(format!(
+        Error::InvalidUrl(format!(
             "invalid TrueNAS url '{url}': it needs a scheme (https://…)"
         ))
     })?;
     let scheme = scheme.to_ascii_lowercase();
     if scheme != "https" && scheme != "http" {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidUrl(format!(
             "invalid TrueNAS url '{url}': only http:// and https:// are understood"
         )));
     }
     let hostport = rest.split(['/', '?', '#']).next().unwrap_or("");
     if hostport.is_empty() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidUrl(format!(
             "invalid TrueNAS url '{url}': it names no host"
         )));
     }
     if hostport.contains('@') {
-        return Err(Error::Invalid(format!(
+        return Err(Error::CredentialInUrl(format!(
             "invalid TrueNAS url '{url}': credentials in the URL are not accepted — use \
              `apiKeySecret` or `passwordSecret` (a `kind: Secret`), which is also what keeps \
              them out of the manifest"
         )));
     }
     if scheme == "http" && has_credential {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InsecureCredential(format!(
             "refusing to send a credential to '{url}' over plain http — it would go over the \
              wire in the clear. Use https:// (with `insecureTLS: true` if the appliance serves \
              its stock self-signed certificate)"
@@ -698,7 +700,7 @@ pub fn validate_target_url(url: &str, has_credential: bool) -> Result<()> {
 /// is a delete on somebody else's machine.
 pub fn validate_dataset_name(dataset: &str) -> Result<()> {
     let bad = |why: &str| {
-        Err(Error::Invalid(format!(
+        Err(Error::InvalidDatasetName(format!(
             "invalid dataset '{dataset}': {why} (expected `<pool>/<name>`, e.g. `tank/projects`)"
         )))
     };

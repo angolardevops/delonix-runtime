@@ -11989,3 +11989,140 @@ msgstr "A ferramenta cloud-localds correu e saiu com um estado diferente de zero
 msgid "Check the cloud-init user-data/meta-data/network-config it was given are well-formed."
 msgstr "Verifica que o user-data/meta-data/network-config de cloud-init que lhe foi dado está bem formado."
 
+# dicionário: entradas do delonix-truenas (ADR-0043)
+
+msgid "quota below TrueNAS' minimum"
+msgstr "quota abaixo do mínimo do TrueNAS"
+
+msgid "TrueNAS refuses a quota under 1 GiB on a dataset; asking for less does not get rounded up, it gets refused."
+msgstr "O TrueNAS recusa uma quota abaixo de 1 GiB num dataset; pedir menos não arredonda para cima, é recusado."
+
+msgid "Ask for at least 1 GiB, or drop the quota to leave the dataset unlimited."
+msgstr "Pede pelo menos 1 GiB, ou tira a quota para deixar o dataset sem limite."
+
+msgid "invalid TrueNAS url"
+msgstr "url do TrueNAS inválido"
+
+msgid "The provisioning target's url has no scheme, an unsupported scheme, or no host."
+msgstr "O url do alvo de provisionamento não tem esquema, tem um esquema não suportado, ou não nomeia um host."
+
+msgid "Write it as https://<host>[:port], with no path."
+msgstr "Escreve-o como https://<host>[:porto], sem caminho."
+
+msgid "credential in the TrueNAS url"
+msgstr "credencial no url do TrueNAS"
+
+msgid "The url carries a username or password (userinfo), which is a credential hidden in the manifest instead of a kind: Secret."
+msgstr "O url leva um utilizador ou password (userinfo), uma credencial escondida no manifesto em vez de um kind: Secret."
+
+msgid "Remove the userinfo and pass the credential as apiKeySecret or passwordSecret."
+msgstr "Tira o userinfo e passa a credencial como apiKeySecret ou passwordSecret."
+
+msgid "credential over plain http"
+msgstr "credencial sobre http simples"
+
+msgid "Sending an API key or password to a plain http:// TrueNAS target would put it on the wire in the clear."
+msgstr "Enviar uma chave de API ou password para um alvo TrueNAS em http:// simples põe-na na rede em claro."
+
+msgid "Use https://, with insecureTLS: true if the appliance serves its own self-signed certificate."
+msgstr "Usa https://, com insecureTLS: true se a appliance servir o seu próprio certificado auto-assinado."
+
+msgid "invalid TrueNAS dataset name"
+msgstr "nome de dataset TrueNAS inválido"
+
+msgid "A ZFS dataset name has to be <pool>/<name>, with no '..', no empty component and no leading '-'."
+msgstr "Um nome de dataset ZFS tem de ser <pool>/<nome>, sem '..', sem componente vazio e sem '-' inicial."
+
+msgid "Write the dataset as <pool>/<name>, e.g. tank/projects."
+msgstr "Escreve o dataset como <pool>/<nome>, por exemplo tank/projects."
+
+msgid "could not build the TrueNAS HTTP client"
+msgstr "não foi possível construir o cliente HTTP do TrueNAS"
+
+msgid "The local TLS/HTTP stack could not build a client for the request. Nothing about the manifest is wrong."
+msgstr "A pilha TLS/HTTP local não conseguiu construir um cliente para o pedido. Não há nada de errado no manifesto."
+
+msgid "Check the host's TLS libraries; `delonix system info` reports what this host has."
+msgstr "Verifica as bibliotecas TLS do host; `delonix system info` reporta o que este host tem."
+
+msgid "unsupported TrueNAS version"
+msgstr "versão do TrueNAS não suportada"
+
+msgid "This build only speaks one TrueNAS REST API major; the surface moves between majors."
+msgstr "Esta build só fala uma versão maior da API REST do TrueNAS; a superfície muda entre versões maiores."
+
+msgid "Point the manifest at a TrueNAS SCALE appliance on the supported major, or update this engine."
+msgstr "Aponta o manifesto a uma appliance TrueNAS SCALE na versão maior suportada, ou actualiza este motor."
+
+msgid "TrueNAS job timed out"
+msgstr "job do TrueNAS esgotou o tempo"
+
+msgid "An asynchronous job on the appliance (permissions, dataset work) did not reach a terminal state before the deadline."
+msgstr "Um job assíncrono na appliance (permissões, trabalho no dataset) não chegou a um estado terminal antes do prazo."
+
+msgid "It may still be finishing on the appliance; check it there before retrying."
+msgstr "Pode ainda estar a terminar na appliance; verifica-o lá antes de repetir."
+
+msgid "TrueNAS request failed"
+msgstr "pedido ao TrueNAS falhou"
+
+msgid "The HTTP request to the appliance could not be sent or answered (network, TLS, DNS)."
+msgstr "O pedido HTTP à appliance não pôde ser enviado nem respondido (rede, TLS, DNS)."
+
+msgid "Check the target url and that the appliance is reachable from this host."
+msgstr "Verifica o url do alvo e que a appliance é alcançável a partir deste host."
+
+msgid "TrueNAS answered with an HTTP error"
+msgstr "TrueNAS respondeu com um erro HTTP"
+
+msgid "The appliance's REST API returned a non-2xx status; the message carries its own error body."
+msgstr "A API REST da appliance devolveu um estado fora de 2xx; a mensagem leva o corpo do erro próprio."
+
+msgid "Read the body in the message — TrueNAS puts the actionable detail there."
+msgstr "Lê o corpo na mensagem — o TrueNAS põe ali o detalhe accionável."
+
+msgid "could not read the TrueNAS response"
+msgstr "não foi possível ler a resposta do TrueNAS"
+
+msgid "The appliance's answer was not the JSON this client expected."
+msgstr "A resposta da appliance não era o JSON que este cliente esperava."
+
+msgid "Check the appliance is on the supported major; the message carries the start of the body."
+msgstr "Verifica que a appliance está na versão maior suportada; a mensagem leva o início do corpo."
+
+msgid "TrueNAS job failed"
+msgstr "job do TrueNAS falhou"
+
+msgid "An asynchronous job on the appliance finished FAILED or ABORTED; the message carries its own reason."
+msgstr "Um job assíncrono na appliance terminou FAILED ou ABORTED; a mensagem leva a razão própria."
+
+msgid "Read the appliance's reason in the message."
+msgstr "Lê a razão da appliance na mensagem."
+
+msgid "TrueNAS job vanished"
+msgstr "job do TrueNAS desapareceu"
+
+msgid "The appliance stopped reporting a job before it reached a terminal state, so whether the work happened is unknown."
+msgstr "A appliance deixou de reportar um job antes de chegar a um estado terminal, por isso não se sabe se o trabalho aconteceu."
+
+msgid "Check the dataset/permissions on the appliance directly."
+msgstr "Verifica o dataset/permissões directamente na appliance."
+
+msgid "TrueNAS dataset has no mountpoint"
+msgstr "dataset do TrueNAS não tem mountpoint"
+
+msgid "The appliance reports the dataset with no mountpoint, so it cannot be shared or mounted."
+msgstr "A appliance reporta o dataset sem mountpoint, por isso não pode ser partilhado nem montado."
+
+msgid "Check the dataset on the appliance; a mountpoint may need to be set explicitly."
+msgstr "Verifica o dataset na appliance; pode ser preciso definir um mountpoint explicitamente."
+
+msgid "TrueNAS state disagreed with its own report"
+msgstr "o estado do TrueNAS discordou do seu próprio relato"
+
+msgid "The appliance reported an action as done, but a read-back immediately after disagrees (dataset missing after create, or still there after delete)."
+msgstr "A appliance relatou uma acção como feita, mas uma releitura logo a seguir discorda (dataset ausente depois de criar, ou ainda presente depois de apagar)."
+
+msgid "Check the dataset on the appliance directly; nothing here was rolled back."
+msgstr "Verifica o dataset directamente na appliance; nada aqui foi revertido."
+
