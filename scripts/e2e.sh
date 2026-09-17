@@ -3205,6 +3205,81 @@ check "ingress ls json separa governado de aberto" ok bash -c \
   # do isolamento. Fica declarado por cobrir, nunca corrido às escondidas.
   skip "system boot enable/disable" "escreve units em ~/.config/systemd/user, fora do DELONIX_ROOT"
 
+  # --- reiniciar UM membro de um pod: o fim do antigo não apaga o novo ---------
+  # Medido a 2026-09-17 na `main` (6209d59d/4fc211a6): `stop -t 0` + `start` de um
+  # membro deixava-o `Crashed`, `pid: null`, sem `crash_reason` e com o log vazio
+  # em 7 de 10 corridas — e o processo novo vivo, sem nada no store a apontar
+  # para ele. Duas metades, e a bateria mede as duas:
+  #   * o `stop` devolvia logo a seguir ao SIGKILL, com o processo ainda a sair
+  #     (o `nc` em `D`, `wb_wait_for_completion`, 1,5–6,8 s neste host);
+  #   * o supervisor antigo, ao acabar o `waitpid`, gravava `Crashed` por cima do
+  #     registo que o `start` já tinha passado à incarnação nova.
+  # A primeira é determinista (o pid antigo tem de ter saído quando o `stop`
+  # devolve); a segunda depende do disco, por isso vai em ciclos, e a prova de
+  # vida não é o `status` — é o pid existir e o membro responder pela netns do pod.
+  PRY="$OUT/podrestart-$PFX.yaml"
+  cat >"$PRY" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: pr$PFX
+spec:
+  containers:
+    - name: srv
+      image: $IMG
+      command: ["sh", "-c", "while true; do printf pong | nc -l -p 7070; done"]
+    - name: cli
+      image: $IMG
+      command: ["sleep", "600"]
+YAML
+  # As duas provas num script à parte: aspas de três níveis dentro de `bash -c`
+  # são onde um check destes passa a verde por não correr o que diz.
+  PRS="$OUT/podrestart-$PFX.sh"
+  cat >"$PRS" <<'SH'
+#!/usr/bin/env bash
+# uso: podrestart.sh <bin> <pod> stop-espera|ciclos
+BIN=$1; POD=$2
+pid_of() { "$BIN" container inspect "$1" | python3 -c \
+  'import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d; print(d.get("pid") or "")'; }
+case $3 in
+  stop-espera)
+    old=$(pid_of "$POD-srv")
+    [ -n "$old" ] || { echo "o membro não tinha pid antes do stop"; exit 1; }
+    "$BIN" container stop -t 0 "$POD-srv" >/dev/null || exit 1
+    st=$(awk '{print $3}' "/proc/$old/stat" 2>/dev/null)
+    rc=0
+    [ -z "$st" ] || [ "$st" = Z ] || { echo "pid $old ainda existe ($st) quando o stop devolveu"; rc=1; }
+    "$BIN" container start "$POD-srv" >/dev/null
+    exit $rc ;;
+  ciclos)
+    for i in 1 2 3 4 5; do
+      "$BIN" container stop -t 0 "$POD-srv" >/dev/null || { echo "ciclo $i: stop falhou"; exit 1; }
+      "$BIN" container start "$POD-srv" >/dev/null || { echo "ciclo $i: start falhou"; exit 1; }
+      sleep 3
+      st=$("$BIN" container inspect "$POD-srv" | grep -m1 '"status"')
+      pid=$(pid_of "$POD-srv")
+      { [ -n "$pid" ] && [ -e "/proc/$pid" ]; } || { echo "ciclo $i: $st pid=${pid:-null}"; exit 1; }
+      r=
+      for _ in 1 2 3 4 5; do
+        r=$(timeout 5 "$BIN" pod exec "$POD" --container cli sh -c 'nc 127.0.0.1 7070 </dev/null' 2>/dev/null)
+        [ "$r" = pong ] && break
+        sleep 1
+      done
+      [ "$r" = pong ] || { echo "ciclo $i: $st pid=$pid, mas o membro não respondeu"; exit 1; }
+    done ;;
+esac
+SH
+  # A infra está de pé aqui (secção acima): um apply que falha é um FAIL, não um
+  # skip — um skip calaria a regressão que este bloco existe para apanhar.
+  check "pod: stack apply de um pod de dois membros" ok "$BIN" stack apply -f "$PRY"
+  if "$BIN" container inspect "pr$PFX-srv" >/dev/null 2>&1; then
+    check "pod: stop -t 0 de um membro só devolve com o processo fora" ok \
+      bash "$PRS" "$BIN" "pr$PFX" stop-espera
+    check "pod: 5× stop -t 0 + start de um membro — vivo e a responder" ok \
+      bash "$PRS" "$BIN" "pr$PFX" ciclos
+    "$BIN" delete pod "pr$PFX" -f >/dev/null 2>&1 || true
+  fi
+
   # --- e a infra desce sem deixar restos --------------------------------------
   check "net netns down" ok "$BIN" net netns down
   check "net netns status diz parado outra vez" ok bash -c \
