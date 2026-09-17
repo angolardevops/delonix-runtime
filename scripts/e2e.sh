@@ -1075,6 +1075,18 @@ check "run -d --net-bps sem rede custom recusa" 1 "$BIN" container run -d --name
 check "run -d --net-bps recusado não deixa container" 4 "$BIN" container inspect "nbd-$PFX"
 check "run --ip sem rede custom recusa" 1 "$BIN" container run -d --name "nip-$PFX" --ip 10.1.1.1 "$IMG" true
 
+# Um perfil seccomp que permite tudo e não nomeia syscalls (ou só repete a acção
+# por omissão) é válido para o Docker e o Podman, e abortava o container com 126:
+# o seccompiler recusa um filtro cujas duas acções são iguais. Uma regra que
+# repete o default não muda nada, e é descartada antes de construir o filtro.
+SC_ALLOW="$OUT/seccomp-allow.json"
+printf '{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["read"],"action":"SCMP_ACT_ALLOW"}]}' >"$SC_ALLOW"
+check "seccomp allow-all sem regras efectivas arranca" ok "$BIN" container run --rm --net none --security-opt "seccomp=$SC_ALLOW" "$IMG" true
+SC_MKDIR="$OUT/seccomp-mkdir.json"
+printf '{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["mkdir","mkdirat"],"action":"SCMP_ACT_ERRNO"}]}' >"$SC_MKDIR"
+check "seccomp: a regra ERRNO continua a negar" ok bash -c \
+  "'$BIN' container run --rm --net none --security-opt 'seccomp=$SC_MKDIR' '$IMG' sh -c 'mkdir /tmp/x' 2>&1 | grep -q 'Operation not permitted'"
+
 # Uma recusa DEPOIS de preparar o rootfs (aqui um `--user` que a imagem não tem)
 # deixava o directório do container para trás, sem registo por onde o `rm` ou o
 # `prune` o encontrassem: um por tentativa, medido. Conta-se o directório, não o
