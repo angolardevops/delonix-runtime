@@ -185,7 +185,7 @@ hipervisores locais.</p>
 <li>CRI: <code>crates/interfaces/delonix-cri/src/bin/delonix-cri.rs</code> → <code>serve_blocking</code> num socket
   unix (<code>DELONIX_CRI_ADDR</code>, default <code>unix:///run/delonix-cri.sock</code>), o endpoint do
   <code>--container-runtime-endpoint</code> do kubelet.</li>
-<li>Registos OCI: <code>crates/adapters/delonix-image/src/registry.rs</code> (<code>pull_from_registry_with_creds</code>,
+<li>Registos OCI: <code>crates/adapters/delonix-oci/src/registry.rs</code> (<code>pull_from_registry_with_creds</code>,
   <code>push_to_registry</code>, <code>push_oci_artifact</code>/<code>pull_oci_artifact</code> — este par com
   verificação de digest do blob contra o manifesto).</li>
 <li>Hosts SSH: <code>bins/delonix-runtime-bin/src/cmd/remote.rs</code> (shell-out a <code>ssh</code>/<code>scp</code>
@@ -309,7 +309,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     CRI[&quot;delonix-cri&lt;br&gt;servidor CRI runtime.v1 — ImageService e RuntimeService&lt;br&gt;modulos: runtime_svc, lifecycle, streaming, spdy&quot;]
     RT[&quot;delonix-runtime&lt;br&gt;motor de containers: clone e namespaces, setup_rootfs,&lt;br&gt;cgroups v2, seccomp, caps, exec, log shim, reconcile_status&quot;]
     NET[&quot;delonix-net&lt;br&gt;SDN rootless: modulo infra — holder netns, slirp unico,&lt;br&gt;publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover&quot;]
-    IMG[&quot;delonix-image&lt;br&gt;imagens OCI: registry pull e push, cas, overlay,&lt;br&gt;build Dockerfile, buildpack CNB, sign, internal_registry&quot;]
+    IMG[&quot;delonix-oci&lt;br&gt;imagens OCI: registry pull e push, cas, overlay,&lt;br&gt;build Dockerfile, buildpack CNB, sign, internal_registry&quot;]
     VM2[&quot;delonix-vm&lt;br&gt;microVMs declarativas: trait VmBackend —&lt;br&gt;Cloud Hypervisor ou libvirt&quot;]
     VOL[&quot;delonix-volume&lt;br&gt;volumes nomeados e bind mounts, sintaxe -v Docker,&lt;br&gt;driver local ou nfs&quot;]
     CORE[&quot;delonix-runtime-core&lt;br&gt;Container, Vm, Status, Store e JsonStore, Mount,&lt;br&gt;typestate, virt, secret e cred_vault — Secret Manager&quot;]
@@ -423,10 +423,10 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     interface no netns de infra);</li>
 <li><code>delonix-net::cni</code> — compatibilidade com plugins CNI reais (opt-in
     <code>DELONIX_CNI=1</code>, <code>cni::enabled_conf</code>);</li>
-<li><code>delonix-image::overlay</code> — <code>mount_rootfs</code> (overlayfs) e <code>export_rootfs</code>
+<li><code>delonix-oci::overlay</code> — <code>mount_rootfs</code> (overlayfs) e <code>export_rootfs</code>
     (achatamento, o caminho rootless);</li>
-<li><code>delonix-image::registry</code> — cliente HTTP de registo, com verificação de digest;</li>
-<li><code>delonix-image::buildpack</code> — Cloud Native Buildpacks (<code>CnbPlan</code>);</li>
+<li><code>delonix-oci::registry</code> — cliente HTTP de registo, com verificação de digest;</li>
+<li><code>delonix-oci::buildpack</code> — Cloud Native Buildpacks (<code>CnbPlan</code>);</li>
 <li><code>delonix-runtime-core::{secret,cred_vault}</code> — Secret Manager do runtime
     (<code>--secret</code>/<code>--secret-files</code>; os valores decifrados só tocam um tmpfs dentro do
     namespace do container — <code>write_secret_files</code> em <code>crates/adapters/delonix-runtime/src/lib.rs</code>);</li>

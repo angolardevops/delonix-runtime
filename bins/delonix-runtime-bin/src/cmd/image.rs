@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::{Error, Result};
 use oci_spec::runtime::{
     get_default_maskedpaths, get_default_mounts, get_default_namespaces,
@@ -529,7 +529,7 @@ pub fn run(action: ImageCmd) -> Result<()> {
             return cmd_login(registry, username, *password_stdin);
         }
         ImageCmd::Logout { registry } => {
-            delonix_image::auth::logout(&super::util::state_root(), registry)?;
+            delonix_oci::auth::logout(&super::util::state_root(), registry)?;
             println!(
                 "{}",
                 super::po::tf(
@@ -662,7 +662,7 @@ pub fn run(action: ImageCmd) -> Result<()> {
 }
 
 /// `image login` — reads the password from stdin (mandatory: an argument would end up
-/// in the shell history and be visible in /proc) and delegates to `delonix_image::auth`.
+/// in the shell history and be visible in /proc) and delegates to `delonix_oci::auth`.
 fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()> {
     if !password_stdin {
         return Err(Error::Invalid(
@@ -685,7 +685,7 @@ fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()>
             super::po::t("empty password on stdin").into(),
         ));
     }
-    delonix_image::auth::login(&super::util::state_root(), registry, username, pw)?;
+    delonix_oci::auth::login(&super::util::state_root(), registry, username, pw)?;
     println!(
         "{}",
         super::po::tf(
@@ -833,7 +833,7 @@ fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Pat
             );
         }
     };
-    let img = delonix_image::registry::pull_from_registry_with_creds_full(
+    let img = delonix_oci::registry::pull_from_registry_with_creds_full(
         images,
         reference,
         None,
@@ -846,7 +846,7 @@ fn cmd_pull(images: &ImageStore, reference: &str, verify: Option<&std::path::Pat
     // the image stays local, but whoever asked for `--verify` knows it is untrusted.
     if let Some(key) = verify {
         let pem = std::fs::read_to_string(key)?;
-        let digest = delonix_image::verify_signature(images, reference, &pem)?;
+        let digest = delonix_oci::verify_signature(images, reference, &pem)?;
         println!(
             "{}",
             super::po::tf(
@@ -895,7 +895,7 @@ fn cmd_history(images: &ImageStore, image: &str) -> Result<()> {
 /// `image verify` — cosign signature against a public key.
 fn cmd_verify(images: &ImageStore, image: &str, key: &std::path::Path) -> Result<()> {
     let pem = std::fs::read_to_string(key)?;
-    let digest = delonix_image::verify_signature(images, image, &pem)?;
+    let digest = delonix_oci::verify_signature(images, image, &pem)?;
     println!(
         "{}",
         super::po::tf(
@@ -917,9 +917,9 @@ fn cmd_sign(
 ) -> Result<()> {
     let key_path = match key {
         Some(k) => k.to_path_buf(),
-        None => delonix_image::sign::default_signing_key_path(images.root()),
+        None => delonix_oci::sign::default_signing_key_path(images.root()),
     };
-    let (digest, pubkey_path) = delonix_image::sign::sign_image(images, image, &key_path, force)?;
+    let (digest, pubkey_path) = delonix_oci::sign::sign_image(images, image, &key_path, force)?;
     println!(
         "{}",
         super::po::tf(
@@ -942,7 +942,7 @@ fn cmd_push(images: &ImageStore, image: &str, destination: Option<&str>) -> Resu
     // Without a destination, publishes under its own reference (the common case: the image
     // was already built with the destination registry's tag).
     let dest = destination.unwrap_or(image);
-    let digest = delonix_image::push_to_registry(images, image, dest)?;
+    let digest = delonix_oci::push_to_registry(images, image, dest)?;
     println!("{dest}  {digest}");
     Ok(())
 }
@@ -956,7 +956,7 @@ fn cmd_push(images: &ImageStore, image: &str, destination: Option<&str>) -> Resu
 /// space does this use?"). A layer missing from the CAS does not count — hence `Option`
 /// only when NOTHING is readable, so as not to report "0 B" for an image whose blobs
 /// have disappeared.
-pub(crate) fn image_size(images: &ImageStore, img: &delonix_image::Image) -> Option<u64> {
+pub(crate) fn image_size(images: &ImageStore, img: &delonix_oci::Image) -> Option<u64> {
     if img.layers.is_empty() {
         return None;
     }
@@ -998,21 +998,18 @@ struct ImageLsRow {
 /// `image remove alpine:latest` happily untagged the image while `c1` still
 /// depended on it, exactly the silent breakage `cmd_rm`'s own doc-comment
 /// says this check exists to prevent.
-fn container_references_image(c_image: &str, img: &delonix_image::Image) -> bool {
+fn container_references_image(c_image: &str, img: &delonix_oci::Image) -> bool {
     c_image == img.id
-        || delonix_image::cas::strip(c_image) == delonix_image::cas::strip(&img.id)
+        || delonix_oci::cas::strip(c_image) == delonix_oci::cas::strip(&img.id)
         || img
             .repo_tags
-            .contains(&delonix_image::image::normalise_tag(c_image))
+            .contains(&delonix_oci::image::normalise_tag(c_image))
 }
 
 /// Whether zero containers reference this image — same match
 /// `cmd_rm` already uses to decide if a removal is safe, reused here
 /// instead of a fresh lookup.
-fn image_is_orphan(
-    store: &delonix_runtime_core::Store,
-    img: &delonix_image::Image,
-) -> Option<bool> {
+fn image_is_orphan(store: &delonix_runtime_core::Store, img: &delonix_oci::Image) -> Option<bool> {
     let cs = store.list().ok()?;
     Some(!cs.iter().any(|c| container_references_image(&c.image, img)))
 }
@@ -1088,7 +1085,7 @@ fn cmd_describe(images: &ImageStore, names: &[String]) -> Result<()> {
     Ok(())
 }
 
-fn describe_one(images: &ImageStore, img: &delonix_image::Image) {
+fn describe_one(images: &ImageStore, img: &delonix_oci::Image) {
     let mut d = super::output::Describe::new();
     d.field("ID", &img.id);
     d.field("Short ID", img.short_id());
@@ -1257,15 +1254,15 @@ fn cmd_rm(
 /// a registry-free deploy to ANOTHER machine possible (build here, `save`, copy,
 /// `load` there). The archive is deliberately readable by all four consumers that
 /// matter: `delonix image load`, `docker load`, `podman load` and `ctr images
-/// import` (see [`delonix_image::write_oci_archive`]).
+/// import` (see [`delonix_oci::write_oci_archive`]).
 ///
 /// The reference is written into the archive VERBATIM (not the store's first
 /// tag): an image can carry several tags, and loading under a name the caller
 /// never asked for is how a deploy ends up pinning the wrong thing.
 fn cmd_save(images: &ImageStore, reference: &str, output: &std::path::Path) -> Result<()> {
     let img = images.resolve(reference)?;
-    let ref_name = delonix_image::image::normalise_tag(reference);
-    delonix_image::write_oci_archive(images, &img, &ref_name, output)?;
+    let ref_name = delonix_oci::image::normalise_tag(reference);
+    delonix_oci::write_oci_archive(images, &img, &ref_name, output)?;
     // stdout is a legitimate destination (`-o /dev/stdout | gzip`) — reporting to
     // stdout there would corrupt the archive. All progress goes to stderr.
     eprintln!(
@@ -1282,7 +1279,7 @@ fn cmd_save(images: &ImageStore, reference: &str, output: &std::path::Path) -> R
 /// `docker save`/`podman save`/`delonix image save` produce (the legacy
 /// `manifest.json` layout).
 fn cmd_load(images: &ImageStore, input: &std::path::Path) -> Result<()> {
-    let img = delonix_image::load_docker_archive(images, input)?;
+    let img = delonix_oci::load_docker_archive(images, input)?;
     let tags = if img.repo_tags.is_empty() {
         img.short_id()
     } else {
@@ -1474,12 +1471,12 @@ mod tests {
         assert!(!linux.namespaces().as_ref().expect("namespaces").is_empty());
     }
 
-    fn tagged_image(id: &str, tags: &[&str]) -> delonix_image::Image {
-        delonix_image::Image {
+    fn tagged_image(id: &str, tags: &[&str]) -> delonix_oci::Image {
+        delonix_oci::Image {
             id: id.to_string(),
             repo_tags: tags.iter().map(|t| t.to_string()).collect(),
             layers: vec![],
-            config: delonix_image::ImageConfig::default(),
+            config: delonix_oci::ImageConfig::default(),
             created_unix: 0,
         }
     }

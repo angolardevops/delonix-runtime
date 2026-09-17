@@ -7,7 +7,7 @@
 //! `build` produces the image from scratch (download of the Ubuntu cloud
 //! image plus `virt-customize`); `push`/`pull` publish/fetch it from an OCI
 //! registry (a single-blob artifact, see
-//! `delonix_image::registry::{push_oci_artifact, pull_oci_artifact}`) — the
+//! `delonix_oci::registry::{push_oci_artifact, pull_oci_artifact}`) — the
 //! same protocol as container images, only without the Docker layers/config
 //! model.
 
@@ -1128,7 +1128,7 @@ pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
     let mut found: Vec<&str> = Vec::new();
     let mut unreachable: Vec<String> = Vec::new();
     for r in OFFICIAL_REPOS {
-        match delonix_image::registry::list_remote_tags(&root, r.repo) {
+        match delonix_oci::registry::list_remote_tags(&root, r.repo) {
             Ok(tags) if tags.iter().any(|t| t == &want) => found.push(r.repo),
             Ok(_) => {}
             // A repository we could not read is NOT a repository without the
@@ -1379,7 +1379,7 @@ pub(crate) fn official_distro_base(
             super::output::progress_bar(&label, done, total);
         }
     };
-    let (data, annotations) = delonix_image::registry::pull_oci_artifact_with_meta(
+    let (data, annotations) = delonix_oci::registry::pull_oci_artifact_with_meta(
         &state_root(),
         &source,
         Some(&on_progress),
@@ -1503,7 +1503,7 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: Option<&str>) -
             super::po::t("could not read the qcow2 of")
         ))
     })?;
-    let digest = delonix_image::registry::push_oci_artifact_with_annotations(
+    let digest = delonix_oci::registry::push_oci_artifact_with_annotations(
         &state_root(),
         target,
         VM_IMAGE_MEDIA_TYPE,
@@ -1817,7 +1817,7 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
             super::output::progress_bar(&label, done, total);
         }
     };
-    let (data, annotations) = delonix_image::registry::pull_oci_artifact_with_meta(
+    let (data, annotations) = delonix_oci::registry::pull_oci_artifact_with_meta(
         &state_root(),
         source,
         Some(&on_progress),
@@ -1912,7 +1912,7 @@ pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
         "{}",
         super::po::tf("repository: {source}", &[("source", shown)])
     );
-    let mut tags = delonix_image::registry::list_remote_tags(&root, source)?;
+    let mut tags = delonix_oci::registry::list_remote_tags(&root, source)?;
     tags.sort();
     // A bare list of tags does not answer the question the reader has, which is
     // "which of these do I want" — so each tag's MANIFEST is read (one GET, no
@@ -1925,7 +1925,7 @@ pub(crate) fn cmd_ls_remote(source: &str) -> Result<()> {
     let mut t = output::Table::new(&["TAG", "DISTRO", "TYPE", "SIZE"]).right_align(3);
     for tag in tags.iter_mut() {
         let tag = std::mem::take(tag);
-        match delonix_image::registry::describe_remote_artifact(&root, source, &tag) {
+        match delonix_oci::registry::describe_remote_artifact(&root, source, &tag) {
             Ok(a) => {
                 let get = |k: &str| {
                     a.annotations
@@ -3852,7 +3852,7 @@ fn download_archive_debs(
 /// pause) fresh on EVERY VM boot, slow enough to blow past kubeadm's own
 /// internal rate-limiter deadline and crash the bootstrap. This alone is not
 /// sufficient — it depends on the CAS-first fix in
-/// `delonix_image::registry::pull_from_registry_with_creds` (skip a blob
+/// `delonix_oci::registry::pull_from_registry_with_creds` (skip a blob
 /// already on disk) to actually pay off at runtime; without that fix,
 /// `delonix-cri` would still re-download every blob regardless of what is
 /// pre-seeded here.
@@ -3963,10 +3963,10 @@ fn preseed_k8s_images(work: &Path, kubeadm_deb: &Path) -> Option<PathBuf> {
     }
 
     let preseed_root = work.join("preseed-images");
-    let store = delonix_image::ImageStore::open(&preseed_root).ok()?;
+    let store = delonix_oci::ImageStore::open(&preseed_root).ok()?;
     for img in &images {
         eprintln!("  pre-seeding {img}...");
-        if let Err(e) = delonix_image::registry::pull_from_registry_with_creds(&store, img, None) {
+        if let Err(e) = delonix_oci::registry::pull_from_registry_with_creds(&store, img, None) {
             eprintln!(
                 "warning: could not pre-seed {img}: {e} (kubeadm will fetch it at runtime instead)"
             );
@@ -4383,7 +4383,7 @@ pub(crate) enum CustomizeOp {
 /// missing, `dpkg` fails LOUDLY and the build stops — it never leaves a half-installed guest.
 ///
 /// `preseed_images_root`, when given (see `preseed_k8s_images`), points at a
-/// HOST-side `delonix_image::ImageStore` root already populated with
+/// HOST-side `delonix_oci::ImageStore` root already populated with
 /// kubeadm's core images — copied verbatim into the guest's own
 /// `/var/lib/delonix` (what `delonix-cri` reads at runtime) via 4
 /// `--copy-in` calls, one per `ImageStore` subdirectory

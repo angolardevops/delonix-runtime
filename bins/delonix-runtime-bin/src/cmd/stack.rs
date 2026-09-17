@@ -1219,7 +1219,7 @@ fn presence(
             Err(e) => ("?".into(), e.to_string()),
         },
         // An image's identity is its REF, never the document name.
-        k::IMAGE => match delonix_image::ImageStore::open(&root) {
+        k::IMAGE => match delonix_oci::ImageStore::open(&root) {
             Ok(s) => yes_no(
                 s.resolve(super::image::image_ref(doc).as_deref().unwrap_or(name))
                     .is_ok(),
@@ -1227,7 +1227,7 @@ fn presence(
             Err(e) => ("?".into(), e.to_string()),
         },
         // An App's identity is its OUTPUT image's ref, same reasoning as Image.
-        k::APP => match delonix_image::ImageStore::open(&root) {
+        k::APP => match delonix_oci::ImageStore::open(&root) {
             Ok(s) => yes_no(
                 s.resolve(super::app::image_ref(doc).as_deref().unwrap_or(name))
                     .is_ok(),

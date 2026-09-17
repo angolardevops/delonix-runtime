@@ -9,7 +9,7 @@
 //! says so explicitly. Only a synced OSV feed (`scan --update`) gives a
 //! trustworthy answer.
 
-use delonix_image::{Image, ImageStore};
+use delonix_oci::{Image, ImageStore};
 use delonix_runtime_core::{Error, Result};
 use delonix_scanner::{AdvisoryDb, Severity};
 
@@ -273,7 +273,7 @@ pub fn cmd_scan_update(feed: Option<String>) -> Result<()> {
         )
     );
     let raw = if source.starts_with("http://") || source.starts_with("https://") {
-        delonix_image::http_get(&source)?
+        delonix_oci::http_get(&source)?
     } else {
         let path = source.strip_prefix("file://").unwrap_or(&source);
         std::fs::read(path)?

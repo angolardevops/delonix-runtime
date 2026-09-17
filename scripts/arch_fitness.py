@@ -61,7 +61,7 @@ LAYERS = {
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
     "delonix-runtime": ADAPTER,  # → delonix-linux (P3)
     "delonix-net": ADAPTER,  # → delonix-sdn (P3)
-    "delonix-image": ADAPTER,  # → delonix-oci (P3)
+    "delonix-oci": ADAPTER,
     "delonix-scanner": ADAPTER,
     "delonix-volume": ADAPTER,  # → delonix-provider-mount (P4)
     "delonix-vm": ADAPTER,  # splits into the VmProvider port (context) + provider crates (P4)
@@ -113,7 +113,7 @@ EXCEPTIONS = {
         "libvirt adapters; P4 moves the port into the compute context and each "
         "backend into its own provider crate",
     ),
-    ("dep", "delonix-scanner", "delonix-image"): (
+    ("dep", "delonix-scanner", "delonix-oci"): (
         "P4",
         "the scanner reads layers through the OCI adapter instead of through an "
         "ImageStore port",

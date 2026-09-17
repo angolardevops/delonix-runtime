@@ -28,7 +28,7 @@
 | `delonix-runtime` | 4 974 | — | Container engine: `clone`/namespaces/cgroups, create/stop/exec, `reconcile_status`. Contains `spawn()` (~405 lines, flagged as maintenance risk). |
 | `delonix-runtime-bin` | **38 050** | `delonix` | The full CLI (44 `cmd/*` modules). Dominant crate by far — effectively the product surface. |
 | `delonix-net` | 9 660 | — | Rootless SDN: holder netns + bridge + single slirp, DNAT/firewall (nft), CNI compat, IPAM, WireGuard overlay, eBPF device-cgroup. |
-| `delonix-image` | 4 503 | — | OCI: pull/registry/build, CNB buildpacks, internal registry, CAS, overlay, OCI-archive save, signature verification. |
+| `delonix-oci` | 4 503 | — | OCI: pull/registry/build, CNB buildpacks, internal registry, CAS, overlay, OCI-archive save, signature verification. |
 | `delonix-cri` | 3 842 | `delonix-cri` | CRI (`runtime.v1`) server for a kubelet. Full method surface (§5). |
 | `delonix-vm` | 2 437 | — | microVMs: the `VmBackend` trait (Cloud Hypervisor / libvirt). |
 | `delonix-mgmt` | 1 792 | — | Management HTTP server: `/metrics` (Prometheus) + `/v1/*` (dash, volumes, containers). |

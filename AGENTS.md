@@ -197,7 +197,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 ```
 crates/foundation/   delonix-runtime-core, delonix-net-rules
 crates/contexts/     delonix-security-runtime
-crates/adapters/     delonix-runtime, delonix-net, delonix-image, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
+crates/adapters/     delonix-runtime, delonix-net, delonix-oci, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
@@ -595,7 +595,7 @@ uma lista plana, um módulo por grupo em `bins/delonix-runtime-bin/src/cmd/`:
   («not supported in v1»); passou a ser encaminhado para o `build.target` do `kind: Image`
   gerado (o mesmo caminho que `delonix build --target` usa). O ganho real não é só o campo —
   é que `delonix build` em si **nunca teve** selecção de estágio nenhuma: só constrói TODOS os
-  estágios e empacota o último. `resolve_target_stage` (`delonix-image::build`, puro/testado)
+  estágios e empacota o último. `resolve_target_stage` (`delonix-oci::build`, puro/testado)
   resolve o nome/índice pedido contra `df.stages` ou o próprio estágio final (que não vive em
   `df.stages` — só `df.from`/`df.steps` — daí o novo `Dockerfile.last_name` para o reconhecer
   pelo nome sem o tratar como desconhecido); um nome/índice que não bate com nenhum dos dois
@@ -606,7 +606,7 @@ uma lista plana, um módulo por grupo em `bins/delonix-runtime-bin/src/cmd/`:
   `--target` a um estágio intermédio já não os herda do estágio final (por vezes NÃO SEQUER
   construído); usa antes os valores já correctos que `final_state` traz do PRÓPRIO estágio-alvo
   (imagem base + os seus próprios passos). **Modo root (overlay) recusa `--target` a um estágio
-  intermédio** — corrigir isso exigiria mexer no `build_image` do `delonix-image` para aceitar
+  intermédio** — corrigir isso exigiria mexer no `build_image` do `delonix-oci` para aceitar
   os valores já resolvidos em vez de ler `&df` cru, fora do âmbito desta fatia; visar o estágio
   final continua a funcionar nos dois modos. **Validado ao vivo**: Dockerfile de 2 estágios
   (`builder`/`runtime`, com um `COPY --from=builder`) — build sem `--target` produz a imagem do
@@ -953,7 +953,7 @@ scrape Prometheus nunca divergirem na aritmética.
   permite `inc`/`inc_by`, que não serve para isso.
 - **`delonix-mgmt` ganhou `GET /v1/dash`** (JSON do mesmo `DashSummary`) e
   passou a depender de `delonix-runtime`/`delonix-vm`/`delonix-net` (antes só
-  `delonix-volume`/`delonix-image`/`delonix-scanner`) — mesma expansão que o
+  `delonix-volume`/`delonix-oci`/`delonix-scanner`) — mesma expansão que o
   `delonix-cri` já tinha feito por uma razão análoga (visibilidade completa
   do motor), sem dependência circular nenhuma.
 - **`delonix dash --json`** (novo, ao lado do `--once` ANSI já existente):
@@ -1887,7 +1887,7 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   `kubeadm init` REAL redescarregava sempre TODAS as imagens core (apiserver/controller-manager/
   scheduler/etcd/coredns/pause) do zero, em CADA VM criada — lento o suficiente para estourar o
   próprio deadline interno do rate-limiter do kubeadm e fazer o `wait-control-plane` falhar a
-  meio. **Causa-raiz de fundo**: `delonix_image::registry::pull_from_registry_with_creds`
+  meio. **Causa-raiz de fundo**: `delonix_oci::registry::pull_from_registry_with_creds`
   descarregava sempre cada blob da rede, mesmo quando o conteúdo exacto já estava no CAS local —
   **corrigido** com um `Cas::has` (já existia, nunca era chamado) antes de cada `GET` de blob;
   sem isto, pré-semear a imagem dourada não adiantava nada (o `delonix-cri` ia redescarregar tudo
@@ -2014,8 +2014,8 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
     o passt do Ubuntu 24.04 é o mesmo que falha aqui (ver a secção do Fedora, mais abaixo).
     **NÃO validado em CI por mim**: disparar o workflow publica imagens e é decisão do dono.
 - **`push`/`pull`**: publicam/obtêm a imagem como artefacto OCI de blob único (config vazio + 1
-  layer, padrão ORAS/Helm) via `delonix_image::registry::{push_oci_artifact,pull_oci_artifact}`
-  (`crates/adapters/delonix-image/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
+  layer, padrão ORAS/Helm) via `delonix_oci::registry::{push_oci_artifact,pull_oci_artifact}`
+  (`crates/adapters/delonix-oci/src/registry.rs`) — generaliza o `Client`/auth/upload já usado por
   `push_to_registry` (imagens de container), sem duplicar a lógica. **PUBLICADA E VALIDADA
   (2026-07-20) via CI** — `ghcr.io/angolardevops/delonix-vm-k8s:1.34` (678.8 MiB, golden
   optimizada), PÚBLICA, com `delonix vm pull` (sem argumento) a descarregá-la de ponta a ponta.
@@ -2038,7 +2038,7 @@ nó não faz nenhuma instalação**, só `kubeadm init`/`kubeadm join`.
   ls-remote`, sem argumento lista as tags do repositório OCI oficial (`GET
   /v2/<repo>/tags/list`), com argumento qualquer outro repositório — descobre que versões (k8s)
   estão publicadas ANTES de um `pull`, sem tocar em nada local. Reutiliza inteiramente o `Client`/
-  auth de `pull`/`push` (`delonix_image::registry::list_remote_tags`, mesmo fluxo 401→token→retry).
+  auth de `pull`/`push` (`delonix_oci::registry::list_remote_tags`, mesmo fluxo 401→token→retry).
   Os três pontos de entrada convergem em `VmImageCmd::LsRemote`, o mesmo padrão triplo que o
   `pull` já seguia. Só a 1.ª página do registo (sem paginação por `Link`) — irrelevante para o
   punhado de tags de uma golden. Validado ao vivo: mostra `1.34` e `1.35` reais no ghcr.io.
@@ -2328,7 +2328,7 @@ sessão, nunca tinham sido revistos adversarialmente):
    já usado por `pull_from_registry_with_creds` (que já estava correcto).
 4. **Path traversal em `COPY` do `delonix build`** — `src`/`dst` de um Dockerfile/Delonixfile não
    eram confinados ao contexto/rootfs (`..` não neutralizado). **Corrigido**: `cmd::build::
-   safe_join` (mesmo padrão de `safe_rel` em `delonix-image::overlay`), rejeita qualquer
+   safe_join` (mesmo padrão de `safe_rel` em `delonix-oci::overlay`), rejeita qualquer
    componente `..`/absoluto fora da base.
 
 **2 achados BAIXOS, defesa em profundidade, também corrigidos**: `--` antes de `user@host` nos
@@ -2336,7 +2336,7 @@ argv de `ssh`/`scp` (`remote.rs`); `VmImageStore::base_cache_path` passou a usar
 como os outros métodos do store (`vmimage.rs`).
 
 Todos os 4 CRÍTICOS têm teste automatizado a replicar o exploit e confirmar a rejeição (`cargo
-test -p delonix-runtime-bin`/`-p delonix-image`) — ver `cmd::cluster::tests::
+test -p delonix-runtime-bin`/`-p delonix-oci`) — ver `cmd::cluster::tests::
 validate_recusa_endpoint_malicioso_no_manifesto_completo`,
 `registry::tests::pull_oci_artifact_recusa_blob_adulterado`,
 `cmd::build::tests::safe_join_recusa_dot_dot`.
@@ -4050,7 +4050,7 @@ pela simplificação anterior — só nunca tinham sido alcançados por um teste
 
 ## `kind: App` — Cloud Native Buildpacks ligadas a um caminho de build real (ADR-0035)
 
-`crates/adapters/delonix-image` já trazia três módulos puros e testados para CNB
+`crates/adapters/delonix-oci` já trazia três módulos puros e testados para CNB
 (`buildpack.rs`, `detect.rs`, `internal_registry.rs`) — **sem UM único
 chamador fora dos seus próprios testes**, confirmado por `git grep`
 exaustivo antes de escrever qualquer código. O único problema real que os
@@ -4341,7 +4341,7 @@ com.docker.network.bridge.enable_ip_masquerade=true -o com.docker.network.driver
 Templates Go usados pelo `kind` são um conjunto **finito e conhecido** (capturado acima) — a fase
 do shim pode emular por **correspondência exacta das strings**, sem motor de templates Go em Rust.
 
-### 2 bugs corrigidos em `delonix image pull` (`crates/adapters/delonix-image/src/registry.rs`)
+### 2 bugs corrigidos em `delonix image pull` (`crates/adapters/delonix-oci/src/registry.rs`)
 
 1. **`parse_reference` não tratava `repo:tag@digest`** (formato combinado, usado pela própria
    referência `kindest/node:v1.34.0@sha256:...`) — o ramo `@` cortava a referência sem primeiro
@@ -4643,7 +4643,7 @@ existe neste host (nem serviria — precisa de um provider Docker/Podman, que es
 desenho). `delonix cluster load <IMAGEM>... [--name <cluster>]` fecha o buraco: empacota a imagem
 do store LOCAL e importa-a no containerd de CADA nó a correr.
 
-- **`delonix_image::write_oci_archive`** (`crates/adapters/delonix-image/src/save.rs`, o inverso do
+- **`delonix_oci::write_oci_archive`** (`crates/adapters/delonix-oci/src/save.rs`, o inverso do
   `load_docker_archive` já existente): escreve um **OCI image layout** (tar) reaproveitando o
   MESMO manifesto que `registry::build_manifest` publica num registo — os blobs do store vão
   verbatim, nada é recomprimido nem re-hashado, e os digests que o nó fica a ter são idênticos aos
@@ -4733,7 +4733,7 @@ uma reescrita: implementa-se por cima do que já existe, não a substituir.
 - **`delonix-net`** (SDN rootless + overlay WireGuard entre nós) já cobre boa parte do "Network
   Engine" do pedido original — falta é NAT/floating-IP/ACL por *tenant*, que é uma noção proibida
   aqui (ver "Regra de ouro" abaixo).
-- **`delonix-image`** (pull/registry/CNB/verificação de assinatura) já é o Image Service.
+- **`delonix-oci`** (pull/registry/CNB/verificação de assinatura) já é o Image Service.
 - Cloud-init já existe para VM dourada (secção "Imagem VM dourada" acima) — não é greenfield.
 - **Não existe hoje**: modelo `Workload` unificado, plugin system formal para drivers, scheduler
   multi-nó, event bus, `delonixd`. Destes, só os dois primeiros pertencem a este repo — ver abaixo.
@@ -6341,7 +6341,7 @@ antes de qualquer commit:
 | `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API |
 | `delonix-net` | SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft, compat CNI, overlay WireGuard inter-nó |
 | `delonix-net-rules` | regras de rede PURAS, **zero dependências** — `Cidr`, nome de bridge, IPAM dentro de um prefixo, leitura de taxas. Existe para o control-plane do `delonix-paas` calcular o MESMO que o motor sem um salto de rede pelo meio; o `delonix-net` re-exporta tudo, por isso nenhum consumidor teve de mudar |
-| `delonix-image` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
+| `delonix-oci` | imagens OCI: pull/registry/build, buildpacks CNB, registo interno, verificação de assinatura |
 | `delonix-vm` | microVMs declarativas — trait `VmBackend` + o **registo** de backends (Cloud Hypervisor e libvirt vêm semeados; um terceiro entra por `register_backend`) |
 | `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |
 | `delonix-truenas` | provisionar dataset/quota/partilha numa NAS pela API (ADR-0009) — mesma razão de crate à parte |

@@ -44,7 +44,7 @@ graph TB
 - CRI: `crates/interfaces/delonix-cri/src/bin/delonix-cri.rs` → `serve_blocking` num socket
   unix (`DELONIX_CRI_ADDR`, default `unix:///run/delonix-cri.sock`), o endpoint do
   `--container-runtime-endpoint` do kubelet.
-- Registos OCI: `crates/adapters/delonix-image/src/registry.rs` (`pull_from_registry_with_creds`,
+- Registos OCI: `crates/adapters/delonix-oci/src/registry.rs` (`pull_from_registry_with_creds`,
   `push_to_registry`, `push_oci_artifact`/`pull_oci_artifact` — este par com
   verificação de digest do blob contra o manifesto).
 - Hosts SSH: `bins/delonix-runtime-bin/src/cmd/remote.rs` (shell-out a `ssh`/`scp`
@@ -140,7 +140,7 @@ graph TB
     CRI["delonix-cri<br>servidor CRI runtime.v1 — ImageService e RuntimeService<br>modulos: runtime_svc, lifecycle, streaming, spdy"]
     RT["delonix-runtime<br>motor de containers: clone e namespaces, setup_rootfs,<br>cgroups v2, seccomp, caps, exec, log shim, reconcile_status"]
     NET["delonix-net<br>SDN rootless: modulo infra — holder netns, slirp unico,<br>publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover"]
-    IMG["delonix-image<br>imagens OCI: registry pull e push, cas, overlay,<br>build Dockerfile, buildpack CNB, sign, internal_registry"]
+    IMG["delonix-oci<br>imagens OCI: registry pull e push, cas, overlay,<br>build Dockerfile, buildpack CNB, sign, internal_registry"]
     VM2["delonix-vm<br>microVMs declarativas: trait VmBackend —<br>Cloud Hypervisor ou libvirt"]
     VOL["delonix-volume<br>volumes nomeados e bind mounts, sintaxe -v Docker,<br>driver local ou nfs"]
     CORE["delonix-runtime-core<br>Container, Vm, Status, Store e JsonStore, Mount,<br>typestate, virt, secret e cred_vault — Secret Manager"]
@@ -273,10 +273,10 @@ Notas de leitura do grafo (todas verificadas):
     interface no netns de infra);
   - `delonix-net::cni` — compatibilidade com plugins CNI reais (opt-in
     `DELONIX_CNI=1`, `cni::enabled_conf`);
-  - `delonix-image::overlay` — `mount_rootfs` (overlayfs) e `export_rootfs`
+  - `delonix-oci::overlay` — `mount_rootfs` (overlayfs) e `export_rootfs`
     (achatamento, o caminho rootless);
-  - `delonix-image::registry` — cliente HTTP de registo, com verificação de digest;
-  - `delonix-image::buildpack` — Cloud Native Buildpacks (`CnbPlan`);
+  - `delonix-oci::registry` — cliente HTTP de registo, com verificação de digest;
+  - `delonix-oci::buildpack` — Cloud Native Buildpacks (`CnbPlan`);
   - `delonix-runtime-core::{secret,cred_vault}` — Secret Manager do runtime
     (`--secret`/`--secret-files`; os valores decifrados só tocam um tmpfs dentro do
     namespace do container — `write_secret_files` em `crates/adapters/delonix-runtime/src/lib.rs`);

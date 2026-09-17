@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use delonix_image::{Image, ImageStore};
+use delonix_oci::{Image, ImageStore};
 use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{Container, Error, Result, Store};
 
@@ -44,7 +44,7 @@ pub(crate) fn resolve_or_pull_with_creds(
     reference: &str,
     creds: Option<(String, String)>,
 ) -> Result<Image> {
-    delonix_image::registry::resolve_or_pull(images, reference, creds, &announce_pull)
+    delonix_oci::registry::resolve_or_pull(images, reference, creds, &announce_pull)
 }
 
 /// The line a pull prints before it starts. English in the source, Portuguese
@@ -87,7 +87,7 @@ pub(crate) fn resolve_or_pull_platform(
             &[("reference", reference), ("arch", arch)],
         )
     );
-    delonix_image::registry::pull_from_registry_with_creds_platform(
+    delonix_oci::registry::pull_from_registry_with_creds_platform(
         images,
         reference,
         None,

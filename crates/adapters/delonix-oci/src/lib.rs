@@ -1,4 +1,4 @@
-//! `delonix-image` — Delonix Engine OCI images.
+//! `delonix-oci` — Delonix Engine OCI images.
 //!
 //! Ties together the four pieces of Month 5 (Part B): **CAS** ([`cas`]), **model +
 //! store** ([`image`]), **load** ([`load`]), **overlay2** ([`overlay`]) and

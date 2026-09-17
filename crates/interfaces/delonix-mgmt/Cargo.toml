@@ -11,7 +11,7 @@ delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
 delonix-runtime = { workspace = true }
 delonix-volume = { workspace = true }
-delonix-image = { workspace = true }
+delonix-oci = { workspace = true }
 delonix-scanner = { workspace = true }
 delonix-vm = { workspace = true }
 delonix-net = { workspace = true }

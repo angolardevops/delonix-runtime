@@ -31,7 +31,7 @@
 
 use std::time::{Duration, Instant};
 
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::{Container, Error, Result, Store};
 
 use super::container::{self, RunOpts};
@@ -1190,7 +1190,7 @@ fn node_snapshotter(c: &Container) -> Option<String> {
 /// (a first segment with a `.` or `:`, or `localhost`) is left ALONE — rewriting
 /// `10.232.67.14:5000/app:1` would point the node at the wrong place entirely.
 fn containerd_ref(reference: &str) -> String {
-    let tagged = delonix_image::image::normalise_tag(reference);
+    let tagged = delonix_oci::image::normalise_tag(reference);
     let first = tagged.split('/').next().unwrap_or("");
     let has_registry = tagged.contains('/')
         && (first.contains('.') || first.contains(':') || first == "localhost");
@@ -1228,7 +1228,7 @@ fn node_ctr_supports_local(c: &Container) -> bool {
 /// # Why this is the right shape for this engine
 ///
 /// The real `kind load` shells out to `docker save` and pipes it into the node.
-/// Here both halves are already ours: [`delonix_image::write_oci_archive`] packs
+/// Here both halves are already ours: [`delonix_oci::write_oci_archive`] packs
 /// the store's blobs verbatim, and the nodes already bind-mount
 /// [`cluster_dir`] at [`NODE_SHARED`] (the channel `cluster create` uses for
 /// `kubeadm.conf`/`kubeconfig`) — so the archive crosses into the node as a plain
@@ -1282,7 +1282,7 @@ pub(crate) fn load(
         let ref_name = containerd_ref(r);
         p.step(&format!("{} {ref_name}", super::po::t("Packing")), "📦");
         let tar = dir.join(format!(".load-{}.tar", image.short_id()));
-        delonix_image::write_oci_archive(images, &image, &ref_name, &tar)?;
+        delonix_oci::write_oci_archive(images, &image, &ref_name, &tar)?;
         p.ok();
 
         for node in &running {

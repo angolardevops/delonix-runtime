@@ -13,7 +13,7 @@ graph TD
     runtime[delonix-runtime] --> core
     net[delonix-net] --> core
     volume[delonix-volume] --> core
-    image[delonix-image] --> core
+    image[delonix-oci] --> core
 
     vm[delonix-vm] --> core
     vm --> net
