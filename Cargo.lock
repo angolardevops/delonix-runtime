@@ -781,6 +781,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "tar",
+ "tempfile",
  "tracing",
  "zstd",
 ]
@@ -997,6 +998,7 @@ dependencies = [
 name = "delonix-volume"
 version = "3.1.0"
 dependencies = [
+ "delonix-compute",
  "delonix-runtime-core",
  "serde",
  "serde_json",

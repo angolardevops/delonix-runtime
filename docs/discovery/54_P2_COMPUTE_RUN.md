@@ -50,10 +50,23 @@ existir — um `pub use` no Compute mantém os chamadores.
 | Porta | Casa final (ADR) | Implementação hoje | Fases |
 |---|---|---|---|
 | `ImageStore` (resolver config + preparar rootfs) | `delonix-artifact` | `delonix-image::ImageStore` | 5 |
-| `StorageProvider` (resolver `-v`) | `delonix-storage` | `delonix-volume::VolumeStore` | 4 |
+| `StorageProvider` (resolver `-v`) | `delonix-storage` | `delonix-volume::HostVolumes` | 4 |
 | `NetworkProvider` (attach, publish, shaping, firewall) | `delonix-networking` | `delonix-net::infra` | 3, 7 |
 | `WorkloadRuntime` (criar, supervisionar, remover) | `delonix-compute` | `delonix-runtime` | 9 |
 | `ContainerRecords` (listar, gravar) | `delonix-compute` | `delonix-runtime-core::Store` | 2, 6, 9 |
+
+Em P3 as implementações saem do binário para o adapter de cada porta, e o binário fica só
+com a composição e com o texto do terminal: `DeviceResolver` → `delonix-runtime::cdi::HostDevices`,
+`NetworkProvider` → `delonix-net::run_network::HostNetwork`, `StorageProvider` →
+`delonix-volume::HostVolumes`. A resolução do `--user` foi para
+`delonix-image::rootfs_user`, que devolve o erro como dado (`UserLookupError`) para o binário o
+traduzir.
+
+O `--user <nome>` estava partido em todo o `run` rootless desde que o rootfs passou a overlay
+(v0.59.0): o `merged/` só é montado pelo init, dentro do userns, e a resolução lia um directório
+vazio. Medido na `main` (`-u nobody` em `alpine:3.20` → «does not exist in the image»). A
+resolução passa a ler as camadas (upper, depois as lowers, com os whiteouts), e nunca segue um
+symlink do `/etc/passwd`, que seria um ficheiro do host.
 
 O `RunSpec` (fase 8) é o contrato de `WorkloadRuntime` e fica do lado do adapter: o caso de
 uso entrega um `Container` completo mais o que só existe no momento de arrancar (rootfs,
