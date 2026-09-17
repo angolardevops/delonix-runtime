@@ -684,9 +684,10 @@ pub enum VmCmd {
         /// column — the probe does live network I/O, off by default).
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
-        /// Also list the VMs that are not running.
+        /// Also list the VMs that are not up (stopped or crashed).
         ///
-        /// Without it `ls` shows what is UP, the same cut `docker ps` makes.
+        /// Without it `ls` shows what is UP — running or paused — the same cut
+        /// `docker ps` makes.
         #[arg(short = 'A', long)]
         all: bool,
         /// Show only the VMs of this isolation namespace (see `vm create
@@ -2042,7 +2043,17 @@ pub fn run(action: VmCmd) -> Result<()> {
                     // comment above already gives: one filter, applied once, so
                     // the table and the JSON cannot disagree about what this
                     // listing contains.
-                    .filter(|vm| all || matches!(vm.status, delonix_runtime_core::Status::Running))
+                    // Paused is UP too: its vCPUs are frozen, not gone, and it holds
+                    // its memory and its domain. `docker ps` lists a paused
+                    // container, and so does `container ls` here; hiding one made a
+                    // `vm pause` look like the VM had vanished.
+                    .filter(|vm| {
+                        all || matches!(
+                            vm.status,
+                            delonix_runtime_core::Status::Running
+                                | delonix_runtime_core::Status::Paused
+                        )
+                    })
                     .collect()
             };
             if output == super::output::OutputFormat::Json {
