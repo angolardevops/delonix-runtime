@@ -2761,7 +2761,18 @@ mod tests {
         let busy = held.local_addr().unwrap().port();
         assert!(host_port_busy("127.0.0.1", busy));
         drop(held);
-        assert!(!host_port_busy("127.0.0.1", busy));
+        // Once released, an EPHEMERAL port can be taken by any other test running in
+        // parallel before this line reads it — measured, 1 run in 12 of the
+        // workspace battery. «Freed means not busy» is what this checks, so it is
+        // asked of a few released ports: a busy answer on all of them would be the
+        // function, not a neighbour.
+        let freed_reads_free = (0..5).any(|_| {
+            let l = TcpListener::bind("127.0.0.1:0").expect("bind an ephemeral port");
+            let port = l.local_addr().unwrap().port();
+            drop(l);
+            !host_port_busy("127.0.0.1", port)
+        });
+        assert!(freed_reads_free, "a released port kept reading busy");
     }
 
     /// Best-effort resolution: while WE hold the port ourselves (this test
@@ -3326,6 +3337,11 @@ mod tests_posse_do_slirp {
 
     #[test]
     fn o_slirp_do_ingress_e_nosso() {
+        // The ingress socket's path comes from `DELONIX_NET_RUNTIME_DIR`, read
+        // twice here (the argv, then `is_ours`). A test that writes that variable
+        // in between turned this into a 1-in-12 failure under the workspace
+        // battery (measured); holding the environment lock keeps both reads equal.
+        let _env = crate::testenv::lock();
         let argv = vec![
             "slirp4netns".to_string(),
             "--configure".into(),
