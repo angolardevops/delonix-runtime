@@ -266,6 +266,54 @@ def regions(lang: str = "en") -> dict[str, str]:
     }
 
 
+ENV_PAGE = "15-environment-variables.md"
+ENV_NAME = re.compile(r"\bDELONIX_[A-Z0-9]+(?:_[A-Z0-9]+)*\b")
+
+
+def env_vars_in_code() -> dict[str, list[str]]:
+    """Every `DELONIX_*` name the engine reads or sets, with the files it appears in.
+
+    Read from string literals in Rust (`"DELONIX_X"`, `env!("DELONIX_X")`), from
+    `build.rs`, and from `scripts/install.sh`. A name only mentioned in a comment is not
+    counted — the table documents what a process actually sees, not what prose talks about.
+    """
+    found: dict[str, set[str]] = {}
+    sources = [p for d in ("crates", "bins") for p in (ROOT / d).rglob("*.rs")] + [ROOT / "scripts" / "install.sh"]
+    for path in sources:
+        rel = path.relative_to(ROOT).as_posix()
+        for line in path.read_text(errors="replace").splitlines():
+            code = line.split("//", 1)[0] if path.suffix == ".rs" else line
+            if path.suffix == ".sh" and code.lstrip().startswith("#"):
+                continue
+            spans = re.findall(r'"([^"\\]*)"', code) if path.suffix == ".rs" else [code]
+            for span in spans:
+                for name in ENV_NAME.findall(span):
+                    if name.endswith("_"):
+                        continue
+                    found.setdefault(name, set()).add(rel)
+    return {name: sorted(files) for name, files in sorted(found.items())}
+
+
+def env_vars_documented() -> set[str]:
+    page = DEV_DOCS / ENV_PAGE
+    if not page.is_file():
+        return set()
+    return set(re.findall(r"^\|\s*`(DELONIX_[A-Z0-9_]+)`", page.read_text(), re.M))
+
+
+def env_var_problems() -> list[str]:
+    """The reference table of `DELONIX_*` variables must match the code in BOTH directions:
+    a variable the code reads and the table omits is invisible to a contributor, and a
+    variable the table lists that the code no longer reads is a lie that still gets copied."""
+    code = env_vars_in_code()
+    documented = env_vars_documented()
+    problems = [f"{name} is read by the code ({', '.join(code[name][:3])}) but missing from docs/dev/{ENV_PAGE}"
+                for name in sorted(set(code) - documented)]
+    problems += [f"{name} is documented in docs/dev/{ENV_PAGE} but no longer appears in the code"
+                 for name in sorted(documented - set(code))]
+    return problems
+
+
 def lang_dir(lang: str) -> Path:
     return DEV_DOCS if lang == "en" else DEV_DOCS / lang
 
@@ -312,6 +360,13 @@ def main() -> int:
     unused = sorted(set(generated) - used)
     if unused:
         print(f"dev_docs: generated regions not placed in any docs/dev page: {', '.join(unused)}")
+        return 1
+
+    env_problems = env_var_problems()
+    if env_problems:
+        print(f"dev_docs: the DELONIX_* reference does not match the code ({len(env_problems)}):")
+        for problem in env_problems:
+            print(f"  {problem}")
         return 1
 
     if args.check and stale:
