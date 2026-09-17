@@ -72,6 +72,7 @@ LAYERS = {
     "delonix-mcp": INTERFACE,
     "delonix-runtime-bin": BIN,  # → delonix-cli (interfaces) + bins/delonix (P2)
     "delonix-mcp-bin": BIN,  # `delonix-mcp`, run by `delonix mcp` (ADR-0040 D2.4 amended)
+    "delonix-mgmt-bin": BIN,  # `delonix-mgmt`, run by `delonix serve api`
 }
 
 # Which layers each layer may depend on. The direction, in one place.

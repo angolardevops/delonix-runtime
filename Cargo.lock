@@ -844,6 +844,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-mgmt-bin"
+version = "3.1.0"
+dependencies = [
+ "delonix-mgmt",
+ "delonix-runtime-core",
+ "delonix-telemetry",
+]
+
+[[package]]
 name = "delonix-model"
 version = "3.1.0"
 dependencies = [
