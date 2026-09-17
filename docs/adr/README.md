@@ -51,6 +51,7 @@ never rewritten — supersede them with a new one.
 | [0039](0039-openstack-vm-backend.md) | An OpenStack `VmBackend`, gated on a spike against a live cloud | Proposed (spike pending) |
 | [0040](0040-engine-restructuring-layers-ports-node-contract.md) | Engine restructuring: contexts named after the published API groups, a `delonix-<role>` naming convention, one long-running role per binary (`delonix-launcher` owns namespace spawns), layered `crates/` layout, provider ports with capability discovery and namespaced extensions, one node contract (`proto/delonix/node/v1`) served as gRPC + REST on the local socket, CRI over the application layer, OTel/Prometheus conventions, fitness functions in CI | **Proposed 2026-09-15** — aligned with the `delonix-paas` node-agent plan (R1–R5); keeps ADR-0010 (local only) and guardrail #1 (socket activation); draft contract compiles (58 RPCs); phases P0–P7 with gates |
 | [0041](0041-node-local-contract-for-the-control-plane-agent.md) | The node-local contract the control plane's agent consumes — coverage, promise, lifetime | **Proposed** — builds on ADR-0040 D4; measured gap matrix (14 rows) in seven waves, `delonix-mgmt` frozen, ADR-0003 trigger met, socket activation with idle exit spiked before code; ADR-0010 not reopened |
+| [0042](0042-one-engine-api-maturity-and-docs.md) | One engine API — one version number (`v1`), Richardson maturity 0–3, FastAPI-style docs served by the API | **Proposed** |
 
 ## Roadmap (from `AGENTS.md` "Universal Runtime" — each phase needs its own accepted ADR)
 
