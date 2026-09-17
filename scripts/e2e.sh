@@ -461,6 +461,17 @@ check "inexistente: lote de ids mantém a classe" 4 \
 # A classe não pode depender da língua — é essa a razão de existir do número.
 check "inexistente em PT continua a dizer 4" 4 \
   "$BIN" --l18n=pt container inspect naoexiste-$PFX
+# O número do dicionário (ADR-0043) na LINHA de erro, e na língua do operador: é
+# o que um log, um ticket ou um screenshot levam. Um teste unitário do rótulo passa
+# na mesma com o `main` a imprimir a mensagem sem ele.
+check "a linha de erro traz o número do dicionário" ok \
+  bash -c "\"$BIN\" --l18n=pt vm stop naoexiste-$PFX 2>&1 | grep -q '\[DX-4501\]'"
+check "o lote de ids traz o número por id" ok \
+  bash -c "\"$BIN\" container rm naoexiste1-$PFX naoexiste2-$PFX 2>&1 | grep -c '\[DX-4000\]' | grep -qx 2"
+check "explain de um código responde" ok "$BIN" explain DX-4501
+check "explain de um código que não existe diz 4" 4 "$BIN" explain DX-4299
+check "explain codes --json é JSON" ok \
+  bash -c "\"$BIN\" explain codes --json | python3 -c 'import json,sys; assert len(json.load(sys.stdin)) > 10'"
 # --- as duas classes novas ---
 # As duas só entraram porque tinham PRODUTORES reais mal classificados: as duas
 # respondiam `1`, o mesmo número de um apply rebentado. E a ligação só se prova
@@ -883,7 +894,12 @@ IMG="${E2E_IMAGE:-alpine:3.19}"
 # `image describe alpine:3.19` a seguir falhava. `redis:7-alpine` também casava
 # com `alpine`, o que tornava o falso positivo ainda mais fácil.
 E2E_HAVE_IMAGE=1
-if "$BIN" image ls 2>/dev/null | grep -qF "$IMG "; then
+# A saída é capturada ANTES do grep, aqui e nos guardas de imagem mais abaixo. Com
+# `pipefail`, `image ls | grep -q` é uma corrida: o `grep -q` sai na primeira linha
+# que casa, o `image ls` leva EPIPE na escrita seguinte e sai 141, e o `if` dá falso
+# com a imagem no store — medido (duas secções saltadas em duas corridas seguidas).
+_ils="$("$BIN" image ls 2>&1)"
+if grep -qF "$IMG " <<<"$_ils"; then
   check "image describe" ok "$BIN" image describe "$IMG"
 elif "$BIN" image pull "$IMG" >/dev/null 2>&1; then
   check "image pull ($IMG)" ok "$BIN" image ls
@@ -1548,7 +1564,8 @@ _cg_of() { # imprime o valor de um ficheiro do cgroup do container $1
 }
 export BIN
 export -f _cg_of
-if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
+_ils="$("$BIN" image ls 2>&1)"; _ils_rc=$?
+if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
   for spec in "64M:67108864" "64Mi:67108864" "1Gi:1073741824"; do
     _v=${spec%%:*}; _want=${spec##*:}; _n="${PFX}lim$(echo "$_v" | tr -d '.')"
     "$BIN" container rm -f "$_n" >/dev/null 2>&1 || true
@@ -1607,7 +1624,7 @@ if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
   fi
   "$BIN" container rm -f "${PFX}limrs" >/dev/null 2>&1 || true
 else
-  skip "limites: chegam ao cgroup" "sem imagem no store (precisa de rede para o pull)"
+  skip "limites: chegam ao cgroup" "sem imagem no store (precisa de rede para o pull) (image ls rc=$_ils_rc: $(head -c 300 <<<"$_ils" | tr '\n' ' '))"
 fi
 
 ########################################
@@ -1645,7 +1662,8 @@ _leaf_of() { # imprime o caminho do cgroup da leaf do container $1
 export -f _leaf_of
 export IMG PFX
 
-if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
+_ils="$("$BIN" image ls 2>&1)"; _ils_rc=$?
+if [ -n "${IMG:-}" ] && [ "$_ils_rc" -eq 0 ] && grep -q . <<<"$_ils"; then
 
   # --- MEMÓRIA: o tecto corta, e corta no sítio certo ------------------------
   #
@@ -1824,7 +1842,7 @@ sys.exit(0 if cores <= 0.75 else 1)"
     [ "$fds1" -le "$((fds0+2))" ] || { echo "vazaram $((fds1-fds0)) descritores"; exit 1; }
   '
 else
-  skip "limites: são impostos, não só escritos" "sem imagem no store (precisa de rede para o pull)"
+  skip "limites: são impostos, não só escritos" "sem imagem no store (precisa de rede para o pull) (image ls rc=$_ils_rc: $(head -c 300 <<<"$_ils" | tr '\n' ' '))"
 fi
 
 # ---------------------------------------------------------------------------
@@ -3405,8 +3423,9 @@ section "cancelamento: um terminal em modo raw não é nosso para deixar partido
 #
 # O gate mede o TERMINAL, não o comando: um `check` por exit code ficaria verde
 # sobre o bug, porque o processo morria na mesma e com o mesmo estado.
-if ! "$BIN" image ls 2>/dev/null | grep -qE "^${IMG%%:*}[[:space:]:]"; then
-  skip "TTY reposto após um sinal" "sem a imagem $IMG no store — nada para exec"
+_ils="$("$BIN" image ls 2>&1)"; _ils_rc=$?
+if ! grep -qE "^${IMG%%:*}[[:space:]:]" <<<"$_ils"; then
+  skip "TTY reposto após um sinal" "sem a imagem $IMG no store — nada para exec (image ls rc=$_ils_rc: $(head -c 300 <<<"$_ils" | tr '\n' ' '))"
 else
   TTYC="ttysig-$PFX"
   "$BIN" container run -d --net none --name "$TTYC" "$IMG" sleep 300 >/dev/null 2>&1

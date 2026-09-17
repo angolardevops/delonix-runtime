@@ -3269,7 +3269,11 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
             // (exits before `run()` ever returns), so it never went through
             // `po::t_dyn` — every batched `stop`/`rm`/... failure stayed in EN
             // even under `--l18n=pt`, unlike a single-id failure of the same command.
-            eprintln!("{id}: {}", super::po::t_dyn(&e.to_string()));
+            eprintln!(
+                "{id}: [{}] {}",
+                delonix_model::codes::label(e.number()),
+                super::po::t_dyn(&e.to_string())
+            );
             codes.push(super::exitcode::for_error(&e));
         }
     }
