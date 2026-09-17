@@ -112,17 +112,14 @@ fn spawn_run_via_reexec(opts: &RunOpts) -> Result<()> {
         Ok(o) if o.status.success() => Ok(()),
         // Carry the child's own message back to the HTTP client: swallowing it
         // would turn every engine failure into an opaque exit code.
-        Ok(o) => {
-            let msg = String::from_utf8_lossy(&o.stderr).trim().to_string();
-            Err(Error::Invalid(if msg.is_empty() {
-                format!(
-                    "container start failed (exit {})",
-                    o.status.code().unwrap_or(-1)
-                )
-            } else {
-                msg
-            }))
-        }
+        Ok(o) => Err(child_error(
+            o.status.code(),
+            &String::from_utf8_lossy(&o.stderr),
+            format!(
+                "container start failed (exit {})",
+                o.status.code().unwrap_or(-1)
+            ),
+        )),
         Err(e) => Err(e),
     }
 }
@@ -145,12 +142,70 @@ fn cli_verb_via_reexec(args: &[&str]) -> Result<()> {
     if out.status.success() {
         return Ok(());
     }
-    let msg = String::from_utf8_lossy(&out.stderr).trim().to_string();
-    Err(Error::Invalid(if msg.is_empty() {
-        format!("`container {}` failed", args.join(" "))
-    } else {
-        msg
-    }))
+    Err(child_error(
+        out.status.code(),
+        &String::from_utf8_lossy(&out.stderr),
+        format!("`container {}` failed", args.join(" ")),
+    ))
+}
+
+/// The error a re-executed child reported, rebuilt with its CLASS.
+///
+/// The child exits with the class of its error (`exitcode::for_error`), and that
+/// number is what lets the HTTP status be chosen from the type rather than from
+/// the message: every child failure used to come back as `Invalid`, so a name
+/// already in use answered 500 where Docker answers 409. The class the child
+/// cannot tell apart — 1 is both «invalid argument» and «the runtime failed» —
+/// is split by the template the message carries.
+///
+/// Only the LAST line of stderr is the error: the lines before it are the
+/// child's own tracing, with ANSI colour, which used to reach the client inside
+/// the message.
+fn child_error(code: Option<i32>, stderr: &str, fallback: String) -> Error {
+    use super::exitcode as x;
+    let msg = last_error_line(stderr).unwrap_or(fallback);
+    // The template can sit behind a `<id>: ` the multi-id printer adds.
+    let body = |prefix: &str| match msg.find(prefix) {
+        Some(i) => msg[i + prefix.len()..].to_string(),
+        None => msg.clone(),
+    };
+    match code {
+        Some(x::NOT_FOUND) => Error::NotFound(body("no such ")),
+        Some(x::NOT_RUNNING) => Error::NotRunning(body("container is not running: ")),
+        Some(x::CONFLICT) => Error::Conflict(body("conflict: ")),
+        Some(x::UNAVAILABLE) => Error::Unavailable(body("unavailable: ")),
+        Some(x::TIMEOUT) => Error::Timeout(body("timed out: ")),
+        _ if msg.contains("invalid argument: ") => Error::Invalid(body("invalid argument: ")),
+        _ => Error::Runtime {
+            context: "container",
+            message: msg,
+        },
+    }
+}
+
+/// The error line of a child's stderr: the last non-empty line, without ANSI
+/// escapes and without the `delonix: `/`error ` label the printer puts in front.
+fn last_error_line(stderr: &str) -> Option<String> {
+    let mut plain = String::with_capacity(stderr.len());
+    let mut chars = stderr.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\x1b' {
+            // CSI: ESC [ ... final byte in @..~
+            if chars.next() == Some('[') {
+                for c in chars.by_ref() {
+                    if ('@'..='~').contains(&c) {
+                        break;
+                    }
+                }
+            }
+            continue;
+        }
+        plain.push(ch);
+    }
+    let line = plain.lines().map(str::trim).rfind(|l| !l.is_empty())?;
+    let line = line.strip_prefix("delonix: ").unwrap_or(line);
+    let line = line.strip_prefix("error ").unwrap_or(line);
+    Some(line.to_string())
 }
 
 fn start_via_reexec(id: &str) -> Result<()> {
@@ -164,7 +219,9 @@ pub(crate) fn run_from_spec_file(path: &std::path::Path) -> ! {
         Ok(()) => 0,
         Err(e) => {
             eprintln!("delonix: {}", super::po::t_dyn(&e.to_string()));
-            1
+            // The class, not a flat 1: the server rebuilds the error's type from
+            // it (`child_error`) to answer with the right HTTP status.
+            super::exitcode::for_error(&e)
         }
     };
     let _ = std::fs::remove_file(path);
@@ -396,7 +453,10 @@ where
 {
     match tokio::task::spawn_blocking(f).await {
         Ok(r) => r,
-        Err(e) => Err(Error::Invalid(format!("internal task join error: {e}"))),
+        Err(e) => Err(Error::Runtime {
+            context: "task join",
+            message: e.to_string(),
+        }),
     }
 }
 
@@ -404,14 +464,31 @@ fn ok_json(v: serde_json::Value) -> (StatusCode, Vec<u8>) {
     (StatusCode::OK, v.to_string().into_bytes())
 }
 
+/// The HTTP status of an error, from its TYPE — the statuses Docker itself
+/// answers with.
+///
+/// It used to match the message («not found»/«no such» → 404, the rest 500), so
+/// an invalid argument and a name already in use both answered 500, which tells
+/// a client «the server is broken» when the request was the problem. The same
+/// classes the exit codes publish, in the transport that has words for them.
+fn error_status(e: &Error) -> StatusCode {
+    match e {
+        Error::NotFound(_) | Error::VmNotFound(_) => StatusCode::NOT_FOUND,
+        Error::Invalid(_) => StatusCode::BAD_REQUEST,
+        // Docker answers 409 both for a name in use and for acting on a
+        // container that is not running (`kill`).
+        Error::Conflict(_) | Error::NotRunning(_) => StatusCode::CONFLICT,
+        Error::Unavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+        Error::Timeout(_) => StatusCode::GATEWAY_TIMEOUT,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    }
+}
+
 fn err_response(e: &Error) -> (StatusCode, Vec<u8>) {
-    let msg = e.to_string();
-    let status = if msg.contains("not found") || msg.contains("no such") {
-        StatusCode::NOT_FOUND
-    } else {
-        StatusCode::INTERNAL_SERVER_ERROR
-    };
-    (status, json!({ "message": msg }).to_string().into_bytes())
+    (
+        error_status(e),
+        json!({ "message": e.to_string() }).to_string().into_bytes(),
+    )
 }
 
 /// Every Docker Engine API route this layer implements, and what each one maps
@@ -860,8 +937,9 @@ async fn handle_create(
             .list()?
             .into_iter()
             .find(|c| c.name == name)
-            .ok_or_else(|| {
-                Error::Invalid("container created but not found afterward (unexpected)".into())
+            .ok_or_else(|| Error::Runtime {
+                context: "container create",
+                message: "container created but not found afterward (unexpected)".into(),
             })?;
         Ok(c.id)
     })
@@ -886,7 +964,7 @@ async fn handle_start(_state: &Arc<AppState>, id: &str) -> (StatusCode, Vec<u8>)
         Ok(()) => (StatusCode::NO_CONTENT, Vec::new()),
         // Docker's own real semantics: starting an already-running container
         // is a no-op success (304), not an error.
-        Err(Error::Invalid(msg)) if msg.contains("already running") => {
+        Err(e) if e.to_string().contains("already running") => {
             (StatusCode::NOT_MODIFIED, Vec::new())
         }
         Err(e) => err_response(&e),
@@ -1696,5 +1774,77 @@ mod matrix_tests {
                 "{m} {path} appears as both implemented and not"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod error_tests {
+    use super::{child_error, error_status};
+    use delonix_runtime_core::Error;
+    use hyper::StatusCode;
+
+    #[test]
+    fn a_child_error_keeps_its_class_and_loses_the_tracing() {
+        let stderr = "\x1b[2m2026-09-17T04:34:56Z\x1b[0m INFO pulling\n\
+                      delonix: conflict: the name 's1' is already in use\n";
+        match child_error(Some(5), stderr, "fallback".into()) {
+            Error::Conflict(m) => assert_eq!(m, "the name 's1' is already in use"),
+            other => panic!("expected a conflict, got {other:?}"),
+        }
+        assert!(matches!(
+            child_error(Some(4), "error no such container: zz", String::new()),
+            Error::NotFound(m) if m == "container: zz"
+        ));
+        // Class 1 is split by the template: an invalid argument is the request's
+        assert!(matches!(
+            child_error(Some(1), "error s1: invalid argument: s1 is already running", String::new()),
+            Error::Invalid(m) if m == "s1 is already running"
+        ));
+        // fault, anything else is the runtime's.
+        assert!(matches!(
+            child_error(Some(1), "delonix: invalid argument: web is already running", String::new()),
+            Error::Invalid(m) if m == "web is already running"
+        ));
+        assert!(matches!(
+            child_error(
+                Some(1),
+                "delonix: system call `clone` failed: EPERM",
+                String::new()
+            ),
+            Error::Runtime { .. }
+        ));
+        assert!(matches!(
+            child_error(Some(1), "   \n", "container start failed (exit 1)".into()),
+            Error::Runtime { message, .. } if message == "container start failed (exit 1)"
+        ));
+    }
+
+    #[test]
+    fn the_status_comes_from_the_type_not_the_message() {
+        assert_eq!(
+            error_status(&Error::Invalid("bad".into())),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            error_status(&Error::Conflict("dup".into())),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            error_status(&Error::NotRunning("web".into())),
+            StatusCode::CONFLICT
+        );
+        assert_eq!(
+            error_status(&Error::NotFound("container: zz".into())),
+            StatusCode::NOT_FOUND
+        );
+        // A runtime failure whose text happens to say «not found» is still a
+        // server error — the old message match read it as 404.
+        assert_eq!(
+            error_status(&Error::Runtime {
+                context: "mount",
+                message: "file not found".into()
+            }),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

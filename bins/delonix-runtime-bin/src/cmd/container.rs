@@ -2459,7 +2459,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         .iter()
         .find(|c| c.name == cname && c.namespace == namespace)
     {
-        return Err(Error::Invalid(super::po::tf(
+        return Err(Error::Conflict(super::po::tf(
             "the name '{name}' is already in use in namespace '{ns}' by container {id} — pick another or remove it first",
             &[
                 ("name", cname.as_str()),
@@ -4031,7 +4031,7 @@ pub(crate) fn cmd_rename(store: &Store, id: &str, new_name: &str) -> Result<()> 
     }
     let c = find(store, id)?;
     if store.load(new_name).is_ok() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::Conflict(format!(
             "a container named '{new_name}' already exists"
         )));
     }

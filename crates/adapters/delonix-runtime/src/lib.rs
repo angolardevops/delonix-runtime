@@ -8209,7 +8209,7 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
     if let Some(pid) = container.pid {
         if safe_to_signal(pid, container.pid_starttime) {
             if !force {
-                return Err(Error::Invalid(format!(
+                return Err(Error::Conflict(format!(
                     "container {} is running (use --force)",
                     container.short_id()
                 )));
