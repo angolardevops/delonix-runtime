@@ -1,9 +1,13 @@
-<!-- translated-from: rust-primer.md sha256:d2605cd548346247408cbcaa88492cc0987f515dfe45c1abecc59aa84b09f403 -->
+<!-- translated-from: rust-primer.md sha256:1816db1c294bfdfdb88795ccb366f48135a04bbd7d7d37815302e6d006a262c8 -->
 # Introdução ao Rust para esta base de código
+
+**Antes de leres:** [Introdução ao cloud native](cloud-native-primer.md), cujo vocabulário os exemplos usam, e Rust básico ([The Rust Programming Language](https://doc.rust-lang.org/book/), capítulos 1–10).
 
 Isto não é um tutorial de Rust. É o subconjunto de Rust de que precisas para *ler este repositório*,
 com cada ideia presa a um ficheiro que podes abrir. Se um conceito for novo para ti, os links
-«Ler mais» levam à fonte oficial; volta aqui para ver como o motor o usa.
+«Ler mais» levam à fonte oficial; volta aqui para ver como o motor o usa. Depois dela consegues
+abrir qualquer crate do workspace e seguir os seus tipos de erro, os seus traits, os seus blocos
+`unsafe` e os seus testes sem parares na língua.
 
 Os caminhos são relativos à raiz do repositório. Os símbolos são nomeados para os poderes procurar
 com `grep` — os números de linha ficam de fora de propósito, porque mudam a cada PR.
@@ -23,10 +27,12 @@ O repositório é um único **workspace** do Cargo: um `Cargo.toml` na raiz com
    os crates de terceiros (por `version`). Um membro nunca escreve uma versão; escreve:
 
    ```toml
-   # crates/foundation/delonix-runtime-core/Cargo.toml
+   # crates/contexts/delonix-node/Cargo.toml
    [dependencies]
+   delonix-model = { workspace = true }
    serde = { workspace = true }
-   thiserror = { workspace = true }
+   serde_json = { workspace = true }
+   libc = { workspace = true }
    ```
 
    Um membro pode acrescentar `features = [...]`, e mais nada. O `default-features = false` vive na
@@ -37,8 +43,9 @@ O repositório é um único **workspace** do Cargo: um `Cargo.toml` na raiz com
 2. **O directório é a camada.** Os crates vivem em `crates/foundation/`, `crates/contexts/`,
    `crates/adapters/`, `crates/providers/`, `crates/interfaces/` e os binários em `bins/`
    (ADR-0040). O `scripts/arch_fitness.py` recusa um crate cujo directório não corresponda à sua
-   camada declarada, e uma dependência que aponte contra a direcção permitida. Ver
-   [Arquitectura](architecture.md) para as regras das camadas.
+   camada declarada, e uma dependência que aponte contra a direcção permitida. As regras de
+   camada são ensinadas mais à frente no curso, em
+   [Arquitectura — Camadas e a direcção permitida](architecture.md#layers-and-the-allowed-direction).
 
 3. **Os lints são herdados.** A raiz declara `[workspace.lints.clippy]` com
    `undocumented_unsafe_blocks = "deny"`, e cada membro adere com `[lints] workspace = true`.
@@ -46,7 +53,8 @@ O repositório é um único **workspace** do Cargo: um `Cargo.toml` na raiz com
 
 A raiz define também `[workspace.package]` (a `version`, a `edition` e a `license` partilhadas), que
 os membros consomem como `version.workspace = true`. A versão não é decoração: ver
-[Compilar e testar](build-and-test.md) para o gate de versão.
+[Alinhamento da versão](contributing-workflow.md#version-alignment) para a regra e
+[Os gates que a CI corre](build-and-test.md#the-gates-ci-runs) para o gate de versão.
 
 **Ler mais:** Cargo Book —
 [Workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html),
@@ -58,11 +66,11 @@ os membros consomem como `version.workspace = true`. A versão não é decoraç�
 
 ## 3.2 Erros: um só `Error`, e códigos de saída derivados do seu tipo
 
-Quase todas as funções falíveis do motor devolvem `delonix_runtime_core::Result<T>`, um alias
-sobre o enum partilhado definido em `crates/foundation/delonix-model/src/error.rs`. O enum vive no
-crate de fundação puro `delonix-model`; o `delonix-runtime-core` re-exporta `Error` e `Result`
-(`pub use delonix_model::{Error, Result};`), por isso o caminho `delonix_runtime_core::` que a maioria
-dos pontos de chamada usa continua a funcionar. É construído com
+Quase todas as funções falíveis do motor devolvem `delonix_model::Result<T>`, um alias sobre o
+enum partilhado definido em `crates/foundation/delonix-model/src/error.rs`. O enum vive no crate de
+fundação puro `delonix-model`, do qual qualquer outro crate do motor pode depender. Alguns adapters
+definem o seu próprio erro e convertem-no neste (§5.2 de
+[Convenções de código](coding-conventions.md)). É construído com
 [`thiserror`](https://docs.rs/thiserror): `#[derive(Error)]` gera o `Display` a partir do atributo
 `#[error("...")]`, e `#[from]` gera impls de `From` para que o `?` converta automaticamente um erro de
 nível mais baixo:
@@ -170,14 +178,14 @@ Um motor de containers é sobretudo chamadas de sistema. Este repo chega ao kern
 | Crate | Usado para | Exemplo neste repo |
 |---|---|---|
 | [`nix`](https://docs.rs/nix) | Wrappers mais ou menos seguros: `clone`, `setns`, `unshare`, `pivot_root`, `fork`, `mount`, sinais | `use nix::sched::{clone, setns, unshare, CloneFlags};` em `crates/adapters/delonix-linux/src/lib.rs` |
-| [`libc`](https://docs.rs/libc) | Chamadas cruas que o `nix` não embrulha, ou onde a struct exacta importa | `libc::getsockopt(.., SO_PEERCRED, ..)` em `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`); `libc::flock` em `crates/adapters/delonix-state/src/store.rs` |
+| [`libc`](https://docs.rs/libc) | Chamadas cruas que o `nix` não embrulha, ou onde a struct exacta importa | `libc::getsockopt(.., SO_PEERCRED, ..)` em `crates/contexts/delonix-node/src/peer_cred.rs` (`peer_uid`); `libc::flock` em `crates/adapters/delonix-state/src/store.rs` |
 | [`rustix`](https://docs.rs/rustix) | A nova API de mount (`fsopen`/`fsconfig`/`fsmount`/`move_mount`) | `fsopen_overlay` em `crates/adapters/delonix-linux/src/lib.rs` |
 
 **Todos os blocos `unsafe` dizem porque são correctos**, ao lado deles (o lint do workspace impõe a
 presença do comentário; os revisores impõem a sua veracidade):
 
 ```rust
-// crates/foundation/delonix-runtime-core/src/peer_cred.rs
+// crates/contexts/delonix-node/src/peer_cred.rs
 // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
 let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
 ```
@@ -253,8 +261,10 @@ pub cloud_init: Option<bool>,
 
 Aqui `None` (todos os registos escritos antes de o campo existir) é lido como «sim»; um simples `bool`
 teria como default `false` e mudaria em silêncio o comportamento das imagens antigas. Vais ver o
-mesmo raciocínio em `Mount::propagation` e `Mount::optional` em
-`crates/foundation/delonix-runtime-core/src/lib.rs` (`#[serde(default, skip_serializing_if = "Option::is_none")]`).
+mesmo raciocínio em `crates/contexts/delonix-compute/src/record.rs`: o `Mount::propagation` é um
+`Option` (`#[serde(default, skip_serializing_if = "Option::is_none")]`), e o `Mount::optional` é um
+simples `bool` com `#[serde(default)]`, porque `false` é o que todos os registos mais antigos
+significavam.
 
 **Manifestos.** O `bins/delonix-runtime-bin/src/cmd/manifest.rs` lê YAML multi-documento com
 `serde_yaml::Deserializer::from_str(text)` para `ManifestDoc`, cujo `spec` fica como um
@@ -364,7 +374,7 @@ Dentro de um único processo, o estado partilhado usa os tipos padrão: um
 (`SharedRoutes` em `cmd/ingress_proxy.rs`), e o dashboard partilha a sua amostra lenta através de um
 `Arc<Mutex<...>>` (`cmd/dash.rs`).
 
-Uma ideia relacionada que vais encontrar em `crates/foundation/delonix-runtime-core/src/typestate.rs`: o
+Uma ideia relacionada que vais encontrar em `crates/foundation/delonix-model/src/typestate.rs`: o
 padrão **typestate**, em que os estados do ciclo de vida são tipos e as transições ilegais não
 compilam (os seus doc tests incluem exemplos `compile_fail`).
 
@@ -420,3 +430,7 @@ A lista completa e a forma de correr cada um localmente estão em [Compilar e te
 **Ler mais:** [Clippy](https://doc.rust-lang.org/clippy/),
 [rustfmt](https://rust-lang.github.io/rustfmt/),
 [cargo-deny](https://embarkstudios.github.io/cargo-deny/).
+
+---
+
+**Seguinte:** [Preparar o teu ambiente](environment.md) — um host que consegue compilar a árvore e correr os caminhos ao vivo, e as armadilhas do host que parecem bugs do motor.

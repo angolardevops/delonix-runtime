@@ -209,11 +209,20 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a class="on" aria-current="page" href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Fundamentos</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/cloud-native-primer.html">Ler a página em inglês</a></span></div><h1 id="cloud-native-primer">Introdução ao cloud native</h1>
+<h1 id="cloud-native-primer">Introdução ao cloud native</h1>
+<p><strong>Antes de leres:</strong> <a href="linux-foundations.html">Fundações de Linux</a> (namespaces, cgroups v2, descritores de ficheiro) e <a href="iaas-and-cloud-native.html">IaaS e cloud native</a> (do que é responsável o motor).</p>
 <p>O motor é uma camada fina e cuidadosa sobre funcionalidades do kernel Linux e um punhado de
 especificações abertas. Esta página dá-te o suficiente de cada conceito para leres o código, e diz
-<strong>onde vive</strong> neste repositório. Para aprofundar, segue os links oficiais — são melhores do que
-qualquer resumo aqui.</p>
+<strong>onde vive</strong> neste repositório. Depois dela consegues pegar em qualquer mecanismo — um namespace,
+um limite de cgroup, uma layer de imagem, uma chain de firewall, o arranque de uma VM, o apply de
+um manifesto — e nomear o ficheiro e o símbolo que o implementa. Para aprofundar, segue os links
+oficiais — são melhores do que qualquer resumo aqui.</p>
+<p>Os conceitos são ensinados uma vez neste manual. Os primitivos do kernel (namespaces, user
+namespaces, cgroups v2) são ensinados à mão em <a href="linux-foundations.html">Fundações de Linux</a>, por
+isso as secções 4.1 e 4.2 só os recapitulam e mapeiam para o código. O que cada padrão aberto
+<em>exige</em>, e até onde o motor é conforme, está em <a href="cloud-native-standards.html">Padrões cloud native</a>,
+mais à frente no curso. Os caminhos nomeiam crates (<code>crates/&lt;camada&gt;/&lt;crate&gt;</code>); as camadas são
+explicadas em <a href="architecture.html">Arquitectura</a>, e por agora um caminho diz apenas onde o código está.</p>
 <p>Cada secção tem três partes: o conceito, <strong>No Delonix</strong> (ficheiros e símbolos que podes procurar com
 <code>grep</code>), e <strong>Ler mais</strong>. Os caminhos são relativos à raiz do repositório.</p>
 <p>Para te orientares no ecossistema mais amplo, o <a href="https://landscape.cncf.io/">CNCF Landscape</a> e o
@@ -221,18 +230,17 @@ qualquer resumo aqui.</p>
 ou Podman só aparecem onde ajudam a explicar uma escolha de desenho.</p>
 <hr />
 <h2 id="41-linux-namespaces-and-rootless-operation">4.1 Namespaces do Linux e funcionamento rootless<a class="hanchor" href="#41-linux-namespaces-and-rootless-operation" aria-label="#">#</a></h2>
-<p>Um <strong>namespace</strong> dá a um processo a sua própria vista de um tipo de recurso global. Um container é,
-no fundo, um processo arrancado num conjunto novo deles: <strong>mount</strong> (a sua própria árvore de sistema de
-ficheiros), <strong>PID</strong> (a sua própria numeração de processos, com ele próprio como PID 1), <strong>network</strong> (as
-suas próprias interfaces e rotas), <strong>IPC</strong>, <strong>UTS</strong> (hostname), <strong>cgroup</strong> (a sua própria vista da árvore
-de cgroups) e <strong>user</strong>.</p>
-<p>O <strong>user namespace</strong> é o que torna possíveis os containers rootless. Lá dentro, um processo pode ser
-uid 0 com capabilities completas <em>sobre os recursos que pertencem a esse namespace</em>, enquanto no host é
-um utilizador comum. O mapeamento entre os uids de dentro e de fora é escrito em
-<code>/proc/&lt;pid&gt;/uid_map</code> e <code>gid_map</code>. Um utilizador sem privilégio só consegue mapear o seu próprio uid;
-mapear um <em>intervalo</em> exige os helpers setuid <code>newuidmap</code>/<code>newgidmap</code>, que verificam <code>/etc/subuid</code> e
-<code>/etc/subgid</code>. Algumas distribuições restringem além disso os user namespaces sem privilégio através do
-AppArmor — ver <a href="environment.html">Ambiente</a> para as consequências práticas.</p>
+<p><strong>Recapitulação.</strong> Um container é um processo arrancado num conjunto novo de namespaces (mount,
+PID, network, IPC, UTS, cgroup, user). O <strong>user namespace</strong> é o que o torna rootless: lá dentro, o
+processo é uid 0 sobre os recursos que esse namespace possui; fora, é um utilizador comum. Um
+utilizador sem privilégio só consegue mapear o seu próprio uid; um <em>intervalo</em> exige
+<code>newuidmap</code>/<code>newgidmap</code> e <code>/etc/subuid</code>. Os dois são ensinados, com comandos para escreveres, em
+<a href="linux-foundations.html#namespaces">Fundações de Linux — Namespaces</a> e
+<a href="linux-foundations.html#user-namespaces-and-uid-mapping">User namespaces e mapeamento de uid</a>.
+Algumas distribuições restringem além disso os user namespaces sem privilégio através do
+AppArmor — ver
+<a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ambiente</a> para
+as consequências práticas.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
 <li>A <code>fn spawn</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> constrói as <code>CloneFlags</code>
@@ -240,12 +248,13 @@ AppArmor — ver <a href="environment.html">Ambiente</a> para as consequências 
   A partilha de IPC/UTS entre membros de um pod é tratada por <code>setns</code> no <code>container_init</code>.</li>
 <li>O <code>write_userns_maps</code> no mesmo ficheiro escreve os mapas a partir do pai: um mapa de um só uid
   (<code>0 &lt;euid&gt; 1</code>) em rootless, ou um intervalo de subuid através de <code>newuidmap</code>/<code>newgidmap</code> quando
-  <code>have_subid_helpers()</code> diz que estão disponíveis. <code>USERNS_UID_BASE</code>/<code>USERNS_RANGE</code> definem o intervalo
-  usado quando se corre como root.</li>
-<li>O <code>setup_rootfs</code> monta a raiz do container e chama <code>pivot_root</code>; o <code>container_init</code> é o código que
-  corre dentro dos novos namespaces antes do <code>execvp</code>.</li>
-<li>As operações rootless sobre ficheiros que pertencem a subuids mapeados re-executam o binário dentro de
-  um user namespace mapeado: <code>reexec_mapped</code>, <code>reexec_mapped_hold</code>, <code>remove_tree_mapped</code>.</li>
+  <code>have_subid_helpers()</code> diz que estão disponíveis. <code>USERNS_UID_BASE</code>/<code>USERNS_RANGE</code> definem o
+  intervalo usado quando se corre como root.</li>
+<li>O <code>setup_rootfs</code> monta a raiz do container e chama <code>pivot_root</code>; o <code>container_init</code> é o código
+  que corre dentro dos novos namespaces antes do <code>execvp</code>.</li>
+<li>As operações rootless sobre ficheiros que pertencem a subuids mapeados re-executam o binário
+  dentro de um user namespace mapeado: <code>reexec_mapped</code>, <code>reexec_mapped_hold</code>,
+  <code>remove_tree_mapped</code>.</li>
 </ul>
 <p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html"><code>namespaces(7)</code></a>,
 <a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html"><code>user_namespaces(7)</code></a>,
@@ -254,94 +263,98 @@ AppArmor — ver <a href="environment.html">Ambiente</a> para as consequências 
 <a href="https://man7.org/linux/man-pages/man2/pivot_root.2.html"><code>pivot_root(2)</code></a>.</p>
 <hr />
 <h2 id="42-cgroups-v2-and-delegation">4.2 cgroups v2 e delegação<a class="hanchor" href="#42-cgroups-v2-and-delegation" aria-label="#">#</a></h2>
-<p>Os <strong>control groups</strong> limitam e contabilizam recursos (memória, CPU, PIDs, I/O) para um conjunto de
-processos. O cgroup v2 é uma árvore única montada em <code>/sys/fs/cgroup</code>; um directório é um grupo, e
-ficheiros como <code>memory.max</code>, <code>cpu.max</code>, <code>pids.max</code> e <code>memory.events</code> são a sua interface. Um
-controlador só está disponível para um filho se o pai o listar em <code>cgroup.subtree_control</code>.</p>
-<p>Um utilizador sem privilégio só consegue gerir uma subárvore se ela lhe tiver sido <strong>delegada</strong>. Em
-hosts com systemd, o <code>user@&lt;uid&gt;.service</code> delega tipicamente alguns controladores, e o
-<code>systemd-run --user --scope -p Delegate=yes</code> cria um scope delegado a pedido. Um processo num scope de
-sessão SSH fica normalmente <em>fora</em> da subárvore delegada, e a regra «sem processos internos» impede de o
-mover para lá — por isso os limites podem, em silêncio, não se aplicar aí. O motor é só v2.</p>
+<p><strong>Recapitulação.</strong> O cgroup v2 é uma árvore única em <code>/sys/fs/cgroup</code> cujos ficheiros
+(<code>memory.max</code>, <code>cpu.max</code>, <code>pids.max</code>, <code>memory.events</code>) limitam e contabilizam um grupo de
+processos. Um utilizador sem privilégio só consegue escrever numa subárvore que o systemd lhe
+tenha <strong>delegado</strong>, e uma shell num scope de sessão SSH fica normalmente <em>fora</em> dela — por isso os
+limites podem, em silêncio, não se aplicar aí. A árvore, a regra "sem processos internos" e a
+delegação são ensinadas à mão em <a href="linux-foundations.html#cgroups-v2">Fundações de Linux — cgroups v2</a>;
+o contrato de delegação como padrão, e a conformidade do motor, estão em
+<a href="cloud-native-standards.html#1315-linux-cgroup-v2-and-systemd-delegation">Padrões cloud native — 13.15</a>.
+O motor é só v2.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
-<li>O modo root coloca os containers debaixo de <code>delonix_runtime_core::DELONIX_SLICE</code>
+<li>O modo root coloca os containers debaixo de <code>delonix_compute::DELONIX_SLICE</code>
   (<code>/sys/fs/cgroup/delonix.slice</code>).</li>
 <li>O modo rootless encontra o cgroup do serviço do utilizador e cria folhas debaixo de
   <code>&lt;user@uid.service&gt;/dlx-containers</code> — ver <code>user_service_base</code> e <code>try_delegated_base</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>. O <code>cgroup_limits_apply</code> responde a «os limites vão
   aplicar-se neste host?» sem arrancar um container.</li>
 <li>A decisão de desenho sobre o nível intermédio é o
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>; a forma como o CRI segue a hierarquia de cgroups
-  do kubelet é o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>, com o pai vindo do
-  kubelet validado por <code>KubeCgroupParent::parse</code> em
-  <code>crates/foundation/delonix-runtime-core/src/lib.rs</code>.</li>
+  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>; a forma como o CRI segue a hierarquia de
+  cgroups do kubelet é o <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>, com o pai
+  do kubelet validado por <code>KubeCgroupParent::parse</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>.</li>
 </ul>
-<p><strong>Ler mais:</strong> <a href="https://docs.kernel.org/admin-guide/cgroup-v2.html">kernel Linux — Control Group v2</a>,
+<p><strong>Ler mais:</strong> <a href="https://docs.kernel.org/admin-guide/cgroup-v2.html">Linux kernel — Control Group v2</a>,
 <a href="https://systemd.io/CGROUP_DELEGATION/">systemd — Control Group APIs and Delegation</a>,
 <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html"><code>cgroups(7)</code></a>.</p>
 <hr />
 <h2 id="43-capabilities-seccomp-apparmor-masked-paths">4.3 Capabilities, seccomp, AppArmor, caminhos mascarados<a class="hanchor" href="#43-capabilities-seccomp-apparmor-masked-paths" aria-label="#">#</a></h2>
-<p>O poder do root está dividido em <strong>capabilities</strong> (<code>CAP_NET_ADMIN</code>, <code>CAP_SYS_ADMIN</code>, …). Um container
-mantém um pequeno conjunto por omissão e larga o resto. O <strong>seccomp</strong> instala um filtro BPF que permite
-ou nega chamadas de sistema, reduzindo a superfície de ataque ao kernel. O <strong>AppArmor</strong> (e o SELinux
-noutras distribuições) são Linux Security Modules que confinam um processo por perfil. Por fim, os
-runtimes <strong>mascaram</strong> caminhos sensíveis de <code>/proc</code> e <code>/sys</code> (fazem bind de algo vazio por cima deles) e
-tornam outros só de leitura, porque esses ficheiros deixam escapar informação do host ou permitem
-controlá-lo.</p>
-<p>Um ponto subtil que o código documenta: o <code>clone3</code> passa as suas flags através de um ponteiro que um
-filtro seccomp não consegue inspeccionar, por isso um filtro que bloqueie <code>clone(CLONE_NEWUSER)</code> tem
-também de fazer o <code>clone3</code> falhar com <code>ENOSYS</code>, para obrigar a libc a voltar ao <code>clone</code> filtrável.</p>
+<p>O poder do root divide-se em <strong>capabilities</strong> (<code>CAP_NET_ADMIN</code>, <code>CAP_SYS_ADMIN</code>, …). Um container
+mantém um pequeno conjunto por omissão e larga o resto. O <strong>seccomp</strong> instala um filtro BPF que
+permite ou recusa system calls, reduzindo a superfície de ataque do kernel. O <strong>AppArmor</strong> (e o
+SELinux noutras distribuições) são Linux Security Modules que confinam um processo por perfil.
+Por fim, os runtimes <strong>mascaram</strong> caminhos sensíveis de <code>/proc</code> e <code>/sys</code> (montam algo vazio por
+cima) e tornam outros só-de-leitura, porque esses ficheiros vazam informação do host ou permitem
+controlar o host.</p>
+<p>Um ponto subtil que o código regista: o <code>clone3</code> passa as suas flags através de um ponteiro que um
+filtro seccomp não consegue inspeccionar, por isso um filtro que bloqueia
+<code>clone(CLONE_NEWUSER)</code> tem também de fazer o <code>clone3</code> falhar com <code>ENOSYS</code> para forçar a libc a
+voltar ao <code>clone</code> filtrável.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
 <li>Capabilities: <code>KEPT_CAPS</code> e <code>resolve_cap_keep</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/capabilities.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/capabilities.rs</code></a>; <code>drop_capabilities</code> em <code>lib.rs</code>.</li>
 <li>seccomp: <code>apply_seccomp</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> (construído com o crate
-  <a href="https://docs.rs/seccompiler"><code>seccompiler</code></a>, incluindo o pré-filtro <code>clone3</code> → <code>ENOSYS</code>); os perfis
-  JSON personalizados são lidos e compilados em <code>seccomp_profile.rs</code> (<code>parse</code>, <code>compile</code>).</li>
+  <a href="https://docs.rs/seccompiler"><code>seccompiler</code></a>, incluindo o pré-filtro <code>clone3</code> → <code>ENOSYS</code>);
+  perfis JSON personalizados são analisados e compilados em <code>seccomp_profile.rs</code> (<code>parse</code>,
+  <code>compile</code>).</li>
 <li>AppArmor: <code>apply_apparmor</code> em <code>lib.rs</code>.</li>
-<li>Caminhos mascarados e só de leitura: <code>DEFAULT_MASKED_PATHS</code>, <code>DEFAULT_READONLY_PATHS</code>,
+<li>Caminhos mascarados e só-de-leitura: <code>DEFAULT_MASKED_PATHS</code>, <code>DEFAULT_READONLY_PATHS</code>,
   <code>apply_masked_paths</code>, <code>apply_readonly_paths</code>, <code>mask_proc_paths</code> em <code>lib.rs</code>.</li>
-<li>As decisões de segurança ao nível do nó (política, admissão, eventos, score) são um crate puro à parte:
-  <code>evaluate</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-security-runtime/src/admission.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-security-runtime/src/admission.rs</code></a>
+<li>As decisões de segurança ao nível do nó (política, admissão, eventos, score) são um crate puro à
+  parte: <code>evaluate</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-security-runtime/src/admission.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-security-runtime/src/admission.rs</code></a>
   (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0026-security-runtime-decision-crate.md" target="_blank" rel="noopener">ADR-0026</a>).</li>
 </ul>
 <p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man7/capabilities.7.html"><code>capabilities(7)</code></a>,
 <a href="https://docs.kernel.org/userspace-api/seccomp_filter.html">kernel — Seccomp BPF</a>,
-<a href="https://gitlab.com/apparmor/apparmor/-/wikis/Documentation">documentação do AppArmor</a>,
-<a href="https://github.com/opencontainers/runtime-spec/blob/main/config-linux.md">OCI runtime spec — configuração Linux</a>
+<a href="https://gitlab.com/apparmor/apparmor/-/wikis/Documentation">Documentação do AppArmor</a>,
+<a href="https://github.com/opencontainers/runtime-spec/blob/main/config-linux.md">OCI runtime spec — Linux config</a>
 (os campos <code>maskedPaths</code>/<code>readonlyPaths</code>/<code>seccomp</code> que outros runtimes consomem).</p>
 <hr />
 <h2 id="44-oci-images-content-addressed-storage-and-overlayfs">4.4 Imagens OCI, armazenamento endereçado por conteúdo e overlayfs<a class="hanchor" href="#44-oci-images-content-addressed-storage-and-overlayfs" aria-label="#">#</a></h2>
 <p>A <strong>Open Container Initiative</strong> publica três especificações:</p>
 <ul>
-<li>a <strong>image spec</strong> — uma imagem é um <em>manifesto</em> (JSON) que aponta para uma <em>config</em> e para uma lista
-  ordenada de <em>camadas</em> (tarballs), e possivelmente um <em>índice</em> que aponta para um manifesto por
+<li>a <strong>image spec</strong> — uma imagem é um <em>manifesto</em> (JSON) que aponta para uma <em>config</em> e uma lista
+  ordenada de <em>layers</em> (tarballs), e possivelmente um <em>index</em> que aponta para um manifesto por
   plataforma;</li>
 <li>a <strong>distribution spec</strong> — a API HTTP que os registos servem (<code>/v2/&lt;name&gt;/manifests/&lt;ref&gt;</code>,
   <code>/v2/&lt;name&gt;/blobs/&lt;digest&gt;</code>, autenticação por token);</li>
-<li>a <strong>runtime spec</strong> — como se diz a um runtime como o runc ou o crun para correr um bundle de sistema
-  de ficheiros.</li>
+<li>a <strong>runtime spec</strong> — como um runtime como o runc ou o crun recebe a instrução de correr um
+  bundle de sistema de ficheiros.</li>
 </ul>
-<p>Tudo é <strong>endereçado por conteúdo</strong>: um blob é nomeado pelo digest SHA-256 dos seus bytes, por isso um
-cliente verifica o que descarregou calculando o hash. Fazer pull por digest (<code>name@sha256:…</code>) só é uma
-garantia se o <em>manifesto</em> for verificado contra esse digest, além de cada blob contra o manifesto.</p>
-<p>Em tempo de execução, as camadas são empilhadas com <strong>overlayfs</strong>: <code>lowerdir</code>s só de leitura, um
-<code>upperdir</code> gravável para onde as alterações são copiadas, e um <code>workdir</code>. Muitos containers podem
-partilhar as mesmas camadas inferiores.</p>
+<p>Tudo é <strong>endereçado por conteúdo</strong>: um blob é nomeado pelo digest SHA-256 dos seus bytes, por isso
+um cliente verifica o que descarregou fazendo-lhe hash. Fazer pull por digest (<code>name@sha256:…</code>)
+só é uma garantia se o próprio <em>manifesto</em> for verificado contra esse digest, além de cada blob
+contra o manifesto.</p>
+<p>Em runtime, as layers são empilhadas com <strong>overlayfs</strong>: <code>lowerdir</code>s só-de-leitura, um <code>upperdir</code>
+escrevível para onde as mudanças são copiadas, e um <code>workdir</code>. Muitos containers podem partilhar
+as mesmas lower layers.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
 <li>Cliente de registo (distribution spec): <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a> —
-  funções <code>pull_from_registry*</code>, os media types de <code>ACCEPT_MANIFEST</code>, e
-  <code>verify_manifest_digest</code>. Os tipos vêm do crate <a href="https://docs.rs/oci-spec"><code>oci-spec</code></a>.</li>
+  funções <code>pull_from_registry*</code>, os media types <code>ACCEPT_MANIFEST</code>, e <code>verify_manifest_digest</code>. Os
+  tipos vêm do crate <a href="https://docs.rs/oci-spec"><code>oci-spec</code></a>.</li>
 <li>Store de blobs endereçado por conteúdo: <code>Cas</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/cas.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/cas.rs</code></a>.</li>
-<li>Escrever um arquivo de image layout OCI: <code>write_oci_archive</code> em <code>save.rs</code>.</li>
-<li>Preparação do overlay: o <code>ImageStore::prepare_overlay</code> em <code>overlay.rs</code> escreve um marcador
-  <code>overlay-lowers</code> (<code>LOWERS_FILE</code>); o mount propriamente dito acontece dentro dos user e mount
-  namespaces do container em <code>mount_overlay_if_marked</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>),
-  usando a nova API de mount — ver <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a> e
+<li>Escrever um arquivo de OCI image layout: <code>write_oci_archive</code> em <code>save.rs</code>.</li>
+<li>Preparação do overlay: <code>ImageStore::prepare_overlay</code> em <code>overlay.rs</code> escreve um marcador
+  <code>overlay-lowers</code> (<code>LOWERS_FILE</code>); o mount em si acontece dentro do user e mount namespace do
+  container em <code>mount_overlay_if_marked</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>), usando a
+  nova API de mount — ver <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0016-filesystem-under-the-state-root.md" target="_blank" rel="noopener">ADR-0016</a> e
   <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>.</li>
-<li>O motor corre ele próprio os containers, em vez de entregar um bundle de runtime OCI ao runc/crun.</li>
+<li>O motor corre os containers ele próprio em vez de entregar um bundle de runtime OCI ao
+  runc/crun.</li>
 </ul>
 <p><strong>Ler mais:</strong> <a href="https://github.com/opencontainers/image-spec">OCI image spec</a>,
 <a href="https://github.com/opencontainers/distribution-spec">OCI distribution spec</a>,
@@ -349,105 +362,108 @@ partilhar as mesmas camadas inferiores.</p>
 <a href="https://docs.kernel.org/filesystems/overlayfs.html">kernel — Overlay Filesystem</a>.</p>
 <hr />
 <h2 id="45-container-networking">4.5 Rede de containers<a class="hanchor" href="#45-container-networking" aria-label="#">#</a></h2>
-<p>Blocos de construção da rede no Linux:</p>
+<p>Blocos de construção da rede em Linux:</p>
 <ul>
 <li>um <strong>network namespace</strong> tem as suas próprias interfaces, rotas e firewall;</li>
 <li>um <strong>par veth</strong> é um cabo virtual com uma ponta em cada namespace;</li>
-<li>uma <strong>bridge</strong> é um switch virtual que junta muitas pontas veth;</li>
-<li>o <strong>nftables</strong> é o filtro de pacotes e o motor de NAT do kernel; o <strong>DNAT</strong> reescreve um destino
-  (é assim que uma porta publicada chega a um container), e o <strong>conntrack</strong> segue os fluxos para que o
-  tráfego de resposta de uma ligação permitida passe (<code>ct state established,related</code>);</li>
-<li>o <strong>slirp4netns</strong> dá a um network namespace sem privilégio conectividade de saída, emulando uma pilha
-  TCP/IP em espaço de utilizador, e encaminha portas do host para dentro dele;</li>
+<li>uma <strong>bridge</strong> é um switch virtual que junta várias pontas veth;</li>
+<li>o <strong>nftables</strong> é o filtro de pacotes e motor de NAT do kernel; o <strong>DNAT</strong> reescreve um destino
+  (como uma porta publicada alcança um container), e o <strong>conntrack</strong> acompanha fluxos para o
+  tráfego de resposta de uma ligação permitida passar (<code>ct state established,related</code>);</li>
+<li>o <strong>slirp4netns</strong> dá conectividade de saída a um network namespace sem privilégio, emulando uma
+  pilha TCP/IP em user space, e reencaminha portas do host para dentro dele;</li>
 <li>o <strong>VXLAN</strong> transporta frames L2 sobre UDP entre hosts, e o <strong>WireGuard</strong> cifra um túnel.</li>
 </ul>
-<p>O <strong>CNI</strong> (Container Network Interface) é uma especificação em que um runtime executa binários de plugin
-(<code>bridge</code>, <code>host-local</code>, <code>portmap</code>, …) com comandos <code>ADD</code>/<code>DEL</code> e uma configuração JSON de
-<code>/etc/cni/net.d</code>. Os runtimes de Kubernetes usam-no para a rede dos pods.</p>
+<p>O <strong>CNI</strong> (Container Network Interface) é uma especificação em que um runtime executa binários de
+plugin (<code>bridge</code>, <code>host-local</code>, <code>portmap</code>, …) com comandos <code>ADD</code>/<code>DEL</code> e uma config JSON de
+<code>/etc/cni/net.d</code>. Os runtimes do Kubernetes usam-no para a rede dos pods.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
-<li>A rede rootless não consegue criar interfaces no host, por isso o motor mantém um network namespace
-  <strong>holder</strong> de longa duração: um processo <em>pin</em> mínimo é dono dos namespaces, e um processo <em>control</em>
-  reiniciável serve um socket Unix. Ver <code>start_pin</code>, <code>start_control</code> e <code>ensure_up</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>.</li>
-<li>Ligar um workload: <code>attach_container</code> (IPAM + comando de controlo) e <code>do_attach</code> (veth para dentro da
-  bridge, dentro do holder). Os nomes das bridges vêm do <code>bridge_name</code> no
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>, que não tem dependências.</li>
-<li>Saída e encaminhamento de portas: <code>slirp_attach</code> e <code>slirp_add_hostfwd</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a> (que lançam o <code>slirp4netns</code>); publicação dentro do holder em
-  <code>publish_port</code>/<code>do_publish</code> (<code>infra.rs</code>).</li>
+<li>A rede rootless não consegue criar interfaces no host, por isso o motor mantém um network
+  namespace <strong>holder</strong> de vida longa: um processo <em>pin</em> mínimo possui os namespaces, e um
+  processo <em>control</em> reiniciável serve um socket Unix. Ver <code>start_pin</code>, <code>start_control</code> e
+  <code>ensure_up</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>.</li>
+<li>Ligar um workload: <code>attach_container</code> (IPAM + comando de controlo) e <code>do_attach</code> (veth para a
+  bridge, dentro do holder). Os nomes de bridge vêm de <code>bridge_name</code>, no crate sem dependências
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-net-rules/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-net-rules/src/lib.rs</code></a>.</li>
+<li>Saída e reencaminhamento de portas: <code>slirp_attach</code> e <code>slirp_add_hostfwd</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a> (que arrancam o <code>slirp4netns</code>); a publicação dentro do
+  holder em <code>publish_port</code>/<code>do_publish</code> (<code>infra.rs</code>).</li>
 <li>Firewall: <code>table ip dlxing</code> com as base chains <code>fwguard</code>, <code>fwdeny</code>, <code>fwcont</code> e o verdict map
-  <code>fwmap</code> (<code>FWMAP</code>), gerados em <code>infra.rs</code> (<code>do_firewall</code>, <code>apply_firewall_all</code>,
-  <code>ns_set_join</code> para os sets de isolamento de namespace).</li>
+  <code>fwmap</code> (<code>FWMAP</code>), gerado em <code>infra.rs</code> (<code>do_firewall</code>, <code>apply_firewall_all</code>, <code>ns_set_join</code>
+  para os sets de isolamento de namespace).</li>
 <li>DNS interno (<code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>): <code>dns_server_main</code>, <code>handle_dns</code>,
   <code>dns_resolve_for</code>, <code>dns_resolve_multi_for</code> em <code>infra.rs</code>.</li>
 <li>Redes overlay: <code>set_vxlan</code> (<code>infra.rs</code>) e os helpers de WireGuard em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/wg.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/wg.rs</code></a>, orquestrados pelo <code>realize_overlay</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/wg.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/wg.rs</code></a>, orquestrados por <code>realize_overlay</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/network.rs</code></a>.</li>
 <li>CNI: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/cni.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/cni.rs</code></a> — <code>add</code>, <code>del</code>, <code>readiness</code>,
-  <code>attach_named_netns</code>. O uso rootless é opt-in (<code>enabled_conf</code> verifica <code>DELONIX_CNI=1</code>); o caminho
-  CRI em root usa a cadeia CNI do nó (<code>root_cni_readiness</code> em
+  <code>attach_named_netns</code>. O uso em rootless é opt-in (<code>enabled_conf</code> verifica <code>DELONIX_CNI=1</code>); o
+  caminho do CRI em root usa a cadeia CNI do nó (<code>root_cni_readiness</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc.rs</code></a>).</li>
 <li>Decisões de topologia: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0013-network-topology.md" target="_blank" rel="noopener">ADR-0013</a>,
   <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0014-runtime-dir-per-root.md" target="_blank" rel="noopener">ADR-0014</a>.</li>
 </ul>
 <p><strong>Ler mais:</strong> <a href="https://man7.org/linux/man-pages/man7/network_namespaces.7.html"><code>network_namespaces(7)</code></a>,
 <a href="https://man7.org/linux/man-pages/man4/veth.4.html"><code>veth(4)</code></a>,
-<a href="https://wiki.nftables.org/">wiki do nftables</a>,
+<a href="https://wiki.nftables.org/">nftables wiki</a>,
 <a href="https://github.com/rootless-containers/slirp4netns">slirp4netns</a>,
 <a href="https://docs.kernel.org/networking/vxlan.html">kernel — VXLAN</a>,
 <a href="https://www.wireguard.com/">WireGuard</a>,
 <a href="https://www.cni.dev/">CNI</a> e a sua <a href="https://www.cni.dev/docs/spec/">especificação</a>.</p>
 <hr />
 <h2 id="46-kubernetes-cri-kubelet-kubeadm-and-kind">4.6 Kubernetes: CRI, kubelet, kubeadm e kind<a class="hanchor" href="#46-kubernetes-cri-kubelet-kubeadm-and-kind" aria-label="#">#</a></h2>
-<p>O <strong>kubelet</strong> é o agente de nó do Kubernetes. Não corre containers ele próprio; fala com um runtime de
-containers através da <strong>Container Runtime Interface</strong>, uma API gRPC (<code>RuntimeService</code>,
-<code>ImageService</code>) servida num socket Unix local. O kubelet cria um <em>pod sandbox</em>
-(<code>RunPodSandbox</code>) e depois containers dentro dele. Tem também uma definição de <strong>cgroup driver</strong>
-(<code>systemd</code> ou <code>cgroupfs</code>) que tem de corresponder à forma como o runtime gere os cgroups, senão os
-cgroups dos pods e os cgroups dos containers divergem.</p>
-<p>O <strong>kubeadm</strong> faz o bootstrap de um cluster em máquinas existentes (<code>kubeadm init</code>, <code>kubeadm join</code>).
-O <strong>kind</strong> corre nós Kubernetes como containers construídos a partir da imagem <code>kindest/node</code>.</p>
+<p>O <strong>kubelet</strong> é o agente de nó do Kubernetes. Não corre containers ele próprio; fala com um
+runtime de containers através da <strong>Container Runtime Interface</strong>, uma API gRPC (<code>RuntimeService</code>,
+<code>ImageService</code>) servida num socket Unix local. O kubelet cria uma <em>pod sandbox</em>
+(<code>RunPodSandbox</code>) e depois os containers dentro dela. Tem também uma definição de <strong>cgroup
+driver</strong> (<code>systemd</code> ou <code>cgroupfs</code>) que tem de bater certo com a forma como o runtime gere
+cgroups, senão os cgroups do pod e os do container divergem.</p>
+<p>O <strong>kubeadm</strong> faz bootstrap de um cluster em máquinas já existentes (<code>kubeadm init</code>, <code>kubeadm
+join</code>). O <strong>kind</strong> corre nós Kubernetes como containers construídos a partir da imagem
+<code>kindest/node</code>.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
-<li>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a> é um servidor CRI <code>runtime.v1</code>. O protobuf é
-  <code>proto/api.proto</code> dentro desse crate, compilado pelo <code>build.rs</code> com <code>tonic-build</code>.
-  O binário é o <code>src/bin/delonix-cri.rs</code>.</li>
-<li>O cgroup driver reportado ao kubelet: <code>engine_cgroup_driver</code> em <code>runtime_svc.rs</code>; o seu doc comment
-  regista porque é que a resposta é a que é e o que teria de mudar para ser a outra.</li>
-<li>Um round-trip sobre gRPC real é testado em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a>.</li>
-<li>Comandos de bootstrap de clusters: kubeadm sobre SSH em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/cluster.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/cluster.rs</code></a>
-  (com <code>kubeadm_config.rs</code>, <code>etcd.rs</code>, <code>lb.rs</code>), e clusters locais ao estilo kind em <code>kindmode.rs</code>.</li>
+<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a> é um servidor CRI <code>runtime.v1</code>. O protobuf é <code>proto/api.proto</code>
+  dentro desse crate, compilado pelo <code>build.rs</code> com <code>tonic-build</code>. O binário é
+  <code>src/bin/delonix-cri.rs</code>.</li>
+<li>O cgroup driver reportado ao kubelet: <code>engine_cgroup_driver</code> em <code>runtime_svc.rs</code>; o seu
+  doc-comment regista porque é essa a resposta e o que teria de mudar para ser a outra.</li>
+<li>Um round-trip sobre gRPC real é testado em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a>.</li>
+<li>Comandos de bootstrap de cluster: kubeadm por SSH em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/cluster.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/cluster.rs</code></a> (com <code>kubeadm_config.rs</code>, <code>etcd.rs</code>, <code>lb.rs</code>), e
+  clusters locais ao estilo kind em <code>kindmode.rs</code>.</li>
 </ul>
 <p><strong>Ler mais:</strong> <a href="https://kubernetes.io/docs/concepts/architecture/cri/">Kubernetes — Container Runtime Interface</a>,
 <a href="https://github.com/kubernetes/cri-api">repositório cri-api</a>,
-<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/configure-cgroup-driver/">Configuring a cgroup driver</a>,
+<a href="https://kubernetes.io/docs/tasks/administer-cluster/kubeadm/configure-cgroup-driver/">Configurar um cgroup driver</a>,
 <a href="https://kubernetes.io/docs/reference/setup-tools/kubeadm/">kubeadm</a>,
 <a href="https://kind.sigs.k8s.io/">kind</a>.</p>
 <hr />
 <h2 id="47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init">4.7 Virtualização: KVM, virtio, Cloud Hypervisor, libvirt, cloud-init<a class="hanchor" href="#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init" aria-label="#">#</a></h2>
-<p>O <strong>KVM</strong> é o hypervisor do kernel, exposto como <code>/dev/kvm</code>; um <strong>VMM</strong> em espaço de utilizador (QEMU,
-Cloud Hypervisor) usa-o para correr convidados. O <strong>virtio</strong> é a família de dispositivos paravirtuais
-(disco, rede, partilha de sistema de ficheiros 9p) que os convidados usam para I/O eficiente. O <strong>Cloud
-Hypervisor</strong> é um VMM em Rust focado em cargas cloud que pode correr sem privilégio com acesso a
-<code>/dev/kvm</code>; arranca os convidados através de um firmware (um build UEFI do EDK2 ou o
-<code>rust-hypervisor-firmware</code>) ou directamente a partir de uma imagem de kernel.
-O <strong>libvirt</strong> gere domínios QEMU/KVM descritos em XML, através do <code>virsh</code> e do <code>libvirtd</code>.</p>
-<p>As cloud images são genéricas; a configuração por instância (hostname, chaves SSH, utilizadores, rede)
-vem do <strong>cloud-init</strong>, que lê um datasource. O datasource <strong>NoCloud</strong> é um pequeno ISO com a etiqueta
-<code>cidata</code> que contém <code>user-data</code>, <code>meta-data</code> e opcionalmente <code>network-config</code>.</p>
+<p>O <strong>KVM</strong> é o hipervisor do kernel, exposto como <code>/dev/kvm</code>; um <strong>VMM</strong> em user-space (QEMU,
+Cloud Hypervisor) usa-o para correr convidados. O <strong>virtio</strong> é a família de dispositivos
+paravirtuais (disco, rede, partilha de sistema de ficheiros 9p) que os convidados usam para I/O
+eficiente. O <strong>Cloud Hypervisor</strong> é um VMM em Rust focado em workloads cloud que consegue correr
+sem privilégio com acesso a <code>/dev/kvm</code>; arranca convidados através de um firmware (uma build UEFI
+EDK2 ou <code>rust-hypervisor-firmware</code>) ou directamente a partir de uma imagem de kernel. O
+<strong>libvirt</strong> gere domínios QEMU/KVM descritos em XML, via <code>virsh</code> e <code>libvirtd</code>.</p>
+<p>As cloud images são genéricas; a configuração por-instância (hostname, chaves SSH, utilizadores,
+rede) vem do <strong>cloud-init</strong>, que lê uma datasource. A datasource <strong>NoCloud</strong> é um pequeno ISO
+etiquetado <code>cidata</code> com <code>user-data</code>, <code>meta-data</code> e opcionalmente <code>network-config</code>.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
-<li>A porta é o <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, implementado por
+<li>A porta é <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>, implementada por
   <code>CloudHypervisorBackend</code> e <code>LibvirtBackend</code> aí e por <code>ProxmoxBackend</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>).</li>
-<li>Ordem de procura do firmware do Cloud Hypervisor: <code>DEFAULT_CH_FIRMWARES</code> (o <code>CLOUDHV.fd</code> do EDK2 antes
-  do <code>hypervisor-fw</code>); a linha de comandos do VMM é construída no <code>boot_ch</code>.</li>
-<li>XML de domínio do libvirt: <code>libvirt_domain_xml</code>.</li>
-<li>Geração do seed NoCloud: <code>generate_seed_iso</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vm.rs</code></a>.</li>
-<li>As VMs na SDN rootless recebem um lease DHCP derivado do seu MAC: <code>dhcp_lease_ip</code> em
+<li>Ordem de procura do firmware do Cloud Hypervisor: <code>DEFAULT_CH_FIRMWARES</code> (EDK2 <code>CLOUDHV.fd</code>
+  antes do <code>hypervisor-fw</code>); a linha de comandos do VMM é construída em <code>boot_ch</code>.</li>
+<li>XML de domínio libvirt: <code>libvirt_domain_xml</code>.</li>
+<li>Geração de seed NoCloud: <code>generate_seed_iso</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vm.rs</code></a>.</li>
+<li>As VMs na SDN rootless ganham um lease DHCP derivado do seu MAC: <code>dhcp_lease_ip</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>.</li>
-<li>Configuração prática e armadilhas conhecidas do host: <a href="microvm-setup.html">Configurar microVMs</a>.</li>
+<li>Configuração prática e armadilhas conhecidas do host: <a href="microvm-setup.html">Construir microVMs</a>.</li>
 </ul>
 <p><strong>Ler mais:</strong> <a href="https://docs.kernel.org/virt/kvm/index.html">kernel — KVM</a>,
 <a href="https://docs.oasis-open.org/virtio/virtio/">especificação virtio (OASIS)</a>,
@@ -457,27 +473,30 @@ vem do <strong>cloud-init</strong>, que lê um datasource. O datasource <strong>
 <a href="https://docs.cloud-init.io/en/latest/reference/datasources/nocloud.html">cloud-init NoCloud</a>.</p>
 <hr />
 <h2 id="48-declarative-reconciliation">4.8 Reconciliação declarativa<a class="hanchor" href="#48-declarative-reconciliation" aria-label="#">#</a></h2>
-<p>O Kubernetes popularizou um modelo em que os utilizadores submetem o <strong>estado desejado</strong> como objectos
-tipados (<code>apiVersion</code>, <code>kind</code>, <code>metadata</code>, <code>spec</code>), e os controladores comparam-no repetidamente com o
-<strong>estado real</strong> e agem para convergir. O <code>kubectl apply</code> acrescenta um <strong>diff de três vias</strong>: guarda a
-última configuração aplicada no próprio objecto, para conseguir distinguir «tiraste este campo do teu
-ficheiro» (reverte-o) de «alguém definiu este campo à mão» (deixa-o estar).</p>
+<p>O Kubernetes popularizou um modelo em que os utilizadores submetem <strong>estado desejado</strong> como
+objectos tipados (<code>apiVersion</code>, <code>kind</code>, <code>metadata</code>, <code>spec</code>), e controladores comparam-no
+repetidamente com o <strong>estado real</strong> e agem para convergir. O <code>kubectl apply</code> acrescenta um
+<strong>diff de três vias</strong>: guarda a última configuração aplicada no objecto, para conseguir
+distinguir "tiraste este campo do teu ficheiro" (reverte-o) de "alguém pôs este campo à mão"
+(deixa-o em paz).</p>
+<p>O princípio, e o que te pede quando acrescentas um Kind, estão em
+<a href="iaas-and-cloud-native.html#declarative-and-convergent">IaaS e cloud native — Declarativo e convergente</a>.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
-<li>O motor tem os seus próprios Kinds em grupos de API (o <code>delonix api-resources</code> lista-os). Os factos
-  sobre cada Kind (domínio, se converge, teardown, namespacing) vivem numa só tabela: <code>KindFacts</code>
-  em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>.</li>
+<li>O motor tem os seus próprios Kinds em grupos de API (<code>delonix api-resources</code> lista-os). Os
+  factos sobre cada Kind (domínio, se converge, teardown, namespacing) vivem numa tabela só:
+  <code>KindFacts</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>.</li>
 <li>O planeador é puro: <code>plan(desired, actual, stack)</code> em
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>. A documentação do módulo tem a tabela de verdade de
-  três vias, e o último spec aplicado é guardado no próprio recurso debaixo da anotação <code>LAST_APPLIED</code>
-  (<code>delonix.io/last-applied</code>) — não há um ficheiro de estado à parte.</li>
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>. O doc-comment do módulo tem a tabela de
+  verdade de três vias, e o último spec aplicado é guardado no próprio recurso sob a anotação
+  <code>LAST_APPLIED</code> (<code>delonix.io/last-applied</code>) — não há ficheiro de estado à parte.</li>
 <li>A posse é uma label no recurso; o histórico de revisões está em <code>revision.rs</code>
   (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0019-stack-revision-history.md" target="_blank" rel="noopener">ADR-0019</a>).</li>
-<li>Os manifestos são lidos em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a>; <code>stack plan</code>/<code>apply</code>
-  vivem em <code>cmd/stack.rs</code>.</li>
+<li>Os manifestos são analisados em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a>; <code>stack
+  plan</code>/<code>apply</code> vivem em <code>cmd/stack.rs</code>.</li>
 <li>Não há nenhum ciclo de controlador a correr em segundo plano: a reconciliação acontece quando um
-  comando corre (daemonless). O reconciliador pull proposto mantém essa propriedade por ser um timer do
-  systemd que invoca o mesmo apply, e não um processo residente
+  comando corre (daemonless). O reconciliador de pull proposto mantém essa propriedade por ser um
+  timer systemd que invoca o mesmo apply, não um processo residente
   (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0021-gitops-pull-reconciler.md" target="_blank" rel="noopener">ADR-0021</a>, estado <em>Proposed</em>).</li>
 </ul>
 <p><strong>Ler mais:</strong> <a href="https://kubernetes.io/docs/concepts/overview/working-with-objects/">Kubernetes — Objects</a>,
@@ -485,37 +504,41 @@ ficheiro» (reverte-o) de «alguém definiu este campo à mão» (deixa-o estar)
 <a href="https://kubernetes.io/docs/tasks/manage-kubernetes-objects/declarative-config/">Gestão declarativa com <code>kubectl apply</code></a>.</p>
 <hr />
 <h2 id="49-observability-and-the-mcp-interface">4.9 Observabilidade e a interface MCP<a class="hanchor" href="#49-observability-and-the-mcp-interface" aria-label="#">#</a></h2>
-<p>O <strong>OpenTelemetry</strong> é um padrão da CNCF para traces, métricas e logs, exportados por <strong>OTLP</strong> para um
-collector. O <strong>Prometheus</strong> recolhe métricas de um endpoint HTTP <code>/metrics</code> num formato de exposição em
-texto. O <strong>Model Context Protocol</strong> é um protocolo aberto que permite a clientes de IA descobrir e chamar
-ferramentas expostas por um servidor, normalmente sobre stdio.</p>
+<p>O <strong>OpenTelemetry</strong> é um padrão CNCF para traces, métricas e logs, exportados por <strong>OTLP</strong> para
+um colector. O <strong>Prometheus</strong> faz scrape de métricas a partir de um endpoint HTTP <code>/metrics</code> num
+formato de exposição em texto. O <strong>Model Context Protocol</strong> é um protocolo aberto que deixa
+clientes de IA descobrir e chamar ferramentas expostas por um servidor, normalmente sobre stdio.</p>
 <p><strong>No Delonix</strong></p>
 <ul>
 <li>Logging estruturado e spans OTLP opcionais: <code>init</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> (os spans só são exportados quando
-  <code>DELONIX_OTLP_ENDPOINT</code> está definido; o exportador corre na sua própria thread, para que a CLI
-  síncrona não precise de runtime async).</li>
-<li>Registo Prometheus (prefixo <code>delonix</code>) e codificação em texto: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a>
-  (<code>encode</code>). A API de gestão local serve <code>/metrics</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt/src/lib.rs</code></a>.</li>
-<li>MCP: <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> (construído sobre <a href="https://docs.rs/rmcp"><code>rmcp</code></a>, transporte stdio),
-  com o binário em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin</code></a>. Âmbito e limites:
+  <code>DELONIX_OTLP_ENDPOINT</code> está definida; o exportador corre na sua própria thread para a CLI
+  síncrona não precisar de nenhum runtime assíncrono).</li>
+<li>Registo Prometheus (prefixo <code>delonix</code>) e codificação em texto:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/metrics.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/metrics.rs</code></a> (<code>encode</code>). A API de gestão local serve
+  <code>/metrics</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt/src/lib.rs</code></a>.</li>
+<li>MCP: <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> (construído sobre o <a href="https://docs.rs/rmcp"><code>rmcp</code></a>,
+  transporte stdio), com o binário em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin</code></a>. Âmbito e limites:
   <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>.</li>
 </ul>
-<p><strong>Ler mais:</strong> <a href="https://opentelemetry.io/docs/">documentação do OpenTelemetry</a>,
-<a href="https://opentelemetry.io/docs/specs/otlp/">especificação OTLP</a>,
+<p><strong>Ler mais:</strong> <a href="https://opentelemetry.io/docs/">Documentação do OpenTelemetry</a>,
+<a href="https://opentelemetry.io/docs/specs/otlp/">Especificação OTLP</a>,
 <a href="https://prometheus.io/docs/instrumenting/exposition_formats/">Prometheus — formatos de exposição</a>,
 <a href="https://modelcontextprotocol.io/">Model Context Protocol</a>.</p>
 <hr />
 <h2 id="410-daemonless-in-one-paragraph">4.10 Daemonless, num parágrafo<a class="hanchor" href="#410-daemonless-in-one-paragraph" aria-label="#">#</a></h2>
-<p>O containerd e o Docker Engine mantêm um daemon residente que é dono do estado dos containers; o Podman
-mostrou que um runtime pode, em vez disso, ser um comando que sai, com processos auxiliares por container
-e o systemd para tudo o que tenha de persistir. O Delonix segue o segundo modelo: a CLI faz o trabalho e
-sai, o estado são ficheiros debaixo da raiz de estado protegidos por <code>flock</code> (ver
+<p>O containerd e o Docker Engine mantêm um daemon residente que possui o estado dos containers; o
+Podman mostrou que um runtime pode ser, em vez disso, um comando que sai, com processos auxiliares
+por-container e o systemd para tudo o que tem de persistir. O Delonix segue o segundo modelo: a
+CLI faz o trabalho e sai, o estado são ficheiros debaixo do state root guardados por <code>flock</code> (ver
 <a href="rust-primer.html#38-concurrency-and-shared-state">Introdução ao Rust §3.8</a>), existe um processo
 supervisor por container destacado, o holder de rede só existe enquanto algo precisa dele, e a
-persistência no arranque são units do systemd (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>). As
-consequências — boas e más — são discutidas em <a href="architecture.html">Arquitectura</a> e
-<a href="system-design-interview.html">System design interview</a>.</p>
+persistência no arranque são units systemd
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>). As consequências — boas e más — são discutidas em
+<a href="architecture.html">Arquitectura</a> e <a href="system-design-interview.html">System Design Interview</a>. O
+princípio em si, e a regra de que um daemon novo precisa de um ADR, estão em
+<a href="iaas-and-cloud-native.html#daemonless">IaaS e cloud native — Daemonless</a>.</p>
+<hr />
 <nav class="pager"><a href="linux-foundations.html"><span>← Anterior</span>Linux foundations</a><a class="next" href="rust-primer.html"><span>Seguinte →</span>Introdução ao Rust para esta base de código</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/cloud-native-primer.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/cloud-native-primer.md</code></footer>
 </div></main>
