@@ -1,6 +1,6 @@
 # ADR-0042: One engine API — one version number, Richardson maturity, published docs
 
-- **Status:** Proposed (2026-09-17)
+- **Status:** Accepted (2026-09-17) — steps A and B delivered (#388, #389); step C and onwards wait for the node API server being built in another session, and follow this ADR when they land
 - **Date:** 2026-09-17
 - **Deciders:** Walter (owner)
 - **Builds on, does not reopen:** ADR-0040 D4 (one contract in `proto/delonix/node/v1`, gRPC
@@ -124,8 +124,8 @@ Each step is one PR, measured, with the E2E battery green.
 
 | Step | What | Done when |
 |---|---|---|
-| A | This ADR and the discovery map | merged |
-| B | Remove the consumer transport (`http_post_json`, `http_get_auth`, `http_post_stream`) | no caller, no re-export, battery green |
+| A | This ADR and the discovery map | merged — #388 |
+| B | Remove the consumer transport (`http_post_json`, `http_get_auth`, `http_post_stream`) | no caller, no re-export, battery green — #389 |
 | C | `delonix-node-proto` (prost/tonic) + `delonix-node-api` skeleton on the socket: `GET /v1`, `/openapi.json`, `/docs`, `/redoc`, `NodeService` health/info/capacity; `delonix serve api` runs it | the three doc endpoints answer; spike result on REST transcoding recorded |
 | D | The D2 conventions as one layer (problem+json, `ETag`/`If-Match`, `Link`, pagination, idempotency) and `links` in the contract | conformance suite covers each |
 | E | Coverage waves over the contract (containers, VMs, networks, volumes, images, operations, stacks), each mapped `delonix-mgmt` path migrated | every row of the discovery map is served, refused with a reason, or marked missing |
