@@ -323,6 +323,7 @@ mod tests {
                 | Error::Unavailable(_)
                 | Error::Timeout(_) => true,
                 Error::Io(_) | Error::Json(_) | Error::Runtime { .. } => false,
+                Error::Coded { .. } => unreachable!("root() looks through the carrier"),
             };
             let rendered = e.to_string();
             let matched = split_error_wrapper(&rendered).is_some();

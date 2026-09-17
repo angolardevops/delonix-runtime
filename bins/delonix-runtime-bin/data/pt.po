@@ -11289,3 +11289,68 @@ msgstr "Com um código ou `codes`: imprime JSON, na língua escolhida."
 msgid "--json applies to a code or to `codes`, not to a Kind"
 msgstr "o --json aplica-se a um código ou a `codes`, não a um Kind"
 
+
+# dicionário: entradas do scanner (ADR-0043 passo 4)
+msgid "empty SBOM"
+msgstr "SBOM vazio"
+
+msgid "The image has no apk or dpkg package database, so there is nothing to scan for vulnerabilities."
+msgstr "A imagem não tem base de dados de pacotes apk ou dpkg, por isso não há nada para procurar vulnerabilidades."
+
+msgid "Scan an image built on a distribution with a package manager, or scan its base image instead."
+msgstr "Analisa uma imagem construída sobre uma distribuição com gestor de pacotes, ou analisa antes a imagem base."
+
+msgid "invalid advisory database"
+msgstr "base de dados de avisos inválida"
+
+msgid "The advisory database the scanner loaded is not valid JSON."
+msgstr "A base de dados de avisos que o scanner carregou não é JSON válido."
+
+msgid "Sync it again with `delonix image scan --update --feed <url>`."
+msgstr "Sincroniza-a outra vez com `delonix image scan --update --feed <url>`."
+
+msgid "OSV feed is not JSON"
+msgstr "o feed OSV não é JSON"
+
+msgid "The feed given to the scanner could not be parsed as JSON."
+msgstr "O feed dado ao scanner não pôde ser lido como JSON."
+
+msgid "Check the --feed URL points at an OSV JSON export, not an HTML page."
+msgstr "Confirma que o URL do --feed aponta para uma exportação OSV em JSON, e não para uma página HTML."
+
+msgid "OSV feed has the wrong shape"
+msgstr "o feed OSV tem a forma errada"
+
+msgid "The feed is JSON but neither an array of advisories nor an object with a vulns array."
+msgstr "O feed é JSON mas não é uma lista de avisos nem um objecto com uma lista vulns."
+
+msgid "Point --feed at an OSV export: an array of advisories, or an object with a vulns array."
+msgstr "Aponta o --feed para uma exportação OSV: uma lista de avisos, ou um objecto com uma lista vulns."
+
+msgid "not an Odoo module"
+msgstr "não é um módulo Odoo"
+
+msgid "The directory named as a module has no __manifest__.py."
+msgstr "O directório indicado como módulo não tem __manifest__.py."
+
+msgid "Point the scan at the module's own directory, the one holding __manifest__.py."
+msgstr "Aponta a análise para o directório do próprio módulo, o que tem o __manifest__.py."
+
+msgid "no Odoo module found"
+msgstr "nenhum módulo Odoo encontrado"
+
+msgid "No directory under the path given has a __manifest__.py."
+msgstr "Nenhum directório abaixo do caminho indicado tem __manifest__.py."
+
+msgid "Point the scan at the directory that contains the modules."
+msgstr "Aponta a análise para o directório que contém os módulos."
+
+msgid "a module tree could not be read"
+msgstr "não foi possível ler a árvore de módulos"
+
+msgid "Reading the module directory failed: a permission, a missing path or an I/O error."
+msgstr "A leitura do directório de módulos falhou: uma permissão, um caminho em falta ou um erro de I/O."
+
+msgid "Check the path in the message is readable by this user."
+msgstr "Confirma que o caminho na mensagem é legível por este utilizador."
+
