@@ -197,6 +197,11 @@ jobs:
         run: python3 -m pip install --break-system-packages markdown
       - name: Regenera o site
         run: python3 docs/gen.py
+      # The contributor handbook site (docs/handbook/<lang>/) is generated from
+      # docs/dev/; publishing it hand-edited or stale would show readers pages
+      # that no longer match the Markdown they review.
+      - name: Contributor handbook site matches docs/dev
+        run: python3 scripts/dev_docs_site.py --check
       - name: O site publicado tem de ser o gerado
         run: |
           if ! git diff --quiet -- docs/; then

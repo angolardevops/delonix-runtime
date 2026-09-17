@@ -43,6 +43,44 @@ MARKER = re.compile(
     re.S,
 )
 
+# The handbook's languages. English is the source; a translation lives in
+# docs/dev/<lang>/ with the same file names. Generated regions are rendered in
+# each page's own language (only the prose — identifiers stay as in the code).
+LANGS = ("en", "pt-AO", "fr-FR")
+
+PROSE = {
+    "en": {
+        "toolchain": "- **Rust toolchain:** `{channel}` (pinned in `rust-toolchain.toml`; `rustup` installs it on the first `cargo` call)\n- **Components:** {components}\n",
+        "layer_head": "| Layer | May depend on |",
+        "exceptions": "Declared exceptions (each one names the ADR-0040 phase that removes it):",
+        "removed_in": "removed in",
+        "crates_head": "| Crate | Layer | Path | Binaries | Depends on (engine crates) | Used by |",
+        "ci_head": "| CI job | What it checks |",
+        "crate_count": "The workspace has **{crates} crates** and ships **{bins} binaries** ({names}).\n",
+        "ratchets": "`scripts/arch_fitness.py` keeps **{n} debt ratchets** (baseline in `scripts/arch_baseline.json`):",
+    },
+    "pt-AO": {
+        "toolchain": "- **Toolchain de Rust:** `{channel}` (fixada no `rust-toolchain.toml`; o `rustup` instala-a na primeira chamada ao `cargo`)\n- **Componentes:** {components}\n",
+        "layer_head": "| Camada | Pode depender de |",
+        "exceptions": "Excepções declaradas (cada uma nomeia a fase do ADR-0040 que a remove):",
+        "removed_in": "removida na",
+        "crates_head": "| Crate | Camada | Caminho | Binários | Depende de (crates do motor) | Usado por |",
+        "ci_head": "| Job de CI | O que verifica |",
+        "crate_count": "O workspace tem **{crates} crates** e produz **{bins} binários** ({names}).\n",
+        "ratchets": "O `scripts/arch_fitness.py` mantém **{n} ratchets de dívida** (linha de base em `scripts/arch_baseline.json`):",
+    },
+    "fr-FR": {
+        "toolchain": "- **Chaîne d'outils Rust :** `{channel}` (épinglée dans `rust-toolchain.toml` ; `rustup` l'installe au premier appel à `cargo`)\n- **Composants :** {components}\n",
+        "layer_head": "| Couche | Peut dépendre de |",
+        "exceptions": "Exceptions déclarées (chacune nomme la phase de l'ADR-0040 qui la supprime) :",
+        "removed_in": "supprimée en",
+        "crates_head": "| Crate | Couche | Chemin | Binaires | Dépend de (crates du moteur) | Utilisé par |",
+        "ci_head": "| Job CI | Ce qu'il vérifie |",
+        "crate_count": "Le workspace compte **{crates} crates** et livre **{bins} binaires** ({names}).\n",
+        "ratchets": "`scripts/arch_fitness.py` maintient **{n} cliquets de dette** (référence dans `scripts/arch_baseline.json`) :",
+    },
+}
+
 LAYER_ORDER = ["foundation", "context", "adapter", "provider", "interface", "bin"]
 LAYER_TITLE = {
     "foundation": "Foundation",
@@ -103,18 +141,14 @@ def layer_of(arch, name: str) -> str:
     return layer
 
 
-def render_toolchain() -> str:
+def render_toolchain(lang: str) -> str:
     toolchain = tomllib.loads((ROOT / "rust-toolchain.toml").read_text())["toolchain"]
     components = ", ".join(f"`{c}`" for c in toolchain.get("components", []))
-    return (
-        f"- **Rust toolchain:** `{toolchain['channel']}` (pinned in `rust-toolchain.toml`; "
-        f"`rustup` installs it on the first `cargo` call)\n"
-        f"- **Components:** {components}\n"
-    )
+    return PROSE[lang]["toolchain"].format(channel=toolchain["channel"], components=components)
 
 
-def render_layers(arch) -> str:
-    lines = ["| Layer | May depend on |", "|---|---|"]
+def render_layers(arch, lang: str) -> str:
+    lines = [PROSE[lang]["layer_head"], "|---|---|"]
     for layer in LAYER_ORDER:
         allowed = ", ".join(LAYER_TITLE[x].lower() for x in LAYER_ORDER if x in arch.ALLOWED.get(layer, set()))
         lines.append(f"| {LAYER_TITLE[layer]} | {allowed or '—'} |")
@@ -122,20 +156,20 @@ def render_layers(arch) -> str:
         (key, value) for key, value in arch.EXCEPTIONS.items() if key[0] == "dep"
     )
     if exceptions:
-        lines += ["", "Declared exceptions (each one names the ADR-0040 phase that removes it):", ""]
+        lines += ["", PROSE[lang]["exceptions"], ""]
         for (_, source, target), (phase, _why) in exceptions:
-            lines.append(f"- `{source}` → `{target}` — removed in **{phase}**")
+            lines.append(f"- `{source}` → `{target}` — {PROSE[lang]['removed_in']} **{phase}**")
     return "\n".join(lines) + "\n"
 
 
-def render_crates_table(arch, crates: list[dict]) -> str:
+def render_crates_table(arch, crates: list[dict], lang: str) -> str:
     dependents: dict[str, list[str]] = {c["name"]: [] for c in crates}
     for crate in crates:
         for dep in crate["deps"]:
             dependents.setdefault(dep, []).append(crate["name"])
     ordered = sorted(crates, key=lambda c: (LAYER_ORDER.index(layer_of(arch, c["name"])), c["name"]))
     lines = [
-        "| Crate | Layer | Path | Binaries | Depends on (engine crates) | Used by |",
+        PROSE[lang]["crates_head"],
         "|---|---|---|---|---|---|",
     ]
     for crate in ordered:
@@ -194,13 +228,13 @@ def ci_jobs() -> list[tuple[str, str]]:
     return jobs
 
 
-def render_ci_gates() -> str:
-    lines = ["| CI job | What it checks |", "|---|---|"]
+def render_ci_gates(lang: str) -> str:
+    lines = [PROSE[lang]["ci_head"], "|---|---|"]
     lines += [f"| `{job}` | {name} |" for job, name in ci_jobs()]
     return "\n".join(lines) + "\n"
 
 
-def render_ratchets() -> str:
+def render_ratchets(lang: str) -> str:
     """The NAMES of the debt ratchets, from the baseline the gate compares against — not
     their values, which change every time the debt goes down. A ratchet added to
     arch_fitness.py lands in the baseline in the same commit, and so here."""
@@ -208,32 +242,40 @@ def render_ratchets() -> str:
 
     names = json.loads((ROOT / "scripts" / "arch_baseline.json").read_text())
     lines = [f"- `{name}`" for name in names]
-    return (
-        f"`scripts/arch_fitness.py` keeps **{len(names)} debt ratchets** "
-        "(baseline in `scripts/arch_baseline.json`):\n\n" + "\n".join(lines) + "\n"
-    )
+    return PROSE[lang]["ratchets"].format(n=len(names)) + "\n\n" + "\n".join(lines) + "\n"
 
 
-def render_crate_count(crates: list[dict]) -> str:
+def render_crate_count(crates: list[dict], lang: str) -> str:
     bins = sorted(b for c in crates for b in c["bins"])
-    return (
-        f"The workspace has **{len(crates)} crates** and ships **{len(bins)} binaries** "
-        f"({', '.join(f'`{b}`' for b in bins)}).\n"
+    return PROSE[lang]["crate_count"].format(
+        crates=len(crates), bins=len(bins), names=", ".join(f"`{b}`" for b in bins)
     )
 
 
-def regions() -> dict[str, str]:
+def regions(lang: str = "en") -> dict[str, str]:
     arch = load_arch_fitness()
     crates = workspace_crates()
     return {
-        "toolchain": render_toolchain(),
-        "layers": render_layers(arch),
-        "crate-count": render_crate_count(crates),
-        "crates-table": render_crates_table(arch, crates),
+        "toolchain": render_toolchain(lang),
+        "layers": render_layers(arch, lang),
+        "crate-count": render_crate_count(crates, lang),
+        "crates-table": render_crates_table(arch, crates, lang),
         "crates-graph": render_crates_graph(arch, crates),
-        "ci-gates": render_ci_gates(),
-        "ratchets": render_ratchets(),
+        "ci-gates": render_ci_gates(lang),
+        "ratchets": render_ratchets(lang),
     }
+
+
+def lang_dir(lang: str) -> Path:
+    return DEV_DOCS if lang == "en" else DEV_DOCS / lang
+
+
+def strip_regions(text: str) -> str:
+    """The page without the bodies of its generated regions. A translation records the
+    hash of THIS form of its English source, so regenerating facts (a crate added,
+    a CI job renamed) does not mark every translation as behind — only a change to
+    the narrative does."""
+    return MARKER.sub(lambda m: m.group(1) + m.group(4), text)
 
 
 def rewrite(text: str, generated: dict[str, str], path: Path) -> str:
@@ -251,17 +293,20 @@ def main() -> int:
     parser.add_argument("--check", action="store_true", help="fail instead of writing when docs/dev is stale")
     args = parser.parse_args()
 
-    generated = regions()
     stale = []
     used = set()
-    for path in sorted(DEV_DOCS.glob("*.md")):
-        text = path.read_text()
-        used.update(m.group("key") for m in MARKER.finditer(text))
-        new = rewrite(text, generated, path)
-        if new != text:
-            stale.append(path.relative_to(ROOT))
-            if not args.check:
-                path.write_text(new)
+    for lang in LANGS:
+        generated = regions(lang)
+        for path in sorted(lang_dir(lang).glob("*.md")):
+            text = path.read_text()
+            if lang == "en":
+                used.update(m.group("key") for m in MARKER.finditer(text))
+            new = rewrite(text, generated, path)
+            if new != text:
+                stale.append(path.relative_to(ROOT))
+                if not args.check:
+                    path.write_text(new)
+    generated = regions("en")
 
     # A region nobody renders is a fact the handbook silently stopped stating.
     unused = sorted(set(generated) - used)
