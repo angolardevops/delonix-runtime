@@ -2386,6 +2386,14 @@ if "$BIN" pod create -f "$PPY" >/dev/null 2>&1 && pp_wait 200; then
   "$BIN" container rm -f "pp$PFX-web" >/dev/null 2>&1
   check "o rm -f de um membro de pod liberta a porta" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$PPORT')\" ]"
   check "e um pod novo na mesma porta é aceite" ok "$BIN" pod create -f "$PPY"
+  # Publicar a QUENTE num membro também passa pelo ingress. Era recusado com
+  # «created without `-p` and without `--net`», que não era a razão.
+  HPORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+  check "container update --publish-add num membro de pod" ok "$BIN" container update --publish-add "$HPORT:8080" "pp$PFX-web"
+  check "e a porta publicada a quente responde" ok bash -c \
+    "for _ in \$(seq 1 30); do [ \"\$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:$HPORT/)\" = 200 ] && exit 0; sleep 0.5; done; exit 1"
+  check "container update --publish-rm num membro de pod" ok "$BIN" container update --publish-rm "$HPORT" "pp$PFX-web"
+  check "e a porta deixa de escutar" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$HPORT')\" ]"
   "$BIN" container rm -f "pp$PFX-web" >/dev/null 2>&1
 else
   skip "portas de um membro de pod" "o pod create com porta falhou (holder/SDN indisponível)"
