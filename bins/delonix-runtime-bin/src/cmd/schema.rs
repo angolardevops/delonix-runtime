@@ -478,6 +478,14 @@ pub fn run(action: SchemaCmd) -> Result<()> {
 /// Resolves `$ref`s as it walks, so a nested type reads like the YAML the user
 /// is going to write rather than like the JSON Schema it comes from.
 pub fn explain(path: &str) -> Result<()> {
+    // A numbered code (ADR-0043) never parses as a Kind — no Kind is four digits —,
+    // so one verb answers both «what is this field» and «what is this code».
+    if let Some(number) = delonix_model::codes::parse(path) {
+        return super::codes::explain(number);
+    }
+    if path == "codes" {
+        return super::codes::list();
+    }
     let (kind, rest) = match path.split_once('.') {
         Some((k, r)) => (k, Some(r)),
         None => (path, None),
