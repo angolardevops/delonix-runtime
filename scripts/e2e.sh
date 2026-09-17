@@ -1121,6 +1121,31 @@ fi
 sleep 2
 check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $RS_SLEEP' | wc -l)\" = 0 ]"
 
+# `stop` seguido de `start` enquanto o supervisor da encarnação anterior ainda não
+# registou a morte: gravava `pid = None` por cima do pid que o `start` acabara de
+# gravar. O registo perdia o processo novo — `stop` já não o alcançava, cada `start`
+# arrancava outro, e ele sobrevivia ao `rm -f`. A corrida depende do escalonador;
+# congelar o supervisor antigo (SIGSTOP) torna-a determinística.
+SS_SLEEP=$(( 5000 + RANDOM % 900 ))
+"$BIN" container run -d --net none --name "ss-$PFX" "$IMG" sleep "$SS_SLEEP" >/dev/null 2>&1
+sleep 1
+SS_INIT=$(pgrep -f -x "sleep $SS_SLEEP" | head -1)
+SS_SUP=$( [ -n "$SS_INIT" ] && ps -o ppid= -p "$SS_INIT" | tr -d ' ')
+if [ -n "$SS_SUP" ] && kill -STOP "$SS_SUP" 2>/dev/null; then
+  "$BIN" container stop -t 0 "ss-$PFX" >/dev/null 2>&1
+  "$BIN" container start "ss-$PFX" >/dev/null 2>&1
+  kill -CONT "$SS_SUP" 2>/dev/null
+  sleep 2
+  check "um supervisor atrasado não apaga o pid da encarnação nova" ok bash -c \
+    "live=\$(pgrep -f -x 'sleep $SS_SLEEP'); [ \"\$(echo \"\$live\" | wc -w)\" = 1 ] && [ \"\$('$BIN' container inspect 'ss-$PFX' | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d; print(d.get(\"pid\"))')\" = \"\$live\" ]"
+else
+  skip "um supervisor atrasado não apaga o pid da encarnação nova" "não encontrei o supervisor do container"
+fi
+"$BIN" container rm -f "ss-$PFX" >/dev/null 2>&1
+sleep 1
+check "e o rm -f não deixa o processo para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $SS_SLEEP' | wc -l)\" = 0 ]"
+pkill -9 -f -x "sleep $SS_SLEEP" 2>/dev/null || true
+
 # Um perfil seccomp que permite tudo e não nomeia syscalls (ou só repete a acção
 # por omissão) é válido para o Docker e o Podman, e abortava o container com 126:
 # o seccompiler recusa um filtro cujas duas acções são iguais. Uma regra que
