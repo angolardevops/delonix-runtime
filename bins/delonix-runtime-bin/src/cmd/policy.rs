@@ -29,7 +29,7 @@
 //! is what is left over and cannot move: reading the file, rendering a refusal
 //! in the operator's language, and recording the event.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_security_runtime as srt;
 use srt::admission::{Decision, Violation, Workload};
 use srt::policy::SecurityPolicy;

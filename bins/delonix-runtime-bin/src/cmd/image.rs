@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
+use delonix_model::{Error, Result};
 use delonix_oci::ImageStore;
-use delonix_runtime_core::{Error, Result};
 use oci_spec::runtime::{
     get_default_maskedpaths, get_default_mounts, get_default_namespaces,
     get_default_readonly_paths, Capability, LinuxBuilder, LinuxCapabilitiesBuilder, ProcessBuilder,
@@ -1236,7 +1236,7 @@ fn cmd_rm(
         }
     }
     let removed = images.remove(reference)?;
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &super::util::state_root(),
         "image",
         "remove",

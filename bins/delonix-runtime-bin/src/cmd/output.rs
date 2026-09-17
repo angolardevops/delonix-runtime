@@ -33,9 +33,9 @@ pub enum OutputFormat {
 /// Prints `items` as a pretty JSON **array** (one element per resource, `[]` when
 /// empty) — the ADR-0005 contract for `-o json`. Newline-terminated, no human
 /// chrome, safe to pipe into `jq`.
-pub fn print_json<T: serde::Serialize>(items: &[T]) -> delonix_runtime_core::Result<()> {
+pub fn print_json<T: serde::Serialize>(items: &[T]) -> delonix_model::Result<()> {
     let s = serde_json::to_string_pretty(items)
-        .map_err(|e| delonix_runtime_core::Error::Invalid(format!("json output: {e}")))?;
+        .map_err(|e| delonix_model::Error::Invalid(format!("json output: {e}")))?;
     println!("{s}");
     Ok(())
 }
@@ -133,7 +133,7 @@ pub fn error(msg: &str) {
 /// An engine failure: the label carries its dictionary code (ADR-0043), so the
 /// number survives whatever language the message was printed in —
 /// `error[DX-4501] no such VM: dev`. `delonix explain DX-4501` says the rest.
-pub fn engine_error(e: &delonix_runtime_core::Error) {
+pub fn engine_error(e: &delonix_model::Error) {
     eprintln!(
         "{} {}",
         paint(color::RED, &coded_label(e)),
@@ -142,7 +142,7 @@ pub fn engine_error(e: &delonix_runtime_core::Error) {
 }
 
 /// `error[DX-4501]` — the label [`engine_error`] prints, without colour.
-pub fn coded_label(e: &delonix_runtime_core::Error) -> String {
+pub fn coded_label(e: &delonix_model::Error) -> String {
     format!(
         "{}[{}]",
         label_error(),
@@ -550,7 +550,7 @@ pub fn fmt_local(unix: u64) -> String {
     )
 }
 
-pub use delonix_runtime_core::now_unix;
+pub use delonix_node::now_unix;
 
 /// Relative age in `docker ps` style — "About a minute ago", "3 hours ago".
 /// Pure function on `secs` so it's testable without a clock.
@@ -648,9 +648,9 @@ pub fn uptime_from_starttime(starttime_jiffies: u64) -> Option<u64> {
 /// `pod create` (one member). They share this instead of each printing its own
 /// pair, because a `•` that a later `✓` has to match is exactly the kind of
 /// agreement that drifts when it is written twice.
-pub fn announced<T, F>(label: &str, icon: &str, f: F) -> delonix_runtime_core::Result<T>
+pub fn announced<T, F>(label: &str, icon: &str, f: F) -> delonix_model::Result<T>
 where
-    F: FnOnce() -> delonix_runtime_core::Result<T>,
+    F: FnOnce() -> delonix_model::Result<T>,
 {
     eprintln!(" {} {label} {icon}", paint(color::YELLOW, "•"));
     let t0 = std::time::Instant::now();
@@ -683,9 +683,9 @@ impl Layers {
     /// the Kind's own `apply`; its error passes straight through, with the layer
     /// closed as ✗ first so the failure is attributed to the layer that produced
     /// it rather than to the apply as a whole.
-    pub fn run<F>(&mut self, kind: &str, icon: &str, f: F) -> delonix_runtime_core::Result<()>
+    pub fn run<F>(&mut self, kind: &str, icon: &str, f: F) -> delonix_model::Result<()>
     where
-        F: FnOnce() -> delonix_runtime_core::Result<()>,
+        F: FnOnce() -> delonix_model::Result<()>,
     {
         let n = self.counts.get(kind).copied().unwrap_or(0);
         // `Ingress` folds into `HTTPRoute` at load, so both count toward that layer.

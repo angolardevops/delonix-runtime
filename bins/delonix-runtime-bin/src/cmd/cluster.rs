@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};

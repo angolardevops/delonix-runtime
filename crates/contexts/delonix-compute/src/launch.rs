@@ -6,7 +6,9 @@
 //! decision of who becomes the process's parent (a supervisor, or the caller)
 //! and the cleanup of a start that never happened are the use case, [`start`].
 
-use delonix_runtime_core::{Container, Mount, Result, Status};
+use crate::{Container, Mount};
+use delonix_model::records::Status;
+use delonix_model::Result;
 
 use crate::RunOpts;
 
@@ -169,7 +171,7 @@ pub fn should_restart(policy: &str, status: &Status, restarts: u32) -> bool {
 mod tests {
     #[test]
     fn restart_policy_docker_semantics() {
-        use delonix_runtime_core::Status as S;
+        use delonix_model::records::Status as S;
         // `no` (and unknown ones): never restarts, however it died.
         for st in [S::Stopped, S::Failed(1), S::Crashed] {
             assert!(!should_restart("no", &st, 0));
@@ -194,7 +196,7 @@ mod tests {
     }
 
     use super::*;
-    use delonix_runtime_core::Error;
+    use delonix_model::Error;
     use std::cell::RefCell;
 
     #[derive(Default)]

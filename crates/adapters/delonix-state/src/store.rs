@@ -5,7 +5,7 @@
 //! `rename`).
 
 use crate::{Error, Result};
-use delonix_runtime_core::Container;
+use delonix_compute::Container;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs;
@@ -258,7 +258,7 @@ struct Ident {
     id: String,
     #[serde(default)]
     name: String,
-    #[serde(default = "delonix_runtime_core::default_namespace")]
+    #[serde(default = "delonix_model::records::default_namespace")]
     namespace: String,
     #[serde(default)]
     created_unix: u64,
@@ -576,14 +576,12 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use delonix_runtime_core::Container;
+    use delonix_compute::Container;
 
     #[test]
     fn store_round_trip_and_lookup() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-test-{}",
-            delonix_runtime_core::generate_id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("delonix-test-{}", delonix_node::generate_id()));
         let store = Store::open(&dir).unwrap();
 
         let mut c = Container::new(
@@ -594,7 +592,7 @@ mod tests {
             "64M".to_string(),
         );
         c.pid = Some(4242);
-        c.status = delonix_runtime_core::Status::Running;
+        c.status = delonix_model::records::Status::Running;
         store.save(&c).unwrap();
 
         assert_eq!(store.load("aaaa1111bbbb2222").unwrap().pid, Some(4242));

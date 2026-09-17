@@ -1,7 +1,7 @@
 //! The model of an image and its local store.
 
 use crate::cas::{strip, Cas};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -306,4 +306,4 @@ pub fn normalise_tag(name: &str) -> String {
 }
 
 /// The current instant in Unix seconds.
-pub use delonix_runtime_core::now_unix;
+pub use delonix_node::now_unix;

@@ -19,7 +19,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use delonix_runtime_core::{Container, Error as EngineError};
+use delonix_compute::Container;
+use delonix_model::Error as EngineError;
 use delonix_state::Store;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
@@ -131,7 +132,7 @@ fn list_containers(base: &Path) -> Result<Vec<Container>, ErrorData> {
         .map_err(|e| from_engine_error(e.into()))
 }
 
-fn list_vms(base: &Path) -> Result<Vec<delonix_runtime_core::Vm>, ErrorData> {
+fn list_vms(base: &Path) -> Result<Vec<delonix_compute::Vm>, ErrorData> {
     delonix_vm::list(base).map_err(from_engine_error)
 }
 
@@ -810,7 +811,7 @@ pub fn doctor_checks(base: &Path) -> Vec<(&'static str, bool, String)> {
 
     // The CLI the mutations run: never this executable, which is the MCP server
     // (`delonix mcp` runs `delonix-mcp`), and the answer must be a file that exists.
-    let bin = delonix_runtime_core::dispatch::cli_bin();
+    let bin = delonix_node::dispatch::cli_bin();
     let found = if bin.is_absolute() {
         bin.is_file().then(|| bin.clone())
     } else {
@@ -837,7 +838,7 @@ pub fn doctor_checks(base: &Path) -> Vec<(&'static str, bool, String)> {
 /// that is `delonix-mcp`, and re-running it would start another server instead
 /// of running the command.
 fn run_cli_blocking(base: &Path, args: Vec<String>) -> Result<(bool, String), String> {
-    let bin = delonix_runtime_core::dispatch::cli_bin();
+    let bin = delonix_node::dispatch::cli_bin();
     let out = std::process::Command::new(&bin)
         .env("DELONIX_ROOT", base)
         .args(&args)

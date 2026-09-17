@@ -15,7 +15,7 @@
 
 use std::path::{Path, PathBuf};
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 use super::util::state_root;

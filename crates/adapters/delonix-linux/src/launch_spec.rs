@@ -8,7 +8,7 @@
 
 use crate::{DnsConfig, RunSpec, StartedHook};
 use delonix_compute::launch::Launch;
-use delonix_runtime_core::Container;
+use delonix_compute::Container;
 
 /// The spawn specification for container `c` started as `l`.
 ///

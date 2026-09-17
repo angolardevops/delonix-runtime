@@ -4,7 +4,7 @@
 //! an AI client's configuration only ever name `delonix`.
 
 use clap::Subcommand;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 
 #[derive(Subcommand)]
 pub enum McpCmd {

@@ -25,7 +25,7 @@ use super::kinds as k;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use super::manifest::{self, ManifestDoc};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// `spec` of `kind: Dependency`.
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -98,7 +98,7 @@ pub fn lower_dependencies(docs: &[ManifestDoc]) -> Result<Vec<ManifestDoc>> {
             )));
         }
         let proto = spec.proto.clone().unwrap_or_else(|| "any".into());
-        if !delonix_runtime_core::fw_proto_ok(&proto) {
+        if !delonix_model::records::fw_proto_ok(&proto) {
             return Err(Error::Invalid(super::po::tf(
                 "Dependency '{name}': invalid proto '{proto}'",
                 &[("name", name), ("proto", &proto)],

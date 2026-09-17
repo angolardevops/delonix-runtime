@@ -21,7 +21,7 @@ use super::kinds as k;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 
 /// `spec` of `kind: NetworkRoute`.
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -110,7 +110,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 /// thing that builds these.
 fn split_route_name(name: &str) -> Result<(&str, &str)> {
     name.split_once("->").ok_or_else(|| {
-        delonix_runtime_core::Error::Invalid(format!(
+        delonix_model::Error::Invalid(format!(
             "'{name}' is not a route name (expected `<from>-><to>`)"
         ))
     })
@@ -304,7 +304,7 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
     for name in names {
         let (from, to) = split_route_name(name)?;
         let Some(def) = delonix_sdn::infra::route_get(from, to) else {
-            return Err(delonix_runtime_core::Error::NotFound(format!(
+            return Err(delonix_model::Error::NotFound(format!(
                 "no such route: {name}"
             )));
         };
@@ -349,8 +349,7 @@ pub(crate) fn presence_of(doc: &ManifestDoc) -> (String, String) {
 /// Dry-run: the spec with every `#[serde(default)]` materialized.
 pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     let spec: NetworkRouteSpec = manifest::spec_of(doc)?;
-    serde_yaml::to_value(spec)
-        .map_err(|e| delonix_runtime_core::Error::Invalid(format!("dry-run: {e}")))
+    serde_yaml::to_value(spec).map_err(|e| delonix_model::Error::Invalid(format!("dry-run: {e}")))
 }
 
 /// Applies the `kind: NetworkRoute` documents.

@@ -4,7 +4,7 @@
 //! terminates at the real apiserver, per standard kubeadm HA guidance —
 //! this LB is a dumb TCP forwarder, it never sees plaintext.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 use super::cluster::valid_endpoint;
 use super::remote::{self, SshTarget};

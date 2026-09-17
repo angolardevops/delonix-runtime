@@ -116,7 +116,7 @@ Confirmação no código, peça a peça:
 O estado vive em `$DELONIX_ROOT` (default `/var/lib/delonix` para root,
 `~/.local/share/delonix` para rootless — `infra::base_root` e
 `ImageStore::default_root`): `Store`/`JsonStore`
-(`crates/foundation/delonix-runtime-core/src/store.rs`) persistem `Container`/`Vm` como um
+(`crates/adapters/delonix-state/src/store.rs`) persistem `Container`/`Vm` como um
 JSON por registo; o CRI guarda os seus registos próprios em `<root>/cri/`
 (`crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs`).
 
@@ -132,7 +132,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 ## C4 — Nível 3: Componentes (os 22 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
-`use delonix_*` dos `src/`. Não há ciclos; `delonix-runtime-core` é a raiz comum.
+`use delonix_*` dos `src/`. Não há ciclos; `delonix-model` é a raiz comum.
 
 ```mermaid
 graph TB
@@ -143,7 +143,7 @@ graph TB
     IMG["delonix-oci<br>imagens OCI: registry pull e push, cas, overlay,<br>build Dockerfile, buildpack CNB, sign, internal_registry"]
     VM2["delonix-vm<br>microVMs declarativas: trait VmBackend —<br>Cloud Hypervisor ou libvirt"]
     VOL["delonix-volume<br>volumes nomeados e bind mounts, sintaxe -v Docker,<br>driver local ou nfs"]
-    CORE["delonix-runtime-core<br>Container, Vm, Mount, consultas ao host,<br>events, virt — a distribuir pelos contextos"]
+    NODECTX["delonix-node<br>contexto do no: eventos, verificacoes do host,<br>peer_cred, dispatch e as perguntas ao host e aos processos"]
     STATECRATE["delonix-state<br>estado persistido: Store e JsonStore com flock,<br>escrita atomica, SecretStore e CredVault cifrados"]
     MGMT["delonix-mgmt<br>API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)<br>expoe as metricas partilhadas em /metrics"]
     TEL["delonix-telemetry<br>observabilidade: logging estruturado, spans OpenTelemetry/OTLP<br>e o registo Prometheus partilhado (saiu do core na P3)"]
@@ -164,7 +164,6 @@ graph TB
     BIN --> VM2
     BIN --> VOL
     BIN --> NET
-    BIN --> CORE
     BIN --> CRI
     BIN --> MGMT
     BIN --> SCAN
@@ -177,8 +176,6 @@ graph TB
     BIN --> STACK
     BIN --> COMPUTE
     BIN --> TEL
-    COMPUTE --> CORE
-    STACK --> CORE
 
     MGMT --> RT
     MGMT --> IMG
@@ -186,34 +183,58 @@ graph TB
     MGMT --> VOL
     MGMT --> NET
     MGMT --> SCAN
-    MGMT --> CORE
     MGMT --> TEL
 
     SCAN --> IMG
-    SCAN --> CORE
 
     CRI --> RT
     CRI --> IMG
     CRI --> NET
-    CRI --> CORE
     CRI --> TEL
 
     VM2 --> COMPUTE
-    VM2 --> CORE
-
-    RT --> CORE
-    NET --> CORE
-    IMG --> CORE
-    VOL --> CORE
 
     NET --> RULES
     PVE --> VM2
-    PVE --> CORE
-    NAS --> CORE
-
-    MCP --> CORE
-    STATECRATE --> CORE
     STATECRATE --> MODEL
+    COMPUTE --> NODECTX
+    COMPUTE --> MODEL
+    CRI --> NODECTX
+    CRI --> COMPUTE
+    CRI --> MODEL
+    RT --> NODECTX
+    RT --> COMPUTE
+    RT --> MODEL
+    MCP --> NODECTX
+    MCP --> COMPUTE
+    MCP --> MODEL
+    MCPBIN --> NODECTX
+    MGMT --> NODECTX
+    MGMT --> COMPUTE
+    MGMT --> MODEL
+    MGMTBIN --> NODECTX
+    NODECTX --> MODEL
+    IMG --> NODECTX
+    IMG --> COMPUTE
+    IMG --> MODEL
+    PVE --> COMPUTE
+    PVE --> MODEL
+    BIN --> NODECTX
+    SCAN --> MODEL
+    NET --> NODECTX
+    NET --> COMPUTE
+    NET --> MODEL
+    SEC --> NODECTX
+    SEC --> MODEL
+    STACK --> MODEL
+    STATECRATE --> NODECTX
+    STATECRATE --> COMPUTE
+    NAS --> MODEL
+    VM2 --> NODECTX
+    VM2 --> MODEL
+    VOL --> NODECTX
+    VOL --> COMPUTE
+    VOL --> MODEL
     RT --> STATECRATE
     NET --> STATECRATE
     IMG --> STATECRATE
@@ -289,7 +310,7 @@ Notas de leitura do grafo (todas verificadas):
     (achatamento, o caminho rootless);
   - `delonix-oci::registry` — cliente HTTP de registo, com verificação de digest;
   - `delonix-oci::buildpack` — Cloud Native Buildpacks (`CnbPlan`);
-  - `delonix-runtime-core::{secret,cred_vault}` — Secret Manager do runtime
+  - `delonix-state::{secret,cred_vault}` — Secret Manager do runtime
     (`--secret`/`--secret-files`; os valores decifrados só tocam um tmpfs dentro do
     namespace do container — `write_secret_files` em `crates/adapters/delonix-linux/src/lib.rs`);
   - `delonix-runtime-bin::cmd::{cluster,k8s_recipes,vmimage,remote}` — o plano de
@@ -490,7 +511,7 @@ diagramas acima.
    plano físico do holder (`infra::network_create_with`) só é orquestrado para o
    driver `bridge` — o único a que containers se ligam hoje.
 4. **`Container.restart_policy` não é consumida.** O campo existe em
-   `delonix_runtime_core::Container`, mas nada no motor nem na CLI o lê para
+   `delonix_compute::Container`, mas nada no motor nem na CLI o lê para
    containers (grep confirmado); sem daemon, não há quem reinicie. Nas **VMs** a
    política é materializada apenas pelo backend libvirt (`on_crash`); no
    Cloud Hypervisor fica não-supervisionada e o código avisa
@@ -502,7 +523,7 @@ diagramas acima.
    hosts (`cmd/cluster.rs`, cabeçalho).
 6. **Exit code real perde-se em detach.** Em foreground o `waitpid` produz
    `Stopped`/`Failed(n)`/`Crashed` (`Status::from_wait`,
-   `crates/foundation/delonix-runtime-core/src/lib.rs`); em detach não há monitor, e a
+   `crates/contexts/delonix-compute/src/record.rs`); em detach não há monitor, e a
    reconciliação posterior só consegue classificar um processo desaparecido como
    `Crashed` (reportado como 137) — o código de saída verdadeiro já não é
    observável. Trade-off directo do daemonless (ver ADR-1).
@@ -574,7 +595,7 @@ módulo); e a limitação 1 enquanto o re-exec não chegar ao `run` normal.
 ### ADR-4 — Estado em ficheiros JSON, não numa BD
 
 **Decisão.** Persistência por um-JSON-por-registo (`Store`/`JsonStore`,
-`crates/foundation/delonix-runtime-core/src/store.rs`) sob `$DELONIX_ROOT`; o CRI e o ingress
+`crates/adapters/delonix-state/src/store.rs`) sob `$DELONIX_ROOT`; o CRI e o ingress
 seguem o mesmo padrão (ficheiros de pid/refcount/status).
 **Porquê.** Sem daemon não há dono natural de uma BD; ficheiros são inspecionáveis
 (`cat`), sobrevivem a crashes de qualquer processo e não acrescentam dependências.
@@ -621,7 +642,7 @@ preço em aberto de ter separado os dois binários.
 ### ADR-7 — Fronteira público/privado com o PaaS
 
 **Decisão.** Este repositório compila sozinho e não conhece tenant, licença,
-billing nem consola. `delonix-runtime-core` é a base que o lado privado reexporta —
+billing nem consola. `delonix-model` e os contextos são a base que o lado privado reexporta —
 nunca o inverso (doc do crate). Ficam **aqui** as peças que são mecanismo genuíno de
 runtime/SDN: Secret Manager (`secret`/`cred_vault`), WireGuard do overlay (`wg.rs`).
 Ficam **fora** as políticas de plataforma (quem publica o quê, planos, quotas) — os

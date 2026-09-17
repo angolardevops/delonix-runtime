@@ -351,7 +351,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Diagnosticar a delegação de cgroup — porque é que -m/--cpus não pegam</div><div class='cap lang-en'>Diagnose cgroup delegation — why -m/--cpus aren&#x27;t taking effect</div><pre><code>delonix system setup</code></pre></div><div class="ex"><div class='cap lang-pt'>A 1.ª correcção: um scope delegado (sem root, sem reboot, vale já)</div><div class='cap lang-en'>The 1st fix: a delegated scope (no root, no reboot, works right away)</div><pre><code>systemd-run --user --scope -p Delegate=yes -- delonix system setup</code></pre></div><div class="ex"><div class='cap lang-pt'>Só se a de cima ainda disser que falta o `cpu` (precisa de root, sobrevive ao reboot)</div><div class='cap lang-en'>Only if the one above still says `cpu` is missing (needs root, survives a reboot)</div><pre><code>sudo delonix system setup --delegate</code></pre></div>
 <h2 id='events'><code>system events</code></h2>
 <p class='intro'>Engine events (create/start/die/remove/…), from oldest to most recent.</p>
-<p class='intro'>With no daemon, the log is a shared append-only file — each command appends its own line (see <code>delonix_runtime_core::events</code>).</p>
+<p class='intro'>With no daemon, the log is a shared append-only file — each command appends its own line (see <code>delonix_node::events</code>).</p>
 <div class='help'><pre><code>Usage: delonix system events [OPTIONS]
 
 Options:

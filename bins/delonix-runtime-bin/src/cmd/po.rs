@@ -54,7 +54,7 @@ pub fn tf(en: &'static str, subs: &[(&str, &str)]) -> String {
     out
 }
 
-/// Known `#[error("...")]` wrapper templates from `delonix_runtime_core::Error`
+/// Known `#[error("...")]` wrapper templates from `delonix_model::Error`
 /// (`(prefix, suffix)`) — the SAME shared `Error` type used by every engine
 /// crate. BUG FIXED (gap): `t_dyn` did a single exact-string lookup against
 /// the FULLY rendered `e.to_string()` — but that string is always the fixed EN
@@ -291,7 +291,7 @@ mod tests {
     /// translate» without telling anyone.
     #[test]
     fn every_translatable_variant_has_a_wrapper() {
-        use delonix_runtime_core::Error;
+        use delonix_model::Error;
 
         let sample = [
             Error::NotFound("container: web".into()),
@@ -382,7 +382,7 @@ mod tests {
     /// against the FULLY rendered engine error — but that's always a fixed EN
     /// prefix (sometimes + suffix) glued to the actual message, so it NEVER
     /// matched a `pt.po` entry seeded with just the inner text. Locks in that
-    /// the wrapper-splitting recognizes every `delonix_runtime_core::Error`
+    /// the wrapper-splitting recognizes every `delonix_model::Error`
     /// template it claims to, and rejects the ones deliberately excluded
     /// (`Io`/`Json`/`Runtime` — OS errno/serde text, not ours to translate).
     #[test]

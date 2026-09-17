@@ -29,7 +29,7 @@
 //! storage and doesn't compose with a subdirectory of a network mount; this
 //! is stated up front rather than silently downgraded.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 use std::path::Path;

@@ -9,7 +9,8 @@
 
 use clap::Subcommand;
 use delonix_linux::{self as runtime};
-use delonix_runtime_core::{events, Error, Result};
+use delonix_model::{Error, Result};
+use delonix_node::events;
 use delonix_state::Store;
 
 use super::util::{open_stores, state_root};
@@ -19,7 +20,7 @@ pub enum SystemCmd {
     /// Engine events (create/start/die/remove/…), from oldest to most recent.
     ///
     /// With no daemon, the log is a shared append-only file — each command
-    /// appends its own line (see `delonix_runtime_core::events`).
+    /// appends its own line (see `delonix_node::events`).
     Events {
         /// Follow continuously (Ctrl-C to exit).
         #[arg(short, long, visible_short_alias = 'w')]
@@ -506,7 +507,7 @@ fn cmd_monitor(interval: u64, no_stream: bool) -> Result<()> {
 fn above_threshold(threshold: u8) -> Result<bool> {
     let root = super::util::state_root();
     let Some(pct) = super::prune::filesystem_used_pct(&root) else {
-        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+        return Err(delonix_model::Error::Invalid(super::po::tf(
             "cannot read the occupancy of the filesystem holding {path} — refusing to reclaim \
              blind",
             &[("path", &root.display().to_string())],
@@ -735,7 +736,7 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
 /// `system virt` — detects virtualization and says what to tune. Without `--tune`
 /// it changes nothing: it lists the recommendations and the command to apply them.
 fn cmd_virt(tune: bool) -> Result<()> {
-    use delonix_runtime_core::virt;
+    use delonix_node::virt;
     let v = virt::detect();
     if !v.virtualized {
         println!(
@@ -863,7 +864,7 @@ fn cmd_virt(tune: bool) -> Result<()> {
 fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Result<()> {
     use delonix_linux::{self as runtime};
     if high <= low {
-        return Err(delonix_runtime_core::Error::Invalid(
+        return Err(delonix_model::Error::Invalid(
             super::po::t("--high must be greater than --low").into(),
         ));
     }
@@ -874,7 +875,7 @@ fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Re
     // a delegation BOUNDARY — an SSH session scope has none, and there the
     // refusal is real and says so.
     if runtime::slice_path().is_none() {
-        return Err(delonix_runtime_core::Error::Invalid(
+        return Err(delonix_model::Error::Invalid(
             super::po::t(
                 "no cgroup to govern: this session has no delegation boundary (see `system setup`)",
             )
@@ -989,7 +990,7 @@ fn cmd_events(
 /// One event as a single JSON line (JSONL). A record that fails to serialize is
 /// SKIPPED rather than printed half-formed: a consumer reading line by line
 /// would take a truncated object as a parse error for the whole stream.
-fn print_event_line(e: &delonix_runtime_core::events::Event) {
+fn print_event_line(e: &delonix_node::events::Event) {
     match serde_json::to_string(e) {
         Ok(s) => println!("{s}"),
         // Unreachable today (`Event` is a u64 and five strings), and it says so
@@ -1085,7 +1086,7 @@ fn cmd_regulate_timer(install: bool, interval: u64, floor: u64) -> Result<()> {
     let exe = std::env::current_exe()
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_else(|_| "delonix".into());
-    std::fs::create_dir_all(&dir).map_err(|e| delonix_runtime_core::Error::Runtime {
+    std::fs::create_dir_all(&dir).map_err(|e| delonix_model::Error::Runtime {
         context: "regulate timer",
         message: format!("{}: {e}", dir.display()),
     })?;
@@ -1103,7 +1104,7 @@ fn cmd_regulate_timer(install: bool, interval: u64, floor: u64) -> Result<()> {
              ExecStart={exe} system regulate --apply --once --floor {floor}\n"
         ),
     )
-    .map_err(|e| delonix_runtime_core::Error::Runtime {
+    .map_err(|e| delonix_model::Error::Runtime {
         context: "regulate timer",
         message: format!("{}: {e}", service.display()),
     })?;
@@ -1126,7 +1127,7 @@ fn cmd_regulate_timer(install: bool, interval: u64, floor: u64) -> Result<()> {
              WantedBy=timers.target\n"
         ),
     )
-    .map_err(|e| delonix_runtime_core::Error::Runtime {
+    .map_err(|e| delonix_model::Error::Runtime {
         context: "regulate timer",
         message: format!("{}: {e}", timer.display()),
     })?;
@@ -1215,7 +1216,7 @@ fn cmd_regulate(
                     Ok(()) => {
                         // The event log is the only record a daemonless engine
                         // leaves of a decision nobody watched happen.
-                        delonix_runtime_core::events::emit(
+                        delonix_node::events::emit(
                             &root,
                             "regulate",
                             &format!("{} {}", a.verb(), a.knob().as_str()),
@@ -2222,7 +2223,7 @@ fn cmd_doctor(strict: bool) -> Result<()> {
     }
 
     if strict && (failed > 0 || !resource_findings.is_empty()) {
-        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+        return Err(delonix_model::Error::Invalid(super::po::tf(
             "{n} host prerequisite(s) not met, {r} resource finding(s) open",
             &[
                 ("n", &failed.to_string()),
@@ -2238,7 +2239,7 @@ fn cmd_info() -> Result<()> {
     let cs = store.list()?;
     let running = cs
         .iter()
-        .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
+        .filter(|c| matches!(c.status, delonix_model::records::Status::Running))
         .count();
 
     println!("Delonix Engine {}", env!("CARGO_PKG_VERSION"));

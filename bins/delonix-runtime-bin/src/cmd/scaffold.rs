@@ -20,7 +20,7 @@
 
 use std::path::{Path, PathBuf};
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 // Templates embedded by `build.rs`: `TEMPLATES: &[(&str, &[(&str, &str)])]`
 // = [(name, [(relative-path, content)])].
@@ -479,7 +479,7 @@ pub(crate) fn init(target: Target, o: &InitOpts) -> Result<()> {
     // running where a VM was expected).
     let templates_apply = matches!(target, Target::Container | Target::Stack);
     if !templates_apply && o.template.is_some() && o.template.as_deref() != Some("list") {
-        return Err(delonix_runtime_core::Error::Invalid(
+        return Err(delonix_model::Error::Invalid(
             super::po::t(
                 "app templates scaffold containerized apps — use `delonix stack init --template <t>`; this command scaffolds a VM/cluster project",
             )

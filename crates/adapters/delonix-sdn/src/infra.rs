@@ -18,8 +18,8 @@
 //! the bin's `main()` before clap parses anything).
 
 use crate::{run, run_ok, SLIRP_IP};
-use delonix_runtime_core::peer_cred::peer_uid;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
+use delonix_node::peer_cred::peer_uid;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -284,7 +284,7 @@ fn runtime_dir() -> PathBuf {
     // every socket operation failed with a bare `Permission denied`. Found by
     // running the whole engine under `unshare --user --map-root-user`, which is
     // a legitimate rootless environment, not an exotic one.
-    if !delonix_runtime_core::in_initial_userns() || uid != 0 {
+    if !delonix_node::in_initial_userns() || uid != 0 {
         // NOT `$XDG_RUNTIME_DIR`/`/run/user/<uid>`, despite being the more
         // conventional choice for this kind of ephemeral state (systemd-
         // logind guarantees it's short) — BUG FOUND live trying exactly
@@ -880,7 +880,7 @@ fn read_refcount() -> i64 {
 /// sections here are not bookkeeping: `release` and `teardown` tear the network
 /// infra DOWN, and doing that unlocked while a concurrent `acquire` is bringing a
 /// container up takes the network away from a running workload. Same defect, and
-/// same fix, as the state store's `FileLock` in `delonix-runtime-core`. A path that
+/// same fix, as the state store's `FileLock` in `delonix-state`. A path that
 /// could not be a C string used to fall back to a lock at `/tmp/dlxlock`, shared by
 /// every user of the host; that fallback is gone too.
 struct FileLock {
@@ -3769,7 +3769,7 @@ fn is_port(p: &str) -> bool {
 /// unicast): the default network (10.200) or a private network (10.201+). Anti-injection
 /// defense without fixing a single `/16`.
 /// Workload space (`10.200.0.0`–`10.254.255.255`, see
-/// `delonix_runtime_core::workload_net` — shared with `delonix-tunnel`, which uses the
+/// `delonix_compute::workload_net` — shared with `delonix-tunnel`, which uses the
 /// SAME range for the tunnel's "no-bypass" guard), except each /16's
 /// network/broadcast addresses (`.0.0` and `.255.255`), which here are not usable
 /// workload IPs.
@@ -3787,7 +3787,7 @@ fn is_ingress_ip(ip: &str) -> bool {
         Err(_) => return false,
     };
     let addr = std::net::Ipv4Addr::new(n[0], n[1], n[2], n[3]);
-    delonix_runtime_core::workload_net::is_workload_ipv4(addr)
+    delonix_compute::workload_net::is_workload_ipv4(addr)
         && (n[2], n[3]) != (0, 0)
         && (n[2], n[3]) != (255, 255)
 }
@@ -3947,7 +3947,7 @@ pub(crate) fn isolation_elements(bridge: &str) -> Vec<(&'static str, String)> {
 /// that is ALREADY established, it only stops new ones. That is what iptables/
 /// nftables/Kubernetes NetworkPolicy all do, and it is why `conntrack -D` exists
 /// (the CLI already ships conntrack for exactly this kind of cleanup).
-pub fn fw_chain_prologue(fw: &delonix_runtime_core::ContainerFw) -> String {
+pub fn fw_chain_prologue(fw: &delonix_model::records::ContainerFw) -> String {
     if !fw.enabled {
         return String::new();
     }
@@ -3965,7 +3965,7 @@ pub fn fw_chain_prologue(fw: &delonix_runtime_core::ContainerFw) -> String {
 /// holds, which is exactly what makes it usable as the key to sum a rule's counters
 /// back across networks. If the two had separate copies of this formatting, the
 /// reader would silently stop matching the day the generator changed a space.
-pub fn fw_rule_tail(r: &delonix_runtime_core::FwRule) -> Option<String> {
+pub fn fw_rule_tail(r: &delonix_model::records::FwRule) -> Option<String> {
     // Defense against nft injection: refuses rules with unsafe fields
     // (src/proto/port are interpolated into the ruleset fed to `nft -f`).
     if !r.nft_safe() {
@@ -4047,7 +4047,7 @@ pub fn parse_fw_counters(listing: &str) -> Vec<(String, u64, u64)> {
     out
 }
 
-pub fn fw_chain_body(ip: &str, fw: &delonix_runtime_core::ContainerFw) -> String {
+pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> String {
     let mut body = String::new();
     if !fw.enabled {
         return body; // empty chain = open (behavior prior to fw/namespace)
@@ -4278,7 +4278,7 @@ fn do_firewall(ips: &str, hex: &str) -> Result<()> {
         }
     }
     let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid hex".into()))?;
-    let fw: delonix_runtime_core::ContainerFw = serde_json::from_slice(&bytes)
+    let fw: delonix_model::records::ContainerFw = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
     // The chain is named after the PRIMARY IP so it stays stable as extra networks
     // come and go (`do_unfirewall` finds it by the same name).
@@ -4563,7 +4563,7 @@ fn egress_specs(bridge: &str, state: &EgressState) -> Vec<Vec<String>> {
     ];
     if let Some(cidrs) = policy.strip_prefix("allowlist:") {
         for cidr in cidrs.split(',').map(|c| c.trim()).filter(|c| !c.is_empty()) {
-            if delonix_runtime_core::fw_src_ok(cidr) {
+            if delonix_model::records::fw_src_ok(cidr) {
                 specs.push(base(&["ip", "daddr", cidr, "accept"]));
             } else {
                 tracing::warn!(cidr = ?cidr, "egress allowlist — invalid CIDR skipped");
@@ -5793,7 +5793,7 @@ pub fn detach_container(id: &str, ip: &str) {
 ///
 /// Covers only the PRIMARY IP — see [`apply_firewall_all`] for a multi-homed container.
 /// Kept because most callers have a single IP in hand and the wire line stays identical.
-pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_runtime_core::ContainerFw) -> Result<()> {
+pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_model::records::ContainerFw) -> Result<()> {
     apply_firewall_all(id, std::slice::from_ref(&ip), fw)
 }
 
@@ -5808,7 +5808,7 @@ pub fn apply_firewall(id: &str, ip: &str, fw: &delonix_runtime_core::ContainerFw
 pub fn apply_firewall_all(
     id: &str,
     ips: &[&str],
-    fw: &delonix_runtime_core::ContainerFw,
+    fw: &delonix_model::records::ContainerFw,
 ) -> Result<()> {
     if ips.is_empty() {
         return Err(Error::Invalid("apply_firewall: no IP given".into()));
@@ -6043,7 +6043,7 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
     // found in — reachable from another namespace while looking isolated.
     if namespace != "default" {
         if let Some(ip) = &lease {
-            let fw = delonix_runtime_core::ContainerFw {
+            let fw = delonix_model::records::ContainerFw {
                 enabled: true,
                 namespace: namespace.to_string(),
                 ..Default::default()
@@ -8341,12 +8341,12 @@ Inter-|   Receive                                                |  Transmit
 
     #[test]
     fn fw_body_translates_rules_and_policy() {
-        let fw = delonix_runtime_core::ContainerFw {
+        let fw = delonix_model::records::ContainerFw {
             enabled: true,
             policy_in: "deny".into(),
             policy_out: "allow".into(),
             rules: vec![
-                delonix_runtime_core::FwRule {
+                delonix_model::records::FwRule {
                     dir: "in".into(),
                     proto: "tcp".into(),
                     port: "8080".into(),
@@ -8355,7 +8355,7 @@ Inter-|   Receive                                                |  Transmit
                     note: String::new(),
                     origin: None,
                 },
-                delonix_runtime_core::FwRule {
+                delonix_model::records::FwRule {
                     dir: "out".into(),
                     proto: "any".into(),
                     port: String::new(),
@@ -8382,7 +8382,7 @@ Inter-|   Receive                                                |  Transmit
         // EXPLICIT inbound policy (deny) → does NOT emit namespace rules.
         assert!(!body.contains("@dlxall"), "{body}");
         // disabled → empty body
-        let off = delonix_runtime_core::ContainerFw {
+        let off = delonix_model::records::ContainerFw {
             enabled: false,
             ..fw
         };
@@ -8395,7 +8395,7 @@ Inter-|   Receive                                                |  Transmit
     /// Reproduced live against a real published port before the fix.
     #[test]
     fn fw_body_keeps_the_port_when_proto_is_any() {
-        let rule = |port: &str, action: &str| delonix_runtime_core::FwRule {
+        let rule = |port: &str, action: &str| delonix_model::records::FwRule {
             dir: "in".into(),
             proto: "any".into(),
             port: port.into(),
@@ -8404,7 +8404,7 @@ Inter-|   Receive                                                |  Transmit
             note: String::new(),
             origin: None,
         };
-        let fw = delonix_runtime_core::ContainerFw {
+        let fw = delonix_model::records::ContainerFw {
             enabled: true,
             policy_in: "deny".into(),
             policy_out: "allow".into(),
@@ -8431,7 +8431,7 @@ Inter-|   Receive                                                |  Transmit
             "{body}"
         );
         // `proto: any` with NO port stays the whole-container rule it always was.
-        let wide = delonix_runtime_core::ContainerFw {
+        let wide = delonix_model::records::ContainerFw {
             enabled: true,
             policy_in: "deny".into(),
             policy_out: "allow".into(),
@@ -8447,7 +8447,7 @@ Inter-|   Receive                                                |  Transmit
     #[test]
     fn fw_body_emits_namespace_isolation_when_no_explicit_ingress() {
         // enabled, no inbound rules and policy_in != deny → namespace isolation.
-        let fw = delonix_runtime_core::ContainerFw {
+        let fw = delonix_model::records::ContainerFw {
             enabled: true,
             namespace: "web".into(),
             ..Default::default()
@@ -8476,7 +8476,7 @@ Inter-|   Receive                                                |  Transmit
     /// expressible at all; without it the whole subsystem is decorative.
     #[test]
     fn prologo_deixa_passar_o_trafego_ja_estabelecido() {
-        let fw = delonix_runtime_core::ContainerFw {
+        let fw = delonix_model::records::ContainerFw {
             enabled: true,
             policy_in: "deny".into(),
             policy_out: "deny".into(),
@@ -8499,7 +8499,7 @@ Inter-|   Receive                                                |  Transmit
             "the conntrack accept must precede the policy drop:\n{full}"
         );
         // A firewall that is off stays a completely empty chain.
-        let off = delonix_runtime_core::ContainerFw {
+        let off = delonix_model::records::ContainerFw {
             enabled: false,
             ..fw
         };
@@ -8512,7 +8512,7 @@ Inter-|   Receive                                                |  Transmit
     /// otherwise `ingress ls` silently shows `-` on every rule.
     #[test]
     fn counters_voltam_a_casar_com_a_regra_que_os_gerou() {
-        let r = delonix_runtime_core::FwRule {
+        let r = delonix_model::records::FwRule {
             dir: "in".into(),
             proto: "tcp".into(),
             port: "5432".into(),
@@ -8525,7 +8525,7 @@ Inter-|   Receive                                                |  Transmit
         // A single-host source must NOT carry `/32`: the kernel prints it as a bare
         // address, and the listed text is what the counter lookup matches on. Caught
         // live — an `--from <ip>/32` rule with real traffic showed `-` in `ingress ls`.
-        let host = delonix_runtime_core::FwRule {
+        let host = delonix_model::records::FwRule {
             src: "172.16.31.103/32".into(),
             ..r.clone()
         };
@@ -8533,7 +8533,7 @@ Inter-|   Receive                                                |  Transmit
         assert!(host_tail.contains("ip saddr 172.16.31.103 "), "{host_tail}");
         assert!(!host_tail.contains("/32"), "{host_tail}");
         // A real prefix is left exactly as it is.
-        let net = delonix_runtime_core::FwRule {
+        let net = delonix_model::records::FwRule {
             src: "10.200.0.0/16".into(),
             ..r.clone()
         };

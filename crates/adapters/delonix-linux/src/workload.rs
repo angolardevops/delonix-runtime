@@ -15,7 +15,9 @@
 use std::path::Path;
 
 use delonix_compute::launch::{Launch, WorkloadRuntime};
-use delonix_runtime_core::{Container, Result, Status};
+use delonix_compute::Container;
+use delonix_model::records::Status;
+use delonix_model::Result;
 use delonix_state::Store;
 
 /// The resolver and the `/etc/hosts` address a start gets from the network.

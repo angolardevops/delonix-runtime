@@ -26,7 +26,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// The proxy's runtime config (written by Phase 4, read by `run`). Routes already
 /// resolved — the proxy knows no containers or stores.

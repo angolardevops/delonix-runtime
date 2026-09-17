@@ -9,15 +9,14 @@
 //!    depends on `delonix-mgmt` (not the other way around), so it calls
 //!    straight into [`collect`] instead of re-implementing the aggregation.
 //!
-//! Lives here (not in `delonix-runtime-core`) because it needs the store/
+//! Lives here (not in the foundation or a context) because it needs the store/
 //! cgroup/netns access of `delonix-linux`/`delonix-vm`/`delonix-sdn`/
-//! `delonix-oci`/`delonix-volume` — `runtime-core` is a shared-types leaf
-//! crate none of the higher-level crates depend on for this.
+//! `delonix-oci`/`delonix-volume` — adapters a lower layer cannot depend on.
 
 use std::path::Path;
 use std::time::Duration;
 
-use delonix_runtime_core::Status;
+use delonix_model::records::Status;
 
 /// A point-in-time snapshot of engine-wide resource usage. `Serialize` so it
 /// is BOTH the body of `GET /v1/dash` and the payload of `delonix dash --json`.

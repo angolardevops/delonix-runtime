@@ -22,7 +22,7 @@
 //! `infra::attach_container` asks the **holder** for the wiring over a control
 //! socket.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -853,7 +853,7 @@ impl Network {
     /// 88 = default and 90 = service VIPs).
     /// The network's 2nd octet, derived from the name. **It MUST fall within the
     /// ingress workload space** (`10.200.x`–`10.254.x`, see
-    /// `delonix_runtime_core::workload_net`): that's where the ingress's DNAT/firewall
+    /// `delonix_compute::workload_net`): that's where the ingress's DNAT/firewall
     /// accepts publishing ports.
     ///
     /// It was `100 + (fnv32 % 140)` → `10.100.x`–`10.239.x`, and the ingress only
@@ -864,8 +864,8 @@ impl Network {
     /// numbers repeated by hand: that boundary also underpins the tunnel's
     /// "no-bypass" guard, and duplicating it here was what created the divergence.
     fn base_for(name: &str) -> u8 {
-        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         let span = (hi - lo) as u32 + 1;
         lo + (fnv32(name) % span) as u8
     }
@@ -1059,8 +1059,8 @@ impl NetworkStore {
             .iter()
             .filter_map(|n| n.prefix.rsplit('.').next().and_then(|o| o.parse().ok()))
             .collect();
-        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         // searches for a free base octet starting from the candidate.
         let mut base = Network::base_for(name);
         let mut livre = false;
@@ -1108,8 +1108,8 @@ impl NetworkStore {
     /// bridge driver: the caller asked for `10.50.0.0/16`, got whatever octet
     /// the store picked from the network's name hash, and was told nothing.
     pub fn base_from_subnet(subnet: &str) -> Result<u8> {
-        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         let unsupported = |why: &str| {
             Error::Invalid(format!(
                 "subnet '{subnet}': {why}. A bridge network is always \
@@ -1298,8 +1298,8 @@ impl NetworkStore {
             }
             return Ok(existing);
         }
-        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         if !(lo..=hi).contains(&base) {
             return Err(Error::Invalid(format!(
                 "invalid /16 base octet: {base} (workload space is 10.{lo}..10.{hi})"
@@ -1599,10 +1599,10 @@ impl NetworkStore {
 }
 
 /// CANONICAL types of the per-container L4 firewall, defined in
-/// `delonix-runtime-core` (where they are also persisted in the `Container` record).
+/// `delonix-model` (and persisted in the `Container` record of `delonix-compute`).
 /// Re-exported here so that `apply_container_firewall` and the management API keep
 /// using `delonix_sdn::ContainerFw`.
-pub use delonix_runtime_core::{ContainerFw, FwRule};
+pub use delonix_model::records::{ContainerFw, FwRule};
 
 /// Default slirp4netns IP/gateway/DNS (rootless network).
 pub const SLIRP_IP: &str = "10.0.2.100";
@@ -2799,7 +2799,7 @@ mod tests {
     /// names catches the divergence as soon as it comes back.
     #[test]
     fn prefixo_de_rede_cai_sempre_no_espaco_de_ingress() {
-        use delonix_runtime_core::workload_net::is_workload_ipv4;
+        use delonix_compute::workload_net::is_workload_ipv4;
         let mut nomes: Vec<String> = vec![
             "kind".into(),
             "dlx-delonix".into(),
@@ -3261,8 +3261,8 @@ mod tests_alocacao_16 {
 
     #[test]
     fn sem_16_livre_recusa_em_vez_de_entregar_um_duplicado() {
-        let lo = delonix_runtime_core::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_runtime_core::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
+        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         let capacidade = (hi - lo) as usize + 1;
 
         let store = NetworkStore::open(raiz("tecto")).unwrap();
