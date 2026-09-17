@@ -2701,6 +2701,22 @@ for spec in "api:/v1/dash" "docker-api:/_ping"; do
   rm -f "$SOCK"
 done
 
+# `POST /containers/{id}/wait` tem de devolver o código REAL. Um container criado
+# por esta API corria sem supervisor (resquício de quando o arranque corria no
+# próprio servidor multi-thread), ninguém era o pai do processo, e o `wait`
+# respondia «exit code was not captured» — `exit 7` ficava `Exited (unknown)`.
+DSOCK="/tmp/dlx-srv-dwait-$PFX.sock"
+DPID="$(e2e_serve_up docker-api "$DSOCK")"
+DID=$(curl -s --unix-socket "$DSOCK" --max-time 120 -X POST -H 'Content-Type: application/json' \
+  -d "{\"Image\":\"$IMG\",\"Cmd\":[\"sh\",\"-c\",\"sleep 1; exit 7\"],\"HostConfig\":{\"NetworkMode\":\"none\"}}" \
+  "http://localhost/containers/create?name=dwait-$PFX" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Id',''))" 2>/dev/null)
+check "docker-api: POST /wait devolve o código real (7)" ok bash -c \
+  "[ -n '$DID' ] && curl -s --unix-socket '$DSOCK' --max-time 60 -X POST 'http://localhost/containers/$DID/wait' | grep -q '\"StatusCode\":7'"
+curl -s --unix-socket "$DSOCK" --max-time 30 -X DELETE "http://localhost/containers/$DID?force=1" >/dev/null 2>&1
+[ -n "$DPID" ] && kill "$DPID" 2>/dev/null
+for i in $(seq 1 40); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.2; done
+rm -f "$DSOCK"
+
 # O CRI fala gRPC, não HTTP — a sonda honesta é o socket mais o processo vivo,
 # e é isso que se afirma, em vez de fingir um pedido que não sabemos fazer aqui.
 CRISOCK="/tmp/dlx-srv-cri-$PFX.sock"

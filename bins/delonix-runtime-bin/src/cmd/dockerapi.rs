@@ -1180,12 +1180,14 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
         tmpfs,
         ulimit,
         detach: true,
-        // This server is MULTI-THREADED and `run_supervised` does a bare
-        // `fork()` that assumes a single-threaded caller — the same reason
-        // `--restart` is already refused here. Opting out keeps the pre-existing
-        // behaviour (no supervisor, so no captured exit code over this API) as a
-        // documented gap, instead of forking from a threaded process.
-        no_supervisor: true,
+        // Supervised, like a CLI `run -d`: the start runs in the `__apirun` re-exec
+        // (`spawn_run_via_reexec`), a FRESH single-threaded process, so the
+        // supervisor's bare `fork()` is safe there. This used to opt out, from when
+        // the server ran the start on its own multi-threaded runtime — and with no
+        // supervisor nobody was the container's parent, so `POST /wait` answered
+        // «exit code was not captured» for every container created over this API
+        // (measured: `exit 7` → `Exited (unknown)`).
+        no_supervisor: false,
         name: Some(name),
         net: "host".to_string(),
         volumes,
