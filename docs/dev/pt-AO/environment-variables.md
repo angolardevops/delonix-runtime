@@ -1,9 +1,13 @@
-<!-- translated-from: environment-variables.md sha256:f7f566ca9ecc9f42731a0594c334f54e529f5912adb02aad8437036d774069d6 -->
+<!-- translated-from: environment-variables.md sha256:6efb8b2e894c0308c3a6505d300ffcd10085f3e02ecf158884adedb7f896ebc5 -->
 # Variáveis de ambiente (`DELONIX_*`)
+
+**Antes de leres:** [Isolar o estado do motor](build-and-test.md#isolating-the-engines-state) em Clonar, construir e testar.
 
 Esta página lista todos os nomes `DELONIX_*` que aparecem no código do motor, com o sítio onde são
 lidos, o que mudam e se alguma vez os deves definir. É uma referência: lê a secção que corresponde
-ao que estás a fazer, não a página inteira.
+ao que estás a fazer, não a página inteira. Depois dela consegues isolar uma corrida, ligar os
+diagnósticos de que precisas, e reconhecer as variáveis que baixam uma fronteira de segurança
+antes de definires uma.
 
 ## Como ler esta página
 
@@ -194,8 +198,8 @@ normal comportar-se como uma passagem interna.
 
 | Variável | Lida por | Finalidade | Valores / omissão | Notas |
 |---|---|---|---|---|
-| `DELONIX_BIN` | `crates/foundation/delonix-runtime-core/src/dispatch.rs:cli_bin` (usada por `delonix-cri`, `delonix-mgmt`, `delonix-mcp`) | O executável `delonix` que um servidor volta a chamar para operações de ciclo de vida. | Um caminho. Sem valor: o `delonix` ao lado do executável do servidor, depois o `delonix` no `PATH`. | Definida por `delonix serve …` / `delonix mcp` (`cmd/serve.rs:exec_server`) com a CLI em execução. Defini-la à mão só é legítimo quando arrancas um binário de servidor directamente e queres que ele chame uma CLI específica. `scripts/cli-tree.sh` e `scripts/docs_cli_gate.py` também lêem uma variável com este nome para escolher o binário que inspeccionam (ver [Clonar, compilar e testar](build-and-test.md)). |
-| `DELONIX_DISPATCH_VERSION` | `crates/foundation/delonix-runtime-core/src/dispatch.rs:check_version` (no `delonix-cri`, `delonix-mgmt`, `delonix-mcp`) | A versão que o servidor tem de ser; um servidor de outra release recusa-se a arrancar. | Definida por `cmd/serve.rs:exec_server` com a versão da CLI. | Um servidor arrancado directamente (por exemplo por uma unit do systemd) não tem expectativa nenhuma e não é verificado. |
+| `DELONIX_BIN` | `crates/contexts/delonix-node/src/dispatch.rs:cli_bin` (usada por `delonix-cri`, `delonix-mgmt`, `delonix-mcp`) | O executável `delonix` que um servidor volta a chamar para operações de ciclo de vida. | Um caminho. Sem valor: o `delonix` ao lado do executável do servidor, depois o `delonix` no `PATH`. | Definida por `delonix serve …` / `delonix mcp` (`cmd/serve.rs:exec_server`) com a CLI em execução. Defini-la à mão só é legítimo quando arrancas um binário de servidor directamente e queres que ele chame uma CLI específica. `scripts/cli-tree.sh` e `scripts/docs_cli_gate.py` também lêem uma variável com este nome para escolher o binário que inspeccionam (ver [Clonar, compilar e testar](build-and-test.md)). |
+| `DELONIX_DISPATCH_VERSION` | `crates/contexts/delonix-node/src/dispatch.rs:check_version` (no `delonix-cri`, `delonix-mgmt`, `delonix-mcp`) | A versão que o servidor tem de ser; um servidor de outra release recusa-se a arrancar. | Definida por `cmd/serve.rs:exec_server` com a versão da CLI. | Um servidor arrancado directamente (por exemplo por uma unit do systemd) não tem expectativa nenhuma e não é verificado. |
 | `DELONIX_REEXEC_ID` | `bins/delonix-runtime-bin/src/cmd/container.rs` (`cmd_run`, `reexec_env`) | Marca a segunda passagem de `container run/start --net <custom>` ou `--pod`, re-executada dentro dos namespaces do holder, e leva o id do container. | Definida por `cmd/container.rs:reexec_env`. | A sua presença salta verificações que a primeira passagem já fez (posse da porta). |
 | `DELONIX_REEXEC_IP` | `bins/delonix-runtime-bin/src/cmd/container.rs` | O endereço SDN que a primeira passagem atribuiu, para a segunda passagem o registar. | Definida por `cmd/container.rs:reexec_env`. | |
 | `DELONIX_PIN_SYNC` | `crates/adapters/delonix-sdn/src/pin_userns.rs` (`SYNC_ENV`) | Descritores de ficheiro dos pipes de handshake entre o chamador e o pin de rede enquanto os mapas do user namespace são escritos. | `<read-fd>,<write-fd>`. | Só definida quando o pin tem de criar namespaces novos; um pin que adopta nunca a recebe. |
@@ -270,3 +274,7 @@ nunca precisas de os definir:
   `image vm build` escreve **dentro** de uma imagem de VM construída
   (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`). Lê-as no convidado com
   `cat /etc/delonix-image-release`; nenhum processo as lê.
+
+---
+
+**Seguinte:** [Glossário](glossary.md) — os termos que encontras neste repositório, com o seu significado no Delonix e onde cada um é explicado.
