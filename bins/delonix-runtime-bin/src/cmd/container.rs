@@ -5265,6 +5265,29 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
     Ok(())
 }
 
+/// Whether a container's ports are published on the shared ingress: a custom
+/// network's are, and so are a pod member's. A member's record has no `network`
+/// (membership is the `pod` field), so asking only about `network` sent it down
+/// the per-container slirp path it does not have — `--publish-add` was refused
+/// with «created without `-p` and without `--net`», which was not the reason.
+fn on_ingress(c: &Container) -> bool {
+    c.network.is_some() || c.pod.is_some()
+}
+
+/// The address the ingress forwards a container's ports to. A pod member's is
+/// the pod's netns address, which its record deliberately does not carry.
+fn ingress_address(c: &Container) -> Result<String> {
+    if let Some(pn) = &c.pod {
+        return Ok(infra::container_ip(pn));
+    }
+    c.ip.clone().ok_or_else(|| {
+        Error::Invalid(format!(
+            "'{}' is on a custom network but has no IP in the record",
+            c.name
+        ))
+    })
+}
+
 /// Publish a port on a LIVE container, by the right path for its network.
 pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Result<()> {
     let (host_addr, hp, cp, proto) = delonix_net::parse_publish_addr(spec)?;
@@ -5283,19 +5306,15 @@ pub(crate) fn publish_live(store: &Store, c: &mut Container, spec: &str) -> Resu
             "port {hp} is already published by container '{owner}'"
         )));
     }
-    match c.network.as_deref() {
-        // Custom network: DNAT on the holder + hostfwd on the single slirp (the ingress).
-        Some(_) => {
-            let ip = c.ip.clone().ok_or_else(|| {
-                Error::Invalid(format!(
-                    "'{}' is on a custom network but has no IP in the record",
-                    c.name
-                ))
-            })?;
+    match on_ingress(c) {
+        // Custom network or pod: DNAT on the holder + hostfwd on the single slirp
+        // (the ingress).
+        true => {
+            let ip = ingress_address(c)?;
             publish_with_retry(&ip, spec)?;
         }
         // Per-container slirp path: requests the hostfwd from ITS slirp.
-        None => {
+        false => {
             let pid = c.pid.ok_or_else(|| Error::NotRunning(c.name.clone()))?;
             let sock = delonix_net::slirp_container_sock(pid);
             if !sock.exists() {
@@ -5346,9 +5365,9 @@ pub(crate) fn unpublish_live(store: &Store, c: &mut Container, host_port: &str) 
     }
     for spec in &hits {
         let proto = delonix_net::parse_publish(spec).map(|(_, _, pr)| pr).ok();
-        match c.network.as_deref() {
-            Some(_) => infra::unpublish_port_proto(host_port, proto.as_deref()),
-            None => {
+        match on_ingress(c) {
+            true => infra::unpublish_port_proto(host_port, proto.as_deref()),
+            false => {
                 // Without a custom network, the hostfwd lives in the PER-container slirp —
                 // which dies with it. On a stopped container there's no dataplane to clean up,
                 // only the record (before: an error "container is not running" and the publish
@@ -7027,6 +7046,24 @@ restartPolicy: OnFailure
         let yaml = "containers:\n  - image: a\n  - image: b\n";
         let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(super::pod_to_run_opts("x", None, pod).is_err());
+    }
+
+    #[test]
+    fn a_pod_member_publishes_hot_ports_on_the_ingress() {
+        let mut c = delonix_runtime_core::Container::new(
+            "id1".into(),
+            "p-web".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        assert!(!super::on_ingress(&c), "no network, no pod: its own slirp");
+        c.pod = Some("pod-p".into());
+        assert!(super::on_ingress(&c));
+        assert_eq!(
+            super::ingress_address(&c).unwrap(),
+            delonix_net::infra::container_ip("pod-p")
+        );
     }
 
     #[test]
