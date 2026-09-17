@@ -925,6 +925,25 @@ pub fn http_post_stream(
     Ok(status)
 }
 
+/// A local image, or the image pulled from its registry when there is none.
+///
+/// `announce` is called with the reference right before a pull starts, so the
+/// caller can say so in its own words; nothing is announced for a local hit.
+/// `creds: None` reads the credential vault (`image login`); `Some` uses the
+/// caller's pair instead, which is how a manifest names its own credential.
+pub fn resolve_or_pull(
+    store: &ImageStore,
+    reference: &str,
+    creds: Option<(String, String)>,
+    announce: &dyn Fn(&str),
+) -> Result<Image> {
+    if let Ok(img) = store.resolve(reference) {
+        return Ok(img);
+    }
+    announce(reference);
+    pull_from_registry_with_creds(store, reference, creds)
+}
+
 /// Downloads `reference` from an OCI registry into the local store. Credentials
 /// (if any) come from the local `delonix login` (`<root>/auth.json`).
 pub fn pull_from_registry(store: &ImageStore, reference: &str) -> Result<Image> {
