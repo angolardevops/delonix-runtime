@@ -1,4 +1,4 @@
-<!-- translated-from: 01-environment.md sha256:2fa9b18d23c95c5d2b01c35e9e1a3eece195a5754b6a4ba0d3143aa61cd3b9ec -->
+<!-- translated-from: 01-environment.md sha256:fc28c01da6663e20f7492e9316ad321722f4da5e89817bdf5ca508bbd2abc001 -->
 # 1. Préparer votre environnement
 
 Delonix Runtime est **exclusivement Linux** : chaque primitive qu’il utilise — namespaces, cgroups v2, nftables,
@@ -156,12 +156,23 @@ Options, de la moins à la plus invasive :
 3. Fixez `kernel.apparmor_restrict_unprivileged_userns=0` — cela abaisse une frontière à l’échelle de l’hôte ; seulement
    sur une machine qui vous appartient.
 
-### Délégation de cgroup : les limites sont acceptées puis silencieusement ignorées
+### Délégation de cgroup : certaines limites sont refusées, d’autres ne sont pas appliquées
 
-`--memory`, `--cpus` et `--pids-limit` ne fonctionnent que si le shell depuis lequel vous lancez le moteur se trouve dans un
-cgroup **délégué**. Sans délégation, les options sont analysées, acceptées et inertes : le container
-s’exécute sans limite. C’est une règle de cgroup v2, pas une limitation de Delonix — Podman rootless a la
-même exigence.
+Les limites de ressources n’atteignent le noyau que si le shell depuis lequel vous lancez le moteur se trouve dans un cgroup
+**délégué**. C’est une règle de cgroup v2, pas une limitation de Delonix — Podman rootless a la même
+exigence. Sans délégation, le moteur fait deux choses différentes, selon l’option :
+
+- `-m`/`--memory`, `-c`/`--cpus` et `--cpu-weight` : `container run` **refuse** avant de créer
+  quoi que ce soit, avec une erreur qui nomme le correctif, et sort avec **69** (`Error::Unavailable`, la classe
+  `EX_UNAVAILABLE` — `preflight_resource_limits` dans
+  `bins/delonix-runtime-bin/src/cmd/container.rs`). `DELONIX_ALLOW_UNENFORCED_LIMITS=1` exécute
+  malgré tout le container, sans limite, avec un avertissement.
+- `--cpuset`, `--io-weight` et la famille `--device-read-bps`/`--device-write-bps`/`--device-read-iops`/
+  `--device-write-iops` ne sont **pas** vérifiés par cette sonde : ils sont acceptés et appliqués
+  au mieux, donc sans les contrôleurs `cpuset`/`io` ils n’ont aucun effet et rien n’échoue.
+
+Il n’existe pas d’option `--pids-limit` ; le plafond de pids est une propriété du groupe de cgroups du moteur, pas
+de `container run`.
 
 Le cas courant est une **session SSH** : son `session-N.scope` est un *frère* de
 `user@<uid>.service`, et déplacer un processus entre eux exige d’écrire dans un cgroup appartenant à root.

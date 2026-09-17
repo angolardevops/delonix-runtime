@@ -60,7 +60,7 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <div class="tools"><button class="searchbtn" type="button">🔍 Pesquisar <kbd>Ctrl K</kbd></button>
 <select class="lang" aria-label="Language"><option value="../en/01-environment.html">EN · English</option><option value="../pt-AO/01-environment.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/01-environment.html">FR-FR · Français</option></select></div>
 <a class="" href="index.html">Delonix Runtime — Manual do Contribuidor</a>
-<a class="" href="00-start-here.html">0. Start here</a>
+<a class="" href="00-start-here.html">0. Começa aqui</a>
 <a class="on" href="01-environment.html">1. Preparar o teu ambiente</a>
 <a class="" href="02-build-and-test.html">2. Clonar, compilar e testar</a>
 <a class="" href="03-rust-primer.html">3. Introdução ao Rust para esta base de código</a>
@@ -72,10 +72,10 @@ blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);
 <a class="" href="09-microvm-setup.html">9. Construir microVMs</a>
 <a class="" href="10-contributing-workflow.html">10. Fluxo de contribuição</a>
 <a class="" href="11-publishing-docs.html">11. Publicar a documentação</a>
-<a class="" href="12-coding-conventions.html">12. Coding conventions</a>
-<a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
-<a class="" href="14-glossary.html">14. Glossary</a></nav>
-<main><div class="notice">Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/01-environment.html">Ler a página em inglês</a></div><h1 id="1-preparing-your-environment">1. Preparar o teu ambiente</h1>
+<a class="" href="12-coding-conventions.html">12. Convenções de código</a>
+<a class="" href="13-cloud-native-standards.html">13. Padrões cloud native, camada a camada</a>
+<a class="" href="14-glossary.html">14. Glossário</a></nav>
+<main><h1 id="1-preparing-your-environment">1. Preparar o teu ambiente</h1>
 <p>O Delonix Runtime é <strong>só para Linux</strong>: todos os primitivos que usa — namespaces, cgroups v2, nftables,
 <code>pivot_root</code>, a nova API de mount — vivem no kernel Linux. Consegues <em>compilar</em> a maior parte do
 workspace e correr os seus testes de lógica pura em qualquer máquina Linux com a toolchain abaixo;
@@ -285,11 +285,22 @@ omissão, <code>~/.local/bin/delonix</code> com <code>--user</code>). Um binári
 <li>Define <code>kernel.apparmor_restrict_unprivileged_userns=0</code> — isto baixa uma fronteira de todo o host;
    só numa máquina que é tua.</li>
 </ol>
-<h3 id="cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Delegação de cgroup: os limites são aceites e ignorados em silêncio</h3>
-<p><code>--memory</code>, <code>--cpus</code> e <code>--pids-limit</code> só funcionam se a shell a partir da qual corres o motor estiver
-num cgroup <strong>delegado</strong>. Sem delegação as flags são lidas, aceites e ficam inertes: o container
-corre sem limite. Isto é uma regra do cgroup v2, não uma limitação do Delonix — o Podman rootless tem
-o mesmo requisito.</p>
+<h3 id="cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Delegação de cgroup: uns limites são recusados, outros não são impostos</h3>
+<p>Os limites de recursos só chegam ao kernel se a shell a partir da qual corres o motor estiver num
+cgroup <strong>delegado</strong>. Isto é uma regra do cgroup v2, não uma limitação do Delonix — o Podman rootless
+tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, conforme a flag:</p>
+<ul>
+<li><code>-m</code>/<code>--memory</code>, <code>-c</code>/<code>--cpus</code> e <code>--cpu-weight</code>: o <code>container run</code> <strong>recusa</strong> antes de criar
+  seja o que for, com um erro que diz como corrigir, e sai com <strong>69</strong> (<code>Error::Unavailable</code>, a
+  classe <code>EX_UNAVAILABLE</code> — <code>preflight_resource_limits</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> corre o
+  container na mesma, sem limites, com um aviso.</li>
+<li><code>--cpuset</code>, <code>--io-weight</code> e a família <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/
+  <code>--device-write-iops</code> <strong>não</strong> são verificados por essa sonda: são aceites e aplicados em melhor
+  esforço, por isso sem os controladores <code>cpuset</code>/<code>io</code> não têm efeito e nada falha.</li>
+</ul>
+<p>Não existe a flag <code>--pids-limit</code>; o tecto de pids é uma propriedade do grupo de cgroup do motor, não
+do <code>container run</code>.</p>
 <p>O caso comum é uma <strong>sessão SSH</strong>: o seu <code>session-N.scope</code> é <em>irmão</em> do
 <code>user@&lt;uid&gt;.service</code>, e mover um processo entre os dois exige escrever num cgroup que pertence ao root.
 A correcção por comando não precisa de root:</p>
@@ -317,7 +328,7 @@ número de versão.</p>
   Hypervisor, um <code>passt</code> antigo nos builds do libguestfs, as permissões de <code>/boot/vmlinuz-*</code>) são
   tratadas em <a href="09-microvm-setup.html">09</a>.</li>
 </ul>
-<div class="pager"><a href="00-start-here.html"><span>← Anterior</span>0. Start here</a><a class="next" href="02-build-and-test.html"><span>Seguinte →</span>2. Clonar, compilar e testar</a></div>
+<div class="pager"><a href="00-start-here.html"><span>← Anterior</span>0. Começa aqui</a><a class="next" href="02-build-and-test.html"><span>Seguinte →</span>2. Clonar, compilar e testar</a></div>
 <p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/01-environment.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/pt-AO/01-environment.md</code></p></main>
 <aside class="toc"><h5>Nesta página</h5><div class="toc">
 <ul>
@@ -335,7 +346,7 @@ número de versão.</p>
 <li><a href="#diagnosing-the-host">Diagnosticar o host</a></li>
 <li><a href="#known-host-traps">Armadilhas conhecidas do host</a><ul>
 <li><a href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: o AppArmor bloqueia user namespaces para o teu binário de desenvolvimento</a></li>
-<li><a href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Delegação de cgroup: os limites são aceites e ignorados em silêncio</a></li>
+<li><a href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Delegação de cgroup: uns limites são recusados, outros não são impostos</a></li>
 <li><a href="#a-stale-delonix-on-your-path">Um delonix antigo no teu PATH</a></li>
 <li><a href="#other-traps-you-may-hit">Outras armadilhas que podes encontrar</a></li>
 </ul>

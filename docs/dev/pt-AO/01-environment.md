@@ -1,4 +1,4 @@
-<!-- translated-from: 01-environment.md sha256:2fa9b18d23c95c5d2b01c35e9e1a3eece195a5754b6a4ba0d3143aa61cd3b9ec -->
+<!-- translated-from: 01-environment.md sha256:fc28c01da6663e20f7492e9316ad321722f4da5e89817bdf5ca508bbd2abc001 -->
 # 1. Preparar o teu ambiente
 
 O Delonix Runtime é **só para Linux**: todos os primitivos que usa — namespaces, cgroups v2, nftables,
@@ -156,12 +156,23 @@ Opções, da menos para a mais invasiva:
 3. Define `kernel.apparmor_restrict_unprivileged_userns=0` — isto baixa uma fronteira de todo o host;
    só numa máquina que é tua.
 
-### Delegação de cgroup: os limites são aceites e ignorados em silêncio
+### Delegação de cgroup: uns limites são recusados, outros não são impostos
 
-`--memory`, `--cpus` e `--pids-limit` só funcionam se a shell a partir da qual corres o motor estiver
-num cgroup **delegado**. Sem delegação as flags são lidas, aceites e ficam inertes: o container
-corre sem limite. Isto é uma regra do cgroup v2, não uma limitação do Delonix — o Podman rootless tem
-o mesmo requisito.
+Os limites de recursos só chegam ao kernel se a shell a partir da qual corres o motor estiver num
+cgroup **delegado**. Isto é uma regra do cgroup v2, não uma limitação do Delonix — o Podman rootless
+tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, conforme a flag:
+
+- `-m`/`--memory`, `-c`/`--cpus` e `--cpu-weight`: o `container run` **recusa** antes de criar
+  seja o que for, com um erro que diz como corrigir, e sai com **69** (`Error::Unavailable`, a
+  classe `EX_UNAVAILABLE` — `preflight_resource_limits` em
+  `bins/delonix-runtime-bin/src/cmd/container.rs`). `DELONIX_ALLOW_UNENFORCED_LIMITS=1` corre o
+  container na mesma, sem limites, com um aviso.
+- `--cpuset`, `--io-weight` e a família `--device-read-bps`/`--device-write-bps`/`--device-read-iops`/
+  `--device-write-iops` **não** são verificados por essa sonda: são aceites e aplicados em melhor
+  esforço, por isso sem os controladores `cpuset`/`io` não têm efeito e nada falha.
+
+Não existe a flag `--pids-limit`; o tecto de pids é uma propriedade do grupo de cgroup do motor, não
+do `container run`.
 
 O caso comum é uma **sessão SSH**: o seu `session-N.scope` é *irmão* do
 `user@<uid>.service`, e mover um processo entre os dois exige escrever num cgroup que pertence ao root.

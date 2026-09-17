@@ -498,7 +498,8 @@ no notion of tenant, account, plan or billing, may appear in `crates/`, `bins/`,
   not on the list is not caught.
 - **Tenant, account, plan and billing concepts.** **Decided**: AGENTS.md § "Identidade e fronteira
   do motor". No gate matches them; review checks it.
- If a consumer needs something, write it as a generic
+
+If a consumer needs something, write it as a generic
 capability in the engine's own vocabulary (Kinds and resources), and add it only if it makes sense
 for any client. The engine validates its own contract and never trusts a caller to refuse what it
 doesn't support.
