@@ -1437,7 +1437,7 @@ pub fn register(target: Target) -> Result<()> {
     validate_node_name(&target.node)?;
 
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_vm::register_backend(delonix_vm::BackendRegistration {
+    Ok(delonix_vm::register_backend(delonix_vm::BackendRegistration {
         id: "proxmox",
         aliases: &["pve"],
         auto_selectable: false,
@@ -1453,7 +1453,7 @@ pub fn register(target: Target) -> Result<()> {
             *slot = Some(c.clone());
             Ok(Box::new(ProxmoxBackend::sharing(c)))
         }),
-    })
+    })?)
 }
 
 #[cfg(test)]

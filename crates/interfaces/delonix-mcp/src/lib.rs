@@ -133,7 +133,7 @@ fn list_containers(base: &Path) -> Result<Vec<Container>, ErrorData> {
 }
 
 fn list_vms(base: &Path) -> Result<Vec<delonix_compute::Vm>, ErrorData> {
-    delonix_vm::list(base).map_err(from_engine_error)
+    delonix_vm::list(base).map_err(|e| from_engine_error(e.into()))
 }
 
 fn list_volumes(base: &Path) -> Result<Vec<delonix_volume::Volume>, ErrorData> {
@@ -159,7 +159,7 @@ fn get_kind(base: &Path, kind: ResourceKind, name: &str) -> Result<serde_json::V
             .map_err(|e| from_engine_error(e.into())),
         ResourceKind::Vm => delonix_vm::status(base, name)
             .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
-            .map_err(from_engine_error),
+            .map_err(|e| from_engine_error(e.into())),
         ResourceKind::Volume => list_volumes(base)?
             .into_iter()
             .find(|v| v.name == name)

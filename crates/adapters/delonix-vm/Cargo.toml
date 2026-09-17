@@ -10,6 +10,7 @@ delonix-model = { workspace = true }
 delonix-state = { workspace = true }
 delonix-compute = { workspace = true }
 delonix-net-rules = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }
 
