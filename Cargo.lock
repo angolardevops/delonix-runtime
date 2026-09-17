@@ -893,7 +893,6 @@ dependencies = [
  "clap",
  "clap_complete",
  "delonix-compute",
- "delonix-cri",
  "delonix-image",
  "delonix-mcp",
  "delonix-mgmt",

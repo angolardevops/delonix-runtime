@@ -11047,3 +11047,6 @@ msgstr "-m/--cpus/--cpu-weight foram pedidos mas esta sessão não tem delegaç�
 
 msgid "Internal: the kubelet's cgroup for this pod (CRI `cgroup_parent`, ADR 0038). Unspecified limits mean no limit under it."
 msgstr "Interno: o cgroup do kubelet para este pod (`cgroup_parent` do CRI, ADR 0038). Limites não especificados significam sem limite debaixo dele."
+
+msgid "'{name}' is not installed next to delonix nor on the PATH — install it with `{hint}`"
+msgstr "'{name}' não está instalado ao lado do delonix nem no PATH — instala-o com `{hint}`"

@@ -53,21 +53,27 @@ pub fn run(action: ServeCmd) -> Result<()> {
             cap_ceiling,
             cap_ceiling_mode,
         } => {
-            let addr = addr
-                .or_else(|| std::env::var("DELONIX_CRI_ADDR").ok())
-                .unwrap_or_else(|| "unix:///run/delonix-cri.sock".to_string());
-            // Flag beats env var, same precedence as `--addr`. A malformed value
-            // is refused BEFORE the socket is bound — a capability ceiling that
-            // silently degraded to "unlimited" on a typo would be worse than
-            // having none at all.
-            let spec = cap_ceiling
-                .or_else(|| std::env::var(delonix_cri::cap_ceiling::CEILING_ENV).ok())
-                .unwrap_or_default();
-            let mode = cap_ceiling_mode
-                .or_else(|| std::env::var(delonix_cri::cap_ceiling::MODE_ENV).ok())
-                .unwrap_or_default();
-            let ceiling = delonix_cri::CapCeiling::parse(&spec, &mode).map_err(Error::Invalid)?;
-            delonix_cri::serve_blocking(super::util::state_root(), &addr, ceiling)
+            // Flags AND their environment variables: a `delonix-cri` from before
+            // it took flags reads only the variables, and would otherwise ignore
+            // `--addr` and serve on the default socket.
+            let mut args = Vec::new();
+            let mut env = Vec::new();
+            for (flag, var, value) in [
+                ("--addr", "DELONIX_CRI_ADDR", addr),
+                ("--cap-ceiling", "DELONIX_CRI_CAP_CEILING", cap_ceiling),
+                (
+                    "--cap-ceiling-mode",
+                    "DELONIX_CRI_CAP_CEILING_MODE",
+                    cap_ceiling_mode,
+                ),
+            ] {
+                if let Some(v) = value {
+                    args.push(flag.to_string());
+                    args.push(v.clone());
+                    env.push((var, v));
+                }
+            }
+            exec_server("delonix-cri", &args, &env, "install.sh --with-cri")
         }
         ServeCmd::Api { addr } => {
             let addr = addr
@@ -83,4 +89,49 @@ pub fn run(action: ServeCmd) -> Result<()> {
             super::dockerapi::run(addr)
         }
     }
+}
+
+/// Runs a server's own executable in place of this process (ADR-0040 D2.4 as
+/// amended): each server is its own binary, and `delonix` stays the one name a
+/// user needs — `delonix serve cri` runs `delonix-cri`, as `git lfs` runs
+/// `git-lfs`.
+///
+/// `exec` and not a child: the server takes this process's pid, so a unit, a
+/// signal or a `kill` aimed at `delonix serve cri` reaches the server itself.
+///
+/// The sibling next to this executable wins over the `PATH`, and it is told the
+/// version it must be: an older `delonix-cri` left in `~/.local/bin` would
+/// otherwise serve a kubelet with a server from another release. Only a server
+/// from this release on checks it; one from before cannot, which is why the
+/// flags also travel as the environment variables it does read. The state root
+/// is passed explicitly, because the server's own default (`/var/lib/delonix`)
+/// is not this user's.
+fn exec_server(
+    name: &str,
+    args: &[String],
+    env: &[(&str, String)],
+    install_hint: &str,
+) -> Result<()> {
+    use std::os::unix::process::CommandExt;
+    let beside = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|d| d.join(name)))
+        .filter(|p| p.is_file());
+    let program = beside.unwrap_or_else(|| std::path::PathBuf::from(name));
+    let err = std::process::Command::new(&program)
+        .args(args)
+        .envs(env.iter().map(|(k, v)| (*k, v.as_str())))
+        .env("DELONIX_ROOT", super::util::state_root())
+        .env("DELONIX_DISPATCH_VERSION", env!("CARGO_PKG_VERSION"))
+        .exec();
+    if err.kind() == std::io::ErrorKind::NotFound {
+        return Err(Error::Unavailable(super::po::tf(
+            "'{name}' is not installed next to delonix nor on the PATH — install it with `{hint}`",
+            &[("name", name), ("hint", install_hint)],
+        )));
+    }
+    Err(Error::Runtime {
+        context: "exec",
+        message: format!("{}: {err}", program.display()),
+    })
 }

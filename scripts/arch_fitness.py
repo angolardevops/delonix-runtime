@@ -116,10 +116,11 @@ EXCEPTIONS = {
         "the scanner reads layers through the OCI adapter instead of through an "
         "ImageStore port",
     ),
-    ("roles", "delonix-runtime-bin", "3 interfaces"): (
+    ("roles", "delonix-runtime-bin", "2 interfaces"): (
         "P3",
-        "one executable holds the CLI, the CRI server, the management API and the "
-        "MCP server; each becomes its own binary",
+        "one executable holds the CLI, the management API and the MCP server; each "
+        "becomes its own binary, which `delonix` runs (the CRI already is: "
+        "`delonix serve cri` runs `delonix-cri`)",
     ),
     ("dep", "delonix-mcp", "delonix-mgmt"): (
         "P5",
