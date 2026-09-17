@@ -9,7 +9,8 @@
 //! The `-v` syntax follows Docker: `name:/target` (volume) or
 //! `/host/path:/target` (bind), with an optional `:ro` for read-only.
 
-use delonix_runtime_core::{write_atomic, Mount};
+use delonix_runtime_core::Mount;
+use delonix_state::write_atomic;
 
 mod error;
 pub use error::{Error, Result};

@@ -1245,8 +1245,8 @@ pub(crate) fn stamp(
     stack: &str,
     fields: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
-    let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
-        delonix_runtime_core::JsonStore::open(state_root().join("vms"))?;
+    let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+        delonix_state::JsonStore::open(state_root().join("vms"))?;
     let encoded = super::reconcile::encode_last_applied(fields);
     st.update(name, |vm| {
         vm.labels
@@ -2852,7 +2852,7 @@ fn cmd_ssh(
 /// to reintroduce that shape for a new writer.
 fn random_suffix() -> String {
     let mut buf = [0u8; 4];
-    let _ = delonix_runtime_core::cred_vault::random_bytes(&mut buf);
+    let _ = delonix_state::cred_vault::random_bytes(&mut buf);
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 

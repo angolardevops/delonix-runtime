@@ -41,10 +41,7 @@ pub struct CredVault {
 /// without duplicating the syscall wrapper (e.g. `secret rotate`'s generated
 /// value), the same discipline as `fw_rule_tail`'s single generator/reader.
 pub fn random_bytes(buf: &mut [u8]) -> Result<()> {
-    getrandom::getrandom(buf).map_err(|e| Error::Runtime {
-        context: "getrandom",
-        message: e.to_string(),
-    })
+    getrandom::getrandom(buf).map_err(|e| Error::Entropy(e.to_string()))
 }
 
 /// Valid credential name: `[a-z0-9._:-]`, 1–96 chars (allows `ngrok`,
@@ -93,17 +90,14 @@ impl CredVault {
                 k.copy_from_slice(&bytes);
                 Ok(k)
             }
-            Ok(_) => Err(Error::Invalid(format!(
-                "corrupted master key at {}",
-                key_path.display()
-            ))),
+            Ok(_) => Err(Error::CorruptMasterKey(key_path.to_path_buf())),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => {
                 let mut k = [0u8; KEY_LEN];
                 random_bytes(&mut k)?;
                 write_0600(key_path, &k)?;
                 Ok(k)
             }
-            Err(e) => Err(Error::Io(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -123,7 +117,7 @@ impl CredVault {
         random_bytes(&mut nonce)?;
         let ct = Self::cipher(&self.key)
             .encrypt(XNonce::from_slice(&nonce), plaintext)
-            .map_err(|_| Error::Invalid("failed to encrypt".into()))?;
+            .map_err(|_| Error::Vault("failed to encrypt".into()))?;
         let mut blob = Vec::with_capacity(NONCE_LEN + ct.len());
         blob.extend_from_slice(&nonce);
         blob.extend_from_slice(&ct);
@@ -133,18 +127,18 @@ impl CredVault {
     /// Decrypts a `nonce(24) || ciphertext` blob produced by [`CredVault::seal`].
     pub fn unseal(&self, blob: &[u8]) -> Result<Vec<u8>> {
         if blob.len() < NONCE_LEN + 16 {
-            return Err(Error::Invalid("corrupted encrypted blob".into()));
+            return Err(Error::Vault("corrupted encrypted blob".into()));
         }
         let (nonce, ct) = blob.split_at(NONCE_LEN);
         Self::cipher(&self.key)
             .decrypt(XNonce::from_slice(nonce), ct)
-            .map_err(|_| Error::Invalid("failed to decrypt (wrong key?)".into()))
+            .map_err(|_| Error::Vault("failed to decrypt (wrong key?)".into()))
     }
 
     /// Encrypts and persists a credential (overwrites if it exists).
     pub fn put(&self, name: &str, value: &str) -> Result<()> {
         if !valid_cred_name(name) {
-            return Err(Error::Invalid(format!("invalid credential name: {name}")));
+            return Err(Error::InvalidCredentialName(name.to_string()));
         }
         write_0600(&self.cred_path(name), &self.seal(value.as_bytes())?)?;
         Ok(())
@@ -158,18 +152,18 @@ impl CredVault {
     /// unvalidated name here is an arbitrary-file-read/delete primitive.
     pub fn get(&self, name: &str) -> Result<Option<String>> {
         if !valid_cred_name(name) {
-            return Err(Error::Invalid(format!("invalid credential name: {name}")));
+            return Err(Error::InvalidCredentialName(name.to_string()));
         }
         let blob = match fs::read(self.cred_path(name)) {
             Ok(b) => b,
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-            Err(e) => return Err(Error::Io(e)),
+            Err(e) => return Err(e.into()),
         };
         let pt = self.unseal(&blob).map_err(|_| {
-            Error::Invalid(format!("failed to decrypt {name} (wrong key/corrupted?)"))
+            Error::Vault(format!("failed to decrypt {name} (wrong key/corrupted?)"))
         })?;
         let s = String::from_utf8(pt)
-            .map_err(|_| Error::Invalid(format!("credential {name} is not UTF-8")))?;
+            .map_err(|_| Error::Vault(format!("credential {name} is not UTF-8")))?;
         Ok(Some(s))
     }
 
@@ -198,12 +192,12 @@ impl CredVault {
     /// Removes a credential (idempotent).
     pub fn remove(&self, name: &str) -> Result<()> {
         if !valid_cred_name(name) {
-            return Err(Error::Invalid(format!("invalid credential name: {name}")));
+            return Err(Error::InvalidCredentialName(name.to_string()));
         }
         match fs::remove_file(self.cred_path(name)) {
             Ok(()) => Ok(()),
             Err(ref e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(e) => Err(Error::Io(e)),
+            Err(e) => Err(e.into()),
         }
     }
 
@@ -231,7 +225,7 @@ impl CredVault {
             random_bytes(&mut nonce)?;
             let ct = cipher
                 .encrypt(XNonce::from_slice(&nonce), v.as_bytes())
-                .map_err(|_| Error::Invalid("failed to re-encrypt during rotation".into()))?;
+                .map_err(|_| Error::Vault("failed to re-encrypt during rotation".into()))?;
             let mut blob = Vec::with_capacity(NONCE_LEN + ct.len());
             blob.extend_from_slice(&nonce);
             blob.extend_from_slice(&ct);

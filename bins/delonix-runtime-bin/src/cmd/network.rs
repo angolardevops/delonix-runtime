@@ -541,13 +541,11 @@ pub fn run(action: NetworkCmd) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
     match action {
         NetworkCmd::Connect { network, container } => {
-            let cstore =
-                delonix_runtime_core::Store::open(super::util::state_root().join("containers"))?;
+            let cstore = delonix_state::Store::open(super::util::state_root().join("containers"))?;
             super::container::cmd_network_connect(&cstore, &container, &network)
         }
         NetworkCmd::Disconnect { network, container } => {
-            let cstore =
-                delonix_runtime_core::Store::open(super::util::state_root().join("containers"))?;
+            let cstore = delonix_state::Store::open(super::util::state_root().join("containers"))?;
             super::container::cmd_network_disconnect(&cstore, &container, &network)
         }
         NetworkCmd::Vlan {
@@ -1340,7 +1338,7 @@ fn cmd_describe(store: &NetworkStore, names: &[String]) -> Result<()> {
 /// and [`network_user_names`] (the bare-names `ls` form) share, so the two
 /// views can never disagree about who counts as "attached".
 fn containers_on_network(net: &str) -> Option<Vec<delonix_runtime_core::Container>> {
-    let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
+    let store = delonix_state::Store::open(state_root().join("containers")).ok()?;
     let cs = store.list().ok()?;
     Some(
         cs.into_iter()

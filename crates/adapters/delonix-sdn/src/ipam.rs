@@ -124,7 +124,7 @@ fn load(prefix: &str) -> Option<BTreeMap<String, String>> {
 /// Persists the `id → ip` map of a prefix (pretty, like the `NetDef`s).
 ///
 /// **Atomic AND durable** (temp → `fsync` → `rename` → `fsync` the dir, via
-/// [`delonix_runtime_core::write_atomic`]): a lockless reader (`lookup`, on the
+/// [`delonix_state::write_atomic`]): a lockless reader (`lookup`, on the
 /// cleanup path) never sees a file truncated in the middle of a concurrent
 /// `store` — it sees the OLD map or the NEW one, never garbage. Without that, a
 /// torn read returned `None` and cleanup fell back to the DERIVED IP (wrong, if
@@ -144,7 +144,7 @@ fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
         context: "ipam serialize",
         message: e.to_string(),
     })?;
-    delonix_runtime_core::write_atomic(&prefix_file(prefix), &json).map_err(|e| Error::Runtime {
+    delonix_state::write_atomic(&prefix_file(prefix), &json).map_err(|e| Error::Runtime {
         context: "ipam write",
         message: e.to_string(),
     })
@@ -372,7 +372,7 @@ fn store_reap_candidates(candidates: &BTreeMap<String, u64>) {
         return;
     }
     if let Ok(json) = serde_json::to_vec_pretty(candidates) {
-        let _ = delonix_runtime_core::write_atomic(&reap_candidates_file(), &json);
+        let _ = delonix_state::write_atomic(&reap_candidates_file(), &json);
     }
 }
 

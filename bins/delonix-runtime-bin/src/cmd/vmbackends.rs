@@ -101,7 +101,7 @@ fn proxmox_auth(lookup: &dyn Fn(&str) -> Option<String>) -> Result<delonix_proxm
     // A `kind: Secret` first: a token on the command line lands in the shell
     // history and in `ps`.
     if let Some(name) = lookup("DELONIX_PROXMOX_SECRET") {
-        let s = delonix_runtime_core::SecretStore::open(state_root())?.load(&name)?;
+        let s = delonix_state::SecretStore::open(state_root())?.load(&name)?;
         let get = |k: &str| s.data.get(k).cloned();
         if let (Some(id), Some(secret)) = (
             get("tokenId").or_else(|| get("token_id")),

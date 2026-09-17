@@ -2399,16 +2399,13 @@ fn kubeadm_init(
         // world-writable and the name was guessable, so another local user could
         // pre-plant a symlink there and redirect the write, or simply read the
         // cluster's init configuration while it sat at the ambient umask.
-        let tmp = delonix_runtime_core::write_private_temp(
-            "delonix-kubeadm-config.yaml",
-            yaml.as_bytes(),
-        )
-        .map_err(|e| {
-            Error::Invalid(format!(
-                "{}: {e}",
-                super::po::t("writing local kubeadm-config.yaml")
-            ))
-        })?;
+        let tmp = delonix_state::write_private_temp("delonix-kubeadm-config.yaml", yaml.as_bytes())
+            .map_err(|e| {
+                Error::Invalid(format!(
+                    "{}: {e}",
+                    super::po::t("writing local kubeadm-config.yaml")
+                ))
+            })?;
         let scp_result = remote::scp_to(cp1, &tmp, "/tmp/delonix-kubeadm-config.yaml");
         let _ = std::fs::remove_file(&tmp);
         scp_result.map_err(|e| Error::Invalid(format!("[{label}] kubeadm config: {e}")))?;
@@ -2571,7 +2568,7 @@ fn fetch_kubeconfig(cp1: &SshTarget, cluster_name: &str) -> Result<PathBuf> {
     // what was there before, replaces any symlink sitting at `dest` instead of
     // following it, and makes the update atomic so a crash cannot leave half a
     // kubeconfig behind.
-    delonix_runtime_core::write_atomic_mode(&dest, kubeconfig.as_bytes(), Some(0o600))?;
+    delonix_state::write_atomic_mode(&dest, kubeconfig.as_bytes(), Some(0o600))?;
 
     if let Some(home) = std::env::var_os("HOME") {
         let kube_dir = PathBuf::from(home).join(".kube");
@@ -2756,7 +2753,7 @@ fn merge_into_local_kubeconfig(source: &Path, cluster_name: &str, dest: &Path) -
     // default install) for the window before the `chmod` lands. Same fix
     // `fetch_kubeconfig` already carries a few functions up; this path had been
     // left on the old shape.
-    delonix_runtime_core::write_atomic_mode(dest, out.as_bytes(), Some(0o600))?;
+    delonix_state::write_atomic_mode(dest, out.as_bytes(), Some(0o600))?;
     let selected = merged
         .get("current-context")
         .and_then(Value::as_str)
