@@ -141,8 +141,58 @@ pub fn start<W: WorkloadRuntime>(
     }
 }
 
+/// Decide whether a container should be restarted, given the policy, the state
+/// it died with, and how many times it's already been restarted. **Pure**
+/// function — the restart state machine is tested without cloning any processes.
+///
+/// Docker semantics: `no` never; `on-failure[:max]` only on exit ≠ 0 (or signal),
+/// up to `max` attempts (no `max` = no limit); `always`/`unless-stopped` always.
+/// The real distinction between `always` and `unless-stopped` is what happens on
+/// **host reboot** (`unless-stopped` doesn't resurrect a container the user
+/// stopped) — without a daemon doing a boot-time reconcile, here the two behave
+/// the same WHILE ALIVE; documented so as not to promise what isn't there.
+pub fn should_restart(policy: &str, status: &Status, restarts: u32) -> bool {
+    use Status as S;
+    let failed = matches!(status, S::Failed(_) | S::Crashed);
+    let (kind, max) = match policy.split_once(':') {
+        Some((k, m)) => (k, m.parse::<u32>().ok()),
+        None => (policy, None),
+    };
+    match kind {
+        "always" | "unless-stopped" => true,
+        "on-failure" => failed && max.map(|m| restarts < m).unwrap_or(true),
+        _ => false, // "no" and anything unknown: don't restart
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn restart_policy_docker_semantics() {
+        use delonix_runtime_core::Status as S;
+        // `no` (and unknown ones): never restarts, however it died.
+        for st in [S::Stopped, S::Failed(1), S::Crashed] {
+            assert!(!should_restart("no", &st, 0));
+            assert!(!should_restart("qualquer-coisa", &st, 0));
+        }
+        // `always`/`unless-stopped`: always, even on a clean exit.
+        for p in ["always", "unless-stopped"] {
+            assert!(should_restart(p, &S::Stopped, 0));
+            assert!(should_restart(p, &S::Failed(1), 99));
+            assert!(should_restart(p, &S::Crashed, 99));
+        }
+        // `on-failure`: only on failure; exit 0 stops.
+        assert!(!should_restart("on-failure", &S::Stopped, 0));
+        assert!(should_restart("on-failure", &S::Failed(2), 0));
+        assert!(should_restart("on-failure", &S::Crashed, 0));
+        // `on-failure:max` respects the cap (the `max` counts RESTARTS already done).
+        assert!(should_restart("on-failure:3", &S::Failed(1), 2));
+        assert!(!should_restart("on-failure:3", &S::Failed(1), 3));
+        assert!(!should_restart("on-failure:0", &S::Failed(1), 0));
+        // `on-failure` without `max` has no cap.
+        assert!(should_restart("on-failure", &S::Failed(1), 10_000));
+    }
+
     use super::*;
     use delonix_runtime_core::Error;
     use std::cell::RefCell;

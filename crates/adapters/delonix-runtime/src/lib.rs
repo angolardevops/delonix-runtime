@@ -14,6 +14,7 @@ use std::time::Duration;
 
 pub mod capabilities;
 pub mod cdi;
+pub mod launch_spec;
 pub mod regulate;
 pub mod resource_advice;
 pub mod run_host;
