@@ -32,7 +32,6 @@ delonix-scan = { workspace = true }
 # The node's security decisions (ADR-0026). Pure: three dependencies, no daemon,
 # no privileges — see the crate doc for what it deliberately does NOT do.
 delonix-security-runtime = { workspace = true }
-delonix-cri = { workspace = true }
 delonix-mgmt = { workspace = true }
 # The MCP server (ADR-0025) — a local, tenancy-free AI control surface. Kept
 # out of the workspace's dependency-clean engine crates for the same reason
