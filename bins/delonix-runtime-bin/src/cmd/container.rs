@@ -2067,28 +2067,6 @@ fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
 
 pub(crate) use delonix_compute::RunOpts;
 
-/// The explicit resolver a container was created with, if any.
-///
-/// Shared by `cmd_run` and `cmd_start` on purpose: the DNS the container gets on
-/// a `restart` has to be the one it was created with. Every field of this family
-/// that only the creation path read has ended up lost on the first restart —
-/// `-v`, `-p` on a custom network, extra networks, pod membership. Four times.
-///
-/// FIVE, and this comment was the fifth: it said «shared by `cmd_run` and
-/// `cmd_start`» while `cmd_start` never called it. Measured on a running
-/// container — `--dns 1.1.1.1` held until the first `stop`+`start` and then
-/// resolved through the host's resolver, silently. A comment that promises what
-/// the code does not do is worse than no comment: it is the thing a reader
-/// checks INSTEAD of the call sites.
-pub(crate) fn dns_config_of(c: &Container) -> Option<runtime::DnsConfig> {
-    let cfg = runtime::DnsConfig {
-        servers: c.dns_servers.clone(),
-        searches: c.dns_searches.clone(),
-        options: c.dns_options.clone(),
-    };
-    (!cfg.is_empty()).then_some(cfg)
-}
-
 /// Warns, loudly, when `--namespace <ns>` was requested but the kernel is
 /// not actually filtering intra-bridge traffic — the precondition namespace
 /// isolation silently depends on (see the `br_netfilter` section of
@@ -2226,60 +2204,16 @@ struct CliRunPorts<'a> {
 }
 
 impl CliRunPorts<'_> {
-    /// The engine's spawn specification for a [`delonix_compute::launch::Launch`].
+    /// The engine's spawn specification for a [`delonix_compute::launch::Launch`]:
+    /// what the network decides (`run_network::launch_addresses`), then the one
+    /// builder (`delonix_runtime::launch_spec::run_spec`).
     fn run_spec<'h>(
         c: &Container,
         l: &delonix_compute::launch::Launch,
         slirp_hook: &'h runtime::StartedHook<'h>,
     ) -> RunSpec<'h> {
-        // DNS for /etc/resolv.conf: on a custom network it's the holder's own address
-        // on the bridge (where the internal resolver answers); with `-p` (slirp) it's
-        // the slirp's DNS; on `--net host` it's `None` (the runtime copies the host's
-        // resolv.conf).
-        //
-        // `bridge_addr` and NOT `default_route`: a network with a DECLARED gateway
-        // sends its workloads out through an appliance, and that appliance does not
-        // run this engine's resolver. Taking one string for both questions is what
-        // made `<name>.<ns>.delonix.internal` stop resolving on such a network — with
-        // no error, because a resolver that is simply not there just times out.
-        let dns = match &l.custom_net {
-            Some(n) => infra::resolve_net(n).ok().map(|p| p.bridge_addr),
-            // A POD member is on delonix0 like any custom-network container, so the
-            // resolver is the holder's DNS on the infra gateway. Without this nothing
-            // resolved by name in a pod: the re-exec runs in the holder's mount-ns,
-            // where the host's `/etc/resolv.conf` does not exist.
-            None if l.pod => Some(infra::INFRA_GATEWAY.to_string()),
-            None if !l.slirp_ports.is_empty() => Some(delonix_net::SLIRP_DNS.to_string()),
-            None => None,
-        };
-        RunSpec {
-            dns_config: dns_config_of(c),
-            detach: l.detach,
-            new_netns: l.new_netns(),
-            pod_infra_pid: l.pod_infra_pid(),
-            userns: l.userns(c),
-            inherit_userns: l.inherit_userns(),
-            log_path: l.log_path.clone(),
-            mounts: l.mounts.clone(),
-            on_started: if l.slirp_ports.is_empty() {
-                None
-            } else {
-                Some(slirp_hook)
-            },
-            // /etc/hosts: the custom network's IP, or the slirp's when `-p` without a network.
-            hosts_ip: l
-                .attached_ip
-                .clone()
-                .or_else(|| (!l.slirp_ports.is_empty()).then(|| delonix_net::SLIRP_IP.to_string())),
-            dns,
-            host_pid: c.host_pid,
-            host_ipc: c.host_ipc,
-            apparmor: l.apparmor.clone(),
-            selinux: c.selinux.clone(),
-            log_cri: c.log_cri,
-            run_uid: c.run_uid,
-            run_gid: c.run_gid,
-        }
+        let addrs = delonix_net::run_network::launch_addresses(l);
+        runtime::launch_spec::run_spec(c, l, addrs.dns, addrs.hosts_ip, slirp_hook)
     }
 }
 
@@ -3462,7 +3396,7 @@ fn run_supervised(
                 &c.name,
                 Some(&format!("exit={}", status.exit_code())),
             );
-            if !should_restart(policy, &status, restarts) {
+            if !delonix_compute::launch::should_restart(policy, &status, restarts) {
                 std::process::exit(0);
             }
             // Desired state trumps the policy: if the record disappeared (`rm -f`)
@@ -3522,30 +3456,6 @@ fn run_supervised(
     unsafe { libc::close(rd) };
     println!("{id}");
     Ok(())
-}
-
-/// Decide whether a container should be restarted, given the policy, the state
-/// it died with, and how many times it's already been restarted. **Pure**
-/// function — the restart state machine is tested without cloning any processes.
-///
-/// Docker semantics: `no` never; `on-failure[:max]` only on exit ≠ 0 (or signal),
-/// up to `max` attempts (no `max` = no limit); `always`/`unless-stopped` always.
-/// The real distinction between `always` and `unless-stopped` is what happens on
-/// **host reboot** (`unless-stopped` doesn't resurrect a container the user
-/// stopped) — without a daemon doing a boot-time reconcile, here the two behave
-/// the same WHILE ALIVE; documented so as not to promise what isn't there.
-fn should_restart(policy: &str, status: &delonix_runtime_core::Status, restarts: u32) -> bool {
-    use delonix_runtime_core::Status as S;
-    let failed = matches!(status, S::Failed(_) | S::Crashed);
-    let (kind, max) = match policy.split_once(':') {
-        Some((k, m)) => (k, m.parse::<u32>().ok()),
-        None => (policy, None),
-    };
-    match kind {
-        "always" | "unless-stopped" => true,
-        "on-failure" => failed && max.map(|m| restarts < m).unwrap_or(true),
-        _ => false, // "no" and anything unknown: don't restart
-    }
 }
 
 /// Does the policy require supervision? (`no` needs no supervisor at all.)
@@ -6349,13 +6259,16 @@ mod runspec_single_builder_tests {
     /// test only refuses a second one appearing in this module.
     #[test]
     fn container_has_one_runspec_builder() {
+        // The spawn specification is built in ONE place,
+        // `delonix_runtime::launch_spec::run_spec`, from a `Launch`; `run` and
+        // `start` both go through it. A literal here would be a second builder.
         let src = include_str!("container.rs");
         let needle = concat!("RunSpec", " {");
         let builders = src.matches(needle).count();
         assert_eq!(
-            builders, 1,
+            builders, 0,
             "container.rs builds the spawn specification in {builders} places — \
-             build every start from a `Launch` through `CliRunPorts::run_spec`"
+             build every start from a `Launch` through `launch_spec::run_spec`"
         );
     }
 }
@@ -6720,7 +6633,7 @@ mod tests {
     use super::{compose_io_max, parse_io_rate};
     use super::{
         container_ips, fmt_ports, fmt_status, next_extra_idx, normalize_container_spec,
-        parse_cri_log_line, parse_signal, policy_supervised, reexec_env, should_restart,
+        parse_cri_log_line, parse_signal, policy_supervised, reexec_env,
         unix_secs_to_rfc3339_prefix, valid_container_name, ContainerSpec,
     };
     use delonix_runtime_core::{Container, ExtraNet, Status};
@@ -7097,32 +7010,6 @@ mod tests {
     }
 
     #[test]
-    fn restart_policy_docker_semantics() {
-        use delonix_runtime_core::Status as S;
-        // `no` (and unknown ones): never restarts, however it died.
-        for st in [S::Stopped, S::Failed(1), S::Crashed] {
-            assert!(!should_restart("no", &st, 0));
-            assert!(!should_restart("qualquer-coisa", &st, 0));
-        }
-        // `always`/`unless-stopped`: always, even on a clean exit.
-        for p in ["always", "unless-stopped"] {
-            assert!(should_restart(p, &S::Stopped, 0));
-            assert!(should_restart(p, &S::Failed(1), 99));
-            assert!(should_restart(p, &S::Crashed, 99));
-        }
-        // `on-failure`: only on failure; exit 0 stops.
-        assert!(!should_restart("on-failure", &S::Stopped, 0));
-        assert!(should_restart("on-failure", &S::Failed(2), 0));
-        assert!(should_restart("on-failure", &S::Crashed, 0));
-        // `on-failure:max` respects the cap (the `max` counts RESTARTS already done).
-        assert!(should_restart("on-failure:3", &S::Failed(1), 2));
-        assert!(!should_restart("on-failure:3", &S::Failed(1), 3));
-        assert!(!should_restart("on-failure:0", &S::Failed(1), 0));
-        // `on-failure` without `max` has no cap.
-        assert!(should_restart("on-failure", &S::Failed(1), 10_000));
-    }
-
-    #[test]
     fn supervised_policy_only_for_active_policies() {
         assert!(!policy_supervised("no"));
         assert!(!policy_supervised(""));
@@ -7492,31 +7379,6 @@ containers:
         // presente uma observação que já não se está a fazer.
         c.status = Status::Stopped;
         assert_eq!(fmt_status_of(&c, None), "Exited (0)");
-    }
-
-    #[test]
-    fn o_dns_explicito_tem_de_chegar_aos_dois_caminhos() {
-        // A guarda contra a 5.ª ocorrencia da armadilha, e contra a sua
-        // reintroducao: `dns_config_of` existe precisamente para o `run` e o
-        // `start` darem o MESMO resolver, e durante quatro versoes so o `run`
-        // lhe chamava — um container criado com `--dns 1.1.1.1` resolvia por ele
-        // ate ao primeiro `stop`+`start`, e a seguir pelo resolver do host, em
-        // silencio.
-        //
-        // O teste e sobre o CODIGO e nao sobre um container porque a alternativa
-        // exige um host. Desde que `run` e `start` constroem o `RunSpec` num so
-        // sitio (`CliRunPorts::run_spec`, guardado por
-        // `container_has_one_runspec_builder`), basta esse construtor passar o
-        // campo para os dois caminhos o terem.
-        let src = include_str!("container.rs");
-        let chamadas = src
-            .matches(concat!("dns_config: ", "dns_config_of("))
-            .count();
-        assert_eq!(
-            chamadas, 1,
-            "o construtor unico do `RunSpec` tem de passar `dns_config_of` \
-             (encontradas {chamadas} chamadas) — sem ele, `run` e `start` perdem o `--dns`"
-        );
     }
 
     fn scratch_root(tag: &str) -> std::path::PathBuf {

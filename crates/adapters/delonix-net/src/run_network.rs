@@ -92,6 +92,45 @@ pub fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
     }
 }
 
+/// What a container's start needs from the network: the resolver for its
+/// `/etc/resolv.conf` and the address for its `/etc/hosts`.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LaunchAddresses {
+    pub dns: Option<String>,
+    pub hosts_ip: Option<String>,
+}
+
+/// The network's answers for a start.
+///
+/// DNS: on a custom network it is the holder's own address on the bridge, where
+/// the internal resolver answers; a pod member is on `delonix0`, so it is the
+/// infra gateway; with `-p` (slirp) it is the slirp's resolver; on `--net host`
+/// there is none, and the runtime copies the host's `resolv.conf`.
+///
+/// `bridge_addr` and NOT `default_route`: a network with a DECLARED gateway sends
+/// its workloads out through an appliance, and that appliance does not run this
+/// engine's resolver. Taking one string for both questions is what made
+/// `<name>.<ns>.delonix.internal` stop resolving on such a network — with no
+/// error, because a resolver that is simply not there just times out.
+///
+/// A POD member needs the infra gateway for the same reason: without it nothing
+/// resolved by name in a pod, since the re-exec runs in the holder's mount
+/// namespace, where the host's `/etc/resolv.conf` does not exist.
+pub fn launch_addresses(l: &delonix_compute::launch::Launch) -> LaunchAddresses {
+    let dns = match &l.custom_net {
+        Some(n) => crate::infra::resolve_net(n).ok().map(|p| p.bridge_addr),
+        None if l.pod => Some(crate::infra::INFRA_GATEWAY.to_string()),
+        None if !l.slirp_ports.is_empty() => Some(crate::SLIRP_DNS.to_string()),
+        None => None,
+    };
+    // /etc/hosts: the custom network's address, or the slirp's with `-p`.
+    let hosts_ip = l
+        .attached_ip
+        .clone()
+        .or_else(|| (!l.slirp_ports.is_empty()).then(|| crate::SLIRP_IP.to_string()));
+    LaunchAddresses { dns, hosts_ip }
+}
+
 /// The host's network as the `container run` use case's `NetworkProvider`.
 pub struct HostNetwork<'a> {
     /// The engine's state root, where networks are declared.
