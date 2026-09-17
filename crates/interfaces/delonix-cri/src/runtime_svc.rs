@@ -126,7 +126,7 @@ impl RuntimeService for DelonixRuntime {
         // `Ready` in K8s even without working networking. Now it actually checks,
         // in BOTH modes (rootless: holder+slirp alive via pidfiles; root: the
         // CNI chain the sandboxes are networked with — reads and stats only).
-        let network_ready = if delonix_runtime::is_rootless() {
+        let network_ready = if delonix_linux::is_rootless() {
             let st = delonix_sdn::infra::status();
             // DOWN-AND-UNUSED IS NOT BROKEN, and conflating the two deadlocks
             // the node. This engine is daemonless: the infra netns starts on
@@ -472,7 +472,7 @@ impl RuntimeService for DelonixRuntime {
             .and_then(|c| c.network_config)
             .map(|n| n.pod_cidr)
             .unwrap_or_default();
-        let cni = if delonix_runtime::is_rootless() {
+        let cni = if delonix_linux::is_rootless() {
             delonix_sdn::cni::enabled_conf().is_some()
         } else {
             // Root networks every pod through CNI (see `run_pod_sandbox`).
@@ -624,7 +624,7 @@ mod tests {
     /// back `true`, masking exactly this scenario).
     #[tokio::test]
     async fn network_ready_reflecte_infra_rootless_real_nao_fabricada() {
-        if !delonix_runtime::is_rootless() {
+        if !delonix_linux::is_rootless() {
             eprintln!("SKIP: teste assume ambiente rootless (uid != 0)");
             return;
         }

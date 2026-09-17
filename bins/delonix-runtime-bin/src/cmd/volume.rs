@@ -1506,7 +1506,7 @@ pub(crate) fn measured_usage(path: &std::path::Path) -> delonix_volume::Usage {
     let _ = std::fs::remove_file(&out);
     let p = path.to_string_lossy().to_string();
     let o = out.to_string_lossy().to_string();
-    let mapped = match delonix_runtime::reexec_mapped(&["__duusage", &p, &o]) {
+    let mapped = match delonix_linux::reexec_mapped(&["__duusage", &p, &o]) {
         Some(true) => std::fs::read_to_string(&out)
             .ok()
             .and_then(|s| parse_duusage(&s)),
@@ -1555,7 +1555,7 @@ pub(crate) fn volsnap_run(
 ) -> Result<()> {
     let d = data.to_string_lossy().to_string();
     let t = tarball.to_string_lossy().to_string();
-    match delonix_runtime::reexec_mapped(&["__volsnap", mode, &d, &t]) {
+    match delonix_linux::reexec_mapped(&["__volsnap", mode, &d, &t]) {
         Some(true) => Ok(()),
         Some(false) => Err(Error::Runtime {
             context: "volume snapshot",
@@ -1992,7 +1992,7 @@ pub(crate) fn cmd_rm_with(
             super::po::t("destroyed the provisioned storage"),
         );
     }
-    store.remove_with(name, Some(&delonix_runtime::remove_tree_mapped))?;
+    store.remove_with(name, Some(&delonix_linux::remove_tree_mapped))?;
     // A network-storage volume's NAS username+password live in a sidecar file
     // this store never touches (see `storage::remove_credentials`) — a plain
     // volume never had one, so this is a harmless no-op for it. Unconditional
@@ -2013,7 +2013,7 @@ pub(crate) fn cmd_rm_with(
         // userns, so a plain `remove_dir_all` may hit EACCES — the mapped
         // fallback is what `volumes rm` already uses for the same reason.
         if std::fs::remove_dir_all(&vol.mountpoint).is_err() {
-            delonix_runtime::remove_tree_mapped(std::path::Path::new(&vol.mountpoint));
+            delonix_linux::remove_tree_mapped(std::path::Path::new(&vol.mountpoint));
         }
         if std::path::Path::new(&vol.mountpoint).exists() {
             return Err(Error::Runtime {

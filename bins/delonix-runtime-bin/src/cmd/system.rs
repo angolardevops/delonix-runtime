@@ -8,7 +8,7 @@
 //! are properties of the ENGINE, not of one resource group.
 
 use clap::Subcommand;
-use delonix_runtime::{self as runtime};
+use delonix_linux::{self as runtime};
 use delonix_runtime_core::{events, Error, Result, Store};
 
 use super::util::{open_stores, state_root};
@@ -860,7 +860,7 @@ fn cmd_virt(tune: bool) -> Result<()> {
 
 /// `system thermal` — thermal governor over Delonix's cgroup slice.
 fn cmd_thermal(high: u64, low: u64, floor: u64, interval: u64, once: bool) -> Result<()> {
-    use delonix_runtime::{self as runtime};
+    use delonix_linux::{self as runtime};
     if high <= low {
         return Err(delonix_runtime_core::Error::Invalid(
             super::po::t("--high must be greater than --low").into(),
@@ -1153,7 +1153,7 @@ fn cmd_regulate_timer(install: bool, interval: u64, floor: u64) -> Result<()> {
 
 /// `system regulate` — the deterministic half of resource management.
 ///
-/// The decision lives in `delonix_runtime::regulate` and is pure; this reads
+/// The decision lives in `delonix_linux::regulate` and is pure; this reads
 /// the host, prints, and (with `--apply`) writes. Same split as `resources`,
 /// and for the same reason: a rule inside a `println!` cannot be tested and
 /// cannot be reused by anything else.
@@ -1165,7 +1165,7 @@ fn cmd_regulate(
     output: super::output::OutputFormat,
 ) -> Result<()> {
     let output = super::config::resolve_output(&state_root(), output);
-    use delonix_runtime::regulate;
+    use delonix_linux::regulate;
 
     let root = state_root();
     let json = output == super::output::OutputFormat::Json;
@@ -1350,7 +1350,7 @@ fn cmd_regulate(
 /// The engine hands over a template and its holes precisely so this can come out
 /// in Portuguese without the engine crate knowing that Portuguese exists. Shared
 /// by `resources` and `doctor`, which print the same findings.
-fn say(m: &delonix_runtime::resource_advice::Message) -> String {
+fn say(m: &delonix_linux::resource_advice::Message) -> String {
     let args: Vec<(&str, &str)> = m.args.iter().map(|(k, v)| (*k, v.as_str())).collect();
     super::po::tf(m.template, &args)
 }
@@ -1367,7 +1367,7 @@ fn say(m: &delonix_runtime::resource_advice::Message) -> String {
 /// findings, with the same stable ids, have to reach an MCP client and a fleet
 /// gate, and a rule that lives inside a `println!` reaches neither.
 fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()> {
-    use delonix_runtime::resource_advice as advice;
+    use delonix_linux::resource_advice as advice;
 
     let root = state_root();
     let output = super::config::resolve_output(&root, output);
@@ -1385,7 +1385,7 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
         .map(|cs| {
             cs.into_iter()
                 .filter(|c| c.pid.is_some())
-                .map(|c| delonix_runtime::workload_view::view(&c))
+                .map(|c| delonix_linux::workload_view::view(&c))
                 .collect()
         })
         .unwrap_or_default();
@@ -2203,7 +2203,7 @@ fn cmd_doctor(strict: bool) -> Result<()> {
     // `doctor` answers «is this host able to do what the engine promises», and
     // this minute's CPU pressure is not an answer to that.
     let resource_findings: Vec<_> = {
-        use delonix_runtime::resource_advice as advice;
+        use delonix_linux::resource_advice as advice;
         advice::advise(&advice::collect(&state_root()))
             .into_iter()
             .filter(|f| f.class.gates())
@@ -2246,7 +2246,7 @@ fn cmd_info() -> Result<()> {
         super::po::t("state root:"),
         state_root().display()
     );
-    let rootless = delonix_runtime::is_rootless();
+    let rootless = delonix_linux::is_rootless();
     println!(
         "  {:<19} {}",
         super::po::t("mode:"),
@@ -2269,7 +2269,7 @@ fn cmd_info() -> Result<()> {
     //
     // `cgroup_limits_apply` asks the engine's own question, about the base
     // `spawn` would actually use.
-    let delegated = delonix_runtime::cgroup_limits_apply();
+    let delegated = delonix_linux::cgroup_limits_apply();
     println!(
         "  {:<19} {}",
         super::po::t("cgroup2 delegated:"),

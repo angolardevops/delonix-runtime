@@ -59,7 +59,7 @@ LAYERS = {
     "delonix-compute": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
-    "delonix-runtime": ADAPTER,  # → delonix-linux (P3)
+    "delonix-linux": ADAPTER,
     "delonix-sdn": ADAPTER,
     "delonix-oci": ADAPTER,
     "delonix-scanner": ADAPTER,

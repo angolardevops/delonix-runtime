@@ -503,10 +503,10 @@ impl Freeze {
             if !matches!(c.status, delonix_runtime_core::Status::Running) {
                 continue; // stopped: nothing writes, nothing to freeze
             }
-            if delonix_runtime::is_frozen(c) {
+            if delonix_linux::is_frozen(c) {
                 continue; // already paused by the operator — leave it that way
             }
-            match delonix_runtime::set_frozen(c, true) {
+            match delonix_linux::set_frozen(c, true) {
                 Ok(()) => thaw.push(c.clone()),
                 Err(e) => {
                     // Do NOT refuse. The freezer needs a delegated cgroup, and on
@@ -535,7 +535,7 @@ impl Freeze {
 impl Drop for Freeze {
     fn drop(&mut self) {
         for c in &self.thaw {
-            if let Err(e) = delonix_runtime::set_frozen(c, false) {
+            if let Err(e) = delonix_linux::set_frozen(c, false) {
                 // A container left frozen is a container that looks alive and
                 // answers nothing. This has to be loud even on the error path.
                 eprintln!(

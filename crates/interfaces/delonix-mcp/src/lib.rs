@@ -320,7 +320,7 @@ impl DelonixMcp {
         annotations(read_only_hint = true)
     )]
     fn resources_get(&self) -> String {
-        use delonix_runtime::resource_advice as advice;
+        use delonix_linux::resource_advice as advice;
         // The rules are NOT re-implemented here. An agent that disagrees with
         // `delonix system resources` about the same host is worse than no
         // agent: whoever reads the two has no way to tell which one is lying.

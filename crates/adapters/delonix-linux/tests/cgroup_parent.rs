@@ -9,7 +9,7 @@
 //! cgroup v2 base, which is the normal CI container. A test that fails because of the
 //! environment teaches people to ignore the suite.
 //!
-//! `cargo test -p delonix-runtime --test cgroup_parent -- --nocapture --test-threads=1`
+//! `cargo test -p delonix-linux --test cgroup_parent -- --nocapture --test-threads=1`
 
 use std::path::{Path, PathBuf};
 
@@ -44,7 +44,7 @@ impl Drop for Cleanup {
     fn drop(&mut self) {
         if let Ok(store) = Store::open(&self.store_dir) {
             for c in &self.ids {
-                let _ = delonix_runtime::stop(&store, &mut c.clone(), 2);
+                let _ = delonix_linux::stop(&store, &mut c.clone(), 2);
                 let _ = store.remove(&c.id);
             }
         }
@@ -98,7 +98,7 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
             "32M".into(),
         );
         c.cgroup_parent = Some(group.clone());
-        match delonix_runtime::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
+        match delonix_linux::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
             Ok(st) => {
                 eprintln!("container {} -> {st:?}", c.name);
                 guard.ids.push(c.clone());
@@ -112,7 +112,7 @@ fn two_containers_of_a_group_share_one_intermediate_cgroup_with_its_ceiling() {
     }
 
     // Where did they actually land? `live_cgroup` is the same resolver production uses.
-    let paths: Vec<String> = guard.ids.iter().map(delonix_runtime::live_cgroup).collect();
+    let paths: Vec<String> = guard.ids.iter().map(delonix_linux::live_cgroup).collect();
     for p in &paths {
         eprintln!("cgroup: {p}");
     }
@@ -196,14 +196,14 @@ fn an_unsafe_group_name_does_not_escape_the_delegated_base() {
         name: "../escapou".into(),
         ..Default::default()
     });
-    match delonix_runtime::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
+    match delonix_linux::create(&store, &mut c, &rootfs.to_string_lossy(), true) {
         Ok(_) => guard.ids.push(c.clone()),
         Err(e) => {
             eprintln!("SKIPPED: cannot start a container here ({e}).");
             return;
         }
     }
-    let path = delonix_runtime::live_cgroup(&c);
+    let path = delonix_linux::live_cgroup(&c);
     eprintln!("cgroup with a rejected name: {path}");
     assert!(
         !path.contains("escapou"),

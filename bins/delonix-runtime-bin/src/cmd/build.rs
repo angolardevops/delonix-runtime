@@ -55,9 +55,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
+use delonix_linux as runtime;
 use delonix_oci::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
 use delonix_oci::{Image, ImageStore};
-use delonix_runtime as runtime;
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
 use sha2::{Digest, Sha256};
 
@@ -1538,7 +1538,7 @@ mod tests {
         for rootless in [true, false] {
             let c = super::work_container("0123456789abcdef", "alpine", rootless);
             let hook = |_: i32| Ok(());
-            let spec = delonix_runtime::launch_spec::run_spec(
+            let spec = delonix_linux::launch_spec::run_spec(
                 &c,
                 &super::work_launch("/r"),
                 None,

@@ -25,7 +25,7 @@
 | Crate | LOC | Bin | Role (confirmed in code) |
 |---|---:|---|---|
 | `delonix-runtime-core` | 3 663 | — | Shared types (`Container`, `Vm`, `Status`), `Store`/`JsonStore`, typestate, virt detection, Secret Manager (`secret`/`cred_vault`), **and the cross-cutting foundations below** (`events`, `telemetry`, `metrics`, `peer_cred`, `workload_net`). The dependency **sink** — depends on nothing internal. |
-| `delonix-runtime` | 4 974 | — | Container engine: `clone`/namespaces/cgroups, create/stop/exec, `reconcile_status`. Contains `spawn()` (~405 lines, flagged as maintenance risk). |
+| `delonix-linux` | 4 974 | — | Container engine: `clone`/namespaces/cgroups, create/stop/exec, `reconcile_status`. Contains `spawn()` (~405 lines, flagged as maintenance risk). |
 | `delonix-runtime-bin` | **38 050** | `delonix` | The full CLI (44 `cmd/*` modules). Dominant crate by far — effectively the product surface. |
 | `delonix-sdn` | 9 660 | — | Rootless SDN: holder netns + bridge + single slirp, DNAT/firewall (nft), CNI compat, IPAM, WireGuard overlay, eBPF device-cgroup. |
 | `delonix-oci` | 4 503 | — | OCI: pull/registry/build, CNB buildpacks, internal registry, CAS, overlay, OCI-archive save, signature verification. |

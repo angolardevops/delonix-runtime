@@ -724,7 +724,7 @@ impl VolumeStore {
     /// the data cannot be removed** — a failed `rm` now leaves a volume that is
     /// still fully visible and still fully its owner's.
     ///
-    /// `rmtree` lets the CLI inject `delonix_runtime::remove_tree_mapped` (the
+    /// `rmtree` lets the CLI inject `delonix_linux::remove_tree_mapped` (the
     /// same mapped-userns helper `system prune` already uses) so subuid-owned
     /// data actually goes away instead of leaving a volume that no command can
     /// delete. Without the hook, the plain `fs` path is used and a subuid tree

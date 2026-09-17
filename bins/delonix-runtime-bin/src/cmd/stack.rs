@@ -1171,7 +1171,7 @@ fn presence(
         k::CONTAINER => match containers.iter().find(|c| c.name == name) {
             Some(c) => {
                 let mut c = c.clone();
-                delonix_runtime::reconcile_status(&mut c);
+                delonix_linux::reconcile_status(&mut c);
                 ("yes".into(), c.status.to_string())
             }
             None => ("no".into(), "-".into()),

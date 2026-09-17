@@ -97,8 +97,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use clap::Subcommand;
+use delonix_linux::{self as runtime};
 use delonix_oci::ImageStore;
-use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{Container, Error, Result, Status, Store};
 use delonix_sdn::NetworkStore;
 use delonix_volume::VolumeStore;

@@ -51,11 +51,11 @@ pub struct Env {
 }
 
 impl Env {
-    /// Probes the host for real. Reuses `delonix_runtime::is_rootless` (the
+    /// Probes the host for real. Reuses `delonix_linux::is_rootless` (the
     /// canonical privilege helper, the same one the rest of the runtime uses).
     pub fn probe() -> Env {
         Env {
-            rootless: delonix_runtime::is_rootless(),
+            rootless: delonix_linux::is_rootless(),
             mount_nfs: which("mount.nfs"),
             mount_cifs: which("mount.cifs"),
             mount_davfs: which("mount.davfs"),

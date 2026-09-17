@@ -546,7 +546,7 @@ fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_runtime_core::Co
     // updates → 1 survivor (see `store::tests::update_concorrente_nao_perde_escritas`).
     store
         .update(&format!("cri-{cri_id}"), |c| {
-            delonix_runtime::reconcile_status(c)
+            delonix_linux::reconcile_status(c)
         })
         .ok()
 }
@@ -580,10 +580,10 @@ fn delonix_exit(base: &Path, cri_id: &str) -> Option<i32> {
 }
 
 /// Whether the kernel's OOM killer took this CRI container down (the engine
-/// records it on the cgroup before removing it — see `delonix_runtime::OOM_KILLED`).
+/// records it on the cgroup before removing it — see `delonix_linux::OOM_KILLED`).
 fn delonix_oom_killed(base: &Path, cri_id: &str) -> bool {
     load_reconciled(base, cri_id)
-        .is_some_and(|c| c.crash_reason.as_deref() == Some(delonix_runtime::OOM_KILLED))
+        .is_some_and(|c| c.crash_reason.as_deref() == Some(delonix_linux::OOM_KILLED))
 }
 
 /// The CRI `reason` for an exited container. `OOMKilled` is the string the
@@ -662,7 +662,7 @@ pub fn run_pod_sandbox(
     if !host_network {
         let pod = format!("cri-{id}");
         let cni = delonix_sdn::cni::enabled_conf();
-        if let Some(conf) = cni.filter(|_| delonix_runtime::is_rootless()) {
+        if let Some(conf) = cni.filter(|_| delonix_linux::is_rootless()) {
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
             match delonix_sdn::infra::cni_attach_container(&pod, &conf_json) {
@@ -671,7 +671,7 @@ pub fn run_pod_sandbox(
                 }
                 Err(e) => return Err(Status::internal(format!("CNI ADD of sandbox {pod}: {e}"))),
             }
-        } else if delonix_runtime::is_rootless() {
+        } else if delonix_linux::is_rootless() {
             // ROOTLESS: the pod is a SHARED ingress netns (delonix0 + DHCP +
             // DNS + firewall); the sandbox's containers join via `--pod`.
             if let Some(why) = delonix_detached_why(base, &["net", "netns", "attach", &pod])? {
@@ -895,7 +895,7 @@ pub fn remove_pod_sandbox(
                     let cj = serde_json::to_string(&conf).unwrap_or_default();
                     let _ = delonix_sdn::infra::cni_detach_container(&format!("cri-{id}"), &cj);
                 }
-            } else if delonix_runtime::is_rootless() {
+            } else if delonix_linux::is_rootless() {
                 let _ = delonix(base, &["net", "netns", "detach", &format!("cri-{id}")]);
             }
             // No root branch without `cni_netns`: it used to run `pod rm cri-<id>`,
@@ -972,7 +972,7 @@ pub fn pod_sandbox_status(
     } else if !r.cni_ip.is_empty() {
         // CNI-configured sandbox: the IP came from the plugin's IPAM.
         r.cni_ip.clone()
-    } else if delonix_runtime::is_rootless() {
+    } else if delonix_linux::is_rootless() {
         // ROOTLESS: IP of the pod's shared netns in the ingress (deterministic).
         delonix_sdn::infra::container_ip(&format!("cri-{}", r.id))
     } else {
@@ -1106,7 +1106,7 @@ pub fn create_container(
     if let Some(path) = &seccomp_profile_path {
         let json = std::fs::read_to_string(path)
             .map_err(|e| Status::invalid_argument(format!("seccomp profile {path}: {e}")))?;
-        delonix_runtime::seccomp_profile::parse(&json)
+        delonix_linux::seccomp_profile::parse(&json)
             .map_err(|e| Status::invalid_argument(format!("seccomp profile {path}: {e}")))?;
     }
     // AppArmor: the NEW field (`apparmor`, SecurityProfile) takes precedence; if it
