@@ -88,7 +88,7 @@ pub fn cmd_scan(image: &str, sbom: bool, fail_on: Option<&str>) -> Result<()> {
     let (images, _store) = open_stores()?;
     let img = match images.resolve(image) {
         Ok(img) => img,
-        Err(Error::NotFound(_)) => {
+        Err(e) if e.is_not_found() => {
             // A VM image is NOT a container image, and the difference has to be said before
             // the pull. Measured: `image scan delonix-vm-base:ubuntu-24.04` — an image that
             // IS on this node — announced "not local", went to Docker Hub for

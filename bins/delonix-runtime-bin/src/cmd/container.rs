@@ -3885,7 +3885,7 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     // Idempotent like docker: stopping an already-stopped container succeeds
     // (it broke the natural `stop X && rm X` idiom, RC=1 for a no-op).
     if let Err(e) = runtime::stop(store, &mut c, time) {
-        if matches!(e, delonix_runtime_core::Error::NotRunning(_)) {
+        if e.is_not_running() {
             println!("{}", c.name);
             return Ok(());
         }

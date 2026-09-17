@@ -4282,7 +4282,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
         // No local record, but with a domain in libvirt (orphaned from an old
         // `rm`): power it off anyway — the intent is unambiguous and answering
         // "no such VM" for a VM that libvirt lists would be a lie.
-        Err(Error::NotFound(_)) => {
+        Err(e) if e.is_not_found() => {
             return match libvirt_domain_uri(name) {
                 Some(uri) => libvirt_poweroff(uri, name),
                 None => Err(Error::VmNotFound(name.to_string())),
@@ -4311,7 +4311,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
 /// Loads a VM record, mapping the shared `NotFound` to the VM-specific
 /// `VmNotFound` ("no such VM: …") — same idiom as `stop`/`status`.
 fn load_vm(base: &Path, name: &str) -> Result<Vm> {
-    store(base)?.load(name).map_err(|e| match e {
+    store(base)?.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(_) => Error::VmNotFound(name.to_string()),
         e => e,
     })
@@ -4764,7 +4764,7 @@ fn config_from(vm: &Vm) -> VmConfig {
 /// real shape.
 pub fn start(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
-    let vm = st.load(name).map_err(|e| match e {
+    let vm = st.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(n) => Error::VmNotFound(n),
         e => e,
     })?;
@@ -4776,7 +4776,7 @@ pub fn start(base: &Path, name: &str) -> Result<Vm> {
 /// `start`/[`config_from`].
 pub fn restart(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
-    let vm = st.load(name).map_err(|e| match e {
+    let vm = st.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(n) => Error::VmNotFound(n),
         e => e,
     })?;
@@ -4791,7 +4791,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
     // load() first just to resolve the NotFound->VmNotFound mapping before
     // taking the lock (update() would otherwise surface the generic NotFound).
-    st.load(name).map_err(|e| match e {
+    st.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(n) => Error::VmNotFound(n),
         e => e,
     })?;
@@ -5657,7 +5657,13 @@ Format specific information:
         let _ = std::fs::create_dir_all(&base);
         for res in [super::stop(&base, "nope"), super::remove(&base, "nope")] {
             match res {
-                Err(Error::VmNotFound(n)) => assert_eq!(n, "nope"),
+                // DX-4501 is «no such VM» — the variant this test pins, asked by
+                // its dictionary number instead of by a pattern a wrapped error
+                // would stop matching.
+                Err(e) => {
+                    assert_eq!(e.number(), 4501, "{e}");
+                    assert!(e.to_string().contains("nope"), "{e}");
+                }
                 other => panic!("expected VmNotFound, got {other:?}"),
             }
         }

@@ -753,7 +753,7 @@ mod tests {
         assert_eq!(full.image, "img");
         assert_eq!(full.command, vec!["x".to_string()]);
         // inexistente
-        assert!(matches!(store.load("nao-existe"), Err(Error::NotFound(_))));
+        assert!(store.load("nao-existe").is_err_and(|e| e.is_not_found()));
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -972,7 +972,7 @@ mod tests {
             *n += 1;
             true
         });
-        assert!(matches!(err, Err(Error::NotFound(_))));
+        assert!(err.is_err_and(|e| e.is_not_found()));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1049,7 +1049,7 @@ mod tests {
         assert_eq!(store.load("teamB/db").unwrap().id, "bbb2");
         // The id keeps working, and a qualified miss is NotFound, not ambiguity.
         assert_eq!(store.load("bbb2").unwrap().namespace, "teamB");
-        assert!(matches!(store.load("teamC/db"), Err(Error::NotFound(_))));
+        assert!(store.load("teamC/db").is_err_and(|e| e.is_not_found()));
         let _ = fs::remove_dir_all(&root);
     }
 
@@ -1070,7 +1070,7 @@ mod tests {
         store.save(&c).unwrap();
         assert_eq!(store.load("web").unwrap().id, "aaa1");
         assert_eq!(store.load("teamA/web").unwrap().id, "aaa1");
-        assert!(matches!(store.load("nope"), Err(Error::NotFound(_))));
+        assert!(store.load("nope").is_err_and(|e| e.is_not_found()));
         let _ = fs::remove_dir_all(&root);
     }
 

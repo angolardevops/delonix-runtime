@@ -2,5 +2,6 @@
   "self_exec_sites": 30,
   "library_prints": 93,
   "env_writes": 23,
-  "shared_error_imports": 29
+  "shared_error_imports": 29,
+  "raw_error_variant_matches": 0
 }

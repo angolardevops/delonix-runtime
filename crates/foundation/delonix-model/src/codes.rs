@@ -307,6 +307,61 @@ impl Error {
             Error::Io(_) => 9001,
         }
     }
+
+    /// The failure itself, for the rare caller that needs a variant's payload.
+    ///
+    /// Today every error is its own root. When a crate's error carries its specific
+    /// code inside the shared class (ADR-0043 D4), this is what looks through the
+    /// carrier — so a `match e.root()` keeps matching where a `match e` would not.
+    /// For «which class is this», ask [`Error::class`] instead.
+    pub fn root(&self) -> &Error {
+        self
+    }
+
+    /// [`Error::root`] by value, to move a payload out.
+    pub fn into_root(self) -> Error {
+        self
+    }
+
+    /// The class of this failure — what the caller does next.
+    ///
+    /// **Ask this, not the variant.** A crate's own error travels as a shared class
+    /// that carries its specific code (ADR-0043 D4), and a `match` on
+    /// `Err(Error::NotFound(_))` stops matching it without a word from the
+    /// compiler. A class question keeps its answer.
+    pub fn class(&self) -> Class {
+        Class::ALL[usize::from(self.number() / 1000)]
+    }
+
+    /// «No such resource» — the caller creates it or reports it missing.
+    pub fn is_not_found(&self) -> bool {
+        self.class() == Class::NotFound
+    }
+
+    /// «Already exists» — the caller adopts it, skips, or picks another name.
+    pub fn is_conflict(&self) -> bool {
+        self.class() == Class::Conflict
+    }
+
+    /// «Exists but is not running».
+    pub fn is_not_running(&self) -> bool {
+        self.class() == Class::NotRunning
+    }
+
+    /// «A capability this host does not have».
+    pub fn is_unavailable(&self) -> bool {
+        self.class() == Class::Unavailable
+    }
+
+    /// «The deadline passed».
+    pub fn is_timeout(&self) -> bool {
+        self.class() == Class::Timeout
+    }
+
+    /// «An argument is wrong».
+    pub fn is_invalid_argument(&self) -> bool {
+        self.class() == Class::InvalidArgument
+    }
 }
 
 #[cfg(test)]
@@ -419,6 +474,25 @@ mod tests {
             let entry =
                 lookup(e.number()).unwrap_or_else(|| panic!("{} has no entry", label(e.number())));
             assert_eq!(entry.exit, crate::exitcode::for_error(&e), "{e}");
+        }
+    }
+
+    #[test]
+    fn the_class_question_answers_what_the_variant_did() {
+        assert!(Error::NotFound("x".into()).is_not_found());
+        assert!(Error::VmNotFound("x".into()).is_not_found());
+        assert!(Error::Conflict("x".into()).is_conflict());
+        assert!(Error::NotRunning("x".into()).is_not_running());
+        assert!(Error::Unavailable("x".into()).is_unavailable());
+        assert!(Error::Timeout("x".into()).is_timeout());
+        assert!(Error::Invalid("x".into()).is_invalid_argument());
+        assert!(!Error::Registry("x".into()).is_not_found());
+        for e in one_of_each() {
+            assert!(
+                e.class().exit_code() == crate::exitcode::for_error(&e)
+                    || e.class() == Class::SystemFailure,
+                "{e}"
+            );
         }
     }
 
