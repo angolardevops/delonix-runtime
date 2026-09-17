@@ -1146,6 +1146,31 @@ sleep 1
 check "e o rm -f não deixa o processo para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $SS_SLEEP' | wc -l)\" = 0 ]"
 pkill -9 -f -x "sleep $SS_SLEEP" 2>/dev/null || true
 
+# O mesmo, do lado do `stop`: um `stop` à espera (PID 1 sem handler de SIGTERM)
+# enquanto o processo morre por fora e um `start` grava o processo novo. Ao
+# retomar, o `stop` gravava `pid = None` por cima dele, e o processo novo
+# sobrevivia ao `rm -f`. Congelar o `stop` (SIGSTOP) torna a corrida determinística.
+SW_SLEEP=$(( 5000 + RANDOM % 900 ))
+"$BIN" container run -d --net none --name "sw-$PFX" "$IMG" sh -c "exec sleep $SW_SLEEP" >/dev/null 2>&1
+sleep 1
+SW_X=$(pgrep -f -x "sleep $SW_SLEEP" | head -1)
+if [ -n "$SW_X" ]; then
+  "$BIN" container stop -t 30 "sw-$PFX" >/dev/null 2>&1 & SW_STOP=$!
+  sleep 1
+  kill -STOP "$SW_STOP" 2>/dev/null
+  kill -9 "$SW_X"; sleep 2
+  "$BIN" container start "sw-$PFX" >/dev/null 2>&1; sleep 1
+  kill -CONT "$SW_STOP" 2>/dev/null; wait "$SW_STOP" 2>/dev/null; sleep 1
+  check "um stop que retoma não apaga o pid de um start feito entretanto" ok bash -c \
+    "live=\$(pgrep -f -x 'sleep $SW_SLEEP'); [ \"\$(echo \"\$live\" | wc -w)\" = 1 ] && [ \"\$('$BIN' container inspect 'sw-$PFX' | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d; print(d.get(\"pid\"))')\" = \"\$live\" ]"
+else
+  skip "um stop que retoma não apaga o pid de um start feito entretanto" "o container não arrancou"
+fi
+"$BIN" container rm -f "sw-$PFX" >/dev/null 2>&1
+sleep 1
+check "e o rm -f não deixa esse processo para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $SW_SLEEP' | wc -l)\" = 0 ]"
+pkill -9 -f -x "sleep $SW_SLEEP" 2>/dev/null || true
+
 # Um perfil seccomp que permite tudo e não nomeia syscalls (ou só repete a acção
 # por omissão) é válido para o Docker e o Podman, e abortava o container com 126:
 # o seccompiler recusa um filtro cujas duas acções são iguais. Uma regra que
