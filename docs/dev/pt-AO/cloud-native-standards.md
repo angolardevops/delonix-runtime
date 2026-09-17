@@ -1,5 +1,7 @@
-<!-- translated-from: cloud-native-standards.md sha256:67e14333585d548f73c2e978bae848f63a2870f0975085ceedda9f23cc7eb68d -->
+<!-- translated-from: cloud-native-standards.md sha256:b42da13e7ba332edc815ba25d93934d6e2e59b6827868ca6f84561249d2e8d4c -->
 # Padrões cloud native, camada a camada
+
+**Antes de leres:** [Introdução ao cloud native](cloud-native-primer.md) (como o motor usa cada mecanismo) e [Arquitectura](architecture.md) (os crates nomeados abaixo). Esta é uma página de referência: lê a secção do padrão que te toca.
 
 Um motor de containers e microVMs não é uma especificação. É uma pilha de camadas, e a maior parte
 das camadas tem um padrão aberto: uns da **OCI** (Open Container Initiative), outros dos SIGs do
@@ -9,10 +11,14 @@ são interfaces de facto sem nenhum organismo de normalização por trás.
 Esta página está organizada **por padrão e por camada**. Para cada um responde a quatro perguntas:
 o que é o padrão, o que exige de uma implementação, como o Delonix o implementa hoje (crate,
 ficheiro, símbolo), e o que as evidências dizem sobre a conformidade, lacunas incluídas. Se
-procurares «OCI, CRI, CNI, CSI, CDI», esta é a página.
+procurares «OCI, CRI, CNI, CSI, CDI», esta é a página. Depois de leres a secção de que precisas,
+consegues dizer o que um padrão pede, onde o motor o cumpre, e que evidência de conformidade
+existe — com a sua data e versão.
 
-Lê primeiro [Introdução ao cloud native](cloud-native-primer.md) se namespaces, cgroups,
-overlayfs ou o kubelet forem novidade para ti. Esta página assume essas bases e não as repete.
+Lê primeiro [Fundações de Linux](linux-foundations.md) e [Introdução ao cloud native](cloud-native-primer.md)
+se namespaces, cgroups, overlayfs ou o kubelet forem novidade para ti. Esta página assume essas
+bases e não as repete: o primitivo é ensinado na primeira, como o motor o usa na segunda, e o
+padrão e a sua conformidade aqui.
 
 Três regras para ler esta página:
 
@@ -244,7 +250,7 @@ de `--container-runtime-endpoint`.
   kubelet matava pods em ciclo.
 - **Modelo de recursos do kubelet**: [ADR-0038](../../adr/0038-cri-follows-kubelet-resource-model.md).
   O `cgroup_parent` do kubelet é validado por `KubeCgroupParent::parse`
-  (`crates/foundation/delonix-runtime-core/src/lib.rs`) e consumido em
+  (`crates/contexts/delonix-compute/src/record.rs`) e consumido em
   `crates/contexts/delonix-compute/src/run.rs`; o `delonix-linux` tem `transient_scope_argv` para
   colocar um container num scope systemd debaixo de um slice de pod.
 - **Tecto de capabilities**: `CapCeiling` (`src/cap_ceiling.rs`), configurado por
@@ -681,11 +687,12 @@ que parte da árvore. Todos os runtimes de containers dependem dos dois.
 delegada, respeitar a regra de «no internal processes», e nunca assumir que um controlador listado
 na raiz está disponível para a sessão que chama.
 
-**Como o Delonix o implementa.** `crates/adapters/delonix-linux/src/lib.rs`:
+**Como o Delonix o implementa.** Onde os containers são colocados (modo root debaixo de
+`delonix.slice`, rootless debaixo de `user@<uid>.service/dlx-containers`) está em
+[Manual de cloud native 4.2](cloud-native-primer.md#42-cgroups-v2-and-delegation); a árvore e a
+regra de delegação em si estão em [Fundações de Linux](linux-foundations.md#cgroups-v2). O que
+importa para o contrato, em `crates/adapters/delonix-linux/src/lib.rs`:
 
-- Modo root: folhas debaixo de `delonix.slice` (`DELONIX_SLICE` no `delonix-runtime-core`).
-- Rootless: o `user_service_base` e o `try_delegated_base` colocam os containers debaixo de
-  `user@<uid>.service/dlx-containers`.
 - O `cgroup_limits_apply` responde a «os limites vão aplicar-se aqui?» sem arrancar um container. Em
   rootless, sonda o cgroup *actual* do processo (`delegated_base_usable`), não o cgroup raiz do host;
   em root, sonda o `delonix.slice` e cria-o se faltar (`root_slice_writable`).
@@ -765,3 +772,7 @@ Quando mudares um destes componentes, actualiza a sua linha e a sua secção no 
 Se voltares a correr uma suite de conformidade, substitui o número, a data e a versão em conjunto, e
 actualiza primeiro o documento de origem ([docs/cri-conformance.md](../../cri-conformance.md) para o
 CRI).
+
+---
+
+**Seguinte:** [Variáveis de ambiente (`DELONIX_*`)](environment-variables.md) — cada variável `DELONIX_*` que o código lê, a sua omissão, e quais baixam uma fronteira.

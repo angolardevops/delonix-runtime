@@ -1,5 +1,7 @@
-<!-- translated-from: cloud-native-standards.md sha256:67e14333585d548f73c2e978bae848f63a2870f0975085ceedda9f23cc7eb68d -->
+<!-- translated-from: cloud-native-standards.md sha256:b42da13e7ba332edc815ba25d93934d6e2e59b6827868ca6f84561249d2e8d4c -->
 # Standards cloud native, couche par couche
+
+**Avant de lire :** [Introduction au cloud native](cloud-native-primer.md) (comment le moteur utilise chaque mécanisme) et [Architecture](architecture.md) (les crates nommés ci-dessous). C'est une page de référence : lisez la section du standard qui vous concerne.
 
 Un moteur de containers et de microVMs n'est pas une spécification unique. C'est un empilement de
 couches, et la plupart des couches ont un standard ouvert : certains viennent de l'**OCI** (Open
@@ -10,11 +12,11 @@ normalisation derrière elles.
 Cette page est organisée **par standard et par couche**. Pour chacun, elle répond à quatre questions :
 ce qu'est le standard, ce qu'il exige d'une implémentation, comment Delonix l'implémente aujourd'hui
 (crate, fichier, symbole), et ce que disent les éléments de preuve sur la conformité, lacunes
-comprises. Si vous cherchez « OCI, CRI, CNI, CSI, CDI », c'est cette page.
+comprises. Si vous cherchez « OCI, CRI, CNI, CSI, CDI », c'est cette page. Une fois la section dont vous avez besoin lue, vous pouvez dire ce qu'un standard demande, où le moteur le satisfait, et quelle preuve de conformité existe — avec sa date et sa version.
 
-Lisez d'abord [Introduction au cloud native](cloud-native-primer.md) si les namespaces, les
+Lisez d'abord [Fondations Linux](linux-foundations.md) et [Introduction au cloud native](cloud-native-primer.md) si les namespaces, les
 cgroups, overlayfs ou le kubelet sont nouveaux pour vous. Cette page suppose ces bases acquises et ne
-les répète pas.
+les répète pas : le primitif est enseigné dans la première, la façon dont le moteur l'utilise dans la deuxième, et le standard et sa conformité ici.
 
 Trois règles pour lire cette page :
 
@@ -250,7 +252,7 @@ runtime via `--container-runtime-endpoint`.
   vides, et le kubelet tuait les pods en boucle.
 - **Modèle de ressources du kubelet** : [ADR-0038](../../adr/0038-cri-follows-kubelet-resource-model.md).
   Le `cgroup_parent` du kubelet est validé par `KubeCgroupParent::parse`
-  (`crates/foundation/delonix-runtime-core/src/lib.rs`) et consommé dans
+  (`crates/contexts/delonix-compute/src/record.rs`) et consommé dans
   `crates/contexts/delonix-compute/src/run.rs` ; `delonix-linux` dispose de `transient_scope_argv` pour
   placer un container dans un scope systemd sous une slice de pod.
 - **Plafond de capabilities** : `CapCeiling` (`src/cap_ceiling.rs`), configuré par
@@ -696,11 +698,12 @@ quelle partie de l'arborescence. Chaque runtime de containers dépend des deux.
 délégué, respecter la règle « no internal processes », et ne jamais supposer qu'un contrôleur listé à
 la racine est disponible pour la session appelante.
 
-**Comment Delonix l'implémente.** `crates/adapters/delonix-linux/src/lib.rs` :
+**Comment Delonix l'implémente.** L'endroit où les containers sont placés (mode root sous
+`delonix.slice`, rootless sous `user@<uid>.service/dlx-containers`) est décrit dans le
+[Manuel de cloud native 4.2](cloud-native-primer.md#42-cgroups-v2-and-delegation) ; l'arborescence et la règle de délégation elles-mêmes sont dans
+[Fondations Linux](linux-foundations.md#cgroups-v2). Ce qui compte pour le contrat, dans
+`crates/adapters/delonix-linux/src/lib.rs` :
 
-- Mode root : des feuilles sous `delonix.slice` (`DELONIX_SLICE` dans `delonix-runtime-core`).
-- Rootless : `user_service_base` et `try_delegated_base` placent les containers sous
-  `user@<uid>.service/dlx-containers`.
 - `cgroup_limits_apply` répond à « les limites s'appliqueront-elles ici ? » sans démarrer de container.
   En rootless, il sonde le cgroup *courant* du processus (`delegated_base_usable`), et non le cgroup
   racine de l'hôte ; en root, il sonde `delonix.slice` et le crée s'il manque (`root_slice_writable`).
@@ -782,3 +785,7 @@ Lorsque vous modifiez l'un de ces composants, mettez à jour sa ligne et sa sect
 request. Si vous réexécutez une suite de conformité, remplacez ensemble le nombre, la date et la
 version, et mettez d'abord à jour le document source ([docs/cri-conformance.md](../../cri-conformance.md)
 pour le CRI).
+
+---
+
+**Suivant :** [Variables d'environnement (`DELONIX_*`)](environment-variables.md) — chaque variable `DELONIX_*` lue par le code, sa valeur par défaut, et lesquelles abaissent une frontière.
