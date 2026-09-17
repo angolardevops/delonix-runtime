@@ -41,7 +41,7 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::json;
 
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::peer_cred::peer_uid;
 use delonix_runtime_core::{Container, Error, Result, Status, Store};
 

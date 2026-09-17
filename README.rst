@@ -536,7 +536,7 @@ Ten crates, one binary, no residing process:
      - The runtime (clone/namespaces/cgroups, create/stop/exec, reconcile) + the ``delonix`` CLI.
    * - ``delonix-net``
      - Rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall, internal DNS, WireGuard overlay, and the eBPF flow datapath.
-   * - ``delonix-image``
+   * - ``delonix-oci``
      - OCI images: pull (digest-verified), build, export, buildpacks, signatures, internal registry.
    * - ``delonix-vm``
      - Declarative microVMs (``VmBackend``: Cloud Hypervisor / libvirt), cloud-init.

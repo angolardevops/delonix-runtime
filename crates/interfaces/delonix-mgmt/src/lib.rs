@@ -24,7 +24,7 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::peer_cred::peer_uid;
 use delonix_runtime_core::{Error, Store};
 use delonix_volume::VolumeStore;
@@ -1938,7 +1938,7 @@ mod tests {
 
     #[tokio::test]
     async fn imagens_list_e_rmi() {
-        use delonix_image::{Image, ImageConfig, ImageStore};
+        use delonix_oci::{Image, ImageConfig, ImageStore};
         let (st, dir) = test_state();
         let store = ImageStore::open(dir.path()).unwrap();
         store

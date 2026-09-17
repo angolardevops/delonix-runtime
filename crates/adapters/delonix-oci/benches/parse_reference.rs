@@ -1,6 +1,6 @@
 //! Criterion micro-benchmark for `registry::parse_reference` — the pure image-ref
 //! parser run on every image operation. Dev-only (criterion is a dev-dependency);
-//! it never enters the release tree. Run: `cargo bench -p delonix-image`.
+//! it never enters the release tree. Run: `cargo bench -p delonix-oci`.
 //!
 //! First exemplar of the repo's bench harness (see the `delonix-testing` skill /
 //! `performance-engineer` agent): measure a real hot pure function, keep the
@@ -8,7 +8,7 @@
 //! ground truth.
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use delonix_image::registry::parse_reference;
+use delonix_oci::registry::parse_reference;
 
 fn bench_parse_reference(c: &mut Criterion) {
     // Representative refs: short, registry-qualified, and the combined

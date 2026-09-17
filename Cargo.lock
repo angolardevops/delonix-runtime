@@ -744,8 +744,8 @@ version = "3.1.0"
 dependencies = [
  "axum",
  "delonix-compute",
- "delonix-image",
  "delonix-net",
+ "delonix-oci",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-telemetry",
@@ -763,29 +763,6 @@ dependencies = [
  "tonic-build",
  "tower 0.5.3",
  "tracing",
-]
-
-[[package]]
-name = "delonix-image"
-version = "3.1.0"
-dependencies = [
- "base64",
- "criterion",
- "delonix-compute",
- "delonix-runtime-core",
- "flate2",
- "nix",
- "oci-spec",
- "proptest",
- "reqwest 0.12.28",
- "ring",
- "serde",
- "serde_json",
- "sha2",
- "tar",
- "tempfile",
- "tracing",
- "zstd",
 ]
 
 [[package]]
@@ -824,8 +801,8 @@ name = "delonix-mgmt"
 version = "0.1.0"
 dependencies = [
  "axum",
- "delonix-image",
  "delonix-net",
+ "delonix-oci",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scanner",
@@ -879,6 +856,29 @@ name = "delonix-net-rules"
 version = "3.1.0"
 
 [[package]]
+name = "delonix-oci"
+version = "3.1.0"
+dependencies = [
+ "base64",
+ "criterion",
+ "delonix-compute",
+ "delonix-runtime-core",
+ "flate2",
+ "nix",
+ "oci-spec",
+ "proptest",
+ "reqwest 0.12.28",
+ "ring",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tar",
+ "tempfile",
+ "tracing",
+ "zstd",
+]
+
+[[package]]
 name = "delonix-proxmox"
 version = "3.1.0"
 dependencies = [
@@ -913,10 +913,10 @@ dependencies = [
  "clap",
  "clap_complete",
  "delonix-compute",
- "delonix-image",
  "delonix-mgmt",
  "delonix-model",
  "delonix-net",
+ "delonix-oci",
  "delonix-proxmox",
  "delonix-runtime",
  "delonix-runtime-core",
@@ -964,7 +964,7 @@ dependencies = [
 name = "delonix-scanner"
 version = "3.1.0"
 dependencies = [
- "delonix-image",
+ "delonix-oci",
  "delonix-runtime-core",
  "flate2",
  "serde",

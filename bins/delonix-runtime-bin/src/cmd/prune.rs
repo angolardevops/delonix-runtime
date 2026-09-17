@@ -50,7 +50,7 @@
 
 use std::collections::HashSet;
 
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime_core::{Result, Store};
 use delonix_volume::VolumeStore;
 
@@ -518,9 +518,9 @@ pub(crate) fn sweep_images(images: &ImageStore, store: &Store, all: bool) -> Res
 
     let mut referenced: HashSet<String> = HashSet::new();
     for img in images.list()? {
-        referenced.insert(delonix_image::cas::strip(&img.id).to_string());
+        referenced.insert(delonix_oci::cas::strip(&img.id).to_string());
         for l in &img.layers {
-            referenced.insert(delonix_image::cas::strip(l).to_string());
+            referenced.insert(delonix_oci::cas::strip(l).to_string());
         }
     }
     let blobs_dir = images.root().join("blobs").join("sha256");
@@ -640,9 +640,9 @@ pub(crate) fn plan(images: &ImageStore, store: &Store, all: bool) -> Result<Prun
             });
             continue;
         }
-        referenced.insert(delonix_image::cas::strip(&img.id).to_string());
+        referenced.insert(delonix_oci::cas::strip(&img.id).to_string());
         for l in &img.layers {
-            referenced.insert(delonix_image::cas::strip(l).to_string());
+            referenced.insert(delonix_oci::cas::strip(l).to_string());
         }
     }
 

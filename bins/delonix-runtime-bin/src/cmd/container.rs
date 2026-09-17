@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_image::ImageStore;
 use delonix_net::infra;
+use delonix_oci::ImageStore;
 use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{
     generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status, Store,
@@ -1968,15 +1968,15 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 /// `--user <uid[:gid]|name[:group]>` resolved against the image rootfs
-/// ([`delonix_image::rootfs_user`]), worded for the terminal.
+/// ([`delonix_oci::rootfs_user`]), worded for the terminal.
 fn resolve_run_user(rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
-    delonix_image::rootfs_user::resolve_user(std::path::Path::new(rootfs), spec)
+    delonix_oci::rootfs_user::resolve_user(std::path::Path::new(rootfs), spec)
         .map_err(user_lookup_error)
 }
 
 /// A `--user` the image cannot satisfy, in the operator's language.
-fn user_lookup_error(e: delonix_image::rootfs_user::UserLookupError) -> Error {
-    use delonix_image::rootfs_user::UserLookupError;
+fn user_lookup_error(e: delonix_oci::rootfs_user::UserLookupError) -> Error {
+    use delonix_oci::rootfs_user::UserLookupError;
     Error::Invalid(match e {
         UserLookupError::EmptyUser => super::po::t("--user: empty user").into(),
         UserLookupError::NoSuchUser(user) => super::po::tf(
@@ -2499,7 +2499,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         cname,
         namespace.clone(),
         reexec,
-        &delonix_image::run_images::HostImages {
+        &delonix_oci::run_images::HostImages {
             store: images,
             announce_pull: &super::util::announce_pull,
             unpacking: &unpacking,
@@ -4593,7 +4593,7 @@ fn container_fs_root(images: &ImageStore, c: &Container) -> Result<FsRoot> {
     //
     // Returning the empty `merged/` would be the worst possible answer: `cp`
     // would copy nothing and report success.
-    if dir.join(delonix_image::ImageStore::LOWERS_FILE).exists() {
+    if dir.join(delonix_oci::ImageStore::LOWERS_FILE).exists() {
         let hold = runtime::reexec_mapped_hold(&["__ovlhold", &dir.to_string_lossy()])
             .ok_or_else(|| {
                 Error::Invalid(super::po::tf(

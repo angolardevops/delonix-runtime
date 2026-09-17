@@ -8,7 +8,7 @@
 //! `delonix container start <name>` and `ExecStop` is `delonix container stop`.
 
 use clap::Subcommand;
-use delonix_image::ImageStore;
+use delonix_oci::ImageStore;
 use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{Result, Store};
 

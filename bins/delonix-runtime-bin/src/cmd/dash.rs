@@ -275,7 +275,7 @@ impl DashData {
         let volumes = delonix_volume::VolumeStore::open(root)
             .and_then(|s| s.list())
             .unwrap_or_default();
-        let images = delonix_image::ImageStore::open(root)
+        let images = delonix_oci::ImageStore::open(root)
             .and_then(|s| s.list())
             .unwrap_or_default();
         let secrets = delonix_runtime_core::SecretStore::open(root)

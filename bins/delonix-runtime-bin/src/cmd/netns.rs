@@ -207,8 +207,7 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
             failed += 1;
             continue;
         }
-        let images = match delonix_image::ImageStore::open(delonix_image::ImageStore::default_root())
-        {
+        let images = match delonix_oci::ImageStore::open(delonix_oci::ImageStore::default_root()) {
             Ok(i) => i,
             Err(e) => {
                 eprintln!(

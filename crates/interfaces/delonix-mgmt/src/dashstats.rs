@@ -11,7 +11,7 @@
 //!
 //! Lives here (not in `delonix-runtime-core`) because it needs the store/
 //! cgroup/netns access of `delonix-runtime`/`delonix-vm`/`delonix-net`/
-//! `delonix-image`/`delonix-volume` — `runtime-core` is a shared-types leaf
+//! `delonix-oci`/`delonix-volume` — `runtime-core` is a shared-types leaf
 //! crate none of the higher-level crates depend on for this.
 
 use std::path::Path;
@@ -128,7 +128,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
         .and_then(|s| s.list())
         .map(|l| l.len() as u64)
         .unwrap_or(0);
-    let images_total = delonix_image::ImageStore::open(root)
+    let images_total = delonix_oci::ImageStore::open(root)
         .and_then(|s| s.list())
         .map(|l| l.len() as u64)
         .unwrap_or(0);
