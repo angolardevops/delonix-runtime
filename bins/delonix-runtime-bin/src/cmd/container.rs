@@ -934,11 +934,30 @@ fn valid_container_name(name: &str) -> bool {
 use delonix_compute::pod::HostAlias;
 pub(crate) use delonix_compute::pod::{PodSpec, POD_SPEC_FIELDS};
 
+/// Prints each translation notice ONCE per invocation.
+///
+/// One document is translated more than once in a single command: `stack apply`
+/// builds the plan (`desired`), then applies, and each pass hands back the same
+/// notices. Measured: the emptyDir warning came out three times for one volume.
 fn print_notices(notices: &[delonix_compute::Notice]) {
+    static SEEN: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
     for n in notices {
         let args: Vec<(&str, &str)> = n.args.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        eprintln!("{}", super::po::tf(n.template, &args));
+        let line = super::po::tf(n.template, &args);
+        if first_time(&SEEN, &line) {
+            eprintln!("{line}");
+        }
     }
+}
+
+/// `true` the first time `line` is offered to `seen`.
+fn first_time(seen: &std::sync::Mutex<Vec<String>>, line: &str) -> bool {
+    let mut seen = seen.lock().unwrap_or_else(|p| p.into_inner());
+    if seen.iter().any(|s| s == line) {
+        return false;
+    }
+    seen.push(line.to_string());
+    true
 }
 
 fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Result<RunOpts> {
@@ -6995,6 +7014,14 @@ restartPolicy: OnFailure
         let yaml = "containers:\n  - image: a\n  - image: b\n";
         let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(super::pod_to_run_opts("x", None, pod).is_err());
+    }
+
+    #[test]
+    fn a_notice_is_said_once_per_invocation() {
+        let seen = std::sync::Mutex::new(Vec::new());
+        assert!(super::first_time(&seen, "warning: volume 'a'"));
+        assert!(!super::first_time(&seen, "warning: volume 'a'"));
+        assert!(super::first_time(&seen, "warning: volume 'b'"));
     }
 
     #[test]

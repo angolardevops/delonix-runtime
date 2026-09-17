@@ -1193,6 +1193,26 @@ fi
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"
+
+# Um aviso de tradução sai UMA vez por comando. O `stack apply` traduz o mesmo
+# documento para o plano e para o apply, e o aviso do emptyDir saía três vezes.
+cat > "$WORK/emptydir.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata: { name: ed-$PFX }
+spec:
+  containers:
+    - name: app
+      image: $IMG
+      command: ["sleep", "60"]
+      volumeMounts: [{ name: scratch, mountPath: /scratch }]
+  volumes:
+    - name: scratch
+      emptyDir: {}
+YAML
+check "stack apply diz o aviso do emptyDir uma só vez" ok bash -c \
+  "[ \"\$('$BIN' stack apply -f '$WORK/emptydir.yaml' 2>&1 | grep -c 'emptyDir without')\" = 1 ]"
+"$BIN" container rm -f "ed-$PFX" >/dev/null 2>&1
 cat >"$WORK/delonix-manifest.yaml" <<YAML
 apiVersion: delonix.io/v1
 kind: Volume
