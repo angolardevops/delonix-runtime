@@ -8,9 +8,10 @@ use clap_complete::engine::ArgValueCandidates;
 use delonix_linux::{self as runtime};
 use delonix_oci::ImageStore;
 use delonix_runtime_core::{
-    generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status, Store,
+    generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status,
 };
 use delonix_sdn::infra;
+use delonix_state::Store;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
@@ -4328,7 +4329,7 @@ pub(crate) fn cmd_exec(
     // the precedence the flag already had.
     let mut extra_env: Vec<String> = Vec::new();
     if !c.secret_files && !c.secrets.is_empty() {
-        if let Ok(ss) = delonix_runtime_core::SecretStore::open(super::util::state_root()) {
+        if let Ok(ss) = delonix_state::SecretStore::open(super::util::state_root()) {
             extra_env.extend(ss.resolve_env(&c.secrets));
         }
     }
@@ -7055,7 +7056,7 @@ restartPolicy: OnFailure
             std::process::id()
         ));
         let _ = std::fs::remove_dir_all(&dir);
-        let store = delonix_runtime_core::Store::open(&dir).unwrap();
+        let store = delonix_state::Store::open(&dir).unwrap();
         // A pid that is certainly dead: a child that already exited and was reaped.
         let dead = std::process::Command::new("true")
             .spawn()

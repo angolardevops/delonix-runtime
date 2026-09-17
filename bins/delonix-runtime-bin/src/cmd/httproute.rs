@@ -697,7 +697,7 @@ fn container_ips() -> std::collections::HashMap<String, String> {
 /// (`tls.crt`/`tls.key`) OR the variant with `_` (the vault does not allow `.` in
 /// env keys — see `valid_env_key`), whichever is found.
 fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
-    let store = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
+    let store = delonix_state::SecretStore::open(super::util::state_root())?;
     let s = store.load(name)?;
     let pick = |a: &str, b: &str| s.data.get(a).or_else(|| s.data.get(b)).cloned();
     let cert = pick("tls_crt", "tls.crt").ok_or_else(|| {

@@ -12,6 +12,7 @@ name = "delonix"
 path = "src/main.rs"
 
 [dependencies]
+delonix-state = { workspace = true }
 delonix-model = { workspace = true }
 delonix-stack = { workspace = true }
 delonix-compute = { workspace = true }

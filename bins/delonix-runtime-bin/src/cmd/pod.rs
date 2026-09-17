@@ -84,7 +84,7 @@ pub(crate) fn member_order(c: &Container) -> (u32, String) {
 /// Shared by [`ls`] and [`actual`], which grouped `Store::list` by [`POD_LABEL`] with the
 /// same eight lines each and then both read per-pod fields off `members.first()` — the
 /// `read_dir` coin flip of [`POD_INDEX_LABEL`], twice.
-fn pods_by_label(store: &delonix_runtime_core::Store) -> Result<BTreeMap<String, Vec<Container>>> {
+fn pods_by_label(store: &delonix_state::Store) -> Result<BTreeMap<String, Vec<Container>>> {
     let mut pods: BTreeMap<String, Vec<Container>> = BTreeMap::new();
     for c in store.list()? {
         if let Some(pod) = c.labels.get(POD_LABEL) {
@@ -396,7 +396,7 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
 /// The containers that belong to a pod (by the `delonix.io/pod` label), in the order
 /// they were declared in `spec.containers` — see [`POD_INDEX_LABEL`] for why that has
 /// to be said out loud.
-fn members_of(store: &delonix_runtime_core::Store, pod: &str) -> Result<Vec<Container>> {
+fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>> {
     let mut out: Vec<Container> = store
         .list()?
         .into_iter()
@@ -752,7 +752,7 @@ pub(crate) fn describe(names: &[String]) -> Result<()> {
 /// different container on a different root. Explicit `--container` was always
 /// correct and is untouched.
 fn resolve_target(
-    store: &delonix_runtime_core::Store,
+    store: &delonix_state::Store,
     pod: &str,
     container_short: Option<&str>,
 ) -> Result<Container> {
@@ -1169,7 +1169,7 @@ mod tests {
                 .as_nanos(),
             SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
         ));
-        let store = delonix_runtime_core::Store::open(&dir).unwrap();
+        let store = delonix_state::Store::open(&dir).unwrap();
         // Saved back-to-front, and with a container that is not in the pod at
         // all, so the filter has something to drop.
         store.save(&member("p", "side", Some(1))).unwrap();

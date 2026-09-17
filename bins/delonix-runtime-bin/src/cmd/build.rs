@@ -58,7 +58,8 @@ use clap::Args;
 use delonix_linux as runtime;
 use delonix_oci::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
 use delonix_oci::{Image, ImageStore};
-use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
+use delonix_runtime_core::{generate_id, Container, Error, Result};
+use delonix_state::Store;
 use sha2::{Digest, Sha256};
 
 use super::util::{open_stores, prepare_rootfs_flat, resolve_or_pull_platform};
@@ -123,7 +124,7 @@ pub(crate) fn parse_build_args(raw: &[String]) -> Vec<(String, String)> {
         .collect()
 }
 
-/// Same character class as `delonix_runtime_core::secret`'s own secret-name
+/// Same character class as `delonix_state::secret`'s own secret-name
 /// validation — kept local rather than shared for a 1-line check, matching
 /// this file's own `safe_join`/`confine_to` precedent of small, self-contained
 /// security helpers next to their one use.

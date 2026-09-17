@@ -117,7 +117,7 @@ fn collect_in(root: &std::path::Path) -> std::collections::BTreeMap<String, Cont
         out.entry(ns).or_default();
     }
 
-    if let Ok(store) = delonix_runtime_core::Store::open(root.join("containers")) {
+    if let Ok(store) = delonix_state::Store::open(root.join("containers")) {
         let all = store.list().unwrap_or_default();
         for c in &all {
             let ns = if c.namespace.is_empty() {

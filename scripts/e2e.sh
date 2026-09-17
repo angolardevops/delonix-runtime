@@ -467,7 +467,7 @@ check "inexistente em PT continua a dizer 4" 4 \
 check "a linha de erro traz o número do dicionário" ok \
   bash -c "\"$BIN\" --l18n=pt vm stop naoexiste-$PFX 2>&1 | grep -q '\[DX-4501\]'"
 check "o lote de ids traz o número por id" ok \
-  bash -c "\"$BIN\" container rm naoexiste1-$PFX naoexiste2-$PFX 2>&1 | grep -c '\[DX-4000\]' | grep -qx 2"
+  bash -c "\"$BIN\" container rm naoexiste1-$PFX naoexiste2-$PFX 2>&1 | grep -c '\[DX-4101\]' | grep -qx 2"
 check "explain de um código responde" ok "$BIN" explain DX-4501
 check "explain de um código que não existe diz 4" 4 "$BIN" explain DX-4299
 check "explain codes --json é JSON" ok \

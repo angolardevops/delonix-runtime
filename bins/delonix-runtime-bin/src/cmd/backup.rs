@@ -73,7 +73,8 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-use delonix_runtime_core::{Error, Result, Store};
+use delonix_runtime_core::{Error, Result};
+use delonix_state::Store;
 use serde::{Deserialize, Serialize};
 
 use super::po;
@@ -1019,7 +1020,7 @@ fn verify_secrets(root: &Path, m: &Manifest) -> Result<()> {
     if !m.areas.contains_key("secrets") {
         return Ok(());
     }
-    let store = delonix_runtime_core::SecretStore::open(root)?;
+    let store = delonix_state::SecretStore::open(root)?;
     let mut names = Vec::new();
     for e in std::fs::read_dir(root.join("secrets")).map_err(io_err("system snapshot restore"))? {
         let p = e.map_err(io_err("system snapshot restore"))?.path();

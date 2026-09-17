@@ -366,7 +366,7 @@ fn resolve_password(password: Option<String>, secret: Option<String>) -> Result<
         return Ok(Some(p));
     }
     let Some(name) = secret else { return Ok(None) };
-    let store = delonix_runtime_core::SecretStore::open(state_root())?;
+    let store = delonix_state::SecretStore::open(state_root())?;
     let s = store.load(&name)?;
     s.data.get("password").cloned().map(Some).ok_or_else(|| {
         Error::Invalid(super::po::tf(

@@ -1234,9 +1234,9 @@ fn presence(
             ),
             Err(e) => ("?".into(), e.to_string()),
         },
-        k::SECRET => match delonix_runtime_core::SecretStore::open(&root) {
+        k::SECRET => match delonix_state::SecretStore::open(&root) {
             Ok(s) => yes_no(s.list().iter().any(|sec| sec.name == name)),
-            Err(e) => ("?".into(), e.to_string()),
+            Err(e) => ("?".into(), delonix_runtime_core::Error::from(e).to_string()),
         },
         // `status` (and not the raw record) so the state comes reconciled with the
         // backend — a VM that died externally shows as Stopped, not Running.
@@ -2448,10 +2448,10 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
         .map(|vs| vs.into_iter().map(|v| v.name).collect())
         .unwrap_or_default();
     let existing_containers: Vec<String> = super::util::open_stores()
-        .and_then(|(_, cstore)| cstore.list())
+        .and_then(|(_, cstore)| Ok(cstore.list()?))
         .map(|cs| cs.into_iter().map(|c| c.name).collect())
         .unwrap_or_default();
-    let existing_secrets: Vec<String> = delonix_runtime_core::SecretStore::open(&root)
+    let existing_secrets: Vec<String> = delonix_state::SecretStore::open(&root)
         .map(|s| s.list().into_iter().map(|sec| sec.name).collect())
         .unwrap_or_default();
 

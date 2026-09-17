@@ -10,6 +10,7 @@ license.workspace = true
 # official Rust MCP SDK (`rmcp`) and its own `tokio` runtime, and no engine
 # crate depends on it.
 [dependencies]
+delonix-state = { workspace = true }
 delonix-runtime-core = { workspace = true }
 delonix-vm = { workspace = true }
 delonix-volume = { workspace = true }

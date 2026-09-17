@@ -43,7 +43,8 @@ fn network() -> Result<&'static dyn VmNetwork> {
             message: "no VM network provider is registered in this process".into(),
         })
 }
-use delonix_runtime_core::{Error, JsonStore, Result, Status, Vm, VmBootSpec};
+use delonix_runtime_core::{Error, Result, Status, Vm, VmBootSpec};
+use delonix_state::JsonStore;
 
 /// The VM shapes that [`Vm`] persists. They are DEFINED in
 /// `delonix-runtime-core` — the record lives there and the dependency cannot
@@ -231,7 +232,7 @@ fn vms_dir(base: &Path) -> std::path::PathBuf {
 }
 
 fn store(base: &Path) -> Result<JsonStore<Vm>> {
-    JsonStore::open(vms_dir(base))
+    Ok(JsonStore::open(vms_dir(base))?)
 }
 
 // `is_alive` era uma TERCEIRA cópia da mesma pergunta (a do motor usa o
@@ -1321,7 +1322,7 @@ pub fn set_default_backend(base: &Path, backend: &str) -> Result<()> {
     std::fs::create_dir_all(base)?;
     // Atomic: a torn write leaves a truncated backend name, and the reader has no way to
     // tell "libvir" from a value someone meant to write.
-    delonix_runtime_core::write_atomic(&default_backend_file(base), canon.as_bytes())?;
+    delonix_state::write_atomic(&default_backend_file(base), canon.as_bytes())?;
     Ok(())
 }
 
@@ -3345,7 +3346,7 @@ impl VmBackend for LibvirtBackend {
             xml = xml.replace("</domain>\n", &format!("{sec}</domain>\n"));
         }
         let xml_path = vmdir.join(format!("{}.xml", cfg.name));
-        delonix_runtime_core::write_atomic(&xml_path, xml.as_bytes())?;
+        delonix_state::write_atomic(&xml_path, xml.as_bytes())?;
 
         // Idempotent: if the domain already exists (auto-heal), it just (re)starts; otherwise
         // define + start. `virsh start` on an already-running domain is a benign no-op.
@@ -3647,7 +3648,7 @@ impl VmBackend for LibvirtBackend {
                     vm.name
                 ),
             })?;
-            delonix_runtime_core::write_atomic(&dir.join(format!("{n}.xml")), xml.as_bytes())?;
+            delonix_state::write_atomic(&dir.join(format!("{n}.xml")), xml.as_bytes())?;
         }
         Ok(names)
     }
@@ -3754,7 +3755,7 @@ impl LibvirtBackend {
                     // Written next to the original: the redefine reads a FILE,
                     // and this one carries the current domain's uuid.
                     let tmp = path.with_extension("xml.redefine");
-                    delonix_runtime_core::write_atomic(&tmp, patched.as_bytes())
+                    delonix_state::write_atomic(&tmp, patched.as_bytes())
                         .map_err(|e| e.to_string())?;
                     let out = quiet(
                         "virsh",
@@ -4267,7 +4268,7 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
     // The cloud-init seed directory (`vms/<name>/`, from `generate_seed_iso`)
     // also belongs to the VM — it was left behind and accumulated junk per name.
     let _ = std::fs::remove_dir_all(vmdir.join(name));
-    st.remove(name)
+    Ok(st.remove(name)?)
 }
 
 /// Stops the VM via ITS backend (CH/libvirt) but **preserves** the record and disk
@@ -4288,7 +4289,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
                 None => Err(Error::VmNotFound(name.to_string())),
             };
         }
-        Err(e) => return Err(e),
+        Err(e) => return Err(e.into()),
     };
     let backend = backend_for(&vm)?;
     // BEFORE the stop, and its failure aborts the stop: on libvirt the stop
@@ -4332,7 +4333,7 @@ pub fn pause(base: &Path, name: &str) -> Result<()> {
     }
     backend_for(&vm)?.pause(&vmdir, &vm)?;
     vm.status = Status::Paused;
-    st.save(name, &vm)
+    Ok(st.save(name, &vm)?)
 }
 
 /// Resumes a VM suspended with [`pause`]. Refuses a VM that is not currently
@@ -4349,7 +4350,7 @@ pub fn unpause(base: &Path, name: &str) -> Result<()> {
     }
     backend_for(&vm)?.unpause(&vmdir, &vm)?;
     vm.status = Status::Running;
-    st.save(name, &vm)
+    Ok(st.save(name, &vm)?)
 }
 
 /// Takes a named snapshot of VM `name` (see [`VmBackend::snapshot`]). On libvirt a
@@ -4849,6 +4850,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // — so `vm unpause` went on to aim at a VM that no longer existed.
         adopted || vm.ip != old_ip || vm.status != old_status
     })
+    .map_err(Into::into)
 }
 
 /// Does this VM's recorded IP come from a PREDICTION rather than an

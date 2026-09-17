@@ -4,7 +4,8 @@
 //! is persisted in `root/<id>.json`, with atomic writes (temporary file +
 //! `rename`).
 
-use crate::{Container, Error, Result};
+use crate::{Error, Result};
+use delonix_runtime_core::Container;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::fs;
@@ -55,26 +56,22 @@ impl FileLock {
             .write(true)
             .truncate(false)
             .open(path)
-            .map_err(|e| Error::Runtime {
-                context: "state lock",
-                message: format!(
+            .map_err(|e| {
+                Error::Lock(format!(
                     "cannot open the lock file {}: {e} — refusing the \
                          read-modify-write rather than doing it unlocked, which \
                          would silently lose a concurrent write",
                     path.display()
-                ),
+                ))
             })?;
         // SAFETY: valid, open fd; LOCK_EX blocks until the lock is ours.
         if unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) } != 0 {
-            return Err(Error::Runtime {
-                context: "state lock",
-                message: format!(
-                    "flock on {} failed: {} — refusing the read-modify-write \
+            return Err(Error::Lock(format!(
+                "flock on {} failed: {} — refusing the read-modify-write \
                      rather than doing it unlocked",
-                    path.display(),
-                    std::io::Error::last_os_error()
-                ),
-            });
+                path.display(),
+                std::io::Error::last_os_error()
+            )));
         }
         Ok(FileLock(f))
     }
@@ -261,7 +258,7 @@ struct Ident {
     id: String,
     #[serde(default)]
     name: String,
-    #[serde(default = "crate::default_namespace")]
+    #[serde(default = "delonix_runtime_core::default_namespace")]
     namespace: String,
     #[serde(default)]
     created_unix: u64,
@@ -424,16 +421,16 @@ impl Store {
                 .map(|i| format!("{}/{}", i.namespace, i.name))
                 .collect();
             opts.sort();
-            return Err(Error::Invalid(format!(
-                "container name '{id_or_name}' exists in several namespaces ({}) — qualify it as <namespace>/<name>",
-                opts.join(", ")
-            )));
+            return Err(Error::AmbiguousContainer {
+                name: id_or_name.to_string(),
+                options: opts.join(", "),
+            });
         }
         if let Some(hit) = named.first() {
             return Ok(serde_json::from_slice(&fs::read(self.path(&hit.id))?)?);
         }
         if qualified.is_some() {
-            return Err(Error::NotFound(format!("container: {id_or_name}")));
+            return Err(Error::NoSuchContainer(id_or_name.to_string()));
         }
         // Same tie-break as before (`list()` sorts newest-first and the old loop
         // returned the first match), so an ambiguous prefix keeps resolving to
@@ -441,7 +438,7 @@ impl Store {
         hits.sort_by_key(|i| std::cmp::Reverse(i.created_unix));
         match hits.first() {
             Some(hit) => Ok(serde_json::from_slice(&fs::read(self.path(&hit.id))?)?),
-            None => Err(Error::NotFound(format!("container: {id_or_name}"))),
+            None => Err(Error::NoSuchContainer(id_or_name.to_string())),
         }
     }
 
@@ -466,7 +463,7 @@ impl Store {
     pub fn remove(&self, id: &str) -> Result<()> {
         let p = self.path(id);
         if !p.exists() {
-            return Err(Error::NotFound(format!("container: {id}")));
+            return Err(Error::NoSuchContainer(id.to_string()));
         }
         fs::remove_file(p)?;
         Ok(())
@@ -540,7 +537,7 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
     pub fn load(&self, key: &str) -> Result<T> {
         let p = self.path(key);
         if !p.exists() {
-            return Err(Error::NotFound(key.to_string()));
+            return Err(Error::NoSuchRecord(key.to_string()));
         }
         Ok(serde_json::from_slice(&fs::read(p)?)?)
     }
@@ -579,7 +576,37 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Container;
+    use delonix_runtime_core::Container;
+
+    #[test]
+    fn store_round_trip_and_lookup() {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-test-{}",
+            delonix_runtime_core::generate_id()
+        ));
+        let store = Store::open(&dir).unwrap();
+
+        let mut c = Container::new(
+            "aaaa1111bbbb2222".to_string(),
+            "web".to_string(),
+            "/tmp/rootfs".to_string(),
+            vec!["/bin/sh".to_string()],
+            "64M".to_string(),
+        );
+        c.pid = Some(4242);
+        c.status = delonix_runtime_core::Status::Running;
+        store.save(&c).unwrap();
+
+        assert_eq!(store.load("aaaa1111bbbb2222").unwrap().pid, Some(4242));
+        assert_eq!(store.load("aaaa1111").unwrap().name, "web");
+        assert_eq!(store.load("web").unwrap().id, "aaaa1111bbbb2222");
+
+        assert_eq!(store.list().unwrap().len(), 1);
+        store.remove("aaaa1111bbbb2222").unwrap();
+        assert!(store.load("web").is_err());
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     fn tmp_dir(tag: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
