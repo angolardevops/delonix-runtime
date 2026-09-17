@@ -227,7 +227,9 @@ jobs:
           bash scripts/gen-releases.sh
           # The generated facts of the contributor handbook follow the release too;
           # the narrative is reviewed by a person after the release is validated.
-          python3 scripts/dev_docs.py
+          # A generator failure must not cost the release appendix, which was independent
+          # of it before: warn loudly and commit what did regenerate.
+          python3 scripts/dev_docs.py || echo "::warning::dev_docs.py falhou — os factos de docs/dev ficam por regenerar nesta release"
           if ! git diff --quiet -- docs/RELEASES.md docs/dev; then
             git add docs/RELEASES.md docs/dev
             git commit -m "docs(releases): apêndice e factos do manual actualizados para ${GITHUB_REF_NAME} [skip ci]"

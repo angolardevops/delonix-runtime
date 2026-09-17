@@ -179,8 +179,9 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 ```
 
 - It always redirects both roots into its sandbox (`DELONIX_CHAOS_DIR`, default `/tmp/dlx-chaos`)
-  and never touches the real engine. Images are symlinked read-only from your real store to avoid
-  downloads.
+  and never touches the real engine's containers, networks or records. The image directories
+  (`images`, `layers`, `blobs`) are **symlinks to your real store** to avoid downloads: the harness
+  only reads them in practice, but a scenario that wrote an image would write to the real store.
 - It **refuses to run on a busy machine** (load above a threshold, shared with `scripts/bench.sh`
   through `scripts/bancada.sh`): under load, scenarios fail for reasons that belong to the bench,
   not the product. `--max-load N` changes the threshold; `--force` runs anyway and marks the

@@ -555,8 +555,9 @@ dev-only `proptest` for IP allocation invariants.
   the exit status**. Read its output; never treat its `Ok` as "the command
   succeeded". (The helper of the same name in `delonix-vm` is different: it returns
   `None` on failure.)
-- The control socket path is derived from the uid (`runtime_dir`), not from
-  `DELONIX_ROOT`. Anything re-executed across a user namespace must carry
+- The control socket path is derived from the uid **and**, when `DELONIX_ROOT` is not
+  the default, from a hash of it (`runtime_dir` + `root_suffix`, ADR-0014);
+  `DELONIX_NET_RUNTIME_DIR` overrides both. Anything re-executed across a user namespace must carry
   `runtime_dir_env()` as well as `DELONIX_ROOT`; see how the pin is spawned in
   `infra.rs`. When isolating a test run, set both `DELONIX_ROOT` and
   `DELONIX_NET_RUNTIME_DIR`.
@@ -723,8 +724,10 @@ servers deliver reliably (module doc of `telemetry.rs`).
 ## Providers
 
 Providers are backends that speak to an external system's management API. They
-live outside the adapters so that engine adapters do not grow an HTTP client
-(Cargo.toml comments of both crates).
+live outside the adapters so that talking to a remote management API stays out of
+the engine adapters (Cargo.toml comments of both crates). This is not "no HTTP in
+adapters": `delonix-image` has its own OCI registry client, and `delonix-telemetry`
+exports OTLP over HTTP.
 
 ### `delonix-proxmox`
 

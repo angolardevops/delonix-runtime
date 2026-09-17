@@ -117,9 +117,9 @@ a change:
   `{ workspace = true, features = [...] }` and nothing else.
 - **Exceptions name the phase that removes them.** An exception without a phase fails, and so does
   an exception that no longer applies.
-- **Two debt ratchets**: `self_exec_sites` (a library re-running the engine's own binary instead of
-  calling a function) and `library_prints` (`println!`/`eprintln!` in a library crate — libraries
-  emit `tracing`, interfaces print). Same semantics as the language ratchet (`--list`, `--update`).
+- **Three debt ratchets**: `self_exec_sites` (a library re-running the engine's own binary instead
+  of calling a function), `library_prints` (`println!`/`eprintln!` in a library crate — libraries
+  emit `tracing`, interfaces print) and `env_writes` (`env::set_var`/`remove_var`). Same semantics as the language ratchet (`--list`, `--update`).
 
 Beyond what the gate can see, three principles decide reviews: **daemonless** (a new resident
 process needs an ADR with evidence of what systemd units, timers or socket activation could not
