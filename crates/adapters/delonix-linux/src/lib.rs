@@ -1,4 +1,4 @@
-//! `delonix-runtime` — the Delonix Engine's low-level OCI runtime.
+//! `delonix-linux` — the Delonix Engine's low-level OCI runtime.
 //!
 //! It is Month 5's `mini-runc`, promoted to a library: it creates containers with
 //! `clone` (namespaces) + `pivot_root` (rootfs) + cgroup (memory) + seccomp

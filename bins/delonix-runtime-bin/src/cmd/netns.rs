@@ -174,7 +174,7 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
     // container, whose netns is its own, snapshot and live are equivalent.
     let mut candidates = Vec::new();
     for mut c in store.list()? {
-        delonix_runtime::reconcile_status(&mut c);
+        delonix_linux::reconcile_status(&mut c);
         if is_reattach_candidate(&c.status, c.network.as_deref(), c.pid, c.pod.as_deref()) {
             candidates.push(c);
         }
@@ -232,7 +232,7 @@ fn reconcile_after_respawn() -> Result<(usize, usize)> {
 pub fn run(action: NetnsCmd) -> Result<()> {
     match action {
         NetnsCmd::Up => {
-            if !delonix_runtime::is_rootless() {
+            if !delonix_linux::is_rootless() {
                 println!("ingress: in root mode the single ingress already exists (nft DNAT on the host); the infra netns is rootless-only.");
                 return Ok(());
             }

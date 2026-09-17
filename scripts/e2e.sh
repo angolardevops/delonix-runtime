@@ -989,7 +989,7 @@ if "$BIN" container inspect "$C" >/dev/null 2>&1; then
   #
   # O que ele NÃO prova — que a espera existe e é limitada — está provado onde é
   # determinístico: `the_mount_wait_has_three_exits_and_none_is_unbounded`,
-  # em `crates/adapters/delonix-runtime/src/lib.rs`. Nenhum dos dois substitui o outro.
+  # em `crates/adapters/delonix-linux/src/lib.rs`. Nenhum dos dois substitui o outro.
   check "run -d devolve com os mounts de pé (sem janela para o host)" ok bash -c "
     marca='$OUT/.so-existe-no-host'; : > \"\$marca\"
     carga=(); trap 'kill \"\${carga[@]}\" 2>/dev/null' EXIT
@@ -1682,7 +1682,7 @@ if [ -n "${IMG:-}" ] && "$BIN" image ls 2>/dev/null | grep -q .; then
   # `delonix`, não na leaf `dlx-<id>` — fora do `dlx-containers`, portanto fora
   # também do tecto agregado de 85% que protege o host.
   #
-  # CAUSA, lida no código e não deduzida (`crates/adapters/delonix-runtime/src/lib.rs`):
+  # CAUSA, lida no código e não deduzida (`crates/adapters/delonix-linux/src/lib.rs`):
   # o `setup_cgroup` corria DEPOIS do byte "GO" que liberta o filho para executar
   # o entrypoint, e a migração de cgroup v2 move UM processo, nunca a sua
   # descendência. O comentário no sítio raciocina sobre a janela — «every

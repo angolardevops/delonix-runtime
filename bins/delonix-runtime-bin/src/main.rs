@@ -712,7 +712,7 @@ fn main() {
     }
     // Hidden MAPPED re-execs (`__rmtree`, `__volsnap`): we already run as root
     // in a user namespace with the subuids mapped (the parent used `newuidmap` —
-    // see `delonix_runtime::{remove_tree_mapped, reexec_mapped}`), so we are the
+    // see `delonix_linux::{remove_tree_mapped, reexec_mapped}`), so we are the
     // effective owners of the files the container wrote.
     //
     // **These halves were missing in this binary** and only existed in
@@ -869,8 +869,8 @@ mod advisory_flag_tests {
     fn named_flags_all_exist() {
         let real = container_run_flags();
         let mut missing = Vec::new();
-        for c in delonix_runtime::RESOURCE_CONTROLLERS {
-            for f in delonix_runtime::flags_of_controller(c) {
+        for c in delonix_linux::RESOURCE_CONTROLLERS {
+            for f in delonix_linux::flags_of_controller(c) {
                 if !real.contains(*f) {
                     missing.push(format!("{c}: {f}"));
                 }

@@ -192,7 +192,7 @@ fn pod_sandbox_pid(base: &std::path::Path, sandbox_id: &str) -> Option<i32> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     let c = store.load(&format!("pod-cri-{sandbox_id}")).ok()?;
     c.pid
-        .filter(|p| delonix_runtime::safe_to_signal(*p, c.pid_starttime))
+        .filter(|p| delonix_linux::safe_to_signal(*p, c.pid_starttime))
 }
 
 /// HTTP handler → SPDY upgrade for `PortForward`.
@@ -747,7 +747,7 @@ mod tests_sandbox_pid_identity {
     #[test]
     fn a_recycled_pid_is_refused() {
         let mine = std::process::id() as i32;
-        let real = delonix_runtime::proc_starttime(mine).expect("own starttime is readable");
+        let real = delonix_linux::proc_starttime(mine).expect("own starttime is readable");
         let base = store_with("recycled", Some(mine), Some(real.wrapping_add(1)));
         assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), None);
         let _ = std::fs::remove_dir_all(&base);
@@ -759,7 +759,7 @@ mod tests_sandbox_pid_identity {
     #[test]
     fn the_same_process_is_accepted() {
         let mine = std::process::id() as i32;
-        let real = delonix_runtime::proc_starttime(mine).expect("own starttime is readable");
+        let real = delonix_linux::proc_starttime(mine).expect("own starttime is readable");
         let base = store_with("same", Some(mine), Some(real));
         assert_eq!(super::pod_sandbox_pid(&base, "sandbox1"), Some(mine));
         let _ = std::fs::remove_dir_all(&base);

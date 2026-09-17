@@ -20,7 +20,7 @@ delonix-mgmt = { workspace = true }
 # For `resources.get`: the snapshot and the advice rules, so an agent and the
 # CLI answer with the SAME finding ids. Already in this crate's dependency
 # graph through `delonix-mgmt`; named directly because it is used directly.
-delonix-runtime = { workspace = true }
+delonix-linux = { workspace = true }
 
 rmcp = { workspace = true, features = ["server", "transport-io", "macros", "schemars"] }
 schemars = { workspace = true, features = ["derive"] }

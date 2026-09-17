@@ -197,7 +197,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 ```
 crates/foundation/   delonix-runtime-core, delonix-net-rules
 crates/contexts/     delonix-security-runtime
-crates/adapters/     delonix-runtime, delonix-sdn, delonix-oci, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
+crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
@@ -900,7 +900,7 @@ scrape Prometheus nunca divergirem na aritmética.
 - **Novo módulo `delonix-mgmt::dashstats`** (`crates/interfaces/delonix-mgmt/src/
   dashstats.rs`): `pub fn collect(root, include_network, include_storage) ->
   DashSummary` — contagens de containers/VMs/redes/volumes/imagens/segredos,
-  `memory.current`/`memory.max` do slice cgroup inteiro (`delonix_runtime::
+  `memory.current`/`memory.max` do slice cgroup inteiro (`delonix_linux::
   slice_budget`), soma de bytes rx/tx por-container
   (`delonix_sdn::infra::container_net_bytes`, um `nsenter`+`cat` por
   container a correr) e uso de disco por área (`blobs+layers`/`volumes`/
@@ -2428,7 +2428,7 @@ em 2026-07-27, 1 ainda aberto**:
   `sleep` a meio da janela de corrida que `update_concorrente_nao_perde_escritas` já usava para o
   `Store<Container>` irmão) — sem lock perderia escritas, com lock as 24 tiveram de bater certo.
   Validado ao vivo: `vm ls` (que chama `status()` para cada VM) continua a funcionar identicamente.
-- **`spawn()` (`crates/adapters/delonix-runtime/src/lib.rs`) é uma função de ~405 linhas** — ainda aberto,
+- **`spawn()` (`crates/adapters/delonix-linux/src/lib.rs`) é uma função de ~405 linhas** — ainda aberto,
   cobrindo
   preparação de hostname/argv, setup de pty/socketpair, cálculo de flags de clone, o próprio
   `clone()`, um handshake de userns cuja correcção depende de uma ordem só documentada em
@@ -2939,7 +2939,7 @@ porque o utilizador julga estar protegido. Três corrigidos para fail-closed
    Passa a AVISO no `run` (implementar a resolução por alias é follow-up).
 
 4. **`cpuset`/`cpu.weight`/`io.weight` no cgroup rootless-delegado** — `try_delegated_base`
-   (`crates/adapters/delonix-runtime/src/lib.rs`) já activava `+cpuset`/`+io` no
+   (`crates/adapters/delonix-linux/src/lib.rs`) já activava `+cpuset`/`+io` no
    `subtree_control` da base delegada, mas nunca ESCREVIA `cpuset.cpus`/
    `cpu.weight`/`io.weight` na leaf — só `memory.max`/`pids.max`/`cpu.max`. O
    caminho não-delegado (root) já aplicava os três correctamente; o delegado
@@ -3159,7 +3159,7 @@ static pod que nunca passou pelo API server.
   funcionalidade inútil.
 - **O clamp não reimplementa a resolução de capabilities** — chama o `resolve_cap_keep` DO MOTOR e
   intersecta com o tecto, emitindo `--cap-drop ALL` + um `--cap-add` por capability do conjunto
-  final. Por isso o módulo `delonix_runtime::capabilities` passou a ser **público** (`KEPT_CAPS`/
+  final. Por isso o módulo `delonix_linux::capabilities` passou a ser **público** (`KEPT_CAPS`/
   `cap_num`/`cap_name`/`all_caps_mask`/`resolve_cap_keep`/`names_from_mask`, movidos do interior do
   `lib.rs`): uma segunda tabela nome↔número do lado do CRI divergiria no dia em que uma capability
   fosse acrescentada aqui — a mesma disciplina gerador-e-leitor-partilham-o-formato do
@@ -4358,7 +4358,7 @@ em ~2min (antes falhava sempre, nos dois bugs).
 ### Spike GO/NO-GO: `container run --privileged` — resultado: **NO-GO nesta v1**
 
 Achado inesperado antes mesmo do spike: o motor **já tem** lógica dedicada de delegação de
-cgroup2 para nodes Kind (`setup_node_cgroup_ns` em `crates/adapters/delonix-runtime/src/lib.rs`), activada
+cgroup2 para nodes Kind (`setup_node_cgroup_ns` em `crates/adapters/delonix-linux/src/lib.rs`), activada
 quando `--privileged` + uma label `io.x-k8s.kind.*` está presente — trabalho não documentado
 antes desta sessão. Para a poder exercitar, adicionou-se uma flag `--label KEY=VAL` (repetível) a
 `delonix container run` (`bins/delonix-runtime-bin/src/cmd/container.rs`) — não existia
@@ -6335,7 +6335,7 @@ antes de qualquer commit:
 |---|---|
 | `delonix-runtime-core` | tipos partilhados: `Container`, `Vm`, `Status` (6 estados), `Store`/`JsonStore`, typestate, deteção de virtualização, Secret Manager |
 | `delonix-telemetry` | observabilidade: logging estruturado (`tracing`), spans OpenTelemetry/OTLP e as métricas Prometheus partilhadas pelo CRI e pela `mgmt`. Saiu do `delonix-runtime-core` na P3 do ADR-0040: a fundação não carrega um exportador, e todo o crate que só precisava de um `Container` compilava um cliente OTLP |
-| `delonix-runtime` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
+| `delonix-linux` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
 | `delonix-model` | fundação PURA do ADR-0040: o que qualquer camada nomeia sem depender de mecanismo. Tem os nomes gerados (`names`) e as classes de saída (`exitcode`: `Error` → código de saída e `DX_*`); os ids e o `ResourceMeta` entram nas fatias seguintes da P2 |
 | `delonix-stack` | contexto Stack (`core.delonix.io`, ADR-0040): a tabela de Kinds (`kinds`), o reconciliador de 3 vias (`reconcile`), o tipo `Condition` e o histórico de revisões (`revision`). Planear é puro; o `-bin` re-exporta os módulos com os nomes antigos (`cmd::kinds`…), por isso nenhum chamador mudou. `manifest`/`stack`/`schema`/`compose` continuam no `-bin`: cada um depende de 20 a 30 módulos de lá |
 | `delonix-compute` | contexto Compute (`compute.delonix.io`, ADR-0040): a especificação de execução única, `RunOpts`, que a CLI, os documentos `Container`/`Pod`, o compose, a Docker API, o kind e o `App` produzem antes de um só caminho a executar. Tem também os tipos da forma de Pod (`pod`: `PodSpec`, `PodContainer`…) e os seus tradutores para `RunOpts`, que devolvem os avisos como `Notice` em vez de os imprimir — o `-bin` mostra-os com o catálogo de tradução, com o mesmo texto. E a validação pura da especificação (`preflight::check_run_opts`), que o `cmd_run` chama antes de qualquer efeito. Continuam no `-bin` o resto do `cmd_run`, a forma plana `ContainerSpec` (normalizada a partir de YAML cru) e os tradutores do compose e da Docker API |

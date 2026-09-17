@@ -341,7 +341,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
             continue;
         }
         let size = measure(&images.container_path(&c.id));
-        let _ = delonix_runtime::remove(store, &c, true);
+        let _ = delonix_linux::remove(store, &c, true);
         let _ = images.unmount_rootfs(&c.id);
         if images.remove_container_dir(&c.id) {
             out.freed.add(size);
@@ -422,7 +422,7 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     let containers_dir = images.root().join("containers");
     for path in orphan_container_dirs(&containers_dir, &live_ids) {
         out.freed.add(measure(&path));
-        delonix_runtime::remove_tree_mapped(&path);
+        delonix_linux::remove_tree_mapped(&path);
         out.dirs += 1;
     }
 
@@ -1078,7 +1078,7 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
             },
             None => store,
         };
-        match home.remove_with(&v.name, Some(&delonix_runtime::remove_tree_mapped)) {
+        match home.remove_with(&v.name, Some(&delonix_linux::remove_tree_mapped)) {
             Ok(()) => {
                 out.freed.add(size);
                 out.removed.push(v.qualified());

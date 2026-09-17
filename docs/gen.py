@@ -3440,7 +3440,7 @@ ARCH = """
 <div class="row"><div class="box mut" style="flex:3"><b>delonix (CLI) — delonix-runtime-bin</b>
 comandos agrupados: container · image · build · vm · volumes · network · stack · cluster</div></div>
 <div class="row">
-<div class="box"><b>delonix-runtime</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
+<div class="box"><b>delonix-linux</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
 pivot_root, seccomp/caps, cgroups v2 delegados, exec, reconcile</div>
 <div class="box"><b>delonix-oci</b>pull OCI (digest verificado), build, export, buildpacks CNB,
 assinaturas, registo</div>
@@ -3515,7 +3515,7 @@ ARCH_EN = """
 <div class="row"><div class="box mut" style="flex:3"><b>delonix (CLI) — delonix-runtime-bin</b>
 grouped commands: container · image · build · vm · volumes · network · stack · cluster</div></div>
 <div class="row">
-<div class="box"><b>delonix-runtime</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
+<div class="box"><b>delonix-linux</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
 pivot_root, seccomp/caps, delegated cgroups v2, exec, reconcile</div>
 <div class="box"><b>delonix-oci</b>OCI pull (digest verified), build, export, CNB buildpacks,
 signatures, registry</div>
