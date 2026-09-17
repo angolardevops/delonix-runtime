@@ -4,11 +4,18 @@ Thanks for considering a contribution. This is a systems project (namespaces, cg
 raw `clone()`/`unshare()`) — small mistakes here can have real security or stability consequences,
 so we lean on tests, live validation, and careful review more than most projects.
 
+**Contributor handbook:** [docs/dev/README.md](docs/dev/README.md) — host requirements, building,
+every CI gate as a local command, the architecture, the crates, and the contribution workflow. This
+file is the short version.
+
 ## Before you start
 
 - Skim [README.rst](README.rst) for the shape of the project, and
-  [docs/arquitectura.html](https://angolardevops.github.io/delonix-runtime/arquitectura.html) for
-  the crate layout.
+  [docs/dev/05-architecture.md](docs/dev/05-architecture.md) and
+  [docs/dev/06-crates.md](docs/dev/06-crates.md) for the layers and the crate layout. The engine
+  runs containers and microVMs on one node, daemonless and rootless-first, and knows no consumer —
+  read «Identidade e fronteira do motor» at the top of [AGENTS.md](AGENTS.md) before proposing a
+  change to its boundaries.
 - For anything non-trivial (a new command, a new manifest `Kind`, a change to the namespace/cgroup
   setup), open an issue first to discuss the approach before writing code. It saves everyone time.
 - Check open issues and pull requests so you don't duplicate work already in flight.
@@ -22,37 +29,27 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-`delonix-cri` (the Kubernetes CRI server) uses `tonic-build`, which needs `protoc` on `PATH`:
+You need the pinned Rust toolchain (`rust-toolchain.toml`) and `protoc` on `PATH` — `delonix-cri`
+compiles the CRI protobuf with `tonic-build` (`sudo apt install protobuf-compiler` on
+Debian/Ubuntu). Running containers also needs a Linux host with cgroup v2, unprivileged user
+namespaces, a subuid range and `slirp4netns`/`nftables`/`iproute2`/`uidmap`; see
+[docs/dev/01-environment.md](docs/dev/01-environment.md) for the full list and the host traps
+(AppArmor on recent Ubuntu, cgroup delegation over SSH).
 
-```bash
-# Debian/Ubuntu
-sudo apt install protobuf-compiler
-# or download a release from https://github.com/protocolbuffers/protobuf/releases
-```
-
-Build and try the CLI directly:
-
-```bash
-cargo build -p delonix-runtime-bin
-./target/debug/delonix container run -d --name web -p 8080:80 nginx
-```
-
-Most of the runtime needs `slirp4netns`/`nftables`/`uidmap` on the host to actually create
-containers — see the [install.sh](install.sh) script for what a fully-functional host needs, or
-run `cargo test` for pure-logic coverage that doesn't touch the kernel.
+Always test the binary you built (`./target/debug/delonix`), not a `delonix` installed on your
+`PATH`. Before running anything beyond `--help`, isolate the engine's state by exporting **both**
+`DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR` to scratch directories — see
+[docs/dev/02-build-and-test.md](docs/dev/02-build-and-test.md#isolating-the-engines-state).
 
 ## Before opening a PR
 
-Run the full local gate — this is exactly what CI checks:
-
-```bash
-cargo build --workspace
-cargo clippy --workspace --all-targets -- -D warnings
-cargo fmt --all --check
-cargo test --workspace
-```
-
-All four must be clean. Zero clippy warnings is enforced, not a suggestion.
+CI runs more than build, clippy, fmt and test: a language ratchet, the architecture fitness gate,
+the node contract gate, the version gate, the CLI surface and documentation gates, `cargo-deny` and
+the generated site. Each one, with the command to run it locally, is listed in
+[docs/dev/02-build-and-test.md](docs/dev/02-build-and-test.md#the-gates-ci-runs). Zero clippy
+warnings is enforced, not a suggestion. How to work (one worktree per task, version alignment,
+English-only code, when to write an ADR) is in
+[docs/dev/10-contributing-workflow.md](docs/dev/10-contributing-workflow.md).
 
 **If you touch runtime/namespace/cgroup code**, unit tests alone don't prove much — validate live
 against a real container on a Linux host before opening the PR, and say what you tested in the PR
@@ -61,9 +58,9 @@ description (command run, expected vs. actual behavior).
 **If you add or change a CLI command:**
 - New user-facing strings are authored in English in the source and wrapped in
   `po::t(...)`/`po::tf(...)` (see `bins/delonix-runtime-bin/src/cmd/po.rs`); the Portuguese
-  translation goes in `bins/delonix-runtime-bin/data/pt.po`, never inline in the code. This is
-  enforced by review, not by a lint — a string that shows up in Portuguese when running with the
-  default (English) language is a bug.
+  translation goes in `bins/delonix-runtime-bin/data/pt.po`, never inline in the code. Portuguese
+  left in code is counted by `scripts/lang_ratchet.py` in CI — a string that shows up in Portuguese
+  when running with the default (English) language is a bug.
 - If the command has multiple entry points that should behave the same way (a common pattern in
   this codebase — see `delonix vm`/`delonix image vm`/`delonix image --vm`), wire all of them, not
   just the first one you find.
