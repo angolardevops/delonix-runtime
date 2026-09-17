@@ -186,19 +186,19 @@ td code{font-size:.82em}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="00-start-here.html"><span class="n">00</span><span>Commencer ici</span></a><a href="01-environment.html"><span class="n">01</span><span>Préparer votre environnement</span></a><a class="on" aria-current="page" href="02-build-and-test.html"><span class="n">02</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="03-rust-primer.html"><span class="n">03</span><span>Initiation à Rust pour cette base de code</span></a><a href="04-cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="05-architecture.html"><span class="n">05</span><span>Architecture</span></a><a href="06-crates.html"><span class="n">06</span><span>Les crates</span></a><a href="07-system-design-interview.html"><span class="n">07</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="08-delonixfile-and-vmfile.html"><span class="n">08</span><span>Delonixfile et VMfile</span></a><a href="09-microvm-setup.html"><span class="n">09</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="10-contributing-workflow.html"><span class="n">10</span><span>Flux de contribution</span></a><a href="11-publishing-docs.html"><span class="n">11</span><span>Publier la documentation</span></a><a href="12-coding-conventions.html"><span class="n">12</span><span>Conventions de code</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="13-cloud-native-standards.html"><span class="n">13</span><span>Standards cloud native, couche par couche</span></a><a href="14-glossary.html"><span class="n">14</span><span>Glossaire</span></a></div></nav>
+<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="00-start-here.html"><span class="n">00</span><span>Commencer ici</span></a><a href="01-environment.html"><span class="n">01</span><span>Préparer votre environnement</span></a><a class="on" aria-current="page" href="02-build-and-test.html"><span class="n">02</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="03-rust-primer.html"><span class="n">03</span><span>Initiation à Rust pour cette base de code</span></a><a href="04-cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="05-architecture.html"><span class="n">05</span><span>Architecture</span></a><a href="06-crates.html"><span class="n">06</span><span>Les crates</span></a><a href="07-system-design-interview.html"><span class="n">07</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="08-delonixfile-and-vmfile.html"><span class="n">08</span><span>Delonixfile et VMfile</span></a><a href="09-microvm-setup.html"><span class="n">09</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="10-contributing-workflow.html"><span class="n">10</span><span>Flux de contribution</span></a><a href="11-publishing-docs.html"><span class="n">11</span><span>Publier la documentation</span></a><a href="12-coding-conventions.html"><span class="n">12</span><span>Conventions de code</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="13-cloud-native-standards.html"><span class="n">13</span><span>Standards cloud native, couche par couche</span></a><a href="14-glossary.html"><span class="n">14</span><span>Glossaire</span></a><a href="15-environment-variables.html"><span class="n">15</span><span>Environment variables (DELONIX_*)</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Démarrer</p>
-<h1 id="2-clone-build-and-test">2. Cloner, compiler et tester</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/02-build-and-test.html">Lire la page en anglais</a></span></div><h1 id="2-cloner-compiler-et-tester">2. Cloner, compiler et tester</h1>
 <p>Cette page suppose l’hôte décrit dans <a href="01-environment.html">01 — Préparer votre environnement</a> : la toolchain
 Rust épinglée et <code>protoc</code>. Tout ce qui suit s’exécute depuis la racine de votre checkout — idéalement un
 <strong>git worktree</strong>, voir <a href="10-contributing-workflow.html">10 — Flux de contribution</a>.</p>
-<h2 id="clone">Cloner<a class="hanchor" href="#clone" aria-label="#">#</a></h2>
+<h2 id="cloner">Cloner<a class="hanchor" href="#cloner" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
 cd delonix-runtime
 git fetch --tags origin      # several gates compare against the release tags
 </code></pre></div>
-<h2 id="build">Compiler<a class="hanchor" href="#build" aria-label="#">#</a></h2>
+<h2 id="compiler">Compiler<a class="hanchor" href="#compiler" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo build --workspace                    # every crate and every binary
 cargo build -p delonix-runtime-bin         # just the `delonix` CLI
 cargo build --release -p delonix-runtime-bin   # what the docs generator and the CLI gates use
@@ -246,7 +246,7 @@ y atterrissent au lieu de <code>target/</code>.</p>
   les artefacts l’un de l’autre. Un répertoire target par worktree est plus lent la première fois et prévisible
   ensuite.</li>
 </ul>
-<h2 id="run-the-tests">Exécuter les tests<a class="hanchor" href="#run-the-tests" aria-label="#">#</a></h2>
+<h2 id="executer-les-tests">Exécuter les tests<a class="hanchor" href="#executer-les-tests" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo test --workspace                       # the whole suite
 cargo test -p delonix-sdn                    # one crate
 cargo test -p delonix-stack -- reconcile       # tests whose path contains &quot;reconcile&quot;
@@ -261,7 +261,7 @@ que sur une machine qui vous appartient :</p>
 <p>Un <code>cargo test</code> vert prouve la logique pure. Il ne prouve <strong>pas</strong> qu’une modification des namespaces,
 des cgroups, du holder réseau ou du démarrage des VM fonctionne — cela exige une exécution réelle (voir
 <a href="#end-to-end-battery-scriptse2esh">Batterie de bout en bout</a> et <a href="#chaos-harness-scriptschaossh">Harnais de chaos</a>).</p>
-<h2 id="the-gates-ci-runs">Les gates exécutés par la CI<a class="hanchor" href="#the-gates-ci-runs" aria-label="#">#</a></h2>
+<h2 id="les-gates-executes-par-la-ci">Les gates exécutés par la CI<a class="hanchor" href="#les-gates-executes-par-la-ci" aria-label="#">#</a></h2>
 <!-- dev-docs:begin ci-gates -->
 <div class="tablewrap"><table>
 <thead>
@@ -400,7 +400,7 @@ pages de manuel (<code>delonix man --dir &lt;dir&gt; --index</code>) et les vér
 <p>Workflows séparés, non requis à chaque modification : <code>chaos.yml</code> exécute le harnais de chaos sur un
 runner propre (et signale <code>skipped</code> lorsque le runner bloque les user namespaces), <code>release.yml</code> publie un
 tag, et <code>vm-image.yml</code> / <code>vm-appliances.yml</code> construisent des images de VM.</p>
-<h2 id="isolating-the-engines-state">Isoler l’état du moteur<a class="hanchor" href="#isolating-the-engines-state" aria-label="#">#</a></h2>
+<h2 id="isoler-letat-du-moteur">Isoler l’état du moteur<a class="hanchor" href="#isoler-letat-du-moteur" aria-label="#">#</a></h2>
 <p>Tout ce qui va au-delà de <code>--help</code> touche l’état du moteur. Par défaut, c’est <strong>votre état réel</strong> : vos
 containers, réseaux, volumes et le holder réseau. Avant d’exécuter le moteur pour tester —
 à la main, via <code>e2e.sh</code>, ou via n’importe quel script — faites pointer <strong>les deux</strong> racines d’état vers un
@@ -426,7 +426,7 @@ le chemin du socket court et sous votre contrôle, et c’est ce que font <a cla
 <p>Lorsque vous avez terminé, démontez l’infrastructure réseau isolée avec les deux mêmes variables exportées :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">./target/debug/delonix net netns down
 </code></pre></div>
-<h2 id="end-to-end-battery-scriptse2esh">Batterie de bout en bout (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)<a class="hanchor" href="#end-to-end-battery-scriptse2esh" aria-label="#">#</a></h2>
+<h2 id="batterie-de-bout-en-bout-scriptse2esh">Batterie de bout en bout (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)<a class="hanchor" href="#batterie-de-bout-en-bout-scriptse2esh" aria-label="#">#</a></h2>
 <p><code>e2e.sh</code> exécute la CLI contre le vrai noyau : le <code>--help</code> de chaque feuille, plus des exécutions réelles d’une
 grande partie de la surface, et affiche un rapport PASS/FAIL/SKIP/XFAIL (détail JSONL dans
 <code>$OUT/results.jsonl</code>, par défaut <code>OUT=/tmp/delonix-e2e</code>).</p>
@@ -445,7 +445,7 @@ grande partie de la surface, et affiche un rapport PASS/FAIL/SKIP/XFAIL (détail
 <li>Une exécution verte signifie que le <code>--help</code> de chaque feuille a été vérifié et que <em>certaines</em> feuilles ont été exécutées.
   Lisez l’en-tête du script pour savoir ce qui est exécuté et ce qui ne l’est pas.</li>
 </ul>
-<h2 id="chaos-harness-scriptschaossh">Harnais de chaos (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)<a class="hanchor" href="#chaos-harness-scriptschaossh" aria-label="#">#</a></h2>
+<h2 id="harnais-de-chaos-scriptschaossh">Harnais de chaos (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)<a class="hanchor" href="#harnais-de-chaos-scriptschaossh" aria-label="#">#</a></h2>
 <p>Le harnais de chaos casse volontairement un moteur en cours d’exécution — tuer le holder, remplir le disque,
 attaches concurrents, applies partiels — et indique s’il s’est dégradé de la manière qu’il promet.</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">scripts/chaos.sh                        # every scenario, ./target/debug/delonix
@@ -473,13 +473,13 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#clone">Cloner</a></li>
-<li><a href="#build">Compiler</a></li>
-<li><a href="#run-the-tests">Exécuter les tests</a></li>
-<li><a href="#the-gates-ci-runs">Les gates exécutés par la CI</a></li>
-<li><a href="#isolating-the-engines-state">Isoler l’état du moteur</a></li>
-<li><a href="#end-to-end-battery-scriptse2esh">Batterie de bout en bout (scripts/e2e.sh)</a></li>
-<li><a href="#chaos-harness-scriptschaossh">Harnais de chaos (scripts/chaos.sh)</a></li>
+<li><a href="#cloner">Cloner</a></li>
+<li><a href="#compiler">Compiler</a></li>
+<li><a href="#executer-les-tests">Exécuter les tests</a></li>
+<li><a href="#les-gates-executes-par-la-ci">Les gates exécutés par la CI</a></li>
+<li><a href="#isoler-letat-du-moteur">Isoler l’état du moteur</a></li>
+<li><a href="#batterie-de-bout-en-bout-scriptse2esh">Batterie de bout en bout (scripts/e2e.sh)</a></li>
+<li><a href="#harnais-de-chaos-scriptschaossh">Harnais de chaos (scripts/chaos.sh)</a></li>
 </ul>
 </div>
 </aside>

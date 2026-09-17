@@ -41,6 +41,190 @@ Two practical notes:
   other's artefacts. A target directory per worktree is slower the first time and predictable
   afterwards.
 
+## Installing your build locally
+
+Most changes never need an installed build: run `./target/debug/delonix` from your worktree. Install
+only when you need a stable path — a systemd unit, a script on another shell, a kubelet talking to
+`delonix-cri`. Before and after installing, confirm **which build** you are running:
+
+```bash
+./target/debug/delonix --version    # commit: <hash> (+N commits since vX.Y.Z) · built: <date>
+command -v delonix                  # which `delonix` your shell would run instead
+```
+
+The `commit:` line comes from `bins/delonix-runtime-bin/build.rs` (`DELONIX_GIT_HASH`,
+`DELONIX_GIT_SINCE`). Between releases every build carries the same version number, so the commit
+is the only way to tell your build from the released one.
+
+### How `delonix` finds its server binaries
+
+`delonix serve cri`, `delonix serve api` and `delonix mcp` do not contain the servers: they `exec`
+`delonix-cri`, `delonix-mgmt` and `delonix-mcp` (`exec_server` in
+`bins/delonix-runtime-bin/src/cmd/serve.rs`). The lookup is:
+
+1. the file of that name **next to the running `delonix`**;
+2. otherwise the name on `PATH`.
+
+`delonix` passes the server its own version in `DELONIX_DISPATCH_VERSION`, and a server from a
+different release refuses to start. It also passes itself in `DELONIX_BIN`, so the server calls back
+the same CLI. A server started directly (for example by a unit) finds the CLI through
+`DELONIX_BIN`, then a `delonix` next to itself, then `PATH` (`cli_bin` in
+`crates/foundation/delonix-runtime-core/src/dispatch.rs`). **Keep the four binaries of one build
+together**; a mix of your build and a release is refused, or runs code you did not mean to test.
+
+`delonix cluster kubeadm` and `delonix image vm build` look for `delonix-cri` in their own order
+(`resolve_cri_bin` in `bins/delonix-runtime-bin/src/cmd/vmimage.rs`): `--cri-bin`, then next to
+`delonix`, then a `cargo build --release -p delonix-cri` if the current directory is inside a
+source checkout, and only then a download of the released asset.
+
+Build the four before installing them:
+
+```bash
+cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
+```
+
+### Option A — run it from the worktree (safest)
+
+Nothing is copied, so nothing outside your checkout can pick it up by accident:
+
+```bash
+alias delonix-dev="$PWD/target/release/delonix"
+delonix-dev --version
+```
+
+The servers are found because they sit next to it in `target/release/`. On Ubuntu 23.10+ this path
+needs its own AppArmor profile (see
+[01 — AppArmor](01-environment.md#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary)).
+
+### Option B — install for your user in `~/.local/bin`
+
+```bash
+install -d ~/.local/bin
+install -m 0755 target/release/delonix target/release/delonix-cri \
+  target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
+hash -r                              # forget the path your shell cached
+command -v delonix && delonix --version
+```
+
+If a release is also installed in `/usr/local/bin`, whichever directory comes first on `PATH` wins.
+
+**AppArmor.** `scripts/install.sh` writes one profile, `/etc/apparmor.d/delonix`, bound to
+`<install dir>/delonix`, and only on hosts with
+`kernel.apparmor_restrict_unprivileged_userns=1`. A binary you copied to a new path is not covered.
+Do not re-run the installer to "move" that profile on a machine that also uses a released
+installation: the profile file is rewritten, and the released binary loses it. Add a second profile
+with a different name instead — the same shape the installer writes, so it replaces nothing:
+
+```bash
+printf 'abi <abi/4.0>,\ninclude <tunables/global>\nprofile delonix-dev %s flags=(unconfined) {\n  userns,\n}\n' \
+  "$HOME/.local/bin/delonix" | sudo tee /etc/apparmor.d/delonix-dev >/dev/null
+sudo apparmor_parser -r /etc/apparmor.d/delonix-dev
+```
+
+*Unverified here:* this command mirrors `install.sh` (the AppArmor block) with a different profile
+name and file; it was not loaded on a host with the restriction active while writing this page.
+
+The installer also adds shell completion, man pages and editor syntax files, but only in its binary
+phase. For your own build, generate them from the binary if you want them:
+
+```bash
+mkdir -p ~/.local/share/bash-completion/completions
+delonix completion shell bash > ~/.local/share/bash-completion/completions/delonix
+delonix man --dir ~/.local/share/man
+```
+
+### Option C — system install in `/usr/local/bin`
+
+```bash
+sudo install -m 0755 target/release/delonix target/release/delonix-cri \
+  target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
+```
+
+**Only on a machine where no Delonix workload is in use.** The installed binary is not just a
+command:
+
+- boot units written by `delonix system boot enable` start `ExecStart=<exe> container start <name>`,
+  where `<exe>` is the path of the binary that ran `enable` (`bins/delonix-runtime-bin/src/cmd/boot.rs`,
+  unit prefix `delonix-boot-`); replacing that file changes what comes up after the next reboot;
+- `dist/delonix-cri.service` runs `/usr/local/bin/delonix-cri`, so on a Kubernetes node the kubelet
+  gets your build at the next restart of that unit;
+- long-lived processes started earlier (the network pin and control process, container supervisors)
+  keep running the code they started with, so for a while two builds run side by side.
+
+Check first:
+
+```bash
+delonix container ls -a; delonix vm ls
+ls ~/.config/systemd/user/delonix-boot-* /etc/systemd/system/delonix-* 2>/dev/null
+pgrep -a delonix
+```
+
+### Preparing the host
+
+`scripts/install.sh` does two separate jobs. Only the first one is about the binary:
+
+| Part | What it does | Flag that skips or enables it |
+|---|---|---|
+| Binary | downloads a release, verifies the minisign signature and sha256, installs `delonix` (plus `delonix-mcp`, `delonix-mgmt`, and `delonix-cri` with `--with-cri`), then completion, man pages, editor syntax and the editor extension | skipped with `--no-binary`; `--user` picks `~/.local/bin` |
+| Host packages | `slirp4netns`, `uidmap`, `nftables`, `iproute2`, `conntrack` | always |
+| Rootless identity | `/etc/subuid` and `/etc/subgid` ranges for your user | always |
+| AppArmor | profile for `<dir>/delonix` when the userns restriction is active | always (when the restriction is on) |
+| Old Debian | `kernel.unprivileged_userns_clone=1` when it is `0` | always (when needed) |
+| VM dependencies | libvirt, qemu, cloud-init tooling; Cloud Hypervisor and its firmware downloaded from upstream | skipped with `--no-vm` |
+| Kernel tuning | `/etc/modules-load.d/delonix.conf`, `/etc/sysctl.d/99-delonix.conf` | skipped with `--no-tune` |
+| cgroup delegation | `user@.service` drop-in, only if not already delegated | skipped with `--no-delegate` |
+| Accelerators | NVIDIA CDI and `render` group, only when a GPU is present | skipped with `--no-gpu` |
+| Opt-ins | ports below 1024 (`--low-ports`), VM image building (`--with-image-build`), scale tuning (`--production`) | off by default |
+
+To prepare a host for your own build **without downloading any Delonix release**, run the installer
+from your checkout with `--no-binary`:
+
+```bash
+bash scripts/install.sh --no-binary            # add --no-vm if you do not need VM dependencies
+bash scripts/install.sh --help                 # the full flag list, from the script header
+```
+
+With `--no-binary` the AppArmor profile is written for the directory of the `delonix` that
+`command -v delonix` finds (or `/usr/local/bin` if none) — the same caution as above applies on a
+machine with a released installation. The script uses `sudo` for the host steps.
+
+Then ask the binary whether the host is ready (read-only):
+
+```bash
+delonix system doctor     # every prerequisite, and how to fix each; --strict exits non-zero on a failure
+delonix system info       # state root, rootless, cgroup delegation, network infra
+```
+
+See [01 — Diagnosing the host](01-environment.md#diagnosing-the-host) for what each check means.
+
+### Use an isolated state root
+
+An installed build uses your **real** state root by default: the same containers, networks and
+volumes as the release. Export `DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR` first (see
+[Isolating the engine's state](#isolating-the-engines-state)), and see
+[15 — Environment variables](15-environment-variables.md) for every other variable your build reads.
+
+### Uninstall and roll back
+
+There is no uninstall flag in `install.sh`. Remove what you copied:
+
+```bash
+rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
+hash -r
+sudo apparmor_parser -R /etc/apparmor.d/delonix-dev && sudo rm /etc/apparmor.d/delonix-dev   # if you added it
+```
+
+To go back to a released binary, run the installer again; it replaces the binaries in its install
+directory with the release you name:
+
+```bash
+curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --user
+curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash -s -- --version vX.Y.Z
+```
+
+Completion files and man pages you generated by hand are not removed by either step. Finish with
+`delonix --version` to confirm the commit you are back on.
+
 ## Run the tests
 
 ```bash

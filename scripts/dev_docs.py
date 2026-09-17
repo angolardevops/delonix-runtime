@@ -270,6 +270,26 @@ ENV_PAGE = "15-environment-variables.md"
 ENV_NAME = re.compile(r"\bDELONIX_[A-Z0-9]+(?:_[A-Z0-9]+)*\b")
 
 
+# Names that match the extraction but that no process reads from its environment.
+# Each one says why, so the list cannot quietly become a way to skip documenting a
+# real variable: a new entry needs a reason a reviewer can check.
+NOT_ENV = {
+    "DELONIX_CRI_SOCKET": "Rust constant in cmd/cluster.rs interpolated into kubeadm --cri-socket",
+    "DELONIX_ROOTX": "test fixture in delonix-sdn infra.rs (prefix matching of a process environ)",
+    "DELONIX_ROOT_BACKUP": "test fixture in delonix-sdn infra.rs (prefix matching of a process environ)",
+    "DELONIX_IMAGE": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_DISTRO": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_RELEASE": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_BUILT_BY": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_BASE_IMAGE": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_BASE_SHA256": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_K8S_VERSION": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_OFFLINE": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_NODE_EXPORTER": "key of /etc/delonix-image-release written inside a built VM image",
+    "DELONIX_EXTRA_PACKAGES": "key of /etc/delonix-image-release written inside a built VM image",
+}
+
+
 def env_vars_in_code() -> dict[str, list[str]]:
     """Every `DELONIX_*` name the engine reads or sets, with the files it appears in.
 
@@ -291,7 +311,12 @@ def env_vars_in_code() -> dict[str, list[str]]:
                     if name.endswith("_"):
                         continue
                     found.setdefault(name, set()).add(rel)
-    return {name: sorted(files) for name, files in sorted(found.items())}
+    stale = sorted(set(NOT_ENV) - set(found))
+    if stale:
+        # An exclusion for a name the code no longer contains is dead weight that would
+        # hide the name if it came back as a real variable.
+        sys.exit(f"dev_docs: NOT_ENV lists names no longer in the code: {', '.join(stale)}")
+    return {name: sorted(files) for name, files in sorted(found.items()) if name not in NOT_ENV}
 
 
 def env_vars_documented() -> set[str]:
