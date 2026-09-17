@@ -1,8 +1,12 @@
-<!-- translated-from: microvm-setup.md sha256:968372c7e81787a3f0847e63fec588cd3752d3a8ea507cb37913b059391a217c -->
+<!-- translated-from: microvm-setup.md sha256:90b3c976c5f086be4734500b81c5e673cff0a7d3f684e2a423f2849320d57300 -->
 # Construir microVMs
 
+**Antes de leres:** [Preparar o ambiente](environment.md), [Clonar, compilar e testar](build-and-test.md), a [secção de virtualização do Manual de cloud native](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), e a Parte 2 de [Delonixfile e VMfile](delonixfile-and-vmfile.md#part-2-vmfile).
+
 Esta página leva um contribuidor de um host Linux sem nada até construir, arrancar e testar VMs
-com o Delonix, e mostra onde vive o código quando algo precisa de mudar. Assume que já leste
+com o Delonix, e mostra onde vive o código quando algo precisa de mudar. Depois dela consegues
+preparar um host para o Cloud Hypervisor e o libvirt, prever que backend uma VM recebe, e testar
+uma mudança de VM através da CLI. Assume que já leste
 [Preparar o ambiente](environment.md) e que consegues construir a árvore
 ([Clonar, compilar e testar](build-and-test.md)).
 
@@ -498,3 +502,8 @@ Lê primeiro o [ADR-0008](../../adr/0008-proxmox-vm-backend.md); é o modelo. Em
   screenshot do libvirt respondem em segundos ao que as hipóteses levam horas a encontrar — e valida
   com o comando que um utilizador escreveria, não com as flags que são convenientes para depurar (o
   `--vnc` já mascarou uma falha de boot que só acontecia sem dispositivo de vídeo).
+
+---
+
+**Seguinte:** [Resolução de problemas](troubleshooting.md) — um índice organizado por sintoma para
+os gates e as armadilhas de host em que podes cair ao construir e testar.
