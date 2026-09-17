@@ -206,7 +206,10 @@ def stash_fences(text: str) -> tuple[str, dict[str, str]]:
         else:
             cls = f' class="language-{"bash" if lang in SHELL_LANGS else lang}"' if lang else ' class="nohighlight"'
             shell = " data-shell" if lang in SHELL_LANGS else ""
-            blocks[key] = f'<div class="code"{shell}><pre><code{cls}>{html.escape(code)}</code></pre></div>'
+            label = html.escape("shell" if lang in SHELL_LANGS else (lang or "text"))
+            blocks[key] = (f'<div class="code"{shell}><div class="code-head"><span class="lang">{label}</span>'
+                           f'<button class="copy" type="button">{ICON_COPY}<span>{{COPY}}</span></button></div>'
+                           f'<pre><code{cls}>{html.escape(code)}</code></pre></div>')
         return f"{indent}{key}\n"
 
     return FENCE.sub(take, text), blocks
@@ -256,7 +259,10 @@ def post_process(body: str) -> str:
         lang = m.group(1) or ""
         cls = f' class="language-{"bash" if lang in SHELL_LANGS else lang}"' if lang else ' class="nohighlight"'
         shell = " data-shell" if lang in SHELL_LANGS else ""
-        return f'<div class="code"{shell}><pre><code{cls}>{m.group(2)}</code></pre></div>'
+        label = html.escape("shell" if lang in SHELL_LANGS else (lang or "text"))
+        return (f'<div class="code"{shell}><div class="code-head"><span class="lang">{label}</span>'
+                f'<button class="copy" type="button">{ICON_COPY}<span>{{COPY}}</span></button></div>'
+                f'<pre><code{cls}>{m.group(2)}</code></pre></div>')
 
     body = re.sub(r'<pre><code(?: class="language-([A-Za-z0-9_+-]+)")?>(.*?)</code></pre>', block, body, flags=re.S)
     return body.replace("<table>", '<div class="tablewrap"><table>').replace("</table>", "</table></div>")
@@ -273,7 +279,7 @@ def sections(body: str, title: str, url: str) -> list[dict]:
             anchor = hm.group(1)
             heading = html.unescape(re.sub(r"<[^>]+>", "", hm.group(2))).replace("{SOURCE}", "").strip()
             continue
-        text = re.sub(r'<pre class="mermaid">.*?</pre>', " ", piece, flags=re.S)
+        text = re.sub(r'<pre class="mermaid">.*?</pre>|<div class="code-head">.*?</div>', " ", piece, flags=re.S)
         text = html.unescape(re.sub(r"<[^>]+>", " ", text))
         text = re.sub(r"\s+", " ", text).strip()
         if text or anchor:
@@ -281,111 +287,328 @@ def sections(body: str, title: str, url: str) -> list[dict]:
     return records
 
 
+GROUPS = [
+    # (first page number, key) — the order a contributor meets the material.
+    (-1, "overview"), (0, "start"), (3, "foundations"), (5, "architecture"),
+    (8, "images"), (10, "contributing"), (13, "reference"),
+]
+GROUP_NAMES = {
+    "en": {"overview": "Overview", "start": "Get started", "foundations": "Foundations", "architecture": "Architecture",
+           "images": "Images & microVMs", "contributing": "Contributing", "reference": "Reference"},
+    "pt-AO": {"overview": "Visão geral", "start": "Começar", "foundations": "Fundamentos", "architecture": "Arquitectura",
+              "images": "Imagens e microVMs", "contributing": "Contribuir", "reference": "Referência"},
+    "fr-FR": {"overview": "Vue d'ensemble", "start": "Démarrer", "foundations": "Fondamentaux", "architecture": "Architecture",
+              "images": "Images et microVM", "contributing": "Contribuer", "reference": "Référence"},
+}
+CHROME = {
+    "en": {"theme": "Toggle colour theme", "menu": "Menu", "github": "GitHub", "home": "Handbook home"},
+    "pt-AO": {"theme": "Alternar tema de cor", "menu": "Menu", "github": "GitHub", "home": "Início do manual"},
+    "fr-FR": {"theme": "Changer le thème de couleur", "menu": "Menu", "github": "GitHub", "home": "Accueil du guide"},
+}
+DIALOGUE = {"Interviewer": "interviewer", "Entrevistador": "interviewer", "Recruteur": "interviewer",
+            "Candidate": "candidate", "Candidato": "candidate", "Candidat": "candidate"}
+
+
+def page_number(name: str) -> int:
+    m = re.match(r"^(\d+)-", name)
+    return int(m.group(1)) if m else -1
+
+
+def group_of(name: str) -> str:
+    number = page_number(name)
+    key = GROUPS[0][1]
+    for first, k in GROUPS:
+        if number >= first:
+            key = k
+    return key
+
+
+def decorate(body: str) -> str:
+    """Heading anchors, interview dialogue and the code-block header — the shape of the
+    content, added after Markdown so the source stays plain."""
+    def anchor(m: re.Match) -> str:
+        level, hid, inner = m.group(1), m.group(2), m.group(3)
+        if level == "1":
+            return m.group(0)
+        return f'<h{level} id="{hid}">{inner}<a class="hanchor" href="#{hid}" aria-label="#">#</a></h{level}>'
+
+    body = re.sub(r'<h([23]) id="([^"]*)">(.*?)</h\1>', anchor, body, flags=re.S)
+
+    speaker_p = re.compile(r'<p><strong>([^<]+?)\s*(?:&nbsp;|\u00a0)?:?</strong>\s*(?:&nbsp;|\u00a0)?:?\s*')
+
+    def dialogue(m: re.Match) -> str:
+        inner = m.group(1)
+        starts = [s for s in speaker_p.finditer(inner) if DIALOGUE.get(html.unescape(s.group(1)).replace("\u00a0", " ").strip())]
+        if not starts or inner[: starts[0].start()].strip():
+            return m.group(0)
+        turns = []
+        for k, s in enumerate(starts):
+            end = starts[k + 1].start() if k + 1 < len(starts) else len(inner)
+            name = html.unescape(s.group(1)).replace("\u00a0", " ").strip()
+            rest = inner[s.end():end]
+            turns.append(f'<blockquote class="say say-{DIALOGUE[name]}"><p><span class="speaker">{html.escape(name)}</span>{rest}</blockquote>')
+        return "".join(turns)
+
+    body = re.sub(r"<blockquote>(.*?)</blockquote>", dialogue, body, flags=re.S)
+    return body
+
+
 CSS = r"""
-:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
---code-bg:#0f172a;--code-ink:#e2e8f0;--inline:#f1f3f5;--warn:#fff7db;--warn-line:#e0b400;--shadow:0 12px 40px rgba(0,0,0,.18)}
-@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;--bg:#0d1117;--side:#10151c;
---accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;--inline:#1b212b;--warn:#2a2410;--warn-line:#8a6d00;--shadow:0 12px 40px rgba(0,0,0,.6)}}
-*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,sans-serif;color:var(--ink);background:var(--bg)}
-a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
-.layout{display:grid;grid-template-columns:290px minmax(0,1fr) 240px;max-width:1640px;margin:0 auto}
-nav.side{background:var(--side);border-right:1px solid var(--line);padding:1.1rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
-.brand{font-weight:700;font-size:1.05rem}.subtitle{color:var(--muted);font-size:.82rem;margin-bottom:.8rem}
-.tools{display:flex;gap:.4rem;margin-bottom:1rem;flex-wrap:wrap}
-.searchbtn{flex:1;display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);background:var(--bg);color:var(--muted);
-border-radius:8px;padding:.35rem .55rem;font:inherit;font-size:.85rem;cursor:pointer;min-width:0}
-kbd{font:600 .72rem ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:.05rem .3rem;background:var(--side);color:var(--muted)}
+:root{
+  --bg:#ffffff;--surface:#f5f7fa;--surface-2:#eef1f5;--ink:#141821;--ink-2:#2c3340;--muted:#5a6372;--line:#e2e6ec;
+  --accent:#d9480f;--accent-ink:#b93d0c;--accent-soft:#fff0e7;--focus:#d9480f;
+  --code-bg:#0f141b;--code-ink:#dbe2ea;--code-line:#222a35;--code-label:#8b96a5;
+  --warn-bg:#fff7e0;--warn-line:#e6b400;--warn-ink:#5c4700;
+  --shadow:0 1px 2px rgba(20,24,33,.05),0 8px 24px rgba(20,24,33,.08);
+  --f-display:"Hanken Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-body:"Source Sans 3",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0d1117;--surface:#141a22;--surface-2:#1a212b;--ink:#e4e8ee;--ink-2:#c8ced8;--muted:#98a2b0;--line:#242c37;
+  --accent:#ff7b3a;--accent-ink:#ff9460;--accent-soft:#2a1a10;--focus:#ff7b3a;
+  --code-bg:#0a0e13;--code-line:#1d242e;
+  --warn-bg:#2a2208;--warn-line:#8a6d00;--warn-ink:#f1d98a;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.45);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0d1117;--surface:#141a22;--surface-2:#1a212b;--ink:#e4e8ee;--ink-2:#c8ced8;--muted:#98a2b0;--line:#242c37;
+  --accent:#ff7b3a;--accent-ink:#ff9460;--accent-soft:#2a1a10;--focus:#ff7b3a;
+  --code-bg:#0a0e13;--code-line:#1d242e;
+  --warn-bg:#2a2208;--warn-line:#8a6d00;--warn-ink:#f1d98a;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.45);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:7px;background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .searchbtn kbd{margin-left:auto}
-select.lang{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:.3rem .4rem;font:inherit;font-size:.85rem}
-nav.side a{display:block;padding:.3rem .55rem;border-radius:6px;color:var(--ink);font-size:.92rem}
-nav.side a:hover{background:var(--accent-soft);text-decoration:none}nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
-main{padding:2rem 3rem 5rem;min-width:0}
-aside.toc{position:sticky;top:0;height:100vh;overflow-y:auto;padding:2rem 1rem;font-size:.84rem;border-left:1px solid var(--line)}
-aside.toc h5{margin:0 0 .5rem;text-transform:uppercase;letter-spacing:.08em;font-size:.7rem;color:var(--muted)}
-aside.toc ul{list-style:none;padding-left:.7rem;margin:0}aside.toc>div>ul{padding-left:0}aside.toc a{color:var(--muted)}aside.toc li{margin:.2rem 0}
-h1{font-size:2rem;line-height:1.25;margin-top:0}h2{margin-top:2.4rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}h3{margin-top:1.8rem}
-h2,h3{scroll-margin-top:1rem}
-code{font:.87em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--inline);padding:.1em .35em;border-radius:5px}
-a.src code{color:var(--accent);text-decoration:underline dotted}
-.crate-src{font-size:.72rem;font-weight:600;vertical-align:middle;border:1px solid var(--accent);border-radius:99px;padding:.05rem .5rem;margin-left:.4rem}
-.code{position:relative;margin:1rem 0}
-.code pre{background:var(--code-bg);color:var(--code-ink);padding:2.1rem 1.1rem 1rem;border-radius:10px;overflow-x:auto;line-height:1.5;margin:0;color-scheme:dark;scrollbar-width:thin;scrollbar-color:#475569 transparent}
-.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#475569;border-radius:8px}.code pre::-webkit-scrollbar-track{background:transparent}
-.code pre code{background:none;padding:0;color:inherit;font-size:.86em}.code pre code.hljs{background:none;padding:0}
-.copy{position:absolute;top:.45rem;right:.45rem;border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:6px;
-font:600 .72rem -apple-system,sans-serif;padding:.2rem .5rem;cursor:pointer;opacity:.75}.copy:hover,.copy:focus{opacity:1}
-pre.mermaid{background:var(--side);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:1rem;text-align:center;overflow-x:auto}
-.tablewrap{overflow-x:auto;margin:1rem 0}table{border-collapse:collapse;font-size:.9rem;width:100%}
-th,td{border:1px solid var(--line);padding:.45rem .6rem;vertical-align:top;text-align:left}th{background:var(--side)}
-blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);background:var(--accent-soft)}
-.notice{background:var(--warn);border:1px solid var(--warn-line);border-radius:8px;padding:.6rem .9rem;margin-bottom:1.4rem;font-size:.92rem}
-.pager{display:flex;justify-content:space-between;gap:1rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1rem;font-size:.92rem}
-.pager span{color:var(--muted);font-size:.78rem;display:block}.pager .next{text-align:right;margin-left:auto}
-.foot{font-size:.8rem;color:var(--muted);margin-top:1.5rem}
-#search{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding:10vh 1rem;z-index:50}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:272px minmax(0,1fr) 232px;max-width:1440px;margin-inline:auto}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px 56px 80px}
+.content{max-width:760px;margin-inline:auto}
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:anywhere}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:0;padding:14px 18px;border-radius:12px;background:var(--surface);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:12px;background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 16px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
 #search[hidden]{display:none}
-.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
-.sbox input{width:100%;border:0;border-bottom:1px solid var(--line);padding:1rem 1.1rem;font:inherit;font-size:1.05rem;background:var(--bg);color:var(--ink);outline:none}
-.sres{max-height:60vh;overflow-y:auto;margin:0;padding:.3rem;list-style:none}
-.sres a{display:block;padding:.55rem .7rem;border-radius:8px;color:var(--ink)}.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
-.sres .sp{font-size:.74rem;color:var(--muted)}.sres .sh{font-weight:600}.sres .st{font-size:.82rem;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.sres mark{background:none;color:var(--accent);font-weight:700}.sempty{padding:1rem;color:var(--muted)}
-.shelp{display:flex;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--line);font-size:.75rem;color:var(--muted)}
-@media (max-width:1100px){.layout{grid-template-columns:250px minmax(0,1fr)}aside.toc{display:none}}
-@media (max-width:760px){.layout{display:block}nav.side{position:static;height:auto}main{padding:1.2rem 1rem}}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1200px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}main{padding:36px 40px 72px}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+}
 """
 
 JS = r"""
 (function(){
   const ui = window.HANDBOOK_UI;
-  // Copy buttons: shell blocks drop a leading "$ " prompt so the copied text runs as is.
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
   document.querySelectorAll('.code').forEach(function(box){
-    const btn = document.createElement('button');
-    btn.className = 'copy'; btn.type = 'button'; btn.textContent = ui.copy;
+    const btn = box.querySelector('.copy'); if (!btn) return;
     btn.addEventListener('click', function(){
-      let text = box.querySelector('code').innerText;
+      let text = box.querySelector('pre code').innerText;
       if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
       navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
-        btn.textContent = ui.copied; setTimeout(function(){ btn.textContent = ui.copy; }, 1400);
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
       });
     });
-    box.appendChild(btn);
   });
   if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
-  if (window.mermaid) mermaid.initialize({startOnLoad:true, securityLevel:'strict',
-    theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'});
 
-  // Search (Ctrl+K / Cmd+K): a static index of this language, scored in the browser.
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:'"Source Sans 3", system-ui, sans-serif'});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
   const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
   let selected = 0;
   function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
   const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
   function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
-  function snippet(r, terms){
-    const i = terms.length ? r.nt.indexOf(terms[0]) : -1;
-    const start = Math.max(0, i - 50);
-    return (start ? '…' : '') + r.t.slice(start, start + 160);
-  }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
   function run(){
     const terms = norm(input.value).split(/\s+/).filter(Boolean);
     if (!terms.length){ list.innerHTML = ''; return; }
     const hits = [];
     index.forEach(function(r){
       let score = 0;
-      for (const t of terms){
-        const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0);
-        if (!s) return; score += s;
-      }
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
       hits.push([score, r]);
     });
     hits.sort(function(a, b){ return b[0] - a[0]; });
     selected = 0;
     list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
       const r = h[1];
-      return '<li><a href="' + r.u + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span><br>' +
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
         '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
-    }).join('') : '<li class="sempty">' + ui.no_results + '</li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
   }
   function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
   function close(){ modal.hidden = true; }
@@ -403,17 +626,22 @@ JS = r"""
   });
   document.addEventListener('keydown', function(e){
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
-    else if (e.key === 'Escape' && !modal.hidden) close();
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
     else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
   });
-  document.querySelectorAll('select.lang').forEach(function(s){
-    s.addEventListener('change', function(){ location.href = s.value; });
-  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
 })();
 """
 
 HLJS = "https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0"
 HL_LANGS = ("rust", "bash", "yaml", "json", "ini", "dockerfile", "python", "protobuf", "diff", "makefile", "xml")
+FONTS = ("https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@500;600;700;800"
+         "&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap")
+ICON_SEARCH = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>'
+ICON_THEME = '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg>'
+ICON_GITHUB = '<svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg>'
+ICON_MENU = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg>'
+ICON_COPY = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg>'
 
 
 def render_site(out: Path) -> None:
@@ -421,6 +649,7 @@ def render_site(out: Path) -> None:
     crates = crate_paths()
     for lang in LANGS:
         ui = UI[lang]
+        chrome = CHROME[lang]
         lang_out = out / lang
         lang_out.mkdir(parents=True, exist_ok=True)
         docs = []
@@ -443,45 +672,74 @@ def render_site(out: Path) -> None:
             body = link_sources(body, crates).replace("{SOURCE}", html.escape(ui["source"]))
             url = out_name(page.name)
             index_records += sections(body, title, url)
+            body = decorate(body).replace("{COPY}", html.escape(ui["copy"]))
 
             notice = ""
             if state == "missing":
-                notice = f'<div class="notice">{html.escape(ui["not_translated"].format(lang=ui["name"]))}</div>'
+                notice = f'<div class="notice" role="note">{html.escape(ui["not_translated"].format(lang=ui["name"]))}</div>'
             elif state == "stale":
-                notice = (f'<div class="notice">{html.escape(ui["stale"])} '
-                          f'<a href="../en/{url}">{html.escape(ui["english"])}</a></div>')
+                notice = (f'<div class="notice" role="note"><span>{html.escape(ui["stale"])} '
+                          f'<a href="../en/{url}">{html.escape(ui["english"])}</a></span></div>')
 
-            nav = "\n".join(
-                f'<a class="{"on" if d[0] == page else ""}" href="{out_name(d[0].name)}">{html.escape(d[4])}</a>' for d in docs
-            )
+            nav_parts = []
+            for _first, key in GROUPS:
+                items = [d for d in docs if group_of(d[0].name) == key]
+                if not items:
+                    continue
+                links = []
+                for d in items:
+                    number = page_number(d[0].name)
+                    label = re.sub(r"^\d+\.\s*", "", d[4])
+                    n = f'<span class="n">{number:02d}</span>' if number >= 0 else '<span class="n">·</span>'
+                    current = ' class="on" aria-current="page"' if d[0] == page else ""
+                    links.append(f'<a{current} href="{out_name(d[0].name)}">{n}<span>{html.escape(label)}</span></a>')
+                nav_parts.append(f'<div class="group"><div class="gtitle">{html.escape(GROUP_NAMES[lang][key])}</div>{"".join(links)}</div>')
+            nav = "".join(nav_parts)
+
             options = "".join(
                 f'<option value="../{l}/{url}"{" selected" if l == lang else ""}>{UI[l]["short"]} · {html.escape(UI[l]["name"])}</option>'
                 for l in LANGS
             )
-            prev_link = (f'<a href="{out_name(docs[i-1][0].name)}"><span>← {ui["prev"]}</span>{html.escape(docs[i-1][4])}</a>'
-                         if i else "")
-            next_link = (f'<a class="next" href="{out_name(docs[i+1][0].name)}"><span>{ui["next"]} →</span>{html.escape(docs[i+1][4])}</a>'
+            prev_link = (f'<a href="{out_name(docs[i-1][0].name)}"><span>← {html.escape(ui["prev"])}</span>{html.escape(docs[i-1][4])}</a>'
+                         if i else "<span></span>")
+            next_link = (f'<a class="next" href="{out_name(docs[i+1][0].name)}"><span>{html.escape(ui["next"])} →</span>{html.escape(docs[i+1][4])}</a>'
                          if i + 1 < len(docs) else "")
             rel_src = src.relative_to(ROOT).as_posix()
             hl = "".join(f'<script src="{HLJS}/languages/{l}.min.js"></script>' for l in HL_LANGS)
-            html_lang = {"en": "en", "pt-AO": "pt-AO", "fr-FR": "fr-FR"}[lang]
+            kicker = html.escape(GROUP_NAMES[lang][group_of(page.name)])
             doc = f"""<!doctype html>
-<html lang="{html_lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<html lang="{lang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)} · Delonix Runtime — {html.escape(ui["title"])}</title>
+<script>try{{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}}catch(e){{}}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="{FONTS}">
 <link rel="stylesheet" href="{HLJS}/styles/github-dark.min.css">
 <style>{CSS}</style></head>
-<body><div class="layout">
-<nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">{html.escape(ui["title"])}</div>
-<div class="tools"><button class="searchbtn" type="button">🔍 {html.escape(ui["search"])} <kbd>Ctrl K</kbd></button>
-<select class="lang" aria-label="Language">{options}</select></div>
-{nav}</nav>
-<main>{notice}{body}
-<div class="pager">{prev_link}{next_link}</div>
-<p class="foot"><a href="{REPO}/blob/main/{rel_src}" target="_blank" rel="noopener">{html.escape(ui["edit"])}</a> · <code>{rel_src}</code></p></main>
-<aside class="toc"><h5>{html.escape(ui["on_page"])}</h5>{toc}</aside></div>
-<div id="search" hidden><div class="sbox" role="dialog" aria-label="{html.escape(ui["search"])}">
-<input type="search" placeholder="{html.escape(ui["search_ph"])}" autocomplete="off"><ul class="sres"></ul>
-<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span><span><kbd>Esc</kbd></span></div></div></div>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="{html.escape(chrome["menu"])}">{ICON_MENU}</button>
+  <a class="brand" href="index.html" aria-label="{html.escape(chrome["home"])}"><span class="mark">D</span>Delonix Runtime<span class="sep"></span><span class="sub">{html.escape(ui["title"])}</span></a>
+  <button class="searchbtn" type="button">{ICON_SEARCH}<span class="label">{html.escape(ui["search_ph"])}</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language">{options}</select>
+    <button class="iconbtn themebtn" type="button" aria-label="{html.escape(chrome["theme"])}" title="{html.escape(chrome["theme"])}">{ICON_THEME}</button>
+    <a class="iconbtn" href="{REPO}" target="_blank" rel="noopener" aria-label="{chrome["github"]}" title="{chrome["github"]}">{ICON_GITHUB}</a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="{html.escape(ui["title"])}">{nav}</nav>
+<main><div class="content">
+<p class="kicker">{kicker}</p>
+{notice}{body}
+<nav class="pager">{prev_link}{next_link}</nav>
+<footer class="foot"><a href="{REPO}/blob/main/{rel_src}" target="_blank" rel="noopener">{html.escape(ui["edit"])}</a><code>{rel_src}</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">{html.escape(ui["on_page"])}</p>{toc}</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="{html.escape(ui["search"])}">
+<div class="sfield">{ICON_SEARCH}<input id="search-input" type="search" placeholder="{html.escape(ui["search_ph"])}" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
 <script>window.HANDBOOK_UI={json.dumps({k: ui[k] for k in ("copy", "copied", "no_results")}, ensure_ascii=False)};</script>
 <script src="search-index.js"></script>
 <script src="{HLJS}/highlight.min.js"></script>{hl}
