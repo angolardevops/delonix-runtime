@@ -1,8 +1,12 @@
-<!-- translated-from: microvm-setup.md sha256:968372c7e81787a3f0847e63fec588cd3752d3a8ea507cb37913b059391a217c -->
+<!-- translated-from: microvm-setup.md sha256:90b3c976c5f086be4734500b81c5e673cff0a7d3f684e2a423f2849320d57300 -->
 # Construire des microVMs
 
+**Avant de lire :** [Préparer votre environnement](environment.md), [Cloner, compiler et tester](build-and-test.md), la [section virtualisation du manuel de cloud native](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), et la Partie 2 de [Delonixfile et VMfile](delonixfile-and-vmfile.md#part-2-vmfile).
+
 Cette page mène un contributeur d'un hôte Linux nu jusqu'à la construction, au démarrage et au test
-de VMs avec Delonix, et montre où se trouve le code lorsqu'il faut modifier quelque chose. Elle
+de VMs avec Delonix, et montre où se trouve le code lorsqu'il faut modifier quelque chose. Après
+elle, vous pouvez préparer un hôte pour Cloud Hypervisor et libvirt, prévoir quel backend une VM
+obtient, et tester une modification de VM via la CLI. Elle
 suppose que vous avez déjà lu [Préparer votre environnement](environment.md) et que vous
 savez construire l'arborescence ([Cloner, compiler et tester](build-and-test.md)).
 
@@ -512,3 +516,7 @@ Lisez d'abord [ADR-0008](../../adr/0008-proxmox-vm-backend.md) ; c'est le modè
   à trouver — et validez avec la commande qu'un utilisateur taperait, et non avec les options
   pratiques pour le débogage (`--vnc` a un jour masqué un échec de démarrage qui ne se produisait
   que sans périphérique vidéo).
+
+---
+
+**Suivant :** [Dépannage](troubleshooting.md) — un index organisé par symptôme pour les gates et les pièges d'hôte que vous pouvez rencontrer en construisant et en testant.
