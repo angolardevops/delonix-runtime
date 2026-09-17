@@ -3039,6 +3039,9 @@ struct IoSpec {
     console_sock: Option<(i32, i32)>,
     /// The child writes one byte here once it is past the point of no return.
     ready_w: Option<i32>,
+    /// The child writes the reason here only when the `execvp` of its command
+    /// FAILED; a successful `execvp` closes it (CLOEXEC) with nothing written.
+    exec_w: Option<i32>,
 }
 
 fn container_init(spec: ContainerInitSpec<'_>) -> isize {
@@ -3094,6 +3097,7 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
                 sync,
                 console_sock,
                 ready_w,
+                exec_w,
             },
     } = spec;
     // User namespace: wait for the PARENT to write uid_map/gid_map before continuing
@@ -3374,8 +3378,20 @@ fn container_init(spec: ContainerInitSpec<'_>) -> isize {
             );
         }
     }
-    let _ = execvp(&argv[0], argv);
-    eprintln!("delonix: exec failed: {:?}", argv[0]);
+    let err = execvp(&argv[0], argv).unwrap_err();
+    let reason = format!("exec {}: {err}", argv[0].to_string_lossy());
+    eprintln!("delonix: {reason}");
+    if let Some(w) = exec_w {
+        // SAFETY: our end of the pipe created in `spawn`; the reason goes to the
+        // parent, which is waiting for it on a detached start. SIGPIPE ignored
+        // first: a parent that stopped waiting has closed its end, and dying of
+        // the signal would replace the 127 every caller reads.
+        unsafe {
+            libc::signal(libc::SIGPIPE, libc::SIG_IGN);
+            let _ = libc::write(w, reason.as_ptr() as *const libc::c_void, reason.len());
+            libc::close(w);
+        }
+    }
     127
 }
 
@@ -5434,6 +5450,40 @@ fn wait_for_mounts_with(ready_r: i32, name: &str, ceiling_ms: i32) -> MountWait 
     outcome
 }
 
+/// How long a detached `run` waits for its command's `execvp` once the mount
+/// namespace is final. Long enough for the common case, short enough that a
+/// one-off chown of a large rootfs does not hold `run -d` hostage.
+const EXEC_CEILING_MS: i32 = 5_000;
+
+/// Waits for the exec pipe: `Some(reason)` when the init wrote one (its `execvp`
+/// failed), `None` on EOF (the command started) or past the ceiling (unknown,
+/// reported as a start, as before this wait existed).
+fn wait_for_exec(exec_r: i32, ceiling_ms: i32) -> Option<String> {
+    let mut pfd = libc::pollfd {
+        fd: exec_r,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    // SAFETY: single valid fd we own; poll writes only into `pfd.revents`.
+    let n = unsafe { libc::poll(&mut pfd, 1, ceiling_ms) };
+    let mut reason = None;
+    if n > 0 {
+        let mut buf = [0u8; 512];
+        // SAFETY: valid fd, and `buf` is a live buffer we own.
+        let got = unsafe { libc::read(exec_r, buf.as_mut_ptr() as *mut libc::c_void, buf.len()) };
+        if got > 0 {
+            reason = Some(
+                String::from_utf8_lossy(&buf[..got as usize])
+                    .trim()
+                    .to_string(),
+            );
+        }
+    }
+    // SAFETY: ours, and unused from here on.
+    unsafe { libc::close(exec_r) };
+    reason
+}
+
 fn spawn(
     store: &Store,
     container: &mut Container,
@@ -5660,6 +5710,18 @@ fn spawn(
         (fds[0], fds[1])
     };
     let ready_w = ready.1;
+    // EXEC pipe — the child's proof that its command really started. Written only
+    // when the `execvp` fails; a successful one closes the CLOEXEC write end with
+    // nothing in it, so the parent reads EOF.
+    let exec_pipe = {
+        let mut fds = [0i32; 2];
+        // SAFETY: pipe2() fills the 2-fd array.
+        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+            None
+        } else {
+            Some((fds[0], fds[1]))
+        }
+    };
 
     let host_pid = spec.host_pid;
     let inherit_userns = spec.inherit_userns;
@@ -5753,6 +5815,7 @@ fn spawn(
                 sync,
                 console_sock,
                 ready_w: Some(ready_w),
+                exec_w: exec_pipe.map(|(_, w)| w),
             },
         })
     });
@@ -5765,11 +5828,19 @@ fn spawn(
     // error path would leak a pair of fds per attempt.
     // SAFETY: our own end; the child got its copy through the `clone`.
     unsafe { libc::close(ready_w) };
+    if let Some((_, w)) = exec_pipe {
+        // SAFETY: our own end; the child got its copy through the `clone`.
+        unsafe { libc::close(w) };
+    }
     let pid = match cloned {
         Ok(p) => p,
         Err(e) => {
             // SAFETY: nothing else refers to the read end once there is no child.
             unsafe { libc::close(ready.0) };
+            if let Some((r, _)) = exec_pipe {
+                // SAFETY: as above.
+                unsafe { libc::close(r) };
+            }
             return Err(syserr("clone")(e));
         }
     };
@@ -6045,7 +6116,34 @@ fn spawn(
     // or a CI job reads that 0 as success. We are the parent, so the real exit code is
     // one `waitpid` away, and the record is never published. The foreground path needs
     // nothing: its `waitpid` below already returns the code to the caller.
-    if wait_for_mounts(ready.0, &container.name) == MountWait::InitExited && detach {
+    let mounted = wait_for_mounts(ready.0, &container.name);
+    // A DETACHED start whose command could not be executed is a failed start too.
+    // `run -d /no-such-binary` returned 0 and the container turned up `Exited (127)`
+    // a moment later (measured); Docker refuses it on the spot with 127. Bounded:
+    // the `execvp` comes after the confinement and, for an image with a non-root
+    // `USER`, after a one-off chown of the rootfs, and `run -d` must not wait for
+    // that — past the ceiling the start is reported as it always was.
+    let exec_failure = match exec_pipe {
+        Some((r, _)) if detach && mounted == MountWait::Ready => wait_for_exec(r, EXEC_CEILING_MS),
+        Some((r, _)) => {
+            // SAFETY: ours, and unused on this path.
+            unsafe { libc::close(r) };
+            None
+        }
+        None => None,
+    };
+    if let Some(reason) = exec_failure {
+        let code = waitpid(pid, None).map(wait_to_code).unwrap_or(-1);
+        remove_container_cgroup(container);
+        return Err(Error::Runtime {
+            context: "container start",
+            message: format!(
+                "{}: the container's command did not start ({reason}), exit code {code}",
+                container.name
+            ),
+        });
+    }
+    if mounted == MountWait::InitExited && detach {
         let code = waitpid(pid, None).map(wait_to_code).unwrap_or(-1);
         remove_container_cgroup(container);
         // The init's own words: a detached init writes to the log file, and no record
@@ -9572,6 +9670,45 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
     /// `spawn` — that is what the `run -d devolve com os mounts de pé` check in
     /// `scripts/e2e.sh` is for. It proves the part the E2E check cannot: that
     /// none of the three ways out is an unbounded wait.
+    /// The exec wait: a reason means the `execvp` failed, EOF means the command
+    /// started, and the ceiling means unknown — reported as a start, never a hang.
+    #[test]
+    fn the_exec_wait_tells_a_failed_exec_from_a_started_one() {
+        use std::time::Instant;
+        let pipe = || {
+            let mut fds = [0i32; 2];
+            // SAFETY: `fds` is an owned `[c_int; 2]`, the buffer `pipe(2)` fills.
+            assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
+            (fds[0], fds[1])
+        };
+
+        let (r, w) = pipe();
+        let reason = "exec /nope: ENOENT";
+        // SAFETY: the write end just created, written once and closed once.
+        unsafe {
+            libc::write(w, reason.as_ptr() as *const libc::c_void, reason.len());
+            libc::close(w);
+        }
+        assert_eq!(wait_for_exec(r, 5_000).as_deref(), Some(reason));
+
+        let (r, w) = pipe();
+        // SAFETY: the write end just created, closed once — what a successful exec does.
+        unsafe { libc::close(w) };
+        let t = Instant::now();
+        assert_eq!(wait_for_exec(r, 5_000), None);
+        assert!(t.elapsed().as_millis() < 1_000, "EOF must return at once");
+
+        let (r, w) = pipe();
+        let t = Instant::now();
+        assert_eq!(wait_for_exec(r, 100), None);
+        assert!(
+            t.elapsed().as_millis() < 1_000,
+            "the ceiling must bound the wait"
+        );
+        // SAFETY: the write end kept open for the ceiling case, closed once.
+        unsafe { libc::close(w) };
+    }
+
     #[test]
     fn the_mount_wait_has_three_exits_and_none_is_unbounded() {
         use std::time::Instant;

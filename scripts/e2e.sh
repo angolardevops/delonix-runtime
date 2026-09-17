@@ -1105,6 +1105,18 @@ check "run -d -u com grupo inexistente recusa" 1 "$BIN" container run -d --net n
 check "run recusado não deixa directório em containers/" ok bash -c \
   "test \$(ls '$DELONIX_ROOT/containers' 2>/dev/null | wc -l) -eq $dirs_before"
 
+# Um `run -d` cujo comando não arranca (binário inexistente, sem permissão de
+# execução) devolvia 0 e o container aparecia `Exited (127)` a seguir — um script
+# lia o 0 como sucesso. Recusa agora, com a razão do `execvp`, sem registo e sem
+# directório: o overlay já montado deixa o `work/work` a 0000, que só a remoção
+# mapeada leva.
+dirs_before=$(ls "$DELONIX_ROOT/containers" 2>/dev/null | wc -l)
+check "run -d de um binário inexistente recusa com a razão" ok bash -c \
+  "out=\$('$BIN' container run -d --net none --name 'nx-$PFX' '$IMG' /nao-existe-$PFX 2>&1); rc=\$?; [ \$rc -ne 0 ] && grep -q 'did not start' <<<\"\$out\" && grep -q ENOENT <<<\"\$out\""
+check "run -d de um binário inexistente não deixa registo" 4 "$BIN" container inspect "nx-$PFX"
+check "nem directório em containers/" ok bash -c \
+  "test \$(ls '$DELONIX_ROOT/containers' 2>/dev/null | wc -l) -eq $dirs_before"
+
 ########################################
 section "container em rede custom: hot reconfig pelo ingress"
 ########################################

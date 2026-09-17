@@ -5841,7 +5841,10 @@ fn discard_unstarted(images: &ImageStore, store: &Store, id: &str) {
         return;
     }
     let _ = images.unmount_rootfs(id);
-    let _ = images.remove_container_dir(id);
+    // `purge_` and not the plain removal: once the init has mounted the overlay, the
+    // kernel leaves `work/work` at mode 0000, which only the mapped removal takes.
+    // Measured: every `run -d` whose command failed to exec left the directory.
+    purge_container_dir(images, id);
 }
 
 /// Starts the health monitor as a CHILD PROCESS of the supervisor, not a thread.
