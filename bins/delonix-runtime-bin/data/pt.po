@@ -11950,3 +11950,42 @@ msgstr "Um passo do pipeline de backup de disco a quente (listar discos, prepara
 msgid "Read the step's own error in the message; the VM is left running either way."
 msgstr "Lê o próprio erro do passo na mensagem; a VM fica a correr de qualquer forma."
 
+# dicionário: entradas do delonix-vm::cloudinit (ADR-0043)
+# (a validação de nome reutiliza "invalid VM name"/DX-1507, acima — sem entrada própria)
+
+msgid "could not copy the cloud-init user-data"
+msgstr "não foi possível copiar o user-data do cloud-init"
+
+msgid "The file a --user-data override names could not be copied into the VM's seed directory."
+msgstr "O ficheiro que um --user-data nomeia não pôde ser copiado para o directório de seed da VM."
+
+msgid "Check the path exists and is readable by this user."
+msgstr "Verifica que o caminho existe e é legível por este utilizador."
+
+msgid "cloud-localds not found"
+msgstr "cloud-localds não encontrado"
+
+msgid "Generating a cloud-init NoCloud seed needs the cloud-localds tool, which is not on PATH."
+msgstr "Gerar um seed NoCloud de cloud-init precisa da ferramenta cloud-localds, que não está no PATH."
+
+msgid "Install it (Debian/Ubuntu: cloud-image-utils, Fedora/Rocky: cloud-utils), or pass a ready-made seed."
+msgstr "Instala-a (Debian/Ubuntu: cloud-image-utils, Fedora/Rocky: cloud-utils), ou passa um seed já feito."
+
+msgid "could not run cloud-localds"
+msgstr "não foi possível correr o cloud-localds"
+
+msgid "The cloud-localds tool could not be started, for a reason other than being missing."
+msgstr "A ferramenta cloud-localds não pôde ser arrancada, por uma razão que não a de estar em falta."
+
+msgid "Read the error in the message; check the host's permissions and free space."
+msgstr "Lê o erro na mensagem; verifica as permissões e o espaço livre do host."
+
+msgid "cloud-localds failed"
+msgstr "cloud-localds falhou"
+
+msgid "The cloud-localds tool ran and exited with a non-zero status while building the seed ISO."
+msgstr "A ferramenta cloud-localds correu e saiu com um estado diferente de zero ao construir o ISO de seed."
+
+msgid "Check the cloud-init user-data/meta-data/network-config it was given are well-formed."
+msgstr "Verifica que o user-data/meta-data/network-config de cloud-init que lhe foi dado está bem formado."
+
