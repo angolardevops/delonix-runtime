@@ -3,37 +3,46 @@
 <title>Delonix Runtime — Contributor Handbook · Delonix Runtime — Contributor handbook</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@500;600;700;800&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
 <style>
 :root{
-  --bg:#ffffff;--surface:#f5f7fa;--surface-2:#eef1f5;--ink:#141821;--ink-2:#2c3340;--muted:#5a6372;--line:#e2e6ec;
-  --accent:#d9480f;--accent-ink:#b93d0c;--accent-soft:#fff0e7;--focus:#d9480f;
-  --code-bg:#0f141b;--code-ink:#dbe2ea;--code-line:#222a35;--code-label:#8b96a5;
-  --warn-bg:#fff7e0;--warn-line:#e6b400;--warn-ink:#5c4700;
-  --shadow:0 1px 2px rgba(20,24,33,.05),0 8px 24px rgba(20,24,33,.08);
-  --f-display:"Hanken Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  --f-body:"Source Sans 3",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
-  --f-mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
   --header:60px;color-scheme:light;
 }
 @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
-  --bg:#0d1117;--surface:#141a22;--surface-2:#1a212b;--ink:#e4e8ee;--ink-2:#c8ced8;--muted:#98a2b0;--line:#242c37;
-  --accent:#ff7b3a;--accent-ink:#ff9460;--accent-soft:#2a1a10;--focus:#ff7b3a;
-  --code-bg:#0a0e13;--code-line:#1d242e;
-  --warn-bg:#2a2208;--warn-line:#8a6d00;--warn-ink:#f1d98a;
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.45);color-scheme:dark;
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
 }}
 :root[data-theme="dark"]{
-  --bg:#0d1117;--surface:#141a22;--surface-2:#1a212b;--ink:#e4e8ee;--ink-2:#c8ced8;--muted:#98a2b0;--line:#242c37;
-  --accent:#ff7b3a;--accent-ink:#ff9460;--accent-soft:#2a1a10;--focus:#ff7b3a;
-  --code-bg:#0a0e13;--code-line:#1d242e;
-  --warn-bg:#2a2208;--warn-line:#8a6d00;--warn-ink:#f1d98a;
-  --shadow:0 1px 2px rgba(0,0,0,.4),0 8px 24px rgba(0,0,0,.45);color-scheme:dark;
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
 }
 *{box-sizing:border-box}
 html{scroll-padding-top:calc(var(--header) + 16px)}
-body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
 a{color:var(--accent-ink);text-decoration:none}
 a:hover{text-decoration:underline;text-underline-offset:3px}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
@@ -41,10 +50,10 @@ a:hover{text-decoration:underline;text-underline-offset:3px}
 
 /* Header */
 .top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
-  padding-inline:20px;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
 .brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
 .brand:hover{text-decoration:none}
-.brand .mark{width:26px;height:26px;border-radius:7px;background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
 .brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
 .brand .sep{width:1px;height:18px;background:var(--line)}
 .searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
@@ -72,9 +81,8 @@ nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--
 nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
 nav.side a.on .n{color:var(--accent-ink)}
 main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
-.content{max-width:1180px;margin-inline:auto}
-/* Prose keeps a reading measure; tables, code and diagrams take the whole column. */
-.content>p,.content>ul,.content>ol,.content>h1,.content>h2,.content>h3,.content>h4,.content>blockquote,.content>.notice,.content>.kicker{max-width:76ch}
+.content{max-width:1120px;margin-inline:auto}
+
 aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
 aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
 aside.toc ul{list-style:none;margin:0;padding:0}
@@ -109,7 +117,7 @@ a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
 /* Blocks */
 blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
 blockquote p:last-child{margin-bottom:0}
-blockquote.say{border:0;padding:14px 18px;border-radius:12px;background:var(--surface);margin:18px 0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
 blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
   padding:5px 8px;border-radius:999px;vertical-align:1px}
 blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
@@ -118,7 +126,7 @@ blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
 .notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
   border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
 .notice a{color:inherit;font-weight:600;text-decoration:underline}
-.code{margin:18px 0 22px;border-radius:12px;background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
 .code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
 .code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
 .copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
@@ -130,8 +138,8 @@ blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
 .code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
 .code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
 .code pre code.hljs{background:none;padding:0}
-pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface);text-align:center;overflow-x:auto;font-family:var(--f-body)}
-.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:12px}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
 table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
 th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
 th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
@@ -192,13 +200,13 @@ th:first-child,td:first-child{white-space:nowrap}
   <a class="brand" href="index.html" aria-label="Handbook home"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Contributor handbook</span></a>
   <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Search the handbook…</span><kbd>Ctrl K</kbd></button>
   <div class="actions">
-    <select class="lang" id="lang" aria-label="Language"><option value="../en/index.html" selected>EN · English</option><option value="../pt-AO/index.html">PT-AO · Português (Angola)</option><option value="../fr-FR/index.html">FR-FR · Français</option></select>
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/index.html" selected>EN · English</option><option value="../pt-AO/index.html">PT-AO · Português (Angola)</option><option value="../fr-FR/index.html">FR-FR · Français</option><option value="../zh-CN/index.html">ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="Toggle colour theme" title="Toggle colour theme"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
     <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a class="on" aria-current="page" href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="00-start-here.html"><span class="n">00</span><span>Start here</span></a><a href="01-environment.html"><span class="n">01</span><span>Preparing your environment</span></a><a href="02-build-and-test.html"><span class="n">02</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="03-rust-primer.html"><span class="n">03</span><span>Rust primer for this codebase</span></a><a href="04-cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="05-architecture.html"><span class="n">05</span><span>Architecture</span></a><a href="06-crates.html"><span class="n">06</span><span>The crates</span></a><a href="07-system-design-interview.html"><span class="n">07</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="08-delonixfile-and-vmfile.html"><span class="n">08</span><span>Delonixfile and VMfile</span></a><a href="09-microvm-setup.html"><span class="n">09</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="10-contributing-workflow.html"><span class="n">10</span><span>Contribution workflow</span></a><a href="11-publishing-docs.html"><span class="n">11</span><span>Publishing the documentation</span></a><a href="12-coding-conventions.html"><span class="n">12</span><span>Coding conventions</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="13-cloud-native-standards.html"><span class="n">13</span><span>Cloud native standards, layer by layer</span></a><a href="14-glossary.html"><span class="n">14</span><span>Glossary</span></a><a href="15-environment-variables.html"><span class="n">15</span><span>Environment variables (DELONIX_*)</span></a></div></nav>
+<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a class="on" aria-current="page" href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="cloud-native-primer.html"><span class="n">02</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">03</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">Set up &amp; build</div><a href="environment.html"><span class="n">04</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">05</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="architecture.html"><span class="n">06</span><span>Architecture</span></a><a href="crates.html"><span class="n">07</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">08</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">09</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">10</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="coding-conventions.html"><span class="n">11</span><span>Coding conventions</span></a><a href="contributing-workflow.html"><span class="n">12</span><span>Contribution workflow</span></a><a href="publishing-docs.html"><span class="n">13</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="cloud-native-standards.html"><span class="n">14</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">15</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">16</span><span>Glossary</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Overview</p>
 <h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Contributor Handbook</h1>
@@ -238,7 +246,7 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Never edit them by hand — CI runs <code>dev_docs.py --check</code> and fails.
   If a fact is wrong, fix the source or the generator.</li>
 <li><strong>Narrative</strong> — why things are the way they are, how flows work, how to contribute. It is
-  written by hand and reviewed after each release. See <a href="11-publishing-docs.html">11 — Publishing the docs</a>.</li>
+  written by hand and reviewed after each release. See <a href="publishing-docs.html">Publishing the docs</a>.</li>
 </ul>
 <h2 id="reading-paths">Reading paths<a class="hanchor" href="#reading-paths" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
@@ -251,27 +259,27 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
 <tbody>
 <tr>
 <td><strong>Start from zero, with no one to ask</strong></td>
-<td><a href="00-start-here.html">00</a> (keep <a href="14-glossary.html">14</a> open) → the path below that matches your change</td>
+<td><a href="start-here.html">Start here</a> (keep <a href="glossary.html">Glossary</a> open) → the path below that matches your change</td>
 </tr>
 <tr>
 <td><strong>Send a first PR</strong> (a CLI fix, a docs fix, a small feature)</td>
-<td><a href="00-start-here.html">00</a> → <a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> (keep <a href="15-environment-variables.html">15</a> at hand) → <a href="10-contributing-workflow.html">10</a> → <a href="12-coding-conventions.html">12</a> → <a href="06-crates.html">06</a> for the crate you touch</td>
+<td><a href="start-here.html">Start here</a> → <a href="environment.html">Preparing your environment</a> → <a href="build-and-test.html">Clone, build and test</a> (keep <a href="environment-variables.html">Environment variables (<code>DELONIX_*</code>)</a> at hand) → <a href="contributing-workflow.html">Contribution workflow</a> → <a href="coding-conventions.html">Coding conventions</a> → <a href="crates.html">The crates</a> for the crate you touch</td>
 </tr>
 <tr>
 <td><strong>Understand the engine in depth</strong></td>
-<td><a href="03-rust-primer.html">03</a> → <a href="04-cloud-native-primer.html">04</a> → <a href="13-cloud-native-standards.html">13</a> → <a href="05-architecture.html">05</a> → <a href="06-crates.html">06</a> → <a href="07-system-design-interview.html">07</a></td>
+<td><a href="rust-primer.html">Rust primer for this codebase</a> → <a href="cloud-native-primer.html">Cloud native primer</a> → <a href="cloud-native-standards.html">Cloud native standards, layer by layer</a> → <a href="architecture.html">Architecture</a> → <a href="crates.html">The crates</a> → <a href="system-design-interview.html">System Design Interview — the Delonix Engine</a></td>
 </tr>
 <tr>
 <td><strong>Work on VMs or VM images</strong></td>
-<td><a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="08-delonixfile-and-vmfile.html">08</a> → <a href="09-microvm-setup.html">09</a> → the <code>delonix-vm</code> section of <a href="06-crates.html">06</a> → the VM tuning section of <a href="15-environment-variables.html">15</a></td>
+<td><a href="environment.html">Preparing your environment</a> → <a href="build-and-test.html">Clone, build and test</a> → <a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a> → <a href="microvm-setup.html">Building microVMs</a> → the <code>delonix-vm</code> section of <a href="crates.html">The crates</a> → the VM tuning section of <a href="environment-variables.html">Environment variables (<code>DELONIX_*</code>)</a></td>
 </tr>
 <tr>
 <td><strong>Change how documentation is produced</strong></td>
-<td><a href="11-publishing-docs.html">11</a></td>
+<td><a href="publishing-docs.html">Publishing the documentation</a></td>
 </tr>
 <tr>
 <td><strong>Configure, isolate or tune a run</strong> (state roots, logging, escape hatches, providers)</td>
-<td><a href="02-build-and-test.html#isolating-the-engines-state">02 — Isolating the engine's state</a> → <a href="15-environment-variables.html">15</a></td>
+<td><a href="build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a> → <a href="environment-variables.html">Environment variables (<code>DELONIX_*</code>)</a></td>
 </tr>
 </tbody>
 </table></div>
@@ -287,82 +295,82 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
 <tbody>
 <tr>
 <td>00</td>
-<td><a href="00-start-here.html">Start here</a></td>
+<td><a href="start-here.html">Start here</a></td>
 <td>Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck</td>
 </tr>
 <tr>
 <td>01</td>
-<td><a href="01-environment.html">Preparing your environment</a></td>
+<td><a href="environment.html">Preparing your environment</a></td>
 <td>What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs</td>
 </tr>
 <tr>
 <td>02</td>
-<td><a href="02-build-and-test.html">Clone, build and test</a></td>
+<td><a href="build-and-test.html">Clone, build and test</a></td>
 <td>Building, running tests, every CI gate as a local command, E2E and chaos with isolation</td>
 </tr>
 <tr>
 <td>03</td>
-<td><a href="03-rust-primer.html">Rust primer</a></td>
+<td><a href="rust-primer.html">Rust primer</a></td>
 <td>The Rust this codebase actually uses</td>
 </tr>
 <tr>
 <td>04</td>
-<td><a href="04-cloud-native-primer.html">Cloud native primer</a></td>
+<td><a href="cloud-native-primer.html">Cloud native primer</a></td>
 <td>Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — and where each appears in the engine</td>
 </tr>
 <tr>
 <td>05</td>
-<td><a href="05-architecture.html">Architecture</a></td>
+<td><a href="architecture.html">Architecture</a></td>
 <td>Layers, the crate graph, control and data paths, state on disk</td>
 </tr>
 <tr>
 <td>06</td>
-<td><a href="06-crates.html">The crates</a></td>
+<td><a href="crates.html">The crates</a></td>
 <td>One block per crate: responsibility, main types, where to start reading</td>
 </tr>
 <tr>
 <td>07</td>
-<td><a href="07-system-design-interview.html">System Design Interview</a></td>
+<td><a href="system-design-interview.html">System Design Interview</a></td>
 <td>The engine designed as an interview answer, then compared with what was built</td>
 </tr>
 <tr>
 <td>08</td>
-<td><a href="08-delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
 <td>The build file grammars and how they differ from a Dockerfile</td>
 </tr>
 <tr>
 <td>09</td>
-<td><a href="09-microvm-setup.html">Building microVMs</a></td>
+<td><a href="microvm-setup.html">Building microVMs</a></td>
 <td>KVM, Cloud Hypervisor and firmware, libvirt, VM images</td>
 </tr>
 <tr>
 <td>10</td>
-<td><a href="10-contributing-workflow.html">Contribution workflow</a></td>
+<td><a href="contributing-workflow.html">Contribution workflow</a></td>
 <td>Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs</td>
 </tr>
 <tr>
 <td>11</td>
-<td><a href="11-publishing-docs.html">Publishing the documentation</a></td>
+<td><a href="publishing-docs.html">Publishing the documentation</a></td>
 <td>How the site and this handbook are generated, gated and published</td>
 </tr>
 <tr>
 <td>12</td>
-<td><a href="12-coding-conventions.html">Coding conventions</a></td>
+<td><a href="coding-conventions.html">Coding conventions</a></td>
 <td>How code in this repository is written, and the checklist reviewers apply</td>
 </tr>
 <tr>
 <td>13</td>
-<td><a href="13-cloud-native-standards.html">Cloud native standards</a></td>
+<td><a href="cloud-native-standards.html">Cloud native standards</a></td>
 <td>The cloud-native standards a change is measured against</td>
 </tr>
 <tr>
 <td>14</td>
-<td><a href="14-glossary.html">Glossary</a></td>
+<td><a href="glossary.html">Glossary</a></td>
 <td>The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more</td>
 </tr>
 <tr>
 <td>15</td>
-<td><a href="15-environment-variables.html">Environment variables</a></td>
+<td><a href="environment-variables.html">Environment variables</a></td>
 <td>Every <code>DELONIX_*</code> variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary</td>
 </tr>
 </tbody>
@@ -370,7 +378,7 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
 <p>Other references you will be pointed to: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (C4 diagrams),
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (architecture decisions), <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
 (private vulnerability reports) and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (the short front door).</p>
-<nav class="pager"><span></span><a class="next" href="00-start-here.html"><span>Next →</span>0. Start here</a></nav>
+<nav class="pager"><span></span><a class="next" href="start-here.html"><span>Next →</span>Start here</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/README.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">On this page</p><div class="toc">
@@ -434,7 +442,7 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
     if (!window.mermaid || !diagrams.length) return;
     diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
     mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
-      fontFamily:'"Source Sans 3", system-ui, sans-serif'});
+      fontFamily:getComputedStyle(document.body).fontFamily});
     mermaid.run({nodes: diagrams});
   }
   renderMermaid();

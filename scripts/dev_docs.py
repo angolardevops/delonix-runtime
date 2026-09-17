@@ -46,7 +46,7 @@ MARKER = re.compile(
 # The handbook's languages. English is the source; a translation lives in
 # docs/dev/<lang>/ with the same file names. Generated regions are rendered in
 # each page's own language (only the prose — identifiers stay as in the code).
-LANGS = ("en", "pt-AO", "fr-FR")
+LANGS = ("en", "pt-AO", "fr-FR", "zh-CN")
 
 PROSE = {
     "en": {
@@ -79,7 +79,16 @@ PROSE = {
         "crate_count": "Le workspace compte **{crates} crates** et livre **{bins} binaires** ({names}).\n",
         "ratchets": "`scripts/arch_fitness.py` maintient **{n} cliquets de dette** (référence dans `scripts/arch_baseline.json`) :",
     },
-}
+    "zh-CN": {
+        "toolchain": "- **Rust 工具链：** `{channel}`（固定在 `rust-toolchain.toml` 中；首次调用 `cargo` 时由 `rustup` 安装）\n- **组件：** {components}\n",
+        "layer_head": "| 层 | 可以依赖 |",
+        "exceptions": "已声明的例外（每一项都注明了移除它的 ADR-0040 阶段）：",
+        "removed_in": "移除于",
+        "crates_head": "| Crate | 层 | 路径 | 二进制 | 依赖（引擎 crate） | 被使用于 |",
+        "ci_head": "| CI 作业 | 检查内容 |",
+        "crate_count": "工作区共有 **{crates} 个 crate**，产出 **{bins} 个二进制**（{names}）。\n",
+        "ratchets": "`scripts/arch_fitness.py` 维护 **{n} 个债务棘轮（ratchet）**（基线在 `scripts/arch_baseline.json`）：",
+    },}
 
 LAYER_ORDER = ["foundation", "context", "adapter", "provider", "interface", "bin"]
 LAYER_TITLE = {
@@ -266,7 +275,7 @@ def regions(lang: str = "en") -> dict[str, str]:
     }
 
 
-ENV_PAGE = "15-environment-variables.md"
+ENV_PAGE = "environment-variables.md"
 ENV_NAME = re.compile(r"\bDELONIX_[A-Z0-9]+(?:_[A-Z0-9]+)*\b")
 
 

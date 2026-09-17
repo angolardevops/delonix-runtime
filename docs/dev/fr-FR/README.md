@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:16bc925163a0f88ba4af46214d9a1ab7bbdd2860e46d2560626905e05d074659 -->
+<!-- translated-from: README.md sha256:29776abb02b6075313674773e1fe104e088721c2ffd8ce4d80684b8fcc3ec301 -->
 # Delonix Runtime — Manuel du contributeur
 
 Ce manuel s’adresse aux personnes qui veulent **modifier le moteur** : vous avez cloné le dépôt
@@ -42,39 +42,39 @@ Les pages de ce manuel mélangent deux types de contenu :
   `.github/workflows/ci.yml`. Ne les modifiez jamais à la main — la CI exécute `dev_docs.py --check` et échoue.
   Si un fait est faux, corrigez la source ou le générateur.
 - **Récit** — pourquoi les choses sont ainsi, comment les flux fonctionnent, comment contribuer. Il est
-  écrit à la main et relu après chaque release. Voir [11 — Publier la documentation](11-publishing-docs.md).
+  écrit à la main et relu après chaque release. Voir [Publier la documentation](publishing-docs.md).
 
 ## Parcours de lecture
 
 | Si vous voulez… | Lisez, dans l’ordre |
 |---|---|
-| **Partir de zéro, sans personne à qui demander** | [00](00-start-here.md) (gardez [14](14-glossary.md) ouvert) → le parcours ci-dessous qui correspond à votre modification |
-| **Envoyer une première PR** (un correctif de CLI, un correctif de doc, une petite fonctionnalité) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) (gardez [15](15-environment-variables.md) sous la main) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) pour le crate que vous touchez |
-| **Comprendre le moteur en profondeur** | [03](03-rust-primer.md) → [04](04-cloud-native-primer.md) → [13](13-cloud-native-standards.md) → [05](05-architecture.md) → [06](06-crates.md) → [07](07-system-design-interview.md) |
-| **Travailler sur les VM ou les images de VM** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → la section `delonix-vm` de [06](06-crates.md) → la section de réglage des VM de [15](15-environment-variables.md) |
-| **Changer la façon dont la documentation est produite** | [11](11-publishing-docs.md) |
-| **Configurer, isoler ou régler une exécution** (racines d’état, logs, échappatoires, providers) | [02 — Isoler l’état du moteur](02-build-and-test.md#isolating-the-engines-state) → [15](15-environment-variables.md) |
+| **Partir de zéro, sans personne à qui demander** | [Commencer ici](start-here.md) (gardez [Glossaire](glossary.md) ouvert) → le parcours ci-dessous qui correspond à votre modification |
+| **Envoyer une première PR** (un correctif de CLI, un correctif de doc, une petite fonctionnalité) | [Commencer ici](start-here.md) → [Préparer votre environnement](environment.md) → [Cloner, compiler et tester](build-and-test.md) (gardez [Variables d’environnement (`DELONIX_*`)](environment-variables.md) sous la main) → [Flux de contribution](contributing-workflow.md) → [Conventions de code](coding-conventions.md) → [Les crates](crates.md) pour le crate que vous touchez |
+| **Comprendre le moteur en profondeur** | [Initiation à Rust pour cette base de code](rust-primer.md) → [Initiation au cloud native](cloud-native-primer.md) → [Standards cloud native, couche par couche](cloud-native-standards.md) → [Architecture](architecture.md) → [Les crates](crates.md) → [Entretien de conception de système — le Delonix Engine](system-design-interview.md) |
+| **Travailler sur les VM ou les images de VM** | [Préparer votre environnement](environment.md) → [Cloner, compiler et tester](build-and-test.md) → [Delonixfile et VMfile](delonixfile-and-vmfile.md) → [Construire des microVMs](microvm-setup.md) → la section `delonix-vm` de [Les crates](crates.md) → la section de réglage des VM de [Variables d’environnement (`DELONIX_*`)](environment-variables.md) |
+| **Changer la façon dont la documentation est produite** | [Publier la documentation](publishing-docs.md) |
+| **Configurer, isoler ou régler une exécution** (racines d’état, logs, échappatoires, providers) | [Isoler l’état du moteur](build-and-test.md#isolating-the-engines-state) → [Variables d’environnement (`DELONIX_*`)](environment-variables.md) |
 
 ## Pages
 
 | # | Page | Ce à quoi elle répond |
 |---|---|---|
-| 00 | [Commencer ici](00-start-here.md) | Vérification de la configuration au jour 0, votre première contribution de bout en bout, où va une modification, les règles et leurs sources, que faire quand vous êtes bloqué |
-| 01 | [Préparer votre environnement](01-environment.md) | Ce dont le noyau et l’hôte ont besoin, la toolchain épinglée, et les pièges de l’hôte qui ressemblent à des bugs du moteur |
-| 02 | [Cloner, compiler et tester](02-build-and-test.md) | Compiler, exécuter les tests, chaque gate de CI comme commande locale, E2E et chaos avec isolation |
-| 03 | [Initiation à Rust](03-rust-primer.md) | Le Rust que cette base de code utilise réellement |
-| 04 | [Initiation au cloud native](04-cloud-native-primer.md) | Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — et où chacun apparaît dans le moteur |
-| 05 | [Architecture](05-architecture.md) | Couches, le graphe des crates, chemins de contrôle et de données, état sur disque |
-| 06 | [Les crates](06-crates.md) | Un bloc par crate : responsabilité, types principaux, par où commencer la lecture |
-| 07 | [System Design Interview](07-system-design-interview.md) | Le moteur conçu comme une réponse d’entretien, puis comparé à ce qui a été construit |
-| 08 | [Delonixfile et VMfile](08-delonixfile-and-vmfile.md) | Les grammaires des fichiers de build et en quoi elles diffèrent d’un Dockerfile |
-| 09 | [Construire des microVM](09-microvm-setup.md) | KVM, Cloud Hypervisor et firmware, libvirt, images de VM |
-| 10 | [Flux de contribution](10-contributing-workflow.md) | Worktrees, versions, règle de langue, règles d’architecture, ADR, commits et PR |
-| 11 | [Publier la documentation](11-publishing-docs.md) | Comment le site et ce manuel sont générés, contrôlés et publiés |
-| 12 | [Conventions de code](12-coding-conventions.md) | Comment le code de ce dépôt est écrit, et la liste de contrôle qu’appliquent les relecteurs |
-| 13 | [Standards cloud native](13-cloud-native-standards.md) | Les standards cloud native à l’aune desquels une modification est mesurée |
-| 14 | [Glossaire](14-glossary.md) | Les termes du moteur et du cloud native que vous rencontrez ici, avec leur sens dans Delonix et où en lire davantage |
-| 15 | [Variables d’environnement](15-environment-variables.md) | Chaque variable `DELONIX_*` que lit le code : qui la lit, ce qu’elle change, sa valeur par défaut, et lesquelles abaissent une frontière |
+| 00 | [Commencer ici](start-here.md) | Vérification de la configuration au jour 0, votre première contribution de bout en bout, où va une modification, les règles et leurs sources, que faire quand vous êtes bloqué |
+| 01 | [Préparer votre environnement](environment.md) | Ce dont le noyau et l’hôte ont besoin, la toolchain épinglée, et les pièges de l’hôte qui ressemblent à des bugs du moteur |
+| 02 | [Cloner, compiler et tester](build-and-test.md) | Compiler, exécuter les tests, chaque gate de CI comme commande locale, E2E et chaos avec isolation |
+| 03 | [Initiation à Rust](rust-primer.md) | Le Rust que cette base de code utilise réellement |
+| 04 | [Initiation au cloud native](cloud-native-primer.md) | Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — et où chacun apparaît dans le moteur |
+| 05 | [Architecture](architecture.md) | Couches, le graphe des crates, chemins de contrôle et de données, état sur disque |
+| 06 | [Les crates](crates.md) | Un bloc par crate : responsabilité, types principaux, par où commencer la lecture |
+| 07 | [System Design Interview](system-design-interview.md) | Le moteur conçu comme une réponse d’entretien, puis comparé à ce qui a été construit |
+| 08 | [Delonixfile et VMfile](delonixfile-and-vmfile.md) | Les grammaires des fichiers de build et en quoi elles diffèrent d’un Dockerfile |
+| 09 | [Construire des microVM](microvm-setup.md) | KVM, Cloud Hypervisor et firmware, libvirt, images de VM |
+| 10 | [Flux de contribution](contributing-workflow.md) | Worktrees, versions, règle de langue, règles d’architecture, ADR, commits et PR |
+| 11 | [Publier la documentation](publishing-docs.md) | Comment le site et ce manuel sont générés, contrôlés et publiés |
+| 12 | [Conventions de code](coding-conventions.md) | Comment le code de ce dépôt est écrit, et la liste de contrôle qu’appliquent les relecteurs |
+| 13 | [Standards cloud native](cloud-native-standards.md) | Les standards cloud native à l’aune desquels une modification est mesurée |
+| 14 | [Glossaire](glossary.md) | Les termes du moteur et du cloud native que vous rencontrez ici, avec leur sens dans Delonix et où en lire davantage |
+| 15 | [Variables d’environnement](environment-variables.md) | Chaque variable `DELONIX_*` que lit le code : qui la lit, ce qu’elle change, sa valeur par défaut, et lesquelles abaissent une frontière |
 
 Autres références vers lesquelles on vous renverra : [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) (diagrammes C4),
 [`docs/adr/`](../../adr/README.md) (décisions d’architecture), [`SECURITY.md`](../../../SECURITY.md)
