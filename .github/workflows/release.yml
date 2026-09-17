@@ -225,10 +225,13 @@ jobs:
           git fetch origin main
           git checkout -B main origin/main
           bash scripts/gen-releases.sh
-          if ! git diff --quiet -- docs/RELEASES.md; then
-            git add docs/RELEASES.md
-            git commit -m "docs(releases): apêndice actualizado para ${GITHUB_REF_NAME} [skip ci]"
+          # The generated facts of the contributor handbook follow the release too;
+          # the narrative is reviewed by a person after the release is validated.
+          python3 scripts/dev_docs.py
+          if ! git diff --quiet -- docs/RELEASES.md docs/dev; then
+            git add docs/RELEASES.md docs/dev
+            git commit -m "docs(releases): apêndice e factos do manual actualizados para ${GITHUB_REF_NAME} [skip ci]"
             git push origin main
           else
-            echo "docs/RELEASES.md já actualizado — nada a comitar"
+            echo "docs/RELEASES.md e docs/dev já actualizados — nada a comitar"
           fi

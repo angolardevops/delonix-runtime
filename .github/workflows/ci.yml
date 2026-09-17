@@ -51,6 +51,11 @@ jobs:
         run: rustup show
       - name: Layer direction, foundation purity and the debt ratchets
         run: python3 scripts/arch_fitness.py
+      # The contributor handbook's FACTS (crates, layers, dependencies, binaries,
+      # toolchain, CI jobs) are generated from the same sources this job checks.
+      # Hand-written, they rotted twice; generated, a stale page fails here.
+      - name: Contributor handbook facts match the code (docs/dev)
+        run: python3 scripts/dev_docs.py --check
 
   # ---- The node contract: format, lint, compatibility and the generated OpenAPI ----
   # ADR-0040 P1. Tool versions are pinned — a newer buf or generator changing its output
