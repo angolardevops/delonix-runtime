@@ -1083,6 +1083,44 @@ check "os reinícios da política contam no RESTARTS" ok bash -c \
   "for _ in \$(seq 1 30); do '$BIN' container ls -a -o json | python3 -c \"import json,sys; sys.exit(0 if any(c.get('names',c.get('name'))=='rc-$PFX' and c.get('restarts')==2 for c in json.load(sys.stdin)) else 1)\" && exit 0; sleep 1; done; exit 1"
 "$BIN" container rm -f "rc-$PFX" >/dev/null 2>&1
 
+# Um `stop` durante a ESPERA entre reinícios tem de ser respeitado. O supervisor
+# só perguntava antes de esperar, e o `create_with` gravava a cópia antiga do
+# registo por cima da flag — medido: RESTARTS 2 → 4 depois do stop. E um `start`
+# na mesma janela deixava DUAS encarnações do comando, uma a sobreviver ao `rm -f`.
+e2e_restarts() { "$BIN" container ls -a -o json | python3 -c "import json,sys; print(next((c.get('restarts') for c in json.load(sys.stdin) if c.get('names',c.get('name'))=='$1'),-1))"; }
+e2e_status() { "$BIN" container ls -a -o json | python3 -c "import json,sys; print(next((str(c.get('status')) for c in json.load(sys.stdin) if c.get('names',c.get('name'))=='$1'),'?'))"; }
+e2e_in_backoff() {  # espera até o container estar parado entre dois reinícios
+  local i
+  for i in $(seq 1 300); do
+    [ "$(e2e_restarts "$1")" -ge "$2" ] 2>/dev/null && ! e2e_status "$1" | grep -qiE 'up|running' && return 0
+    sleep 0.2
+  done
+  return 1
+}
+"$BIN" container run -d --net none --restart always --name "rb-$PFX" "$IMG" sh -c 'sleep 1; exit 1' >/dev/null 2>&1
+if e2e_in_backoff "rb-$PFX" 1; then
+  RB0=$(e2e_restarts "rb-$PFX")
+  "$BIN" container stop -t 1 "rb-$PFX" >/dev/null 2>&1
+  sleep 10
+  check "um stop durante a espera entre reinícios é respeitado" ok bash -c "[ \"\$('$BIN' container ls -a -o json | python3 -c \"import json,sys; print(next((c.get('restarts') for c in json.load(sys.stdin) if c.get('names',c.get('name'))=='rb-$PFX'),-1))\")\" = '$RB0' ]"
+else
+  skip "um stop durante a espera entre reinícios é respeitado" "não apanhei o container entre reinícios"
+fi
+"$BIN" container rm -f "rb-$PFX" >/dev/null 2>&1
+RS_SLEEP=$(( 3000 + RANDOM % 900 ))
+"$BIN" container run -d --net none --restart always --name "rs-$PFX" "$IMG" sh -c "test -f /flag || { touch /flag; exit 1; }; exec sleep $RS_SLEEP" >/dev/null 2>&1
+if e2e_in_backoff "rs-$PFX" 0; then
+  "$BIN" container stop -t 1 "rs-$PFX" >/dev/null 2>&1
+  "$BIN" container start "rs-$PFX" >/dev/null 2>&1
+  sleep 6
+  check "stop+start durante a espera não duplica a encarnação" ok bash -c "[ \"\$(pgrep -f -x 'sleep $RS_SLEEP' | wc -l)\" = 1 ]"
+else
+  skip "stop+start durante a espera não duplica a encarnação" "não apanhei o container entre reinícios"
+fi
+"$BIN" container rm -f "rs-$PFX" >/dev/null 2>&1
+sleep 2
+check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $RS_SLEEP' | wc -l)\" = 0 ]"
+
 # Um perfil seccomp que permite tudo e não nomeia syscalls (ou só repete a acção
 # por omissão) é válido para o Docker e o Podman, e abortava o container com 126:
 # o seccompiler recusa um filtro cujas duas acções são iguais. Uma regra que
