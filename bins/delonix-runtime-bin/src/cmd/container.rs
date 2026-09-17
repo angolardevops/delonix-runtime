@@ -2688,6 +2688,16 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         on_attached: &on_attached,
         register_expose: &register_expose,
     };
+    // Resolving prepares the rootfs, and every refusal from here to the launch (an
+    // unknown `--user`, a bad `--security-opt`, a network that will not attach)
+    // used to leave that directory behind with no record to find it by. The guard
+    // discards it on any early return; `launch::start` owns the cleanup after that.
+    let mut unstarted = UnstartedGuard {
+        images,
+        store,
+        id: &id,
+        armed: true,
+    };
     let resolved = delonix_compute::run::resolve_run(
         &opts_copy,
         id.clone(),
@@ -2825,6 +2835,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     );
     // A detached start gets a SUPERVISOR that becomes the container's parent, so the
     // exit code is not lost; see `delonix_compute::launch::start`.
+    unstarted.armed = false;
     let final_status =
         match delonix_compute::launch::start(&opts_copy, &mut c, &launch, &read_ports)? {
             delonix_compute::launch::Started::Supervised => {
@@ -6186,6 +6197,23 @@ pub(crate) fn apply_probe(
         failing_streak: streak,
         last_exit: exit,
         checked_unix: now_unix,
+    }
+}
+
+/// Discards a container's on-disk state when `cmd_run` returns before handing the
+/// container to `launch::start` — see [`discard_unstarted`] for why the record guards it.
+struct UnstartedGuard<'a> {
+    images: &'a ImageStore,
+    store: &'a Store,
+    id: &'a str,
+    armed: bool,
+}
+
+impl Drop for UnstartedGuard<'_> {
+    fn drop(&mut self) {
+        if self.armed {
+            discard_unstarted(self.images, self.store, self.id);
+        }
     }
 }
 
