@@ -1,14 +1,25 @@
-<!-- translated-from: start-here.md sha256:029aee4557434cdd412e0f03af65f533d801eb905b6dc2d6c8121ec1b2ec4e80 -->
+<!-- translated-from: start-here.md sha256:330654e7ab818b3b9bb88817dac83eae2f11aae1306174d0bf5b83c6c165de11 -->
 # Commencer ici
 
 Cette page vous mène de « je viens de cloner le dépôt » à « ma première pull request est en cours de revue »,
-une étape à la fois. Chaque étape dit quoi faire, ce que vous devriez voir, et quelle page explique les
+une étape à la fois. Après elle, vous aurez un checkout qui compile, un binaire que vous pouvez
+exécuter contre un état isolé, et une carte de l’endroit où va votre modification et des règles
+qu’elle doit respecter. Chaque étape dit quoi faire, ce que vous devriez voir, et quelle page explique les
 détails. Chaque règle de cette page renvoie à l’endroit où elle est écrite — si une règle n’a pas de lien, ce
 n’est pas une règle.
 
 Si un mot vous est inconnu, cherchez-le dans le [glossaire](glossary.md).
 
 ## Jour 0 en 30 minutes
+
+Le jour 0 suit l’ordre du manuel, mais ne prend de chaque partie que ce dont vous avez besoin
+aujourd’hui : l’idée du moteur ([IaaS et cloud native](iaas-and-cloud-native.md)), l’hôte dont il a
+besoin ([Préparer votre environnement](environment.md), qui s’appuie sur les primitives dans
+[Fondations Linux](linux-foundations.md)), une compilation et une exécution isolée
+([Cloner, compiler et tester](build-and-test.md), avec chaque variable dans
+[Variables d’environnement](environment-variables.md)), et où se trouvent les choses
+([Structure du projet](project-structure.md)). Revenez aux pages complètes quand une étape vous y
+renvoie.
 
 ### Ce qu’est Delonix (5 minutes)
 
@@ -22,15 +33,19 @@ réseau et le stockage dont ils ont besoin. Il est :
 - **rootless-first** — le chemin normal s’exécute sous votre propre utilisateur non privilégié.
 
 Il ne sait **pas** qui l’utilise : aucune notion de plateforme, de locataire, de compte ou de facturation n’existe dans le
-code. Lisez [Architecture](architecture.md#engine-identity-and-boundaries) pour le tableau
-complet ; pour l’instant, ces quatre phrases suffisent.
+code. Lisez [IaaS et cloud native](iaas-and-cloud-native.md#where-delonix-runtime-fits-and-where-it-deliberately-stops)
+pour savoir quelle place cela donne au moteur dans un cloud, et [Architecture](architecture.md#engine-identity-and-boundaries)
+pour la façon dont la frontière est imposée ; pour l’instant, ces quatre phrases suffisent.
 
 ### Ce dont vous avez besoin (10 minutes)
 
 Un hôte Linux avec cgroup v2 et les user namespaces non privilégiés, la toolchain Rust épinglée dans
 `rust-toolchain.toml`, et `protoc` dans votre `PATH`. La liste complète, et les pièges de l’hôte qui ressemblent à
 des bugs du moteur, se trouvent dans [Préparer votre environnement](environment.md). Lisez au moins sa section
-[Pièges connus de l’hôte](environment.md#known-host-traps) avant l’étape 5 ci-dessous.
+[Pièges connus de l’hôte](environment.md#known-host-traps) avant l’étape 5 ci-dessous. Si
+« user namespace » ou « délégation de cgroup » sont des mots nouveaux pour vous, l’explication en pratique se trouve
+dans [Fondations Linux](linux-foundations.md) — vous n’en avez pas besoin pour terminer le jour 0, mais vous en
+aurez besoin la première fois qu’une limite ne s’appliquera pas.
 
 ### Cinq commandes qui prouvent que votre configuration fonctionne (15 minutes)
 
@@ -88,7 +103,8 @@ release installée et est généralement plus ancien ([Préparer votre environne
 
 Tout ce qui va au-delà de `--help` lit et écrit l’état du moteur. Faites d’abord pointer **les deux** variables d’état vers des
 répertoires de travail jetables — une demi-isolation est pire que pas d’isolation du tout
-([Cloner, compiler et tester](build-and-test.md#isolating-the-engines-state)) :
+([Cloner, compiler et tester](build-and-test.md#isolating-the-engines-state) ; ce que fait chaque variable
+se trouve dans [Variables d’environnement](environment-variables.md#isolating-a-development-run)) :
 
 ```bash
 export DELONIX_ROOT=$HOME/scratch/dlx/root
@@ -166,7 +182,9 @@ ont été essayées, mesurées et modifiées ([Partez du dernier tag](contributi
 ### 3. Trouvez où va la modification
 
 Utilisez l’arbre de décision de [Où va ma modification ?](#where-does-my-change-go) ci-dessous, puis lisez la
-section de [Les crates](crates.md) consacrée à ce crate.
+section de [Les crates](crates.md) consacrée à ce crate. Si un chemin de la table ne vous dit encore rien,
+[Structure du projet](project-structure.md) explique chaque répertoire de premier niveau, et pourquoi le
+répertoire d’un crate est sa couche.
 
 ### 4. Écrivez le test d’abord
 
@@ -196,7 +214,8 @@ python3 scripts/version_gate.py
 ```
 
 Ajoutez ceux qui correspondent à ce que vous avez touché (les gates de surface de la CLI si vous avez ajouté une commande, le gate de
-contrat si vous avez touché `proto/`, le générateur de documentation si le texte d’aide a changé) — le tableau de 02 indique lesquels.
+contrat si vous avez touché `proto/`, le générateur de documentation si le texte d’aide a changé) — le tableau de
+[Les gates exécutés par la CI](build-and-test.md#the-gates-ci-runs) indique lesquels.
 
 ### 6. Rédigez la pull request
 
@@ -260,7 +279,7 @@ flowchart TD
 | **Nouveau Kind, ou un champ d’un Kind** | Les faits du Kind : `FACTS` dans `crates/contexts/delonix-stack/src/kinds.rs`. Son type de spec et son apply : `bins/delonix-runtime-bin/src/cmd/<kind>.rs`. Champs modifiables à chaud : `hot_fields` dans `crates/contexts/delonix-stack/src/reconcile.rs`. Le schéma : `TYPED_KINDS` dans `cmd/schema.rs`, et le `docs/schema/v1/delonix.json` publié (`delonix manifest schema`) | [Réconciliation déclarative](cloud-native-primer.md#48-declarative-reconciliation), [`delonix-stack`](crates.md#delonix-stack) | Ouvrir d’abord une issue (`CONTRIBUTING.md`) ; le schéma est généré à partir du code ([ADR-0007](../../adr/0007-generated-manifest-schema.md)) ; les tests de `kinds.rs` et `schema.rs` échouent lorsqu’une table est oubliée |
 | **Comportement réseau** | Règles pures sans I/O : `crates/foundation/delonix-net-rules/src/lib.rs`. Dataplane (holder, socket de contrôle, nftables, IPAM, CNI) : `crates/adapters/delonix-sdn/src/` (`infra.rs`, `ipam.rs`, `cni.rs`). L’étape réseau de `container run` : `crates/contexts/delonix-compute/src/network.rs`. CLI : `cmd/network.rs`, `cmd/net.rs`, `cmd/firewall.rs` | [Réseau des containers](cloud-native-primer.md#45-container-networking), [`delonix-sdn`](crates.md#delonix-sdn) | Rootless-first et pas d’échec silencieux ([Règles d’architecture](contributing-workflow.md#architecture-rules-the-gates-enforce)) ; signaler la frontière de privilège dans la PR (`SECURITY.md`) |
 | **Images, registre, build** | `crates/adapters/delonix-oci/src/` (`registry.rs`, `build.rs`, `cas.rs`, `overlay.rs`) ; CLI dans `cmd/build.rs`, `cmd/image.rs` | [Delonixfile et VMfile](delonixfile-and-vmfile.md), [`delonix-oci`](crates.md#delonix-oci) | Les téléchargements sont vérifiés par digest (`SECURITY.md`, périmètre supply chain) |
-| **État persisté : un champ d’enregistrement, un store, le verrouillage de fichiers, les secrets au repos** | Types d’enregistrement (`Container`, `Vm`) : `crates/foundation/delonix-runtime-core/src/lib.rs`. Comment ils sont stockés et verrouillés (`Store`, `JsonStore`, `write_atomic*`, `SecretStore`, `CredVault`) : `crates/adapters/delonix-state/src/` (`store.rs`, `secret.rs`, `cred_vault.rs`) | [`delonix-state`](crates.md#delonix-state), [L’état sur disque](architecture.md#state-on-disk), [Concurrence](rust-primer.md#38-concurrency-and-shared-state) | Les nouveaux champs d’enregistrement prennent `#[serde(default)]` ; la lecture-modification-écriture passe par `update` ([État et concurrence](coding-conventions.md#8-state-and-concurrency)) |
+| **État persisté : un champ d’enregistrement, un store, le verrouillage de fichiers, les secrets au repos** | Types d’enregistrement (`Container`, `Vm`) : `crates/contexts/delonix-compute/src/record.rs` ; les parties de données simples (`Status`, `ContainerFw`) : `crates/foundation/delonix-model/src/records.rs`. Comment ils sont stockés et verrouillés (`Store`, `JsonStore`, `write_atomic*`, `SecretStore`, `CredVault`) : `crates/adapters/delonix-state/src/` (`store.rs`, `secret.rs`, `cred_vault.rs`) | [`delonix-state`](crates.md#delonix-state), [L’état sur disque](architecture.md#state-on-disk), [Concurrence](rust-primer.md#38-concurrency-and-shared-state) | Les nouveaux champs d’enregistrement prennent `#[serde(default)]` ; la lecture-modification-écriture passe par `update` ([État et concurrence](coding-conventions.md#8-state-and-concurrency)) |
 | **Comportement des VM sur ce nœud** | `crates/adapters/delonix-vm/src/lib.rs` (le trait `VmBackend` et le registre de backends), `cloudinit.rs` ; CLI dans `cmd/vm.rs`, `cmd/vmimage.rs`, `cmd/vmfile.rs` | [Construire des microVMs](microvm-setup.md), [Les traits comme ports](rust-primer.md#33-traits-as-ports-vmbackend-and-the-backend-registry) | [ADR-0008](../../adr/0008-proxmox-vm-backend.md) (les backends sont enregistrables) |
 | **Un nouveau backend de VM ou provider de stockage derrière une API distante** | Un nouveau crate sous `crates/providers/`, qui implémente un port ; enregistré à la racine de composition (`cmd/vmbackends.rs`) | [Providers](crates.md#providers), [Les couches](architecture.md#layers-and-the-allowed-direction) | ADR d’abord ([Quand écrire un ADR](contributing-workflow.md#when-to-write-an-adr)) ; [ADR-0040](../../adr/0040-engine-restructuring-layers-ports-node-contract.md) |
 | **CRI (ce à quoi parle le kubelet)** | `crates/interfaces/delonix-cri/src/` (`runtime_svc.rs`, `runtime_svc/lifecycle.rs`, `streaming.rs`) | [Kubernetes](cloud-native-primer.md#46-kubernetes-cri-kubelet-kubeadm-and-kind), [`delonix-cri`](crates.md#delonix-cri) | [ADR-0038](../../adr/0038-cri-follows-kubelet-resource-model.md) |
@@ -340,3 +359,7 @@ aller-retour :
 - [ ] J’ai lu [Conventions de code](coding-conventions.md) et [Standards cloud native, couche par couche](cloud-native-standards.md).
 - [ ] Ma PR remplit chaque section du modèle, y compris ce qui n’a *pas* été validé.
 - [ ] Après le merge, j’ai supprimé mon worktree et ma branch.
+
+---
+
+**Suivant :** [IaaS et cloud native — où s’inscrit le moteur](iaas-and-cloud-native.md) — le modèle mental d’une IaaS, quelle couche est ce moteur, et comment les principes cloud native apparaissent dans ses fichiers.
