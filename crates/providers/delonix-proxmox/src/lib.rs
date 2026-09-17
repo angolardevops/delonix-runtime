@@ -41,8 +41,10 @@
 //!   that may not be configured at all, and auto-detection is not a place to
 //!   make HTTP requests.
 
+mod error;
+
 use delonix_compute::Vm;
-use delonix_model::{Error, Result};
+pub use error::{Error, Result};
 // `mem_mib` comes from the engine and is NOT re-implemented here. The copy that
 // used to live in this file did not know the k8s `Gi`/`Mi` suffix the engine
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
@@ -195,7 +197,7 @@ impl Client {
             .danger_accept_invalid_certs(target.insecure_tls)
             .build()
             .map_err(|e| {
-                Error::Invalid(format!("proxmox: could not build the HTTP client: {e}"))
+                Error::ClientBuild(format!("proxmox: could not build the HTTP client: {e}"))
             })?;
         let me = Self {
             http,
@@ -216,7 +218,7 @@ impl Client {
             .filter_map(|n| n.get("node").and_then(|v| v.as_str()).map(str::to_string))
             .collect();
         if !names.iter().any(|n| n == &me.node) {
-            return Err(Error::Invalid(format!(
+            return Err(Error::NoSuchNode(format!(
                 "proxmox: no node named '{}' at {} (it has: {})",
                 me.node,
                 me.base,
@@ -266,13 +268,13 @@ impl Client {
         let rb = if authed { self.authed(rb) } else { rb };
         let resp = rb
             .send()
-            .map_err(|e| Error::Invalid(format!("proxmox: request failed: {e}")))?;
+            .map_err(|e| Error::Request(format!("proxmox: request failed: {e}")))?;
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
         if !status.is_success() {
             // The body carries the actionable part — a bare status code sends
             // people hunting in the wrong subsystem.
-            return Err(Error::Invalid(format!(
+            return Err(Error::HttpStatus(format!(
                 "proxmox: {} returned HTTP {status}: {}",
                 self.base,
                 truncate_chars(body.trim(), 400)
@@ -332,7 +334,7 @@ impl Client {
             .and_then(|s| s.parse().ok())
             .or_else(|| w.data.as_u64().map(|n| n as u32))
             .ok_or_else(|| {
-                Error::Invalid(format!(
+                Error::UnexpectedAnswer(format!(
                     "proxmox: could not read a VM id from /cluster/nextid: {}",
                     w.data
                 ))
@@ -512,7 +514,7 @@ impl Client {
     /// as on libvirt, and not whatever shape the node's refusal takes.
     pub fn rollback(&self, vmid: u32, name: &str) -> Result<()> {
         if !self.snapshots(vmid)?.iter().any(|s| s == name) {
-            return Err(Error::NotFound(format!(
+            return Err(Error::SnapshotNotFound(format!(
                 "snapshot of Proxmox VM {vmid}: {name}"
             )));
         }
@@ -584,7 +586,7 @@ impl Client {
     fn wait_upid(&self, body: &str, what: &str) -> Result<()> {
         let w: Wrapped<serde_json::Value> = parse(body, what)?;
         let upid = w.data.as_str().ok_or_else(|| {
-            Error::Invalid(format!(
+            Error::UnexpectedAnswer(format!(
                 "proxmox: {what} did not answer with a task id: {}",
                 truncate_chars(body, 200)
             ))
@@ -609,12 +611,12 @@ impl Client {
             match task_verdict(&t.data.status, t.data.exitstatus.as_deref()) {
                 Some(Ok(())) => return Ok(()),
                 Some(Err(why)) => {
-                    return Err(Error::Invalid(format!("proxmox: task failed: {why}")))
+                    return Err(Error::TaskFailed(format!("proxmox: task failed: {why}")))
                 }
                 None => {}
             }
             if Instant::now() >= deadline {
-                return Err(Error::Invalid(format!(
+                return Err(Error::TaskTimeout(format!(
                     "proxmox: task {upid} was still '{}' after {}s — giving up. It may still be \
                      running on the node; nothing here was rolled back",
                     t.data.status,
@@ -669,7 +671,7 @@ fn retry_on_lock<T>(
         match op() {
             Err(e) if is_lock_timeout(&e) => {
                 if started.elapsed() >= window {
-                    return Err(Error::Invalid(format!(
+                    return Err(Error::LockTimeout(format!(
                         "{e} — the VM's config lock stayed busy for {}s over {attempt} attempts \
                          of '{what}'; something on the node is still holding it (check the \
                          node's task log for this VM)",
@@ -693,14 +695,14 @@ fn retry_on_lock<T>(
 /// libvirt's backend gives: the next move is «pick another name or remove that
 /// one», not «something broke».
 fn taken_snapshot(vmid: u32, name: &str) -> Error {
-    Error::Conflict(format!(
+    Error::SnapshotTaken(format!(
         "Proxmox VM {vmid} already has a snapshot named '{name}'"
     ))
 }
 
 fn parse<T: for<'de> Deserialize<'de>>(body: &str, what: &str) -> Result<T> {
     serde_json::from_str(body).map_err(|e| {
-        Error::Invalid(format!(
+        Error::Decode(format!(
             "proxmox: could not read the answer from {what}: {e} (body starts: {})",
             truncate_chars(body, 160)
         ))
@@ -752,23 +754,23 @@ fn urlencode(s: &str) -> String {
 /// under another name (and the classic way to make a URL read as one host and
 /// reach another).
 pub fn validate_target_url(url: &str) -> Result<()> {
-    let (scheme, rest) = url
-        .split_once("://")
-        .ok_or_else(|| Error::Invalid(format!("invalid Proxmox url '{url}': it needs a scheme")))?;
+    let (scheme, rest) = url.split_once("://").ok_or_else(|| {
+        Error::InvalidUrl(format!("invalid Proxmox url '{url}': it needs a scheme"))
+    })?;
     if !scheme.eq_ignore_ascii_case("https") {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidUrl(format!(
             "invalid Proxmox url '{url}': only https:// is accepted — the API token would go over \
              the wire in the clear otherwise (use `insecureTLS` for the node's self-signed cert)"
         )));
     }
     let hostport = rest.split(['/', '?', '#']).next().unwrap_or("");
     if hostport.is_empty() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidUrl(format!(
             "invalid Proxmox url '{url}': it names no host"
         )));
     }
     if hostport.contains('@') {
-        return Err(Error::Invalid(format!(
+        return Err(Error::CredentialInUrl(format!(
             "invalid Proxmox url '{url}': credentials in the URL are not accepted — use a \
              `kind: Secret`"
         )));
@@ -797,7 +799,7 @@ pub fn validate_bridge_name(bridge: &str) -> Result<()> {
     if ok {
         Ok(())
     } else {
-        Err(Error::Invalid(format!(
+        Err(Error::InvalidBridgeName(format!(
             "invalid Proxmox bridge name '{bridge}': expected something like 'vmbr0'"
         )))
     }
@@ -816,7 +818,7 @@ pub fn validate_node_name(node: &str) -> Result<()> {
     if ok {
         Ok(())
     } else {
-        Err(Error::Invalid(format!(
+        Err(Error::InvalidNodeName(format!(
             "invalid Proxmox node name '{node}': expected letters, digits, '-' and '.'"
         )))
     }
@@ -839,7 +841,7 @@ enum DiskSpec {
 /// disk somewhere nobody asked for.
 fn parse_disk_spec(disk: &str) -> Result<DiskSpec> {
     let bad = || {
-        Error::Invalid(format!(
+        Error::InvalidDiskSpec(format!(
             "proxmox: '{disk}' does not name anything on the node — use `template:<vmid>` to \
              clone a template, or `<storage>:<size-in-GiB>` for a fresh disk (e.g. \
              `local-lvm:8`). A local path has no meaning on a remote node"
@@ -931,7 +933,7 @@ fn validate_snapshot_name(name: &str) -> Result<()> {
     if ok {
         Ok(())
     } else {
-        Err(Error::Invalid(format!(
+        Err(Error::InvalidSnapshotName(format!(
             "invalid Proxmox snapshot name '{name}': expected letters, digits, '-' and '_' \
              (and not 'current', which the API uses for the live state)"
         )))
@@ -991,7 +993,7 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     if bad.is_empty() {
         return Ok(());
     }
-    Err(Error::Invalid(format!(
+    Err(Error::UnsupportedField(format!(
         "the 'proxmox' backend cannot honour: {}. A VM on a remote node has no access to this \
          host's kernel/initrd/seed/devices/9p paths, its QEMU tuning (hugepages, CPU pinning, \
          machine type, TPM, video, boot order) is the node's own configuration, and there is no \
@@ -1168,7 +1170,7 @@ impl ProxmoxBackend {
     /// saying so beats guessing an id.
     fn vmid_of(&self, vm: &Vm) -> Result<u32> {
         vmid_from_handle(&vm.api_socket).ok_or_else(|| {
-            Error::Invalid(format!(
+            Error::NoHandle(format!(
                 "VM '{}' has no Proxmox handle in its record (found {:?}) — it was not created \
                  by this backend",
                 vm.name, vm.api_socket
@@ -1217,7 +1219,7 @@ impl VmBackend for ProxmoxBackend {
         cfg: &VmConfig,
         disk: &str,
         on: &dyn Fn(CreateStage),
-    ) -> Result<Boot> {
+    ) -> delonix_model::Result<Boot> {
         // BEFORE anything is created on the node: a field this backend cannot
         // honour is refused by name, never accepted and dropped. The ADR calls
         // that "the failure mode this repo treats as its worst", and it was
@@ -1346,7 +1348,7 @@ impl VmBackend for ProxmoxBackend {
     /// the disk is the engine's file; here the node owns it, so destroying the
     /// VM destroyed the guest's data on a plain `vm stop`. Freeing everything
     /// is now [`Self::destroy`], which is what `vm rm` calls.
-    fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+    fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
         if self.is_running(vm) {
             self.client.stop(vmid)?;
@@ -1359,10 +1361,10 @@ impl VmBackend for ProxmoxBackend {
     ///
     /// The order matters: a running VM cannot be destroyed, and asking anyway
     /// gets a task failure that reads like a bug.
-    fn destroy(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+    fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
         self.stop(vmdir, vm)?;
-        self.client.destroy(vmid)
+        Ok(self.client.destroy(vmid)?)
     }
 
     /// Starts the VM this record already names, instead of creating another.
@@ -1375,7 +1377,7 @@ impl VmBackend for ProxmoxBackend {
     ///
     /// `Ok(None)` when the node no longer has that vmid — the VM was removed
     /// outside this engine, and creating one is then the honest answer.
-    fn resume(&self, _vmdir: &Path, vm: &Vm) -> Result<Option<Boot>> {
+    fn resume(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<Option<Boot>> {
         let Ok(vmid) = self.vmid_of(vm) else {
             // No handle: not created by this backend. Let the caller create.
             return Ok(None);
@@ -1394,24 +1396,24 @@ impl VmBackend for ProxmoxBackend {
         }))
     }
 
-    fn snapshot(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+    fn snapshot(&self, _vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
-        self.client.snapshot(vmid, name)
+        Ok(self.client.snapshot(vmid, name)?)
     }
 
-    fn restore(&self, _vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+    fn restore(&self, _vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
-        self.client.rollback(vmid, name)
+        Ok(self.client.rollback(vmid, name)?)
     }
 
     // `_vmdir` porque o Proxmox não tem disco local nosso: os instantâneos
     // vivem no lado do servidor, indexados pelo `vmid`. O parâmetro entrou no
     // trait quando os verbos passaram a servir uma VM PARADA (v0.52.0), e serve
     // os backends que leem o overlay em disco — este não é um deles.
-    fn snapshots(&self, _vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
-        self.client.snapshots(self.vmid_of(vm)?)
+    fn snapshots(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<Vec<String>> {
+        Ok(self.client.snapshots(self.vmid_of(vm)?)?)
     }
 }
 
@@ -1430,7 +1432,7 @@ impl VmBackend for ProxmoxBackend {
 ///
 /// Never auto-selectable: auto-detection asks `available()`, and the only
 /// honest answer here costs a network round trip to a node nobody named.
-pub fn register(target: Target) -> Result<()> {
+pub fn register(target: Target) -> delonix_model::Result<()> {
     // Fail on a malformed target HERE, at registration, rather than at the
     // first `vm create`: the operator is looking at the configuration now.
     validate_target_url(&target.base_url)?;
@@ -1450,7 +1452,10 @@ pub fn register(target: Target) -> Result<()> {
                 // A failed connect is NOT cached: a node that was down when the
                 // first VM was listed must not stay "down" for the rest of the
                 // process.
-                let c = std::sync::Arc::new(Client::connect(&target)?);
+                let c = std::sync::Arc::new(
+                    Client::connect(&target)
+                        .map_err(|e| delonix_vm::Error::Engine(delonix_model::Error::from(e)))?,
+                );
                 *slot = Some(c.clone());
                 Ok(Box::new(ProxmoxBackend::sharing(c)))
             }),
@@ -1518,22 +1523,22 @@ mod tests {
     /// it is not.
     #[test]
     fn recognises_the_nodes_lock_contention() {
-        let real = Error::Invalid(
+        let real = Error::TaskFailed(
             "proxmox: task failed: can't lock file '/var/lock/qemu-server/lock-100.conf' - got \
              timeout"
                 .into(),
         );
         assert!(is_lock_timeout(&real));
-        assert!(!is_lock_timeout(&Error::Invalid(
+        assert!(!is_lock_timeout(&Error::TaskFailed(
             "proxmox: task failed: can't lock file '/x': Permission denied".into()
         )));
-        assert!(!is_lock_timeout(&Error::Invalid(
+        assert!(!is_lock_timeout(&Error::TaskFailed(
             "proxmox: task failed: snapshot name 's1' already used".into()
         )));
     }
 
     fn lock_err() -> Error {
-        Error::Invalid("task failed: can't lock file 'lock-100.conf' - got timeout".into())
+        Error::TaskFailed("task failed: can't lock file 'lock-100.conf' - got timeout".into())
     }
 
     /// Retries while the lock is busy, and stops as soon as it clears.
@@ -1557,7 +1562,7 @@ mod tests {
         let mut n = 0;
         let r: Result<()> = retry_on_lock("stop", Duration::from_secs(5), Duration::ZERO, || {
             n += 1;
-            Err(Error::Invalid("proxmox: returned HTTP 400".into()))
+            Err(Error::HttpStatus("proxmox: returned HTTP 400".into()))
         });
         assert!(r.is_err());
         assert_eq!(n, 1);
@@ -1715,7 +1720,7 @@ mod tests {
                 _: &VmConfig,
                 _: &str,
                 _: &dyn Fn(CreateStage),
-            ) -> Result<Boot> {
+            ) -> delonix_model::Result<Boot> {
                 unreachable!()
             }
             fn is_running(&self, _: &Vm) -> bool {
@@ -1724,7 +1729,7 @@ mod tests {
             fn ip(&self, _: &Vm) -> Option<String> {
                 None
             }
-            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 Ok(())
             }
             fn manages_own_storage(&self) -> bool {
@@ -2097,7 +2102,7 @@ mod tests {
     /// credential ends up locked out.
     #[test]
     fn so_um_401_dispara_nova_autenticacao() {
-        let err = |s: &str| Error::Invalid(s.to_string());
+        let err = |s: &str| Error::HttpStatus(s.to_string());
         assert!(is_unauthorized(&err(
             "proxmox: https://pve returned HTTP 401 Unauthorized: bad ticket"
         )));

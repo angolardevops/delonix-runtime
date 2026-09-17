@@ -11989,3 +11989,170 @@ msgstr "A ferramenta cloud-localds correu e saiu com um estado diferente de zero
 msgid "Check the cloud-init user-data/meta-data/network-config it was given are well-formed."
 msgstr "Verifica que o user-data/meta-data/network-config de cloud-init que lhe foi dado está bem formado."
 
+# dicionário: entradas do delonix-proxmox (ADR-0043)
+
+msgid "no such Proxmox node"
+msgstr "não existe esse nó Proxmox"
+
+msgid "The node named in the target is not part of the cluster this url answers for."
+msgstr "O nó nomeado no alvo não faz parte do cluster a que este url responde."
+
+msgid "Point the target at a node `GET /nodes` on this cluster actually reports, or fix the url."
+msgstr "Aponta o alvo a um nó que o `GET /nodes` deste cluster realmente reporta, ou corrige o url."
+
+msgid "invalid Proxmox url"
+msgstr "url do Proxmox inválido"
+
+msgid "The target url has no scheme, a scheme other than https, or no host."
+msgstr "O url do alvo não tem esquema, tem um esquema que não https, ou não nomeia um host."
+
+msgid "Write it as https://<host>:8006, with no path."
+msgstr "Escreve-o como https://<host>:8006, sem caminho."
+
+msgid "credential in the Proxmox url"
+msgstr "credencial no url do Proxmox"
+
+msgid "The url carries a username or password (userinfo), which is a credential hidden in the manifest instead of a kind: Secret."
+msgstr "O url leva um utilizador ou password (userinfo), uma credencial escondida no manifesto em vez de um kind: Secret."
+
+msgid "Remove the userinfo and pass the credential as a Proxmox API token or password secret."
+msgstr "Tira o userinfo e passa a credencial como um token de API ou password do Proxmox num Secret."
+
+msgid "invalid Proxmox bridge name"
+msgstr "nome de bridge Proxmox inválido"
+
+msgid "A bridge name is interpolated into the VM's net0 property, and has to be a valid Linux interface name."
+msgstr "Um nome de bridge é interpolado na propriedade net0 da VM, e tem de ser um nome de interface Linux válido."
+
+msgid "Use a name like vmbr0: letters, digits, '-', '_' or '.', up to 15 characters."
+msgstr "Usa um nome como vmbr0: letras, dígitos, '-', '_' ou '.', até 15 caracteres."
+
+msgid "invalid Proxmox node name"
+msgstr "nome de nó Proxmox inválido"
+
+msgid "A node name goes into a URL path on every call, and has to be what Proxmox itself accepts."
+msgstr "Um nome de nó entra num caminho de URL em cada chamada, e tem de ser o que o próprio Proxmox aceita."
+
+msgid "Use letters, digits, '-' and '.', matching the node's name in `pvecm status`."
+msgstr "Usa letras, dígitos, '-' e '.', a bater com o nome do nó em `pvecm status`."
+
+msgid "invalid Proxmox disk spec"
+msgstr "spec de disco Proxmox inválida"
+
+msgid "A VM's disk on this backend has to name a template to clone or a storage and size on the node; a local path has no meaning there."
+msgstr "O disco de uma VM neste backend tem de nomear um template a clonar ou um storage e tamanho no nó; um caminho local não tem significado ali."
+
+msgid "Write `template:<vmid>` to clone a template, or `<storage>:<size-in-GiB>` for a fresh disk, e.g. local-lvm:8."
+msgstr "Escreve `template:<vmid>` para clonar um template, ou `<storage>:<tamanho-em-GiB>` para um disco novo, por exemplo local-lvm:8."
+
+msgid "invalid Proxmox snapshot name"
+msgstr "nome de instantâneo Proxmox inválido"
+
+msgid "A snapshot name goes into a URL path and into Proxmox's own namespace, and 'current' is reserved for the live state."
+msgstr "Um nome de instantâneo entra num caminho de URL e no próprio espaço de nomes do Proxmox, e 'current' está reservado para o estado ao vivo."
+
+msgid "Use letters, digits, '-' and '_', and not 'current'."
+msgstr "Usa letras, dígitos, '-' e '_', e não 'current'."
+
+msgid "unsupported field on the Proxmox backend"
+msgstr "campo não suportado no backend Proxmox"
+
+msgid "The manifest asks for a local kernel/initrd/seed/device, a QEMU tuning knob the node owns, or a libvirt-only escape hatch — none of which this remote backend can honour."
+msgstr "O manifesto pede um kernel/initrd/seed/dispositivo local, um ajuste do QEMU que pertence ao nó, ou uma escapatória exclusiva do libvirt — nada disto este backend remoto consegue honrar."
+
+msgid "Remove the field the message names, or use a local backend (`--backend libvirt`)."
+msgstr "Tira o campo que a mensagem nomeia, ou usa um backend local (`--backend libvirt`)."
+
+msgid "VM has no Proxmox handle"
+msgstr "VM sem handle do Proxmox"
+
+msgid "The VM's record carries no Proxmox handle, so it was not created by this backend and this backend does not know its vmid."
+msgstr "O registo da VM não leva handle do Proxmox, por isso não foi criada por este backend e este backend não sabe o seu vmid."
+
+msgid "Manage this VM with the backend that created it."
+msgstr "Gere esta VM com o backend que a criou."
+
+msgid "The VM has no snapshot with that name on the Proxmox node."
+msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
+
+msgid "snapshot name already used"
+msgstr "nome de instantâneo já usado"
+
+msgid "The VM already has a snapshot with that name on the Proxmox node."
+msgstr "A VM já tem um instantâneo com esse nome no nó Proxmox."
+
+msgid "Pick another name, or remove the existing snapshot first."
+msgstr "Escolhe outro nome, ou remove primeiro o instantâneo existente."
+
+msgid "could not build the Proxmox HTTP client"
+msgstr "não foi possível construir o cliente HTTP do Proxmox"
+
+msgid "The local TLS/HTTP stack could not build a client for the request. Nothing about the manifest is wrong."
+msgstr "A pilha TLS/HTTP local não conseguiu construir um cliente para o pedido. Não há nada de errado no manifesto."
+
+msgid "Check the host's TLS libraries; `delonix system info` reports what this host has."
+msgstr "Verifica as bibliotecas TLS do host; `delonix system info` reporta o que este host tem."
+
+msgid "Proxmox task timed out"
+msgstr "task do Proxmox esgotou o tempo"
+
+msgid "A task on the node (create, start, snapshot, destroy) did not reach a terminal state before the deadline."
+msgstr "Uma task no nó (criar, arrancar, instantâneo, destruir) não chegou a um estado terminal antes do prazo."
+
+msgid "It may still be finishing on the node; check the node's task log before retrying."
+msgstr "Pode ainda estar a terminar no nó; verifica o registo de tasks do nó antes de repetir."
+
+msgid "Proxmox VM config lock stayed busy"
+msgstr "lock de configuração da VM Proxmox ficou ocupado"
+
+msgid "The node kept refusing because the VM's config lock was held (usually qmeventd cleaning up after a stop), past the retry window."
+msgstr "O nó continuou a recusar porque o lock de configuração da VM estava tomado (normalmente o qmeventd a limpar depois de um stop), para lá da janela de repetição."
+
+msgid "Check the node's task log for this VM; something is still holding the lock."
+msgstr "Verifica o registo de tasks do nó para esta VM; algo ainda está a segurar o lock."
+
+msgid "Proxmox request failed"
+msgstr "pedido ao Proxmox falhou"
+
+msgid "The HTTP request to the node could not be sent or answered (network, TLS, DNS)."
+msgstr "O pedido HTTP ao nó não pôde ser enviado nem respondido (rede, TLS, DNS)."
+
+msgid "Check the target url and that the node is reachable from this host."
+msgstr "Verifica o url do alvo e que o nó é alcançável a partir deste host."
+
+msgid "Proxmox answered with an HTTP error"
+msgstr "Proxmox respondeu com um erro HTTP"
+
+msgid "The node's REST API returned a non-2xx status; the message carries its own error body."
+msgstr "A API REST do nó devolveu um estado fora de 2xx; a mensagem leva o corpo do erro próprio."
+
+msgid "Read the body in the message — Proxmox puts the actionable detail there."
+msgstr "Lê o corpo na mensagem — o Proxmox põe ali o detalhe accionável."
+
+msgid "Proxmox answer had the wrong shape"
+msgstr "a resposta do Proxmox tinha a forma errada"
+
+msgid "The node's response parsed as JSON but did not carry what a specific call needed (a VM id, a task id)."
+msgstr "A resposta do nó fez parse como JSON mas não levava o que uma chamada específica precisava (um id de VM, um id de task)."
+
+msgid "Check the node's Proxmox VE version matches what this build expects."
+msgstr "Verifica que a versão do Proxmox VE do nó bate com o que esta build espera."
+
+msgid "Proxmox task failed"
+msgstr "task do Proxmox falhou"
+
+msgid "A task on the node (create, start, snapshot, destroy) finished with a verdict other than OK; the message carries the node's own reason."
+msgstr "Uma task no nó (criar, arrancar, instantâneo, destruir) terminou com um veredicto diferente de OK; a mensagem leva a razão própria do nó."
+
+msgid "Read the node's reason in the message, or check its task log."
+msgstr "Lê a razão do nó na mensagem, ou verifica o seu registo de tasks."
+
+msgid "could not read the Proxmox response"
+msgstr "não foi possível ler a resposta do Proxmox"
+
+msgid "The node's answer was not the JSON this client expected."
+msgstr "A resposta do nó não era o JSON que este cliente esperava."
+
+msgid "Check the node's Proxmox VE version matches what this build expects; the message carries the start of the body."
+msgstr "Verifica que a versão do Proxmox VE do nó bate com o que esta build espera; a mensagem leva o início do corpo."
+
