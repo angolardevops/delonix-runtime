@@ -6213,6 +6213,18 @@ fn spawn(
     Ok(container.status.clone())
 }
 
+/// Whether a supervisor may record the death of the process (`pid`,
+/// `starttime`) it waited on: yes unless the record already names ANOTHER live
+/// incarnation. A record with no pid is fine — `stop` clears it before this wait
+/// returns, and the final status (`Exited (0)` for a requested stop) is still
+/// this supervisor's to write.
+fn describes_incarnation(c: &Container, pid: i32, starttime: Option<u64>) -> bool {
+    match c.pid {
+        None => true,
+        Some(p) => p == pid && (starttime.is_none() || c.pid_starttime == starttime),
+    }
+}
+
 /// Waits for the container to terminate and **records the REAL state** (with the exit code) in
 /// the `Store`. Returns the final state.
 ///
@@ -6238,7 +6250,18 @@ pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Statu
     // `update` (flock) and not `save`: the CRI/CLI may be reconciling the
     // same container right now — see `Store::update`.
     let final_status = status.clone();
+    let waited_starttime = container.pid_starttime;
     let _ = store.update(&container.id, |c| {
+        // Only the incarnation this supervisor waited on is its to bury. A
+        // `stop` followed at once by a `start` brings up a new process and saves
+        // its pid BEFORE this wait returns; writing `pid = None` over it lost the
+        // new process from the record — measured on the first `stop -t 0` +
+        // `start`: the record said no pid while the container ran, `stop` could
+        // not reach it, every later `start` launched another one, and it survived
+        // `rm -f`.
+        if !describes_incarnation(c, pid, waited_starttime) {
+            return false;
+        }
         // **A requested stop is never a crash**, and this is where that promise
         // was being broken. [`stop`] already writes `Stopped` "even if SIGKILL
         // was needed"; the supervisor then waited on the same process, saw
@@ -9865,5 +9888,35 @@ mod root_slice_probe_tests {
         assert!(!root_slice_writable(std::path::Path::new(
             "/proc/delonix.slice"
         )));
+    }
+}
+
+#[cfg(test)]
+mod incarnation_tests {
+    use super::describes_incarnation;
+    use delonix_runtime_core::Container;
+
+    #[test]
+    fn a_supervisor_only_buries_the_incarnation_it_waited_on() {
+        let mut c = Container::new(
+            "id1".into(),
+            "c".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        c.pid = Some(100);
+        c.pid_starttime = Some(7);
+        assert!(describes_incarnation(&c, 100, Some(7)));
+        // A `start` saved a newer process before this wait returned.
+        c.pid = Some(200);
+        c.pid_starttime = Some(9);
+        assert!(!describes_incarnation(&c, 100, Some(7)));
+        // Same number, recycled: a different process.
+        c.pid = Some(100);
+        assert!(!describes_incarnation(&c, 100, Some(7)));
+        // `stop` already cleared the pid: the final status is still ours.
+        c.pid = None;
+        assert!(describes_incarnation(&c, 100, Some(7)));
     }
 }
