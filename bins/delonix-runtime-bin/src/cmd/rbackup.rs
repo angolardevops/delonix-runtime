@@ -1710,7 +1710,7 @@ fn restore_containers(unpacked: &Path, meta: &Meta, root: &Path, force: bool) ->
                 // prepared exactly as `run` would, then the record goes back —
                 // which is what `start` needs to find.
                 let img = super::util::resolve_or_pull(&images, &r.image)?;
-                super::util::prepare_rootfs(&images, &img, &r.id)?;
+                images.prepare_container_rootfs(&img, &r.id)?;
                 let mut rec = r.clone();
                 rec.status = delonix_runtime_core::Status::Stopped;
                 rec.pid = None;

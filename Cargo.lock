@@ -770,6 +770,7 @@ version = "3.1.0"
 dependencies = [
  "base64",
  "criterion",
+ "delonix-compute",
  "delonix-runtime-core",
  "flate2",
  "nix",
