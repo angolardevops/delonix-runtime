@@ -14,7 +14,6 @@ use delonix_runtime_core::{
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
 
-use super::cdi;
 use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::{container_writable_dir, find, open_stores, prepare_rootfs, resolve_or_pull};
@@ -1949,36 +1948,6 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     Ok(())
 }
 
-/// Expand `--gpus <spec>` into the list of raw device nodes to bind. Still
-/// takes a `nvidia`/`dri`/`all` spec string for generality, but `cmd_run`
-/// only ever calls it with `"dri"` now — the `nvidia`/`all` portion is
-/// resolved via CDI instead (`cdi::resolve_cdi_device`), which injects the
-/// real userspace driver libraries too, not just the raw `/dev/nvidia*`
-/// nodes (CUDA/cuDNN need both). Includes only the nodes that EXIST on the
-/// host (asking for a GPU on a GPU-less machine invents no devices).
-fn expand_gpu_devices(spec: &str) -> Vec<String> {
-    let want_nvidia = spec == "all" || spec.contains("nvidia");
-    let want_dri = spec == "all" || spec.contains("dri");
-    let mut out = Vec::new();
-    let mut add_glob = |dir: &str, prefix: &str| {
-        if let Ok(rd) = std::fs::read_dir(dir) {
-            for e in rd.flatten() {
-                let name = e.file_name().to_string_lossy().into_owned();
-                if prefix.is_empty() || name.starts_with(prefix) {
-                    out.push(format!("{dir}/{name}"));
-                }
-            }
-        }
-    };
-    if want_nvidia {
-        add_glob("/dev", "nvidia"); // /dev/nvidia0, /dev/nvidiactl, /dev/nvidia-uvm, …
-    }
-    if want_dri {
-        add_glob("/dev/dri", ""); // /dev/dri/card0, /dev/dri/renderD128, …
-    }
-    out
-}
-
 /// Ensure the AppArmor profile `profile` is loaded. `unconfined` does nothing;
 /// `delonix-default` is loaded from the embedded profile; any other name is
 /// assumed already loaded on the host (we don't invent it).
@@ -2435,49 +2404,6 @@ impl delonix_compute::ports::StorageProvider for CliRunPorts<'_> {
     }
 }
 
-impl delonix_compute::ports::DeviceResolver for CliRunPorts<'_> {
-    fn resolve(
-        &self,
-        gpus: Option<&str>,
-        devices: &[String],
-    ) -> Result<delonix_compute::ports::DeviceEdits> {
-        // `--gpus nvidia|all` and `--device vendor.com/class=name` resolve via CDI
-        // before anything is created; `--gpus dri` stays the raw `/dev/dri/*` glob.
-        let mut devices = devices.to_vec();
-        let mut cdi_edits = cdi::CdiEdits::default();
-        if let Some(g) = gpus {
-            if g == "all" || g.contains("nvidia") {
-                cdi::ensure_cdi_available()?;
-                cdi::resolve_cdi_device("nvidia.com/gpu=all", &mut cdi_edits)?;
-            }
-            if g == "all" || g.contains("dri") {
-                devices.extend(expand_gpu_devices("dri"));
-            }
-        }
-        for d in devices.iter().filter(|d| cdi::is_cdi_qualified(d)) {
-            cdi::ensure_cdi_available()?;
-            cdi::resolve_cdi_device(d, &mut cdi_edits)?;
-        }
-        devices.retain(|d| !cdi::is_cdi_qualified(d));
-        devices.extend(cdi_edits.devices);
-        let mut notices = Vec::new();
-        if cdi_edits.had_unexecuted_hooks {
-            notices.push(delonix_compute::Notice::new(
-                "warning: the CDI spec declares hooks that this engine does not execute (uses \
-                 `ldconfig -r` instead) — if something does not load at runtime, manually check \
-                 the hook steps",
-                &[],
-            ));
-        }
-        Ok(delonix_compute::ports::DeviceEdits {
-            devices,
-            mounts: cdi_edits.mounts,
-            env: cdi_edits.env,
-            notices,
-        })
-    }
-}
-
 impl delonix_compute::ports::NetworkProvider for CliRunPorts<'_> {
     fn check_network(&self, name: &str) -> Result<()> {
         delonix_net::NetworkStore::open(super::util::state_root())?
@@ -2893,7 +2819,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         reexec,
         &read_ports,
         &read_ports,
-        &read_ports,
+        &delonix_runtime::cdi::HostDevices,
         &read_ports,
     )?;
     print_notices(&resolved.notices);
@@ -7418,14 +7344,6 @@ mod tests {
         assert!(valid_container_name("njinga-benguela-07"));
         assert!(valid_container_name("web"));
         assert!(valid_container_name("my_app-2"));
-    }
-
-    #[test]
-    fn gpus_sem_dispositivos_no_host_da_lista_vazia() {
-        // On a test host without /dev/nvidia* or /dev/dri, `all` invents nothing.
-        // (If the CI machine has DRI, the list may not be empty — so we only assert
-        // that it does NOT blow up and that an unknown spec gives empty.)
-        assert!(super::expand_gpu_devices("nenhum-desses").is_empty());
     }
 
     #[test]

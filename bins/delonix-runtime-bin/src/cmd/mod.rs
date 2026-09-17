@@ -3,7 +3,6 @@ pub mod backup;
 pub mod boot;
 pub mod build;
 pub mod capture;
-pub mod cdi;
 pub mod cluster;
 pub mod compatibility;
 pub mod complete;
