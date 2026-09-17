@@ -5408,6 +5408,24 @@ fn cpu_usage_usec(pid: i32) -> Option<u64> {
         .and_then(|v| v.trim().parse().ok())
 }
 
+/// Reconciles `c` and, when it changed, persists the reconciliation over the
+/// record as it is NOW — never the copy `c` was read from.
+///
+/// `stats` wrote the whole stale copy back (`store.save`): a container started
+/// between the listing and the save had its new pid replaced by the reconciled
+/// «died, no pid» of the incarnation before, which is how a running process drops
+/// out of the record and survives `rm -f` (#377/#378 are the same loss by other
+/// writers). `update` re-reads under the lock and reconciles THAT.
+fn reconcile_and_persist(store: &Store, c: &mut Container) -> bool {
+    if !runtime::reconcile_status(c) {
+        return false;
+    }
+    *c = store
+        .update(&c.id, runtime::reconcile_status)
+        .unwrap_or_else(|_| c.clone());
+    true
+}
+
 /// `container stats` — one sample of CPU/mem/PIDs per running container.
 /// CPU% = delta of `usage_usec` over 500ms; memory from `memory.current`; with the
 /// cgroup non-delegated (rootless without Delegate), it falls back to the container
@@ -5420,9 +5438,7 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
     };
     let mut rows = Vec::new();
     for c in cs.iter_mut() {
-        if runtime::reconcile_status(c) {
-            let _ = store.save(c);
-        }
+        reconcile_and_persist(store, c);
         if !matches!(
             c.status,
             delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
@@ -7046,6 +7062,50 @@ restartPolicy: OnFailure
         let yaml = "containers:\n  - image: a\n  - image: b\n";
         let pod: super::PodSpec = serde_yaml::from_str(yaml).unwrap();
         assert!(super::pod_to_run_opts("x", None, pod).is_err());
+    }
+
+    #[test]
+    fn a_stale_reconciliation_does_not_erase_a_newer_incarnation() {
+        let dir = std::env::temp_dir().join(format!(
+            "delonix-stats-reconcile-test-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        let store = delonix_runtime_core::Store::open(&dir).unwrap();
+        // A pid that is certainly dead: a child that already exited and was reaped.
+        let dead = std::process::Command::new("true")
+            .spawn()
+            .and_then(|mut ch| {
+                let id = ch.id() as i32;
+                ch.wait().map(|_| id)
+            })
+            .unwrap();
+        let mut stale = delonix_runtime_core::Container::new(
+            "abc123def4560000".into(),
+            "web".into(),
+            "alpine".into(),
+            vec!["true".into()],
+            "64M".into(),
+        );
+        stale.status = delonix_runtime_core::Status::Running;
+        stale.pid = Some(dead);
+        stale.pid_starttime = None;
+        store.save(&stale).unwrap();
+        // A `start` lands meanwhile: the record now names a live process.
+        let me = std::process::id() as i32;
+        store
+            .update(&stale.id, |c| {
+                c.pid = Some(me);
+                c.pid_starttime = delonix_runtime_core::proc_starttime(me);
+                true
+            })
+            .unwrap();
+        // The reader still holds the old copy, which does look dead.
+        assert!(super::reconcile_and_persist(&store, &mut stale));
+        let rec = store.load(&stale.id).unwrap();
+        assert_eq!(rec.pid, Some(me), "the newer incarnation's pid survived");
+        assert!(matches!(rec.status, delonix_runtime_core::Status::Running));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
