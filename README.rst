@@ -532,7 +532,7 @@ Ten crates, one binary, no residing process:
      - Responsibility
    * - ``delonix-runtime-core``
      - Shared types: ``Container``, ``Vm``, ``Status`` (6-state), ``Store``, the secret vault.
-   * - ``delonix-runtime`` / ``-bin``
+   * - ``delonix-linux`` / ``delonix-runtime-bin``
      - The runtime (clone/namespaces/cgroups, create/stop/exec, reconcile) + the ``delonix`` CLI.
    * - ``delonix-sdn``
      - Rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall, internal DNS, WireGuard overlay, and the eBPF flow datapath.

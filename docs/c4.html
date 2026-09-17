@@ -273,7 +273,7 @@ JSON, não um socket de daemon.</p>
 </tr>
 <tr>
 <td>log shim</td>
-<td><code>fork</code> no pai em <code>spawn</code> (<code>crates/adapters/delonix-runtime/src/lib.rs</code>), corre <code>log_shim</code> — lê o pipe (ou o master do pty em modo console) e escreve o log com rotação</td>
+<td><code>fork</code> no pai em <code>spawn</code> (<code>crates/adapters/delonix-linux/src/lib.rs</code>), corre <code>log_shim</code> — lê o pipe (ou o master do pty em modo console) e escreve o log com rotação</td>
 <td>vida do container; destaca-se do stdio com <code>setsid</code> + <code>/dev/null</code></td>
 </tr>
 <tr>
@@ -296,7 +296,7 @@ JSON por registo; o CRI guarda os seus registos próprios em <code>&lt;root&gt;/
 (<code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code>).</p>
 <p>Consequência directa do daemonless: como não há monitor residente, o estado
 <code>Running</code> de um registo JSON pode divergir do kernel. A verdade é reconciliada na
-leitura — <code>reconcile_status</code> (<code>crates/adapters/delonix-runtime/src/lib.rs</code>) usa
+leitura — <code>reconcile_status</code> (<code>crates/adapters/delonix-linux/src/lib.rs</code>) usa
 <code>safe_to_signal</code> (PID + <code>starttime</code> de <code>/proc</code>, para fechar a janela de reutilização
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
@@ -307,7 +307,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 <pre class="mermaid">graph TB
     BIN[&quot;delonix-runtime-bin&lt;br&gt;CLI delonix — um modulo por grupo em src/cmd&lt;br&gt;manifesto e apply, cluster kubeadm, imagens VM douradas&quot;]
     CRI[&quot;delonix-cri&lt;br&gt;servidor CRI runtime.v1 — ImageService e RuntimeService&lt;br&gt;modulos: runtime_svc, lifecycle, streaming, spdy&quot;]
-    RT[&quot;delonix-runtime&lt;br&gt;motor de containers: clone e namespaces, setup_rootfs,&lt;br&gt;cgroups v2, seccomp, caps, exec, log shim, reconcile_status&quot;]
+    RT[&quot;delonix-linux&lt;br&gt;motor de containers: clone e namespaces, setup_rootfs,&lt;br&gt;cgroups v2, seccomp, caps, exec, log shim, reconcile_status&quot;]
     NET[&quot;delonix-sdn&lt;br&gt;SDN rootless: modulo infra — holder netns, slirp unico,&lt;br&gt;publish e DNAT, DNS e DHCP; cni, wg WireGuard, discover&quot;]
     IMG[&quot;delonix-oci&lt;br&gt;imagens OCI: registry pull e push, cas, overlay,&lt;br&gt;build Dockerfile, buildpack CNB, sign, internal_registry&quot;]
     VM2[&quot;delonix-vm&lt;br&gt;microVMs declarativas: trait VmBackend —&lt;br&gt;Cloud Hypervisor ou libvirt&quot;]
@@ -384,7 +384,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
   <code>image</code>, <code>vm</code>, <code>volume</code>, <code>net</code>, <code>scan</code>, <code>core</code>) e é isso que a sua função exige —
   responde por todo o motor a um control-plane local. Nada depende dele a não ser o
   <code>-bin</code>, e é local por desenho: socket unix, <code>SO_PEERCRED</code>, só o próprio uid (ADR-0010).</li>
-<li><strong><code>delonix-runtime</code> só depende de <code>core</code></strong> — o motor de containers não conhece
+<li><strong><code>delonix-linux</code> só depende de <code>core</code></strong> — o motor de containers não conhece
   rede: a integração faz-se por inversão de controlo, com o hook <code>on_started</code> do
   <code>RunSpec</code> (a CLI passa closures que chamam <code>delonix-sdn</code>).</li>
 <li><strong><code>delonix-vm</code> → <code>delonix-sdn</code></strong> existe porque o backend Cloud Hypervisor liga o
@@ -429,7 +429,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 <li><code>delonix-oci::buildpack</code> — Cloud Native Buildpacks (<code>CnbPlan</code>);</li>
 <li><code>delonix-runtime-core::{secret,cred_vault}</code> — Secret Manager do runtime
     (<code>--secret</code>/<code>--secret-files</code>; os valores decifrados só tocam um tmpfs dentro do
-    namespace do container — <code>write_secret_files</code> em <code>crates/adapters/delonix-runtime/src/lib.rs</code>);</li>
+    namespace do container — <code>write_secret_files</code> em <code>crates/adapters/delonix-linux/src/lib.rs</code>);</li>
 <li><code>delonix-runtime-bin::cmd::{cluster,k8s_recipes,vmimage,remote}</code> — o plano de
     cluster kubeadm (fluxo d, abaixo).</li>
 </ul>
@@ -440,7 +440,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 netns próprio servido por um <code>slirp4netns</code> dedicado — o comportamento do
 <code>docker run -p</code> no modelo rootless do Podman (<code>cmd_run</code> em
 <code>bins/delonix-runtime-bin/src/cmd/container.rs</code>; <code>spawn</code> em
-<code>crates/adapters/delonix-runtime/src/lib.rs</code>; <code>slirp_attach</code> em <code>crates/adapters/delonix-sdn/src/lib.rs</code>).</p>
+<code>crates/adapters/delonix-linux/src/lib.rs</code>; <code>slirp_attach</code> em <code>crates/adapters/delonix-sdn/src/lib.rs</code>).</p>
 <pre class="mermaid">sequenceDiagram
     participant U as operador
     participant CLI as delonix run
@@ -542,7 +542,7 @@ documentada no cabeçalho de <code>lifecycle.rs</code>).</p>
     CRI-&gt;&gt;D: stop e rm -f de cada container, depois desfaz o netns ou o infra container
 </pre>
 <p>Os logs no formato CRI são escritos pelo mesmo log shim do fluxo (a) —
-<code>RunSpec.log_cri</code> (<code>crates/adapters/delonix-runtime/src/lib.rs</code>) — para o <code>kubectl logs</code>/
+<code>RunSpec.log_cri</code> (<code>crates/adapters/delonix-linux/src/lib.rs</code>) — para o <code>kubectl logs</code>/
 <code>crictl logs</code> lerem directamente o ficheiro. <code>exec</code>/<code>attach</code>/<code>port-forward</code> do
 kubectl passam por <code>streaming.rs</code>/<code>spdy.rs</code> (servidor de streaming próprio, SPDY).</p>
 <h3>(d) <code>cluster kubeadm</code> — da imagem dourada ao cluster</h3>
@@ -592,8 +592,8 @@ diagramas acima.</p>
    (<code>infra::start_holder</code>); o processo do container, sem privilégio nesse userns,
    não a consegue abrir. O mecanismo certo já existe no motor — re-exec via
    <code>nsenter … ip netns exec</code> + <code>RunSpec.inherit_userns</code>
-   (<code>crates/adapters/delonix-runtime/src/lib.rs</code>) — mas hoje só é usado pelo próprio holder;
-   não há nenhum caminho em <code>delonix-runtime</code>/<code>delonix-runtime-bin</code> que o faça para
+   (<code>crates/adapters/delonix-linux/src/lib.rs</code>) — mas hoje só é usado pelo próprio holder;
+   não há nenhum caminho em <code>delonix-linux</code>/<code>delonix-runtime-bin</code> que o faça para
    um <code>container run</code> normal. Fechar isto é trabalho do motor, não da CLI.</li>
 <li><strong><code>delonix build</code> é single-stage.</strong> Um Dockerfile/Delonixfile com <code>FROM … AS x</code>
    seguido doutro <code>FROM</code> é recusado com erro claro (<code>cmd/build.rs</code>); multi-stage
@@ -653,7 +653,7 @@ peça existente.</p>
 <p><strong>Decisão.</strong> O caminho rootless é o desenho principal, não um modo degradado:
 <code>CLONE_NEWUSER</code> + <code>write_userns_maps</code>, que usa a gama subuid/subgid completa via
 <code>newuidmap</code>/<code>newgidmap</code> quando os helpers existem (<code>have_subid_helpers</code>,
-<code>crates/adapters/delonix-runtime/src/lib.rs</code>), com fallback para mapa de um só uid.
+<code>crates/adapters/delonix-linux/src/lib.rs</code>), com fallback para mapa de um só uid.
 <strong>Porquê.</strong> Correr imagens reais (nginx faz <code>chown</code> para o uid 101; <code>USER</code> ≠ 0 via
 <code>RunSpec.run_uid</code>) exige uma gama de uids, não só o root mapeado. A fronteira
 rootless→root foi auditada ofensivamente (holder valida <code>SO_PEERCRED</code>; <code>join_netns</code>

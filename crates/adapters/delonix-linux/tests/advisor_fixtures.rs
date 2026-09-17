@@ -13,7 +13,7 @@
 //! `resource_advice` without regenerating fails here rather than silently
 //! grading models against yesterday's answers.
 //!
-//!   regenerate:  DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-runtime --test advisor_fixtures
+//!   regenerate:  DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 //!
 //! The fixtures are synthetic on purpose. Real captures from one machine
 //! cluster in one corner of the space — this host would only ever produce
@@ -22,8 +22,8 @@
 //! reads any file of the same shape, so `delonix system resources -o json`
 //! output can be dropped in beside these.
 
-use delonix_runtime::resource_advice::{advise, local_inference, GpuFacts, ResourceSnapshot};
-use delonix_runtime::{bottleneck, Psi};
+use delonix_linux::resource_advice::{advise, local_inference, GpuFacts, ResourceSnapshot};
+use delonix_linux::{bottleneck, Psi};
 
 const GIB: u64 = 1024 * 1024 * 1024;
 
@@ -348,7 +348,7 @@ fn goldens_match_the_rules_as_they_are_today() {
         missing.is_empty() && stale.is_empty(),
         "the goldens no longer match the rules — missing: {missing:?}, stale: {stale:?}\n\
          Regenerate them in the SAME commit as the rule change:\n  \
-         DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-runtime --test advisor_fixtures"
+         DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures"
     );
 }
 

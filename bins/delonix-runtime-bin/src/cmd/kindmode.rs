@@ -155,7 +155,7 @@ const NODE_SHARED: &str = "/kind/delonix";
 /// [`node_exec_capture`].
 fn node_exec(c: &Container, script: &str) -> Result<i32> {
     let argv = vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()];
-    delonix_runtime::exec(c, &argv, false)
+    delonix_linux::exec(c, &argv, false)
 }
 
 /// Like [`node_exec`], but **captures** the output instead of dumping it to the terminal.
@@ -163,7 +163,7 @@ fn node_exec(c: &Container, script: &str) -> Result<i32> {
 ///
 /// # Why this way, and not with an `exec` that captures
 ///
-/// `delonix_runtime::exec` inherits the parent process's stdio and has no capture
+/// `delonix_linux::exec` inherits the parent process's stdio and has no capture
 /// variant. Instead of touching a central engine API just for this,
 /// it redirects INSIDE the node to a file in the shared directory (which is
 /// a bind mount, see `cluster_dir`) and reads it from the host. Zero changes to the engine.
@@ -496,10 +496,10 @@ fn boot_node(
 /// delegated` — a message the operator never sees, because the failure surfaces
 /// as a timeout on a different service.
 fn preflight_cgroup_controllers() -> Result<()> {
-    if !delonix_runtime::is_rootless() {
+    if !delonix_linux::is_rootless() {
         return Ok(()); // real root owns the whole tree
     }
-    let Some(cur) = delonix_runtime::current_cgroup_v2() else {
+    let Some(cur) = delonix_linux::current_cgroup_v2() else {
         return Ok(()); // cannot tell — do not block on a guess
     };
     let have: Vec<String> = std::fs::read_to_string(format!("{cur}/cgroup.controllers"))
@@ -628,7 +628,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     // 4× in a 4-node cluster, in the middle of the progress. It is warned ONCE here (with the
     // same test the engine does, `cgroup_limits_apply`) and ALL the
     // nodes are silenced via env — inherited by the whole re-exec chain.
-    if !delonix_runtime::cgroup_limits_apply() {
+    if !delonix_linux::cgroup_limits_apply() {
         super::output::warn(
             super::po::t("rootless without cgroup delegation: the nodes' CPU/memory/PIDs limits are not enforced \
                  (namespace/seccomp isolation still holds). For limits, run under \
@@ -1129,7 +1129,7 @@ fn cluster_nodes(store: &Store, name: Option<&str>) -> Result<(String, Vec<Conta
         let Some(n) = c.labels.get("io.x-k8s.kind.cluster").cloned() else {
             continue;
         };
-        delonix_runtime::reconcile_status(&mut c);
+        delonix_linux::reconcile_status(&mut c);
         by_cluster.entry(n).or_default().push(c);
     }
     match name {
@@ -1617,8 +1617,8 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
         let Some(name) = c.labels.get("io.x-k8s.kind.cluster").cloned() else {
             continue;
         };
-        if delonix_runtime::reconcile_status(&mut c) {
-            let _ = store.update(&c.id, delonix_runtime::reconcile_status);
+        if delonix_linux::reconcile_status(&mut c) {
+            let _ = store.update(&c.id, delonix_linux::reconcile_status);
         }
         clusters.entry(name).or_default().push(c);
     }

@@ -9,7 +9,7 @@ repository = "https://github.com/angolardevops/delonix-runtime"
 [dependencies]
 delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
-delonix-runtime = { workspace = true }
+delonix-linux = { workspace = true }
 delonix-volume = { workspace = true }
 delonix-oci = { workspace = true }
 delonix-scanner = { workspace = true }

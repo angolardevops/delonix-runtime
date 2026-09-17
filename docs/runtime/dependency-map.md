@@ -10,7 +10,7 @@
 graph TD
     core[delonix-runtime-core<br/>SINK · depends on nothing internal]
 
-    runtime[delonix-runtime] --> core
+    runtime[delonix-linux] --> core
     net[delonix-sdn] --> core
     volume[delonix-volume] --> core
     image[delonix-oci] --> core

@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/foundation/delonix-runtime-core",
-    "crates/adapters/delonix-runtime",
+    "crates/adapters/delonix-linux",
     "bins/delonix-runtime-bin",
     "crates/adapters/delonix-oci",
     "crates/adapters/delonix-sdn",
@@ -36,7 +36,7 @@ repository = "https://github.com/angolardevops/delonix-runtime"
 # every manifest that depends on it. The directory is the crate's LAYER, and
 # `scripts/arch_fitness.py` fails when the two disagree.
 delonix-runtime-core = { path = "crates/foundation/delonix-runtime-core" }
-delonix-runtime = { path = "crates/adapters/delonix-runtime" }
+delonix-linux = { path = "crates/adapters/delonix-linux" }
 delonix-runtime-bin = { path = "bins/delonix-runtime-bin" }
 delonix-oci = { path = "crates/adapters/delonix-oci" }
 delonix-sdn = { path = "crates/adapters/delonix-sdn" }

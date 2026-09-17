@@ -6,13 +6,13 @@
 //! In rootless with subuid, the files a container writes belong to **mapped**
 //! uids (e.g. the container's uid 0 → 100000 on the host). The real user cannot
 //! delete or read them. The solution (the same as `podman unshare`):
-//! `delonix-runtime` forks a child in a user namespace, maps its subuid range
+//! `delonix-linux` forks a child in a user namespace, maps its subuid range
 //! with `newuidmap`, and the child — now root IN THAT userns, hence the
 //! effective owner of the subuids — re-executes `delonix __rmtree <path>` or
 //! `delonix __volsnap <mode> <data> <tarball>`.
 //!
 //! **The contract was half-implemented in the public repo**: the library
-//! (`delonix_runtime::{remove_tree_mapped, reexec_mapped}`) did the re-exec, but
+//! (`delonix_linux::{remove_tree_mapped, reexec_mapped}`) did the re-exec, but
 //! the subcommands only existed in another program's CLI. A user of the
 //! public `delonix` caught the child dying with "unrecognized subcommand
 //! '__rmtree'" (rc=2) — and since `remove_tree_mapped` did not even look at the
@@ -540,7 +540,7 @@ pub fn ovlhold(dir: &Path) -> Result<()> {
         ));
     }
     let merged = dir.join("merged");
-    delonix_runtime::mount_overlay_if_marked(&merged.to_string_lossy()).map_err(|e| {
+    delonix_linux::mount_overlay_if_marked(&merged.to_string_lossy()).map_err(|e| {
         Error::Runtime {
             context: "__ovlhold mount overlay",
             message: e.to_string(),

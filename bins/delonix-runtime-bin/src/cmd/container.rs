@@ -5,8 +5,8 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
+use delonix_linux::{self as runtime};
 use delonix_oci::ImageStore;
-use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{
     generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status, Store,
 };
@@ -2046,7 +2046,7 @@ pub(crate) fn parse_io_rate(spec: &str, is_bytes: bool) -> std::result::Result<u
 /// `io.max` line (`rbps=… wbps=… riops=… wiops=…`). `None` when none was given.
 ///
 /// The engine prepends the store device's `major:minor` — see
-/// `delonix_runtime`'s `slice_io_device`.
+/// `delonix_linux`'s `slice_io_device`.
 pub(crate) fn compose_io_max(
     read_bps: Option<&str>,
     write_bps: Option<&str>,
@@ -2215,7 +2215,7 @@ mod resource_limits_preflight_tests {
 }
 
 /// Runs `f` with the host as the `container run` use case's `WorkloadRuntime`
-/// (`delonix_runtime::workload::HostWorkload`), composed with what this CLI owns:
+/// (`delonix_linux::workload::HostWorkload`), composed with what this CLI owns:
 /// the network's answers, the health monitor, the printed id and the removal of
 /// what a refused start left behind.
 pub(crate) fn with_host_workload<R>(
@@ -2508,8 +2508,8 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         &delonix_volume::HostVolumes {
             root: super::util::state_root(),
         },
-        &delonix_runtime::cdi::HostDevices,
-        &delonix_runtime::run_host::HostRuntime {
+        &delonix_linux::cdi::HostDevices,
+        &delonix_linux::run_host::HostRuntime {
             state_root: super::util::state_root(),
             apparmor_disabled: &apparmor_disabled,
         },
@@ -3035,7 +3035,7 @@ fn fmt_status_of(c: &Container, uptime: Option<u64>) -> String {
     // The column an operator reads to find out why a container is down. «Dead»
     // alone reads the same for an OOM and for an external `kill -9`, and those
     // two have opposite fixes (raise `-m`, or find who sent the signal).
-    if c.crash_reason.as_deref() == Some(delonix_runtime::OOM_KILLED)
+    if c.crash_reason.as_deref() == Some(delonix_linux::OOM_KILLED)
         && matches!(c.status, Status::Crashed | Status::Failed(_))
     {
         return format!("{} (OOMKilled)", fmt_status(&c.status, uptime));
@@ -5468,7 +5468,7 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
 }
 
 /// Splits one CRI-format log line (`<rfc3339nano> stdout F <line>` — the
-/// format `--log-cri` writes, see `delonix_runtime::log_shim`) into
+/// format `--log-cri` writes, see `delonix_linux::log_shim`) into
 /// `(timestamp, body)`. `None` for anything that doesn't match — a raw
 /// (non-CRI) log, or an odd malformed record.
 fn parse_cri_log_line(line: &str) -> Option<(&str, &str)> {
@@ -5487,7 +5487,7 @@ fn parse_cri_log_line(line: &str) -> Option<(&str, &str)> {
 /// timestamp starts with — RFC3339 UTC timestamps compare lexicographically in
 /// the same order as chronologically, so `--since` just needs this string
 /// prefix, not a full parse back into a comparable integer. Small hand-written
-/// civil-calendar conversion (mirrors `delonix_runtime`'s own private
+/// civil-calendar conversion (mirrors `delonix_linux`'s own private
 /// `rfc3339` helper) rather than a `chrono` dependency, matching this
 /// project's supply-chain-minimalism rule (see AGENTS.md's "Output" section).
 fn unix_secs_to_rfc3339_prefix(secs: u64) -> String {
@@ -6134,7 +6134,7 @@ mod runspec_single_builder_tests {
     #[test]
     fn container_has_one_runspec_builder() {
         // The spawn specification is built in ONE place,
-        // `delonix_runtime::launch_spec::run_spec`, from a `Launch`; `run` and
+        // `delonix_linux::launch_spec::run_spec`, from a `Launch`; `run` and
         // `start` both go through it. A literal here would be a second builder.
         let src = include_str!("container.rs");
         let needle = concat!("RunSpec", " {");

@@ -349,7 +349,7 @@ impl ImageStore {
     /// be mounted from INSIDE the container's user namespace (where the creator
     /// holds full caps). So this call does the part that must happen outside
     /// (extract/cache the layers, create the write layer) and leaves the mount
-    /// to `delonix-runtime`'s `setup_rootfs`, which reads [`Self::LOWERS_FILE`].
+    /// to `delonix-linux`'s `setup_rootfs`, which reads [`Self::LOWERS_FILE`].
     ///
     /// What this replaces is a FULL COPY of the image per container
     /// (`export_rootfs`): measured on this host, 21 containers of the same
