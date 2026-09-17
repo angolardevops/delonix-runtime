@@ -1,13 +1,16 @@
-<!-- translated-from: glossary.md sha256:b3639c47dba48ec2f15561c5c42ff3a9e50f62de763f290882cdc887ce8a4991 -->
+<!-- translated-from: glossary.md sha256:071ac52aaf0edbe956d3e4e8e8c506b79751fb106caa6ecef29e4d9ce6505ac0 -->
 # Glossário
+
+**Antes de leres:** nada — isto é uma referência. Mantém-na aberta ao lado de qualquer outra página.
 
 As palavras que quem chega encontra neste repositório, com o significado que têm **no Delonix** — que
 às vezes é mais estreito do que o significado geral no cloud native. Cada entrada aponta para o sítio
 onde o termo é explicado ou implementado. Os caminhos são relativos à raiz do repositório;
 `file.rs::symbol` nomeia um símbolo dentro desse ficheiro.
 
-Os termos estão por ordem alfabética. Para o contexto geral (namespaces, cgroups,
-OCI, CRI, CNI, KVM), começa por [Introdução ao cloud native](cloud-native-primer.md).
+Os termos estão por ordem alfabética. Para o contexto geral, os primitivos do kernel (processos,
+namespaces, cgroups, descritores de ficheiro, sinais) são ensinados em [Fundações de Linux](linux-foundations.md),
+e o OCI, o CRI, o CNI e o KVM tal como o motor os usa em [Introdução ao cloud native](cloud-native-primer.md).
 
 ---
 
@@ -275,3 +278,7 @@ day-2 (`ls`, `describe`, `stop`, `rm`) que lista e actua sobre containers e VMs 
 seu próprio branch. Cada tarefa aqui tem o seu, criado a partir de `origin/main` num directório
 persistente fora do repositório (nunca `/tmp`), e é removido juntamente com o seu branch no fim. Ver:
 [Um worktree por tarefa](contributing-workflow.md#one-worktree-per-task).
+
+---
+
+**Seguinte:** [Visão geral e percursos de leitura](README.md#reading-paths-by-role) — é o fim do curso; volta aos percursos de leitura por papel para escolheres o que aprofundar a seguir.

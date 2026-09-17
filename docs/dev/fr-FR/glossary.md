@@ -1,13 +1,14 @@
-<!-- translated-from: glossary.md sha256:b3639c47dba48ec2f15561c5c42ff3a9e50f62de763f290882cdc887ce8a4991 -->
+<!-- translated-from: glossary.md sha256:071ac52aaf0edbe956d3e4e8e8c506b79751fb106caa6ecef29e4d9ce6505ac0 -->
 # Glossaire
+
+**Avant de lire :** rien — c'est une référence. Gardez-la ouverte à côté de toute autre page.
 
 Les mots qu’un nouveau venu rencontre dans ce dépôt, avec le sens qu’ils ont **dans Delonix** — qui est
 parfois plus restreint que le sens général du cloud native. Chaque entrée renvoie à l’endroit où le terme est
 expliqué ou implémenté. Les chemins sont relatifs à la racine du dépôt ; `file.rs::symbol` désigne un
 symbole à l’intérieur de ce fichier.
 
-Les termes sont classés par ordre alphabétique. Pour le contexte général (namespaces, cgroups, OCI, CRI, CNI,
-KVM), commencez par [Initiation au cloud native](cloud-native-primer.md).
+Les termes sont classés par ordre alphabétique. Pour le contexte général, les primitifs du noyau (processus, namespaces, cgroups, descripteurs de fichiers, signaux) sont enseignés dans [Fondations Linux](linux-foundations.md), et l'OCI, le CRI, le CNI et le KVM tels que le moteur les utilise dans [Initiation au cloud native](cloud-native-primer.md).
 
 ---
 
@@ -264,3 +265,7 @@ container|pod|vm|microvm` qui est abaissé vers le Kind correspondant au chargem
 propre branch. Chaque tâche a ici le sien, créé à partir de `origin/main` dans un répertoire persistant
 en dehors du dépôt (jamais `/tmp`), et supprimé en même temps que sa branch à la fin. Voir :
 [Un worktree par tâche](contributing-workflow.md#one-worktree-per-task).
+
+---
+
+**Suivant :** [Vue d'ensemble et parcours de lecture](README.md#reading-paths-by-role) — c'est la fin du cours ; revenez aux parcours de lecture par rôle pour choisir quoi approfondir ensuite.
