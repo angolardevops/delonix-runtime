@@ -1,9 +1,17 @@
-<!-- translated-from: build-and-test.md sha256:74fec18c261272757929564c270a7c9080ed8c35bfd5402d755e2d7818476fc3 -->
+<!-- translated-from: build-and-test.md sha256:a2ec1ffc29baac1b5431b76324ed7af5894d0f18b6668a3bc52ddadf65accebe -->
 # Cloner, compiler et tester
 
+**Avant de lire :** [Préparer votre environnement](environment.md) : la toolchain épinglée, `protoc`, et un hôte qui passe ses vérifications.
+
 Cette page suppose l’hôte décrit dans [Préparer votre environnement](environment.md) : la toolchain
-Rust épinglée et `protoc`. Tout ce qui suit s’exécute depuis la racine de votre checkout — idéalement un
-**git worktree**, voir [Flux de contribution](contributing-workflow.md).
+Rust épinglée et `protoc`. Après elle, vous saurez compiler et installer votre arborescence, exécuter
+chaque gate de CI localement, et exécuter la batterie E2E et le harnais de chaos sans toucher à un
+état réel du moteur.
+
+Tout ce qui suit s’exécute depuis la racine de votre checkout — idéalement un **git worktree** : un
+répertoire de travail séparé avec sa propre branche, un par tâche, créé à partir de `origin/main`
+(la commande se trouve dans [Commencer ici, étape 2](start-here.md#2-open-a-worktree-from-originmain) ;
+les règles se trouvent dans [Flux de contribution](contributing-workflow.md#one-worktree-per-task)).
 
 ## Cloner
 
@@ -70,7 +78,7 @@ est donc le seul moyen de distinguer votre build de celui publié.
 autre release refuse de démarrer. Il se passe aussi lui-même dans `DELONIX_BIN`, afin que le serveur rappelle
 la même CLI. Un serveur démarré directement (par exemple par une unité) trouve la CLI via
 `DELONIX_BIN`, puis un `delonix` situé à côté de lui-même, puis le `PATH` (`cli_bin` dans
-`crates/foundation/delonix-runtime-core/src/dispatch.rs`). **Gardez ensemble les quatre binaires d’un même build** ;
+`crates/contexts/delonix-node/src/dispatch.rs`). **Gardez ensemble les quatre binaires d’un même build** ;
 un mélange de votre build et d’une release est refusé, ou exécute du code que vous n’aviez pas l’intention de tester.
 
 `delonix cluster kubeadm` et `delonix image vm build` cherchent `delonix-cri` dans leur propre ordre
@@ -377,3 +385,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 
 Les répertoires jetables sous `/tmp` conviennent pour ces sandboxes à usage unique. Vos **worktrees**, non
 — voir [Flux de contribution](contributing-workflow.md#one-worktree-per-task).
+
+---
+
+**Suivant :** [Structure du projet](project-structure.md) — la carte du dépôt : ce qu’est chaque répertoire, qui le modifie, et ce qui est généré.

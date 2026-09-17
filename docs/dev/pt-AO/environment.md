@@ -1,11 +1,14 @@
-<!-- translated-from: environment.md sha256:0cc0dc0b2e98faf47695bd311495da633f196e123de2be842b5b84482becae8c -->
+<!-- translated-from: environment.md sha256:29a46c673dae7f412b2e88dbcf5a56a00385849cb1bff2804877d0ab9b85a677 -->
 # Preparar o teu ambiente
+
+**Antes de leres:** [Começa aqui](start-here.md#day-0-in-30-minutes) (Dia 0) e [Fundações de Linux](linux-foundations.md) — as armadilhas do host abaixo são explicadas em termos de user namespaces e delegação de cgroup.
 
 O Delonix Runtime é **só para Linux**: todos os primitivos que usa — namespaces, cgroups v2, nftables,
 `pivot_root`, a nova API de mount — vivem no kernel Linux. Consegues *compilar* a maior parte do
 workspace e correr os seus testes de lógica pura em qualquer máquina Linux com a toolchain abaixo;
 para *correr* containers e exercitar os caminhos ao vivo precisas de um host que cumpra os requisitos
-de kernel e de pacotes desta página.
+de kernel e de pacotes desta página. Depois dela o teu host passa o `delonix system info`, e quando
+algo falha consegues distinguir um pré-requisito do host de um bug do motor.
 
 Muito do que parece um bug do motor numa máquina acabada de instalar é um pré-requisito do host. Lê a
 secção [Armadilhas conhecidas do host](#known-host-traps) antes de abrires uma issue.
@@ -174,9 +177,10 @@ tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, confo
 Não existe a flag `--pids-limit`; o tecto de pids é uma propriedade do grupo de cgroup do motor, não
 do `container run`.
 
-O caso comum é uma **sessão SSH**: o seu `session-N.scope` é *irmão* do
-`user@<uid>.service`, e mover um processo entre os dois exige escrever num cgroup que pertence ao root.
-A correcção por comando não precisa de root:
+O caso comum é uma **sessão SSH**: o seu scope fica fora da tua subárvore delegada, e a sessão não se
+consegue mover para lá sozinha — o porquê, com os comandos para o veres, está em
+[Fundações de Linux — Delegação a utilizadores](linux-foundations.md#delegation-to-users). A
+correcção por comando não precisa de root:
 
 ```bash
 systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
@@ -206,3 +210,7 @@ número de versão.
 - **As armadilhas de firmware de VM e de construção de imagens** (a escolha do firmware do Cloud
   Hypervisor, um `passt` antigo nos builds do libguestfs, as permissões de `/boot/vmlinuz-*`) são
   tratadas em [Construir microVMs](microvm-setup.md).
+
+---
+
+**Seguinte:** [Clonar, compilar e testar](build-and-test.md) — compilar, instalar e testar a tua árvore, e cada gate de CI como comando local.

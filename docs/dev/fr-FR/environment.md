@@ -1,11 +1,14 @@
-<!-- translated-from: environment.md sha256:0cc0dc0b2e98faf47695bd311495da633f196e123de2be842b5b84482becae8c -->
+<!-- translated-from: environment.md sha256:29a46c673dae7f412b2e88dbcf5a56a00385849cb1bff2804877d0ab9b85a677 -->
 # Préparer votre environnement
+
+**Avant de lire :** [Commencer ici](start-here.md#day-0-in-30-minutes) (Jour 0) et [Fondations Linux](linux-foundations.md) — les pièges de l’hôte ci-dessous sont expliqués en termes de user namespaces et de délégation de cgroup.
 
 Delonix Runtime est **exclusivement Linux** : chaque primitive qu’il utilise — namespaces, cgroups v2, nftables,
 `pivot_root`, la nouvelle API de montage — vit dans le noyau Linux. Vous pouvez *compiler* la plus grande partie du
 workspace et exécuter ses tests de logique pure sur n’importe quelle machine Linux disposant de la toolchain ci-dessous ; pour *exécuter*
 des containers et exercer les chemins réels, il vous faut un hôte qui satisfait les exigences de noyau et de
-paquets de cette page.
+paquets de cette page. Après elle, votre hôte passe `delonix system info`, et quand quelque chose
+échoue vous savez distinguer un prérequis de l’hôte d’un bug du moteur.
 
 Une grande partie de ce qui ressemble à un bug du moteur sur une machine neuve est un prérequis de l’hôte. Lisez la
 section [Pièges connus de l’hôte](#known-host-traps) avant d’ouvrir une issue.
@@ -174,9 +177,11 @@ exigence. Sans délégation, le moteur fait deux choses différentes, selon l’
 Il n’existe pas d’option `--pids-limit` ; le plafond de pids est une propriété du groupe de cgroups du moteur, pas
 de `container run`.
 
-Le cas courant est une **session SSH** : son `session-N.scope` est un *frère* de
-`user@<uid>.service`, et déplacer un processus entre eux exige d’écrire dans un cgroup appartenant à root.
-Le correctif par commande ne nécessite pas root :
+Le cas courant est une **session SSH** : sa scope se trouve en dehors de votre sous-arborescence
+déléguée, et la session ne peut pas s’y déplacer elle-même — le pourquoi, avec les commandes pour le
+voir, se trouve dans [Fondations Linux — Délégation aux
+utilisateurs](linux-foundations.md#delegation-to-users). Le correctif par commande ne nécessite
+pas root :
 
 ```bash
 systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
@@ -205,3 +210,7 @@ numéro de version.
   hôte, un runner auto-hébergé ou une VM.
 - **Les pièges du firmware des VM et de la construction d’images** (le choix du firmware de Cloud Hypervisor, un `passt` ancien
   dans les builds libguestfs, les permissions de `/boot/vmlinuz-*`) sont traités dans [Construire des microVMs](microvm-setup.md).
+
+---
+
+**Suivant :** [Cloner, compiler et tester](build-and-test.md) — compiler, installer et tester votre arborescence, et chaque gate de CI comme commande locale.

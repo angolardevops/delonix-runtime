@@ -209,12 +209,14 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a class="on" aria-current="page" href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Preparar e compilar</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/environment.html">Ler a página em inglês</a></span></div><h1 id="preparing-your-environment">Preparar o teu ambiente</h1>
+<h1 id="preparing-your-environment">Preparar o teu ambiente</h1>
+<p><strong>Antes de leres:</strong> <a href="start-here.html#day-0-in-30-minutes">Começa aqui</a> (Dia 0) e <a href="linux-foundations.html">Fundações de Linux</a> — as armadilhas do host abaixo são explicadas em termos de user namespaces e delegação de cgroup.</p>
 <p>O Delonix Runtime é <strong>só para Linux</strong>: todos os primitivos que usa — namespaces, cgroups v2, nftables,
 <code>pivot_root</code>, a nova API de mount — vivem no kernel Linux. Consegues <em>compilar</em> a maior parte do
 workspace e correr os seus testes de lógica pura em qualquer máquina Linux com a toolchain abaixo;
 para <em>correr</em> containers e exercitar os caminhos ao vivo precisas de um host que cumpra os requisitos
-de kernel e de pacotes desta página.</p>
+de kernel e de pacotes desta página. Depois dela o teu host passa o <code>delonix system info</code>, e quando
+algo falha consegues distinguir um pré-requisito do host de um bug do motor.</p>
 <p>Muito do que parece um bug do motor numa máquina acabada de instalar é um pré-requisito do host. Lê a
 secção <a href="#known-host-traps">Armadilhas conhecidas do host</a> antes de abrires uma issue.</p>
 <h2 id="toolchain">Toolchain<a class="hanchor" href="#toolchain" aria-label="#">#</a></h2>
@@ -435,9 +437,10 @@ tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, confo
 </ul>
 <p>Não existe a flag <code>--pids-limit</code>; o tecto de pids é uma propriedade do grupo de cgroup do motor, não
 do <code>container run</code>.</p>
-<p>O caso comum é uma <strong>sessão SSH</strong>: o seu <code>session-N.scope</code> é <em>irmão</em> do
-<code>user@&lt;uid&gt;.service</code>, e mover um processo entre os dois exige escrever num cgroup que pertence ao root.
-A correcção por comando não precisa de root:</p>
+<p>O caso comum é uma <strong>sessão SSH</strong>: o seu scope fica fora da tua subárvore delegada, e a sessão não se
+consegue mover para lá sozinha — o porquê, com os comandos para o veres, está em
+<a href="linux-foundations.html#delegation-to-users">Fundações de Linux — Delegação a utilizadores</a>. A
+correcção por comando não precisa de root:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 </code></pre></div>
 <p>Para workloads de longa duração, usa uma unit systemd de <strong>utilizador</strong> com <code>Delegate=yes</code>. Alguns
@@ -462,6 +465,8 @@ número de versão.</p>
   Hypervisor, um <code>passt</code> antigo nos builds do libguestfs, as permissões de <code>/boot/vmlinuz-*</code>) são
   tratadas em <a href="microvm-setup.html">Construir microVMs</a>.</li>
 </ul>
+<hr />
+<p><strong>Seguinte:</strong> <a href="build-and-test.html">Clonar, compilar e testar</a> — compilar, instalar e testar a tua árvore, e cada gate de CI como comando local.</p>
 <nav class="pager"><a href="rust-primer.html"><span>← Anterior</span>Introdução ao Rust para esta base de código</a><a class="next" href="build-and-test.html"><span>Seguinte →</span>Clonar, compilar e testar</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/environment.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/environment.md</code></footer>
 </div></main>

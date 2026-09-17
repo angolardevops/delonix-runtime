@@ -1,9 +1,16 @@
-<!-- translated-from: build-and-test.md sha256:74fec18c261272757929564c270a7c9080ed8c35bfd5402d755e2d7818476fc3 -->
+<!-- translated-from: build-and-test.md sha256:a2ec1ffc29baac1b5431b76324ed7af5894d0f18b6668a3bc52ddadf65accebe -->
 # Clonar, compilar e testar
 
+**Antes de leres:** [Preparar o teu ambiente](environment.md): a toolchain fixada, o `protoc`, e um host que passa nas suas verificações.
+
 Esta página assume o host de [Preparar o teu ambiente](environment.md): a toolchain de Rust
-fixada e o `protoc`. Tudo aqui corre a partir da raiz da tua checkout — idealmente um
-**git worktree**, ver [Fluxo de contribuição](contributing-workflow.md).
+fixada e o `protoc`. Depois dela consegues compilar e instalar a tua árvore, correr cada gate
+de CI localmente, e correr a bateria E2E e o arnês de caos sem tocar em estado real do motor.
+
+Tudo aqui corre a partir da raiz da tua checkout — idealmente um **git worktree**: um directório
+de trabalho separado com o seu próprio branch, um por tarefa, criado a partir de `origin/main` (o
+comando está em [Começa aqui, passo 2](start-here.md#2-open-a-worktree-from-originmain); as
+regras estão em [Fluxo de contribuição](contributing-workflow.md#one-worktree-per-task)).
 
 ## Clonar
 
@@ -71,7 +78,7 @@ O `delonix` passa ao servidor a sua própria versão em `DELONIX_DISPATCH_VERSIO
 outra release recusa-se a arrancar. Passa-se também a si próprio em `DELONIX_BIN`, para que o
 servidor volte a chamar a mesma CLI. Um servidor arrancado directamente (por exemplo por uma unit)
 encontra a CLI através de `DELONIX_BIN`, depois de um `delonix` ao seu lado, depois do `PATH`
-(`cli_bin` em `crates/foundation/delonix-runtime-core/src/dispatch.rs`). **Mantém juntos os quatro
+(`cli_bin` em `crates/contexts/delonix-node/src/dispatch.rs`). **Mantém juntos os quatro
 binários de uma mesma build**; uma mistura da tua build com uma release é recusada, ou corre código
 que não querias testar.
 
@@ -387,3 +394,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 
 Os directórios descartáveis debaixo de `/tmp` servem para estes sandboxes efémeros. Os teus
 **worktrees** não — ver [Fluxo de contribuição](contributing-workflow.md#one-worktree-per-task).
+
+---
+
+**Seguinte:** [Estrutura do projecto](project-structure.md) — o mapa do repositório: o que é cada directório, quem o muda, e o que é gerado.
