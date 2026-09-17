@@ -219,7 +219,11 @@ exists twice. The CLI links the servers and the servers exec the CLI back.
     `No such file or directory`.
   `exec`, not a child process: the server takes the pid, so units, signals and `kill`
   reach it. Units may keep calling the binary directly. First slice: `delonix serve cri`
-  → `delonix-cri` (which already existed as a duplicate `[[bin]]`).
+  → `delonix-cri` (which already existed as a duplicate `[[bin]]`). Second: `delonix mcp`
+  → `delonix-mcp` (`bins/delonix-mcp-bin`, installed by default). A server that runs the
+  CLI back resolves it through `delonix_runtime_core::dispatch::cli_bin` —
+  `DELONIX_BIN`, which `delonix` sets to itself, then the sibling, then the `PATH` —
+  never its own executable, which is the server.
 - **`delonix-launcher` owns every spawn that creates namespaces.** It is the
   `ProcessLauncher` adapter of D5: it receives a typed spec over an inherited fd, never an
   argv built by another program. The CLI, the CRI and the node API stop creating user

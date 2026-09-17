@@ -804,23 +804,36 @@ pub fn doctor_checks(base: &Path) -> Vec<(&'static str, bool, String)> {
         mcp_dir.display().to_string(),
     ));
 
-    let bin_ok = std::env::current_exe().is_ok();
+    // The CLI the mutations run: never this executable, which is the MCP server
+    // (`delonix mcp` runs `delonix-mcp`), and the answer must be a file that exists.
+    let bin = delonix_runtime_core::dispatch::cli_bin();
+    let found = if bin.is_absolute() {
+        bin.is_file().then(|| bin.clone())
+    } else {
+        std::env::var_os("PATH").and_then(|p| {
+            std::env::split_paths(&p)
+                .map(|d| d.join(&bin))
+                .find(|c| c.is_file())
+        })
+    };
     checks.push((
         "runtime_binary_resolvable",
-        bin_ok,
-        std::env::current_exe()
+        found.is_some(),
+        found
             .map(|p| p.display().to_string())
-            .unwrap_or_else(|e| e.to_string()),
+            .unwrap_or_else(|| format!("{} not found", bin.display())),
     ));
 
     checks
 }
 
 /// Same pattern `delonix-mgmt::run_cli` already ships for its own mutations:
-/// invoke the `delonix` binary itself (this process IS `delonix mcp serve`) with
-/// a fixed, non-shell-interpolated argv. Not a new mechanism (ADR-0025 §6).
+/// invoke the `delonix` CLI with a fixed, non-shell-interpolated argv. Not a new
+/// mechanism (ADR-0025 §6). The CLI, and never this process's own executable:
+/// that is `delonix-mcp`, and re-running it would start another server instead
+/// of running the command.
 fn run_cli_blocking(base: &Path, args: Vec<String>) -> Result<(bool, String), String> {
-    let bin = std::env::current_exe().map_err(|e| e.to_string())?;
+    let bin = delonix_runtime_core::dispatch::cli_bin();
     let out = std::process::Command::new(&bin)
         .env("DELONIX_ROOT", base)
         .args(&args)

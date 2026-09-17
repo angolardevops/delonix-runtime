@@ -444,7 +444,7 @@ fn list_recs<T: for<'de> Deserialize<'de>>(dir: &Path) -> Vec<T> {
 }
 
 fn delonix_bin() -> PathBuf {
-    crate::cli_bin()
+    delonix_runtime_core::dispatch::cli_bin()
 }
 
 /// Runs the `delonix` binary (single-threaded) with the CRI's `DELONIX_ROOT`.

@@ -3021,6 +3021,18 @@ check "e diz como instalar" ok bash -c \
   "env PATH=/usr/bin:/bin '$LONE/delonix' serve cri --addr 'unix:///tmp/dlx-lone-$PFX.sock' 2>&1 | grep -q 'with-cri'"
 rm -rf "$LONE"
 
+# `delonix mcp` executa o `delonix-mcp` (P3l). As mutações do MCP correm a CLI de
+# volta — e tem de ser o `delonix`, nunca o próprio `delonix-mcp`, que re-correria o
+# servidor em vez do comando.
+check "mcp capabilities responde pelo delonix-mcp" ok bash -c \
+  "'$BIN' mcp capabilities | python3 -c 'import json,sys; sys.exit(0 if any(t[\"tool\"]==\"logs.query\" for t in json.load(sys.stdin)) else 1)'"
+check "mcp doctor resolve a CLI delonix e não o delonix-mcp" ok bash -c \
+  "'$BIN' mcp doctor 2>&1 | grep 'runtime_binary_resolvable' | grep -q '/delonix\$'"
+LONE="$OUT/lone-mcp-$PFX"; mkdir -p "$LONE"; cp "$BIN" "$LONE/delonix"
+check "mcp sem o delonix-mcp instalado sai com 69" 69 \
+  env PATH=/usr/bin:/bin "$LONE/delonix" mcp capabilities
+rm -rf "$LONE"
+
 check "nenhum servidor desta corrida ficou para trás" ok bash -c \
   "! pgrep -f '(serve (cri|api|docker-api)|delonix-cri) --addr unix:///tmp/dlx-srv-.*$PFX' >/dev/null"
 
