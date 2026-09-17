@@ -619,7 +619,10 @@ JS = r"""
     if (!window.mermaid || !diagrams.length) return;
     diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
     mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
-      fontFamily:getComputedStyle(document.body).fontFamily});
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
     mermaid.run({nodes: diagrams});
   }
   renderMermaid();

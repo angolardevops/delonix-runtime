@@ -66,8 +66,11 @@ records are not here: they are read and written by the `delonix-state` adapter.
 ### `delonix-runtime-core`
 
 **Purpose.** The shared vocabulary of the engine: the persisted records
-(`Container`, `Vm`), their `Status`, and the error type every crate returns (defined in
-`delonix-model` and re-exported here with the same path). It also holds the small
+`Container` and `Vm` and the types they are made of (`Mount`, health, cgroup parent,
+extra networks and disks). Two groups of items that every crate still imports from here
+are **defined in `delonix-model`** and re-exported with their old paths: the error type
+(`Error`, `Result`) and, since #405, the plain-data records (`Status`,
+`ContainerFw`/`FwRule` and their validators, `default_namespace`, `typestate`). It also holds the small
 cross-cutting pieces that more than one crate needs and that would otherwise be
 copied: the `SO_PEERCRED` check for local sockets, the append-only event log, and
 the rule a server binary follows when `delonix` runs it. It does **not** create
@@ -78,18 +81,21 @@ The stores (`Store`, `JsonStore<T>`), the atomic-write helpers and the encrypted
 secret store (`SecretStore`, `CredVault`) **left this crate** for `delonix-state`
 (ADR-0040 P3); the pure secret model (`Secret`, `valid_name`, `valid_env_key`,
 `parse_env_file`) went to `delonix-model`. Nothing about them is re-exported here
-any more: `src/lib.rs` re-exports only `delonix_model::{Error, Result}`, so a call
-site that used `delonix_runtime_core::Store` now imports `delonix_state::Store`.
+any more, so a call site that used `delonix_runtime_core::Store` now imports
+`delonix_state::Store`. The only re-exports in `src/lib.rs` are from `delonix-model`:
+`records::{default_namespace, fw_port_ok, fw_proto_ok, fw_src_ok, ContainerFw, FwRule, Status}`
+and `{typestate, Error, Result}` (#405). New code may import either path; the
+definitions are in `delonix-model`.
 
 **Key modules**
 
 | Module | Responsibility |
 |---|---|
-| `lib.rs` | `Container`, `Vm`, `Status`, `Mount`, `ContainerFw`/`FwRule`, health config, cgroup-parent parsing, `generate_id`, pid liveness helpers |
+| `lib.rs` | `Container`, `Vm`, `Mount`, health config, cgroup-parent parsing (`KubeCgroupParent`), `generate_id`, `now_unix`, pid liveness helpers; re-exports `Status`, `ContainerFw`/`FwRule`, `default_namespace` from `delonix-model` |
 | `events` | append-only `events.jsonl` event log (`emit`, `read`) |
 | `dispatch` | version check and CLI resolution for server binaries run by `delonix` |
 | `peer_cred` | `peer_uid` from `SO_PEERCRED` |
-| `typestate` | compile-time lifecycle phases (`Phase<Created/Running/Stopped>`) |
+| `typestate` | re-export of `delonix_model::typestate` (moved in #405) |
 | `virt` | virtualization/virtio detection from `/sys` and `/proc` |
 | `workload_net` | the workload IPv4 range, defined once |
 
@@ -99,14 +105,15 @@ site that used `delonix_runtime_core::Store` now imports `delonix_state::Store`.
 |---|---|---|
 | `Container` | the container record everything reads and writes | `crates/foundation/delonix-runtime-core/src/lib.rs:Container` |
 | `Vm` | the VM record | `crates/foundation/delonix-runtime-core/src/lib.rs:Vm` |
-| `Status` | lifecycle state of a workload | `crates/foundation/delonix-runtime-core/src/lib.rs:Status` |
+| `Status` | lifecycle state of a workload, re-exported | defined in `crates/foundation/delonix-model/src/records.rs:Status` |
 | `Error`, `Result` | the error every engine crate returns, re-exported from `delonix-model` | `crates/foundation/delonix-runtime-core/src/lib.rs` (`pub use delonix_model::{Error, Result}`) |
 | `events::emit` | append one event line | `crates/foundation/delonix-runtime-core/src/events.rs:emit` |
 | `dispatch::check_version`, `dispatch::cli_bin` | how `delonix-cri`/`-mgmt`/`-mcp` refuse a mismatched release and find the `delonix` CLI to run back | `crates/foundation/delonix-runtime-core/src/dispatch.rs` |
 | `is_alive`, `proc_starttime`, `safe_to_signal` | pid checks that survive pid recycling | `crates/foundation/delonix-runtime-core/src/lib.rs` |
 
-**Talks to.** `delonix-model` only, for the `Error`/`Result` it re-exports. No
-subprocesses: detection reads `/sys` and `/proc` directly.
+**Talks to.** `delonix-model` only, for the `Error`/`Result`, the plain-data records
+and the typestate it re-exports. No subprocesses: detection reads `/sys` and `/proc`
+directly.
 
 **Notable external dependencies.** `serde`/`serde_json` (the record types derive
 them), `thiserror`, `libc`. The encryption dependencies (`chacha20poly1305`,
@@ -129,10 +136,10 @@ them), `thiserror`, `libc`. The encryption dependencies (`chacha20poly1305`,
   container has more (see the `NetPlan` doc comment in
   `crates/adapters/delonix-sdn/src/infra.rs` and `apply_firewall_all`, which exists
   because firewalling only the primary IP was bypassable).
-- The crate description in `Cargo.toml` still says it holds the "Secret Manager"
-  and the "Store", and the crate doc in `src/lib.rs` still says "shared types,
-  state and errors". Both predate the move to `delonix-state`; the module list is
-  the reference.
+- The crate description in `Cargo.toml` still says it holds `Status`, the "Secret
+  Manager" and the "Store", and the crate doc in `src/lib.rs` still says "shared
+  types, state and errors". Both predate #404 and #405; the module list is the
+  reference.
 - `Container::cgroup()` is the static root-mode path. For a running rootless
   container the real cgroup is read from `/proc/<pid>/cgroup` by
   `delonix_linux::live_cgroup`.
@@ -142,10 +149,14 @@ them), `thiserror`, `libc`. The encryption dependencies (`chacha20poly1305`,
 **Purpose.** The part of the model any layer can name without depending on a
 mechanism: the engine's shared `Error` type with the stable `DX_*` code of each
 variant, the generated workload names, and the mapping from an `Error` to a process
-exit code, the numbered `DX-CDNN` code dictionary, and the secret model (what a
-secret is and what a valid name and key look like). Pure — no I/O, no process state
-(crate doc). It does not hold records; those are in `delonix-runtime-core`, and the
-files that store them are in `delonix-state`.
+exit code, the numbered `DX-CDNN` code dictionary, the secret model (what a
+secret is and what a valid name and key look like), and — since #405 — the records
+that are plain data: a workload's `Status`, the per-container firewall
+(`ContainerFw`, `FwRule` and the pure validators `fw_proto_ok`, `fw_port_ok`,
+`fw_src_ok`), `default_namespace`, and the compile-time lifecycle `typestate`. Pure —
+no I/O, no process state (crate doc). The `Container` and `Vm` records stay in
+`delonix-runtime-core`, which re-exports everything above under the old paths; the
+files that store records are in `delonix-state`.
 
 **Key modules**
 
@@ -156,6 +167,8 @@ files that store them are in `delonix-state`.
 | `names` | default names (`derived_name`, `random_name`) |
 | `codes` | the dictionary of numbered codes `DX-CDNN` (ADR-0043): class digit, domain digit, number |
 | `secret` | `Secret` and the pure rules `valid_name`, `valid_env_key`, `parse_env_file`; the encrypted store is `delonix-state` |
+| `records` | `Status` (`from_wait`, `is_terminal`, `exit_code`), `ContainerFw`/`FwRule`, `fw_proto_ok`/`fw_port_ok`/`fw_src_ok`, `default_namespace` (moved from `delonix-runtime-core` in #405) |
+| `typestate` | compile-time lifecycle phases `Phase<Created/Running/Stopped>`; illegal transitions do not compile (moved in #405) |
 
 **Main public API**
 
@@ -166,23 +179,34 @@ files that store them are in `delonix-state`.
 | `exitcode::merge` | the code for a batch of results | `crates/foundation/delonix-model/src/exitcode.rs:merge` |
 | `names::derived_name` | deterministic name from an id | `crates/foundation/delonix-model/src/names.rs:derived_name` |
 | `secret::Secret`, `secret::parse_env_file` | the secret record and the `KEY=value` file parser, used by `delonix-compute` without depending on an adapter | `crates/foundation/delonix-model/src/secret.rs` |
+| `records::Status` | lifecycle state of a workload | `crates/foundation/delonix-model/src/records.rs:Status` |
+| `records::ContainerFw`, `records::FwRule` | the persisted per-container firewall; `delonix-sdn` applies it with nftables | `crates/foundation/delonix-model/src/records.rs` |
+| `typestate::Phase` | typed lifecycle phases | `crates/foundation/delonix-model/src/typestate.rs:Phase` |
 
-**Talks to.** No other engine crate: it is now a root of the graph, and
-`delonix-runtime-core` depends on it (the dependency used to point the other way). The CLI
-re-exports both modules as `cmd::exitcode` and `cmd::names`
+**Talks to.** No other engine crate: it is a root of the graph, and
+`delonix-runtime-core` depends on it and re-exports its error and records (the
+dependency used to point the other way). The CLI re-exports `exitcode` and `names` as
+`cmd::exitcode` and `cmd::names`
 (`bins/delonix-runtime-bin/src/cmd/mod.rs`), so older call sites did not change.
 
 **Notable external dependencies.** `thiserror` (the `Error` derive), `serde_json`
 (the `Error::Json` variant wraps `serde_json::Error`) and `serde` (the `Secret`
 derive).
 
-**Tests.** Inline unit tests.
+**Tests.** Inline unit tests (`codes`, `error`, `exitcode`, `names`, `typestate`)
+and a doc-test in `src/typestate.rs`.
 
 **Start reading at.** `src/exitcode.rs` (its module doc explains why classes exist),
-then `src/names.rs`.
+then `src/records.rs`, then `src/names.rs`.
 
-**Gotchas.** The `match` in `for_error` is exhaustive on purpose: a new `Error`
-variant must be classified here or the build fails.
+**Gotchas.**
+
+- The `match` in `for_error` is exhaustive on purpose: a new `Error` variant must
+  be classified here or the build fails.
+- Several import paths reach the same type: `delonix_model::records::FwRule`,
+  `delonix_runtime_core::FwRule` (re-export) and `delonix_sdn::FwRule` (a re-export
+  of the `-core` one, `crates/adapters/delonix-sdn/src/lib.rs`). They are one type,
+  so all compile; `grep` for every path when you look for callers.
 
 ### `delonix-net-rules`
 
@@ -747,8 +771,9 @@ servers deliver reliably (module doc of `telemetry.rs`).
 **Purpose.** The engine's persisted state (crate doc, ADR-0040 D2.3): one JSON file
 per record behind an exclusive `flock`, the atomic-write helpers every adapter uses
 for its own files, and the secret vault encrypted at rest. It came out of
-`delonix-runtime-core`: the record **types** (`Container`, `Vm`) stay in the
-foundation, the files that hold them live here. It does not decide anything about a
+`delonix-runtime-core` in #404: the record **types** stay in the foundation
+(`Container`, `Vm` in `delonix-runtime-core`; since #405 `Status` and the firewall
+records in `delonix-model`), the files that hold them live here. It does not decide anything about a
 workload; it loads, saves and locks.
 
 **Key modules**
@@ -773,8 +798,9 @@ workload; it loads, saves and locks.
 | `Error`, `Result` | `NoSuchContainer`, `AmbiguousContainer`, `NoSuchRecord`, `NoSuchSecret`, `InvalidSecretName`, `InvalidEnvKey`, `InvalidCredentialName`, `CorruptMasterKey`, `Vault`, `Lock`, `Entropy`, and `Engine` wrapping a `delonix_model::Error`; `number`, `is_not_found`, `is_invalid_argument`, `into_root` | `crates/adapters/delonix-state/src/error.rs` |
 
 **Talks to.** `delonix-runtime-core` (the `Container` type the `Store` holds, and
-`default_namespace`) and `delonix-model` (the error class its errors convert into,
-and the secret model). No subprocesses and no network: only the filesystem.
+`default_namespace`, which is defined in `delonix-model` and reached through the
+`-core` re-export in `store.rs`) and `delonix-model` (the error class its errors
+convert into, and the secret model). No subprocesses and no network: only the filesystem.
 Callers, all by direct call: `delonix-linux` (`Store`, `SecretStore`,
 `write_private_temp`), `delonix-vm` (`JsonStore`, `write_atomic`), `delonix-sdn`
 (`write_atomic`, `write_private_temp`), `delonix-oci` (`write_atomic_mode`),
@@ -1154,6 +1180,10 @@ pass attaches through the holder and re-executes into the network namespace
 (`attach_custom_network`, `reexec_into_netns`), and ports are published on the
 holder by `HostNetwork::publish`.
 
+> **Legend** — participants are crates (with the module or type that plays the part), the operator or kubelet, and host tools; solid arrows are calls or messages, labelled with the function; dashed arrows are replies; a self-arrow is work inside that participant; `loop`, `alt` and `opt` boxes are repetition, exclusive branches and optional steps.
+
+The policy and the pure decisions run first; only then does the Linux adapter fork, clone and start the container's own `slirp4netns`.
+
 ```mermaid
 sequenceDiagram
   actor Op as Operator
@@ -1183,6 +1213,10 @@ sequenceDiagram
 
 ### 2. `delonix stack apply -f manifest.yaml`
 
+> **Legend** — participants are crates (with the module or type that plays the part), the operator or kubelet, and host tools; solid arrows are calls or messages, labelled with the function; dashed arrows are replies; a self-arrow is work inside that participant; `loop`, `alt` and `opt` boxes are repetition, exclusive branches and optional steps.
+
+Planning is one pure call into `delonix-stack`; everything that touches a resource stays in the CLI's per-Kind code and the adapters it calls.
+
 ```mermaid
 sequenceDiagram
   actor Op as Operator
@@ -1208,6 +1242,10 @@ sequenceDiagram
 ```
 
 ### 3. kubelet → `delonix-cri` → engine
+
+> **Legend** — participants are crates (with the module or type that plays the part), the operator or kubelet, and host tools; solid arrows are calls or messages, labelled with the function; dashed arrows are replies; a self-arrow is work inside that participant; `loop`, `alt` and `opt` boxes are repetition, exclusive branches and optional steps.
+
+The CRI server pulls images and attaches networks in-process, but every container start crosses into a fresh `delonix` process.
 
 ```mermaid
 sequenceDiagram

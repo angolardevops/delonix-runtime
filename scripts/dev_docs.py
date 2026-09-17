@@ -32,6 +32,7 @@ from __future__ import annotations
 import argparse
 import importlib.util
 import re
+import subprocess
 import sys
 import tomllib
 from pathlib import Path
@@ -192,11 +193,24 @@ def render_crates_table(arch, crates: list[dict], lang: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def render_crates_graph(arch, crates: list[dict]) -> str:
+GRAPH_LEGEND = {
+    "en": "**Legend** — one box per crate, grouped by layer; an arrow `A --> B` means *A depends on B*. "
+          "Red: binaries · white with red border: interfaces · white: contexts and adapters · grey: providers · blue: foundation.",
+    "pt-AO": "**Legenda** — uma caixa por crate, agrupada por camada; uma seta `A --> B` quer dizer *A depende de B*. "
+             "Vermelho: binários · branco com borda vermelha: interfaces · branco: contextos e adaptadores · cinzento: providers · azul: fundação.",
+    "fr-FR": "**Légende** — une boîte par crate, regroupées par couche ; une flèche `A --> B` signifie *A dépend de B*. "
+             "Rouge : binaires · blanc à bordure rouge : interfaces · blanc : contextes et adaptateurs · gris : providers · bleu : fondation.",
+    "zh-CN": "**图例** —— 每个 crate 一个方框，按层分组；箭头 `A --> B` 表示 *A 依赖 B*。"
+             "红色：二进制 · 红边白底：接口 · 白色：上下文与适配器 · 灰色：provider · 蓝色：基础层。",
+}
+LAYER_CLASS = {"bin": "engine", "interface": "iface", "context": "block", "adapter": "block", "provider": "external", "foundation": "store"}
+
+
+def render_crates_graph(arch, crates: list[dict], lang: str = "en") -> str:
     def node(name: str) -> str:
         return name.replace("-", "_")
 
-    lines = ["```mermaid", "graph TB"]
+    lines = [GRAPH_LEGEND[lang], "", "```mermaid", "flowchart TB"]
     for layer in LAYER_ORDER:
         members = sorted(c["name"] for c in crates if layer_of(arch, c["name"]) == layer)
         if not members:
@@ -207,6 +221,15 @@ def render_crates_graph(arch, crates: list[dict]) -> str:
     for crate in sorted(crates, key=lambda c: c["name"]):
         for dep in crate["deps"]:
             lines.append(f"  {node(crate['name'])} --> {node(dep)}")
+    for crate in sorted(crates, key=lambda c: c["name"]):
+        lines.append(f"  class {node(crate['name'])} {LAYER_CLASS[layer_of(arch, crate['name'])]}")
+    lines += [
+        "  classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff",
+        "  classDef iface fill:#ffffff,stroke:#cc2823,stroke-width:2px,color:#191513",
+        "  classDef block fill:#ffffff,stroke:#8a817c,color:#191513",
+        "  classDef external fill:#e1ddda,stroke:#8a817c,color:#191513",
+        "  classDef store fill:#2390c8,stroke:#17618a,color:#ffffff",
+    ]
     lines.append("```")
     return "\n".join(lines) + "\n"
 
@@ -269,7 +292,7 @@ def regions(lang: str = "en") -> dict[str, str]:
         "layers": render_layers(arch, lang),
         "crate-count": render_crate_count(crates, lang),
         "crates-table": render_crates_table(arch, crates, lang),
-        "crates-graph": render_crates_graph(arch, crates),
+        "crates-graph": render_crates_graph(arch, crates, lang),
         "ci-gates": render_ci_gates(lang),
         "ratchets": render_ratchets(lang),
     }
@@ -348,6 +371,39 @@ def env_var_problems() -> list[str]:
     return problems
 
 
+STRUCTURE_PAGE = "project-structure.md"
+
+
+def repository_paths() -> list[str]:
+    """What the project-structure page must explain: every tracked top-level directory
+    and file, and the second level of `crates/`, `bins/` and `docs/` (where the layers and
+    the documentation families live). Read from `git ls-files`, so an untracked build
+    directory never becomes a documentation requirement."""
+    files = subprocess.run(["git", "-C", str(ROOT), "ls-files"], capture_output=True, text=True, check=True).stdout.split()
+    paths = set()
+    for f in files:
+        parts = f.split("/")
+        if len(parts) == 1:
+            paths.add(parts[0])
+            continue
+        paths.add(parts[0] + "/")
+        if parts[0] in ("crates", "bins", "docs") and len(parts) > 2:
+            paths.add(f"{parts[0]}/{parts[1]}/")
+    return sorted(paths)
+
+
+def structure_problems() -> list[str]:
+    """The project-structure table must name every path above and nothing that no longer exists."""
+    page = DEV_DOCS / STRUCTURE_PAGE
+    if not page.is_file():
+        return []  # the page is added in its own commit; until then there is nothing to check
+    documented = set(re.findall(r"^\|\s*`([^`]+)`", page.read_text(), re.M))
+    required = set(repository_paths())
+    problems = [f"{path} exists in the repository but is missing from docs/dev/{STRUCTURE_PAGE}" for path in sorted(required - documented)]
+    problems += [f"{path} is documented in docs/dev/{STRUCTURE_PAGE} but is not a tracked path" for path in sorted(documented - required)]
+    return problems
+
+
 def lang_dir(lang: str) -> Path:
     return DEV_DOCS if lang == "en" else DEV_DOCS / lang
 
@@ -394,6 +450,13 @@ def main() -> int:
     unused = sorted(set(generated) - used)
     if unused:
         print(f"dev_docs: generated regions not placed in any docs/dev page: {', '.join(unused)}")
+        return 1
+
+    structure = structure_problems()
+    if structure:
+        print(f"dev_docs: the project-structure table does not match the repository ({len(structure)}):")
+        for problem in structure:
+            print(f"  {problem}")
         return 1
 
     env_problems = env_var_problems()

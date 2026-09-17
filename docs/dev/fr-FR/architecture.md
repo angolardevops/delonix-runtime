@@ -139,8 +139,10 @@ binaires → P4 providers → P5 API de nœud → P6 CRI → P7 observabilité).
 Le graphe des crates, tel que `Cargo.toml` le déclare :
 
 <!-- dev-docs:begin crates-graph -->
+**Légende** — une boîte par crate, regroupées par couche ; une flèche `A --> B` signifie *A dépend de B*. Rouge : binaires · blanc à bordure rouge : interfaces · blanc : contextes et adaptateurs · gris : providers · bleu : fondation.
+
 ```mermaid
-graph TB
+flowchart TB
   subgraph foundation["Foundation"]
     delonix_model["delonix-model"]
     delonix_net_rules["delonix-net-rules"]
@@ -250,6 +252,33 @@ graph TB
   delonix_volume --> delonix_model
   delonix_volume --> delonix_runtime_core
   delonix_volume --> delonix_state
+  class delonix_compute block
+  class delonix_cri iface
+  class delonix_linux block
+  class delonix_mcp iface
+  class delonix_mcp_bin engine
+  class delonix_mgmt iface
+  class delonix_mgmt_bin engine
+  class delonix_model store
+  class delonix_net_rules store
+  class delonix_oci block
+  class delonix_proxmox external
+  class delonix_runtime_bin engine
+  class delonix_runtime_core store
+  class delonix_scanner block
+  class delonix_sdn block
+  class delonix_security_runtime block
+  class delonix_stack block
+  class delonix_state block
+  class delonix_telemetry block
+  class delonix_truenas external
+  class delonix_vm block
+  class delonix_volume block
+  classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
+  classDef iface fill:#ffffff,stroke:#cc2823,stroke-width:2px,color:#191513
+  classDef block fill:#ffffff,stroke:#8a817c,color:#191513
+  classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
+  classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 ```
 <!-- dev-docs:end crates-graph -->
 

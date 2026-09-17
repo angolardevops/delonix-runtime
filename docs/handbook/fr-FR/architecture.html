@@ -206,10 +206,10 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="cloud-native-primer.html"><span class="n">02</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">03</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">04</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">05</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a class="on" aria-current="page" href="architecture.html"><span class="n">06</span><span>Architecture</span></a><a href="crates.html"><span class="n">07</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">08</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">09</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">10</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">11</span><span>Conventions de code</span></a><a href="contributing-workflow.html"><span class="n">12</span><span>Flux de contribution</span></a><a href="publishing-docs.html"><span class="n">13</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">14</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">15</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">16</span><span>Glossaire</span></a></div></nav>
+<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a class="on" aria-current="page" href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">14</span><span>Conventions de code</span></a><a href="contributing-workflow.html"><span class="n">15</span><span>Flux de contribution</span></a><a href="publishing-docs.html"><span class="n">16</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">17</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">18</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">19</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Architecture</p>
-<h1 id="architecture">Architecture</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/architecture.html">Lire la page en anglais</a></span></div><h1 id="architecture">Architecture</h1>
 <p>Cette page est la carte dont un contributeur a besoin avant de toucher au backend : ce qu’est le moteur, comment
 les crates sont organisés en couches, quels processus existent à l’exécution, où l’état vit sur disque, et comment les
 éléments communiquent entre eux. Chaque affirmation structurelle nomme le fichier et le symbole par rapport auxquels elle a été
@@ -221,7 +221,7 @@ l’<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr
 <code>python3 scripts/dev_docs.py</code> à partir de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> et de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> — ne les modifiez pas
 à la main. Tout le reste est du récit et est relu après chaque release.</p>
 </blockquote>
-<h2 id="engine-identity-and-boundaries">Identité et frontières du moteur<a class="hanchor" href="#engine-identity-and-boundaries" aria-label="#">#</a></h2>
+<h2 id="identite-et-frontieres-du-moteur">Identité et frontières du moteur<a class="hanchor" href="#identite-et-frontieres-du-moteur" aria-label="#">#</a></h2>
 <p>Le texte canonique est la section <em>«Identidade e fronteira do motor»</em> en tête de
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. En bref :</p>
 <ul>
@@ -299,7 +299,7 @@ l’<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr
 <!-- dev-docs:end ratchets -->
 
 <p><code>python3 scripts/arch_fitness.py --list</code> montre ce que chaque ratchet compte aujourd’hui, fichier par fichier.</p>
-<h2 id="layers-and-the-allowed-direction">Les couches et la direction autorisée<a class="hanchor" href="#layers-and-the-allowed-direction" aria-label="#">#</a></h2>
+<h2 id="les-couches-et-la-direction-autorisee">Les couches et la direction autorisée<a class="hanchor" href="#les-couches-et-la-direction-autorisee" aria-label="#">#</a></h2>
 <p>L’ADR-0040 D1 fixe une seule direction de dépendance :</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="nohighlight">interfaces ─► contexts (domain + use cases + ports) ◄─ adapters / providers
      │                                                      ▲
@@ -364,7 +364,7 @@ l’<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr
 </ul>
 <!-- dev-docs:end layers -->
 
-<h3 id="where-the-restructuring-stands">Où en est la restructuration<a class="hanchor" href="#where-the-restructuring-stands" aria-label="#">#</a></h3>
+<h3 id="ou-en-est-la-restructuration">Où en est la restructuration<a class="hanchor" href="#ou-en-est-la-restructuration" aria-label="#">#</a></h3>
 <p>L’ADR-0040 est un plan d’étranglement en phases (P0 rails → P1 contrat → P2 contextes → P3 adaptateurs et
 binaires → P4 providers → P5 API de nœud → P6 CRI → P7 observabilité). Ce que montre le code aujourd’hui :</p>
 <ul>
@@ -394,7 +394,8 @@ binaires → P4 providers → P5 API de nœud → P6 CRI → P7 observabilité).
 </ul>
 <p>Le graphe des crates, tel que <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> le déclare :</p>
 <!-- dev-docs:begin crates-graph -->
-<pre class="mermaid">graph TB
+<p><strong>Légende</strong> — une boîte par crate, regroupées par couche ; une flèche <code>A --&gt; B</code> signifie <em>A dépend de B</em>. Rouge : binaires · blanc à bordure rouge : interfaces · blanc : contextes et adaptateurs · gris : providers · bleu : fondation.</p>
+<pre class="mermaid">flowchart TB
   subgraph foundation[&quot;Foundation&quot;]
     delonix_model[&quot;delonix-model&quot;]
     delonix_net_rules[&quot;delonix-net-rules&quot;]
@@ -504,10 +505,37 @@ binaires → P4 providers → P5 API de nœud → P6 CRI → P7 observabilité).
   delonix_volume --&gt; delonix_model
   delonix_volume --&gt; delonix_runtime_core
   delonix_volume --&gt; delonix_state
+  class delonix_compute block
+  class delonix_cri iface
+  class delonix_linux block
+  class delonix_mcp iface
+  class delonix_mcp_bin engine
+  class delonix_mgmt iface
+  class delonix_mgmt_bin engine
+  class delonix_model store
+  class delonix_net_rules store
+  class delonix_oci block
+  class delonix_proxmox external
+  class delonix_runtime_bin engine
+  class delonix_runtime_core store
+  class delonix_scanner block
+  class delonix_sdn block
+  class delonix_security_runtime block
+  class delonix_stack block
+  class delonix_state block
+  class delonix_telemetry block
+  class delonix_truenas external
+  class delonix_vm block
+  class delonix_volume block
+  classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
+  classDef iface fill:#ffffff,stroke:#cc2823,stroke-width:2px,color:#191513
+  classDef block fill:#ffffff,stroke:#8a817c,color:#191513
+  classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
+  classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
 <!-- dev-docs:end crates-graph -->
 
-<h2 id="executables-and-processes-at-runtime">Exécutables et processus à l’exécution<a class="hanchor" href="#executables-and-processes-at-runtime" aria-label="#">#</a></h2>
+<h2 id="executables-et-processus-a-lexecution">Exécutables et processus à l’exécution<a class="hanchor" href="#executables-et-processus-a-lexecution" aria-label="#">#</a></h2>
 <p>C’est le niveau <em>container</em> du C4 : les choses qui s’exécutent. Le build fournit quatre exécutables (voir le
 nombre généré dans le <a href="index.html">README du manuel</a>) ; plusieurs autres <strong>processus</strong> apparaissent par
 workload ou par nœud, chacun avec un propriétaire.</p>
@@ -660,7 +688,7 @@ workload ou par nœud, chacun avec un propriétaire.</p>
 l’infrastructure réseau, sous un verrou de fichier par racine, et elle distingue trois cas : pin et control
 vivants (rien à faire) ; pin vivant et control disparu (redémarrer <strong>uniquement</strong> le plan de contrôle — aucun câble
 ne bouge) ; pin disparu (démonter et reconstruire).</p>
-<h2 id="one-set-of-operations-several-interfaces">Un seul ensemble d’opérations, plusieurs interfaces<a class="hanchor" href="#one-set-of-operations-several-interfaces" aria-label="#">#</a></h2>
+<h2 id="un-seul-ensemble-doperations-plusieurs-interfaces">Un seul ensemble d’opérations, plusieurs interfaces<a class="hanchor" href="#un-seul-ensemble-doperations-plusieurs-interfaces" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -718,7 +746,7 @@ tag qui contient <code>proto/</code>, un RPC sans mapping HTTP (ou un stream bid
 un document OpenAPI qui diffère de celui généré, et deux chemins qui sont la même URL
 sous des noms de variables différents. Trois règles qu’il protège : un message de requête par RPC, une identité
 explicite (<code>namespace</code>/<code>name</code>) dans la requête, et des images adressées par paramètre de requête.</p>
-<h2 id="state-on-disk">L’état sur disque<a class="hanchor" href="#state-on-disk" aria-label="#">#</a></h2>
+<h2 id="letat-sur-disque">L’état sur disque<a class="hanchor" href="#letat-sur-disque" aria-label="#">#</a></h2>
 <p>Il n’y a pas de base de données. L’état est constitué de fichiers sous une seule <strong>racine d’état</strong> :</p>
 <ul>
 <li><code>DELONIX_ROOT</code> lorsqu’elle est définie ; sinon <code>$XDG_DATA_HOME/delonix</code> ou <code>~/.local/share/delonix</code> pour un
@@ -817,7 +845,7 @@ fonctions de récupération.</p>
 <p>Comme rien de résident ne surveille les processus, un enregistrement indiquant <code>Running</code> peut être obsolète. Les lecteurs
 réconcilient : <code>delonix_linux::reconcile_status</code> vérifie le pid ainsi que son heure de démarrage
 (<code>delonix_runtime_core::safe_to_signal</code>), de sorte qu’un pid recyclé n’est jamais confondu avec le container.</p>
-<h2 id="how-the-crates-communicate">Comment les crates communiquent<a class="hanchor" href="#how-the-crates-communicate" aria-label="#">#</a></h2>
+<h2 id="comment-les-crates-communiquent">Comment les crates communiquent<a class="hanchor" href="#comment-les-crates-communiquent" aria-label="#">#</a></h2>
 <ol>
 <li><strong>Appels Rust directs, dans la direction des couches.</strong> Le cas normal. Par exemple <code>cmd_run</code>
    (<code>cmd/container.rs</code>) appelle <code>delonix_compute::run::resolve_run</code> avec les adaptateurs
@@ -862,7 +890,7 @@ réconcilient : <code>delonix_linux::reconcile_status</code> vérifie le pid ai
    <code>delonix-oci</code> a son propre client de registre OCI (<code>src/registry.rs</code>, <code>reqwest</code> dans son
    <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), et <code>delonix-telemetry</code> exporte OTLP sur HTTP. Aucun crate de contexte ne le fait.</li>
 </ol>
-<h2 id="two-flows-as-sequences">Deux flux, sous forme de séquences<a class="hanchor" href="#two-flows-as-sequences" aria-label="#">#</a></h2>
+<h2 id="deux-flux-sous-forme-de-sequences">Deux flux, sous forme de séquences<a class="hanchor" href="#deux-flux-sous-forme-de-sequences" aria-label="#">#</a></h2>
 <h3 id="container-run-d-net-web-p-808080-nginx-rootless"><code>container run -d --net web -p 8080:80 nginx</code>, rootless<a class="hanchor" href="#container-run-d-net-web-p-808080-nginx-rootless" aria-label="#">#</a></h3>
 <p>Chaque flèche ci-dessous est un appel dans <code>cmd_run</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>) ou dans
 les fonctions qu’il atteint.</p>
@@ -938,7 +966,7 @@ le parent écrit les maps d’id (<code>write_userns_maps</code>), configure le 
     K-&gt;&gt;R: ContainerStatus
     R-&gt;&gt;ST: load_reconciled → reconcile_status against the kernel
 </pre>
-<h2 id="known-limitations">Limitations connues<a class="hanchor" href="#known-limitations" aria-label="#">#</a></h2>
+<h2 id="limitations-connues">Limitations connues<a class="hanchor" href="#limitations-connues" aria-label="#">#</a></h2>
 <blockquote>
 <p><strong>Remarque — le contrat de nœud n’est pas servi.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> est contrôlé par un gate et génère
 l’OpenAPI, mais aucun processus n’y répond. Les intégrations utilisent aujourd’hui la CLI, le CRI, l’API de
@@ -962,7 +990,7 @@ des netns des containers, sauf si <code>DELONIX_ENABLE_IPV6=1</code> (<code>ipv6
 <code>detach &amp;&amp; forkable</code> ; sans superviseur, personne n’est le parent du processus et le vrai code
 de sortie ne peut pas être recueilli.</p>
 </blockquote>
-<h2 id="where-to-start-reading">Par où commencer la lecture<a class="hanchor" href="#where-to-start-reading" aria-label="#">#</a></h2>
+<h2 id="par-ou-commencer-la-lecture">Par où commencer la lecture<a class="hanchor" href="#par-ou-commencer-la-lecture" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -1017,27 +1045,27 @@ de sortie ne peut pas être recueilli.</p>
 </tr>
 </tbody>
 </table></div>
-<nav class="pager"><a href="build-and-test.html"><span>← Précédent</span>Cloner, compiler et tester</a><a class="next" href="crates.html"><span>Suivant →</span>Les crates</a></nav>
+<nav class="pager"><a href="project-structure.html"><span>← Précédent</span>Project structure</a><a class="next" href="crates.html"><span>Suivant →</span>Les crates</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/architecture.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/architecture.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#engine-identity-and-boundaries">Identité et frontières du moteur</a></li>
-<li><a href="#layers-and-the-allowed-direction">Les couches et la direction autorisée</a><ul>
-<li><a href="#where-the-restructuring-stands">Où en est la restructuration</a></li>
+<li><a href="#identite-et-frontieres-du-moteur">Identité et frontières du moteur</a></li>
+<li><a href="#les-couches-et-la-direction-autorisee">Les couches et la direction autorisée</a><ul>
+<li><a href="#ou-en-est-la-restructuration">Où en est la restructuration</a></li>
 </ul>
 </li>
-<li><a href="#executables-and-processes-at-runtime">Exécutables et processus à l’exécution</a></li>
-<li><a href="#one-set-of-operations-several-interfaces">Un seul ensemble d’opérations, plusieurs interfaces</a></li>
-<li><a href="#state-on-disk">L’état sur disque</a></li>
-<li><a href="#how-the-crates-communicate">Comment les crates communiquent</a></li>
-<li><a href="#two-flows-as-sequences">Deux flux, sous forme de séquences</a><ul>
+<li><a href="#executables-et-processus-a-lexecution">Exécutables et processus à l’exécution</a></li>
+<li><a href="#un-seul-ensemble-doperations-plusieurs-interfaces">Un seul ensemble d’opérations, plusieurs interfaces</a></li>
+<li><a href="#letat-sur-disque">L’état sur disque</a></li>
+<li><a href="#comment-les-crates-communiquent">Comment les crates communiquent</a></li>
+<li><a href="#deux-flux-sous-forme-de-sequences">Deux flux, sous forme de séquences</a><ul>
 <li><a href="#container-run-d-net-web-p-808080-nginx-rootless">container run -d --net web -p 8080:80 nginx, rootless</a></li>
 <li><a href="#cri-runpodsandbox-createcontainer-startcontainer">CRI : RunPodSandbox → CreateContainer → StartContainer</a></li>
 </ul>
 </li>
-<li><a href="#known-limitations">Limitations connues</a></li>
-<li><a href="#where-to-start-reading">Par où commencer la lecture</a></li>
+<li><a href="#limitations-connues">Limitations connues</a></li>
+<li><a href="#par-ou-commencer-la-lecture">Par où commencer la lecture</a></li>
 </ul>
 </div>
 </aside>
@@ -1093,7 +1121,10 @@ de sortie ne peut pas être recueilli.</p>
     if (!window.mermaid || !diagrams.length) return;
     diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
     mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
-      fontFamily:getComputedStyle(document.body).fontFamily});
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
     mermaid.run({nodes: diagrams});
   }
   renderMermaid();

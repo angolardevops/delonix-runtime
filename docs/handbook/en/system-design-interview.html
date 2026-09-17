@@ -206,7 +206,7 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="cloud-native-primer.html"><span class="n">02</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">03</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">Set up &amp; build</div><a href="environment.html"><span class="n">04</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">05</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="architecture.html"><span class="n">06</span><span>Architecture</span></a><a href="crates.html"><span class="n">07</span><span>The crates</span></a><a class="on" aria-current="page" href="system-design-interview.html"><span class="n">08</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">09</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">10</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="coding-conventions.html"><span class="n">11</span><span>Coding conventions</span></a><a href="contributing-workflow.html"><span class="n">12</span><span>Contribution workflow</span></a><a href="publishing-docs.html"><span class="n">13</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="cloud-native-standards.html"><span class="n">14</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">15</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">16</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="Contributor handbook"><div class="group"><div class="gtitle">Overview</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">Get started</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Foundations</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">Set up &amp; build</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a class="on" aria-current="page" href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images &amp; microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">Contributing</div><a href="coding-conventions.html"><span class="n">14</span><span>Coding conventions</span></a><a href="contributing-workflow.html"><span class="n">15</span><span>Contribution workflow</span></a><a href="publishing-docs.html"><span class="n">16</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">Reference</div><a href="cloud-native-standards.html"><span class="n">17</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">18</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">19</span><span>Glossary</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Architecture</p>
 <h1 id="system-design-interview-the-delonix-engine">System Design Interview — the Delonix Engine</h1>
@@ -364,42 +364,57 @@ Honest status: no crate references <code>delonix.node.v1</code> yet; local progr
 <h2 id="4-high-level-design">4. High-level design<a class="hanchor" href="#4-high-level-design" aria-label="#">#</a></h2>
 <blockquote class="say say-candidate"><p><span class="speaker">Candidate</span>I will layer it so the rules of the domain never import the kernel, and I will
 make every long-lived process own exactly one thing.</p>
+<p><strong>Legend</strong> — white box with red border: engine building block · outlined region: a layer ·
+cylinder, blue: state on disk · solid arrow: call or data flow, labelled.</p>
 </blockquote>
-<pre class="mermaid">graph TB
-    subgraph IF[&quot;interfaces&quot;]
-        CLI[&quot;CLI&quot;]
-        CRI[&quot;CRI server&quot;]
-        API[&quot;local API server&quot;]
-        MCP[&quot;MCP server&quot;]
-    end
-    subgraph CX[&quot;contexts — use cases and ports&quot;]
-        COMPUTE[&quot;compute: RunOpts, resolve_run, launch, ports&quot;]
-        STACK[&quot;stack: Kind table, 3-way plan&quot;]
-    end
-    subgraph AD[&quot;adapters and providers — implement ports&quot;]
-        LINUX[&quot;kernel: clone, mounts, cgroups, seccomp&quot;]
-        SDN[&quot;SDN: pin, control, nftables, slirp&quot;]
-        OCI[&quot;OCI: registry, CAS, layers&quot;]
-        VMS[&quot;VM backends: Cloud Hypervisor, libvirt, Proxmox&quot;]
-    end
-    STATE[(&quot;files under one state root&quot;)]
-    IF --&gt; CX
-    AD -. implements .-&gt; CX
-    IF --&gt; AD
-    AD --- STATE
+<p>The domain's rules never import the kernel, and one adapter owns every file under the state root.</p>
+<pre class="mermaid">flowchart TB
+  subgraph IF[&quot;interfaces — parse a request, present a result&quot;]
+    CLI[&quot;CLI&lt;br/&gt;&lt;small&gt;delonix&lt;/small&gt;&quot;]
+    CRI[&quot;CRI server&lt;br/&gt;&lt;small&gt;delonix-cri&lt;/small&gt;&quot;]
+    API[&quot;local API server&lt;br/&gt;&lt;small&gt;delonix-mgmt&lt;/small&gt;&quot;]
+    MCP[&quot;MCP server&lt;br/&gt;&lt;small&gt;delonix-mcp&lt;/small&gt;&quot;]
+  end
+  subgraph CX[&quot;contexts — use cases and ports, no kernel&quot;]
+    COMPUTE[&quot;compute&lt;br/&gt;&lt;small&gt;RunOpts, resolve_run, launch, ports&lt;/small&gt;&quot;]
+    STACK[&quot;stack&lt;br/&gt;&lt;small&gt;Kind table, 3-way plan&lt;/small&gt;&quot;]
+  end
+  subgraph AD[&quot;adapters and providers — implement ports&quot;]
+    LINUX[&quot;kernel&lt;br/&gt;&lt;small&gt;clone, mounts, cgroups, seccomp&lt;/small&gt;&quot;]
+    SDN[&quot;SDN&lt;br/&gt;&lt;small&gt;pin, control, nftables, slirp&lt;/small&gt;&quot;]
+    OCI[&quot;OCI&lt;br/&gt;&lt;small&gt;registry, CAS, layers&lt;/small&gt;&quot;]
+    VMS[&quot;VM backends&lt;br/&gt;&lt;small&gt;Cloud Hypervisor, libvirt, Proxmox&lt;/small&gt;&quot;]
+    STA[&quot;state&lt;br/&gt;&lt;small&gt;stores, atomic writes, secret vault&lt;/small&gt;&quot;]
+  end
+  FILES[(&quot;files under one state root&quot;)]
+  IF --&gt;|&quot;call use cases&quot;| CX
+  AD --&gt;|&quot;implement ports&quot;| CX
+  IF --&gt;|&quot;call directly, today&quot;| AD
+  STA --&gt;|&quot;flock, temp file + rename&quot;| FILES
+  class CLI,CRI,API,MCP,COMPUTE,STACK,LINUX,SDN,OCI,VMS,STA block
+  class FILES store
+classDef person fill:#191513,stroke:#191513,color:#ffffff
+classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
+classDef block fill:#ffffff,stroke:#cc2823,color:#191513
+classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
+classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
 <ul>
 <li><strong>Layers</strong> (ADR-0040 D1): foundation → contexts → adapters/providers → interfaces → binaries,
   enforced by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.</li>
 <li><strong>State</strong> is JSON records and content-addressed files under one root, with atomic writes and
-  <code>flock</code> around read-modify-write — no database, because there is no daemon to own one.</li>
+  <code>flock</code> around read-modify-write — no database, because there is no daemon to own one. The
+  record <em>types</em> are foundation types (<code>Container</code>/<code>Vm</code> in <code>delonix-runtime-core</code>; <code>Status</code> and the
+  firewall records in <code>delonix-model</code>); the <em>files</em> are opened only through the <code>delonix-state</code>
+  adapter.</li>
 <li><strong>Processes</strong> exist per workload (a supervisor that is the container's parent, the init, a log
   shim) and per node when networking is used (a <em>pin</em> that only holds namespaces, a restartable
   <em>control</em> process, one <code>slirp4netns</code> uplink). Nothing else stays up.</li>
 </ul>
 <p><strong>Where it lives in the code:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> (<code>Store::update</code>, <code>JsonStore::update</code>,
-<code>write_atomic</code>); <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code>;
+<code>write_atomic</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a> (<code>Container</code>, <code>Vm</code>);
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a> (<code>Status</code>, <code>ContainerFw</code>, <code>FwRule</code>); <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code>;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> (<code>run_supervised</code>).</p>
 <hr />
 <h2 id="5-deep-dives">5. Deep dives<a class="hanchor" href="#5-deep-dives" aria-label="#">#</a></h2>
@@ -430,6 +445,10 @@ process stopped, configure it from outside, and only release it when it is ready
 <li><strong>Publish the record last.</strong> The parent waits for the "mounted" byte (<code>wait_for_mounts</code>),
    briefly for the exec result, and only then <code>store.save</code>s <code>Running</code>.</li>
 </ol>
+<blockquote>
+<p><strong>Legend</strong> — participants are processes; solid arrows are calls, socket lines, forks or clones (the label says which); dashed arrows are replies or bytes sent back; a self-arrow is work inside that process; notes mark state or waits.</p>
+</blockquote>
+<p>The child is created blocked, configured from outside, and the record is saved only after the child reports its mounts.</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix
     participant SV as supervisor
@@ -509,6 +528,10 @@ namespace) are accepted, and <strong>new</strong> connections from any other con
 dropped; replies still flow because the drop matches only <code>ct state new</code>. An explicit ingress
 policy replaces that default. IPv6 in the SDN is refused by default (<code>table ip6</code> with
 <code>policy drop</code>), because every rule above is IPv4.</p>
+<blockquote>
+<p><strong>Legend</strong> — participants are processes; solid arrows are calls, socket lines, forks or clones (the label says which); dashed arrows are replies or bytes sent back; a self-arrow is work inside that process; notes mark state or waits.</p>
+</blockquote>
+<p>Joining a custom network is one control-socket line plus a re-exec into the pin's namespaces; publishing a port is two dataplane writes.</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix (1st pass)
     participant C as control
@@ -631,6 +654,10 @@ and make planning a pure function.</p>
   how presence is observed) governs the planner, apply order and teardown order, instead of lists
   kept in sync by hand.</li>
 </ul>
+<blockquote>
+<p><strong>Legend</strong> — participants are the operator, the <code>stack apply</code> command, the pure planner and the stores and dataplane it acts on; solid arrows are calls; dashed arrows are replies; <code>alt</code> and <code>opt</code> boxes are the failure branch and the optional prune.</p>
+</blockquote>
+<p>Nothing is created before the plan is checked, and a failure mid-apply is stamped rather than rolled back.</p>
 <pre class="mermaid">sequenceDiagram
     participant U as operator
     participant A as stack apply
@@ -871,7 +898,10 @@ a socket-activated server, and a launcher owning every namespace-creating spawn
     if (!window.mermaid || !diagrams.length) return;
     diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
     mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
-      fontFamily:getComputedStyle(document.body).fontFamily});
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
     mermaid.run({nodes: diagrams});
   }
   renderMermaid();
