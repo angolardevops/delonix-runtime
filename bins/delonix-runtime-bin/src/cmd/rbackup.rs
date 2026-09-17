@@ -430,8 +430,8 @@ impl Drop for Scratch {
 /// Reads a VM record. `delonix_vm::load_vm` is private, and the store is the
 /// same one `cmd/vm.rs` opens for exactly this.
 fn load_vm(root: &Path, name: &str) -> Result<delonix_runtime_core::Vm> {
-    let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
-        delonix_runtime_core::JsonStore::open(root.join("vms"))?;
+    let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+        delonix_state::JsonStore::open(root.join("vms"))?;
     st.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(_) => Error::VmNotFound(name.to_string()),
         e => e,
@@ -439,9 +439,9 @@ fn load_vm(root: &Path, name: &str) -> Result<delonix_runtime_core::Vm> {
 }
 
 fn save_vm(root: &Path, vm: &delonix_runtime_core::Vm) -> Result<()> {
-    let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
-        delonix_runtime_core::JsonStore::open(root.join("vms"))?;
-    st.save(&vm.name, vm)
+    let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+        delonix_state::JsonStore::open(root.join("vms"))?;
+    Ok(st.save(&vm.name, vm)?)
 }
 
 fn hostname() -> String {
@@ -484,7 +484,7 @@ impl Freeze {
     /// honest way to get it is to let the application shut down and write it.
     fn stop(
         containers: &[delonix_runtime_core::Container],
-        store: &delonix_runtime_core::Store,
+        store: &delonix_state::Store,
     ) -> Result<Stopped> {
         let mut restart = Vec::new();
         for c in containers {

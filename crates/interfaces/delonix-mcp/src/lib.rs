@@ -19,7 +19,8 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use delonix_runtime_core::{Container, Error as EngineError, Store};
+use delonix_runtime_core::{Container, Error as EngineError};
+use delonix_state::Store;
 use rmcp::handler::server::wrapper::Parameters;
 use rmcp::model::{
     ErrorCode, ErrorData, ReadResourceRequestParams, ReadResourceResult, Resource,
@@ -127,7 +128,7 @@ fn pretty(value: impl serde::Serialize) -> String {
 fn list_containers(base: &Path) -> Result<Vec<Container>, ErrorData> {
     Store::open(base.join("containers"))
         .and_then(|s| s.list())
-        .map_err(from_engine_error)
+        .map_err(|e| from_engine_error(e.into()))
 }
 
 fn list_vms(base: &Path) -> Result<Vec<delonix_runtime_core::Vm>, ErrorData> {
@@ -154,7 +155,7 @@ fn get_kind(base: &Path, kind: ResourceKind, name: &str) -> Result<serde_json::V
         ResourceKind::Container => Store::open(base.join("containers"))
             .and_then(|s| s.load(name))
             .map(|c| serde_json::to_value(c).unwrap_or(serde_json::Value::Null))
-            .map_err(from_engine_error),
+            .map_err(|e| from_engine_error(e.into())),
         ResourceKind::Vm => delonix_vm::status(base, name)
             .map(|v| serde_json::to_value(v).unwrap_or(serde_json::Value::Null))
             .map_err(from_engine_error),
@@ -776,7 +777,7 @@ pub fn capabilities_table() -> Vec<serde_json::Value> {
 pub fn doctor_checks(base: &Path) -> Vec<(&'static str, bool, String)> {
     let mut checks = Vec::new();
 
-    let containers_ok = Store::open(base.join("containers"));
+    let containers_ok = Store::open(base.join("containers")).map_err(EngineError::from);
     checks.push((
         "container_store",
         containers_ok.is_ok(),

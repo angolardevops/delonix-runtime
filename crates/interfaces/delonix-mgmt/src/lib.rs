@@ -26,7 +26,8 @@ use axum::routing::{get, post, put};
 use axum::{Json, Router};
 use delonix_oci::ImageStore;
 use delonix_runtime_core::peer_cred::peer_uid;
-use delonix_runtime_core::{Error, Store};
+use delonix_runtime_core::Error;
+use delonix_state::Store;
 use delonix_volume::VolumeStore;
 
 /// Shared state of the handlers.
@@ -448,11 +449,11 @@ async fn delete_volume(State(s): State<AppState>, Path(name): Path<String>) -> R
 async fn with_container_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
 where
     T: Send + 'static,
-    F: FnOnce(&Store) -> Result<T, Error> + Send + 'static,
+    F: FnOnce(&Store) -> Result<T, delonix_state::Error> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<T, Error> {
         let store = Store::open(base.join("containers"))?;
-        f(&store)
+        Ok(f(&store)?)
     })
     .await
     .map_err(|e| Error::Runtime {

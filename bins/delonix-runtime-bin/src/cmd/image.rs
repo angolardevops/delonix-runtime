@@ -704,7 +704,7 @@ fn cmd_login(registry: &str, username: &str, password_stdin: bool) -> Result<()>
 /// no user) being pointed at a registry, and "unauthorized" from the far end
 /// would send the reader looking at the registry rather than at the secret.
 fn registry_creds_from_secret(image: &str, secret: &str) -> Result<(String, String)> {
-    let store = delonix_runtime_core::SecretStore::open(super::util::state_root())?;
+    let store = delonix_state::SecretStore::open(super::util::state_root())?;
     let s = store.load(secret)?;
     let user = s
         .data
@@ -1009,7 +1009,7 @@ fn container_references_image(c_image: &str, img: &delonix_oci::Image) -> bool {
 /// Whether zero containers reference this image — same match
 /// `cmd_rm` already uses to decide if a removal is safe, reused here
 /// instead of a fresh lookup.
-fn image_is_orphan(store: &delonix_runtime_core::Store, img: &delonix_oci::Image) -> Option<bool> {
+fn image_is_orphan(store: &delonix_state::Store, img: &delonix_oci::Image) -> Option<bool> {
     let cs = store.list().ok()?;
     Some(!cs.iter().any(|c| container_references_image(&c.image, img)))
 }
@@ -1019,8 +1019,7 @@ fn cmd_ls(images: &ImageStore, format: super::output::OutputFormat) -> Result<()
     let mut imgs = images.list()?;
     // Newest first, as in `docker images`.
     imgs.sort_by_key(|i| std::cmp::Reverse(i.created_unix));
-    let cstore =
-        delonix_runtime_core::Store::open(super::util::state_root().join("containers")).ok();
+    let cstore = delonix_state::Store::open(super::util::state_root().join("containers")).ok();
     if format == super::output::OutputFormat::Json {
         let rows: Vec<ImageLsRow> = imgs
             .iter()
@@ -1160,7 +1159,7 @@ fn describe_one(images: &ImageStore, img: &delonix_oci::Image) {
 /// you typed.
 fn cmd_prune(
     images: &ImageStore,
-    store: &delonix_runtime_core::Store,
+    store: &delonix_state::Store,
     force: bool,
     all: bool,
 ) -> Result<()> {
@@ -1208,7 +1207,7 @@ fn cmd_prune(
 /// engine's own invariant forbids.
 fn cmd_rm(
     images: &ImageStore,
-    store: &delonix_runtime_core::Store,
+    store: &delonix_state::Store,
     reference: &str,
     force: bool,
 ) -> Result<()> {

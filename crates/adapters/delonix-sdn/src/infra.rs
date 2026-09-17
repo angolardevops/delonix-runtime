@@ -5001,7 +5001,7 @@ fn write_routedef(def: &RouteDef) -> Result<()> {
     })?;
     // `write_atomic`, not `fs::write` — the same lesson already paid for by the
     // network registry: a reader must never see a half-written record.
-    delonix_runtime_core::write_atomic(&routedef_path(&def.from, &def.to), &json).map_err(|e| {
+    delonix_state::write_atomic(&routedef_path(&def.from, &def.to), &json).map_err(|e| {
         Error::Runtime {
             context: "netroute",
             message: e.to_string(),
@@ -5105,12 +5105,12 @@ fn write_servicedef(def: &ServiceDef) -> Result<()> {
         context: "service",
         message: e.to_string(),
     })?;
-    delonix_runtime_core::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(
-        |e| Error::Runtime {
+    delonix_state::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(|e| {
+        Error::Runtime {
             context: "service",
             message: e.to_string(),
-        },
-    )
+        }
+    })
 }
 
 /// Applies a document's selector/port, PRESERVING whatever labels/annotations

@@ -6,7 +6,8 @@ use std::path::{Path, PathBuf};
 
 use delonix_linux::{self as runtime};
 use delonix_oci::{Image, ImageStore};
-use delonix_runtime_core::{Container, Error, Result, Store};
+use delonix_runtime_core::{Container, Error, Result};
+use delonix_state::Store;
 
 /// The runtime's state root: `$DELONIX_ROOT` or the `ImageStore` default.
 pub(crate) fn state_root() -> PathBuf {
@@ -135,7 +136,7 @@ pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
         return all
             .into_iter()
             .find(|c| c.namespace == ns && c.name == name)
-            .ok_or_else(|| Error::NotFound(format!("container: {q}")));
+            .ok_or_else(|| Error::coded(4101, Error::NotFound(format!("container: {q}"))));
     }
     if let Some(c) = all.iter().find(|c| c.id == q) {
         return Ok(c.clone());
@@ -177,7 +178,10 @@ pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
         // The AMBIGUOUS case below stays `Invalid` on purpose, and the
         // difference is the caller's next move: a prefix matching three
         // containers is a bad argument to fix, not a resource to create.
-        0 => Err(Error::NotFound(format!("container: {q}"))),
+        0 => Err(Error::coded(
+            4101,
+            Error::NotFound(format!("container: {q}")),
+        )),
         1 => Ok(matches.remove(0)),
         _ => {
             let ids: Vec<&str> = matches

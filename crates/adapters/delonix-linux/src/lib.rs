@@ -25,8 +25,9 @@ pub mod workload_view;
 
 use capabilities::{all_caps_mask, resolve_cap_keep};
 use delonix_runtime_core::{
-    Container, Error, KubeCgroupDriver, KubeCgroupParent, Mount, Result, Status, Store,
+    Container, Error, KubeCgroupDriver, KubeCgroupParent, Mount, Result, Status,
 };
+use delonix_state::Store;
 
 /// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
 /// container stdout). Deliberate local copy, to keep this crate's dependency
@@ -5545,7 +5546,7 @@ fn spawn(
     let env = {
         let mut env = container.env.clone();
         if !container.secret_files && !container.secrets.is_empty() {
-            if let Ok(ss) = delonix_runtime_core::SecretStore::open(store.base()) {
+            if let Ok(ss) = delonix_state::SecretStore::open(store.base()) {
                 env.extend(ss.resolve_env(&container.secrets));
             }
         }
@@ -5739,7 +5740,7 @@ fn spawn(
     // the values are captured (moved) into the clone's closure = the child's memory.
     let secret_files: Vec<(String, String)> =
         if container.secret_files && !container.secrets.is_empty() {
-            match delonix_runtime_core::SecretStore::open(store.base()) {
+            match delonix_state::SecretStore::open(store.base()) {
                 Ok(ss) => {
                     let mut map = std::collections::BTreeMap::new();
                     for n in &container.secrets {

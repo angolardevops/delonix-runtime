@@ -13,7 +13,8 @@
 
 use std::path::{Path, PathBuf};
 
-use delonix_runtime_core::{CgroupParent, Container, Status, Store};
+use delonix_runtime_core::{CgroupParent, Container, Status};
+use delonix_state::Store;
 
 const GROUP_MEM: &str = "67108864"; // 64 MiB for the whole group
 

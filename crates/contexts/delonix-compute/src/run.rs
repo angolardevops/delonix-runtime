@@ -317,7 +317,7 @@ pub fn build_record(o: &RunOpts, r: ResolvedRun) -> Result<Container> {
     // `-e` overrides a value from a file), then `-e`, then what CDI injects.
     c.env = r.image_env;
     for content in &r.env_files {
-        for (k, v) in delonix_runtime_core::secret::parse_env_file(content) {
+        for (k, v) in delonix_model::secret::parse_env_file(content) {
             c.env.push(format!("{k}={v}"));
         }
     }

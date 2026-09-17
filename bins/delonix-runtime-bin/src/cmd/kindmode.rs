@@ -32,7 +32,8 @@
 use std::time::{Duration, Instant};
 
 use delonix_oci::ImageStore;
-use delonix_runtime_core::{Container, Error, Result, Store};
+use delonix_runtime_core::{Container, Error, Result};
+use delonix_state::Store;
 
 use super::container::{self, RunOpts};
 

@@ -7,19 +7,14 @@
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub mod cred_vault;
 pub mod dispatch;
 pub mod events;
 pub mod peer_cred;
-pub mod secret;
-mod store;
 pub mod typestate;
 pub mod virt;
 pub mod workload_net;
 
 pub use delonix_model::{Error, Result};
-pub use secret::{Secret, SecretStore};
-pub use store::{write_atomic, write_atomic_mode, write_private_temp, JsonStore, Store};
 
 /// Seconds since the Unix epoch, `0` if the clock is before it.
 ///
@@ -1787,27 +1782,6 @@ mod tests {
             serde_json::from_str::<Status>(r#"{"Exited":3}"#).unwrap(),
             Status::Failed(3)
         );
-    }
-
-    #[test]
-    fn store_round_trip_and_lookup() {
-        let dir = std::env::temp_dir().join(format!("delonix-test-{}", generate_id()));
-        let store = Store::open(&dir).unwrap();
-
-        let mut c = sample("aaaa1111bbbb2222", "web");
-        c.pid = Some(4242);
-        c.status = Status::Running;
-        store.save(&c).unwrap();
-
-        assert_eq!(store.load("aaaa1111bbbb2222").unwrap().pid, Some(4242));
-        assert_eq!(store.load("aaaa1111").unwrap().name, "web");
-        assert_eq!(store.load("web").unwrap().id, "aaaa1111bbbb2222");
-
-        assert_eq!(store.list().unwrap().len(), 1);
-        store.remove("aaaa1111bbbb2222").unwrap();
-        assert!(store.load("web").is_err());
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 }
 

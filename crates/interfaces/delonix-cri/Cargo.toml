@@ -12,6 +12,7 @@ name = "delonix-cri"
 path = "src/bin/delonix-cri.rs"
 
 [dependencies]
+delonix-state = { workspace = true }
 delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
 delonix-compute = { workspace = true }

@@ -51,7 +51,8 @@
 use std::collections::HashSet;
 
 use delonix_oci::ImageStore;
-use delonix_runtime_core::{Result, Store};
+use delonix_runtime_core::Result;
+use delonix_state::Store;
 use delonix_volume::VolumeStore;
 
 use super::po;
@@ -357,8 +358,8 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
     /// store does not know is not alive either — the VM was removed and its ref
     /// outlived it.
     fn vm_is_alive(name: &str) -> bool {
-        let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
-            match delonix_runtime_core::JsonStore::open(super::util::state_root().join("vms")) {
+        let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+            match delonix_state::JsonStore::open(super::util::state_root().join("vms")) {
                 Ok(s) => s,
                 // Cannot tell → do NOT reap. Freeing the ref of a live VM cuts its
                 // network; leaving a stale one costs a refcount.

@@ -733,6 +733,7 @@ checksum = "a4ae5f15dda3c708c0ade84bfee31ccab44a3da4f88015ed22f63732abe300c8"
 name = "delonix-compute"
 version = "3.1.0"
 dependencies = [
+ "delonix-model",
  "delonix-runtime-core",
  "schemars",
  "serde",
@@ -748,6 +749,7 @@ dependencies = [
  "delonix-oci",
  "delonix-runtime-core",
  "delonix-sdn",
+ "delonix-state",
  "delonix-telemetry",
  "flate2",
  "futures-util",
@@ -771,6 +773,7 @@ version = "3.1.0"
 dependencies = [
  "delonix-compute",
  "delonix-runtime-core",
+ "delonix-state",
  "libc",
  "nix",
  "rustix 1.1.4",
@@ -788,6 +791,7 @@ dependencies = [
  "delonix-mgmt",
  "delonix-runtime-core",
  "delonix-sdn",
+ "delonix-state",
  "delonix-vm",
  "delonix-volume",
  "libc",
@@ -821,6 +825,7 @@ dependencies = [
  "delonix-runtime-core",
  "delonix-scanner",
  "delonix-sdn",
+ "delonix-state",
  "delonix-telemetry",
  "delonix-vm",
  "delonix-volume",
@@ -848,6 +853,7 @@ dependencies = [
 name = "delonix-model"
 version = "3.1.0"
 dependencies = [
+ "serde",
  "serde_json",
  "thiserror 2.0.19",
 ]
@@ -864,6 +870,7 @@ dependencies = [
  "criterion",
  "delonix-compute",
  "delonix-runtime-core",
+ "delonix-state",
  "flate2",
  "nix",
  "oci-spec",
@@ -909,6 +916,7 @@ dependencies = [
  "delonix-sdn",
  "delonix-security-runtime",
  "delonix-stack",
+ "delonix-state",
  "delonix-telemetry",
  "delonix-truenas",
  "delonix-vm",
@@ -937,14 +945,11 @@ dependencies = [
 name = "delonix-runtime-core"
 version = "3.1.0"
 dependencies = [
- "chacha20poly1305",
  "delonix-model",
- "getrandom 0.2.17",
  "libc",
  "serde",
  "serde_json",
  "thiserror 2.0.19",
- "tracing",
 ]
 
 [[package]]
@@ -967,6 +972,7 @@ dependencies = [
  "delonix-compute",
  "delonix-net-rules",
  "delonix-runtime-core",
+ "delonix-state",
  "libc",
  "proptest",
  "serde",
@@ -990,6 +996,20 @@ dependencies = [
  "delonix-runtime-core",
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "delonix-state"
+version = "3.1.0"
+dependencies = [
+ "chacha20poly1305",
+ "delonix-model",
+ "delonix-runtime-core",
+ "getrandom 0.2.17",
+ "libc",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
@@ -1022,6 +1042,7 @@ dependencies = [
  "delonix-compute",
  "delonix-net-rules",
  "delonix-runtime-core",
+ "delonix-state",
  "libc",
  "tracing",
 ]
@@ -1033,6 +1054,7 @@ dependencies = [
  "delonix-compute",
  "delonix-model",
  "delonix-runtime-core",
+ "delonix-state",
  "serde",
  "serde_json",
  "thiserror 2.0.19",

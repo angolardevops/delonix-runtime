@@ -40,7 +40,8 @@
 //! deliberately separate, later step — see `docs/adr/0028-network-access-rule-incremental.md`.
 
 use super::kinds as k;
-use delonix_runtime_core::{fw_port_ok, fw_proto_ok, Error, FwRule, Result, Store};
+use delonix_runtime_core::{fw_port_ok, fw_proto_ok, Error, FwRule, Result};
+use delonix_state::Store;
 
 use super::firewall::{check_cidr, require_sdn_ip, update_locked};
 use super::manifest::{self, ManifestDoc};

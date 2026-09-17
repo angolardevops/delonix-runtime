@@ -601,7 +601,7 @@ fn live_attached_refs(base: &std::path::Path) -> Option<i64> {
     if attached.is_empty() {
         return Some(0);
     }
-    let store = delonix_runtime_core::Store::open(base).ok()?;
+    let store = delonix_state::Store::open(base).ok()?;
     let live: std::collections::HashSet<String> = store
         .list()
         .ok()?
