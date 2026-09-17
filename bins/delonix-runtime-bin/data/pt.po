@@ -11708,3 +11708,245 @@ msgstr "A montagem do rootfs overlay da imagem falhou."
 msgid "Read the errno in the message; rootless overlay needs a kernel with unprivileged overlayfs (`delonix system info`)."
 msgstr "Lê o errno na mensagem; o overlay rootless exige um kernel com overlayfs sem privilégio (`delonix system info`)."
 
+# dicionário: entradas do delonix-vm (ADR-0043)
+
+msgid "not supported on this backend"
+msgstr "não suportado neste backend"
+
+msgid "The pause, unpause, snapshot, restore or delete-snapshot verb asked for is not implemented by this VM's backend."
+msgstr "O verbo pause, unpause, snapshot, restore ou delete-snapshot pedido não está implementado pelo backend desta VM."
+
+msgid "Use a backend that supports it (libvirt supports the most), or drop the verb."
+msgstr "Usa um backend que o suporte (o libvirt é o que mais suporta), ou tira o verbo."
+
+msgid "invalid VM backend registration"
+msgstr "registo de backend de VM inválido"
+
+msgid "A backend registration had no id, claimed auto-selection from outside this crate, or claimed a name another backend already has."
+msgstr "Um registo de backend não tinha id, reivindicou auto-selecção vinda de fora desta crate, ou reivindicou um nome que outro backend já tem."
+
+msgid "Fix the registration the message describes; this is a programming error in the process that registered it, not a manifest/flag."
+msgstr "Corrige o registo que a mensagem descreve; isto é um erro de programação no processo que o registou, não um manifesto/flag."
+
+msgid "unknown VM backend"
+msgstr "backend de VM desconhecido"
+
+msgid "The --backend/DELONIX_VM_BACKEND value does not name a registered backend."
+msgstr "O valor de --backend/DELONIX_VM_BACKEND não nomeia um backend registado."
+
+msgid "Use one of the backends the message lists."
+msgstr "Usa um dos backends que a mensagem lista."
+
+msgid "VM record names an unregistered backend"
+msgstr "o registo da VM nomeia um backend não registado"
+
+msgid "The VM's own record names a backend this process has no registration for."
+msgstr "O próprio registo da VM nomeia um backend para o qual este processo não tem registo."
+
+msgid "Run a build/process that registers that backend, or recreate the VM with one that is registered here."
+msgstr "Corre um build/processo que registe esse backend, ou recria a VM com um que esteja registado aqui."
+
+msgid "requires the libvirt backend"
+msgstr "exige o backend libvirt"
+
+msgid "The VM's spec.volumes need virtio-9p, which the Cloud Hypervisor backend does not implement."
+msgstr "O spec.volumes da VM precisa de virtio-9p, que o backend Cloud Hypervisor não implementa."
+
+msgid "Remove `backend: cloud-hypervisor`, or drop the volumes."
+msgstr "Remove `backend: cloud-hypervisor`, ou tira os volumes."
+
+msgid "VM socket path too long"
+msgstr "caminho do socket da VM demasiado longo"
+
+msgid "The VM's api-socket or console socket path would not fit in a UNIX socket's sun_path (108 bytes on Linux)."
+msgstr "O caminho do api-socket ou do socket de consola da VM não caberia no sun_path de um socket UNIX (108 bytes em Linux)."
+
+msgid "Use a shorter VM name or a shorter DELONIX_ROOT."
+msgstr "Usa um nome de VM mais curto ou um DELONIX_ROOT mais curto."
+
+msgid "A VM name may only use letters, digits, dot, dash and underscore, with no path traversal."
+msgstr "Um nome de VM só pode usar letras, dígitos, ponto, traço e underscore, sem travessia de caminho."
+
+msgid "Pick a name made of [A-Za-z0-9._-] with no '/', '..', or leading '-'."
+msgstr "Escolhe um nome feito de [A-Za-z0-9._-] sem '/', '..', nem '-' inicial."
+
+msgid "namespace not enforceable on this backend"
+msgstr "namespace não aplicável neste backend"
+
+msgid "The VM's backend does not put its VMs on this engine's SDN, so namespace isolation cannot be enforced."
+msgstr "O backend da VM não põe as suas VMs na SDN deste motor, por isso o isolamento de namespace não pode ser aplicado."
+
+msgid "Use `--backend cloud-hypervisor`, or drop `--namespace`."
+msgstr "Usa `--backend cloud-hypervisor`, ou tira `--namespace`."
+
+msgid "--disk-size smaller than the base image"
+msgstr "--disk-size menor que a imagem base"
+
+msgid "A qcow2 overlay cannot be smaller than its backing file."
+msgstr "Um overlay qcow2 não pode ser menor que o seu backing file."
+
+msgid "Ask for a --disk-size at least as large as the base image."
+msgstr "Pede um --disk-size pelo menos tão grande como a imagem base."
+
+msgid "A VM snapshot name may only use letters, digits, dot, dash and underscore, with no path traversal."
+msgstr "Um nome de snapshot de VM só pode usar letras, dígitos, ponto, traço e underscore, sem travessia de caminho."
+
+msgid "--ip requires the libvirt nat mode"
+msgstr "--ip exige o modo nat do libvirt"
+
+msgid "A static IP is materialized as a DHCP reservation on the libvirt network, which only the nat/network net mode has."
+msgstr "Um IP estático é materializado como uma reserva DHCP na rede libvirt, que só o modo de rede nat/network tem."
+
+msgid "Drop --net-mode, or set it to nat, to use --ip; on a host bridge, reserve the IP on the LAN's own DHCP instead."
+msgstr "Tira --net-mode, ou põe-no a nat, para usar --ip; numa bridge de host, reserva antes o IP no próprio DHCP da LAN."
+
+msgid "invalid static IP"
+msgstr "IP estático inválido"
+
+msgid "The --ip value does not parse as an IPv4 address."
+msgstr "O valor de --ip não é interpretável como um endereço IPv4."
+
+msgid "Pass a dotted-quad IPv4 address."
+msgstr "Passa um endereço IPv4 em formato de quatro octetos."
+
+msgid "could not reserve the static IP"
+msgstr "não foi possível reservar o IP estático"
+
+msgid "virsh net-update refused the DHCP host reservation for this MAC/IP pair."
+msgstr "o virsh net-update recusou a reserva DHCP para este par MAC/IP."
+
+msgid "Read the virsh reason in the message; the IP may be outside the network's subnet."
+msgstr "Lê a razão do virsh na mensagem; o IP pode estar fora da subnet da rede."
+
+msgid "live disk backup needs the libvirt backend"
+msgstr "o backup de disco a quente exige o backend libvirt"
+
+msgid "A live (running-VM) disk backup uses virsh blockcommit, which only the libvirt backend has."
+msgstr "Um backup de disco a quente (VM a correr) usa o virsh blockcommit, que só o backend libvirt tem."
+
+msgid "Stop the VM and take an offline snapshot instead, or recreate it on the libvirt backend."
+msgstr "Pára a VM e tira antes um snapshot offline, ou recria-a no backend libvirt."
+
+msgid "VM not in the right state for this verb"
+msgstr "VM não está no estado certo para este verbo"
+
+msgid "pause needs a running VM and unpause needs a paused one; the VM is in neither state."
+msgstr "pause precisa de uma VM a correr e unpause precisa de uma em pausa; a VM não está em nenhum dos dois estados."
+
+msgid "Check `delonix vm status <name>` and use the verb that matches its current state."
+msgstr "Consulta `delonix vm status <nome>` e usa o verbo que corresponde ao seu estado actual."
+
+msgid "The VM has no snapshot with that name."
+msgstr "A VM não tem nenhum snapshot com esse nome."
+
+msgid "List its snapshots with `delonix vm snapshot ls <vm>`."
+msgstr "Lista os seus snapshots com `delonix vm snapshot ls <vm>`."
+
+msgid "VM name already used by another VM subsystem"
+msgstr "nome de VM já usado por outro subsistema de VM"
+
+msgid "A VM record under this name already exists, created by the other (direct-QEMU) VM subsystem that shares the same vms/ folder."
+msgstr "Já existe um registo de VM com este nome, criado pelo outro subsistema de VM (QEMU directo) que partilha a mesma pasta vms/."
+
+msgid "Remove it first (`delonix vm rm <name>`), or pick another name."
+msgstr "Remove-o primeiro (`delonix vm rm <nome>`), ou escolhe outro nome."
+
+msgid "VM snapshot name already used"
+msgstr "nome de snapshot de VM já usado"
+
+msgid "The VM already has a snapshot with that name."
+msgstr "A VM já tem um snapshot com esse nome."
+
+msgid "Pick another name, or remove the existing snapshot (`delonix vm snapshot rm`)."
+msgstr "Escolhe outro nome, ou remove o snapshot existente (`delonix vm snapshot rm`)."
+
+msgid "VM backend not configured"
+msgstr "backend de VM não configurado"
+
+msgid "This build knows about the named backend, but nothing in this process has configured it (e.g. Proxmox with no target set)."
+msgstr "Este build conhece o backend nomeado, mas nada neste processo o configurou (por exemplo, Proxmox sem alvo definido)."
+
+msgid "Configure it as the message describes, or use a backend that is already available."
+msgstr "Configura-o como a mensagem descreve, ou usa um backend que já esteja disponível."
+
+msgid "no VM backend available"
+msgstr "nenhum backend de VM disponível"
+
+msgid "Auto-detection found neither Cloud Hypervisor nor libvirt+qemu installed."
+msgstr "A auto-detecção não encontrou nem Cloud Hypervisor nem libvirt+qemu instalados."
+
+msgid "Install cloud-hypervisor or libvirt+qemu."
+msgstr "Instala cloud-hypervisor ou libvirt+qemu."
+
+msgid "no VM firmware found"
+msgstr "nenhum firmware de VM encontrado"
+
+msgid "Booting a cloud image on Cloud Hypervisor without an explicit kernel needs a firmware, and none was given or found bundled."
+msgstr "Arrancar uma cloud image no Cloud Hypervisor sem um kernel explícito precisa de um firmware, e nenhum foi dado nem encontrado embutido."
+
+msgid "Reinstall (curl install.sh) to fetch rust-hypervisor-fw, pass --firmware <path>, or use --backend libvirt."
+msgstr "Reinstala (curl install.sh) para obter o rust-hypervisor-fw, passa --firmware <caminho>, ou usa --backend libvirt."
+
+msgid "VM tool failed"
+msgstr "ferramenta de VM falhou"
+
+msgid "An external tool this VM's lifecycle depends on (virsh, qemu-img, the cloud-hypervisor process) could not be run or exited badly."
+msgstr "Uma ferramenta externa de que o ciclo de vida desta VM depende (virsh, qemu-img, o processo cloud-hypervisor) não pôde ser corrida ou saiu mal."
+
+msgid "Read the tool's own error in the message."
+msgstr "Lê o próprio erro da ferramenta na mensagem."
+
+msgid "Cloud Hypervisor API failed"
+msgstr "a API do Cloud Hypervisor falhou"
+
+msgid "The running VM's Cloud Hypervisor VMM could not be reached over its local api-socket, or answered with a non-2xx status."
+msgstr "O VMM Cloud Hypervisor da VM a correr não pôde ser alcançado pelo seu api-socket local, ou respondeu com um estado não-2xx."
+
+msgid "Check the VM is still alive (`delonix vm status`); a vmm that crashed needs `delonix vm start`."
+msgstr "Confirma que a VM ainda está viva (`delonix vm status`); um vmm que tenha morrido precisa de `delonix vm start`."
+
+msgid "VM disk corrupted after stop"
+msgstr "disco da VM corrompido após o stop"
+
+msgid "qemu-img check found a stopped Cloud Hypervisor VM's disk corrupted (BUG-VM-001) — a post-stop check, not the stop itself failing."
+msgstr "o qemu-img check encontrou o disco de uma VM Cloud Hypervisor parada corrompido (BUG-VM-001) — uma verificação pós-stop, não o próprio stop a falhar."
+
+msgid "Run `qemu-img check -r all` on the disk the message names; consider --backend libvirt for VMs that need reliable disk snapshots."
+msgstr "Corre `qemu-img check -r all` no disco que a mensagem nomeia; considera --backend libvirt para VMs que precisem de snapshots de disco fiáveis."
+
+msgid "snapshot needs a stopped VM"
+msgstr "o snapshot precisa de uma VM parada"
+
+msgid "The Cloud Hypervisor backend cannot snapshot/restore/delete-snapshot a running VM's disk: the vmm holds it exclusively."
+msgstr "O backend Cloud Hypervisor não consegue fazer snapshot/restore/delete-snapshot ao disco de uma VM a correr: o vmm segura-o em exclusivo."
+
+msgid "Stop the VM first (`delonix vm stop`), or use --backend libvirt for live checkpoints."
+msgstr "Pára a VM primeiro (`delonix vm stop`), ou usa --backend libvirt para checkpoints a quente."
+
+msgid "no libvirt domain description on disk"
+msgstr "sem descrição do domínio libvirt em disco"
+
+msgid "A stopped VM has no <name>.xml recorded, so there is nothing to redefine for a snapshot/restore verb."
+msgstr "Uma VM parada não tem nenhum <nome>.xml registado, por isso não há nada para redefinir para um verbo snapshot/restore."
+
+msgid "Start the VM once (`delonix vm start <name>`); the description is written then and stays from then on."
+msgstr "Arranca a VM uma vez (`delonix vm start <nome>`); a descrição é escrita nessa altura e fica desde então."
+
+msgid "VM admission refused"
+msgstr "admissão da VM recusada"
+
+msgid "The host-protection check refused to boot a VM whose requested memory does not fit in what the host has available."
+msgstr "A verificação de protecção do host recusou arrancar uma VM cuja memória pedida não cabe no que o host tem disponível."
+
+msgid "Stop other VMs/containers, reduce the memory, or lower DELONIX_VM_RESERVE_MIB (at your own risk)."
+msgstr "Pára outras VMs/containers, reduz a memória, ou baixa DELONIX_VM_RESERVE_MIB (por tua conta e risco)."
+
+msgid "live disk backup failed"
+msgstr "o backup de disco a quente falhou"
+
+msgid "A step of the live-disk-backup pipeline (list disks, stage the overlay, snapshot, copy, pivot) failed."
+msgstr "Um passo do pipeline de backup de disco a quente (listar discos, preparar o overlay, snapshot, copiar, pivot) falhou."
+
+msgid "Read the step's own error in the message; the VM is left running either way."
+msgstr "Lê o próprio erro do passo na mensagem; a VM fica a correr de qualquer forma."
+
