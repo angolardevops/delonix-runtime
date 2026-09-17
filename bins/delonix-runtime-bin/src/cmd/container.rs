@@ -3731,6 +3731,19 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         // record without one (the address belongs to the pod's netns, not to the
         // member), and a restarted member reporting an IP that a freshly-run one
         // does not would be a new inconsistency, not a fix.
+        //
+        // Its ports go back on the ingress, as `run` publishes them. `stop` releases
+        // them (a member's hostfwd lives on the shared ingress), so a `start` that
+        // did not republish left the port answering nothing — measured: 200 before
+        // the stop, 000 after the start.
+        if let Ok(ip) = std::env::var("DELONIX_REEXEC_IP") {
+            for spec in &c.ports {
+                if let Err(e) = publish_with_retry(&ip, spec) {
+                    unpublish_ports(&c, None);
+                    return Err(e);
+                }
+            }
+        }
     }
 
     let rootfs = if runtime::is_rootless() {

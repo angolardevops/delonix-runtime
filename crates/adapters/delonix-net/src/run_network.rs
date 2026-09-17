@@ -57,8 +57,8 @@ pub fn publish_with_retry(ip: &str, spec: &str) -> Result<()> {
 /// slirp would never be reaped and the bug above would stand. Hence an explicit
 /// parameter instead of coming from the record.
 pub fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
-    match &c.network {
-        Some(_) => {
+    match port_home(c.network.is_some(), c.pod.is_some(), !c.ports.is_empty()) {
+        PortHome::Ingress { detach } => {
             // 1) ports: release the hostfwd/DNAT in the ingress (idempotent — removing
             //    a port that's no longer there is harmless).
             for spec in &c.ports {
@@ -76,19 +76,47 @@ pub fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
             //    path → the ref leaked (seen: 16 with 3 containers alive). The
             //    `system prune` reaper (`reap_orphan_refs`) is the backstop for
             //    containers that die and are never `rm`'d at all.
-            if let Some(ip) = &c.ip {
+            if let (true, Some(ip)) = (detach, &c.ip) {
                 crate::infra::detach_container(&c.id, ip);
             }
         }
-        None => {
-            // With no published ports there's no slirp with an api-socket holding anything.
-            if c.ports.is_empty() {
-                return;
-            }
+        PortHome::OwnSlirp => {
             if let Some(pid) = slirp_pid {
                 crate::reap_slirp_for(pid);
             }
         }
+        // With no published ports there's no slirp with an api-socket holding anything.
+        PortHome::Nowhere => {}
+    }
+}
+
+/// Where a container's published ports live, and so what releasing them means.
+#[derive(Debug, PartialEq, Eq)]
+enum PortHome {
+    /// The shared ingress slirp. `detach` says whether the container also owns
+    /// its netns — a pod member does not: the netns is the pod's, shared with
+    /// its peers.
+    Ingress { detach: bool },
+    /// The container's own slirp (no custom network).
+    OwnSlirp,
+    /// Nothing published, nothing to release.
+    Nowhere,
+}
+
+/// A pod member has no `network` in its record — membership is the `pod` field
+/// — and its ports are published on the shared ingress, like a custom network's.
+/// Reading only `network` sent it down the own-slirp path, which a member does
+/// not have: the hostfwd stayed on the ingress after `rm -f`, and a new pod on
+/// the same port was refused as «already in use» (measured).
+fn port_home(has_network: bool, in_pod: bool, has_ports: bool) -> PortHome {
+    if has_network {
+        PortHome::Ingress { detach: true }
+    } else if in_pod {
+        PortHome::Ingress { detach: false }
+    } else if has_ports {
+        PortHome::OwnSlirp
+    } else {
+        PortHome::Nowhere
     }
 }
 
@@ -186,5 +214,24 @@ impl delonix_compute::ports::NetworkProvider for HostNetwork<'_> {
 
     fn register_expose(&self, name: &str, namespace: &str, ip: &str, port: u16) -> Result<()> {
         (self.register_expose)(name, namespace, ip, port)
+    }
+}
+
+#[cfg(test)]
+mod port_home_tests {
+    use super::{port_home, PortHome};
+
+    #[test]
+    fn a_pod_member_releases_its_ports_on_the_ingress_but_keeps_the_netns() {
+        assert_eq!(
+            port_home(true, false, true),
+            PortHome::Ingress { detach: true }
+        );
+        assert_eq!(
+            port_home(false, true, true),
+            PortHome::Ingress { detach: false }
+        );
+        assert_eq!(port_home(false, false, true), PortHome::OwnSlirp);
+        assert_eq!(port_home(false, false, false), PortHome::Nowhere);
     }
 }
