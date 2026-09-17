@@ -579,31 +579,47 @@ pub fn compile(p: &Profile) -> Result<seccompiler::BpfProgram, String> {
     let arch = std::env::consts::ARCH
         .try_into()
         .map_err(|_| "architecture without seccomp support".to_string())?;
-    let rule_actions: std::collections::BTreeSet<Act> = p
+    // A rule whose action IS the default changes nothing, and seccompiler refuses
+    // a filter whose match and mismatch actions are equal. Without dropping them,
+    // two valid profiles were refused and the container aborted: an allow-all
+    // profile with no rules (`{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[]}`),
+    // and one that restates the default for some syscalls.
+    let effective: Vec<(i64, Act)> = p
         .rules
         .iter()
-        .map(|(_, a)| *a)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
+        .filter(|(_, a)| *a != p.default_action)
+        .copied()
+        .collect();
+    let rule_actions: std::collections::BTreeSet<Act> = effective.iter().map(|(_, a)| *a).collect();
     if rule_actions.len() > 1 {
         return Err(format!(
             "profile mixes {} different rule actions; only one non-default action is supported",
             rule_actions.len()
         ));
     }
-    let match_action = rule_actions
-        .into_iter()
-        .next()
-        .unwrap_or(Act::Allow)
-        .to_seccompiler();
+    // With no effective rule nothing ever matches, so the match action only has
+    // to differ from the default for the filter to be built.
+    let match_action =
+        rule_actions
+            .into_iter()
+            .next()
+            .unwrap_or(if p.default_action == Act::Allow {
+                Act::Errno(libc::EPERM as u32)
+            } else {
+                Act::Allow
+            });
     let mut map: BTreeMap<i64, Vec<SeccompRule>> = BTreeMap::new();
-    for (nr, _) in &p.rules {
+    for (nr, _) in &effective {
         map.insert(*nr, vec![]);
     }
-    SeccompFilter::new(map, p.default_action.to_seccompiler(), match_action, arch)
-        .and_then(|f| f.try_into())
-        .map_err(|e| format!("failed to build the seccomp filter: {e}"))
+    SeccompFilter::new(
+        map,
+        p.default_action.to_seccompiler(),
+        match_action.to_seccompiler(),
+        arch,
+    )
+    .and_then(|f| f.try_into())
+    .map_err(|e| format!("failed to build the seccomp filter: {e}"))
 }
 
 impl PartialOrd for Act {
@@ -741,6 +757,36 @@ mod tests {
         let (p, unknown) = parse(j).unwrap();
         assert_eq!(p.rules.len(), 1);
         assert_eq!(unknown, vec!["uma_syscall_de_outro_arco"]);
+    }
+
+    #[test]
+    fn an_allow_all_profile_without_rules_compiles() {
+        let (p, _) = parse(r#"{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[]}"#).unwrap();
+        assert!(compile(&p).is_ok());
+        let (p, _) = parse(r#"{"defaultAction":"SCMP_ACT_ALLOW"}"#).unwrap();
+        assert!(compile(&p).is_ok());
+    }
+
+    #[test]
+    fn a_deny_all_profile_without_rules_compiles() {
+        let (p, _) = parse(r#"{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[]}"#).unwrap();
+        assert!(compile(&p).is_ok());
+    }
+
+    #[test]
+    fn rules_that_restate_the_default_are_not_a_second_action() {
+        // Docker-style: an ERRNO default, ALLOW exceptions, and a rule that
+        // repeats the default. Only the ALLOW exceptions change anything.
+        let j = r#"{"defaultAction":"SCMP_ACT_ERRNO","syscalls":[
+            {"names":["read","write"],"action":"SCMP_ACT_ALLOW"},
+            {"names":["reboot"],"action":"SCMP_ACT_ERRNO"}]}"#;
+        let (p, _) = parse(j).unwrap();
+        assert!(compile(&p).is_ok());
+        // An ALLOW default whose only rules also say ALLOW is allow-all.
+        let j = r#"{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[
+            {"names":["read"],"action":"SCMP_ACT_ALLOW"}]}"#;
+        let (p, _) = parse(j).unwrap();
+        assert!(compile(&p).is_ok());
     }
 
     #[test]
