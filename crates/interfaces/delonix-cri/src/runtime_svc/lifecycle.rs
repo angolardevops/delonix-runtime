@@ -345,7 +345,7 @@ fn st<E: std::fmt::Display>(e: E) -> Status {
 /// kubelet, and `rm -f` on it by hand afterwards worked first time. The store is
 /// the thing to ask, not a sentence about it.
 fn engine_has(base: &Path, cri_id: &str) -> Option<bool> {
-    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
+    let store = delonix_state::Store::open(base.join("containers")).ok()?;
     match store.load(&format!("cri-{cri_id}")) {
         Ok(_) => Some(true),
         Err(e) if e.is_not_found() => Some(false),
@@ -538,7 +538,7 @@ fn delonix_detached_why_in(
 /// `OnFailure`) did NOT restart it. After reconciling, the crash becomes
 /// `Crashed` (137) and the kubelet reacts.
 fn load_reconciled(base: &Path, cri_id: &str) -> Option<delonix_runtime_core::Container> {
-    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
+    let store = delonix_state::Store::open(base.join("containers")).ok()?;
     // `update` (flock + re-reads under the lock), NOT `load`+`save`: this server
     // is CONCURRENT (the kubelet issues requests in parallel, each in a
     // `spawn_blocking`) and the CLI touches the same state. With the naive
@@ -976,7 +976,7 @@ pub fn pod_sandbox_status(
         // ROOTLESS: IP of the pod's shared netns in the ingress (deterministic).
         delonix_sdn::infra::container_ip(&format!("cri-{}", r.id))
     } else {
-        delonix_runtime_core::Store::open(base.join("containers"))
+        delonix_state::Store::open(base.join("containers"))
             .ok()
             .and_then(|s| s.load(&format!("pod-cri-{}", r.id)).ok())
             .and_then(|c| c.ip)
@@ -1755,7 +1755,7 @@ fn cg_field(cgroup: &str, file: &str, key: &str) -> u64 {
 
 /// The cgroup of a CRI container (`cri-<id>`), via Delonix's `Store`.
 fn container_cgroup(base: &Path, cri_id: &str) -> Option<String> {
-    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
+    let store = delonix_state::Store::open(base.join("containers")).ok()?;
     store
         .load(&format!("cri-{cri_id}"))
         .ok()
@@ -1859,7 +1859,7 @@ fn container_cgroup_metrics(base: &Path, id: &str) -> ContainerCgroupMetrics {
 /// served (measured 2026-09-15, k8s 1.36.4).
 fn writable_layer_dir(base: &Path, cri_id: &str) -> Option<PathBuf> {
     let root = base.join("containers");
-    let c = delonix_runtime_core::Store::open(&root)
+    let c = delonix_state::Store::open(&root)
         .ok()?
         .load(&format!("cri-{cri_id}"))
         .ok()?;
@@ -2961,7 +2961,7 @@ mod tests {
     fn writable_layer_points_at_the_engine_directory_and_measures_it() {
         let tmp = std::env::temp_dir().join(format!("dlx-cri-wl-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let c = delonix_runtime_core::Container::new(
             "e1e1e1e1e1e1e1e1".into(),
             "cri-abc".into(),
@@ -3001,7 +3001,7 @@ mod tests {
     fn engine_has_answers_from_the_store_and_unreadable_is_not_absent() {
         let tmp = std::env::temp_dir().join(format!("dlx-cri-has-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let c = delonix_runtime_core::Container::new(
             "a9c6bb47c90e87bf".into(),
             "cri-bfc39487ccd4adf6".into(),
@@ -3028,7 +3028,7 @@ mod tests {
         // kubelet saw exit 0 (Completed) and restartPolicy OnFailure did NOT restart.
         let tmp = std::env::temp_dir().join(format!("dlx-cri-exit-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
-        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let mut c = delonix_runtime_core::Container::new(
             "cri-abc".into(),
             "cri-abc".into(),
@@ -3080,7 +3080,7 @@ mod tests {
         ));
         let _ = std::fs::remove_dir_all(&tmp);
 
-        let store = delonix_runtime_core::Store::open(tmp.join("containers")).unwrap();
+        let store = delonix_state::Store::open(tmp.join("containers")).unwrap();
         let mut c = delonix_runtime_core::Container::new(
             "cri-abc".into(),
             "cri-abc".into(),

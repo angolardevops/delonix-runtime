@@ -52,7 +52,8 @@ FOUNDATION, CONTEXT, ADAPTER, PROVIDER, INTERFACE, BIN = (
 # these become; this table is updated in the phase that renames each one, so the
 # gate keeps working during the move instead of after it.
 LAYERS = {
-    "delonix-runtime-core": FOUNDATION,  # → delonix-model + delonix-state (P3)
+    "delonix-runtime-core": FOUNDATION,  # → delonix-model + delonix-compute (P3)
+    "delonix-state": ADAPTER,
     "delonix-telemetry": ADAPTER,
     "delonix-model": FOUNDATION,
     "delonix-stack": CONTEXT,
@@ -107,6 +108,26 @@ HEAVY = {
 
 # Each exception names the ADR-0040 phase that removes it. No phase = failure.
 EXCEPTIONS = {
+    ("dep", "delonix-linux", "delonix-state"): (
+        "P4",
+        "the adapter opens its record store directly; P4 hands it a StateRepository port from the composition root",
+    ),
+    ("dep", "delonix-vm", "delonix-state"): (
+        "P4",
+        "the adapter opens its record store directly; P4 hands it a StateRepository port from the composition root",
+    ),
+    ("dep", "delonix-sdn", "delonix-state"): (
+        "P4",
+        "the adapter writes its own files with the state layer's atomic write; P4 hands it the StateRepository port that owns those files",
+    ),
+    ("dep", "delonix-oci", "delonix-state"): (
+        "P4",
+        "the adapter writes its own files with the state layer's atomic write; P4 hands it the StateRepository port that owns those files",
+    ),
+    ("dep", "delonix-volume", "delonix-state"): (
+        "P4",
+        "the adapter writes its own files with the state layer's atomic write; P4 hands it the StateRepository port that owns those files",
+    ),
     ("dep", "delonix-proxmox", "delonix-vm"): (
         "P4",
         "the VmBackend port lives in the same crate as the Cloud Hypervisor and "

@@ -11482,3 +11482,95 @@ msgstr "Uma ferramenta do host de que o volume precisa (mount, mkfs.ext4, resize
 msgid "Read the tool's error in the message; mounting network volumes and hard quotas need CAP_SYS_ADMIN."
 msgstr "Lê o erro da ferramenta na mensagem; montar volumes de rede e quotas rígidas exige CAP_SYS_ADMIN."
 
+
+# dicionário: entradas do delonix-state (ADR-0043)
+msgid "ambiguous container name"
+msgstr "nome de container ambíguo"
+
+msgid "The name exists in more than one namespace, so it does not say which container."
+msgstr "O nome existe em mais de um namespace, por isso não diz qual é o container."
+
+msgid "Qualify it as <namespace>/<name>."
+msgstr "Qualifica-o como <namespace>/<nome>."
+
+msgid "invalid secret name"
+msgstr "nome de segredo inválido"
+
+msgid "A secret name may only use lowercase letters, digits, dot, dash and underscore, up to 64 characters."
+msgstr "O nome de um segredo só pode ter minúsculas, dígitos, ponto, hífen e sublinhado, até 64 caracteres."
+
+msgid "Pick a name made of [a-z0-9._-]."
+msgstr "Escolhe um nome feito de [a-z0-9._-]."
+
+msgid "invalid secret key"
+msgstr "chave de segredo inválida"
+
+msgid "A secret key must be a valid environment variable name: a letter or underscore, then letters, digits or underscores."
+msgstr "A chave de um segredo tem de ser um nome de variável de ambiente válido: uma letra ou sublinhado, seguidos de letras, dígitos ou sublinhados."
+
+msgid "Rename the key, for example DB_PASSWORD."
+msgstr "Muda o nome da chave, por exemplo DB_PASSWORD."
+
+msgid "invalid credential name"
+msgstr "nome de credencial inválido"
+
+msgid "A credential name may only use lowercase letters, digits, dot, dash, underscore and colon."
+msgstr "O nome de uma credencial só pode ter minúsculas, dígitos, ponto, hífen, sublinhado e dois pontos."
+
+msgid "Pick a name made of [a-z0-9._:-]."
+msgstr "Escolhe um nome feito de [a-z0-9._:-]."
+
+msgid "corrupted master key"
+msgstr "chave mestra corrompida"
+
+msgid "The host's master key file has the wrong size, so nothing encrypted with it can be read."
+msgstr "O ficheiro da chave mestra do host tem o tamanho errado, por isso nada do que foi cifrado com ela pode ser lido."
+
+msgid "Restore the key from a node snapshot (`delonix system snapshot restore`); without it the encrypted secrets are lost."
+msgstr "Repõe a chave a partir de um snapshot do nó (`delonix system snapshot restore`); sem ela os segredos cifrados perdem-se."
+
+msgid "the secret vault could not encrypt or decrypt"
+msgstr "o cofre de segredos não conseguiu cifrar ou decifrar"
+
+msgid "Encryption or decryption failed: a blob that is corrupt, or a key that is not the one it was sealed with."
+msgstr "A cifra ou a decifra falhou: um blob corrompido, ou uma chave que não é aquela com que foi selado."
+
+msgid "Check the master key is the host's own; recreate the secret if its file is corrupt."
+msgstr "Confirma que a chave mestra é a do próprio host; recria o segredo se o ficheiro estiver corrompido."
+
+msgid "no such container"
+msgstr "esse container não existe"
+
+msgid "No container answers to that id, id prefix or name in this state root."
+msgstr "Nenhum container responde a esse id, prefixo de id ou nome neste state root."
+
+msgid "List them with `delonix container ps -a`."
+msgstr "Lista-os com `delonix container ps -a`."
+
+msgid "no such secret"
+msgstr "esse segredo não existe"
+
+msgid "There is no secret with that name."
+msgstr "Não existe nenhum segredo com esse nome."
+
+msgid "List them with `delonix secret ls`, or create it with `delonix secret create`."
+msgstr "Lista-os com `delonix secret ls`, ou cria-o com `delonix secret create`."
+
+msgid "the state lock could not be taken"
+msgstr "não foi possível obter o bloqueio do estado"
+
+msgid "The lock that serialises a read-modify-write of a state record could not be opened or taken, so the write was refused rather than risk losing a concurrent one."
+msgstr "O bloqueio que serializa a leitura-modificação-escrita de um registo de estado não pôde ser aberto ou obtido, por isso a escrita foi recusada em vez de arriscar perder uma concorrente."
+
+msgid "Check the state root is writable by this user and not on a filesystem without flock."
+msgstr "Confirma que o state root é gravável por este utilizador e não está num sistema de ficheiros sem flock."
+
+msgid "no entropy from the kernel"
+msgstr "o kernel não deu entropia"
+
+msgid "The kernel did not provide random bytes, which encryption and generated values need."
+msgstr "O kernel não forneceu bytes aleatórios, de que a cifra e os valores gerados precisam."
+
+msgid "Check getrandom(2) works on this host (a very old kernel or a restricted seccomp profile)."
+msgstr "Confirma que o getrandom(2) funciona neste host (um kernel muito antigo ou um perfil seccomp restritivo)."
+

@@ -7,7 +7,8 @@
 //! Docker API and the CRI do with `__apirun`.
 
 use crate::RunSpec;
-use delonix_runtime_core::{Container, Error, Result, Store};
+use delonix_runtime_core::{Container, Error, Result};
+use delonix_state::Store;
 use std::path::Path;
 
 /// What the supervisor needs from its caller.

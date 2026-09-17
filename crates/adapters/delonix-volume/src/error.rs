@@ -112,6 +112,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<delonix_state::Error> for Error {
+    fn from(e: delonix_state::Error) -> Self {
+        Error::Engine(e.into())
+    }
+}
+
 impl From<serde_json::Error> for Error {
     fn from(e: serde_json::Error) -> Self {
         Error::Engine(e.into())

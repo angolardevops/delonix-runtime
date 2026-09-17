@@ -11,10 +11,9 @@
 use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_runtime_core::{
-    fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result, Store,
-};
+use delonix_runtime_core::{fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result};
 use delonix_sdn::infra;
+use delonix_state::Store;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};

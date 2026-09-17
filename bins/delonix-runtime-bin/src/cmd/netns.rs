@@ -152,7 +152,7 @@ pub(crate) fn is_reattach_candidate(
 /// stranded containers and the exact command, without touching them — for
 /// anyone who would rather choose the moment a database restarts.
 fn reconcile_after_respawn() -> Result<(usize, usize)> {
-    let store = delonix_runtime_core::Store::open(delonix_runtime_core::Store::default_root())?;
+    let store = delonix_state::Store::open(delonix_state::Store::default_root())?;
     let manual = std::env::var_os("DELONIX_NO_AUTO_RECOVER").is_some();
     let (mut ok, mut failed) = (0usize, 0usize);
 
