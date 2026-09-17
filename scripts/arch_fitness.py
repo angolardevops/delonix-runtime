@@ -104,11 +104,6 @@ HEAVY = {
 
 # Each exception names the ADR-0040 phase that removes it. No phase = failure.
 EXCEPTIONS = {
-    ("dep", "delonix-vm", "delonix-net"): (
-        "P3",
-        "the VM engine reaches into the SDN holder directly; it moves behind the "
-        "NetworkProvider port",
-    ),
     ("dep", "delonix-proxmox", "delonix-vm"): (
         "P4",
         "the VmBackend port lives in the same crate as the Cloud Hypervisor and "

@@ -1172,11 +1172,17 @@ if [ -n "$SW_X" ]; then
   "$BIN" container stop -t 30 "sw-$PFX" >/dev/null 2>&1 & SW_STOP=$!
   sleep 1
   kill -STOP "$SW_STOP" 2>/dev/null
-  kill -9 "$SW_X"; sleep 2
-  "$BIN" container start "sw-$PFX" >/dev/null 2>&1; sleep 1
-  kill -CONT "$SW_STOP" 2>/dev/null; wait "$SW_STOP" 2>/dev/null; sleep 1
+  kill -9 "$SW_X"
+  # Esperas por CONDIÇÃO, não por tempo: sob a carga da bateria, 2 s não chegavam
+  # para o supervisor antigo registar a morte, o `start` via ainda `Running` e não
+  # arrancava nada — o check falhava sem o motor estar errado.
+  sw_pid() { "$BIN" container inspect "sw-$PFX" 2>/dev/null | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d; print(d.get("pid") or "")' 2>/dev/null; }
+  for _ in $(seq 1 100); do [ -z "$(sw_pid)" ] && break; sleep 0.2; done
+  "$BIN" container start "sw-$PFX" >/dev/null 2>&1
+  for _ in $(seq 1 100); do [ -n "$(pgrep -f -x "sleep $SW_SLEEP")" ] && break; sleep 0.2; done
+  kill -CONT "$SW_STOP" 2>/dev/null; wait "$SW_STOP" 2>/dev/null
   check "um stop que retoma não apaga o pid de um start feito entretanto" ok bash -c \
-    "live=\$(pgrep -f -x 'sleep $SW_SLEEP'); [ \"\$(echo \"\$live\" | wc -w)\" = 1 ] && [ \"\$('$BIN' container inspect 'sw-$PFX' | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d; print(d.get(\"pid\"))')\" = \"\$live\" ]"
+    "for _ in \$(seq 1 30); do live=\$(pgrep -f -x 'sleep $SW_SLEEP'); rec=\$('$BIN' container inspect 'sw-$PFX' | python3 -c 'import json,sys; d=json.load(sys.stdin); d=d[0] if isinstance(d,list) else d; print(d.get(\"pid\"))'); [ \"\$(echo \"\$live\" | wc -w)\" = 1 ] && [ \"\$rec\" = \"\$live\" ] && exit 0; sleep 0.5; done; exit 1"
 else
   skip "um stop que retoma não apaga o pid de um start feito entretanto" "o container não arrancou"
 fi

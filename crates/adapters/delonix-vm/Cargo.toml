@@ -6,7 +6,8 @@ license.workspace = true
 
 [dependencies]
 delonix-runtime-core = { workspace = true }
-delonix-net = { workspace = true }
+delonix-compute = { workspace = true }
+delonix-net-rules = { workspace = true }
 tracing = { workspace = true }
 libc = { workspace = true }
 

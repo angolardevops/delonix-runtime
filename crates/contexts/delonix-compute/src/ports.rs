@@ -89,6 +89,28 @@ pub trait RunHost {
     fn default_log_path(&self, id: &str) -> String;
 }
 
+/// The node's network as a Cloud Hypervisor VM sees it: a `tap` on a network's
+/// bridge inside the rootless infra, with a DHCP lease computable from the MAC.
+/// Its home is the networking context (ADR-0040); it lives here until that
+/// context exists.
+///
+/// `Send + Sync` because the VM engine keeps one process-wide, registered by
+/// the composition root, like its backends.
+pub trait VmNetwork: Send + Sync {
+    /// Ensures a private network's bridge and DHCP exist before an attach.
+    fn ensure_network(&self, name: &str) -> Result<()>;
+    /// Creates `vm`'s tap on `network`, registered in `namespace`; returns the
+    /// tap's name.
+    fn attach_tap(&self, vm: &str, network: &str, mac: &str, namespace: &str) -> Result<String>;
+    /// The address the network's DHCP gives `mac` — computed, not observed.
+    fn lease_ip(&self, network: &str, mac: &str) -> Option<String>;
+    /// Removes `vm`'s tap and forgets its lease.
+    fn detach_tap(&self, vm: &str, lease: Option<&str>);
+    /// The argv prefix that runs a command inside the infra's namespaces, or
+    /// `None` when the infra is not up.
+    fn join_argv(&self) -> Option<Vec<String>>;
+}
+
 /// The node's network: custom networks, published ports, per-container firewall
 /// and shaping, and the L7 proxy's routes. Its home is the networking context
 /// (ADR-0040); it lives here until that context exists.
