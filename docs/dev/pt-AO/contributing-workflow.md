@@ -1,9 +1,13 @@
-<!-- translated-from: contributing-workflow.md sha256:1e04aec92fab41c6b9350e2c07f1f47e4ae45c4051fb393c37ba66aedc651034 -->
+<!-- translated-from: contributing-workflow.md sha256:7a27cf21c3440859aaa70b55740a2566cfff13b0f365c965900c98be188a10db -->
 # Fluxo de contribuição
+
+**Antes de leres:** [Clonar, construir e testar](build-and-test.md#the-gates-ci-runs) (os gates) e [Convenções de código](coding-conventions.md) (o que os revisores verificam).
 
 Esta página é a parte «como trabalhamos» do manual: onde fazer as mudanças, que regras os gates
 impõem e porquê, quando uma mudança precisa primeiro de uma decisão escrita, e como enviá-la. Os
-gates em si, e como os correr, estão em [Clonar, construir e testar](build-and-test.md).
+gates em si, e como os correr, estão em [Clonar, construir e testar](build-and-test.md). Depois
+dela consegues levar uma mudança de uma issue até um pull request fundido sem quebrar um gate nem
+o trabalho de outra sessão.
 
 Para tudo o que não seja trivial — um comando novo, um Kind de manifesto novo, uma mudança na
 preparação de namespaces ou de cgroups, um backend novo — abre primeiro uma issue e acorda a
@@ -203,3 +207,7 @@ conduzido por input do utilizador ou do manifesto. Estas mudanças têm revisão
 Se encontraste uma **vulnerabilidade** e não um bug — escalada de privilégio, fuga de namespace,
 injecção de comandos, path traversal — não abras uma issue nem um PR públicos. Segue o
 [`SECURITY.md`](../../../SECURITY.md) (GitHub Private Vulnerability Reporting).
+
+---
+
+**Seguinte:** [Releases e estabilidade](releases-and-stability.md) — o que uma tag empurrada faz, e o que a CLI e o schema do manifesto prometem não quebrar.

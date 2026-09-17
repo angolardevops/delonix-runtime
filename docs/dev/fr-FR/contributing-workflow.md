@@ -1,10 +1,12 @@
-<!-- translated-from: contributing-workflow.md sha256:1e04aec92fab41c6b9350e2c07f1f47e4ae45c4051fb393c37ba66aedc651034 -->
+<!-- translated-from: contributing-workflow.md sha256:7a27cf21c3440859aaa70b55740a2566cfff13b0f365c965900c98be188a10db -->
 # Flux de contribution
+
+**Avant de lire :** [Cloner, construire et tester](build-and-test.md#the-gates-ci-runs) (les gates) et [Conventions de code](coding-conventions.md) (ce que les relecteurs vérifient).
 
 Cette page est la partie « comment nous travaillons » du manuel : où apporter les modifications,
 quelles règles les gates (contrôles CI) imposent et pourquoi, quand une modification exige d'abord
 une décision écrite, et comment l'envoyer. Les gates eux-mêmes, et la manière de les exécuter, sont
-décrits dans [Cloner, construire et tester](build-and-test.md).
+décrits dans [Cloner, construire et tester](build-and-test.md). Après elle, vous pouvez faire passer une modification d'une issue à une pull request fusionnée sans casser un gate ni le travail d'une autre session.
 
 Pour tout ce qui n'est pas trivial — une nouvelle commande, un nouveau Kind de manifeste, une
 modification de la mise en place des namespaces ou des cgroups, un nouveau backend — ouvrez d'abord
@@ -215,3 +217,7 @@ une entrée utilisateur ou de manifeste. Celles-ci font l'objet d'une revue supp
 Si vous avez trouvé une **vulnérabilité** plutôt qu'un bug — élévation de privilège, évasion de
 namespace, injection de commandes, traversée de chemin — n'ouvrez pas d'issue ni de PR publique.
 Suivez [`SECURITY.md`](../../../SECURITY.md) (GitHub Private Vulnerability Reporting).
+
+---
+
+**Suivant :** [Releases et stabilité](releases-and-stability.md) — ce que fait un tag poussé, et ce que la CLI et le schéma de manifeste promettent de ne pas casser.
