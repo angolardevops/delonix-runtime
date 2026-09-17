@@ -3,6 +3,7 @@
 
 pub use error::{Error, Result};
 
+pub mod codes;
 pub mod error;
 pub mod exitcode;
 pub mod names;

@@ -74,11 +74,14 @@ fn typed_err(kind: &'static str, message: impl Into<String>) -> ErrorData {
 }
 
 fn from_engine_error(e: EngineError) -> ErrorData {
-    let kind = match &e {
-        EngineError::NotFound(_) | EngineError::VmNotFound(_) => "NOT_FOUND",
-        EngineError::Invalid(_) => "VALIDATION_FAILED",
-        EngineError::NotRunning(_) => "CONFLICT",
-        _ => "INTERNAL",
+    let kind = if e.is_not_found() {
+        "NOT_FOUND"
+    } else if e.is_invalid_argument() {
+        "VALIDATION_FAILED"
+    } else if e.is_not_running() {
+        "CONFLICT"
+    } else {
+        "INTERNAL"
     };
     typed_err(kind, e.to_string())
 }

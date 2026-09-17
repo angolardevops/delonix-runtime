@@ -313,7 +313,7 @@ mod tests {
             // Whether the variable part is OURS to translate. `Io`/`Json`/
             // `Runtime` carry an OS errno or a serde message — translating
             // those would be inventing a wording the kernel did not use.
-            let ours = match e {
+            let ours = match e.root() {
                 Error::NotFound(_)
                 | Error::VmNotFound(_)
                 | Error::NotRunning(_)
