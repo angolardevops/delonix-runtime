@@ -127,8 +127,9 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
 
   A crate exists only if it is a bounded context, isolates a heavy or privileged dependency, or is
   a separately installed binary. **No `-core`, `-common`, `-utils` or `-types` suffixes**
-  (ADR-0040 D2.1 records how a `-core` crate became "the sink of everything"). Some crates still
-  carry older names: `delonix-runtime-core`, `delonix-proxmox`, `delonix-truenas`,
+  (ADR-0040 D2.1 records how a `-core` crate became "the sink of everything"; that crate,
+  `delonix-runtime-core`, was removed in #406). Some crates still
+  carry older names: `delonix-proxmox`, `delonix-truenas`,
   `delonix-security-runtime`. ADR-0040 renames each one in the phase that restructures it, "never
   twice". **Don't rename a crate outside its phase.**
 - **Every crate's path is written once**, in `[workspace.dependencies]` of the root `Cargo.toml`.
@@ -246,7 +247,7 @@ comment next to it, as you would for any other exception (see [§10](#10-comment
   (ADR-0007). The manifest schema is declared **stable** (`docs/cli-stability.md` § "O schema dos
   manifestos").
 - **Internal records** (the JSON under the state root) keep Rust's `snake_case` field names. See
-  `crates/foundation/delonix-runtime-core/src/lib.rs` (`net_mode`, `namespace`). **Convention
+  `crates/contexts/delonix-compute/src/record.rs` (`net_mode`, `namespace`). **Convention
   (observed)**.
 
 ### 3.7 Environment variables
@@ -336,7 +337,9 @@ already exist.
 |---|---|---|
 | A pure rule on CIDRs, bridge names or IPAM arithmetic that both sides must compute identically | `delonix-net-rules` (foundation) | 06; AGENTS.md § Arquitetura |
 | A new error class, exit code or `DX_*` code; generated names | `delonix-model` (foundation) | ADR-0040 D1 |
-| A persisted record type (`Container`, `Vm`, …) | `delonix-runtime-core` (foundation) — the leftover of the ADR-0040 P3 split. Add here only what belongs to records, never general helpers | ADR-0040 D2.1 "no `-core`" |
+| A persisted workload record type (`Container`, `Vm`, `Mount`, …) | `delonix-compute` (context): `record.rs` | ADR-0040 D2.2; #406 |
+| A plain-data record with no mechanism (`Status`, `ContainerFw`/`FwRule`, `typestate`) | `delonix-model` (foundation): `records.rs`, `typestate.rs` | ADR-0040 P3 (#405) |
+| A question asked of the host or of a process (`now_unix`, pid liveness, user namespace, id generation), the event log, the server dispatch rule, `SO_PEERCRED` | `delonix-node` (context) | ADR-0040 D2.2; #406 |
 | A pure rule of the secret model (`Secret`, valid names and keys, env-file parsing) | `delonix-model` (foundation): `secret.rs` | ADR-0040 P3 (the PR that moved the stores) |
 | A store, the file lock, `write_atomic*`/`write_private_temp`, the encrypted secret store or credential vault | `delonix-state` (adapter) | ADR-0040 D2.3 |
 | Kind facts, the planner/diff, conditions, revisions | `delonix-stack` (context) | AGENTS.md § Arquitetura |
@@ -434,7 +437,7 @@ already exist.
   ADR-0040 P3.
   **Enforced (gate)**: the `shared_error_imports` ratchet in `arch_fitness.py` (`SHARED_ERROR`,
   limited to `crates/adapters/` and `crates/providers/`) counts
-  `use delonix_runtime_core::{…Error/Result…}` or `use delonix_model::{…}` imports that make the
+  `use delonix_model::{…Error/Result…}` imports that make the
   shared type the crate's own result type. The shared type may still be named inside a `From`
   impl. The reference implementation is `crates/adapters/delonix-scanner/src/error.rs`:
 
@@ -591,7 +594,7 @@ doesn't support.
   `chmod` it, because another user can open it in between. **Decided**: doc comment of
   `delonix-state/src/store.rs:write_atomic_mode`; AGENTS.md (kubeconfig TOCTOU).
 - **Before signalling a pid read from a file, check that it is still the same process.** Use
-  `delonix_runtime_core::safe_to_signal(pid, starttime)`, which compares the start time so a
+  `delonix_node::safe_to_signal(pid, starttime)`, which compares the start time so a
   recycled pid isn't killed. **Decided**: AGENTS.md § "A classe «X não é Y»" (the pid entries).
 - **A process's argv doesn't prove it is ours.** Other state roots of the same user, and other
   tools, run with the same argv. Check a token only we choose: a path derived from our root, or an
@@ -635,7 +638,7 @@ doesn't support.
 - **New fields on persisted records take `#[serde(default)]`** (or `default = "fn"`), so records
   written by older versions still load. The default must describe what old records actually were,
   not a guess. **Decided**: AGENTS.md (for example `Vm.namespace`, `VmImage.cloud_init`).
-  **Convention (observed)**: `delonix-runtime-core/src/lib.rs`, the doc comment on `Vm.namespace`
+  **Convention (observed)**: `delonix-compute/src/record.rs`, the doc comment on `Vm.namespace`
   ("the default is a statement of fact and not a guess").
 - **Anything needed to rebuild a resource must be persisted, not only used at creation.** When you
   touch a `start`/`restart` path, compare field by field what creation uses with what the record
@@ -725,7 +728,7 @@ your PR:
 - **When `#[allow(clippy::…)]` is acceptable.** It is used (`too_many_arguments`) without a written
   policy.
 - **The `Result` type of today's compute ports.** The ports in
-  `delonix-compute/src/ports.rs` return `delonix_runtime_core::Result`, so the adapters that
+  `delonix-compute/src/ports.rs` return `delonix_model::Result`, so the adapters that
   implement them (`HostWorkload`, `HostNetwork`, …) import the shared result type, and those imports
   count towards `shared_error_imports`. P3 decides errors per crate. No document says how a port's
   signature changes, and adding such an import in a new file fails the ratchet. If your change

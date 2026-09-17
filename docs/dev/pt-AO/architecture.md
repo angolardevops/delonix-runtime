@@ -147,10 +147,10 @@ flowchart TB
   subgraph foundation["Foundation"]
     delonix_model["delonix-model"]
     delonix_net_rules["delonix-net-rules"]
-    delonix_runtime_core["delonix-runtime-core"]
   end
   subgraph context["Contexts"]
     delonix_compute["delonix-compute"]
+    delonix_node["delonix-node"]
     delonix_security_runtime["delonix-security-runtime"]
     delonix_stack["delonix-stack"]
   end
@@ -179,30 +179,36 @@ flowchart TB
     delonix_runtime_bin["delonix-runtime-bin"]
   end
   delonix_compute --> delonix_model
-  delonix_compute --> delonix_runtime_core
+  delonix_compute --> delonix_node
   delonix_cri --> delonix_compute
   delonix_cri --> delonix_linux
+  delonix_cri --> delonix_model
+  delonix_cri --> delonix_node
   delonix_cri --> delonix_oci
-  delonix_cri --> delonix_runtime_core
   delonix_cri --> delonix_sdn
   delonix_cri --> delonix_state
   delonix_cri --> delonix_telemetry
   delonix_linux --> delonix_compute
-  delonix_linux --> delonix_runtime_core
+  delonix_linux --> delonix_model
+  delonix_linux --> delonix_node
   delonix_linux --> delonix_state
+  delonix_mcp --> delonix_compute
   delonix_mcp --> delonix_linux
   delonix_mcp --> delonix_mgmt
-  delonix_mcp --> delonix_runtime_core
+  delonix_mcp --> delonix_model
+  delonix_mcp --> delonix_node
   delonix_mcp --> delonix_sdn
   delonix_mcp --> delonix_state
   delonix_mcp --> delonix_vm
   delonix_mcp --> delonix_volume
   delonix_mcp_bin --> delonix_mcp
-  delonix_mcp_bin --> delonix_runtime_core
+  delonix_mcp_bin --> delonix_node
   delonix_mcp_bin --> delonix_telemetry
+  delonix_mgmt --> delonix_compute
   delonix_mgmt --> delonix_linux
+  delonix_mgmt --> delonix_model
+  delonix_mgmt --> delonix_node
   delonix_mgmt --> delonix_oci
-  delonix_mgmt --> delonix_runtime_core
   delonix_mgmt --> delonix_scanner
   delonix_mgmt --> delonix_sdn
   delonix_mgmt --> delonix_state
@@ -210,20 +216,23 @@ flowchart TB
   delonix_mgmt --> delonix_vm
   delonix_mgmt --> delonix_volume
   delonix_mgmt_bin --> delonix_mgmt
-  delonix_mgmt_bin --> delonix_runtime_core
+  delonix_mgmt_bin --> delonix_node
   delonix_mgmt_bin --> delonix_telemetry
+  delonix_node --> delonix_model
   delonix_oci --> delonix_compute
-  delonix_oci --> delonix_runtime_core
+  delonix_oci --> delonix_model
+  delonix_oci --> delonix_node
   delonix_oci --> delonix_state
-  delonix_proxmox --> delonix_runtime_core
+  delonix_proxmox --> delonix_compute
+  delonix_proxmox --> delonix_model
   delonix_proxmox --> delonix_vm
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
   delonix_runtime_bin --> delonix_model
+  delonix_runtime_bin --> delonix_node
   delonix_runtime_bin --> delonix_oci
   delonix_runtime_bin --> delonix_proxmox
-  delonix_runtime_bin --> delonix_runtime_core
   delonix_runtime_bin --> delonix_scanner
   delonix_runtime_bin --> delonix_sdn
   delonix_runtime_bin --> delonix_security_runtime
@@ -233,25 +242,28 @@ flowchart TB
   delonix_runtime_bin --> delonix_truenas
   delonix_runtime_bin --> delonix_vm
   delonix_runtime_bin --> delonix_volume
-  delonix_runtime_core --> delonix_model
   delonix_scanner --> delonix_model
   delonix_scanner --> delonix_oci
   delonix_sdn --> delonix_compute
+  delonix_sdn --> delonix_model
   delonix_sdn --> delonix_net_rules
-  delonix_sdn --> delonix_runtime_core
+  delonix_sdn --> delonix_node
   delonix_sdn --> delonix_state
-  delonix_security_runtime --> delonix_runtime_core
-  delonix_stack --> delonix_runtime_core
+  delonix_security_runtime --> delonix_model
+  delonix_security_runtime --> delonix_node
+  delonix_stack --> delonix_model
+  delonix_state --> delonix_compute
   delonix_state --> delonix_model
-  delonix_state --> delonix_runtime_core
-  delonix_truenas --> delonix_runtime_core
+  delonix_state --> delonix_node
+  delonix_truenas --> delonix_model
   delonix_vm --> delonix_compute
+  delonix_vm --> delonix_model
   delonix_vm --> delonix_net_rules
-  delonix_vm --> delonix_runtime_core
+  delonix_vm --> delonix_node
   delonix_vm --> delonix_state
   delonix_volume --> delonix_compute
   delonix_volume --> delonix_model
-  delonix_volume --> delonix_runtime_core
+  delonix_volume --> delonix_node
   delonix_volume --> delonix_state
   class delonix_compute block
   class delonix_cri iface
@@ -262,10 +274,10 @@ flowchart TB
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_node block
   class delonix_oci block
   class delonix_proxmox external
   class delonix_runtime_bin engine
-  class delonix_runtime_core store
   class delonix_scanner block
   class delonix_sdn block
   class delonix_security_runtime block

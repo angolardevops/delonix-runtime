@@ -69,7 +69,7 @@ is the only way to tell your build from the released one.
 different release refuses to start. It also passes itself in `DELONIX_BIN`, so the server calls back
 the same CLI. A server started directly (for example by a unit) finds the CLI through
 `DELONIX_BIN`, then a `delonix` next to itself, then `PATH` (`cli_bin` in
-`crates/foundation/delonix-runtime-core/src/dispatch.rs`). **Keep the four binaries of one build
+`crates/contexts/delonix-node/src/dispatch.rs`). **Keep the four binaries of one build
 together**; a mix of your build and a release is refused, or runs code you did not mean to test.
 
 `delonix cluster kubeadm` and `delonix image vm build` look for `delonix-cri` in their own order

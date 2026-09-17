@@ -726,7 +726,7 @@ cat /proc/sys/fs/file-nr /proc/sys/fs/file-max /proc/sys/fs/nr_open
   one process for its whole life. See [ADR-0027](../adr/0027-pidfd-for-killing-exec-children.md)
   and `ChildHandle` (`open`, `kill`) in `crates/interfaces/delonix-cri/src/child_handle.rs`. Where
   only a stored PID exists, compare the start time first: `safe_to_signal` in
-  `crates/foundation/delonix-runtime-core/src/lib.rs`.
+  `crates/contexts/delonix-node/src/host.rs`.
 - **Bound fds under load.** A server that opens a descriptor per request must close it on every
   path, including errors and timeouts, and must treat `EMFILE` as back-pressure, not a crash.
 - **After `fork` in a multi-threaded process, do only async-signal-safe work** (close fds, `dup2`,

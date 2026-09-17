@@ -33,116 +33,36 @@ Two conventions you will meet everywhere:
 <!-- dev-docs:begin crates-table -->
 | Crate | Layer | Path | Binaries | Depends on (engine crates) | Used by |
 |---|---|---|---|---|---|
-| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-compute`, `delonix-runtime-bin`, `delonix-runtime-core`, `delonix-scanner`, `delonix-state`, `delonix-volume` |
+| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-node`, `delonix-oci`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
 | `delonix-net-rules` | Foundation | `crates/foundation/delonix-net-rules` | — | — | `delonix-sdn`, `delonix-vm` |
-| `delonix-runtime-core` | Foundation | `crates/foundation/delonix-runtime-core` | — | `delonix-model` | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-oci`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
-| `delonix-compute` | Contexts | `crates/contexts/delonix-compute` | — | `delonix-model`, `delonix-runtime-core` | `delonix-cri`, `delonix-linux`, `delonix-oci`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-vm`, `delonix-volume` |
-| `delonix-security-runtime` | Contexts | `crates/contexts/delonix-security-runtime` | — | `delonix-runtime-core` | `delonix-runtime-bin` |
-| `delonix-stack` | Contexts | `crates/contexts/delonix-stack` | — | `delonix-runtime-core` | `delonix-runtime-bin` |
-| `delonix-linux` | Adapters | `crates/adapters/delonix-linux` | — | `delonix-compute`, `delonix-runtime-core`, `delonix-state` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
-| `delonix-oci` | Adapters | `crates/adapters/delonix-oci` | — | `delonix-compute`, `delonix-runtime-core`, `delonix-state` | `delonix-cri`, `delonix-mgmt`, `delonix-runtime-bin`, `delonix-scanner` |
+| `delonix-compute` | Contexts | `crates/contexts/delonix-compute` | — | `delonix-model`, `delonix-node` | `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-oci`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-state`, `delonix-vm`, `delonix-volume` |
+| `delonix-node` | Contexts | `crates/contexts/delonix-node` | — | `delonix-model` | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-oci`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-security-runtime`, `delonix-state`, `delonix-vm`, `delonix-volume` |
+| `delonix-security-runtime` | Contexts | `crates/contexts/delonix-security-runtime` | — | `delonix-model`, `delonix-node` | `delonix-runtime-bin` |
+| `delonix-stack` | Contexts | `crates/contexts/delonix-stack` | — | `delonix-model` | `delonix-runtime-bin` |
+| `delonix-linux` | Adapters | `crates/adapters/delonix-linux` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
+| `delonix-oci` | Adapters | `crates/adapters/delonix-oci` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state` | `delonix-cri`, `delonix-mgmt`, `delonix-runtime-bin`, `delonix-scanner` |
 | `delonix-scanner` | Adapters | `crates/adapters/delonix-scanner` | — | `delonix-model`, `delonix-oci` | `delonix-mgmt`, `delonix-runtime-bin` |
-| `delonix-sdn` | Adapters | `crates/adapters/delonix-sdn` | — | `delonix-compute`, `delonix-net-rules`, `delonix-runtime-core`, `delonix-state` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
-| `delonix-state` | Adapters | `crates/adapters/delonix-state` | — | `delonix-model`, `delonix-runtime-core` | `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-oci`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-vm`, `delonix-volume` |
+| `delonix-sdn` | Adapters | `crates/adapters/delonix-sdn` | — | `delonix-compute`, `delonix-model`, `delonix-net-rules`, `delonix-node`, `delonix-state` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
+| `delonix-state` | Adapters | `crates/adapters/delonix-state` | — | `delonix-compute`, `delonix-model`, `delonix-node` | `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mgmt`, `delonix-oci`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-vm`, `delonix-volume` |
 | `delonix-telemetry` | Adapters | `crates/adapters/delonix-telemetry` | — | — | `delonix-cri`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-runtime-bin` |
-| `delonix-vm` | Adapters | `crates/adapters/delonix-vm` | — | `delonix-compute`, `delonix-net-rules`, `delonix-runtime-core`, `delonix-state` | `delonix-mcp`, `delonix-mgmt`, `delonix-proxmox`, `delonix-runtime-bin` |
-| `delonix-volume` | Adapters | `crates/adapters/delonix-volume` | — | `delonix-compute`, `delonix-model`, `delonix-runtime-core`, `delonix-state` | `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
-| `delonix-proxmox` | Providers | `crates/providers/delonix-proxmox` | — | `delonix-runtime-core`, `delonix-vm` | `delonix-runtime-bin` |
-| `delonix-truenas` | Providers | `crates/providers/delonix-truenas` | — | `delonix-runtime-core` | `delonix-runtime-bin` |
-| `delonix-cri` | Interfaces | `crates/interfaces/delonix-cri` | `delonix-cri` | `delonix-compute`, `delonix-linux`, `delonix-oci`, `delonix-runtime-core`, `delonix-sdn`, `delonix-state`, `delonix-telemetry` | — |
-| `delonix-mcp` | Interfaces | `crates/interfaces/delonix-mcp` | — | `delonix-linux`, `delonix-mgmt`, `delonix-runtime-core`, `delonix-sdn`, `delonix-state`, `delonix-vm`, `delonix-volume` | `delonix-mcp-bin` |
-| `delonix-mgmt` | Interfaces | `crates/interfaces/delonix-mgmt` | — | `delonix-linux`, `delonix-oci`, `delonix-runtime-core`, `delonix-scanner`, `delonix-sdn`, `delonix-state`, `delonix-telemetry`, `delonix-vm`, `delonix-volume` | `delonix-mcp`, `delonix-mgmt-bin`, `delonix-runtime-bin` |
-| `delonix-mcp-bin` | Binaries | `bins/delonix-mcp-bin` | `delonix-mcp` | `delonix-mcp`, `delonix-runtime-core`, `delonix-telemetry` | — |
-| `delonix-mgmt-bin` | Binaries | `bins/delonix-mgmt-bin` | `delonix-mgmt` | `delonix-mgmt`, `delonix-runtime-core`, `delonix-telemetry` | — |
-| `delonix-runtime-bin` | Binaries | `bins/delonix-runtime-bin` | `delonix` | `delonix-compute`, `delonix-linux`, `delonix-mgmt`, `delonix-model`, `delonix-oci`, `delonix-proxmox`, `delonix-runtime-core`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-telemetry`, `delonix-truenas`, `delonix-vm`, `delonix-volume` | — |
+| `delonix-vm` | Adapters | `crates/adapters/delonix-vm` | — | `delonix-compute`, `delonix-model`, `delonix-net-rules`, `delonix-node`, `delonix-state` | `delonix-mcp`, `delonix-mgmt`, `delonix-proxmox`, `delonix-runtime-bin` |
+| `delonix-volume` | Adapters | `crates/adapters/delonix-volume` | — | `delonix-compute`, `delonix-model`, `delonix-node`, `delonix-state` | `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
+| `delonix-proxmox` | Providers | `crates/providers/delonix-proxmox` | — | `delonix-compute`, `delonix-model`, `delonix-vm` | `delonix-runtime-bin` |
+| `delonix-truenas` | Providers | `crates/providers/delonix-truenas` | — | `delonix-model` | `delonix-runtime-bin` |
+| `delonix-cri` | Interfaces | `crates/interfaces/delonix-cri` | `delonix-cri` | `delonix-compute`, `delonix-linux`, `delonix-model`, `delonix-node`, `delonix-oci`, `delonix-sdn`, `delonix-state`, `delonix-telemetry` | — |
+| `delonix-mcp` | Interfaces | `crates/interfaces/delonix-mcp` | — | `delonix-compute`, `delonix-linux`, `delonix-mgmt`, `delonix-model`, `delonix-node`, `delonix-sdn`, `delonix-state`, `delonix-vm`, `delonix-volume` | `delonix-mcp-bin` |
+| `delonix-mgmt` | Interfaces | `crates/interfaces/delonix-mgmt` | — | `delonix-compute`, `delonix-linux`, `delonix-model`, `delonix-node`, `delonix-oci`, `delonix-scanner`, `delonix-sdn`, `delonix-state`, `delonix-telemetry`, `delonix-vm`, `delonix-volume` | `delonix-mcp`, `delonix-mgmt-bin`, `delonix-runtime-bin` |
+| `delonix-mcp-bin` | Binaries | `bins/delonix-mcp-bin` | `delonix-mcp` | `delonix-mcp`, `delonix-node`, `delonix-telemetry` | — |
+| `delonix-mgmt-bin` | Binaries | `bins/delonix-mgmt-bin` | `delonix-mgmt` | `delonix-mgmt`, `delonix-node`, `delonix-telemetry` | — |
+| `delonix-runtime-bin` | Binaries | `bins/delonix-runtime-bin` | `delonix` | `delonix-compute`, `delonix-linux`, `delonix-mgmt`, `delonix-model`, `delonix-node`, `delonix-oci`, `delonix-proxmox`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-state`, `delonix-telemetry`, `delonix-truenas`, `delonix-vm`, `delonix-volume` | — |
 <!-- dev-docs:end crates-table -->
 
 ## Foundation
 
-Foundation crates carry no mechanism: types, pure rules and the on-disk state
-format. They may depend only on other foundation crates. The files that hold those
-records are not here: they are read and written by the `delonix-state` adapter.
-
-### `delonix-runtime-core`
-
-**Purpose.** The shared vocabulary of the engine: the persisted records
-`Container` and `Vm` and the types they are made of (`Mount`, health, cgroup parent,
-extra networks and disks). Two groups of items that every crate still imports from here
-are **defined in `delonix-model`** and re-exported with their old paths: the error type
-(`Error`, `Result`) and, since #405, the plain-data records (`Status`,
-`ContainerFw`/`FwRule` and their validators, `default_namespace`, `typestate`). It also holds the small
-cross-cutting pieces that more than one crate needs and that would otherwise be
-copied: the `SO_PEERCRED` check for local sockets, the append-only event log, and
-the rule a server binary follows when `delonix` runs it. It does **not** create
-processes, mount, or configure the network, and it has no notion of tenant, plan or
-billing (its crate doc says so, and the rest of the workspace relies on it).
-
-The stores (`Store`, `JsonStore<T>`), the atomic-write helpers and the encrypted
-secret store (`SecretStore`, `CredVault`) **left this crate** for `delonix-state`
-(ADR-0040 P3); the pure secret model (`Secret`, `valid_name`, `valid_env_key`,
-`parse_env_file`) went to `delonix-model`. Nothing about them is re-exported here
-any more, so a call site that used `delonix_runtime_core::Store` now imports
-`delonix_state::Store`. The only re-exports in `src/lib.rs` are from `delonix-model`:
-`records::{default_namespace, fw_port_ok, fw_proto_ok, fw_src_ok, ContainerFw, FwRule, Status}`
-and `{typestate, Error, Result}` (#405). New code may import either path; the
-definitions are in `delonix-model`.
-
-**Key modules**
-
-| Module | Responsibility |
-|---|---|
-| `lib.rs` | `Container`, `Vm`, `Mount`, health config, cgroup-parent parsing (`KubeCgroupParent`), `generate_id`, `now_unix`, pid liveness helpers; re-exports `Status`, `ContainerFw`/`FwRule`, `default_namespace` from `delonix-model` |
-| `events` | append-only `events.jsonl` event log (`emit`, `read`) |
-| `dispatch` | version check and CLI resolution for server binaries run by `delonix` |
-| `peer_cred` | `peer_uid` from `SO_PEERCRED` |
-| `typestate` | re-export of `delonix_model::typestate` (moved in #405) |
-| `virt` | virtualization/virtio detection from `/sys` and `/proc` |
-| `workload_net` | the workload IPv4 range, defined once |
-
-**Main public API**
-
-| Item | What it is | Where |
-|---|---|---|
-| `Container` | the container record everything reads and writes | `crates/foundation/delonix-runtime-core/src/lib.rs:Container` |
-| `Vm` | the VM record | `crates/foundation/delonix-runtime-core/src/lib.rs:Vm` |
-| `Status` | lifecycle state of a workload, re-exported | defined in `crates/foundation/delonix-model/src/records.rs:Status` |
-| `Error`, `Result` | the error every engine crate returns, re-exported from `delonix-model` | `crates/foundation/delonix-runtime-core/src/lib.rs` (`pub use delonix_model::{Error, Result}`) |
-| `events::emit` | append one event line | `crates/foundation/delonix-runtime-core/src/events.rs:emit` |
-| `dispatch::check_version`, `dispatch::cli_bin` | how `delonix-cri`/`-mgmt`/`-mcp` refuse a mismatched release and find the `delonix` CLI to run back | `crates/foundation/delonix-runtime-core/src/dispatch.rs` |
-| `is_alive`, `proc_starttime`, `safe_to_signal` | pid checks that survive pid recycling | `crates/foundation/delonix-runtime-core/src/lib.rs` |
-
-**Talks to.** `delonix-model` only, for the `Error`/`Result`, the plain-data records
-and the typestate it re-exports. No subprocesses: detection reads `/sys` and `/proc`
-directly.
-
-**Notable external dependencies.** `serde`/`serde_json` (the record types derive
-them), `thiserror`, `libc`. The encryption dependencies (`chacha20poly1305`,
-`getrandom`) moved with the secret store to `delonix-state`.
-
-**Tests.** Inline `#[cfg(test)]` modules in the source files; no `tests/` directory.
-
-**Start reading at.** `src/lib.rs` (the `Container` and `Vm` structs), then
-`src/dispatch.rs`. For how the records are stored, see `delonix-state`.
-
-**Gotchas.**
-
-- `Container.userns` says whether the container **created** its own user
-  namespace, not whether it runs in a different one. Workloads that join the
-  network holder's user namespace have `userns = false` and are still in a
-  different user namespace than the caller. `mount_live` in `delonix-linux`
-  records this and always opens the `user` namespace instead of trusting the field
-  (`crates/adapters/delonix-linux/src/lib.rs:mount_live`).
-- `Container.ip` is the address on the **primary** network only; a multi-homed
-  container has more (see the `NetPlan` doc comment in
-  `crates/adapters/delonix-sdn/src/infra.rs` and `apply_firewall_all`, which exists
-  because firewalling only the primary IP was bypassable).
-- The crate description in `Cargo.toml` still says it holds `Status`, the "Secret
-  Manager" and the "Store", and the crate doc in `src/lib.rs` still says "shared
-  types, state and errors". Both predate #404 and #405; the module list is the
-  reference.
-- `Container::cgroup()` is the static root-mode path. For a running rootless
-  container the real cgroup is read from `/proc/<pid>/cgroup` by
-  `delonix_linux::live_cgroup`.
+Foundation crates carry no mechanism: pure types and rules. They may depend only on
+other foundation crates. The persisted `Container` and `Vm` records are not here
+(they belong to `delonix-compute`), and the files that hold records are read and
+written by the `delonix-state` adapter.
 
 ### `delonix-model`
 
@@ -154,9 +74,8 @@ secret is and what a valid name and key look like), and — since #405 — the r
 that are plain data: a workload's `Status`, the per-container firewall
 (`ContainerFw`, `FwRule` and the pure validators `fw_proto_ok`, `fw_port_ok`,
 `fw_src_ok`), `default_namespace`, and the compile-time lifecycle `typestate`. Pure —
-no I/O, no process state (crate doc). The `Container` and `Vm` records stay in
-`delonix-runtime-core`, which re-exports everything above under the old paths; the
-files that store records are in `delonix-state`.
+no I/O, no process state (crate doc). The `Container` and `Vm` records that use these
+types are in `delonix-compute`; the files that store records are in `delonix-state`.
 
 **Key modules**
 
@@ -167,7 +86,7 @@ files that store records are in `delonix-state`.
 | `names` | default names (`derived_name`, `random_name`) |
 | `codes` | the dictionary of numbered codes `DX-CDNN` (ADR-0043): class digit, domain digit, number |
 | `secret` | `Secret` and the pure rules `valid_name`, `valid_env_key`, `parse_env_file`; the encrypted store is `delonix-state` |
-| `records` | `Status` (`from_wait`, `is_terminal`, `exit_code`), `ContainerFw`/`FwRule`, `fw_proto_ok`/`fw_port_ok`/`fw_src_ok`, `default_namespace` (moved from `delonix-runtime-core` in #405) |
+| `records` | `Status` (`from_wait`, `is_terminal`, `exit_code`), `ContainerFw`/`FwRule`, `fw_proto_ok`/`fw_port_ok`/`fw_src_ok`, `default_namespace` (moved here in #405) |
 | `typestate` | compile-time lifecycle phases `Phase<Created/Running/Stopped>`; illegal transitions do not compile (moved in #405) |
 
 **Main public API**
@@ -183,9 +102,8 @@ files that store records are in `delonix-state`.
 | `records::ContainerFw`, `records::FwRule` | the persisted per-container firewall; `delonix-sdn` applies it with nftables | `crates/foundation/delonix-model/src/records.rs` |
 | `typestate::Phase` | typed lifecycle phases | `crates/foundation/delonix-model/src/typestate.rs:Phase` |
 
-**Talks to.** No other engine crate: it is a root of the graph, and
-`delonix-runtime-core` depends on it and re-exports its error and records (the
-dependency used to point the other way). The CLI re-exports `exitcode` and `names` as
+**Talks to.** No other engine crate: it is a root of the graph, and every other
+engine crate that returns the shared error imports it from here. The CLI re-exports `exitcode` and `names` as
 `cmd::exitcode` and `cmd::names`
 (`bins/delonix-runtime-bin/src/cmd/mod.rs`), so older call sites did not change.
 
@@ -203,10 +121,9 @@ then `src/records.rs`, then `src/names.rs`.
 
 - The `match` in `for_error` is exhaustive on purpose: a new `Error` variant must
   be classified here or the build fails.
-- Several import paths reach the same type: `delonix_model::records::FwRule`,
-  `delonix_runtime_core::FwRule` (re-export) and `delonix_sdn::FwRule` (a re-export
-  of the `-core` one, `crates/adapters/delonix-sdn/src/lib.rs`). They are one type,
-  so all compile; `grep` for every path when you look for callers.
+- Two import paths reach the same type: `delonix_model::records::FwRule` and
+  `delonix_sdn::FwRule` (a re-export, `crates/adapters/delonix-sdn/src/lib.rs`). They
+  are one type, so both compile; `grep` for both paths when you look for callers.
 
 ### `delonix-net-rules`
 
@@ -244,21 +161,27 @@ code is the reference.
 ## Contexts
 
 A context owns a domain's decisions and the ports its use cases need. No context
-touches the kernel.
+mounts, spawns or configures the network; `delonix-node` is the one that reads the
+host directly (`/proc`, `/sys`, `kill(pid, 0)`, `SO_PEERCRED`).
 
 ### `delonix-compute`
 
-**Purpose.** The Compute context (`compute.delonix.io`): the run specification
-every entry point translates into (`RunOpts`), and the `container run` use case as
-pure steps over ports — preflight, resolve, build the record, wire the network,
-start. It also holds the Pod specification types and their translation to
-`RunOpts`. It does **not** spawn processes, pull images or configure networks; it
+**Purpose.** The Compute context (`compute.delonix.io`): the records the engine
+persists for a container and a VM (`Container`, `Vm`, and what they carry — `Mount`,
+health checks, cgroup placement, extra networks, disks and NICs), the run
+specification every entry point translates into (`RunOpts`), and the `container run`
+use case as pure steps over ports — preflight, resolve, build the record, wire the
+network, start. It also holds the Pod specification types and their translation to
+`RunOpts`, and the workload IPv4 range. The records came here from the removed
+`delonix-runtime-core` (#406). It does **not** spawn processes, pull images or configure networks; it
 calls traits that adapters implement.
 
 **Key modules**
 
 | Module | Responsibility |
 |---|---|
+| `record` (private, re-exported at the crate root) | `Container`, `Vm`, `Mount`, `HealthConfig`/`Health`/`HealthState`, `CgroupParent`, `KubeCgroupParent`/`KubeCgroupDriver`, `ExtraNet`, the VM types (`CpuTopology`, `ExtraDisk`, `ExtraNic`, `VmVolume`, `VmBootSpec`), `DELONIX_SLICE`, `safe_cgroup_segment` |
+| `workload_net` | the workload IPv4 range (`is_workload_ipv4`), defined once |
 | `run_opts` | `RunOpts`, the one run specification |
 | `preflight` | refuse flag combinations that mean nothing, before any effect |
 | `run` | `resolve_run` (through ports) and `build_record` (pure) |
@@ -272,6 +195,10 @@ calls traits that adapters implement.
 
 | Item | What it is | Where |
 |---|---|---|
+| `Container` | the container record everything reads and writes | `crates/contexts/delonix-compute/src/record.rs:Container` |
+| `Vm` | the VM record | `crates/contexts/delonix-compute/src/record.rs:Vm` |
+| `KubeCgroupParent::parse` | validation of the cgroup parent the kubelet sends | `crates/contexts/delonix-compute/src/record.rs:KubeCgroupParent` |
+| `DELONIX_SLICE` | the root-mode cgroup slice | `crates/contexts/delonix-compute/src/record.rs:DELONIX_SLICE` |
 | `RunOpts` | the run specification | `crates/contexts/delonix-compute/src/run_opts.rs:RunOpts` |
 | `preflight::check_run_opts` | pure refusal of impossible combinations | `crates/contexts/delonix-compute/src/preflight.rs:check_run_opts` |
 | `run::resolve_run` | resolve image, volumes, devices, user, defaults through ports | `crates/contexts/delonix-compute/src/run.rs:resolve_run` |
@@ -282,8 +209,9 @@ calls traits that adapters implement.
 | `ports::NetworkProvider` | port for attach/publish/firewall/shaping | `crates/contexts/delonix-compute/src/ports.rs:NetworkProvider` |
 | `ports::VmNetwork` | port for a VM tap on the rootless network | `crates/contexts/delonix-compute/src/ports.rs:VmNetwork` |
 
-**Talks to.** Only `delonix-runtime-core`, by direct call. Everything else arrives
-through its ports, implemented in adapters:
+**Talks to.** Only `delonix-model` and `delonix-node` (`safe_to_signal` for the
+records, `generate_id` in tests), by direct call. Everything else arrives through its
+ports, implemented in adapters:
 
 | Port | Implemented by |
 |---|---|
@@ -303,9 +231,28 @@ schema cannot drift from the types).
 `FakeRuntime`, `Fake` in `network.rs`, `launch.rs`, `run.rs`) — the use case is
 tested without a kernel.
 
-**Start reading at.** `src/ports.rs`, then `src/run.rs`, then `src/launch.rs`.
+**Start reading at.** `src/record.rs` (the `Container` and `Vm` structs), then
+`src/ports.rs`, then `src/run.rs`, then `src/launch.rs`.
 
 **Gotchas.**
+
+- `Container.userns` says whether the container **created** its own user
+  namespace, not whether it runs in a different one. Workloads that join the
+  network holder's user namespace have `userns = false` and are still in a
+  different user namespace than the caller. `mount_live` in `delonix-linux`
+  records this and always opens the `user` namespace instead of trusting the field
+  (`crates/adapters/delonix-linux/src/lib.rs:mount_live`).
+- `Container.ip` is the address on the **primary** network only; a multi-homed
+  container has more (see the `NetPlan` doc comment in
+  `crates/adapters/delonix-sdn/src/infra.rs` and `apply_firewall_all`, which exists
+  because firewalling only the primary IP was bypassable).
+- `Container::cgroup()` is the static root-mode path. For a running rootless
+  container the real cgroup is read from `/proc/<pid>/cgroup` by
+  `delonix_linux::live_cgroup`.
+- `record.rs` is the leftover of a large split: its module doc still says the records
+  "came out of `delonix-runtime-core`", and the crate doc in `src/lib.rs` still
+  describes the crate as holding only the run specification. The module list above
+  is the reference.
 
 - Two items named `ImageStore` exist: the port trait
   `delonix_compute::ports::ImageStore` and the concrete store
@@ -313,6 +260,56 @@ tested without a kernel.
   first. Import paths matter.
 - `wire_network` must run **before** `launch::start`; its module doc records that a
   supervised `-d` otherwise missed the network settings.
+
+### `delonix-node`
+
+**Purpose.** The node context (crate doc, ADR-0040 D2.2): the node's own concerns
+that more than one crate needs and would otherwise copy — the append-only event log,
+the virtualisation and host checks, the `SO_PEERCRED` check for local sockets, the
+rule a server binary follows when `delonix` runs it, and the questions asked of the
+host and of processes (the clock, the user namespace, pid liveness, a fresh id). It
+came out of the removed `delonix-runtime-core` (#406). It does **not** create
+processes, mount, or configure the network, and holds no workload record.
+
+**Key modules**
+
+| Module | Responsibility |
+|---|---|
+| `host` (private, re-exported at the crate root) | `now_unix`, `in_initial_userns`, `initial_uid_map`, `is_rootless`, `fmt_local_ts`, `is_alive`, `proc_starttime`, `safe_to_signal`, `generate_id`, `self_bin` |
+| `events` | append-only `events.jsonl` event log (`emit`, `read`, `read_from`, `size`) |
+| `dispatch` | version check and CLI resolution for server binaries run by `delonix` (`DELONIX_DISPATCH_VERSION`, `DELONIX_BIN`) |
+| `peer_cred` | `peer_uid` from `SO_PEERCRED` |
+| `virt` | virtualization/virtio detection from `/sys` and `/proc` (`detect`, `blk_scheduler`, `set_blk_scheduler_none`) |
+
+**Main public API**
+
+| Item | What it is | Where |
+|---|---|---|
+| `events::emit` | append one event line | `crates/contexts/delonix-node/src/events.rs:emit` |
+| `dispatch::check_version`, `dispatch::cli_bin` | how `delonix-cri`/`-mgmt`/`-mcp` refuse a mismatched release and find the `delonix` CLI to run back | `crates/contexts/delonix-node/src/dispatch.rs` |
+| `is_alive`, `proc_starttime`, `safe_to_signal` | pid checks that survive pid recycling | `crates/contexts/delonix-node/src/host.rs` |
+| `in_initial_userns`, `is_rootless` | whether uid 0 here is the host's root | `crates/contexts/delonix-node/src/host.rs` |
+| `generate_id`, `now_unix` | a 16-hex-digit id, seconds since the epoch | `crates/contexts/delonix-node/src/host.rs` |
+| `peer_cred::peer_uid` | the uid on the other end of a unix socket | `crates/contexts/delonix-node/src/peer_cred.rs:peer_uid` |
+
+**Talks to.** `delonix-model` only (per `Cargo.toml`). No subprocesses: detection
+reads `/sys` and `/proc` directly, and `is_alive` uses `kill(pid, 0)`.
+
+**Notable external dependencies.** `serde`/`serde_json` (the event lines), `libc`.
+
+**Tests.** Inline `#[cfg(test)]` modules in `events.rs`, `peer_cred.rs` and
+`virt.rs`; no `tests/` directory.
+
+**Start reading at.** `src/lib.rs` (the re-exports), then `src/host.rs`, then
+`src/dispatch.rs`.
+
+**Gotchas.**
+
+- `geteuid() == 0` is not "root on the host": use `in_initial_userns` (its doc
+  comment records two places that took the root path inside a nested user namespace).
+- In `src/host.rs` the rustdoc of `is_alive` begins with a paragraph about the `Vm`
+  record, left behind by the split; the one-line sentence after it is the function's
+  real documentation.
 
 ### `delonix-stack`
 
@@ -341,7 +338,7 @@ each Kind stay in the CLI.
 | `reconcile::hot_fields_for` | which field changes can be applied live | `crates/contexts/delonix-stack/src/reconcile.rs:hot_fields_for` |
 | `revision::record`, `revision::list` | apply history | `crates/contexts/delonix-stack/src/revision.rs` |
 
-**Talks to.** `delonix-runtime-core` only. The CLI re-exports `kinds`, `reconcile`
+**Talks to.** `delonix-model` only. The CLI re-exports `kinds`, `reconcile`
 and `revision` as `cmd::kinds` etc. (`bins/delonix-runtime-bin/src/cmd/mod.rs`).
 
 **Notable external dependencies.** `serde`, `serde_json`.
@@ -384,7 +381,7 @@ by design), and no tenant, project or environment field anywhere.
 | `admission::Request` | container or VM admission input | `crates/contexts/delonix-security-runtime/src/admission.rs:Request` |
 | `redact::redact_text` | mask secrets in text | `crates/contexts/delonix-security-runtime/src/redact.rs:redact_text` |
 
-**Talks to.** `delonix-runtime-core` (`events`, `now_unix`). Consumed by the CLI
+**Talks to.** `delonix-model` and `delonix-node` (`events`, `now_unix`). Consumed by the CLI
 through `bins/delonix-runtime-bin/src/cmd/policy.rs`, which `cmd_run` calls before
 any image is resolved.
 
@@ -441,7 +438,7 @@ caller.
 | `supervise::run_supervised` | detached supervisor | `crates/adapters/delonix-linux/src/supervise.rs:run_supervised` |
 | `workload::HostWorkload` | `WorkloadRuntime` adapter | `crates/adapters/delonix-linux/src/workload.rs:HostWorkload` |
 
-**Talks to.** `delonix-runtime-core`, `delonix-compute` and `delonix-state` (`Store`,
+**Talks to.** `delonix-model`, `delonix-node`, `delonix-compute` and `delonix-state` (`Store`,
 `SecretStore`, `write_private_temp`; a declared layering exception removed in ADR-0040 P4), by direct call.
 Syscalls through `nix`, `libc` and `rustix`. Host tools it runs: `busctl` (systemd
 scopes for the kubelet cgroup parent), `apparmor_parser`, `ldconfig`,
@@ -509,7 +506,7 @@ containers; a build runs its steps through the CLI.
 | `Cas` | blob store | `crates/adapters/delonix-oci/src/cas.rs:Cas` |
 | `verify_signature` | cosign-style verification | `crates/adapters/delonix-oci/src/sign.rs:verify_signature` |
 
-**Talks to.** `delonix-runtime-core`, `delonix-compute` (it implements the
+**Talks to.** `delonix-model`, `delonix-node`, `delonix-compute` (it implements the
 `ImageStore` port), and `delonix-state` (`write_atomic_mode`; a declared layering
 exception removed in ADR-0040 P4). Registries over HTTPS with a blocking `reqwest` client. No host
 subprocesses in its source.
@@ -570,8 +567,8 @@ execution, WireGuard overlay, and optional eBPF flow accounting. It re-exports
 | `infra::apply_firewall_all` | per-container chain for every IP it holds | `crates/adapters/delonix-sdn/src/infra.rs:apply_firewall_all` |
 | `run_network::HostNetwork` | `NetworkProvider` adapter | `crates/adapters/delonix-sdn/src/run_network.rs:HostNetwork` |
 
-**Talks to.** `delonix-runtime-core`, `delonix-net-rules`, `delonix-compute`
-(ports), `delonix-state` (`write_atomic`, `write_private_temp`; a declared layering
+**Talks to.** `delonix-model`, `delonix-node`, `delonix-net-rules`, `delonix-compute`
+(ports, `workload_net`), `delonix-state` (`write_atomic`, `write_private_temp`; a declared layering
 exception removed in ADR-0040 P4). Host tools: `ip`, `nft`, `nsenter`, `slirp4netns`, `conntrack`, `wg`, CNI
 plugin binaries. The holder is started by re-executing the engine binary
 (`netns pin`, `netns control`, intercepted in the CLI's `main` before argument
@@ -633,7 +630,7 @@ provider credentials.
 | `snapshot`, `restore`, `snapshots`, `delete_snapshot` | checkpoints | `crates/adapters/delonix-vm/src/lib.rs` |
 | `valid_vm_name` | name validation at the engine boundary | `crates/adapters/delonix-vm/src/lib.rs:valid_vm_name` |
 
-**Talks to.** `delonix-runtime-core`, `delonix-compute` (the `VmNetwork` port),
+**Talks to.** `delonix-model`, `delonix-node`, `delonix-compute` (the `Vm` record, the `VmNetwork` port),
 `delonix-net-rules`, `delonix-state` (`JsonStore<Vm>`, `write_atomic`; a declared
 layering exception removed in ADR-0040 P4). Host tools: `cloud-hypervisor` (and its HTTP API on a unix
 socket, e.g. `PUT /api/v1/vm.pause`), `virsh`, `qemu-img`, `cloud-localds`, `sh`.
@@ -678,7 +675,7 @@ NAS dataset (that is `delonix-truenas`).
 | `measure`, `Usage` | disk usage with an unreadable counter | `crates/adapters/delonix-volume/src/lib.rs` |
 | `HostVolumes` | `StorageProvider` adapter | `crates/adapters/delonix-volume/src/lib.rs:HostVolumes` |
 
-**Talks to.** `delonix-runtime-core`, `delonix-compute`, `delonix-model`, `delonix-state`
+**Talks to.** `delonix-model`, `delonix-node`, `delonix-compute`, `delonix-state`
 (`write_atomic`; a declared layering exception removed in ADR-0040 P4). Host tools: `mount`,
 `umount`, `losetup`. Removal of trees owned by mapped uids is injected by the
 caller (`remove_with` takes an `rmtree` closure; the CLI passes
@@ -735,8 +732,8 @@ layering exception (see [Architecture](architecture.md)) — and `delonix-model`
 
 **Purpose.** Observability for the engine's binaries: structured `tracing`
 logging, optional OpenTelemetry span export over OTLP, and the shared Prometheus
-registry the servers expose. It left `delonix-runtime-core` so that a crate needing
-a `Container` type does not compile an OTLP client (crate doc).
+registry the servers expose. It was split out of the former `delonix-runtime-core`
+so that a crate needing a `Container` type does not compile an OTLP client (crate doc).
 
 **Key modules**
 
@@ -771,9 +768,9 @@ servers deliver reliably (module doc of `telemetry.rs`).
 **Purpose.** The engine's persisted state (crate doc, ADR-0040 D2.3): one JSON file
 per record behind an exclusive `flock`, the atomic-write helpers every adapter uses
 for its own files, and the secret vault encrypted at rest. It came out of
-`delonix-runtime-core` in #404: the record **types** stay in the foundation
-(`Container`, `Vm` in `delonix-runtime-core`; since #405 `Status` and the firewall
-records in `delonix-model`), the files that hold them live here. It does not decide anything about a
+the former `delonix-runtime-core` in #404: the record **types** live elsewhere
+(`Container`, `Vm` in `delonix-compute`; `Status` and the firewall records in
+`delonix-model`), the files that hold them live here. It does not decide anything about a
 workload; it loads, saves and locks.
 
 **Key modules**
@@ -797,10 +794,9 @@ workload; it loads, saves and locks.
 | `CredVault` | `seal`/`unseal`, `put`/`get`/`exists`/`list`/`remove`, `rotate_key` | `crates/adapters/delonix-state/src/cred_vault.rs:CredVault` |
 | `Error`, `Result` | `NoSuchContainer`, `AmbiguousContainer`, `NoSuchRecord`, `NoSuchSecret`, `InvalidSecretName`, `InvalidEnvKey`, `InvalidCredentialName`, `CorruptMasterKey`, `Vault`, `Lock`, `Entropy`, and `Engine` wrapping a `delonix_model::Error`; `number`, `is_not_found`, `is_invalid_argument`, `into_root` | `crates/adapters/delonix-state/src/error.rs` |
 
-**Talks to.** `delonix-runtime-core` (the `Container` type the `Store` holds, and
-`default_namespace`, which is defined in `delonix-model` and reached through the
-`-core` re-export in `store.rs`) and `delonix-model` (the error class its errors
-convert into, and the secret model). No subprocesses and no network: only the filesystem.
+**Talks to.** `delonix-compute` (the `Container` type the `Store` holds),
+`delonix-model` (`default_namespace`, the error class its errors convert into, and
+the secret model) and `delonix-node` (`generate_id`, in tests). No subprocesses and no network: only the filesystem.
 Callers, all by direct call: `delonix-linux` (`Store`, `SecretStore`,
 `write_private_temp`), `delonix-vm` (`JsonStore`, `write_atomic`), `delonix-sdn`
 (`write_atomic`, `write_private_temp`), `delonix-oci` (`write_atomic_mode`),
@@ -872,7 +868,7 @@ round trip).
 | `register` | register the backend in `delonix-vm`'s registry | `crates/providers/delonix-proxmox/src/lib.rs:register` |
 
 **Talks to.** `delonix-vm` (the trait and `register_backend`; a declared layering
-exception) and `delonix-runtime-core`. The node over HTTPS with blocking `reqwest`.
+exception), `delonix-compute` (the `Vm` record) and `delonix-model`. The node over HTTPS with blocking `reqwest`.
 The CLI registers it from environment configuration at startup
 (`bins/delonix-runtime-bin/src/cmd/vmbackends.rs:register_configured`).
 
@@ -908,7 +904,7 @@ same path as a hand-made share.
 | `Client::remove_nfs_share`, `remove_dataset` | teardown | `crates/providers/delonix-truenas/src/lib.rs` |
 | `validate_quota`, `validate_target_url`, `validate_dataset_name` | input checks before any request | `crates/providers/delonix-truenas/src/lib.rs` |
 
-**Talks to.** `delonix-runtime-core` only; the appliance over HTTPS. Used by
+**Talks to.** `delonix-model` only; the appliance over HTTPS. Used by
 `bins/delonix-runtime-bin/src/cmd/provision.rs`.
 
 **Notable external dependencies.** `reqwest` (blocking, rustls), `serde`,
@@ -1019,7 +1015,7 @@ of ADR-0040/0041 rather than these routes.
 | `dashstats::collect` | summary shared by `delonix dashboard` and `/metrics` | `crates/interfaces/delonix-mgmt/src/dashstats.rs:collect` |
 
 **Talks to.** Direct calls into `delonix-state` (`Store`, `SecretStore`),
-`delonix-runtime-core`, `delonix-volume`, `delonix-oci`, `delonix-scanner`, `delonix-vm`, `delonix-sdn`
+`delonix-model`, `delonix-node` (`peer_cred`, `dispatch`), `delonix-compute` (`Container`), `delonix-volume`, `delonix-oci`, `delonix-scanner`, `delonix-vm`, `delonix-sdn`
 (`infra`, `NetworkStore`), `delonix-linux`, `delonix-telemetry`. Mutations: the
 `delonix` CLI as a subprocess (`run_cli`).
 
@@ -1058,7 +1054,7 @@ JSON text. It keeps a local audit log and an in-process task registry.
 | `DelonixMcp` | the tool handler | `crates/interfaces/delonix-mcp/src/lib.rs:DelonixMcp` |
 | `capabilities_table`, `doctor_checks` | `delonix mcp capabilities` / `doctor` | `crates/interfaces/delonix-mcp/src/lib.rs` |
 
-**Talks to.** Direct calls for reads: `delonix-state` (`Store`), `delonix-runtime-core`, `delonix-vm`,
+**Talks to.** Direct calls for reads: `delonix-state` (`Store`), `delonix-model`, `delonix-node`, `delonix-compute`, `delonix-vm`,
 `delonix-volume`, `delonix-sdn`, `delonix-linux` (`resource_advice`), and
 `delonix-mgmt` (`dashstats`, a declared layering exception). Mutations run the
 `delonix` CLI (`run_cli_blocking`, via `dispatch::cli_bin`).
@@ -1145,7 +1141,7 @@ version, reads `--addr` / `DELONIX_API_ADDR` (default
 `unix:///run/delonix-mgmt.sock`) and `DELONIX_ROOT` (default `/var/lib/delonix`),
 then calls `delonix_mgmt::serve_blocking`.
 
-**Talks to.** `delonix-mgmt`, `delonix-runtime-core` (`dispatch`),
+**Talks to.** `delonix-mgmt`, `delonix-node` (`dispatch`),
 `delonix-telemetry` (`init`). Run by `delonix serve api`.
 
 **Tests.** None of its own.
@@ -1158,7 +1154,7 @@ then calls `delonix_mgmt::serve_blocking`.
 `doctor`, `capabilities`.
 
 **Talks to.** `delonix-mcp` (`serve_stdio`, `doctor_checks`,
-`capabilities_table`), `delonix-runtime-core` (`dispatch`), `delonix-telemetry`.
+`capabilities_table`), `delonix-node` (`dispatch`), `delonix-telemetry`.
 Run by `delonix mcp <verb>`.
 
 **Notable external dependencies.** `tokio`.
@@ -1166,6 +1162,22 @@ Run by `delonix mcp <verb>`.
 **Tests.** None of its own.
 
 **Start reading at.** `bins/delonix-mcp-bin/src/main.rs`.
+
+## Removed crates
+
+- **`delonix-runtime-core`** (foundation) was removed in #406, the gate of ADR-0040 P3.
+  It used to hold the shared records and every small cross-cutting helper. Its
+  contents went to the layer the ADR gives each one:
+  [`delonix-model`](#delonix-model) received `Error`/`Result`, `Status`,
+  `ContainerFw`/`FwRule`, `default_namespace`, `typestate` and the secret model
+  (#397, #405); [`delonix-state`](#delonix-state) the stores, the atomic writes and the
+  secret vault (#404); [`delonix-telemetry`](#delonix-telemetry) logging, spans and
+  metrics; [`delonix-compute`](#delonix-compute) the `Container` and `Vm` records with
+  what they carry, `DELONIX_SLICE` and `workload_net`; and the new context
+  [`delonix-node`](#delonix-node) the event log, `virt`, `peer_cred`, `dispatch` and the
+  host/process helpers (`now_unix`, `safe_to_signal`, `generate_id`, …). There are no
+  re-exports under the old paths: an old `delonix_runtime_core::X` import is rewritten
+  to the crate that now defines `X`.
 
 ## How a request crosses the crates
 

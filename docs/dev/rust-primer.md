@@ -22,10 +22,12 @@ and one `Cargo.toml` per crate. Three conventions matter here:
    third-party crate (by `version`). A member never writes a version; it writes:
 
    ```toml
-   # crates/foundation/delonix-runtime-core/Cargo.toml
+   # crates/contexts/delonix-node/Cargo.toml
    [dependencies]
+   delonix-model = { workspace = true }
    serde = { workspace = true }
-   thiserror = { workspace = true }
+   serde_json = { workspace = true }
+   libc = { workspace = true }
    ```
 
    A member may add `features = [...]`, and that is all. `default-features = false` lives in
@@ -57,11 +59,11 @@ members consume as `version.workspace = true`. The version is not decoration: se
 
 ## 3.2 Errors: one `Error`, and exit codes derived from its type
 
-Almost every fallible function in the engine returns `delonix_runtime_core::Result<T>`, an alias
+Almost every fallible function in the engine returns `delonix_model::Result<T>`, an alias
 over the shared enum defined in `crates/foundation/delonix-model/src/error.rs`. The enum lives in the
-pure foundation crate `delonix-model`; `delonix-runtime-core` re-exports `Error` and `Result`
-(`pub use delonix_model::{Error, Result};`), so the `delonix_runtime_core::` path most call sites
-use still works. It is built with
+pure foundation crate `delonix-model`, which every other engine crate may depend on. Some adapters
+define their own error and convert it into this one (§5.2 of
+[Coding conventions](coding-conventions.md)). It is built with
 [`thiserror`](https://docs.rs/thiserror): `#[derive(Error)]` generates `Display` from the
 `#[error("...")]` attribute, and `#[from]` generates `From` impls so `?` converts a lower-level
 error automatically:
@@ -168,14 +170,14 @@ A container engine is mostly system calls. This repo reaches the kernel through 
 | Crate | Used for | Example in this repo |
 |---|---|---|
 | [`nix`](https://docs.rs/nix) | Safe-ish wrappers: `clone`, `setns`, `unshare`, `pivot_root`, `fork`, `mount`, signals | `use nix::sched::{clone, setns, unshare, CloneFlags};` in `crates/adapters/delonix-linux/src/lib.rs` |
-| [`libc`](https://docs.rs/libc) | Raw calls `nix` does not wrap, or where the exact struct matters | `libc::getsockopt(.., SO_PEERCRED, ..)` in `crates/foundation/delonix-runtime-core/src/peer_cred.rs` (`peer_uid`); `libc::flock` in `crates/adapters/delonix-state/src/store.rs` |
+| [`libc`](https://docs.rs/libc) | Raw calls `nix` does not wrap, or where the exact struct matters | `libc::getsockopt(.., SO_PEERCRED, ..)` in `crates/contexts/delonix-node/src/peer_cred.rs` (`peer_uid`); `libc::flock` in `crates/adapters/delonix-state/src/store.rs` |
 | [`rustix`](https://docs.rs/rustix) | The new mount API (`fsopen`/`fsconfig`/`fsmount`/`move_mount`) | `fsopen_overlay` in `crates/adapters/delonix-linux/src/lib.rs` |
 
 **Every `unsafe` block states why it is sound**, next to it (the workspace lint enforces the
 comment's presence; reviewers enforce its truth):
 
 ```rust
-// crates/foundation/delonix-runtime-core/src/peer_cred.rs
+// crates/contexts/delonix-node/src/peer_cred.rs
 // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
 let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
 ```
@@ -251,8 +253,9 @@ pub cloud_init: Option<bool>,
 
 Here `None` (every record written before the field existed) is read as "yes"; a plain `bool`
 would have defaulted to `false` and silently changed behaviour for old images. You will see the
-same reasoning on `Mount::propagation` and `Mount::optional` in
-`crates/foundation/delonix-runtime-core/src/lib.rs` (`#[serde(default, skip_serializing_if = "Option::is_none")]`).
+same reasoning in `crates/contexts/delonix-compute/src/record.rs`: `Mount::propagation` is an
+`Option` (`#[serde(default, skip_serializing_if = "Option::is_none")]`), and `Mount::optional` is
+a plain `bool` with `#[serde(default)]`, because `false` is what every older record meant.
 
 **Manifests.** `bins/delonix-runtime-bin/src/cmd/manifest.rs` parses multi-document YAML with
 `serde_yaml::Deserializer::from_str(text)` into `ManifestDoc`, whose `spec` stays a raw
@@ -361,7 +364,7 @@ Inside a single process, shared state uses the standard types: an
 (`SharedRoutes` in `cmd/ingress_proxy.rs`), and the dashboard shares its slow sample through an
 `Arc<Mutex<...>>` (`cmd/dash.rs`).
 
-A related idea you will meet in `crates/foundation/delonix-runtime-core/src/typestate.rs`: the
+A related idea you will meet in `crates/foundation/delonix-model/src/typestate.rs`: the
 **typestate** pattern, where lifecycle states are types and illegal transitions do not compile
 (its doc tests include `compile_fail` examples).
 

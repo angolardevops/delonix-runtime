@@ -66,7 +66,7 @@ rule prevents moving it in — so limits can silently not apply there. The engin
 
 **In Delonix**
 
-- Root mode places containers under `delonix_runtime_core::DELONIX_SLICE`
+- Root mode places containers under `delonix_compute::DELONIX_SLICE`
   (`/sys/fs/cgroup/delonix.slice`).
 - Rootless mode finds the user's service cgroup and creates leaves under
   `<user@uid.service>/dlx-containers` — see `user_service_base` and `try_delegated_base` in
@@ -76,7 +76,7 @@ rule prevents moving it in — so limits can silently not apply there. The engin
   [ADR-0015](../adr/0015-intermediate-cgroup-level.md); how the CRI follows the kubelet's cgroup
   hierarchy is [ADR-0038](../adr/0038-cri-follows-kubelet-resource-model.md), with the kubelet's
   parent validated by `KubeCgroupParent::parse` in
-  `crates/foundation/delonix-runtime-core/src/lib.rs`.
+  `crates/contexts/delonix-compute/src/record.rs`.
 
 **Read more:** [Linux kernel — Control Group v2](https://docs.kernel.org/admin-guide/cgroup-v2.html),
 [systemd — Control Group APIs and Delegation](https://systemd.io/CGROUP_DELEGATION/),
