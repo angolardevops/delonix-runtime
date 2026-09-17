@@ -189,6 +189,27 @@ where
     })
 }
 
+/// The entries of an env file in the `/proc/<pid>/environ` format — `KEY=VALUE`
+/// separated by NUL, so a value may hold newlines and `=`. An entry without
+/// `KEY=` is refused, not skipped: a variable that silently does not arrive is
+/// how a pod dies later for an unrelated-looking reason. PURE.
+pub fn parse_env0(bytes: &[u8], path: &str) -> Result<Vec<String>> {
+    let mut out = Vec::new();
+    for entry in bytes.split(|b| *b == 0).filter(|e| !e.is_empty()) {
+        let s = String::from_utf8(entry.to_vec())
+            .map_err(|_| Error::Invalid(format!("--env-file0 {path}: an entry is not UTF-8")))?;
+        match s.split_once('=') {
+            Some((k, _)) if !k.is_empty() => out.push(s),
+            _ => {
+                return Err(Error::Invalid(format!(
+                    "--env-file0 {path}: an entry is not `KEY=VALUE`"
+                )))
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// `--security-opt`, parsed. The files it names are read by [`resolve_run`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SecurityOpts {
@@ -717,6 +738,15 @@ mod tests {
         o.env_file = vec!["gone.env".into()];
         let err = run(&o, &Fake::new(), false).unwrap_err().to_string();
         assert!(err.contains("--env-file gone.env"), "{err}");
+    }
+
+    #[test]
+    fn env0_keeps_newlines_and_refuses_entries_without_a_key() {
+        let got = parse_env0(b"A=1\0CERT=-----B-----\n x\n-----E-----\0", "f").unwrap();
+        assert_eq!(got, ["A=1", "CERT=-----B-----\n x\n-----E-----"]);
+        assert!(parse_env0(b"novalue\0", "f").is_err());
+        assert!(parse_env0(b"=v\0", "f").is_err());
+        assert!(parse_env0(&[b'A', b'=', 0xff, 0], "f").is_err());
     }
 
     #[test]

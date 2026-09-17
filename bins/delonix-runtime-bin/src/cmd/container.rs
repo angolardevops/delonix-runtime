@@ -2213,18 +2213,7 @@ fn with_env_file0(files: &[String], env: Vec<String>) -> Result<Vec<String>> {
     for f in files {
         let bytes =
             std::fs::read(f).map_err(|e| Error::Invalid(format!("--env-file0 {f}: {e}")))?;
-        for entry in bytes.split(|b| *b == 0).filter(|e| !e.is_empty()) {
-            let s = String::from_utf8(entry.to_vec())
-                .map_err(|_| Error::Invalid(format!("--env-file0 {f}: an entry is not UTF-8")))?;
-            match s.split_once('=') {
-                Some((k, _)) if !k.is_empty() => out.push(s),
-                _ => {
-                    return Err(Error::Invalid(format!(
-                        "--env-file0 {f}: an entry is not `KEY=VALUE`"
-                    )))
-                }
-            }
-        }
+        out.extend(delonix_compute::run::parse_env0(&bytes, f)?);
     }
     out.extend(env);
     Ok(out)

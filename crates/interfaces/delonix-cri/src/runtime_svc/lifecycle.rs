@@ -94,7 +94,7 @@ fn sandbox_state(r: &SandboxRec) -> i32 {
     }
 }
 
-/// The CRI's `LinuxContainerResources`, kept field by field so `start_argv` can
+/// The CRI's `LinuxContainerResources`, kept field by field so `start_run_opts` can
 /// turn them into `container run` flags. `0`/empty means «not specified», the
 /// CRI's own convention.
 #[derive(Serialize, Deserialize, Clone, Default, Debug, PartialEq)]
@@ -141,26 +141,20 @@ fn shares_to_weight(shares: i64) -> i64 {
 ///
 /// Only what was specified: an unspecified field keeps the engine's default,
 /// exactly as `container run` without the flag does.
-fn resource_argv(r: &CriResources) -> Vec<String> {
-    let mut args = Vec::new();
+fn apply_resources(r: &CriResources, o: &mut delonix_compute::RunOpts) {
     if r.memory_limit_in_bytes > 0 {
-        args.push("-m".to_string());
-        args.push(r.memory_limit_in_bytes.to_string());
+        o.memory = Some(r.memory_limit_in_bytes.to_string());
     }
     if r.cpu_quota > 0 && r.cpu_period > 0 {
         let cores = r.cpu_quota as f64 / r.cpu_period as f64;
-        args.push("--cpus".to_string());
-        args.push(format!("{cores:.3}"));
+        o.cpus = Some(format!("{cores:.3}"));
     }
     if r.cpu_shares > 0 {
-        args.push("--cpu-weight".to_string());
-        args.push(shares_to_weight(r.cpu_shares).to_string());
+        o.cpu_weight = Some(shares_to_weight(r.cpu_shares).to_string());
     }
     if !r.cpuset_cpus.is_empty() {
-        args.push("--cpuset".to_string());
-        args.push(r.cpuset_cpus.clone());
+        o.cpuset = Some(r.cpuset_cpus.clone());
     }
-    args
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -192,7 +186,7 @@ struct ContainerRec {
     /// log_path) — where the kubelet/crictl expect to read stdout/stderr (CRI format).
     #[serde(default)]
     log_path: String,
-    /// The pod's `linux.resources` — see [`resource_argv`].
+    /// The pod's `linux.resources` — see [`apply_resources`].
     #[serde(default)]
     resources: CriResources,
     labels: HashMap<String, String>,
@@ -1310,233 +1304,145 @@ fn ceiling_reduces(capped: &[String], rec: &ContainerRec) -> bool {
     })
 }
 
-/// Constrói o ARGV de `delonix container run` para um container do CRI.
+/// The run specification of a CRI container, built as data.
 ///
-/// Extraído de [`start_container`] para ser **puro e testável**: este ARGV é a
-/// fronteira onde um erro não aparece como falha de compilação nem de teste
-/// unitário, só como um cluster que não arranca. Foi assim que o
-/// `hostNetwork: true` passou meses a não ser rede do host — ver o comentário
-/// dentro da função.
-fn start_argv(
+/// It used to be the ARGV of `delonix container run`, which the CLI then parsed
+/// back into this same structure — two translations of one thing, and the
+/// boundary where a wrong flag showed up only as a cluster that did not start
+/// (`hostNetwork: true` spent months not being the host's network). Pure and
+/// testable, like the argv was.
+fn start_run_opts(
     rec: &ContainerRec,
     sandbox: Option<&SandboxRec>,
     ceiling: crate::CapCeiling,
     id: &str,
-) -> Vec<String> {
-    let mut args: Vec<String> = vec![
-        "container".into(),
-        "run".into(),
-        "-d".into(),
-        "--name".into(),
-        format!("cri-{id}"),
-    ];
-    args.extend(resource_argv(&rec.resources));
+    env: Vec<String>,
+) -> delonix_compute::RunOpts {
+    // The CLI's defaults for the fields this spec does not decide: the same run
+    // specification `container run -d` builds.
+    let mut o = delonix_compute::RunOpts {
+        detach: true,
+        name: Some(format!("cri-{id}")),
+        net: "host".into(),
+        restart: "no".into(),
+        wait_timeout: 60,
+        image: rec.image.clone(),
+        env,
+        ..Default::default()
+    };
+    apply_resources(&rec.resources, &mut o);
     // The kubelet's hierarchy (ADR 0038). Only with it do unspecified limits mean no limit.
     if let Some(sb) = sandbox.filter(|sb| !sb.cgroup_parent.is_empty()) {
-        args.push("--kube-cgroup-parent".into());
-        args.push(sb.cgroup_parent.clone());
+        o.kube_cgroup_parent = Some(sb.cgroup_parent.clone());
     }
     // Logs in the path/format the kubelet/crictl expect (CRI), if any.
     if !rec.log_path.is_empty() {
-        args.push("--log-file".into());
-        args.push(rec.log_path.clone());
-        args.push("--log-cri".into());
+        o.log_file = Some(rec.log_path.clone());
+        o.log_cri = true;
     }
-    // Joins the pod sandbox's netns (network/namespace sharing), unless the pod
-    // uses the host's network.
     if let Some(sb) = sandbox {
-        if sb.host_network {
-            // `hostNetwork: true` tem de ser a REDE DO HOST, não "sem `--pod`".
-            //
-            // Omitir só o `--pod` deixava o container cair na rede por omissão
-            // (bridge) com um netns SEU — e ao mesmo tempo o `pod_sandbox_status`
-            // reportava ao kubelet que o pod estava na rede do host. Kubelet e
-            // realidade a dizer coisas diferentes, em silêncio.
-            //
-            // Medido a 2026-08-16 numa golden 1.36: os quatro static pods do
-            // control-plane apareciam com portas PUBLICADAS (`6443->6443`,
-            // `2381->2381`), que é a assinatura de um netns próprio. O etcd
-            // escutava em `127.0.0.1:2379` dentro do seu netns, o apiserver
-            // procurava-o em `127.0.0.1:2379` NOUTRO netns
-            // (`--etcd-servers=https://127.0.0.1:2379`), as sondas falhavam, o
-            // kubelet matava-os, e o motor registava `Crashed` — morte por
-            // sinal, sem código de saída. O `kubeadm init` ficava preso em
-            // `wait-control-plane` e a 6443 nunca abria.
-            //
-            // O mesmo etcd, corrido à mão com `--net host` e as mesmas flags de
-            // log do CRI, fica `Up` e serve tráfego. A diferença era esta linha.
-            args.push("--net".into());
-            args.push("host".into());
-        } else if !sb.cni_netns.is_empty() {
-            // ROOT + CNI: `start_container` runs the engine INSIDE the sandbox's
-            // netns (`nsenter --net`), so "the network I am in" is the pod's.
-            // `--pod` would look for a holder netns this path never made.
-            args.push("--net".into());
-            args.push("host".into());
+        if sb.host_network || !sb.cni_netns.is_empty() {
+            // hostNetwork is the host's network; a root CNI sandbox is entered by
+            // `nsenter --net` around the whole run, so inside it `host` is the pod's.
+            o.net = "host".into();
         } else {
-            args.push("--pod".into());
-            args.push(format!("cri-{}", rec.sandbox_id));
+            o.pod = Some(format!("cri-{}", rec.sandbox_id));
         }
-        // Pod hostname (`PodSandboxConfig.hostname`) — CRI conformance checks that
-        // `hostname`/`/etc/hostname` inside the container match the sandbox's.
         if !sb.hostname.is_empty() {
-            args.push("--hostname".into());
-            args.push(sb.hostname.clone());
+            o.hostname = Some(sb.hostname.clone());
         }
-        // Host namespaces inherited from the pod sandbox.
-        if sb.host_pid {
-            args.push("--host-pid".into());
-        }
-        if sb.host_ipc {
-            args.push("--host-ipc".into());
-        }
-        // The pod's resolver and published ports belong to every container of
-        // the sandbox: they share the pod's netns, so this is where both live.
-        for d in &sb.dns_servers {
-            args.push("--dns".into());
-            args.push(d.clone());
-        }
-        for d in &sb.dns_searches {
-            args.push("--dns-search".into());
-            args.push(d.clone());
-        }
-        for d in &sb.dns_options {
-            args.push("--dns-option".into());
-            args.push(d.clone());
-        }
-        // Na rede do HOST não há o que publicar: o processo liga-se
-        // directamente aos portos do host. Publicar aqui pedia DNAT para um
-        // netns que não existe — e era o sintoma pelo qual este defeito se
-        // deixou ver (`6443->6443` num pod `hostNetwork`).
-        // Nor on a CNI sandbox in root: `hostPort` there is the `portmap`
-        // plugin's job, and publishing would DNAT through the native ingress.
+        o.host_pid = sb.host_pid;
+        o.host_ipc = sb.host_ipc;
+        o.dns = sb.dns_servers.clone();
+        o.dns_search = sb.dns_searches.clone();
+        o.dns_option = sb.dns_options.clone();
+        // Ports go through the engine's own netns only: on the host's network the
+        // process binds the host's ports, and a CNI sandbox leaves them to the
+        // `portmap` plugin.
         if !sb.host_network && sb.cni_netns.is_empty() {
-            for p in &sb.port_mappings {
-                args.push("--publish".into());
-                args.push(p.clone());
-            }
+            o.ports = sb.port_mappings.clone();
         }
-        // pod sysctls, applied to the container (shares the pod's namespaces).
-        // `net.*` of a root CNI sandbox are already in its netns (see
-        // `pod_netns_sysctls`); under `--net host` the engine would refuse them.
+        // The `net.*` sysctls of a CNI sandbox were applied to its netns at
+        // creation; under `--net host` the engine would refuse them.
         let own_net = !sb.cni_netns.is_empty();
-        for s in sb
+        o.sysctl = sb
             .sysctls
             .iter()
             .filter(|s| !(own_net && s.starts_with("net.")))
-        {
-            args.push("--sysctl".into());
-            args.push(s.clone());
-        }
+            .cloned()
+            .collect();
     }
-    for v in &rec.volumes {
-        args.push("--volume".into());
-        args.push(v.clone());
-    }
-    // Security context → flags.
-    if rec.readonly_rootfs {
-        args.push("--read-only".into());
-    }
-    for g in &rec.supplemental_groups {
-        args.push("--group-add".into());
-        args.push(g.to_string());
-    }
-    // A `privileged: true` container gets NEITHER of these, and that is not a
-    // relaxation invented here — it is what `--privileged` means, and what
-    // `cap_ceiling`'s own note already states this runtime does: "a
-    // `privileged: true` container still gets `seccomp=unconfined`, a writable
-    // `/sys`, and its own cgroup namespace".
-    //
-    // The kubelet sends `readonly_paths` (with `/proc/sys` in it) and
-    // `masked_paths` for EVERY container, privileged or not; deciding which of
-    // them to honour is the runtime's job, and containerd and CRI-O both drop
-    // them for privileged. Applying them regardless is what broke `kube-proxy`
-    // on every kubeadm cluster this runtime serves:
-    //
-    //     E server.go:136 "Error running ProxyServer" err="could not set
-    //     conntrack parameters from kube-proxy configuration: open
-    //     /proc/sys/net/netfilter/nf_conntrack_max: read-only file system"
-    //
-    // Without `kube-proxy` there is no ClusterIP, and CoreDNS never leaves
-    // `ContainerCreating` — so the whole service plane of the cluster went down
-    // over two `--readonly-path` arguments (issue #237).
+    o.volumes = rec.volumes.clone();
+    o.read_only = rec.readonly_rootfs;
+    o.group_add = rec
+        .supplemental_groups
+        .iter()
+        .map(|g| g.to_string())
+        .collect();
+    // A privileged container gets neither masked nor read-only paths.
     if !rec.privileged {
-        for p in &rec.masked_paths {
-            args.push("--masked-path".into());
-            args.push(p.clone());
-        }
-        for p in &rec.readonly_paths {
-            args.push("--readonly-path".into());
-            args.push(p.clone());
-        }
+        o.masked_path = rec.masked_paths.clone();
+        o.readonly_path = rec.readonly_paths.clone();
     }
-    // `--privileged` has to REACH the engine, not merely be translated into
-    // capabilities. The engine documents it: "without an explicit list, apply
-    // runc's default masked/readonly paths […] `--privileged` opts out
-    // wholesale, matching Docker/runc semantics" — and runc's default list
-    // contains `/proc/sys`.
-    //
-    // Without this, dropping the explicit `--readonly-path` flags below only
-    // swaps one list for the other: the engine falls back to its defaults and
-    // `/proc/sys` stays read-only. MEASURED — the first version of this fix did
-    // exactly that, and `kube-proxy` failed on the same line with the corrected
-    // binary installed on the node.
-    //
-    // Capabilities and mounts are separate axes of `--privileged`, as
-    // `cap_ceiling`'s note already said. The CRI translated the first and
-    // forgot the second.
-    if rec.privileged {
-        args.push("--privileged".into());
-    }
-    args.push("--security-opt".into());
-    args.push(format!("no-new-privileges={}", rec.no_new_privs));
-    // `privileged` implies unconfined seccomp (the engine does the same on its
-    // side), and either way an explicit profile path only applies when nothing
-    // asked for unconfined.
+    o.privileged = rec.privileged;
+    o.security_opt
+        .push(format!("no-new-privileges={}", rec.no_new_privs));
     if rec.privileged || rec.seccomp_unconfined {
-        args.push("--security-opt".into());
-        args.push("seccomp=unconfined".into());
+        o.security_opt.push("seccomp=unconfined".into());
     } else if let Some(p) = &rec.seccomp_profile_path {
-        args.push("--security-opt".into());
-        args.push(format!("seccomp={p}"));
+        o.security_opt.push(format!("seccomp={p}"));
     }
-    args.extend(cap_flags(rec, ceiling, id));
-    if let Some(prof) = &rec.apparmor {
-        args.push("--apparmor".into());
-        args.push(prof.clone());
+    // The node's capability ceiling decides; its answer is `--cap-add`/`--cap-drop`
+    // pairs, read back into the two lists.
+    for pair in cap_flags(rec, ceiling, id).chunks(2) {
+        match (pair[0].as_str(), pair.get(1)) {
+            ("--cap-add", Some(c)) => o.cap_add.push(c.clone()),
+            ("--cap-drop", Some(c)) => o.cap_drop.push(c.clone()),
+            _ => {}
+        }
     }
-    // RunAsUser/RunAsGroup/RunAsUserName → `--user <user[:group]>`. The `--user` of
-    // `delonix run` resolves a NAME against the image's `/etc/passwd` (the
-    // `RunAsUserName` contract) and accepts a numeric uid (`RunAsUser`); the group
-    // is the numeric `RunAsGroup`. `RunAsUserName` takes precedence over `RunAsUser`
-    // (the proto forbids both at the same time).
+    o.apparmor = rec.apparmor.clone();
     let user_part = if !rec.run_as_username.is_empty() {
         Some(rec.run_as_username.clone())
     } else {
         rec.run_as_user.map(|u| u.to_string())
     };
-    if let Some(u) = user_part {
-        let spec = match rec.run_as_group {
-            Some(g) => format!("{u}:{g}"),
-            None => u,
-        };
-        args.push("--user".into());
-        args.push(spec);
-    }
-    // `--` separates the flags from the positionals: prevents an `image`/`command`
-    // coming from the CRI request and starting with `-` from being interpreted as
-    // a flag (injection).
-    // Values by FILE, never on the argv: a detached `run` keeps its command line
-    // for the container's whole life, readable by every user in `ps`.
-    if !rec.env_file0.is_empty() {
-        args.push("--env-file0".into());
-        args.push(rec.env_file0.clone());
-    }
-    args.push("--".into());
-    args.push(rec.image.clone());
-    args.extend(rec.command.iter().cloned());
-    args.extend(rec.args.iter().cloned());
-    args
+    o.user = user_part.map(|u| match rec.run_as_group {
+        Some(g) => format!("{u}:{g}"),
+        None => u,
+    });
+    o.command = rec.command.iter().chain(rec.args.iter()).cloned().collect();
+    o
+}
+
+/// Writes the run specification for `delonix __apirun`: `0600` in a `0700`
+/// directory, a unique name, never followed if pre-created. It carries the pod's
+/// environment, which must never appear in an argv (`ps` shows it for the life of
+/// the process).
+fn write_run_spec(
+    base: &Path,
+    opts: &delonix_compute::RunOpts,
+) -> Result<std::path::PathBuf, Status> {
+    use std::os::unix::fs::{DirBuilderExt as _, OpenOptionsExt as _};
+    let dir = base.join("cri").join("run");
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(&dir)
+        .map_err(st)?;
+    let path = dir.join(format!(
+        "{}-{}.json",
+        std::process::id(),
+        delonix_runtime_core::generate_id()
+    ));
+    let f = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&path)
+        .map_err(st)?;
+    serde_json::to_writer(f, opts).map_err(st)?;
+    Ok(path)
 }
 
 pub fn start_container(
@@ -1553,8 +1459,18 @@ pub fn start_container(
             let _ = std::fs::create_dir_all(dir);
         }
     }
-    let args = start_argv(&rec, sandbox.as_ref(), ceiling, &id);
-    let argv: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+    let env = if rec.env_file0.is_empty() {
+        Vec::new()
+    } else {
+        let bytes = std::fs::read(&rec.env_file0).map_err(st)?;
+        delonix_compute::run::parse_env0(&bytes, &rec.env_file0).map_err(st)?
+    };
+    let opts = start_run_opts(&rec, sandbox.as_ref(), ceiling, &id, env);
+    // The run specification goes to the engine as data, not argv — one translation
+    // (above) instead of two — in a fresh single-threaded process, where the
+    // supervisor's `fork` is safe.
+    let spec = write_run_spec(base, &opts)?;
+    let spec_arg = spec.to_string_lossy().into_owned();
     // WITH the engine's reason. The bare "failed to start container <id>" hid
     // a refusal that named its own fix, and it took reproducing the argv by
     // hand on the node to read it (2026-09-15) — the same trap
@@ -1563,7 +1479,9 @@ pub fn start_container(
         .as_ref()
         .filter(|sb| !sb.host_network && !sb.cni_netns.is_empty())
         .map(|sb| sb.cni_netns.as_str());
-    if let Some(why) = delonix_detached_why_in(base, netns, &argv)? {
+    let started = delonix_detached_why_in(base, netns, &["__apirun", &spec_arg]);
+    let _ = std::fs::remove_file(&spec);
+    if let Some(why) = started? {
         return Err(Status::internal(format!(
             "failed to start container {id}: {why}"
         )));
@@ -2492,41 +2410,39 @@ mod tests {
             cpu_shares: 512,
             cpuset_cpus: "0-1".into(),
         };
-        assert_eq!(
-            resource_argv(&r),
-            vec![
-                "-m",
-                "50331648",
-                "--cpus",
-                "0.500",
-                "--cpu-weight",
-                "20",
-                "--cpuset",
-                "0-1"
-            ]
-        );
+        let mut o = delonix_compute::RunOpts::default();
+        apply_resources(&r, &mut o);
+        assert_eq!(o.memory.as_deref(), Some("50331648"));
+        assert_eq!(o.cpus.as_deref(), Some("0.500"));
+        assert_eq!(o.cpu_weight.as_deref(), Some("20"));
+        assert_eq!(o.cpuset.as_deref(), Some("0-1"));
         let rec = ContainerRec {
             resources: r,
             ..Default::default()
         };
-        let argv = start_argv(&rec, None, crate::CapCeiling::default(), "abc");
-        let m = argv
-            .iter()
-            .position(|a| a == "-m")
-            .expect("start_argv lost the memory limit");
-        assert_eq!(argv[m + 1], "50331648");
+        let o = start_run_opts(&rec, None, crate::CapCeiling::default(), "abc", Vec::new());
+        assert_eq!(
+            o.memory.as_deref(),
+            Some("50331648"),
+            "the run spec lost the memory limit"
+        );
     }
 
     /// Nothing specified: no flag, the engine default applies as before.
     #[test]
     fn unspecified_resources_add_no_flags() {
-        assert!(resource_argv(&CriResources::default()).is_empty());
-        // A quota without a period cannot be turned into cores.
+        let mut o = delonix_compute::RunOpts::default();
+        apply_resources(&CriResources::default(), &mut o);
+        assert!(
+            o.memory.is_none() && o.cpus.is_none() && o.cpu_weight.is_none() && o.cpuset.is_none()
+        );
+        // A quota without a period is not a limit.
         let half = CriResources {
             cpu_quota: 50_000,
             ..Default::default()
         };
-        assert!(resource_argv(&half).is_empty());
+        apply_resources(&half, &mut o);
+        assert!(o.cpus.is_none());
     }
 
     /// The runc/crun map: the kubelet's floor (2) and ceiling (262144) land on
@@ -2547,19 +2463,26 @@ mod tests {
             cgroup_parent: "kubepods-burstable-podabc.slice".into(),
             ..Default::default()
         };
-        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "x");
-        let i = argv
-            .iter()
-            .position(|a| a == "--kube-cgroup-parent")
-            .expect("the parent was not passed");
-        assert_eq!(argv[i + 1], "kubepods-burstable-podabc.slice");
-        let bare = start_argv(
+        let o = start_run_opts(
+            &rec,
+            Some(&sb),
+            crate::CapCeiling::default(),
+            "x",
+            Vec::new(),
+        );
+        assert_eq!(
+            o.kube_cgroup_parent.as_deref(),
+            Some("kubepods-burstable-podabc.slice"),
+            "the parent was not passed"
+        );
+        let bare = start_run_opts(
             &rec,
             Some(&SandboxRec::default()),
             crate::CapCeiling::default(),
             "x",
+            Vec::new(),
         );
-        assert!(!bare.iter().any(|a| a == "--kube-cgroup-parent"));
+        assert!(bare.kube_cgroup_parent.is_none());
     }
 
     /// An escaping parent is refused at the sandbox, not dropped.
@@ -2664,36 +2587,44 @@ mod tests {
             privileged: false,
             ..Default::default()
         };
-        let argv = start_argv(&unprivileged, None, crate::CapCeiling::default(), "a");
-        assert!(
-            argv.iter().any(|a| a == "--readonly-path"),
-            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        let o = start_run_opts(
+            &unprivileged,
+            None,
+            crate::CapCeiling::default(),
+            "a",
+            Vec::new(),
         );
-        assert!(
-            argv.iter().any(|a| a == "--masked-path"),
-            "sem privilégio os caminhos TÊM de ser aplicados: {argv:?}"
+        assert_eq!(
+            o.readonly_path,
+            paths(),
+            "without privilege the paths MUST apply"
+        );
+        assert_eq!(
+            o.masked_path,
+            paths(),
+            "without privilege the paths MUST apply"
         );
 
-        let com_privilegio = ContainerRec {
+        let with_privilege = ContainerRec {
             privileged: true,
             ..unprivileged
         };
-        let argv = start_argv(&com_privilegio, None, crate::CapCeiling::default(), "a");
-        assert!(
-            !argv.iter().any(|a| a == "--readonly-path"),
-            "um privilegiado não leva `--readonly-path`: {argv:?}"
+        let o = start_run_opts(
+            &with_privilege,
+            None,
+            crate::CapCeiling::default(),
+            "a",
+            Vec::new(),
         );
         assert!(
-            !argv.iter().any(|a| a == "--masked-path"),
-            "um privilegiado não leva `--masked-path`: {argv:?}"
+            o.readonly_path.is_empty(),
+            "a privileged container gets no read-only paths"
         );
-        // The half without which the other is worthless: dropping the explicit
-        // paths makes the engine fall back on runc's defaults, which include
-        // `/proc/sys`. Only `--privileged` turns those off.
         assert!(
-            argv.iter().any(|a| a == "--privileged"),
-            "`privileged: true` tem de CHEGAR ao motor: {argv:?}"
+            o.masked_path.is_empty(),
+            "a privileged container gets no masked paths"
         );
+        assert!(o.privileged, "`privileged: true` has to REACH the engine");
     }
 
     #[test]
@@ -2703,30 +2634,27 @@ mod tests {
             sandbox_id: "sb1".into(),
             ..Default::default()
         };
-
         let sb = SandboxRec {
             id: "sb1".into(),
             host_network: true,
             port_mappings: vec!["2381:2381".into()],
             ..Default::default()
         };
-
-        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "abc");
-        let pos = |f: &str| argv.iter().position(|a| a == f);
-
-        // A metade que faltava: rede do host de verdade.
-        let i = pos("--net").unwrap_or_else(|| panic!("`--net` ausente em {argv:?}"));
-        assert_eq!(argv[i + 1], "host", "hostNetwork tem de ser `--net host`");
-        assert!(
-            pos("--pod").is_none(),
-            "na rede do host não se entra no netns do sandbox"
+        let o = start_run_opts(
+            &rec,
+            Some(&sb),
+            crate::CapCeiling::default(),
+            "abc",
+            Vec::new(),
         );
-
-        // A outra metade: publicar portas num pod hostNetwork pede DNAT para um
-        // netns que não existe — e foi o sintoma que denunciou o defeito.
+        assert_eq!(o.net, "host", "hostNetwork has to be `--net host`");
         assert!(
-            pos("--publish").is_none(),
-            "hostNetwork não publica portas — o processo liga-se aos portos do host: {argv:?}"
+            o.pod.is_none(),
+            "on the host's network the sandbox netns is not entered"
+        );
+        assert!(
+            o.ports.is_empty(),
+            "hostNetwork publishes nothing — the process binds the host's ports"
         );
     }
 
@@ -2739,25 +2667,25 @@ mod tests {
             sandbox_id: "sb2".into(),
             ..Default::default()
         };
-
         let sb = SandboxRec {
             id: "sb2".into(),
             host_network: false,
             port_mappings: vec!["8080:80".into()],
             ..Default::default()
         };
-
-        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "xyz");
-        let pos = |f: &str| argv.iter().position(|a| a == f);
-
-        let i = pos("--pod").expect("sem hostNetwork tem de entrar no netns do sandbox");
-        assert_eq!(argv[i + 1], "cri-sb2");
-        assert!(
-            pos("--net").is_none(),
-            "só o caminho hostNetwork mexe em `--net`"
+        let o = start_run_opts(
+            &rec,
+            Some(&sb),
+            crate::CapCeiling::default(),
+            "xyz",
+            Vec::new(),
         );
-        let j = pos("--publish").expect("as portas do pod são publicadas");
-        assert_eq!(argv[j + 1], "8080:80");
+        assert_eq!(
+            o.pod.as_deref(),
+            Some("cri-sb2"),
+            "without hostNetwork the container enters the sandbox netns"
+        );
+        assert_eq!(o.ports, ["8080:80"], "the pod's ports are published");
     }
 
     /// ROOT + CNI: the container enters the sandbox netns through
@@ -2779,14 +2707,16 @@ mod tests {
             cni_netns: "/run/netns/cri-sb3".into(),
             ..Default::default()
         };
-
-        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "c3");
-        let pos = |f: &str| argv.iter().position(|a| a == f);
-
-        let i = pos("--net").unwrap_or_else(|| panic!("`--net` missing in {argv:?}"));
-        assert_eq!(argv[i + 1], "host");
-        assert!(pos("--pod").is_none(), "{argv:?}");
-        assert!(pos("--publish").is_none(), "{argv:?}");
+        let o = start_run_opts(
+            &rec,
+            Some(&sb),
+            crate::CapCeiling::default(),
+            "c3",
+            Vec::new(),
+        );
+        assert_eq!(o.net, "host");
+        assert!(o.pod.is_none());
+        assert!(o.ports.is_empty(), "a CNI sandbox leaves ports to portmap");
     }
 
     /// The netns sysctls of a root CNI sandbox: containerd's two defaults, the
@@ -2826,12 +2756,14 @@ mod tests {
             ],
             ..Default::default()
         };
-        let argv = start_argv(&rec, Some(&sb), crate::CapCeiling::default(), "c");
-        assert!(!argv.iter().any(|a| a.starts_with("net.")), "{argv:?}");
-        assert!(
-            argv.iter().any(|a| a == "kernel.shm_rmid_forced=1"),
-            "{argv:?}"
+        let o = start_run_opts(
+            &rec,
+            Some(&sb),
+            crate::CapCeiling::default(),
+            "c",
+            Vec::new(),
         );
+        assert_eq!(o.sysctl, ["kernel.shm_rmid_forced=1"]);
     }
 
     /// The pod's variables reach the engine by file, byte-exact (multi-line and
@@ -2860,19 +2792,26 @@ mod tests {
         assert_eq!(mode(Path::new(&path)), 0o600);
         assert_eq!(mode(Path::new(&path).parent().unwrap()), 0o700);
 
+        // The engine gets the environment inside the run specification — a file
+        // `0600` in a `0700` directory — and the process's argv carries only its
+        // path. The values reach it by data, never by argv.
+        let bytes = std::fs::read(&path).unwrap();
+        let env = delonix_compute::run::parse_env0(&bytes, &path).unwrap();
         let rec = ContainerRec {
             image: "img".into(),
             env_file0: path.clone(),
             ..Default::default()
         };
-        let argv = start_argv(&rec, None, crate::CapCeiling::default(), "abc");
-        let i = argv
+        let o = start_run_opts(&rec, None, crate::CapCeiling::default(), "abc", env);
+        assert!(o
+            .env
             .iter()
-            .position(|a| a == "--env-file0")
-            .expect("--env-file0");
-        assert_eq!(argv[i + 1], path);
-        let sep = argv.iter().position(|a| a == "--").unwrap();
-        assert!(i < sep, "the flag must come before `--`: {argv:?}");
+            .any(|e| e == "KUBERNETES_SERVICE_HOST=10.96.0.1"));
+        let spec = write_run_spec(&base, &o).unwrap();
+        assert_eq!(mode(&spec), 0o600);
+        assert_eq!(mode(spec.parent().unwrap()), 0o700);
+        let spec_arg = spec.to_string_lossy().into_owned();
+        let argv = ["__apirun", spec_arg.as_str()];
         assert!(!argv.iter().any(|a| a.contains("10.96.0.1")), "{argv:?}");
         let _ = std::fs::remove_dir_all(&base);
     }
