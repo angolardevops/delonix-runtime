@@ -10,11 +10,13 @@
 //! existing images** — exactly like `trivy`/`grype`, but embedded in the engine.
 
 use delonix_oci::{Image, ImageStore};
-use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
 
+mod error;
 pub mod pytree;
+
+pub use error::{Error, Result};
 
 /// The package manager that registered a package (determines the advisory source).
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
@@ -177,9 +179,7 @@ pub fn extract_sbom(images: &ImageStore, image: &Image) -> Result<Vec<Package>> 
         pkgs.extend(parse_dpkg(&db));
     }
     if pkgs.is_empty() {
-        return Err(Error::Invalid(
-            "empty SBOM: no apk/dpkg package database in the image".into(),
-        ));
+        return Err(Error::EmptySbom);
     }
     pkgs.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(pkgs)
@@ -251,8 +251,7 @@ pub struct AdvisoryDb {
 impl AdvisoryDb {
     /// Loads the database from JSON (`[ {id, package, ecosystem, fixed, ...} ]`).
     pub fn load(json: &str) -> Result<Self> {
-        let advisories: Vec<Advisory> =
-            serde_json::from_str(json).map_err(|e| Error::Invalid(format!("advisories: {e}")))?;
+        let advisories: Vec<Advisory> = serde_json::from_str(json).map_err(Error::AdvisoryDb)?;
         Ok(Self { advisories })
     }
 
@@ -351,16 +350,13 @@ fn osv_first_fixed(affected: &serde_json::Value) -> Option<String> {
 /// (Alpine→apk, Debian/Ubuntu→dpkg); the rest are ignored. Without a severity
 /// label, it assumes `Medium`. Pure function — testable without the network.
 pub fn advisories_from_osv(json: &str) -> Result<Vec<Advisory>> {
-    let v: serde_json::Value =
-        serde_json::from_str(json).map_err(|e| Error::Invalid(format!("invalid OSV feed: {e}")))?;
+    let v: serde_json::Value = serde_json::from_str(json).map_err(Error::OsvNotJson)?;
     let vulns = if let Some(arr) = v.as_array() {
         arr.clone()
     } else if let Some(arr) = v.get("vulns").and_then(|x| x.as_array()) {
         arr.clone()
     } else {
-        return Err(Error::Invalid(
-            "OSV feed: expected an array or a {\"vulns\":[…]} object".into(),
-        ));
+        return Err(Error::OsvShape);
     };
     let mut out = Vec::new();
     for vuln in &vulns {
