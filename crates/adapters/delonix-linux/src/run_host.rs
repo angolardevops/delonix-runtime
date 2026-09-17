@@ -1,7 +1,7 @@
 //! The compute context's `RunHost` port: what resolving a run needs to know about
 //! this node — its defaults, its confinement, and where state lives.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::path::PathBuf;
 
 pub struct HostRuntime<'a> {

@@ -7,7 +7,8 @@
 //! Docker API and the CRI do with `__apirun`.
 
 use crate::RunSpec;
-use delonix_runtime_core::{Container, Error, Result};
+use delonix_compute::Container;
+use delonix_model::{Error, Result};
 use delonix_state::Store;
 use std::path::Path;
 
@@ -105,7 +106,7 @@ pub fn run_supervised(
             // the `die` of each run, so `RESTARTS` said 0 for a container that had
             // restarted twice (measured: 3 runs of an `on-failure:2`).
             if restarts > 0 && started.is_ok() {
-                delonix_runtime_core::events::emit(
+                delonix_node::events::emit(
                     sup.state_root,
                     "container",
                     "start",
@@ -168,7 +169,7 @@ pub fn run_supervised(
             };
             // `die` with the REAL exit code — the supervisor is the only one that
             // knows it (and the container's parent); a normal `run -d` would only see "Crashed".
-            delonix_runtime_core::events::emit(
+            delonix_node::events::emit(
                 sup.state_root,
                 "container",
                 "die",
@@ -295,7 +296,7 @@ mod tests {
         // process. This test process is one.
         let mut started = base.clone();
         started.pid = Some(std::process::id() as i32);
-        started.pid_starttime = delonix_runtime_core::proc_starttime(std::process::id() as i32);
+        started.pid_starttime = delonix_node::proc_starttime(std::process::id() as i32);
         assert!(
             !resume_restart(Some(&started)),
             "a live incarnation is not doubled"

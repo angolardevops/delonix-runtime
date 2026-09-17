@@ -10,7 +10,7 @@
 //! `run()` this always had; no behavior changed, only the CLI path to reach it.
 
 use clap::Subcommand;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 
 #[derive(Subcommand)]
 pub enum NetCmd {

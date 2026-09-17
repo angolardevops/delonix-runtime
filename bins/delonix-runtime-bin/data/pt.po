@@ -1965,8 +1965,8 @@ msgstr "Gera um PROJECTO completo de uma stack (ex.: `python`) com boas prática
 msgid "After generating, build the image, start it, and wait until it's healthy."
 msgstr "Depois de gerar, constrói a imagem, arranca e espera ficar saudável."
 
-msgid "Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)."
-msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente. Sem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_runtime_core::events`)."
+msgid "Engine events (create/start/die/remove/…), from oldest to most recent. With no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_node::events`)."
+msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente. Sem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_node::events`)."
 
 msgid "Follow continuously (Ctrl-C to exit)."
 msgstr "Segue em contínuo (Ctrl-C para sair)."
@@ -8180,8 +8180,8 @@ msgstr "Remove todos os containers que o `up` deste projecto criou.\n\nE, com `-
 msgid "Engine events (create/start/die/remove/…), from oldest to most recent."
 msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente."
 
-msgid "Engine events (create/start/die/remove/…), from oldest to most recent.\n\nWith no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_runtime_core::events`)."
-msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente.\n\nSem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_runtime_core::events`)."
+msgid "Engine events (create/start/die/remove/…), from oldest to most recent.\n\nWith no daemon, the log is a shared append-only file — each command appends its own line (see `delonix_node::events`)."
+msgstr "Eventos do motor (create/start/die/remove/…), do mais antigo ao mais recente.\n\nSem daemon, o registo é um log append-only partilhado — cada comando acrescenta a sua linha (ver `delonix_node::events`)."
 
 msgid "Reclaim space taken by what nothing uses any more."
 msgstr "Recupera o espaço ocupado pelo que já ninguém usa."

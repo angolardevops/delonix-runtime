@@ -66,7 +66,7 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
     );
 
     // The record the engine would keep.
-    let vm = delonix_runtime_core::Vm::new(
+    let vm = delonix_compute::Vm::new(
         name.clone(),
         cfg.disk.clone(),
         cfg.disk.clone(),
@@ -162,7 +162,7 @@ fn o_ip_vem_do_agente_de_um_convidado_a_serio() {
         return;
     };
     let b = ProxmoxBackend::connect(&t).expect("connect");
-    let vm = delonix_runtime_core::Vm::new(
+    let vm = delonix_compute::Vm::new(
         "agenttest".into(),
         String::new(),
         String::new(),

@@ -6,7 +6,8 @@ license.workspace = true
 description = "Estado persistido do motor Delonix: registos JSON com flock, escrita atómica e o cofre de segredos cifrado em repouso."
 
 [dependencies]
-delonix-runtime-core = { workspace = true }
+delonix-compute = { workspace = true }
+delonix-node = { workspace = true }
 delonix-model = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

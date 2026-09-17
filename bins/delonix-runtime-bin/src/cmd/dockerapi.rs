@@ -41,9 +41,11 @@ use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::json;
 
+use delonix_compute::Container;
+use delonix_model::records::Status;
+use delonix_model::{Error, Result};
+use delonix_node::peer_cred::peer_uid;
 use delonix_oci::ImageStore;
-use delonix_runtime_core::peer_cred::peer_uid;
-use delonix_runtime_core::{Container, Error, Result, Status};
 use delonix_state::Store;
 
 use super::container::RunOpts;
@@ -1164,8 +1166,8 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
     let add_host: Vec<String> = {
         let mut out = Vec::new();
         for entry in json_str_array(&host["ExtraHosts"]) {
-            let (n, ip) = super::container::parse_add_host(&entry)
-                .map_err(delonix_runtime_core::Error::Invalid)?;
+            let (n, ip) =
+                super::container::parse_add_host(&entry).map_err(delonix_model::Error::Invalid)?;
             out.push(format!("{n}:{ip}"));
         }
         out
@@ -1788,7 +1790,7 @@ mod matrix_tests {
 #[cfg(test)]
 mod error_tests {
     use super::{child_error, error_status};
-    use delonix_runtime_core::Error;
+    use delonix_model::Error;
     use hyper::StatusCode;
 
     #[test]

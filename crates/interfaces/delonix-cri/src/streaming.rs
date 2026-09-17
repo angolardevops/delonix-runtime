@@ -273,7 +273,7 @@ fn random_token() -> std::io::Result<String> {
 }
 
 fn delonix_bin() -> PathBuf {
-    delonix_runtime_core::dispatch::cli_bin()
+    delonix_node::dispatch::cli_bin()
 }
 
 // ---------------------------------------------------------------------------
@@ -716,7 +716,7 @@ pub(crate) fn write_all(fd: i32, mut data: &[u8]) {
 /// `pod_sandbox_pid` is ever weakened back to `is_alive`.
 #[cfg(test)]
 mod tests_sandbox_pid_identity {
-    use delonix_runtime_core::Container;
+    use delonix_compute::Container;
     use delonix_state::Store;
 
     fn store_with(tag: &str, pid: Option<i32>, starttime: Option<u64>) -> std::path::PathBuf {
@@ -734,7 +734,7 @@ mod tests_sandbox_pid_identity {
         );
         c.pid = pid;
         c.pid_starttime = starttime;
-        c.status = delonix_runtime_core::Status::Running;
+        c.status = delonix_model::records::Status::Running;
         store.save(&c).unwrap();
         base
     }

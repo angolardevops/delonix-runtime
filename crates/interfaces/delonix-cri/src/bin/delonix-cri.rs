@@ -43,8 +43,7 @@ fn flag(args: &[String], name: &str) -> Option<String> {
 fn main() {
     delonix_telemetry::telemetry::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Err(e) =
-        delonix_runtime_core::dispatch::check_version("delonix-cri", env!("CARGO_PKG_VERSION"))
+    if let Err(e) = delonix_node::dispatch::check_version("delonix-cri", env!("CARGO_PKG_VERSION"))
     {
         fail(&e);
     }

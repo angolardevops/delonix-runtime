@@ -210,8 +210,8 @@ fn delonix_bin() -> PathBuf {
     // The `delonix` CLI, NOT `current_exe()` (`delonix-cri` itself): reinvoking it
     // with `container exec` would fall into `serve_blocking`, which steals the
     // socket and the exec process hangs serving forever (the critest hang on
-    // "exec tty=false stdin=false"). See `delonix_runtime_core::dispatch::cli_bin`.
-    delonix_runtime_core::dispatch::cli_bin()
+    // "exec tty=false stdin=false"). See `delonix_node::dispatch::cli_bin`.
+    delonix_node::dispatch::cli_bin()
 }
 
 /// Builds a SPDY/3 control frame.

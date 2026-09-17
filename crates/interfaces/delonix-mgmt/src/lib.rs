@@ -24,9 +24,9 @@ use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use delonix_model::Error;
+use delonix_node::peer_cred::peer_uid;
 use delonix_oci::ImageStore;
-use delonix_runtime_core::peer_cred::peer_uid;
-use delonix_runtime_core::Error;
 use delonix_state::Store;
 use delonix_volume::VolumeStore;
 
@@ -52,7 +52,7 @@ pub fn serve_blocking(base: PathBuf, addr: &str) -> Result<(), Error> {
     // The CLI the mutations run: never this process's own executable, which is the
     // API server (`delonix serve api` runs `delonix-mgmt`) and would serve again
     // instead of running the command.
-    let bin = delonix_runtime_core::dispatch::cli_bin();
+    let bin = delonix_node::dispatch::cli_bin();
     serve_blocking_with(base, bin, addr)
 }
 
@@ -184,7 +184,7 @@ fn router(state: AppState) -> Router {
     Router::new()
         .route("/_ping", get(ping))
         // `GET /metrics` — the SAME shared Prometheus registry that `delonix-cri`
-        // exposes (defined in `delonix-runtime-core::metrics`), refreshed with a
+        // exposes (defined in `delonix-telemetry::metrics`), refreshed with a
         // fresh `dashstats::collect` snapshot on every scrape (see `metrics()`).
         // The Grafana-native path: point a Prometheus server at this endpoint.
         .route("/metrics", get(metrics))
@@ -274,7 +274,7 @@ async fn ping() -> &'static str {
 }
 
 /// `GET /metrics` — OpenMetrics body of the SHARED Prometheus registry in
-/// `delonix-runtime-core` (the same one `delonix-cri` serves). Refreshes only
+/// `delonix-telemetry` (the same one `delonix-cri` serves). Refreshes only
 /// the CHEAP gauges (container/VM counts, cgroup memory) inline on every
 /// request — Prometheus's default scrape timeout (10s) does not leave room
 /// for the per-container netns reads, let alone the disk-usage walk (measured
@@ -1096,7 +1096,7 @@ struct FirewallBody {
     /// Id do container — o mecanismo usa-o para nomear a cadeia.
     id: String,
     /// A política INTEIRA, tal como o `kind:Application` a exprime.
-    fw: delonix_runtime_core::ContainerFw,
+    fw: delonix_model::records::ContainerFw,
 }
 
 /// `PUT /v1/net/firewall/:ip` — aplica a firewall de um workload.
@@ -1613,7 +1613,7 @@ mod tests {
     /// Builds a saved container record with an IP, for the publish-persistence tests.
     fn ctr_com_ip(base: &std::path::Path, id: &str, ip: &str) -> Store {
         let store = Store::open(base.join("containers")).unwrap();
-        let mut c = delonix_runtime_core::Container::new(
+        let mut c = delonix_compute::Container::new(
             id.to_string(),
             id.to_string(),
             "alpine:3.20".to_string(),
@@ -1884,7 +1884,7 @@ mod tests {
 
     #[tokio::test]
     async fn containers_devolve_container_populado() {
-        use delonix_runtime_core::Container;
+        use delonix_compute::Container;
         let (st, dir) = test_state();
         // Persist a real container in the store (`<base>/containers`), as the CLI does.
         let store = Store::open(dir.path().join("containers")).unwrap();

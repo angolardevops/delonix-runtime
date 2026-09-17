@@ -36,7 +36,7 @@
 //!    left pointing at a path that no longer exists is a working export serving
 //!    whatever gets created there next.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::Deserialize;
 use std::time::{Duration, Instant};
 

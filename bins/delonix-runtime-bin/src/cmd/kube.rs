@@ -3,7 +3,8 @@
 //! now give me the YAML for k8s" path (equivalent to `podman generate kube`).
 
 use clap::Subcommand;
-use delonix_runtime_core::{Container, Error, Result};
+use delonix_compute::Container;
+use delonix_model::{Error, Result};
 use delonix_state::Store;
 
 use super::util::open_stores;

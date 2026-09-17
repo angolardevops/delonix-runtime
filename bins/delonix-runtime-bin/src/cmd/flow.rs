@@ -10,7 +10,7 @@
 use std::net::Ipv4Addr;
 use std::process::Command;
 
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 use delonix_sdn::{bpf, infra};
 
 use super::output;
@@ -133,7 +133,7 @@ fn render(
 }
 
 /// Per-container byte counters from the veth (always available, coarser).
-fn fallback(containers: &[delonix_runtime_core::Container]) -> Result<()> {
+fn fallback(containers: &[delonix_compute::Container]) -> Result<()> {
     let mut t = output::Table::new(&["CONTAINER", "IP", "RX BYTES", "TX BYTES"]);
     let mut any = false;
     for c in containers {

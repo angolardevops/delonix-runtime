@@ -6,7 +6,7 @@
 //! like `container`/`vm`, so they don't belong at the same level as those.
 
 use clap::Subcommand;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 #[derive(Subcommand)]
 pub enum ServeCmd {

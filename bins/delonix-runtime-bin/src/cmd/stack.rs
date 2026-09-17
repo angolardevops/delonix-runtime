@@ -10,7 +10,7 @@ use super::kinds as k;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 use serde::Deserialize;
 
 use super::manifest;
@@ -923,7 +923,7 @@ fn wait(file: Option<PathBuf>, timeout: u64) -> Result<()> {
             // Not `Invalid`: nothing about the arguments is wrong, and the
             // resources may well be coming up right now. A reconciler waits
             // longer; it must not read this as «it broke».
-            return Err(delonix_runtime_core::Error::Timeout(super::po::tf(
+            return Err(delonix_model::Error::Timeout(super::po::tf(
                 "{n} resource(s) still not ready after {secs}s",
                 &[
                     ("secs", &timeout.to_string()),
@@ -1163,7 +1163,7 @@ fn fmt_labels(meta: &manifest::Metadata) -> String {
 fn presence(
     kind: &str,
     doc: &manifest::ManifestDoc,
-    containers: &[delonix_runtime_core::Container],
+    containers: &[delonix_compute::Container],
 ) -> (String, String) {
     let root = super::util::state_root();
     let name = doc.metadata.name.as_str();
@@ -1236,7 +1236,7 @@ fn presence(
         },
         k::SECRET => match delonix_state::SecretStore::open(&root) {
             Ok(s) => yes_no(s.list().iter().any(|sec| sec.name == name)),
-            Err(e) => ("?".into(), delonix_runtime_core::Error::from(e).to_string()),
+            Err(e) => ("?".into(), delonix_model::Error::from(e).to_string()),
         },
         // `status` (and not the raw record) so the state comes reconciled with the
         // backend — a VM that died externally shows as Stopped, not Running.
@@ -1349,7 +1349,7 @@ fn refuse_unallowed(changes: &[Change], replace: &[String]) -> Result<()> {
     for b in &blocked {
         eprintln!("  ✗ {b}");
     }
-    Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+    Err(delonix_model::Error::Invalid(super::po::tf(
         "stack apply refused: {n} resource(s) need an explicit decision (nothing was changed)",
         &[("n", &blocked.len().to_string())],
     )))
@@ -1384,7 +1384,7 @@ fn apply(
             || (r.split('/').count() == 2 && r.split('/').all(|p| !p.is_empty()))
             || (!r.contains('/') && !r.is_empty());
         if !shape_ok {
-            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            return Err(delonix_model::Error::Invalid(super::po::tf(
                 "--replace '{value}': expected `<Kind>/<name>` (e.g. `Container/web`), \
                  a bare resource name, or `all`",
                 &[("value", r)],
@@ -1425,7 +1425,7 @@ fn apply_docs(
         for i in &issues {
             eprintln!("  ✗ {i}");
         }
-        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+        return Err(delonix_model::Error::Invalid(super::po::tf(
             "stack apply aborted: {n} unresolved reference(s) (fix the manifest or use `stack validate`)",
             &[("n", &issues.len().to_string())],
         )));
@@ -1446,7 +1446,7 @@ fn apply_docs(
                 .iter()
                 .any(|c| format!("{}/{}", c.kind, c.name) == *r || c.name == *r);
             if !hits {
-                return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                return Err(delonix_model::Error::Invalid(super::po::tf(
                     "--replace '{value}': no resource with that name in this manifest \
                      (`stack plan` lists them)",
                     &[("value", r)],
@@ -1771,7 +1771,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
     // the two from drifting: a Kind added to one and not the other now fails
     // here, loudly, instead of being silently skipped or silently refused.
     if !super::kinds::has_teardown(kind) {
-        return Err(delonix_runtime_core::Error::Invalid(
+        return Err(delonix_model::Error::Invalid(
             match no_teardown_reason(kind) {
                 Some(why) => format!("{kind}/{name}: {}", super::po::t(why)),
                 None => {
@@ -1792,7 +1792,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         // Unreachable: the guard above already refused everything outside
         // the `teardown` column. Kept so flipping that column without an arm
         // here fails instead of silently doing nothing.
-        other => Err(delonix_runtime_core::Error::Invalid(format!(
+        other => Err(delonix_model::Error::Invalid(format!(
             "{other}/{name}: cmd::kinds says it has teardown but `destroy_one` has no arm for it"
         ))),
     }
@@ -2000,7 +2000,7 @@ fn converge_and_stamp(
                         .iter()
                         .find(|d| d.kind == c.kind && d.metadata.name == c.name)
                         .ok_or_else(|| {
-                            delonix_runtime_core::Error::Invalid(format!(
+                            delonix_model::Error::Invalid(format!(
                                 "FirewallPolicy/{}: not in the manifest",
                                 c.name
                             ))
@@ -2014,7 +2014,7 @@ fn converge_and_stamp(
                         .iter()
                         .find(|d| d.kind == c.kind && d.metadata.name == c.name)
                         .ok_or_else(|| {
-                            delonix_runtime_core::Error::Invalid(format!(
+                            delonix_model::Error::Invalid(format!(
                                 "NetworkAccessRule/{}: not in the manifest",
                                 c.name
                             ))
@@ -2028,7 +2028,7 @@ fn converge_and_stamp(
                         .iter()
                         .find(|d| d.kind == c.kind && d.metadata.name == c.name)
                         .ok_or_else(|| {
-                            delonix_runtime_core::Error::Invalid(format!(
+                            delonix_model::Error::Invalid(format!(
                                 "Service/{}: not in the manifest",
                                 c.name
                             ))
@@ -2049,7 +2049,7 @@ fn converge_and_stamp(
                         .iter()
                         .find(|d| d.kind == c.kind && d.metadata.name == c.name)
                         .ok_or_else(|| {
-                            delonix_runtime_core::Error::Invalid(format!(
+                            delonix_model::Error::Invalid(format!(
                                 "Tunnel/{}: not in the manifest",
                                 c.name
                             ))
@@ -2060,7 +2060,7 @@ fn converge_and_stamp(
                 // `Update` for one. Saying so beats a silent no-op if that ever
                 // changes.
                 other => {
-                    return Err(delonix_runtime_core::Error::Invalid(format!(
+                    return Err(delonix_model::Error::Invalid(format!(
                         "{other}/{}: no live update path",
                         c.name
                     )))
@@ -2177,13 +2177,13 @@ fn rollback(
 
     let revs = super::revision::list(&root, &stack);
     let Some(rev) = revs.iter().find(|r| r.number == to) else {
-        return Err(delonix_runtime_core::Error::NotFound(super::po::tf(
+        return Err(delonix_model::Error::NotFound(super::po::tf(
             "revision {n} of stack '{stack}' (`stack history` lists them)",
             &[("n", &to.to_string()), ("stack", &stack)],
         )));
     };
     if !rev.ok {
-        return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+        return Err(delonix_model::Error::Invalid(super::po::tf(
             "revision {n} of stack '{stack}' is a FAILED apply — it is on record so it can be \
              read, not replayed. Pick one that succeeded (`stack history`).",
             &[("n", &to.to_string()), ("stack", &stack)],
@@ -2210,7 +2210,7 @@ fn rollback(
             &[
                 ("stack", &stack),
                 ("n", &to.to_string()),
-                ("when", &delonix_runtime_core::fmt_local_ts(rev.ts)),
+                ("when", &delonix_node::fmt_local_ts(rev.ts)),
             ],
         )
     );
@@ -2341,7 +2341,7 @@ fn history(
         };
         t.row(vec![
             r.number.to_string(),
-            delonix_runtime_core::fmt_local_ts(r.ts),
+            delonix_node::fmt_local_ts(r.ts),
             result,
             r.manifest.clone(),
             changes,
@@ -2381,7 +2381,7 @@ fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
             )
         );
         if strict {
-            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            return Err(delonix_model::Error::Invalid(super::po::tf(
                 "{w} ignored field(s) — refused by --strict",
                 &[("w", &ignored.to_string())],
             )));
@@ -2391,7 +2391,7 @@ fn validate(file: Option<PathBuf>, strict: bool) -> Result<()> {
         for i in &issues {
             println!("  ✗ {i}");
         }
-        Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+        Err(delonix_model::Error::Invalid(super::po::tf(
             "{n} unresolved reference(s)",
             &[("n", &issues.len().to_string())],
         )))

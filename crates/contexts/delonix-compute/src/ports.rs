@@ -8,7 +8,9 @@
 //! An implementation owns its terminal manners (a progress line, a translated
 //! message); the use case only sees data and errors.
 
-use delonix_runtime_core::{Container, ContainerFw, Mount, Result};
+use crate::{Container, Mount};
+use delonix_model::records::ContainerFw;
+use delonix_model::Result;
 
 use crate::Notice;
 

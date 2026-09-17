@@ -28,7 +28,7 @@ use super::kinds as k;
 use super::manifest::{self, ManifestDoc};
 use super::output::OutputFormat;
 use super::util::open_stores;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// `spec` of `kind: Service`.
 #[derive(Debug, Clone, serde::Deserialize, serde::Serialize, schemars::JsonSchema)]
@@ -216,7 +216,7 @@ fn match_count(namespace: &str, match_labels: &BTreeMap<String, String>) -> usiz
 /// (`delonix_sdn::infra::service_set`), preserving any existing ownership
 /// stamp (the reconciler's `stamp` runs separately, after `apply`, same
 /// two-step order every other ownable Kind here follows).
-fn apply_one(containers: &[delonix_runtime_core::Container], doc: &ManifestDoc) -> Result<()> {
+fn apply_one(containers: &[delonix_compute::Container], doc: &ManifestDoc) -> Result<()> {
     let spec: ServiceSpec = manifest::spec_of(doc)?;
     let namespace = doc
         .metadata

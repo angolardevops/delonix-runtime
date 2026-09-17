@@ -55,10 +55,12 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
+use delonix_compute::Container;
 use delonix_linux as runtime;
+use delonix_model::{Error, Result};
+use delonix_node::generate_id;
 use delonix_oci::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
 use delonix_oci::{Image, ImageStore};
-use delonix_runtime_core::{generate_id, Container, Error, Result};
 use delonix_state::Store;
 use sha2::{Digest, Sha256};
 
@@ -732,7 +734,7 @@ fn mount_run_secrets(
             .unwrap_or_else(|| format!("/run/secrets/{}", m.id));
         if let Err(e) = runtime::mount_live(
             container,
-            &delonix_runtime_core::Mount {
+            &delonix_compute::Mount {
                 source: src.to_string_lossy().into_owned(),
                 target: target.clone(),
                 readonly: true,

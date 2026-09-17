@@ -28,7 +28,7 @@
 
 use std::process::{Command, Stdio};
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 use super::util::open_stores;
 

@@ -3,7 +3,7 @@
 
 use crate::cas::strip;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
