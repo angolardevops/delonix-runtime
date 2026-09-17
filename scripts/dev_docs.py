@@ -200,6 +200,20 @@ def render_ci_gates() -> str:
     return "\n".join(lines) + "\n"
 
 
+def render_ratchets() -> str:
+    """The NAMES of the debt ratchets, from the baseline the gate compares against — not
+    their values, which change every time the debt goes down. A ratchet added to
+    arch_fitness.py lands in the baseline in the same commit, and so here."""
+    import json
+
+    names = json.loads((ROOT / "scripts" / "arch_baseline.json").read_text())
+    lines = [f"- `{name}`" for name in names]
+    return (
+        f"`scripts/arch_fitness.py` keeps **{len(names)} debt ratchets** "
+        "(baseline in `scripts/arch_baseline.json`):\n\n" + "\n".join(lines) + "\n"
+    )
+
+
 def render_crate_count(crates: list[dict]) -> str:
     bins = sorted(b for c in crates for b in c["bins"])
     return (
@@ -218,6 +232,7 @@ def regions() -> dict[str, str]:
         "crates-table": render_crates_table(arch, crates),
         "crates-graph": render_crates_graph(arch, crates),
         "ci-gates": render_ci_gates(),
+        "ratchets": render_ratchets(),
     }
 
 

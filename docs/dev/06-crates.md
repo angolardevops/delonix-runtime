@@ -33,15 +33,15 @@ Two conventions you will meet everywhere:
 <!-- dev-docs:begin crates-table -->
 | Crate | Layer | Path | Binaries | Depends on (engine crates) | Used by |
 |---|---|---|---|---|---|
-| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-runtime-bin`, `delonix-runtime-core` |
+| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-runtime-bin`, `delonix-runtime-core`, `delonix-scanner` |
 | `delonix-net-rules` | Foundation | `crates/foundation/delonix-net-rules` | — | — | `delonix-sdn`, `delonix-vm` |
-| `delonix-runtime-core` | Foundation | `crates/foundation/delonix-runtime-core` | — | `delonix-model` | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-oci`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-scanner`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
+| `delonix-runtime-core` | Foundation | `crates/foundation/delonix-runtime-core` | — | `delonix-model` | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-oci`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
 | `delonix-compute` | Contexts | `crates/contexts/delonix-compute` | — | `delonix-runtime-core` | `delonix-cri`, `delonix-linux`, `delonix-oci`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-vm`, `delonix-volume` |
 | `delonix-security-runtime` | Contexts | `crates/contexts/delonix-security-runtime` | — | `delonix-runtime-core` | `delonix-runtime-bin` |
 | `delonix-stack` | Contexts | `crates/contexts/delonix-stack` | — | `delonix-runtime-core` | `delonix-runtime-bin` |
 | `delonix-linux` | Adapters | `crates/adapters/delonix-linux` | — | `delonix-compute`, `delonix-runtime-core` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
 | `delonix-oci` | Adapters | `crates/adapters/delonix-oci` | — | `delonix-compute`, `delonix-runtime-core` | `delonix-cri`, `delonix-mgmt`, `delonix-runtime-bin`, `delonix-scanner` |
-| `delonix-scanner` | Adapters | `crates/adapters/delonix-scanner` | — | `delonix-oci`, `delonix-runtime-core` | `delonix-mgmt`, `delonix-runtime-bin` |
+| `delonix-scanner` | Adapters | `crates/adapters/delonix-scanner` | — | `delonix-model`, `delonix-oci` | `delonix-mgmt`, `delonix-runtime-bin` |
 | `delonix-sdn` | Adapters | `crates/adapters/delonix-sdn` | — | `delonix-compute`, `delonix-net-rules`, `delonix-runtime-core` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
 | `delonix-telemetry` | Adapters | `crates/adapters/delonix-telemetry` | — | — | `delonix-cri`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-runtime-bin` |
 | `delonix-vm` | Adapters | `crates/adapters/delonix-vm` | — | `delonix-compute`, `delonix-net-rules`, `delonix-runtime-core` | `delonix-mcp`, `delonix-mgmt`, `delonix-proxmox`, `delonix-runtime-bin` |
@@ -669,6 +669,7 @@ database itself (no HTTP client in its dependencies).
 | Module | Responsibility |
 |---|---|
 | `lib.rs` | `extract_sbom`, `AdvisoryDb`, `Finding`, `advisories_from_osv`, version comparison |
+| `error` | the crate's own `Error`, converted into the engine's `delonix_model::Error` class (`DX_*` codes) |
 | `pytree` | Python module-tree scanning |
 
 **Main public API**
@@ -679,8 +680,9 @@ database itself (no HTTP client in its dependencies).
 | `AdvisoryDb` | advisories to match against | `crates/adapters/delonix-scanner/src/lib.rs:AdvisoryDb` |
 | `advisories_from_osv` | load OSV-format advisories | `crates/adapters/delonix-scanner/src/lib.rs:advisories_from_osv` |
 
-**Talks to.** `delonix-oci` (`ImageStore`, `Image`) and `delonix-runtime-core`,
-by direct call — a declared layering exception (see [05](05-architecture.md)).
+**Talks to.** `delonix-oci` (`ImageStore`, `Image`) by direct call — a declared
+layering exception (see [05](05-architecture.md)) — and `delonix-model`, into whose
+`Error` its own errors convert (`src/error.rs`, `impl From<Error> for delonix_model::Error`).
 
 **Notable external dependencies.** `tar`, `flate2`, `serde`, `serde_json`.
 
