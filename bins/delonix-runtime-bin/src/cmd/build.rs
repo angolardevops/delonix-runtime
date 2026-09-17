@@ -57,7 +57,7 @@ use std::path::{Path, PathBuf};
 use clap::Args;
 use delonix_image::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
 use delonix_image::{Image, ImageStore};
-use delonix_runtime::{self as runtime, RunSpec};
+use delonix_runtime as runtime;
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
 use sha2::{Digest, Sha256};
 
@@ -520,7 +520,15 @@ fn build_one_stage(
                             continue;
                         }
                     }
-                    ensure_container(store, &mut container, &cur_id, &cur_rootfs, from, rootless)?;
+                    ensure_container(
+                        images,
+                        store,
+                        &mut container,
+                        &cur_id,
+                        &cur_rootfs,
+                        from,
+                        rootless,
+                    )?;
                     copy_into_rootfs(src_root, &cur_rootfs, &stage_rel, dst, &cur_workdir)?;
                     if use_cache {
                         save_to_cache(&new_hash, &cur_rootfs);
@@ -553,7 +561,15 @@ fn build_one_stage(
                             continue;
                         }
                     }
-                    ensure_container(store, &mut container, &cur_id, &cur_rootfs, from, rootless)?;
+                    ensure_container(
+                        images,
+                        store,
+                        &mut container,
+                        &cur_id,
+                        &cur_rootfs,
+                        from,
+                        rootless,
+                    )?;
                     let c = container.as_ref().unwrap();
                     let mounted = mount_run_secrets(c, run_step, secrets)?;
                     let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
@@ -608,6 +624,7 @@ fn build_one_stage(
 /// see `build_one_stage`'s doc comment for why a `RUN`/`COPY` failing partway
 /// through must not leak it.
 fn ensure_container(
+    images: &ImageStore,
     store: &Store,
     container: &mut Option<Container>,
     id: &str,
@@ -618,6 +635,21 @@ fn ensure_container(
     if container.is_some() {
         return Ok(());
     }
+    let mut c = work_container(id, from_label, rootless);
+    let launch = work_launch(rootfs);
+    // The same `WorkloadRuntime` `run` and `start` use: one path from a `Launch` to
+    // the engine, so the build's work container cannot drift from a container's
+    // spawn specification (the literal it had here was a second builder).
+    super::container::with_host_workload(images, store, |w| {
+        delonix_compute::launch::WorkloadRuntime::create(w, &mut c, &launch)
+    })?;
+    *container = Some(c);
+    Ok(())
+}
+
+/// The build's work container: `sleep infinity` over the stage's rootfs, each
+/// `RUN` executed into it.
+fn work_container(id: &str, from_label: &str, rootless: bool) -> Container {
     let mut c = Container::new(
         id.to_string(),
         format!("dlx-build-{}", &id[..8.min(id.len())]),
@@ -626,14 +658,26 @@ fn ensure_container(
         "max".into(),
     );
     c.userns = rootless;
-    let spec = RunSpec {
+    c
+}
+
+/// How the work container starts: detached, on the host's network (a `RUN` fetches
+/// packages), with no mounts, no log and no published port.
+fn work_launch(rootfs: &str) -> delonix_compute::launch::Launch {
+    delonix_compute::launch::Launch {
+        rootfs: rootfs.to_string(),
+        mounts: vec![],
         detach: true,
-        userns: rootless,
-        ..Default::default()
-    };
-    runtime::create_with(store, &mut c, rootfs, &spec)?;
-    *container = Some(c);
-    Ok(())
+        second_pass: false,
+        net_none: false,
+        custom_net: None,
+        pod: false,
+        attached_ip: None,
+        slirp_ports: vec![],
+        pod_infra_pid: None,
+        apparmor: None,
+        log_path: None,
+    }
 }
 
 /// Stops the live container (if any) — its id was already recorded in
@@ -1485,6 +1529,48 @@ mod tests {
         confine_to, default_build_file, expand_env_value, parse_build_secrets, parse_platform,
         safe_join, sh_export, valid_secret_id,
     };
+
+    /// The work container's spawn specification, now built from a `Launch`, is the
+    /// one the build's own literal gave: detached, the caller's user namespace,
+    /// the host's network, and nothing else.
+    #[test]
+    fn the_work_container_spec_is_unchanged_by_the_one_builder() {
+        for rootless in [true, false] {
+            let c = super::work_container("0123456789abcdef", "alpine", rootless);
+            let hook = |_: i32| Ok(());
+            let spec = delonix_runtime::launch_spec::run_spec(
+                &c,
+                &super::work_launch("/r"),
+                None,
+                None,
+                &hook,
+            );
+            assert!(spec.detach);
+            assert_eq!(spec.userns, rootless);
+            assert!(!spec.new_netns, "a RUN needs the host's network");
+            assert!(!spec.inherit_userns);
+            assert!(spec.mounts.is_empty());
+            assert!(spec.log_path.is_none());
+            assert!(spec.on_started.is_none());
+            assert!(spec.dns.is_none() && spec.hosts_ip.is_none() && spec.dns_config.is_none());
+            assert!(spec.pod_infra_pid.is_none());
+            assert!(!spec.host_pid && !spec.host_ipc && !spec.log_cri);
+            assert!(spec.apparmor.is_none() && spec.selinux.is_none());
+            assert!(spec.run_uid.is_none() && spec.run_gid.is_none());
+        }
+    }
+
+    #[test]
+    fn build_starts_its_work_container_only_through_the_host_workload() {
+        let src = include_str!("build.rs");
+        for pattern in [concat!("RunSpec", " {"), concat!("create", "_with(")] {
+            assert_eq!(
+                src.matches(pattern).count(),
+                0,
+                "build.rs has `{pattern}` — start the work container through `with_host_workload`"
+            );
+        }
+    }
     use std::path::Path;
 
     /// Regression: `ENV PATH=/app/.venv/bin:$PATH` — one of the most common
