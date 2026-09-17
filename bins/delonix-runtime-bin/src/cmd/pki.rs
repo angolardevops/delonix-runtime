@@ -11,7 +11,7 @@
 //! `.signed_by()`, both already present in the vendored `rcgen 0.13.2` — no
 //! version bump) to build a real CA that signs N leaves.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, KeyPair};
 
 /// A CA's cert + key, kept LIVE (not just PEM) so multiple leaves can be

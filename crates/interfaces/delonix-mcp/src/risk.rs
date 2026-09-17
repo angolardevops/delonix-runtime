@@ -1,5 +1,5 @@
 //! Risk classification for MCP tools (ADR-0025 §5) — scoped to this crate only,
-//! never wired into `delonix-mgmt`/`delonix-runtime-core` in this pass.
+//! never wired into `delonix-mgmt` or the shared model in this pass.
 
 use serde::Serialize;
 

@@ -8,7 +8,8 @@
 //! here — only the operational subcommands do.
 
 use clap::Subcommand;
-use delonix_runtime_core::{ContainerFw, Error, Result};
+use delonix_model::records::ContainerFw;
+use delonix_model::{Error, Result};
 use delonix_sdn::infra;
 
 #[derive(Subcommand)]
@@ -104,14 +105,14 @@ fn fmt_control(st: &delonix_sdn::infra::InfraStatus) -> String {
 }
 
 pub(crate) fn is_reattach_candidate(
-    status: &delonix_runtime_core::Status,
+    status: &delonix_model::records::Status,
     network: Option<&str>,
     pid: Option<i32>,
     pod: Option<&str>,
 ) -> bool {
     let wired = network.map(|n| !n.is_empty()).unwrap_or(false)
         || pod.map(|p| !p.is_empty()).unwrap_or(false);
-    matches!(status, delonix_runtime_core::Status::Running)
+    matches!(status, delonix_model::records::Status::Running)
         && wired
         && pid.map(|p| p > 1).unwrap_or(false)
 }
@@ -395,7 +396,7 @@ fn fmt_pid(p: Option<i32>) -> String {
 #[cfg(test)]
 mod tests {
     use super::is_reattach_candidate;
-    use delonix_runtime_core::Status;
+    use delonix_model::records::Status;
 
     /// Um MEMBRO DE POD também fica sem rede num respawn — a netns partilhada
     /// morre com o holder antigo tal como qualquer veth. Sem isto, a

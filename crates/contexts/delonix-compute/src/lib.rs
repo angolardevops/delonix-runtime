@@ -9,8 +9,11 @@ mod notice;
 pub mod pod;
 pub mod ports;
 pub mod preflight;
+mod record;
 pub mod run;
 mod run_opts;
+pub mod workload_net;
 
 pub use notice::Notice;
+pub use record::*;
 pub use run_opts::RunOpts;

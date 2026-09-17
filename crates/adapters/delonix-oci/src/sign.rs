@@ -20,7 +20,7 @@ use crate::registry::{
 };
 use crate::ImageStore;
 use base64::Engine;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_state::write_atomic_mode;
 use ring::rand::SystemRandom;
 use ring::signature::{EcdsaKeyPair, KeyPair, ECDSA_P256_SHA256_ASN1_SIGNING};

@@ -27,7 +27,7 @@
 //! `nsenter` into namespaces that already exist (the adoption path) must not
 //! create new ones, and it never gets the variable.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
 /// Carries `<read-fd>,<write-fd>` of the pin's ends of the two pipes.
@@ -286,7 +286,7 @@ fn run_helper(path: &str, pid: i32, args: &[String]) -> Result<()> {
 pub(crate) fn write_maps(pid: i32) -> Result<()> {
     // SAFETY: geteuid/getegid have no preconditions.
     let (euid, egid) = unsafe { (libc::geteuid(), libc::getegid()) };
-    if delonix_runtime_core::in_initial_userns() {
+    if delonix_node::in_initial_userns() {
         if let (Some(uidmap), Some(gidmap)) = (helper("newuidmap"), helper("newgidmap")) {
             let name = user_name(euid);
             let read = |p: &str| std::fs::read_to_string(p).unwrap_or_default();

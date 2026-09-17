@@ -12,8 +12,8 @@ name = "delonix-mcp"
 path = "src/main.rs"
 
 [dependencies]
+delonix-node = { workspace = true }
 delonix-mcp = { workspace = true }
-delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 serde_json = { workspace = true }

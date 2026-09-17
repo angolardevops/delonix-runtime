@@ -7,7 +7,7 @@
 //!
 //! The backend is chosen per VM: explicit (`VmConfig.backend`) or **auto-detection**
 //! (prefers `cloud-hypervisor` if installed; otherwise `libvirt`). The per-VM state
-//! ([`delonix_runtime_core::Vm`], persisted in `<base>/vms/<name>.json`) records the backend
+//! ([`delonix_compute::Vm`], persisted in `<base>/vms/<name>.json`) records the backend
 //! that started it, in order to reconcile liveness/shutdown with the right backend.
 //!
 //! Networking: Cloud Hypervisor reuses the `delonix-sdn` *plumbing*
@@ -43,14 +43,16 @@ fn network() -> Result<&'static dyn VmNetwork> {
             message: "no VM network provider is registered in this process".into(),
         })
 }
-use delonix_runtime_core::{Error, Result, Status, Vm, VmBootSpec};
+use delonix_compute::{Vm, VmBootSpec};
+use delonix_model::records::Status;
+use delonix_model::{Error, Result};
 use delonix_state::JsonStore;
 
 /// The VM shapes that [`Vm`] persists. They are DEFINED in
-/// `delonix-runtime-core` — the record lives there and the dependency cannot
+/// `delonix-compute` — the record lives there and the dependency cannot
 /// run the other way — and re-exported here so `delonix_vm::CpuTopology` and
 /// friends keep resolving for every existing caller.
-pub use delonix_runtime_core::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
+pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 
 pub mod cloudinit;
 
@@ -221,7 +223,7 @@ pub struct VmConfig {
 // user writing cloud-init or XML: the bin resolves the name → `source` (the
 // volume's `_data`, or a network Storage's mountpoint) and the engine generates
 // both the domain's `<filesystem>` and the guest-side `mount`. Defined in
-// `delonix-runtime-core` with the other persisted shapes; re-exported above.
+// `delonix-compute` with the other persisted shapes; re-exported above.
 
 // ===========================================================================
 // Shared helpers
@@ -236,9 +238,9 @@ fn store(base: &Path) -> Result<JsonStore<Vm>> {
 }
 
 // `is_alive` era uma TERCEIRA cópia da mesma pergunta (a do motor usa o
-// `kill(pid, 0)`, esta lia `/proc`). Usa-se agora a do `delonix-runtime-core`,
+// `kill(pid, 0)`, esta lia `/proc`). Usa-se agora a do `delonix-node`,
 // que é também onde vive o `safe_to_signal` que fecha a reciclagem de PID.
-use delonix_runtime_core::{proc_starttime, safe_to_signal};
+use delonix_node::{proc_starttime, safe_to_signal};
 
 /// Is `argv` the `cloud-hypervisor` serving THIS VM? PURE.
 ///
@@ -6407,7 +6409,7 @@ Format specific information:
     }
 
     /// The wire-compatibility half of this (a record written before the block
-    /// existed must keep deserializing) lives in `delonix-runtime-core`, where
+    /// existed must keep deserializing) lives in `delonix-compute`, where
     /// `Vm` and `serde_json` both are — this crate has no JSON dependency and
     /// is not gaining one for a test.
 

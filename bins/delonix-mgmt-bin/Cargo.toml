@@ -11,8 +11,8 @@ name = "delonix-mgmt"
 path = "src/main.rs"
 
 [dependencies]
+delonix-node = { workspace = true }
 delonix-mgmt = { workspace = true }
-delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
 
 [lints]

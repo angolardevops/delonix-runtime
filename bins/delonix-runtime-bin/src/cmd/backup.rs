@@ -73,7 +73,7 @@
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_state::Store;
 use serde::{Deserialize, Serialize};
 
@@ -464,7 +464,7 @@ fn live_workloads(root: &Path) -> Vec<String> {
         }
     }
     for vm in delonix_vm::list(root).unwrap_or_default() {
-        if matches!(vm.status, delonix_runtime_core::Status::Running) {
+        if matches!(vm.status, delonix_model::records::Status::Running) {
             out.push(format!("vm {}", vm.name));
         }
     }

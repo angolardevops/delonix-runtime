@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/foundation/delonix-runtime-core",
     "crates/adapters/delonix-linux",
     "bins/delonix-runtime-bin",
     "crates/adapters/delonix-oci",
@@ -20,6 +19,7 @@ members = [
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
     "crates/contexts/delonix-compute",
+    "crates/contexts/delonix-node",
     "crates/adapters/delonix-telemetry",
     "bins/delonix-mcp-bin",
     "bins/delonix-mgmt-bin",
@@ -36,7 +36,6 @@ repository = "https://github.com/angolardevops/delonix-runtime"
 # HERE and nowhere else, so a move or a rename (phases P2-P4) edits one line and not
 # every manifest that depends on it. The directory is the crate's LAYER, and
 # `scripts/arch_fitness.py` fails when the two disagree.
-delonix-runtime-core = { path = "crates/foundation/delonix-runtime-core" }
 delonix-linux = { path = "crates/adapters/delonix-linux" }
 delonix-runtime-bin = { path = "bins/delonix-runtime-bin" }
 delonix-oci = { path = "crates/adapters/delonix-oci" }
@@ -56,6 +55,7 @@ delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
 delonix-model = { path = "crates/foundation/delonix-model" }
 delonix-stack = { path = "crates/contexts/delonix-stack" }
 delonix-compute = { path = "crates/contexts/delonix-compute" }
+delonix-node = { path = "crates/contexts/delonix-node" }
 
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

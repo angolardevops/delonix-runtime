@@ -48,7 +48,7 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use clap::Subcommand;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_state::JsonStore;
 use serde::{Deserialize, Serialize};
 

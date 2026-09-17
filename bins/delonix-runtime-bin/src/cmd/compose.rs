@@ -97,9 +97,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use clap::Subcommand;
+use delonix_compute::Container;
 use delonix_linux::{self as runtime};
+use delonix_model::records::Status;
+use delonix_model::{Error, Result};
 use delonix_oci::ImageStore;
-use delonix_runtime_core::{Container, Error, Result, Status};
 use delonix_sdn::NetworkStore;
 use delonix_state::Store;
 use delonix_volume::VolumeStore;
@@ -2246,7 +2248,7 @@ fn service_to_run_opts(
             let mut out = Vec::new();
             for entry in svc.extra_hosts.to_host_pairs() {
                 let (name, ip) = super::container::parse_add_host(&entry)
-                    .map_err(delonix_runtime_core::Error::Invalid)?;
+                    .map_err(delonix_model::Error::Invalid)?;
                 out.push(format!("{name}:{ip}"));
             }
             out

@@ -5,11 +5,12 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
+use delonix_compute::{Container, Health, HealthConfig, HealthState};
 use delonix_linux::{self as runtime};
+use delonix_model::records::Status;
+use delonix_model::{Error, Result};
+use delonix_node::generate_id;
 use delonix_oci::ImageStore;
-use delonix_runtime_core::{
-    generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status,
-};
 use delonix_sdn::infra;
 use delonix_state::Store;
 use serde::{Deserialize, Serialize};
@@ -25,13 +26,13 @@ use delonix_sdn::run_network::{publish_with_retry, unpublish_ports};
 /// foreground would block waiting for the process to exit — dangerous for a
 /// declarative command. Pass `detach: false` explicitly in the YAML if you want
 /// the synchronous behavior of the interactive `run`.
-/// Manifest mirror of [`delonix_runtime_core::CgroupParent`].
+/// Manifest mirror of [`delonix_compute::CgroupParent`].
 ///
-/// It exists here, and not in `delonix-runtime-core`, for two reasons: the core crate
-/// stays free of `schemars` (the manifest schema is a concern of this binary, not of
+/// It exists here, and not next to the `Container` record in `delonix-compute`, for two
+/// reasons: the record stays free of `schemars` (the manifest schema is a concern of this binary, not of
 /// the domain types), and the manifest speaks camelCase (`memoryMax`) while the
 /// persisted `Container` keeps its own field names. One conversion at the boundary is
-/// cheaper than either a new dependency in core or a rename that breaks stored records.
+/// cheaper than either a new dependency on the record or a rename that breaks stored records.
 #[derive(Debug, Deserialize, Serialize, Clone, schemars::JsonSchema)]
 pub(crate) struct SpecCgroupParent {
     /// Group directory name — a single, safe path segment.
@@ -47,9 +48,9 @@ pub(crate) struct SpecCgroupParent {
     pub(crate) pids_max: Option<String>,
 }
 
-impl From<SpecCgroupParent> for delonix_runtime_core::CgroupParent {
+impl From<SpecCgroupParent> for delonix_compute::CgroupParent {
     fn from(s: SpecCgroupParent) -> Self {
-        delonix_runtime_core::CgroupParent {
+        delonix_compute::CgroupParent {
             name: s.name,
             memory_max: s.memory_max,
             cpus: s.cpus,
@@ -112,7 +113,7 @@ pub(crate) struct ContainerSpec {
     cpuset: Option<String>,
     /// Intermediate cgroup shared by a GROUP of containers, with its own aggregate
     /// ceiling — the only way to bound what N containers hold TOGETHER (see
-    /// `delonix_runtime_core::CgroupParent`).
+    /// `delonix_compute::CgroupParent`).
     #[serde(default, rename = "cgroupParent")]
     cgroup_parent: Option<SpecCgroupParent>,
     #[serde(default, rename = "ioWeight")]
@@ -277,10 +278,7 @@ pub(crate) fn unconverged_fields_condition(
 ///
 /// A named volume lives at `<root>/volumes/<name>/_data`; anything else is a
 /// bind and keeps its host path.
-pub(crate) fn mount_to_spec(
-    m: &delonix_runtime_core::Mount,
-    volumes_root: &std::path::Path,
-) -> String {
+pub(crate) fn mount_to_spec(m: &delonix_compute::Mount, volumes_root: &std::path::Path) -> String {
     let source = std::path::Path::new(&m.source)
         .strip_prefix(volumes_root)
         .ok()
@@ -422,7 +420,7 @@ fn desired_fields_from_run_opts(o: &RunOpts) -> std::collections::BTreeMap<Strin
 
 /// What the machine actually has, in the same comparable form.
 pub(crate) fn actual_container_fields(
-    c: &delonix_runtime_core::Container,
+    c: &delonix_compute::Container,
     volumes_root: &std::path::Path,
 ) -> std::collections::BTreeMap<String, String> {
     let mut f = std::collections::BTreeMap::new();
@@ -895,7 +893,7 @@ use delonix_compute::pod::{default_net, default_restart, default_true};
 ///
 /// Puro e testado de propósito: é a única coisa que separa uma degradação de
 /// uma escolha deliberada, e uma regressão aqui volta a torná-la invisível.
-pub(crate) fn net_mode_display(c: &delonix_runtime_core::Container) -> String {
+pub(crate) fn net_mode_display(c: &delonix_compute::Container) -> String {
     match (c.net_mode.as_deref(), c.network.as_deref()) {
         // Ligado à rede que pediu — o caso normal.
         (_, Some(net)) => net.to_string(),
@@ -1724,7 +1722,7 @@ pub fn run(action: ContainerCmd) -> Result<()> {
                     device_read_iops.as_deref(),
                     device_write_iops.as_deref(),
                 )
-                .map_err(delonix_runtime_core::Error::Invalid)?,
+                .map_err(delonix_model::Error::Invalid)?,
                 read_only,
                 cap_add,
                 cap_drop,
@@ -2173,7 +2171,7 @@ fn resource_limits_decision(asked: bool, delegated: bool, escape_hatch: bool) ->
         );
         return Ok(());
     }
-    Err(delonix_runtime_core::Error::Unavailable(
+    Err(delonix_model::Error::Unavailable(
         super::po::t(
             "-m/--cpus/--cpu-weight were requested but this session has no cgroup2 \
              delegation, so the kernel would never see them — the container would run \
@@ -2629,7 +2627,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     };
     // BEFORE the supervised branch (which returns): otherwise containers with
     // `--restart` would never emit `create`.
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &super::util::state_root(),
         "container",
         "create",
@@ -2932,7 +2930,7 @@ fn record_crash_forensics(c: &Container) {
         tail.as_deref().unwrap_or("<no log>")
     );
     let _ = std::fs::write(dir.join(format!("crash-{ts}.log")), snapshot);
-    delonix_runtime_core::events::emit(&root, "container", "crashed", &c.id, &c.name, Some(reason));
+    delonix_node::events::emit(&root, "container", "crashed", &c.id, &c.name, Some(reason));
 }
 
 /// `--rm` in detached mode: with no daemon, removal is done by a dedicated
@@ -2964,7 +2962,7 @@ fn spawn_rm_watcher(images: &ImageStore, store: &Store, id: &str) {
             let _ = runtime::reconcile_status(&mut c);
             if !matches!(
                 c.status,
-                delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+                delonix_model::records::Status::Running | delonix_model::records::Status::Paused
             ) {
                 let pid = c.pid;
                 let _ = runtime::remove(store, &c, true);
@@ -3127,7 +3125,7 @@ struct ContainerLsRow {
 /// restart-policy supervisor, once for each restart it actually made.
 fn restart_counts(root: &std::path::Path) -> std::collections::HashMap<String, u32> {
     let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
-    for e in delonix_runtime_core::events::read(root) {
+    for e in delonix_node::events::read(root) {
         if e.kind == "container" && e.action == "start" {
             *counts.entry(e.id).or_insert(0) += 1;
         }
@@ -3501,7 +3499,7 @@ pub(crate) fn container_ips(c: &Container) -> Vec<String> {
 /// Applies `fw` over ALL of the container's IPs (see [`container_ips`]).
 pub(crate) fn apply_firewall_everywhere(
     c: &Container,
-    fw: &delonix_runtime_core::ContainerFw,
+    fw: &delonix_model::records::ContainerFw,
 ) -> Result<()> {
     let ips = container_ips(c);
     let refs: Vec<&str> = ips.iter().map(|s| s.as_str()).collect();
@@ -3515,7 +3513,7 @@ pub(crate) fn port_owner(store: &Store, host_port: &str) -> Result<Option<String
     for c in store.list()? {
         if !matches!(
             c.status,
-            delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+            delonix_model::records::Status::Running | delonix_model::records::Status::Paused
         ) {
             continue;
         }
@@ -3576,7 +3574,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     c.stopped_by_user = false;
     if matches!(
         c.status,
-        delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+        delonix_model::records::Status::Running | delonix_model::records::Status::Paused
     ) {
         return Err(Error::Invalid(format!("{} is already running", c.name)));
     }
@@ -3775,7 +3773,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     };
     let policy = c.restart_policy.clone().unwrap_or_default();
     if should_supervise(&policy, true, true) {
-        delonix_runtime_core::events::emit(
+        delonix_node::events::emit(
             &super::util::state_root(),
             "container",
             "start",
@@ -3790,7 +3788,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
     with_host_workload(images, store, |w| {
         delonix_compute::launch::WorkloadRuntime::create(w, &mut c, &launch)
     })?;
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &super::util::state_root(),
         "container",
         "start",
@@ -3893,7 +3891,7 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
         return Err(e);
     }
     unpublish_ports(&c, pid);
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &super::util::state_root(),
         "container",
         "stop",
@@ -3954,7 +3952,7 @@ pub(crate) fn cmd_kill(store: &Store, id: &str, signal: &str) -> Result<()> {
     let sig = parse_signal(signal)?;
     let c = find(store, id)?;
     runtime::send_signal(&c, sig)?;
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &super::util::state_root(),
         "container",
         "kill",
@@ -4016,7 +4014,7 @@ pub(crate) fn cmd_restart(images: &ImageStore, store: &Store, id: &str, time: u6
     let c = find(store, id)?;
     if matches!(
         c.status,
-        delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+        delonix_model::records::Status::Running | delonix_model::records::Status::Paused
     ) {
         cmd_stop(store, id, time)?;
     }
@@ -4043,7 +4041,7 @@ pub(crate) fn cmd_rename(store: &Store, id: &str, new_name: &str) -> Result<()> 
         cur.name = new_name.to_string();
         true
     })?;
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &super::util::state_root(),
         "container",
         "rename",
@@ -4256,7 +4254,7 @@ pub(crate) fn cmd_rm(images: &ImageStore, store: &Store, id: &str, force: bool) 
                                           // and the kubelet marked the node with `disk-pressure`. The `purge_container_dir`
                                           // doc already said "called by `rm`" — but it wasn't.
     purge_container_dir(images, &c.id);
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &super::util::state_root(),
         "container",
         "remove",
@@ -4781,7 +4779,7 @@ fn describe_one(c: &Container) {
     }
     if let Some(h) = &c.health_state {
         let when = if h.checked_unix > 0 {
-            delonix_runtime_core::fmt_local_ts(h.checked_unix as u64)
+            delonix_node::fmt_local_ts(h.checked_unix as u64)
         } else {
             "never".to_string()
         };
@@ -4952,7 +4950,7 @@ pub(crate) fn cmd_network_connect(store: &Store, id: &str, network: &str) -> Res
     }
     let idx = next_extra_idx(&c);
     let (ifname, ip) = infra::attach_extra_container(&c.id, idx, network, &c.namespace)?;
-    let en = delonix_runtime_core::ExtraNet {
+    let en = delonix_compute::ExtraNet {
         network: network.to_string(),
         ip: ip.clone(),
         idx,
@@ -5223,7 +5221,7 @@ fn cmd_update(store: &Store, id: &str, o: UpdateOpts) -> Result<()> {
             // reconstrói o cgroup a partir dele e aí o limite passa a valer); o
             // que não pode acontecer é o comando dizer que está feito.
             runtime::LimitUpdate::NotEnforced => {
-                return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                return Err(delonix_model::Error::Invalid(super::po::tf(
                     "{name}: recorded (memory={memory}, cpus={cpus}) but NOT enforced — \
                      the container is running and its cgroup no longer exists, so there \
                      was nowhere to write them. Check it is still healthy (`delonix \
@@ -5412,7 +5410,7 @@ fn cmd_stats(store: &Store, ids: &[String]) -> Result<()> {
         reconcile_and_persist(store, c);
         if !matches!(
             c.status,
-            delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+            delonix_model::records::Status::Running | delonix_model::records::Status::Paused
         ) {
             continue;
         }
@@ -5620,7 +5618,7 @@ pub(crate) fn cmd_logs(
         let _ = runtime::reconcile_status(&mut c);
         if !matches!(
             c.status,
-            delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+            delonix_model::records::Status::Running | delonix_model::records::Status::Paused
         ) {
             return Ok(());
         }
@@ -5648,7 +5646,7 @@ pub(crate) fn cmd_attach(
     let c = find(store, id)?;
     if !matches!(
         c.status,
-        delonix_runtime_core::Status::Running | delonix_runtime_core::Status::Paused
+        delonix_model::records::Status::Running | delonix_model::records::Status::Paused
     ) {
         return Err(Error::NotRunning(short_id(&c.id).to_string()));
     }
@@ -5974,7 +5972,7 @@ fn health_monitor_loop(id: String, cfg: HealthConfig) {
             true
         });
         if was != Some(next.health) {
-            delonix_runtime_core::events::emit(
+            delonix_node::events::emit(
                 &super::util::state_root(),
                 "container",
                 "health_status",
@@ -6209,7 +6207,7 @@ mod tests {
             ..serde_yaml::from_str::<super::ContainerSpec>("image: nginx:1.27").unwrap()
         };
 
-        let mut c = delonix_runtime_core::Container::new(
+        let mut c = delonix_compute::Container::new(
             "id".into(),
             "web".into(),
             "nginx:1.27".into(),
@@ -6224,7 +6222,7 @@ mod tests {
         c.network = Some("interna".into());
         c.hostname = Some("web".into());
         let root = std::path::Path::new("/var/lib/delonix/volumes");
-        c.mounts = vec![delonix_runtime_core::Mount {
+        c.mounts = vec![delonix_compute::Mount {
             source: root.join("dados/_data").to_string_lossy().into_owned(),
             target: "/var/lib".into(),
             readonly: false,
@@ -6257,7 +6255,7 @@ mod tests {
     #[test]
     fn mount_to_spec_devolve_o_nome_do_volume_e_o_caminho_de_um_bind() {
         let root = std::path::Path::new("/var/lib/delonix/volumes");
-        let named = delonix_runtime_core::Mount {
+        let named = delonix_compute::Mount {
             source: "/var/lib/delonix/volumes/dados/_data".into(),
             target: "/var/lib".into(),
             readonly: false,
@@ -6265,12 +6263,12 @@ mod tests {
             optional: false,
         };
         assert_eq!(super::mount_to_spec(&named, root), "dados:/var/lib");
-        let ro = delonix_runtime_core::Mount {
+        let ro = delonix_compute::Mount {
             readonly: true,
             ..named.clone()
         };
         assert_eq!(super::mount_to_spec(&ro, root), "dados:/var/lib:ro");
-        let bind = delonix_runtime_core::Mount {
+        let bind = delonix_compute::Mount {
             source: "/etc/nginx".into(),
             target: "/etc/nginx".into(),
             readonly: true,
@@ -6283,7 +6281,7 @@ mod tests {
         );
         // A bind that merely SITS under the volumes root is not a named volume:
         // only the exact `<name>/_data` shape is.
-        let deep = delonix_runtime_core::Mount {
+        let deep = delonix_compute::Mount {
             source: "/var/lib/delonix/volumes/dados/_data/sub".into(),
             target: "/x".into(),
             readonly: false,
@@ -6416,7 +6414,7 @@ mod tests {
     #[test]
     fn net_mode_display_separa_degradacao_de_escolha() {
         let base = |net_mode: Option<&str>, network: Option<&str>| {
-            let mut c = delonix_runtime_core::Container::new(
+            let mut c = delonix_compute::Container::new(
                 "id".into(),
                 "n".into(),
                 "img".into(),
@@ -6529,7 +6527,8 @@ mod tests {
         parse_cri_log_line, parse_signal, policy_supervised, reexec_env,
         unix_secs_to_rfc3339_prefix, valid_container_name, ContainerSpec,
     };
-    use delonix_runtime_core::{Container, ExtraNet, Status};
+    use delonix_compute::{Container, ExtraNet};
+    use delonix_model::records::Status;
 
     /// REGRESSION: the firewall used to be keyed on `c.ip` alone, so every additional
     /// network was ungoverned — reproduced live, an `ingress policy deny` container
@@ -7065,14 +7064,14 @@ restartPolicy: OnFailure
                 ch.wait().map(|_| id)
             })
             .unwrap();
-        let mut stale = delonix_runtime_core::Container::new(
+        let mut stale = delonix_compute::Container::new(
             "abc123def4560000".into(),
             "web".into(),
             "alpine".into(),
             vec!["true".into()],
             "64M".into(),
         );
-        stale.status = delonix_runtime_core::Status::Running;
+        stale.status = delonix_model::records::Status::Running;
         stale.pid = Some(dead);
         stale.pid_starttime = None;
         store.save(&stale).unwrap();
@@ -7081,7 +7080,7 @@ restartPolicy: OnFailure
         store
             .update(&stale.id, |c| {
                 c.pid = Some(me);
-                c.pid_starttime = delonix_runtime_core::proc_starttime(me);
+                c.pid_starttime = delonix_node::proc_starttime(me);
                 true
             })
             .unwrap();
@@ -7089,13 +7088,16 @@ restartPolicy: OnFailure
         assert!(super::reconcile_and_persist(&store, &mut stale));
         let rec = store.load(&stale.id).unwrap();
         assert_eq!(rec.pid, Some(me), "the newer incarnation's pid survived");
-        assert!(matches!(rec.status, delonix_runtime_core::Status::Running));
+        assert!(matches!(
+            rec.status,
+            delonix_model::records::Status::Running
+        ));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn a_pod_member_publishes_hot_ports_on_the_ingress() {
-        let mut c = delonix_runtime_core::Container::new(
+        let mut c = delonix_compute::Container::new(
             "id1".into(),
             "p-web".into(),
             "alpine".into(),
@@ -7185,7 +7187,7 @@ containers:
     // ---- health check contínuo ----
 
     use super::{apply_probe, fmt_status_of, health_opts, health_probe_argv};
-    use delonix_runtime_core::{Health, HealthConfig, HealthState};
+    use delonix_compute::{Health, HealthConfig, HealthState};
 
     fn hc(retries: u32, start_period: u64) -> HealthConfig {
         HealthConfig {
@@ -7364,7 +7366,7 @@ containers:
     #[test]
     fn restart_counts_nao_subtrai_um_porque_o_run_nunca_emite_start() {
         let root = scratch_root("basic");
-        delonix_runtime_core::events::emit(&root, "container", "create", "c1", "c1", None);
+        delonix_node::events::emit(&root, "container", "create", "c1", "c1", None);
         let counts = super::restart_counts(&root);
         assert_eq!(
             counts.get("c1").copied().unwrap_or(0),
@@ -7372,14 +7374,14 @@ containers:
             "create sozinho não é um restart"
         );
 
-        delonix_runtime_core::events::emit(&root, "container", "stop", "c1", "c1", None);
-        delonix_runtime_core::events::emit(&root, "container", "die", "c1", "c1", Some("exit=137"));
-        delonix_runtime_core::events::emit(&root, "container", "start", "c1", "c1", None);
+        delonix_node::events::emit(&root, "container", "stop", "c1", "c1", None);
+        delonix_node::events::emit(&root, "container", "die", "c1", "c1", Some("exit=137"));
+        delonix_node::events::emit(&root, "container", "start", "c1", "c1", None);
         let counts = super::restart_counts(&root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 1);
 
-        delonix_runtime_core::events::emit(&root, "container", "stop", "c1", "c1", None);
-        delonix_runtime_core::events::emit(&root, "container", "start", "c1", "c1", None);
+        delonix_node::events::emit(&root, "container", "stop", "c1", "c1", None);
+        delonix_node::events::emit(&root, "container", "start", "c1", "c1", None);
         let counts = super::restart_counts(&root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 2);
 
@@ -7391,9 +7393,9 @@ containers:
     #[test]
     fn restart_counts_e_por_container() {
         let root = scratch_root("perid");
-        delonix_runtime_core::events::emit(&root, "container", "create", "c1", "c1", None);
-        delonix_runtime_core::events::emit(&root, "container", "create", "c2", "c2", None);
-        delonix_runtime_core::events::emit(&root, "container", "start", "c2", "c2", None);
+        delonix_node::events::emit(&root, "container", "create", "c1", "c1", None);
+        delonix_node::events::emit(&root, "container", "create", "c2", "c2", None);
+        delonix_node::events::emit(&root, "container", "start", "c2", "c2", None);
         let counts = super::restart_counts(&root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 0);
         assert_eq!(counts.get("c2").copied().unwrap_or(0), 1);

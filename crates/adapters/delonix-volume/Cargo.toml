@@ -5,8 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+delonix-node = { workspace = true }
 delonix-state = { workspace = true }
-delonix-runtime-core = { workspace = true }
 delonix-model = { workspace = true }
 thiserror = { workspace = true }
 # Implements the compute context's StorageProvider port (ADR-0040).

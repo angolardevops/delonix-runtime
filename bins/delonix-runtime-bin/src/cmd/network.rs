@@ -23,7 +23,7 @@
 use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_sdn::{infra, Network, NetworkStore};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -208,7 +208,7 @@ pub(crate) fn converge(name: &str, diffs: &[super::reconcile::FieldDiff]) -> Res
                 }
             }
             other => {
-                return Err(delonix_runtime_core::Error::Invalid(format!(
+                return Err(delonix_model::Error::Invalid(format!(
                     "network/{name}: '{other}' does not converge hot — bug in \
                      `reconcile::hot_fields`"
                 )))
@@ -311,7 +311,7 @@ fn remove_peer_everywhere(store: &NetworkStore, name: &str, peer: &str) -> Resul
 /// Matched on the error the control socket produces, because the two mean
 /// opposite things here: one says the work is already done, the other says it
 /// was not done and nobody noticed.
-fn holder_is_down(e: &delonix_runtime_core::Error) -> bool {
+fn holder_is_down(e: &delonix_model::Error) -> bool {
     let s = e.to_string();
     s.contains("holder is down") || s.contains("control socket")
 }
@@ -623,8 +623,7 @@ pub fn run(action: NetworkCmd) -> Result<()> {
 /// Dry-run: the spec with every `#[serde(default)]` materialized.
 pub fn spec_with_defaults(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     let spec: NetworkSpec = manifest::spec_of(doc)?;
-    serde_yaml::to_value(spec)
-        .map_err(|e| delonix_runtime_core::Error::Invalid(format!("dry-run: {e}")))
+    serde_yaml::to_value(spec).map_err(|e| delonix_model::Error::Invalid(format!("dry-run: {e}")))
 }
 
 /// Refuses the AWS-VPC vocabulary (`terraform-aws-modules/vpc` names) that this
@@ -667,7 +666,7 @@ fn reject_vpc_vocabulary(doc: &ManifestDoc) -> Result<()> {
     };
     for (field, why) in NOT_HERE {
         if map.contains_key(serde_yaml::Value::String((*field).to_string())) {
-            return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+            return Err(delonix_model::Error::Invalid(super::po::tf(
                 "Network '{name}': `{field}` — {why}",
                 &[("name", &doc.metadata.name), ("field", field), ("why", why)],
             )));
@@ -1015,7 +1014,7 @@ fn declared_gateway(gateway: &str, subnet: &str) -> Result<Option<String>> {
         return Ok(None);
     };
     let cidr = delonix_sdn::Cidr::parse(subnet).ok_or_else(|| {
-        delonix_runtime_core::Error::Invalid(super::po::tf(
+        delonix_model::Error::Invalid(super::po::tf(
             "cannot validate --gateway against subnet {subnet}",
             &[("subnet", subnet)],
         ))
@@ -1106,13 +1105,13 @@ pub(crate) fn create_network(
         }
         "macvlan" | "ipvlan" => {
             let parent = parent.ok_or_else(|| {
-                delonix_runtime_core::Error::Invalid(super::po::tf(
+                delonix_model::Error::Invalid(super::po::tf(
                     "--parent is required for driver {driver}",
                     &[("driver", driver)],
                 ))
             })?;
             let subnet = subnet.ok_or_else(|| {
-                delonix_runtime_core::Error::Invalid(super::po::tf(
+                delonix_model::Error::Invalid(super::po::tf(
                     "--subnet is required for driver {driver}",
                     &[("driver", driver)],
                 ))
@@ -1139,7 +1138,7 @@ pub(crate) fn create_network(
         }
         "overlay" => {
             let vni = vni.ok_or_else(|| {
-                delonix_runtime_core::Error::Invalid(
+                delonix_model::Error::Invalid(
                     super::po::t("--vni is required for driver overlay").into(),
                 )
             })?;
@@ -1165,7 +1164,7 @@ pub(crate) fn create_network(
             }
             Ok(net)
         }
-        other => Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+        other => Err(delonix_model::Error::Invalid(super::po::tf(
             "unknown driver: '{other}' (use bridge|macvlan|ipvlan|overlay)",
             &[("other", other)],
         ))),
@@ -1197,7 +1196,7 @@ fn realize_overlay(net: &Network) -> Result<()> {
     // to be up.
     let encrypted = net.wg_ip.is_some();
     if encrypted && !delonix_sdn::wg::available() {
-        return Err(delonix_runtime_core::Error::Invalid(
+        return Err(delonix_model::Error::Invalid(
             super::po::t(
                 "encrypted overlay (wg_ip) but 'wg' is unavailable on the host — install \
                  wireguard-tools + the kernel module, or remove wg_ip for plain (unencrypted) \
@@ -1337,7 +1336,7 @@ fn cmd_describe(store: &NetworkStore, names: &[String]) -> Result<()> {
 /// the ONE filter both [`attached_containers`] (the detailed `describe` form)
 /// and [`network_user_names`] (the bare-names `ls` form) share, so the two
 /// views can never disagree about who counts as "attached".
-fn containers_on_network(net: &str) -> Option<Vec<delonix_runtime_core::Container>> {
+fn containers_on_network(net: &str) -> Option<Vec<delonix_compute::Container>> {
     let store = delonix_state::Store::open(state_root().join("containers")).ok()?;
     let cs = store.list().ok()?;
     Some(

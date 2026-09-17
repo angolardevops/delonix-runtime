@@ -13,7 +13,7 @@ use super::kinds as k;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

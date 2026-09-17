@@ -11,7 +11,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_state::secret::{parse_env_file, valid_name};
 use delonix_state::{Secret, SecretStore};
 use serde::Deserialize;
@@ -470,7 +470,7 @@ fn hex_encode(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-use delonix_runtime_core::now_unix;
+use delonix_node::now_unix;
 
 /// Splits `KEY=value` (at the FIRST `=`; the value may contain `=`).
 fn parse_kv(s: &str) -> Option<(String, String)> {
@@ -756,14 +756,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
             // what an operator needs to find in `system events` afterwards. The
             // NAME only: values never leave the vault, and events are deliberately
             // short (see `events.rs` on PIPE_BUF atomicity).
-            delonix_runtime_core::events::emit(
-                &state_root(),
-                "secret",
-                "remove",
-                &name,
-                &name,
-                None,
-            );
+            delonix_node::events::emit(&state_root(), "secret", "remove", &name, &name, None);
             println!(
                 "{}",
                 super::po::tf("secret '{name}' removed", &[("name", &name)])

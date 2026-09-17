@@ -22,7 +22,7 @@
 //! enforce on everyone else.
 
 use clap::Subcommand;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 
 #[derive(Subcommand)]
 pub enum CompatibilityCmd {
@@ -41,9 +41,8 @@ pub fn run(cmd: CompatibilityCmd) -> Result<()> {
     match cmd {
         CompatibilityCmd::Docker { output } => match output {
             super::output::OutputFormat::Json => {
-                let s = serde_json::to_string_pretty(&super::dockerapi::matrix_json()).map_err(
-                    |e| delonix_runtime_core::Error::Invalid(format!("json output: {e}")),
-                )?;
+                let s = serde_json::to_string_pretty(&super::dockerapi::matrix_json())
+                    .map_err(|e| delonix_model::Error::Invalid(format!("json output: {e}")))?;
                 println!("{s}");
             }
             super::output::OutputFormat::Table => super::dockerapi::print_matrix(),

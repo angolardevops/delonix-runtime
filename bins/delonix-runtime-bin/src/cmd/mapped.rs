@@ -24,7 +24,7 @@
 
 use std::path::Path;
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 fn io_err(context: &'static str) -> impl Fn(std::io::Error) -> Error {
     move |e: std::io::Error| Error::Runtime {

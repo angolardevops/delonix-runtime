@@ -25,7 +25,7 @@
 //! said — see [`isolation_state`].
 
 use clap::Subcommand;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 use delonix_sdn::infra;
 use serde::Serialize;
 
@@ -251,7 +251,7 @@ pub fn run(cmd: NamespaceCmd) -> Result<()> {
             let fmt = super::config::resolve_output(&super::util::state_root(), fmt);
             let all = collect();
             let c = all.get(&name).ok_or_else(|| {
-                delonix_runtime_core::Error::NotFound(super::po::tf(
+                delonix_model::Error::NotFound(super::po::tf(
                     "namespace {name} (nothing is in it; see `delonix system namespace ls`)",
                     &[("name", &name)],
                 ))

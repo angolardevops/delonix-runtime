@@ -3,7 +3,7 @@
 //! a Docker Engine API create, a kind node, an app build — before one execution
 //! path runs it.
 
-use delonix_runtime_core::HealthConfig;
+use crate::HealthConfig;
 
 /// Arguments for `container run` (CLI and manifest), grouped — the list passed
 /// the `too_many_arguments` threshold long ago.
@@ -59,7 +59,7 @@ pub struct RunOpts {
     #[serde(default)]
     pub cpuset: Option<String>,
     #[serde(default)]
-    pub cgroup_parent: Option<delonix_runtime_core::CgroupParent>,
+    pub cgroup_parent: Option<crate::CgroupParent>,
     /// The kubelet's cgroup for the pod (ADR 0038) — set only by the CRI.
     #[serde(default)]
     pub kube_cgroup_parent: Option<String>,

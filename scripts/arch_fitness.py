@@ -52,12 +52,12 @@ FOUNDATION, CONTEXT, ADAPTER, PROVIDER, INTERFACE, BIN = (
 # these become; this table is updated in the phase that renames each one, so the
 # gate keeps working during the move instead of after it.
 LAYERS = {
-    "delonix-runtime-core": FOUNDATION,  # → delonix-model + delonix-compute (P3)
     "delonix-state": ADAPTER,
     "delonix-telemetry": ADAPTER,
     "delonix-model": FOUNDATION,
     "delonix-stack": CONTEXT,
     "delonix-compute": CONTEXT,
+    "delonix-node": CONTEXT,
     "delonix-net-rules": FOUNDATION,  # → delonix-networking/domain (P2)
     "delonix-security-runtime": CONTEXT,  # → delonix-security (P2)
     "delonix-linux": ADAPTER,
@@ -163,7 +163,7 @@ ENV_WRITES = re.compile(r"\benv::(?:set_var|remove_var)\s*\(")
 # with its own `Error` still names `delonix_model::Error` — in its `From`, not in a
 # `use` that makes the shared type its result type.
 SHARED_ERROR = re.compile(
-    r"use\s+delonix_(?:runtime_core|model)::(?:\{[^}]*\b(?:Error|Result)\b[^}]*\}|(?:Error|Result)\b)"
+    r"use\s+delonix_model::(?:\{[^}]*\b(?:Error|Result)\b[^}]*\}|(?:Error|Result)\b)"
 )
 SHARED_ERROR_DIRS = ("crates/adapters/", "crates/providers/")
 # A `match`/`matches!` on a variant of the shared error, outside the foundation

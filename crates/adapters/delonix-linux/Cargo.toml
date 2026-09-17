@@ -5,8 +5,9 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+delonix-node = { workspace = true }
+delonix-model = { workspace = true }
 delonix-state = { workspace = true }
-delonix-runtime-core = { workspace = true }
 delonix-compute = { workspace = true }
 nix = { workspace = true }
 libc = { workspace = true }

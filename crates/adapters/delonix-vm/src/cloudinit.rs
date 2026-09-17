@@ -20,7 +20,7 @@
 //! format the guest has to agree with.
 
 use crate::{mac_for, valid_vm_name, VmVolume};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

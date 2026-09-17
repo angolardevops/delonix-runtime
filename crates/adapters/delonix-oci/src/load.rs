@@ -2,7 +2,7 @@
 
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use oci_spec::image::ImageConfiguration;
 use serde::Deserialize;
 use std::io::Read;

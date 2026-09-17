@@ -28,8 +28,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use delonix_linux::{self as runtime};
+use delonix_model::{Error, Result};
 use delonix_oci::{buildpack::CnbPlan, detect, ImageStore};
-use delonix_runtime_core::{Error, Result};
 use delonix_sdn::NetworkStore;
 use delonix_state::Store;
 use schemars::JsonSchema;

@@ -11,7 +11,9 @@
 use super::kinds as k;
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_runtime_core::{fw_port_ok, fw_proto_ok, fw_src_ok, Container, Error, FwRule, Result};
+use delonix_compute::Container;
+use delonix_model::records::{fw_port_ok, fw_proto_ok, fw_src_ok, FwRule};
+use delonix_model::{Error, Result};
 use delonix_sdn::infra;
 use delonix_state::Store;
 use serde::{Deserialize, Serialize};
@@ -1105,7 +1107,7 @@ enum PublishReach {
 }
 
 fn published_reach(
-    fw: &delonix_runtime_core::ContainerFw,
+    fw: &delonix_model::records::ContainerFw,
     cont_port: &str,
     proto: &str,
 ) -> PublishReach {
@@ -1389,7 +1391,7 @@ fn rule_key(r: &FwDocRule) -> String {
 /// resolved `/32` against the record's. That is why the desired side resolves
 /// too (below): comparing a name against an address would report drift on every
 /// plan for every rule that names a peer.
-fn stored_rule_key(r: &delonix_runtime_core::FwRule) -> String {
+fn stored_rule_key(r: &delonix_model::records::FwRule) -> String {
     format!("{}|{}|{}|{}|", r.action, r.proto, r.port, r.src)
 }
 
@@ -1882,7 +1884,7 @@ mod tests {
     /// is what keeps this test about name resolution and nothing else.
     fn seed(root: &std::path::Path, id: &str, name: &str, namespace: &str, ip: &str) {
         let store = Store::open(root.to_path_buf()).unwrap();
-        let mut c = delonix_runtime_core::Container::new(
+        let mut c = delonix_compute::Container::new(
             id.into(),
             name.into(),
             "img".into(),
@@ -2076,7 +2078,7 @@ mod tests {
             note: String::new(),
             origin: None,
         };
-        let fw = |policy: &str, rules: Vec<FwRule>| delonix_runtime_core::ContainerFw {
+        let fw = |policy: &str, rules: Vec<FwRule>| delonix_model::records::ContainerFw {
             enabled: true,
             policy_in: policy.into(),
             policy_out: String::new(),

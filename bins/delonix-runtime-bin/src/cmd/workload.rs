@@ -17,7 +17,7 @@
 
 use super::kinds as k;
 use clap::Subcommand;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::Deserialize;
 
 use super::manifest::ManifestDoc;

@@ -31,8 +31,9 @@
 
 use std::time::{Duration, Instant};
 
+use delonix_compute::Container;
+use delonix_model::{Error, Result};
 use delonix_oci::ImageStore;
-use delonix_runtime_core::{Container, Error, Result};
 use delonix_state::Store;
 
 use super::container::{self, RunOpts};
@@ -1246,7 +1247,7 @@ pub(crate) fn load(
     let (cluster, nodes) = cluster_nodes(store, name)?;
     let running: Vec<&Container> = nodes
         .iter()
-        .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
+        .filter(|c| matches!(c.status, delonix_model::records::Status::Running))
         .collect();
     if running.is_empty() {
         return Err(Error::Invalid(super::po::tf(
@@ -1256,7 +1257,7 @@ pub(crate) fn load(
     }
     for n in nodes
         .iter()
-        .filter(|c| !matches!(c.status, delonix_runtime_core::Status::Running))
+        .filter(|c| !matches!(c.status, delonix_model::records::Status::Running))
     {
         eprintln!(
             "{}",
@@ -1654,7 +1655,7 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
     // The `last restart` comes from the EVENT LOG (the `Container` does not count restarts):
     // the most recent `start`/`die` of each node. It is the proof that the log serves for
     // more than `system events`.
-    let evs = delonix_runtime_core::events::read(&super::util::state_root());
+    let evs = delonix_node::events::read(&super::util::state_root());
 
     // `output::Table` measures the columns by content — a long name like
     // `kitamba-benguela-81` stops pushing the other columns out of
@@ -1691,7 +1692,7 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
         let workers = nodes.len() - cp.len();
         let running = nodes
             .iter()
-            .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
+            .filter(|c| matches!(c.status, delonix_model::records::Status::Running))
             .count();
         let state = if running == nodes.len() {
             "up".to_string()
@@ -1727,7 +1728,7 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
             .filter(|e| ids.contains(&e.id.as_str()) && (e.action == "start" || e.action == "die"))
             .map(|e| e.ts)
             .max()
-            .map(delonix_runtime_core::fmt_local_ts)
+            .map(delonix_node::fmt_local_ts)
             .unwrap_or_else(|| "—".into());
 
         // The CRI socket is what we WROTE into the cluster's kubeadm.conf — it is read
@@ -1871,7 +1872,7 @@ fn vm_clusters(base: &std::path::Path) -> std::collections::BTreeMap<String, VmC
         let Some((prefix, role)) = super::vm::vm_cluster_member(&vm.name) else {
             continue;
         };
-        let running = matches!(vm.status, delonix_runtime_core::Status::Running);
+        let running = matches!(vm.status, delonix_model::records::Status::Running);
         out.entry(prefix.to_string())
             .or_default()
             .push((vm.started_unix, role, running));
@@ -1899,7 +1900,7 @@ pub(crate) fn describe(store: &Store, name: &str) -> Result<()> {
         .collect();
     let running = nodes
         .iter()
-        .filter(|c| matches!(c.status, delonix_runtime_core::Status::Running))
+        .filter(|c| matches!(c.status, delonix_model::records::Status::Running))
         .count();
     let api = cp
         .first()
@@ -1913,14 +1914,14 @@ pub(crate) fn describe(store: &Store, name: &str) -> Result<()> {
         .and_then(node_uptime_secs)
         .map(fmt_dur)
         .unwrap_or_else(|| "-".into());
-    let evs = delonix_runtime_core::events::read(&super::util::state_root());
+    let evs = delonix_node::events::read(&super::util::state_root());
     let ids: Vec<&str> = nodes.iter().map(|c| c.id.as_str()).collect();
     let last = evs
         .iter()
         .filter(|e| ids.contains(&e.id.as_str()) && (e.action == "start" || e.action == "die"))
         .map(|e| e.ts)
         .max()
-        .map(delonix_runtime_core::fmt_local_ts)
+        .map(delonix_node::fmt_local_ts)
         .unwrap_or_else(|| "—".into());
     let kubeconfig = kubeconfig_path(name);
 

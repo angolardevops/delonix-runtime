@@ -23,7 +23,8 @@
 
 use std::path::{Path, PathBuf};
 
-use delonix_runtime_core::{Error, Mount, Result};
+use delonix_compute::Mount;
+use delonix_model::{Error, Result};
 use serde::Deserialize;
 
 /// A parsed CDI spec (`cdi.k8s.io/v0.x.x` — only the fields this consumer
