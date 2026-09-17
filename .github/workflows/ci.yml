@@ -180,7 +180,7 @@ jobs:
   # não suposto: o `warn_unknown_fields` só corre no apply REAL, e um apply real
   # em CI criaria recursos — a verificação promete o que faz.
   docs:
-    name: docs geradas e exemplos válidos
+    name: generated docs and valid examples
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
