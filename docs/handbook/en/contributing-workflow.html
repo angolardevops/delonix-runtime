@@ -210,9 +210,12 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Contributing</p>
 <h1 id="contribution-workflow">Contribution workflow</h1>
+<p><strong>Before you read:</strong> <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> (the gates) and <a href="coding-conventions.html">Coding conventions</a> (what reviewers check).</p>
 <p>This page is the "how we work" part of the handbook: where to make changes, which rules the gates
 enforce and why, when a change needs a written decision first, and how to send it. The gates
-themselves, and how to run them, are in <a href="build-and-test.html">Clone, build and test</a>.</p>
+themselves, and how to run them, are in <a href="build-and-test.html">Clone, build and test</a>. After it you
+can take a change from an issue to a merged pull request without breaking a gate or another
+session's work.</p>
 <p>For anything non-trivial — a new command, a new manifest Kind, a change to namespace or cgroup
 setup, a new backend — open an issue first and agree on the approach. It saves a rewrite.</p>
 <h2 id="start-from-the-latest-tag-not-from-memory">Start from the latest tag, not from memory<a class="hanchor" href="#start-from-the-latest-tag-not-from-memory" aria-label="#">#</a></h2>
@@ -382,6 +385,8 @@ seccomp handling, or path handling driven by user or manifest input. These get e
 <p>If you found a <strong>vulnerability</strong> rather than a bug — privilege escalation, namespace escape, command
 injection, path traversal — do not open a public issue or PR. Follow <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
 (GitHub Private Vulnerability Reporting).</p>
+<hr />
+<p><strong>Next:</strong> <a href="publishing-docs.html">Publishing the documentation</a> — how the site and this handbook are generated, gated and published, and what your PR must regenerate.</p>
 <nav class="pager"><a href="coding-conventions.html"><span>← Previous</span>Coding conventions</a><a class="next" href="publishing-docs.html"><span>Next →</span>Publishing the documentation</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/contributing-workflow.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/contributing-workflow.md</code></footer>
 </div></main>

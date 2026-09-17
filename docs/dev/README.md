@@ -1,7 +1,9 @@
 # Delonix Runtime — Contributor Handbook
 
 This handbook is for people who want to **change the engine**: you cloned the repository today and
-want to send a first pull request without breaking your host or the engine. If you only want to
+want to send a first pull request without breaking your host or the engine. After this page you
+will know how the handbook is sequenced and which pages to read, in which order, for your role. If
+you only want to
 *use* Delonix, start with the [README](../../README.rst) and the
 [user documentation site](https://angolardevops.github.io/delonix-runtime/) instead.
 
@@ -43,38 +45,78 @@ Pages in this handbook mix two kinds of content:
 - **Narrative** — why things are the way they are, how flows work, how to contribute. It is
   written by hand and reviewed after each release. See [Publishing the docs](publishing-docs.md).
 
-## Reading paths
+## How this handbook is organised
 
-| If you want to… | Read, in order |
+The pages form **one course**, read top to bottom. Each page opens with a **Before you read** line
+naming the earlier pages it assumes, and ends with a **Next** line pointing to the page that builds
+on it. The number shown next to a page in the site's sidebar is its position in this order. Section
+numbers *inside* a page (for example §3.8 in the Rust primer or 13.4 in the standards page) are
+local labels kept stable for links; they are not page positions.
+
+The course is grouped in seven parts:
+
+| Part | Pages | What you get from it |
+|---|---|---|
+| **Get started** | [Start here](start-here.md) · [IaaS and cloud native](iaas-and-cloud-native.md) | A working checkout, a first contribution path, and the mental model of where a node engine sits in a cloud |
+| **Foundations** | [Linux foundations](linux-foundations.md) · [Cloud native primer](cloud-native-primer.md) · [Rust primer](rust-primer.md) | The kernel primitives hands-on, how the engine uses each one, and the Rust this code is written in |
+| **Set up & build** | [Preparing your environment](environment.md) · [Clone, build and test](build-and-test.md) | A host that can run the live paths, and every CI gate as a local command |
+| **Architecture** | [Project structure](project-structure.md) · [Architecture](architecture.md) · [The crates](crates.md) · [System Design Interview](system-design-interview.md) | Where things are, why they are split that way, what each crate owns, and the reasoning behind the design |
+| **Images & microVMs** | [Delonixfile and VMfile](delonixfile-and-vmfile.md) · [Building microVMs](microvm-setup.md) | The two build grammars, and VMs from host prerequisites to boot |
+| **Contributing** | [Coding conventions](coding-conventions.md) · [Contribution workflow](contributing-workflow.md) · [Publishing the documentation](publishing-docs.md) | How code must be written, how a change is sent, and how docs follow it |
+| **Reference** | [Cloud native standards](cloud-native-standards.md) · [Environment variables](environment-variables.md) · [Glossary](glossary.md) | Pages you look things up in: conformance per standard, every `DELONIX_*` name, every term |
+
+Concepts are **taught once**: a kernel primitive in [Linux foundations](linux-foundations.md), how
+the engine uses it in [Cloud native primer](cloud-native-primer.md), and the standard it follows
+with its conformance status in [Cloud native standards](cloud-native-standards.md). Where a
+page mentions something taught elsewhere, it links there instead of repeating it.
+
+## Reading paths by role
+
+Nobody is expected to read all twenty pages before a first change. Pick the row that describes you
+and read its pages in the order given; keep the [Glossary](glossary.md) open.
+
+| Role | Read, in order — and why |
 |---|---|
-| **Start from zero, with no one to ask** | [Start here](start-here.md) (keep [Glossary](glossary.md) open) → the path below that matches your change |
-| **Send a first PR** (a CLI fix, a docs fix, a small feature) | [Start here](start-here.md) → [Preparing your environment](environment.md) → [Clone, build and test](build-and-test.md) (keep [Environment variables (`DELONIX_*`)](environment-variables.md) at hand) → [Contribution workflow](contributing-workflow.md) → [Coding conventions](coding-conventions.md) → [The crates](crates.md) for the crate you touch |
-| **Understand the engine in depth** | [Rust primer for this codebase](rust-primer.md) → [Cloud native primer](cloud-native-primer.md) → [Cloud native standards, layer by layer](cloud-native-standards.md) → [Architecture](architecture.md) → [The crates](crates.md) → [System Design Interview — the Delonix Engine](system-design-interview.md) |
-| **Work on VMs or VM images** | [Preparing your environment](environment.md) → [Clone, build and test](build-and-test.md) → [Delonixfile and VMfile](delonixfile-and-vmfile.md) → [Building microVMs](microvm-setup.md) → the `delonix-vm` section of [The crates](crates.md) → the VM tuning section of [Environment variables (`DELONIX_*`)](environment-variables.md) |
-| **Change how documentation is produced** | [Publishing the documentation](publishing-docs.md) |
-| **Configure, isolate or tune a run** (state roots, logging, escape hatches, providers) | [Isolating the engine's state](build-and-test.md#isolating-the-engines-state) → [Environment variables (`DELONIX_*`)](environment-variables.md) |
+| **First PR, no time** | 1. [Start here](start-here.md) — Day 0 check and the eight steps of a first PR. 2. [Preparing your environment](environment.md#known-host-traps) — only *Known host traps*. 3. [Clone, build and test](build-and-test.md#the-gates-ci-runs) — the gates you must pass. 4. [The crates](crates.md) — only the section of the crate you touch. 5. [Contribution workflow](contributing-workflow.md) — how the PR is judged. |
+| **DevOps engineer** (CI, packaging, installing, releases) | 1. [Start here](start-here.md) — the setup and the rules. 2. [Preparing your environment](environment.md) — what a host needs and the traps that look like engine bugs. 3. [Clone, build and test](build-and-test.md) — installing a build, every CI job as a local command, E2E and chaos. 4. [Project structure](project-structure.md) — what is generated, what CI checks it, what `release.yml` refreshes. 5. [Contribution workflow](contributing-workflow.md#version-alignment) — tags, version alignment, the gates' rules. 6. [Publishing the documentation](publishing-docs.md) — what happens at release time. 7. [Environment variables](environment-variables.md) — every knob and which ones lower a boundary. |
+| **Platform engineer** (building on the engine's interfaces) | 1. [IaaS and cloud native](iaas-and-cloud-native.md) — which layer the engine is and what it leaves to a control plane. 2. [Cloud native primer](cloud-native-primer.md#48-declarative-reconciliation) — Kinds and the three-way reconciler. 3. [Architecture](architecture.md) — the interfaces (CLI, CRI, management API, MCP, node contract) and the layers. 4. [The crates](crates.md) — `delonix-stack`, `delonix-cri`, `delonix-mgmt`, `delonix-mcp`. 5. [System Design Interview](system-design-interview.md) — the API choices and their trade-offs. 6. [Cloud native standards](cloud-native-standards.md) — what is conformant, partial or absent, with dates. |
+| **SRE** (operating nodes, diagnosing failures) | 1. [Linux foundations](linux-foundations.md) — answer "which namespace, which cgroup, who holds this fd" with a command. 2. [Preparing your environment](environment.md#diagnosing-the-host) — diagnosing a host and its traps. 3. [Architecture](architecture.md#level-2-containers-executables-and-processes) — which processes exist at runtime, state on disk, known limitations. 4. [System Design Interview](system-design-interview.md#7-failure-modes-and-the-limits-of-one-node) — failure modes and the limits of one node. 5. [Coding conventions](coding-conventions.md#38-exit-codes-and-dx_-codes) — what an exit code means. 6. [Environment variables](environment-variables.md#observability) — logging, OTLP and the escape hatches. 7. [Cloud native standards](cloud-native-standards.md#1311-opentelemetry) — OpenTelemetry and Prometheus. |
+| **Cloud developer** (Kinds, manifests, images, Compose/Docker compatibility) | 1. [IaaS and cloud native](iaas-and-cloud-native.md) — principles as they appear in the code. 2. [Cloud native primer](cloud-native-primer.md) — OCI images and declarative reconciliation. 3. [Clone, build and test](build-and-test.md) — build and run isolated. 4. [The crates](crates.md#delonix-stack) — `delonix-stack` and `delonix-oci`. 5. [Delonixfile and VMfile](delonixfile-and-vmfile.md) — the build grammars. 6. [Coding conventions](coding-conventions.md#36-kinds-api-groups-and-manifest-fields) — rules for Kinds and fields. 7. [Cloud native standards](cloud-native-standards.md#138-the-workload-api-own-kinds-and-the-node-contract) — own Kinds, Docker API and Compose subsets. |
+| **Linux developer** (namespaces, cgroups, networking, VMs) | 1. [Linux foundations](linux-foundations.md) — the primitives hands-on. 2. [Cloud native primer](cloud-native-primer.md) — where each primitive lives in the code. 3. [Rust primer](rust-primer.md#34-unsafe-ffi-and-linux-syscalls) — `unsafe`, syscalls, `fork`/`clone` in threaded processes. 4. [Preparing your environment](environment.md) — AppArmor and cgroup delegation traps. 5. [Architecture](architecture.md) — the rootless network infrastructure and the two flows as sequences. 6. [The crates](crates.md#delonix-linux) — `delonix-linux`, `delonix-sdn`, `delonix-vm`. 7. [Building microVMs](microvm-setup.md) — KVM, Cloud Hypervisor, libvirt. 8. [Coding conventions](coding-conventions.md#7-unsafe-syscalls-and-processes) — the rules for `unsafe` and processes. |
+
+Two narrower tasks have their own shortcut: **changing how documentation is produced** starts at
+[Publishing the documentation](publishing-docs.md); **configuring or isolating a run** starts at
+[Isolating the engine's state](build-and-test.md#isolating-the-engines-state) and then
+[Environment variables](environment-variables.md).
 
 ## Pages
 
-| # | Page | What it answers |
-|---|---|---|
-| 00 | [Start here](start-here.md) | Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck |
-| 01 | [Preparing your environment](environment.md) | What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs |
-| 02 | [Clone, build and test](build-and-test.md) | Building, running tests, every CI gate as a local command, E2E and chaos with isolation |
-| 03 | [Rust primer](rust-primer.md) | The Rust this codebase actually uses |
-| 04 | [Cloud native primer](cloud-native-primer.md) | Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — and where each appears in the engine |
-| 05 | [Architecture](architecture.md) | Layers, the crate graph, control and data paths, state on disk |
-| 06 | [The crates](crates.md) | One block per crate: responsibility, main types, where to start reading |
-| 07 | [System Design Interview](system-design-interview.md) | The engine designed as an interview answer, then compared with what was built |
-| 08 | [Delonixfile and VMfile](delonixfile-and-vmfile.md) | The build file grammars and how they differ from a Dockerfile |
-| 09 | [Building microVMs](microvm-setup.md) | KVM, Cloud Hypervisor and firmware, libvirt, VM images |
-| 10 | [Contribution workflow](contributing-workflow.md) | Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs |
-| 11 | [Publishing the documentation](publishing-docs.md) | How the site and this handbook are generated, gated and published |
-| 12 | [Coding conventions](coding-conventions.md) | How code in this repository is written, and the checklist reviewers apply |
-| 13 | [Cloud native standards](cloud-native-standards.md) | The cloud-native standards a change is measured against |
-| 14 | [Glossary](glossary.md) | The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more |
-| 15 | [Environment variables](environment-variables.md) | Every `DELONIX_*` variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary |
+| Page | What it answers |
+|---|---|
+| [Start here](start-here.md) | Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck |
+| [IaaS and cloud native](iaas-and-cloud-native.md) | What an IaaS is made of, which layer this engine is, what it leaves to a control plane, and how cloud native principles show up in its files |
+| [Linux foundations](linux-foundations.md) | Processes, namespaces, cgroups v2, file descriptors and signals — hands-on, with the commands to inspect each |
+| [Cloud native primer](cloud-native-primer.md) | How the engine uses namespaces, cgroups, capabilities, OCI, networking, CRI, KVM and reconciliation — with files and symbols |
+| [Rust primer for this codebase](rust-primer.md) | The Rust this codebase actually uses |
+| [Preparing your environment](environment.md) | What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs |
+| [Clone, build and test](build-and-test.md) | Building, installing, running tests, every CI gate as a local command, E2E and chaos with isolation |
+| [Project structure](project-structure.md) | What each top-level file and directory is, who changes it, and what is generated |
+| [Architecture](architecture.md) | Layers, the crate graph, processes at runtime, control and data paths, state on disk |
+| [The crates](crates.md) | One block per crate: responsibility, main types, where to start reading |
+| [System Design Interview](system-design-interview.md) | The engine designed as an interview answer, then compared with what was built |
+| [Delonixfile and VMfile](delonixfile-and-vmfile.md) | The build file grammars and how they differ from a Dockerfile |
+| [Building microVMs](microvm-setup.md) | KVM, Cloud Hypervisor and firmware, libvirt, VM images |
+| [Coding conventions](coding-conventions.md) | How code in this repository is written, and the checklist reviewers apply |
+| [Contribution workflow](contributing-workflow.md) | Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs |
+| [Publishing the documentation](publishing-docs.md) | How the site and this handbook are generated, gated and published |
+| [Cloud native standards](cloud-native-standards.md) | Each standard, what it requires, how Delonix implements it, and its conformance status |
+| [Environment variables](environment-variables.md) | Every `DELONIX_*` variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary |
+| [Glossary](glossary.md) | The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more |
 
 Other references you will be pointed to: [`ARCHITECTURE.md`](../../ARCHITECTURE.md) (C4 diagrams),
 [`docs/adr/`](../adr/README.md) (architecture decisions), [`SECURITY.md`](../../SECURITY.md)
 (private vulnerability reports) and [`CONTRIBUTING.md`](../../CONTRIBUTING.md) (the short front door).
+
+---
+
+**Next:** [Start here](start-here.md) — check your setup in thirty minutes and walk through a first contribution end to end.

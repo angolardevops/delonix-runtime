@@ -1,9 +1,12 @@
 # The crates
 
+**Before you read:** [Architecture](architecture.md), above all [Layers and the allowed direction](architecture.md#layers-and-the-allowed-direction).
+
 This page is the map you keep open while reading the code. The table below is
 generated from `Cargo.toml` and `scripts/arch_fitness.py`; everything after it is
 written by hand, and every pointer (`path:symbol`) was read in the tree before it
-was written down. Where a claim could not be confirmed it is not here.
+was written down. Where a claim could not be confirmed it is not here. After it you can find the
+crate that owns a change, the files to read first in it, and the traps it has already paid for.
 
 How to use it:
 
@@ -1284,3 +1287,7 @@ sequenceDiagram
   K->>CRI: ContainerStatus
   CRI->>Store: load_reconciled (Store::open, reconcile_status)
 ```
+
+---
+
+**Next:** [System Design Interview — the Delonix Engine](system-design-interview.md) — the same engine argued from requirements, with the trade-offs and failure modes behind each design choice.

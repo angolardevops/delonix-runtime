@@ -1,8 +1,12 @@
 # Rust primer for this codebase
 
+**Before you read:** [Cloud native primer](cloud-native-primer.md), whose vocabulary the examples use, and basic Rust ([The Rust Programming Language](https://doc.rust-lang.org/book/), chapters 1–10).
+
 This is not a Rust tutorial. It is the subset of Rust you need to *read this repository*,
 with each idea pinned to a file you can open. If a concept is new to you, the "Read more"
-links go to the official source; come back here to see how the engine uses it.
+links go to the official source; come back here to see how the engine uses it. After it you can
+open any crate in the workspace and follow its error types, its traits, its `unsafe` blocks and its
+tests without stopping at the language.
 
 Paths are relative to the repository root. Symbols are named so you can `grep` for them —
 line numbers are deliberately left out, because they move with every PR.
@@ -38,8 +42,9 @@ and one `Cargo.toml` per crate. Three conventions matter here:
 2. **The directory is the layer.** Crates live in `crates/foundation/`, `crates/contexts/`,
    `crates/adapters/`, `crates/providers/`, `crates/interfaces/` and binaries in `bins/`
    (ADR-0040). `scripts/arch_fitness.py` refuses a crate whose directory does not match its
-   declared layer, and a dependency that points against the allowed direction. See
-   [Architecture](architecture.md) for the layer rules.
+   declared layer, and a dependency that points against the allowed direction. The layer rules
+   are taught later in the course, in
+   [Architecture — Layers and the allowed direction](architecture.md#layers-and-the-allowed-direction).
 
 3. **Lints are inherited.** The root declares `[workspace.lints.clippy]` with
    `undocumented_unsafe_blocks = "deny"`, and each member opts in with `[lints] workspace = true`.
@@ -47,7 +52,8 @@ and one `Cargo.toml` per crate. Three conventions matter here:
 
 The root also sets `[workspace.package]` (the shared `version`, `edition`, `license`), which
 members consume as `version.workspace = true`. The version is not decoration: see
-[Build and test](build-and-test.md) for the version gate.
+[Version alignment](contributing-workflow.md#version-alignment) for the rule and
+[The gates CI runs](build-and-test.md#the-gates-ci-runs) for the version gate.
 
 **Read more:** Cargo Book —
 [Workspaces](https://doc.rust-lang.org/cargo/reference/workspaces.html),
@@ -419,3 +425,7 @@ The full list and how to run each one locally is in [Build and test](build-and-t
 **Read more:** [Clippy](https://doc.rust-lang.org/clippy/),
 [rustfmt](https://rust-lang.github.io/rustfmt/),
 [cargo-deny](https://embarkstudios.github.io/cargo-deny/).
+
+---
+
+**Next:** [Preparing your environment](environment.md) — a host that can build the tree and run the live paths, and the host traps that look like engine bugs.

@@ -400,10 +400,10 @@ binários → P4 providers → P5 API de nó → P6 CRI → P7 observabilidade).
   subgraph foundation[&quot;Foundation&quot;]
     delonix_model[&quot;delonix-model&quot;]
     delonix_net_rules[&quot;delonix-net-rules&quot;]
-    delonix_runtime_core[&quot;delonix-runtime-core&quot;]
   end
   subgraph context[&quot;Contexts&quot;]
     delonix_compute[&quot;delonix-compute&quot;]
+    delonix_node[&quot;delonix-node&quot;]
     delonix_security_runtime[&quot;delonix-security-runtime&quot;]
     delonix_stack[&quot;delonix-stack&quot;]
   end
@@ -432,30 +432,36 @@ binários → P4 providers → P5 API de nó → P6 CRI → P7 observabilidade).
     delonix_runtime_bin[&quot;delonix-runtime-bin&quot;]
   end
   delonix_compute --&gt; delonix_model
-  delonix_compute --&gt; delonix_runtime_core
+  delonix_compute --&gt; delonix_node
   delonix_cri --&gt; delonix_compute
   delonix_cri --&gt; delonix_linux
+  delonix_cri --&gt; delonix_model
+  delonix_cri --&gt; delonix_node
   delonix_cri --&gt; delonix_oci
-  delonix_cri --&gt; delonix_runtime_core
   delonix_cri --&gt; delonix_sdn
   delonix_cri --&gt; delonix_state
   delonix_cri --&gt; delonix_telemetry
   delonix_linux --&gt; delonix_compute
-  delonix_linux --&gt; delonix_runtime_core
+  delonix_linux --&gt; delonix_model
+  delonix_linux --&gt; delonix_node
   delonix_linux --&gt; delonix_state
+  delonix_mcp --&gt; delonix_compute
   delonix_mcp --&gt; delonix_linux
   delonix_mcp --&gt; delonix_mgmt
-  delonix_mcp --&gt; delonix_runtime_core
+  delonix_mcp --&gt; delonix_model
+  delonix_mcp --&gt; delonix_node
   delonix_mcp --&gt; delonix_sdn
   delonix_mcp --&gt; delonix_state
   delonix_mcp --&gt; delonix_vm
   delonix_mcp --&gt; delonix_volume
   delonix_mcp_bin --&gt; delonix_mcp
-  delonix_mcp_bin --&gt; delonix_runtime_core
+  delonix_mcp_bin --&gt; delonix_node
   delonix_mcp_bin --&gt; delonix_telemetry
+  delonix_mgmt --&gt; delonix_compute
   delonix_mgmt --&gt; delonix_linux
+  delonix_mgmt --&gt; delonix_model
+  delonix_mgmt --&gt; delonix_node
   delonix_mgmt --&gt; delonix_oci
-  delonix_mgmt --&gt; delonix_runtime_core
   delonix_mgmt --&gt; delonix_scanner
   delonix_mgmt --&gt; delonix_sdn
   delonix_mgmt --&gt; delonix_state
@@ -463,20 +469,23 @@ binários → P4 providers → P5 API de nó → P6 CRI → P7 observabilidade).
   delonix_mgmt --&gt; delonix_vm
   delonix_mgmt --&gt; delonix_volume
   delonix_mgmt_bin --&gt; delonix_mgmt
-  delonix_mgmt_bin --&gt; delonix_runtime_core
+  delonix_mgmt_bin --&gt; delonix_node
   delonix_mgmt_bin --&gt; delonix_telemetry
+  delonix_node --&gt; delonix_model
   delonix_oci --&gt; delonix_compute
-  delonix_oci --&gt; delonix_runtime_core
+  delonix_oci --&gt; delonix_model
+  delonix_oci --&gt; delonix_node
   delonix_oci --&gt; delonix_state
-  delonix_proxmox --&gt; delonix_runtime_core
+  delonix_proxmox --&gt; delonix_compute
+  delonix_proxmox --&gt; delonix_model
   delonix_proxmox --&gt; delonix_vm
   delonix_runtime_bin --&gt; delonix_compute
   delonix_runtime_bin --&gt; delonix_linux
   delonix_runtime_bin --&gt; delonix_mgmt
   delonix_runtime_bin --&gt; delonix_model
+  delonix_runtime_bin --&gt; delonix_node
   delonix_runtime_bin --&gt; delonix_oci
   delonix_runtime_bin --&gt; delonix_proxmox
-  delonix_runtime_bin --&gt; delonix_runtime_core
   delonix_runtime_bin --&gt; delonix_scanner
   delonix_runtime_bin --&gt; delonix_sdn
   delonix_runtime_bin --&gt; delonix_security_runtime
@@ -486,25 +495,28 @@ binários → P4 providers → P5 API de nó → P6 CRI → P7 observabilidade).
   delonix_runtime_bin --&gt; delonix_truenas
   delonix_runtime_bin --&gt; delonix_vm
   delonix_runtime_bin --&gt; delonix_volume
-  delonix_runtime_core --&gt; delonix_model
   delonix_scanner --&gt; delonix_model
   delonix_scanner --&gt; delonix_oci
   delonix_sdn --&gt; delonix_compute
+  delonix_sdn --&gt; delonix_model
   delonix_sdn --&gt; delonix_net_rules
-  delonix_sdn --&gt; delonix_runtime_core
+  delonix_sdn --&gt; delonix_node
   delonix_sdn --&gt; delonix_state
-  delonix_security_runtime --&gt; delonix_runtime_core
-  delonix_stack --&gt; delonix_runtime_core
+  delonix_security_runtime --&gt; delonix_model
+  delonix_security_runtime --&gt; delonix_node
+  delonix_stack --&gt; delonix_model
+  delonix_state --&gt; delonix_compute
   delonix_state --&gt; delonix_model
-  delonix_state --&gt; delonix_runtime_core
-  delonix_truenas --&gt; delonix_runtime_core
+  delonix_state --&gt; delonix_node
+  delonix_truenas --&gt; delonix_model
   delonix_vm --&gt; delonix_compute
+  delonix_vm --&gt; delonix_model
   delonix_vm --&gt; delonix_net_rules
-  delonix_vm --&gt; delonix_runtime_core
+  delonix_vm --&gt; delonix_node
   delonix_vm --&gt; delonix_state
   delonix_volume --&gt; delonix_compute
   delonix_volume --&gt; delonix_model
-  delonix_volume --&gt; delonix_runtime_core
+  delonix_volume --&gt; delonix_node
   delonix_volume --&gt; delonix_state
   class delonix_compute block
   class delonix_cri iface
@@ -515,10 +527,10 @@ binários → P4 providers → P5 API de nó → P6 CRI → P7 observabilidade).
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_node block
   class delonix_oci block
   class delonix_proxmox external
   class delonix_runtime_bin engine
-  class delonix_runtime_core store
   class delonix_scanner block
   class delonix_sdn block
   class delonix_security_runtime block

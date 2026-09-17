@@ -1,13 +1,22 @@
 # Start here
 
 This page takes you from "I just cloned the repository" to "my first pull request is under review",
-one step at a time. Every step says what to do, what you should see, and which page explains the
+one step at a time. After it you will have a checkout that builds, a binary you can run against
+isolated state, and a map of where your change goes and which rules it must respect. Every step says what to do, what you should see, and which page explains the
 details. Every rule on this page links to where it is written down — if a rule is not linked, it is
 not a rule.
 
 If a word here is new to you, look it up in the [glossary](glossary.md).
 
 ## Day 0 in 30 minutes
+
+Day 0 follows the order of the handbook, but only takes what you need today from each part: the
+idea of the engine ([IaaS and cloud native](iaas-and-cloud-native.md)), the host it needs
+([Preparing your environment](environment.md), which leans on the primitives in
+[Linux foundations](linux-foundations.md)), a build and an isolated run
+([Clone, build and test](build-and-test.md), with every variable in
+[Environment variables](environment-variables.md)), and where things are
+([Project structure](project-structure.md)). Come back to the full pages when a step sends you there.
 
 ### What Delonix is (5 minutes)
 
@@ -21,15 +30,19 @@ networking and storage they need. It is:
 - **rootless-first** — the normal path runs as your own unprivileged user.
 
 It does **not** know who uses it: no platform, tenant, account or billing concept exists in the
-code. Read [Architecture](architecture.md#engine-identity-and-boundaries) for the full
-picture; for now, those four sentences are enough.
+code. Read [IaaS and cloud native](iaas-and-cloud-native.md#where-delonix-runtime-fits-and-where-it-deliberately-stops)
+for where this places the engine in a cloud, and [Architecture](architecture.md#engine-identity-and-boundaries)
+for how the boundary is enforced; for now, those four sentences are enough.
 
 ### What you need (10 minutes)
 
 A Linux host with cgroup v2 and unprivileged user namespaces, the pinned Rust toolchain from
 `rust-toolchain.toml`, and `protoc` on your `PATH`. The full list, and the host traps that look like
 engine bugs, are in [Preparing your environment](environment.md). Read at least its
-[Known host traps](environment.md#known-host-traps) section before step 5 below.
+[Known host traps](environment.md#known-host-traps) section before step 5 below. If "user
+namespace" or "cgroup delegation" are new words, the hands-on explanation is
+[Linux foundations](linux-foundations.md) — you do not need it to finish Day 0, but you will the
+first time a limit does not apply.
 
 ### Five commands that prove your setup works (15 minutes)
 
@@ -87,7 +100,8 @@ installed release and is usually older ([Preparing your environment](environment
 
 Anything beyond `--help` reads and writes engine state. Point **both** state variables at scratch
 directories first — half isolation is worse than none
-([Clone, build and test](build-and-test.md#isolating-the-engines-state)):
+([Clone, build and test](build-and-test.md#isolating-the-engines-state); what each variable
+does is in [Environment variables](environment-variables.md#isolating-a-development-run)):
 
 ```bash
 export DELONIX_ROOT=$HOME/scratch/dlx/root
@@ -165,7 +179,9 @@ were tried, measured and changed ([Start from the latest tag](contributing-workf
 ### 3. Find where the change goes
 
 Use the decision tree in [Where does my change go?](#where-does-my-change-go) below, then read the
-section of [The crates](crates.md) for that crate.
+section of [The crates](crates.md) for that crate. If a path in the table means nothing to you yet,
+[Project structure](project-structure.md) explains every top-level directory, and why a crate's
+directory is its layer.
 
 ### 4. Write the test first
 
@@ -195,7 +211,8 @@ python3 scripts/version_gate.py
 ```
 
 Add the ones that match what you touched (the CLI surface gates if you added a command, the contract
-gate if you touched `proto/`, the docs generator if help text changed) — the table in 02 says which.
+gate if you touched `proto/`, the docs generator if help text changed) — the table in
+[The gates CI runs](build-and-test.md#the-gates-ci-runs) says which.
 
 ### 6. Write the pull request
 
@@ -339,3 +356,7 @@ round trip:
 - [ ] I read [Coding conventions](coding-conventions.md) and [Cloud native standards, layer by layer](cloud-native-standards.md).
 - [ ] My PR fills every section of the template, including what was *not* validated.
 - [ ] After the merge, I removed my worktree and my branch.
+
+---
+
+**Next:** [IaaS and cloud native — where the engine fits](iaas-and-cloud-native.md) — the mental model of an IaaS, which of its layers this engine is, and how cloud native principles show up in its files.

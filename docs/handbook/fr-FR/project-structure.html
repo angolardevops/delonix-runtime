@@ -210,11 +210,13 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Architecture</p>
 <div class="notice" role="note">Cette page n&#x27;est pas encore traduite en Français — la version anglaise est affichée.</div><h1 id="project-structure">Project structure</h1>
+<p><strong>Before you read:</strong> <a href="build-and-test.html">Clone, build and test</a> — you have a checkout that builds, and know which gates exist.</p>
 <p>This page is the map of the repository: what each top-level file and directory is, who changes it
 and when, and which parts are <strong>generated</strong> and must never be edited by hand. Read it after
 <a href="build-and-test.html">Clone, build and test</a> and before <a href="architecture.html">Architecture</a> — the
 architecture explains <em>why</em> the code is split the way it is; this page tells you <em>where</em> things
-are.</p>
+are. After it you can place any path in the repository, say who changes it, and know whether you
+may edit it by hand or must regenerate it.</p>
 <p>A CI gate keeps it honest: <code>python3 scripts/dev_docs.py --check</code> fails when a tracked top-level
 path (or a second-level directory of <code>crates/</code>, <code>bins/</code> or <code>docs/</code>) is missing from the tables
 below, or when a table names a path that no longer exists.</p>
@@ -437,13 +439,13 @@ below, or when a table names a path that no longer exists.</p>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a></td>
-<td>Pure foundation: shared types and errors (<code>delonix-runtime-core</code>), the data-only model — records, errors, generated names, exit-code and <code>DX_*</code> classes (<code>delonix-model</code>), and zero-dependency network rules (<code>delonix-net-rules</code>). Depends only on the foundation.</td>
+<td>Pure foundation: the data-only model — errors, plain-data records (<code>Status</code>, the firewall records), the secret model, generated names, exit-code and <code>DX_*</code> classes (<code>delonix-model</code>), and zero-dependency network rules (<code>delonix-net-rules</code>). Depends only on the foundation.</td>
 <td>Changes that add a shared type or pure rule.</td>
 <td><a href="crates.html">The crates</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a></td>
-<td>Bounded contexts with the use cases: Compute (<code>delonix-compute</code>), Stack — Kinds, reconciler, revisions (<code>delonix-stack</code>) — and the node's security decisions (<code>delonix-security-runtime</code>).</td>
+<td>Bounded contexts with the use cases: Compute, with the <code>Container</code> and <code>Vm</code> records (<code>delonix-compute</code>), the node's own helpers — event log, host and process checks, server dispatch (<code>delonix-node</code>) —, Stack — Kinds, reconciler, revisions (<code>delonix-stack</code>) — and the node's security decisions (<code>delonix-security-runtime</code>).</td>
 <td>Features that change what the engine decides.</td>
 <td><a href="crates.html">The crates</a></td>
 </tr>
@@ -740,6 +742,8 @@ expect CI to fail if you edit the output by hand.</p>
 <p>The rules behind this list, with examples, are in
 <a href="coding-conventions.html">Coding conventions — Structure: where code goes</a> and
 <a href="crates.html">The crates</a>.</p>
+<hr />
+<p><strong>Next:</strong> <a href="architecture.html">Architecture</a> — why the code is split that way: the layers, the processes at runtime, the crate graph and the state on disk.</p>
 <nav class="pager"><a href="build-and-test.html"><span>← Précédent</span>Cloner, compiler et tester</a><a class="next" href="architecture.html"><span>Suivant →</span>Architecture</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/project-structure.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/project-structure.md</code></footer>
 </div></main>

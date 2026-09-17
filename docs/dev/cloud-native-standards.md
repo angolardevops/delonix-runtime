@@ -1,5 +1,7 @@
 # Cloud native standards, layer by layer
 
+**Before you read:** [Cloud native primer](cloud-native-primer.md) (how the engine uses each mechanism) and [Architecture](architecture.md) (the crates named below). This is a reference page: read the section of the standard you touch.
+
 A container and microVM engine is not one specification. It is a stack of layers, and most
 layers have an open standard: some from the **OCI** (Open Container Initiative), some from
 Kubernetes SIGs and the **CNCF** (Cloud Native Computing Foundation), some from the Linux kernel,
@@ -8,10 +10,14 @@ and a few that are de-facto interfaces with no standards body behind them.
 This page is organised **by standard and by layer**. For each one it answers four questions: what
 the standard is, what it requires of an implementation, how Delonix implements it today (crate,
 file, symbol), and what the evidence says about conformance, gaps included. If you search for
-"OCI, CRI, CNI, CSI, CDI", this is the page.
+"OCI, CRI, CNI, CSI, CDI", this is the page. After reading the section you need, you can say
+what a standard asks, where the engine meets it, and what conformance evidence exists — with its
+date and version.
 
-Read [Cloud native primer](cloud-native-primer.md) first if namespaces, cgroups, overlayfs
-or the kubelet are new to you. This page assumes those basics and does not repeat them.
+Read [Linux foundations](linux-foundations.md) and [Cloud native primer](cloud-native-primer.md)
+first if namespaces, cgroups, overlayfs or the kubelet are new to you. This page assumes those
+basics and does not repeat them: the primitive is taught in the first, how the engine uses it in the
+second, and the standard and its conformance here.
 
 Three rules for reading this page:
 
@@ -299,8 +305,9 @@ operations passed in `CNI_COMMAND` with the configuration on stdin.
 **How Delonix implements it.** Two network providers exist, and CNI is one of them:
 
 - **Native SDN** (the default for containers): the rootless holder netns, bridge, IPAM, nftables
-  firewall — `crates/adapters/delonix-sdn` (see [4.5](cloud-native-primer.md) and
-  [Architecture](architecture.md)).
+  firewall — `crates/adapters/delonix-sdn` (see
+  [Cloud native primer 4.5](cloud-native-primer.md#45-container-networking) and
+  [Architecture](architecture.md#rootless-network-infrastructure)).
 - **CNI protocol layer**: `crates/adapters/delonix-sdn/src/cni.rs`, pure and testable.
   `list_conf_files`, `parse_config`, `load_default`, `resolve_plugin`, `add` (chains
   `prevResult`), `del`, `plugin_dirs` (from `CNI_PATH`), `readiness` (config parses **and** every
@@ -670,11 +677,12 @@ which part of the tree. Every container runtime depends on both.
 "no internal processes" rule, and never assume that a controller listed at the root is available
 to the calling session.
 
-**How Delonix implements it.** `crates/adapters/delonix-linux/src/lib.rs`:
+**How Delonix implements it.** Where containers are placed (root mode under `delonix.slice`,
+rootless under `user@<uid>.service/dlx-containers`) is in
+[Cloud native primer 4.2](cloud-native-primer.md#42-cgroups-v2-and-delegation); the tree and the
+delegation rule themselves are in [Linux foundations](linux-foundations.md#cgroups-v2). What matters
+for the contract, in `crates/adapters/delonix-linux/src/lib.rs`:
 
-- Root mode: leaves under `delonix.slice` (`DELONIX_SLICE` in `delonix-compute`).
-- Rootless: `user_service_base` and `try_delegated_base` place containers under
-  `user@<uid>.service/dlx-containers`.
 - `cgroup_limits_apply` answers "will limits apply here?" without starting a container. Rootless,
   it probes the process's *current* cgroup (`delegated_base_usable`), not the host's root cgroup;
   root, it probes `delonix.slice` and creates it if missing (`root_slice_writable`).
@@ -754,3 +762,7 @@ check the claim, not a promise.
 When you change one of these components, update its row and its section in the same pull request.
 If you re-run a conformance suite, replace the number, the date and the version together, and
 update the source document ([docs/cri-conformance.md](../cri-conformance.md) for the CRI) first.
+
+---
+
+**Next:** [Environment variables (`DELONIX_*`)](environment-variables.md) — every `DELONIX_*` variable the code reads, its default, and which ones lower a boundary.

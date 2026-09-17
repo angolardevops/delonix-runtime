@@ -211,7 +211,9 @@ th:first-child,td:first-child{white-space:nowrap}
 <p class="kicker">概览</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Contributor Handbook</h1>
 <p>This handbook is for people who want to <strong>change the engine</strong>: you cloned the repository today and
-want to send a first pull request without breaking your host or the engine. If you only want to
+want to send a first pull request without breaking your host or the engine. After this page you
+will know how the handbook is sequenced and which pages to read, in which order, for your role. If
+you only want to
 <em>use</em> Delonix, start with the <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> and the
 <a href="https://angolardevops.github.io/delonix-runtime/">user documentation site</a> instead.</p>
 <!-- dev-docs:begin crate-count -->
@@ -248,136 +250,196 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
 <li><strong>Narrative</strong> — why things are the way they are, how flows work, how to contribute. It is
   written by hand and reviewed after each release. See <a href="publishing-docs.html">Publishing the docs</a>.</li>
 </ul>
-<h2 id="reading-paths">Reading paths<a class="hanchor" href="#reading-paths" aria-label="#">#</a></h2>
+<h2 id="how-this-handbook-is-organised">How this handbook is organised<a class="hanchor" href="#how-this-handbook-is-organised" aria-label="#">#</a></h2>
+<p>The pages form <strong>one course</strong>, read top to bottom. Each page opens with a <strong>Before you read</strong> line
+naming the earlier pages it assumes, and ends with a <strong>Next</strong> line pointing to the page that builds
+on it. The number shown next to a page in the site's sidebar is its position in this order. Section
+numbers <em>inside</em> a page (for example §3.8 in the Rust primer or 13.4 in the standards page) are
+local labels kept stable for links; they are not page positions.</p>
+<p>The course is grouped in seven parts:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>If you want to…</th>
-<th>Read, in order</th>
+<th>Part</th>
+<th>Pages</th>
+<th>What you get from it</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Start from zero, with no one to ask</strong></td>
-<td><a href="start-here.html">Start here</a> (keep <a href="glossary.html">Glossary</a> open) → the path below that matches your change</td>
+<td><strong>Get started</strong></td>
+<td><a href="start-here.html">Start here</a> · <a href="iaas-and-cloud-native.html">IaaS and cloud native</a></td>
+<td>A working checkout, a first contribution path, and the mental model of where a node engine sits in a cloud</td>
 </tr>
 <tr>
-<td><strong>Send a first PR</strong> (a CLI fix, a docs fix, a small feature)</td>
-<td><a href="start-here.html">Start here</a> → <a href="environment.html">Preparing your environment</a> → <a href="build-and-test.html">Clone, build and test</a> (keep <a href="environment-variables.html">Environment variables (<code>DELONIX_*</code>)</a> at hand) → <a href="contributing-workflow.html">Contribution workflow</a> → <a href="coding-conventions.html">Coding conventions</a> → <a href="crates.html">The crates</a> for the crate you touch</td>
+<td><strong>Foundations</strong></td>
+<td><a href="linux-foundations.html">Linux foundations</a> · <a href="cloud-native-primer.html">Cloud native primer</a> · <a href="rust-primer.html">Rust primer</a></td>
+<td>The kernel primitives hands-on, how the engine uses each one, and the Rust this code is written in</td>
 </tr>
 <tr>
-<td><strong>Understand the engine in depth</strong></td>
-<td><a href="rust-primer.html">Rust primer for this codebase</a> → <a href="cloud-native-primer.html">Cloud native primer</a> → <a href="cloud-native-standards.html">Cloud native standards, layer by layer</a> → <a href="architecture.html">Architecture</a> → <a href="crates.html">The crates</a> → <a href="system-design-interview.html">System Design Interview — the Delonix Engine</a></td>
+<td><strong>Set up &amp; build</strong></td>
+<td><a href="environment.html">Preparing your environment</a> · <a href="build-and-test.html">Clone, build and test</a></td>
+<td>A host that can run the live paths, and every CI gate as a local command</td>
 </tr>
 <tr>
-<td><strong>Work on VMs or VM images</strong></td>
-<td><a href="environment.html">Preparing your environment</a> → <a href="build-and-test.html">Clone, build and test</a> → <a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a> → <a href="microvm-setup.html">Building microVMs</a> → the <code>delonix-vm</code> section of <a href="crates.html">The crates</a> → the VM tuning section of <a href="environment-variables.html">Environment variables (<code>DELONIX_*</code>)</a></td>
+<td><strong>Architecture</strong></td>
+<td><a href="project-structure.html">Project structure</a> · <a href="architecture.html">Architecture</a> · <a href="crates.html">The crates</a> · <a href="system-design-interview.html">System Design Interview</a></td>
+<td>Where things are, why they are split that way, what each crate owns, and the reasoning behind the design</td>
 </tr>
 <tr>
-<td><strong>Change how documentation is produced</strong></td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td><strong>Images &amp; microVMs</strong></td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a> · <a href="microvm-setup.html">Building microVMs</a></td>
+<td>The two build grammars, and VMs from host prerequisites to boot</td>
 </tr>
 <tr>
-<td><strong>Configure, isolate or tune a run</strong> (state roots, logging, escape hatches, providers)</td>
-<td><a href="build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a> → <a href="environment-variables.html">Environment variables (<code>DELONIX_*</code>)</a></td>
+<td><strong>Contributing</strong></td>
+<td><a href="coding-conventions.html">Coding conventions</a> · <a href="contributing-workflow.html">Contribution workflow</a> · <a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>How code must be written, how a change is sent, and how docs follow it</td>
+</tr>
+<tr>
+<td><strong>Reference</strong></td>
+<td><a href="cloud-native-standards.html">Cloud native standards</a> · <a href="environment-variables.html">Environment variables</a> · <a href="glossary.html">Glossary</a></td>
+<td>Pages you look things up in: conformance per standard, every <code>DELONIX_*</code> name, every term</td>
 </tr>
 </tbody>
 </table></div>
+<p>Concepts are <strong>taught once</strong>: a kernel primitive in <a href="linux-foundations.html">Linux foundations</a>, how
+the engine uses it in <a href="cloud-native-primer.html">Cloud native primer</a>, and the standard it follows
+with its conformance status in <a href="cloud-native-standards.html">Cloud native standards</a>. Where a
+page mentions something taught elsewhere, it links there instead of repeating it.</p>
+<h2 id="reading-paths-by-role">Reading paths by role<a class="hanchor" href="#reading-paths-by-role" aria-label="#">#</a></h2>
+<p>Nobody is expected to read all twenty pages before a first change. Pick the row that describes you
+and read its pages in the order given; keep the <a href="glossary.html">Glossary</a> open.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Read, in order — and why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>First PR, no time</strong></td>
+<td>1. <a href="start-here.html">Start here</a> — Day 0 check and the eight steps of a first PR. 2. <a href="environment.html#known-host-traps">Preparing your environment</a> — only <em>Known host traps</em>. 3. <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> — the gates you must pass. 4. <a href="crates.html">The crates</a> — only the section of the crate you touch. 5. <a href="contributing-workflow.html">Contribution workflow</a> — how the PR is judged.</td>
+</tr>
+<tr>
+<td><strong>DevOps engineer</strong> (CI, packaging, installing, releases)</td>
+<td>1. <a href="start-here.html">Start here</a> — the setup and the rules. 2. <a href="environment.html">Preparing your environment</a> — what a host needs and the traps that look like engine bugs. 3. <a href="build-and-test.html">Clone, build and test</a> — installing a build, every CI job as a local command, E2E and chaos. 4. <a href="project-structure.html">Project structure</a> — what is generated, what CI checks it, what <code>release.yml</code> refreshes. 5. <a href="contributing-workflow.html#version-alignment">Contribution workflow</a> — tags, version alignment, the gates' rules. 6. <a href="publishing-docs.html">Publishing the documentation</a> — what happens at release time. 7. <a href="environment-variables.html">Environment variables</a> — every knob and which ones lower a boundary.</td>
+</tr>
+<tr>
+<td><strong>Platform engineer</strong> (building on the engine's interfaces)</td>
+<td>1. <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> — which layer the engine is and what it leaves to a control plane. 2. <a href="cloud-native-primer.html#48-declarative-reconciliation">Cloud native primer</a> — Kinds and the three-way reconciler. 3. <a href="architecture.html">Architecture</a> — the interfaces (CLI, CRI, management API, MCP, node contract) and the layers. 4. <a href="crates.html">The crates</a> — <code>delonix-stack</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>. 5. <a href="system-design-interview.html">System Design Interview</a> — the API choices and their trade-offs. 6. <a href="cloud-native-standards.html">Cloud native standards</a> — what is conformant, partial or absent, with dates.</td>
+</tr>
+<tr>
+<td><strong>SRE</strong> (operating nodes, diagnosing failures)</td>
+<td>1. <a href="linux-foundations.html">Linux foundations</a> — answer "which namespace, which cgroup, who holds this fd" with a command. 2. <a href="environment.html#diagnosing-the-host">Preparing your environment</a> — diagnosing a host and its traps. 3. <a href="architecture.html#level-2-containers-executables-and-processes">Architecture</a> — which processes exist at runtime, state on disk, known limitations. 4. <a href="system-design-interview.html#7-failure-modes-and-the-limits-of-one-node">System Design Interview</a> — failure modes and the limits of one node. 5. <a href="coding-conventions.html#38-exit-codes-and-dx_-codes">Coding conventions</a> — what an exit code means. 6. <a href="environment-variables.html#observability">Environment variables</a> — logging, OTLP and the escape hatches. 7. <a href="cloud-native-standards.html#1311-opentelemetry">Cloud native standards</a> — OpenTelemetry and Prometheus.</td>
+</tr>
+<tr>
+<td><strong>Cloud developer</strong> (Kinds, manifests, images, Compose/Docker compatibility)</td>
+<td>1. <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> — principles as they appear in the code. 2. <a href="cloud-native-primer.html">Cloud native primer</a> — OCI images and declarative reconciliation. 3. <a href="build-and-test.html">Clone, build and test</a> — build and run isolated. 4. <a href="crates.html#delonix-stack">The crates</a> — <code>delonix-stack</code> and <code>delonix-oci</code>. 5. <a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a> — the build grammars. 6. <a href="coding-conventions.html#36-kinds-api-groups-and-manifest-fields">Coding conventions</a> — rules for Kinds and fields. 7. <a href="cloud-native-standards.html#138-the-workload-api-own-kinds-and-the-node-contract">Cloud native standards</a> — own Kinds, Docker API and Compose subsets.</td>
+</tr>
+<tr>
+<td><strong>Linux developer</strong> (namespaces, cgroups, networking, VMs)</td>
+<td>1. <a href="linux-foundations.html">Linux foundations</a> — the primitives hands-on. 2. <a href="cloud-native-primer.html">Cloud native primer</a> — where each primitive lives in the code. 3. <a href="rust-primer.html#34-unsafe-ffi-and-linux-syscalls">Rust primer</a> — <code>unsafe</code>, syscalls, <code>fork</code>/<code>clone</code> in threaded processes. 4. <a href="environment.html">Preparing your environment</a> — AppArmor and cgroup delegation traps. 5. <a href="architecture.html">Architecture</a> — the rootless network infrastructure and the two flows as sequences. 6. <a href="crates.html#delonix-linux">The crates</a> — <code>delonix-linux</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>. 7. <a href="microvm-setup.html">Building microVMs</a> — KVM, Cloud Hypervisor, libvirt. 8. <a href="coding-conventions.html#7-unsafe-syscalls-and-processes">Coding conventions</a> — the rules for <code>unsafe</code> and processes.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Two narrower tasks have their own shortcut: <strong>changing how documentation is produced</strong> starts at
+<a href="publishing-docs.html">Publishing the documentation</a>; <strong>configuring or isolating a run</strong> starts at
+<a href="build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a> and then
+<a href="environment-variables.html">Environment variables</a>.</p>
 <h2 id="pages">Pages<a class="hanchor" href="#pages" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>#</th>
 <th>Page</th>
 <th>What it answers</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>00</td>
 <td><a href="start-here.html">Start here</a></td>
 <td>Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck</td>
 </tr>
 <tr>
-<td>01</td>
+<td><a href="iaas-and-cloud-native.html">IaaS and cloud native</a></td>
+<td>What an IaaS is made of, which layer this engine is, what it leaves to a control plane, and how cloud native principles show up in its files</td>
+</tr>
+<tr>
+<td><a href="linux-foundations.html">Linux foundations</a></td>
+<td>Processes, namespaces, cgroups v2, file descriptors and signals — hands-on, with the commands to inspect each</td>
+</tr>
+<tr>
+<td><a href="cloud-native-primer.html">Cloud native primer</a></td>
+<td>How the engine uses namespaces, cgroups, capabilities, OCI, networking, CRI, KVM and reconciliation — with files and symbols</td>
+</tr>
+<tr>
+<td><a href="rust-primer.html">Rust primer for this codebase</a></td>
+<td>The Rust this codebase actually uses</td>
+</tr>
+<tr>
 <td><a href="environment.html">Preparing your environment</a></td>
 <td>What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs</td>
 </tr>
 <tr>
-<td>02</td>
 <td><a href="build-and-test.html">Clone, build and test</a></td>
-<td>Building, running tests, every CI gate as a local command, E2E and chaos with isolation</td>
+<td>Building, installing, running tests, every CI gate as a local command, E2E and chaos with isolation</td>
 </tr>
 <tr>
-<td>03</td>
-<td><a href="rust-primer.html">Rust primer</a></td>
-<td>The Rust this codebase actually uses</td>
+<td><a href="project-structure.html">Project structure</a></td>
+<td>What each top-level file and directory is, who changes it, and what is generated</td>
 </tr>
 <tr>
-<td>04</td>
-<td><a href="cloud-native-primer.html">Cloud native primer</a></td>
-<td>Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — and where each appears in the engine</td>
-</tr>
-<tr>
-<td>05</td>
 <td><a href="architecture.html">Architecture</a></td>
-<td>Layers, the crate graph, control and data paths, state on disk</td>
+<td>Layers, the crate graph, processes at runtime, control and data paths, state on disk</td>
 </tr>
 <tr>
-<td>06</td>
 <td><a href="crates.html">The crates</a></td>
 <td>One block per crate: responsibility, main types, where to start reading</td>
 </tr>
 <tr>
-<td>07</td>
 <td><a href="system-design-interview.html">System Design Interview</a></td>
 <td>The engine designed as an interview answer, then compared with what was built</td>
 </tr>
 <tr>
-<td>08</td>
 <td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
 <td>The build file grammars and how they differ from a Dockerfile</td>
 </tr>
 <tr>
-<td>09</td>
 <td><a href="microvm-setup.html">Building microVMs</a></td>
 <td>KVM, Cloud Hypervisor and firmware, libvirt, VM images</td>
 </tr>
 <tr>
-<td>10</td>
-<td><a href="contributing-workflow.html">Contribution workflow</a></td>
-<td>Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs</td>
-</tr>
-<tr>
-<td>11</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
-<td>How the site and this handbook are generated, gated and published</td>
-</tr>
-<tr>
-<td>12</td>
 <td><a href="coding-conventions.html">Coding conventions</a></td>
 <td>How code in this repository is written, and the checklist reviewers apply</td>
 </tr>
 <tr>
-<td>13</td>
+<td><a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs</td>
+</tr>
+<tr>
+<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>How the site and this handbook are generated, gated and published</td>
+</tr>
+<tr>
 <td><a href="cloud-native-standards.html">Cloud native standards</a></td>
-<td>The cloud-native standards a change is measured against</td>
+<td>Each standard, what it requires, how Delonix implements it, and its conformance status</td>
 </tr>
 <tr>
-<td>14</td>
-<td><a href="glossary.html">Glossary</a></td>
-<td>The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more</td>
-</tr>
-<tr>
-<td>15</td>
 <td><a href="environment-variables.html">Environment variables</a></td>
 <td>Every <code>DELONIX_*</code> variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary</td>
+</tr>
+<tr>
+<td><a href="glossary.html">Glossary</a></td>
+<td>The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more</td>
 </tr>
 </tbody>
 </table></div>
 <p>Other references you will be pointed to: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (C4 diagrams),
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (architecture decisions), <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
 (private vulnerability reports) and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (the short front door).</p>
+<hr />
+<p><strong>Next:</strong> <a href="start-here.html">Start here</a> — check your setup in thirty minutes and walk through a first contribution end to end.</p>
 <nav class="pager"><span></span><a class="next" href="start-here.html"><span>下一页 →</span>Start here</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/README.md</code></footer>
 </div></main>
@@ -385,7 +447,8 @@ section <em>«Identidade e fronteira do motor»</em> at the top of <a href="http
 <ul>
 <li><a href="#what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not</a></li>
 <li><a href="#two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative</a></li>
-<li><a href="#reading-paths">Reading paths</a></li>
+<li><a href="#how-this-handbook-is-organised">How this handbook is organised</a></li>
+<li><a href="#reading-paths-by-role">Reading paths by role</a></li>
 <li><a href="#pages">Pages</a></li>
 </ul>
 </div>

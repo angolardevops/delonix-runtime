@@ -210,12 +210,14 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">参考</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="glossary">Glossary</h1>
+<p><strong>Before you read:</strong> nothing — this is a reference. Keep it open next to any other page.</p>
 <p>The words a newcomer meets in this repository, with the meaning they have <strong>in Delonix</strong> — which is
 sometimes narrower than the general cloud-native meaning. Each entry points to where the term is
 explained or implemented. Paths are relative to the repository root; <code>file.rs::symbol</code> names a
 symbol inside that file.</p>
-<p>Terms are in alphabetical order. For the general background (namespaces, cgroups, OCI, CRI, CNI,
-KVM), start with <a href="cloud-native-primer.html">Cloud native primer</a>.</p>
+<p>Terms are in alphabetical order. For the general background, the kernel primitives (processes,
+namespaces, cgroups, file descriptors, signals) are taught in <a href="linux-foundations.html">Linux foundations</a>,
+and OCI, CRI, CNI and KVM as the engine uses them in <a href="cloud-native-primer.html">Cloud native primer</a>.</p>
 <hr />
 <p><strong>Adapter</strong> — A crate in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> that implements a port against a local mechanism: the
 kernel (<code>delonix-linux</code>), the network dataplane (<code>delonix-sdn</code>), the OCI store (<code>delonix-oci</code>), the
@@ -431,6 +433,8 @@ container|pod|vm|microvm</code> that lowers to the matching Kind at load time
 own branch. Every task here gets its own, created from <code>origin/main</code> in a persistent directory
 outside the repository (never <code>/tmp</code>), and is removed together with its branch at the end. See:
 <a href="contributing-workflow.html#one-worktree-per-task">One worktree per task</a>.</p>
+<hr />
+<p><strong>Next:</strong> <a href="index.html#reading-paths-by-role">Overview and reading paths</a> — that is the end of the course; go back to the reading paths by role to pick what to deepen next.</p>
 <nav class="pager"><a href="environment-variables.html"><span>← 上一页</span>Environment variables (DELONIX_*)</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/glossary.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/glossary.md</code></footer>
 </div></main>

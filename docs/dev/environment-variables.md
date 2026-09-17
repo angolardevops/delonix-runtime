@@ -1,8 +1,11 @@
 # Environment variables (`DELONIX_*`)
 
+**Before you read:** [Isolating the engine's state](build-and-test.md#isolating-the-engines-state) in Clone, build and test.
+
 This page lists every `DELONIX_*` name that appears in the engine's code, with where it is read,
 what it changes, and whether you should ever set it. It is a reference: read the section that
-matches what you are doing, not the whole page.
+matches what you are doing, not the whole page. After it you can isolate a run, turn on the
+diagnostics you need, and recognise the variables that lower a security boundary before you set one.
 
 ## How to read this page
 
@@ -266,3 +269,7 @@ and you never need to set them:
   `DELONIX_EXTRA_PACKAGES` — keys of the provenance file `/etc/delonix-image-release` that
   `image vm build` writes **inside** a built VM image (`bins/delonix-runtime-bin/src/cmd/vmimage.rs`).
   Read them in the guest with `cat /etc/delonix-image-release`; no process reads them.
+
+---
+
+**Next:** [Glossary](glossary.md) — the terms you meet in this repository, with their Delonix meaning and where each is explained.

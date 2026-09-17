@@ -1,13 +1,21 @@
 # IaaS and cloud native — where the engine fits
 
+**Before you read:** [Start here](start-here.md#what-delonix-is-5-minutes) (the four sentences on what Delonix is). No kernel or Rust knowledge is needed yet.
+
 You may be a DevOps engineer, an SRE, a platform engineer or a cloud developer who has *used* an
 Infrastructure-as-a-Service cloud for years without ever building one. This page gives you the
 mental model you need before reading the engine's code: what an IaaS is made of, which of its
 layers this repository implements, which it deliberately leaves to others, and how the cloud native
-principles you already know show up in concrete files here.
+principles you already know show up in concrete files here. After it you can say, for any IaaS
+responsibility, whether this repository owns it or leaves it to a control plane, and point to the
+file where each cloud native principle is applied.
 
 Every claim about the engine points to a file, a symbol or an ADR. When an ADR is cited, its
-status is given, because a *Proposed* ADR is a direction, not a fact about the code.
+status is given, because a *Proposed* ADR is a direction, not a fact about the code. Paths such
+as `crates/adapters/delonix-linux` name the engine's crates; you do not need to know them yet — for
+now read a path as "the code for this lives here". The directory level (`foundation`, `contexts`,
+`adapters`, `providers`, `interfaces`) is the crate's layer, explained later in
+[Project structure](project-structure.md) and [Architecture](architecture.md).
 
 If a word is new to you, look it up in the [glossary](glossary.md).
 
@@ -383,8 +391,14 @@ follow each factor. Some factors are simply not the engine's business, and the t
 ## Read next
 
 - **Linux foundations** ([linux-foundations.md](linux-foundations.md)) — the kernel primitives all
-  of this rests on: namespaces, cgroups, capabilities, mounts and netfilter.
-- **Cloud native primer** ([cloud-native-primer.md](cloud-native-primer.md)) — the standards the
-  engine implements (OCI, CRI, CNI, KVM/virtio, cloud-init) and where each appears in the code.
-- **Architecture** ([architecture.md](architecture.md)) — the layers and processes in detail, once
-  the two pages above feel familiar.
+  of this rests on: processes and `/proc`, namespaces, cgroups v2, file descriptors and signals.
+- **Cloud native primer** ([cloud-native-primer.md](cloud-native-primer.md)) — how the engine uses
+  those primitives and the specifications on top of them (OCI, CRI, CNI, KVM/virtio, cloud-init),
+  with files and symbols.
+- **Architecture** ([architecture.md](architecture.md)) — the structure behind this context: layers,
+  processes and crates in detail, once the two pages above and
+  [Project structure](project-structure.md) feel familiar.
+
+---
+
+**Next:** [Linux foundations](linux-foundations.md) — the kernel primitives every later page relies on, hands-on: processes, namespaces, cgroups v2, file descriptors and signals.

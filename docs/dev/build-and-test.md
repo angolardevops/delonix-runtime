@@ -1,8 +1,15 @@
 # Clone, build and test
 
+**Before you read:** [Preparing your environment](environment.md): the pinned toolchain, `protoc`, and a host that passes its checks.
+
 This page assumes the host from [Preparing your environment](environment.md): the pinned
-Rust toolchain and `protoc`. Everything here runs from the root of your checkout — ideally a
-**git worktree**, see [Contribution workflow](contributing-workflow.md).
+Rust toolchain and `protoc`. After it you can build and install your tree, run every CI gate
+locally, and run the E2E battery and the chaos harness without touching real engine state.
+
+Everything here runs from the root of your checkout — ideally a **git worktree**: a separate
+working directory with its own branch, one per task, created from `origin/main` (the command is in
+[Start here, step 2](start-here.md#2-open-a-worktree-from-originmain); the rules are in
+[Contribution workflow](contributing-workflow.md#one-worktree-per-task)).
 
 ## Clone
 
@@ -267,6 +274,12 @@ cgroups, the network holder or VM boot works — that needs a live run (see
 Every job in `.github/workflows/ci.yml` can be reproduced locally. Run the ones that match what you
 touched before you push; run all of them before asking for review.
 
+You can run a gate before you understand the rule behind it; its failure message names what to fix.
+The rules are taught later in the course: layers, the dependency direction and the debt ratchets in
+[Architecture](architecture.md#layers-and-the-allowed-direction), the node contract in
+[Architecture](architecture.md#one-set-of-operations-several-interfaces), and LANG-01 and version
+alignment in [Contribution workflow](contributing-workflow.md#language-english-in-the-code-lang-01).
+
 | Job | Local command | Fails when |
 |---|---|---|
 | `fmt` | `cargo fmt --all --check` | the code is not rustfmt-formatted (default config) |
@@ -376,3 +389,7 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 
 Scratch directories under `/tmp` are fine for these throwaway sandboxes. Your **worktrees** are
 not — see [Contribution workflow](contributing-workflow.md#one-worktree-per-task).
+
+---
+
+**Next:** [Project structure](project-structure.md) — the map of the repository: what each directory is, who changes it, and what is generated.

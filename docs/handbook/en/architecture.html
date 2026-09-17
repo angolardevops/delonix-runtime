@@ -210,12 +210,15 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Architecture</p>
 <h1 id="architecture">Architecture</h1>
+<p><strong>Before you read:</strong> <a href="project-structure.html">Project structure</a> (where things are), <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> (the engine's place and principles) and <a href="cloud-native-primer.html">Cloud native primer</a> (the mechanisms the figures name).</p>
 <p>This page is the map a contributor needs before touching the backend: what the engine is, who
 talks to it, which processes exist at runtime, how the crates are layered and call each other,
 and where state lives on disk. It follows the C4 model in order — <strong>Level 1</strong> system context,
 <strong>Level 2</strong> containers (executables and processes), <strong>Level 3</strong> components (crates), and
 <strong>Level 4</strong> code-level flows as sequences. Every node and arrow in a figure names, in the text
-next to it, the file and symbol it was checked against.</p>
+next to it, the file and symbol it was checked against. After it you can say which process a piece
+of work runs in, which layer a crate belongs to and which dependencies it may take, and where on
+disk its state lives.</p>
 <p>The canonical, longer document is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> at the repository
 root; the decisions behind the structure are in <a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>, above all
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>. If a term is new to
@@ -274,13 +277,11 @@ first:</p>
 </table></div>
 <h2 id="engine-identity-and-boundaries">Engine identity and boundaries<a class="hanchor" href="#engine-identity-and-boundaries" aria-label="#">#</a></h2>
 <p>The canonical text is the section <em>«Identidade e fronteira do motor»</em> at the top of
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. In short:</p>
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. What the engine is, what it leaves to a control plane, and how each
+cloud native principle appears in the code are the <em>context</em>, explained in
+<a href="iaas-and-cloud-native.html#where-delonix-runtime-fits-and-where-it-deliberately-stops">IaaS and cloud native</a>.
+This section keeps only the parts that shape the <em>structure</em> below:</p>
 <ul>
-<li><strong>What it is.</strong> An execution abstraction for <strong>one node</strong>: it runs <strong>containers and microVMs</strong>
-  and manages the networking and storage they need. It is declarative, with its <strong>own Kinds</strong>
-  grouped by <code>apiVersion</code> (<code>core</code>, <code>compute</code>, <code>networking</code>, <code>gateway</code>, <code>storage</code>, <code>artifact</code>,
-  <code>infrastructure</code> — the table is <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>, and
-  <code>delonix api-resources</code> prints it).</li>
 <li><strong>Providers sit behind ports.</strong> The Linux kernel, Cloud Hypervisor and libvirt, Proxmox VE
   and the Kubernetes CRI are reached through a trait, never through <code>if provider == …</code> spread
   across the code. Today's ports: <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) and the
@@ -288,12 +289,13 @@ first:</p>
   (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>, <code>RunHost</code>, <code>NetworkProvider</code>,
   <code>VmNetwork</code>, <code>WorkloadRuntime</code>). An OpenStack backend is designed
   (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>, <em>Proposed</em>) but has no crate yet.</li>
-<li><strong>Cloud native</strong> — plan / apply / drift, the same operations exposed by several interfaces,
-  observability through OpenTelemetry and Prometheus (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry</code></a>).</li>
-<li><strong>Daemonless</strong> — no resident process by default. What must persist belongs to systemd or to a
-  per-workload process with a clear owner (a container's supervisor, the network pin).</li>
-<li><strong>Rootless-first</strong> — the normal path runs as an unprivileged user; privilege is an explicit
-  opt-in (<code>--privileged</code>, <code>vm bridge</code>).</li>
+<li><strong>One set of operations, several interfaces</strong> — the CLI, the CRI, the local management API, MCP
+  and a Docker Engine API slice, with the node contract as the intended single API (see
+  <a href="#one-set-of-operations-several-interfaces">below</a>); observability goes through
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry</code></a>.</li>
+<li><strong>Daemonless and rootless-first decide the process model</strong> — what must persist belongs to systemd
+  or to a per-workload process with a clear owner (a container's supervisor, the network pin), and
+  privilege is an explicit opt-in (<code>--privileged</code>, <code>vm bridge</code>). Level 2 shows those processes.</li>
 <li><strong>Knows no consumer.</strong> No platform, control plane, console or agent is named in <code>crates/</code>,
   <code>bins/</code>, <code>proto/</code> or the manifests, and there is no notion of tenant, account, plan or billing.
   The <em>namespace</em> you will see everywhere is the engine's own <strong>isolation</strong> namespace, not a
@@ -523,7 +525,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 <p>The <code>exec</code> is <code>cmd/serve.rs::exec_server</code> (and <code>cmd/mcp.rs</code>); the run-back is the CRI's
 <code>delonix()</code> helper and <code>write_run_spec</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>,
 <code>run_cli</code> in <code>delonix-mgmt</code> and <code>run_cli_blocking</code> in <code>delonix-mcp</code>, all resolving the CLI through
-<code>delonix_runtime_core::dispatch::cli_bin</code>. The CRI also writes its own records under
+<code>delonix_node::dispatch::cli_bin</code>. The CRI also writes its own records under
 <code>cri/</code> — see <a href="#state-on-disk">State on disk</a>.</p>
 <h3 id="one-detached-container">One detached container<a class="hanchor" href="#one-detached-container" aria-label="#">#</a></h3>
 <p><strong>Legend</strong></p>
@@ -841,8 +843,8 @@ and binaries are the only place where everything meets.</p>
   IF[&quot;Interfaces&lt;br/&gt;&lt;small&gt;crates/interfaces/ — CRI, management API, MCP&lt;/small&gt;&quot;]
   AD[&quot;Adapters&lt;br/&gt;&lt;small&gt;crates/adapters/ — kernel, SDN, OCI, VMs, state&lt;/small&gt;&quot;]
   PR[&quot;Providers&lt;br/&gt;&lt;small&gt;crates/providers/ — one remote management API each&lt;/small&gt;&quot;]
-  CX[&quot;Contexts&lt;br/&gt;&lt;small&gt;crates/contexts/ — use cases and ports&lt;/small&gt;&quot;]
-  FD[&quot;Foundation&lt;br/&gt;&lt;small&gt;crates/foundation/ — model, records, pure rules&lt;/small&gt;&quot;]
+  CX[&quot;Contexts&lt;br/&gt;&lt;small&gt;crates/contexts/ — use cases, ports, workload records&lt;/small&gt;&quot;]
+  FD[&quot;Foundation&lt;br/&gt;&lt;small&gt;crates/foundation/ — errors, plain-data records, pure rules&lt;/small&gt;&quot;]
   BIN --&gt;|&quot;composes one interface&quot;| IF
   BIN --&gt;|&quot;wires adapters to ports&quot;| AD
   IF --&gt;|&quot;calls use cases&quot;| CX
@@ -861,7 +863,10 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 <ul>
 <li><strong>Foundation</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>) — shared, pure-ish types every layer may name.</li>
 <li><strong>Contexts</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>) — one crate per bounded context, named after the published
-  API groups: use cases and the <strong>ports</strong> they need. No kernel, no HTTP, no provider.</li>
+  API groups: use cases and the <strong>ports</strong> they need. No HTTP, no provider, and no mounts,
+  processes or network configuration. <code>delonix-node</code> is the one context that reads the host
+  directly — <code>/proc</code>, <code>/sys</code>, <code>kill(pid, 0)</code>, <code>SO_PEERCRED</code> — because those questions are what it
+  exists to answer once.</li>
 <li><strong>Adapters</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>) and <strong>providers</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) — implement ports:
   kernel, SDN, OCI store, VM backends, persisted state; providers bring an HTTP client for one
   remote target.</li>
@@ -941,43 +946,49 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   through the <code>VmNetwork</code> port, and the CRI, management API and MCP servers became their own
   executables. Four adapters carry their ADR-0040 names: <code>delonix-scanner</code> (was <code>delonix-scan</code>),
   <code>delonix-oci</code> (was <code>delonix-image</code>), <code>delonix-sdn</code> (was <code>delonix-net</code>) and <code>delonix-linux</code> (was
-  <code>delonix-runtime</code>, the container engine crate). <code>delonix-runtime-core</code> is shrinking in two
-  directions: <strong>#404</strong> moved the stores, atomic writes and the encrypted secret store out to the
-  <code>delonix-state</code> adapter, and <strong>#405</strong> moved the plain-data records down to <code>delonix-model</code>,
-  which <code>delonix-runtime-core</code> re-exports under the old paths (so no consumer changed). What stays
-  in <code>delonix-runtime-core</code> is the <code>Container</code> and <code>Vm</code> records, <code>Mount</code>, health and cgroup-parent
-  types, pid liveness (<code>is_alive</code>, <code>safe_to_signal</code>), <code>generate_id</code>, and the <code>events</code>,
-  <code>dispatch</code>, <code>peer_cred</code>, <code>virt</code> and <code>workload_net</code> modules. The adapters that open records or
+  <code>delonix-runtime</code>, the container engine crate). <strong>#406 removed <code>delonix-runtime-core</code></strong>, the
+  foundation crate that used to hold everything shared, in steps: <strong>#404</strong> moved the stores,
+  atomic writes and the encrypted secret store to the <code>delonix-state</code> adapter; <strong>#405</strong> moved the
+  plain-data records (<code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>, <code>typestate</code>) down to <code>delonix-model</code>; and
+  <strong>#406</strong> moved the <code>Container</code> and <code>Vm</code> records (with <code>Mount</code>, health and cgroup-parent types,
+  <code>DELONIX_SLICE</code> and <code>workload_net</code>) to <code>delonix-compute</code>, and the event log, <code>virt</code>,
+  <code>peer_cred</code>, <code>dispatch</code> and the host/process helpers (<code>now_unix</code>, <code>is_alive</code>,
+  <code>safe_to_signal</code>, <code>generate_id</code>, …) to a new context, <code>delonix-node</code>. No re-exports were left
+  behind. The adapters that open records or
   write files through <code>delonix-state</code> (<code>delonix-linux</code>, <code>delonix-vm</code>, <code>delonix-sdn</code>,
   <code>delonix-oci</code>, <code>delonix-volume</code>) are declared exceptions until P4 gives them a
   <code>StateRepository</code> port (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>).</li>
 <li><strong>P4–P7 have not started.</strong> The remaining exceptions in the table above name those phases.</li>
 </ul>
-<h3 id="the-foundation-and-persisted-state-after-404-and-405">The foundation and persisted state, after #404 and #405<a class="hanchor" href="#the-foundation-and-persisted-state-after-404-and-405" aria-label="#">#</a></h3>
+<h3 id="records-node-helpers-and-persisted-state-after-406">Records, node helpers and persisted state, after #406<a class="hanchor" href="#records-node-helpers-and-persisted-state-after-406" aria-label="#">#</a></h3>
 <blockquote>
 <p><strong>Legend</strong> — white box with red border: engine crate (or group of crates) · cylinder, blue:
 files under the state root · solid arrow: <em>uses</em>, with what is used.</p>
 </blockquote>
-<p>Types live in the foundation, the files that hold them live in one adapter, and every other
-adapter reaches those files through that adapter.</p>
+<p>Plain-data types live in the foundation, the workload records in the Compute context, the node's
+own helpers in the Node context, and the files that hold records in one adapter that every other
+adapter reaches those files through.</p>
 <pre class="mermaid">flowchart TB
-  CX[&quot;contexts&lt;br/&gt;&lt;small&gt;delonix-compute, -stack, -security-runtime&lt;/small&gt;&quot;]
+  CX[&quot;other contexts&lt;br/&gt;&lt;small&gt;delonix-stack, -security-runtime&lt;/small&gt;&quot;]
   AD[&quot;other adapters&lt;br/&gt;&lt;small&gt;delonix-linux, -oci, -sdn, -vm, -volume&lt;/small&gt;&quot;]
   STATE[&quot;delonix-state&lt;br/&gt;&lt;small&gt;adapter: Store, JsonStore, write_atomic, SecretStore, CredVault&lt;/small&gt;&quot;]
-  CORE[&quot;delonix-runtime-core&lt;br/&gt;&lt;small&gt;Container, Vm, Mount, events, dispatch, peer_cred&lt;/small&gt;&quot;]
+  COMPUTE[&quot;delonix-compute&lt;br/&gt;&lt;small&gt;context: Container, Vm, Mount, DELONIX_SLICE, workload_net&lt;/small&gt;&quot;]
+  NODE[&quot;delonix-node&lt;br/&gt;&lt;small&gt;context: events, dispatch, peer_cred, virt, safe_to_signal&lt;/small&gt;&quot;]
   MODEL[&quot;delonix-model&lt;br/&gt;&lt;small&gt;Error and DX codes, exit classes, secret model, Status, FwRule, typestate&lt;/small&gt;&quot;]
   NR[&quot;delonix-net-rules&lt;br/&gt;&lt;small&gt;Cidr, bridge_name — zero dependencies&lt;/small&gt;&quot;]
   FILES[(&quot;state root files&lt;br/&gt;&lt;small&gt;containers/, vms/, secrets/, tunnels/&lt;/small&gt;&quot;)]
-  CX --&gt;|&quot;Container, events, now_unix&quot;| CORE
-  CX --&gt;|&quot;Secret, parse_env_file&quot;| MODEL
+  CX --&gt;|&quot;events, now_unix&quot;| NODE
+  CX --&gt;|&quot;Error, Result&quot;| MODEL
   AD --&gt;|&quot;Store, JsonStore, write_atomic — declared exceptions until P4&quot;| STATE
-  AD --&gt;|&quot;records and pid checks&quot;| CORE
+  AD --&gt;|&quot;Container, Vm, ports, workload_net&quot;| COMPUTE
+  AD --&gt;|&quot;pid checks, events, in_initial_userns&quot;| NODE
   AD --&gt;|&quot;Cidr, bridge_name&quot;| NR
-  STATE --&gt;|&quot;stores Container&quot;| CORE
+  STATE --&gt;|&quot;stores Container&quot;| COMPUTE
   STATE --&gt;|&quot;errors convert into Error; re-exports the secret model&quot;| MODEL
-  CORE --&gt;|&quot;re-exports Error, Status, FwRule, typestate&quot;| MODEL
+  COMPUTE --&gt;|&quot;safe_to_signal&quot;| NODE
+  COMPUTE --&gt;|&quot;Status, ContainerFw, parse_env_file&quot;| MODEL
   STATE --&gt;|&quot;flock, temp file + rename&quot;| FILES
-  class CX,AD,STATE,CORE,MODEL,NR block
+  class CX,AD,STATE,COMPUTE,NODE,MODEL,NR block
   class FILES store
 classDef person fill:#191513,stroke:#191513,color:#ffffff
 classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
@@ -985,10 +996,11 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>Checked against: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a> (<code>pub use
-delonix_model::records::{…}</code> and <code>pub use delonix_model::{typestate, Error, Result}</code>);
+<p>Checked against: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>use
+delonix_model::records::{…}</code>, <code>use delonix_node::safe_to_signal</code>) and <code>src/lib.rs</code> (<code>pub use
+record::*</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/lib.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/lib.rs</code></a> and <code>host.rs</code>;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a> and <code>typestate.rs</code>;
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> (<code>use delonix_runtime_core::Container</code>), <code>secret.rs</code>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> (<code>use delonix_compute::Container</code>), <code>secret.rs</code>,
 <code>cred_vault.rs</code>, <code>error.rs</code>. <code>delonix-net-rules</code> is used by <code>delonix-sdn</code> and <code>delonix-vm</code> only;
 <code>delonix-volume</code> and <code>delonix-scanner</code> also name <code>delonix-model</code> directly (the generated graph
 below has every edge).</p>
@@ -1082,10 +1094,10 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   subgraph foundation[&quot;Foundation&quot;]
     delonix_model[&quot;delonix-model&quot;]
     delonix_net_rules[&quot;delonix-net-rules&quot;]
-    delonix_runtime_core[&quot;delonix-runtime-core&quot;]
   end
   subgraph context[&quot;Contexts&quot;]
     delonix_compute[&quot;delonix-compute&quot;]
+    delonix_node[&quot;delonix-node&quot;]
     delonix_security_runtime[&quot;delonix-security-runtime&quot;]
     delonix_stack[&quot;delonix-stack&quot;]
   end
@@ -1114,30 +1126,36 @@ answer "does A depend on B", and read the per-layer figures above to understand 
     delonix_runtime_bin[&quot;delonix-runtime-bin&quot;]
   end
   delonix_compute --&gt; delonix_model
-  delonix_compute --&gt; delonix_runtime_core
+  delonix_compute --&gt; delonix_node
   delonix_cri --&gt; delonix_compute
   delonix_cri --&gt; delonix_linux
+  delonix_cri --&gt; delonix_model
+  delonix_cri --&gt; delonix_node
   delonix_cri --&gt; delonix_oci
-  delonix_cri --&gt; delonix_runtime_core
   delonix_cri --&gt; delonix_sdn
   delonix_cri --&gt; delonix_state
   delonix_cri --&gt; delonix_telemetry
   delonix_linux --&gt; delonix_compute
-  delonix_linux --&gt; delonix_runtime_core
+  delonix_linux --&gt; delonix_model
+  delonix_linux --&gt; delonix_node
   delonix_linux --&gt; delonix_state
+  delonix_mcp --&gt; delonix_compute
   delonix_mcp --&gt; delonix_linux
   delonix_mcp --&gt; delonix_mgmt
-  delonix_mcp --&gt; delonix_runtime_core
+  delonix_mcp --&gt; delonix_model
+  delonix_mcp --&gt; delonix_node
   delonix_mcp --&gt; delonix_sdn
   delonix_mcp --&gt; delonix_state
   delonix_mcp --&gt; delonix_vm
   delonix_mcp --&gt; delonix_volume
   delonix_mcp_bin --&gt; delonix_mcp
-  delonix_mcp_bin --&gt; delonix_runtime_core
+  delonix_mcp_bin --&gt; delonix_node
   delonix_mcp_bin --&gt; delonix_telemetry
+  delonix_mgmt --&gt; delonix_compute
   delonix_mgmt --&gt; delonix_linux
+  delonix_mgmt --&gt; delonix_model
+  delonix_mgmt --&gt; delonix_node
   delonix_mgmt --&gt; delonix_oci
-  delonix_mgmt --&gt; delonix_runtime_core
   delonix_mgmt --&gt; delonix_scanner
   delonix_mgmt --&gt; delonix_sdn
   delonix_mgmt --&gt; delonix_state
@@ -1145,20 +1163,23 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_mgmt --&gt; delonix_vm
   delonix_mgmt --&gt; delonix_volume
   delonix_mgmt_bin --&gt; delonix_mgmt
-  delonix_mgmt_bin --&gt; delonix_runtime_core
+  delonix_mgmt_bin --&gt; delonix_node
   delonix_mgmt_bin --&gt; delonix_telemetry
+  delonix_node --&gt; delonix_model
   delonix_oci --&gt; delonix_compute
-  delonix_oci --&gt; delonix_runtime_core
+  delonix_oci --&gt; delonix_model
+  delonix_oci --&gt; delonix_node
   delonix_oci --&gt; delonix_state
-  delonix_proxmox --&gt; delonix_runtime_core
+  delonix_proxmox --&gt; delonix_compute
+  delonix_proxmox --&gt; delonix_model
   delonix_proxmox --&gt; delonix_vm
   delonix_runtime_bin --&gt; delonix_compute
   delonix_runtime_bin --&gt; delonix_linux
   delonix_runtime_bin --&gt; delonix_mgmt
   delonix_runtime_bin --&gt; delonix_model
+  delonix_runtime_bin --&gt; delonix_node
   delonix_runtime_bin --&gt; delonix_oci
   delonix_runtime_bin --&gt; delonix_proxmox
-  delonix_runtime_bin --&gt; delonix_runtime_core
   delonix_runtime_bin --&gt; delonix_scanner
   delonix_runtime_bin --&gt; delonix_sdn
   delonix_runtime_bin --&gt; delonix_security_runtime
@@ -1168,25 +1189,28 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   delonix_runtime_bin --&gt; delonix_truenas
   delonix_runtime_bin --&gt; delonix_vm
   delonix_runtime_bin --&gt; delonix_volume
-  delonix_runtime_core --&gt; delonix_model
   delonix_scanner --&gt; delonix_model
   delonix_scanner --&gt; delonix_oci
   delonix_sdn --&gt; delonix_compute
+  delonix_sdn --&gt; delonix_model
   delonix_sdn --&gt; delonix_net_rules
-  delonix_sdn --&gt; delonix_runtime_core
+  delonix_sdn --&gt; delonix_node
   delonix_sdn --&gt; delonix_state
-  delonix_security_runtime --&gt; delonix_runtime_core
-  delonix_stack --&gt; delonix_runtime_core
+  delonix_security_runtime --&gt; delonix_model
+  delonix_security_runtime --&gt; delonix_node
+  delonix_stack --&gt; delonix_model
+  delonix_state --&gt; delonix_compute
   delonix_state --&gt; delonix_model
-  delonix_state --&gt; delonix_runtime_core
-  delonix_truenas --&gt; delonix_runtime_core
+  delonix_state --&gt; delonix_node
+  delonix_truenas --&gt; delonix_model
   delonix_vm --&gt; delonix_compute
+  delonix_vm --&gt; delonix_model
   delonix_vm --&gt; delonix_net_rules
-  delonix_vm --&gt; delonix_runtime_core
+  delonix_vm --&gt; delonix_node
   delonix_vm --&gt; delonix_state
   delonix_volume --&gt; delonix_compute
   delonix_volume --&gt; delonix_model
-  delonix_volume --&gt; delonix_runtime_core
+  delonix_volume --&gt; delonix_node
   delonix_volume --&gt; delonix_state
   class delonix_compute block
   class delonix_cri iface
@@ -1197,10 +1221,10 @@ answer "does A depend on B", and read the per-layer figures above to understand 
   class delonix_mgmt_bin engine
   class delonix_model store
   class delonix_net_rules store
+  class delonix_node block
   class delonix_oci block
   class delonix_proxmox external
   class delonix_runtime_bin engine
-  class delonix_runtime_core store
   class delonix_scanner block
   class delonix_sdn block
   class delonix_security_runtime block
@@ -1245,7 +1269,7 @@ answer "does A depend on B", and read the per-layer figures above to understand 
      <code>__rmtree</code>/<code>__ovlhold</code>/… entry points).
    - The servers still build some CLI invocations (<code>delonix-mgmt</code>, <code>delonix-mcp</code>'s
      <code>run_cli_blocking</code>, the CRI's <code>delonix()</code> helper), resolving the CLI through
-     <code>delonix_runtime_core::dispatch::cli_bin</code> (<code>DELONIX_BIN</code>, then the sibling <code>delonix</code>, then
+     <code>delonix_node::dispatch::cli_bin</code> (<code>DELONIX_BIN</code>, then the sibling <code>delonix</code>, then
      the <code>PATH</code>) — never their own executable.
    ADR-0040 D2.4/D5 plans a <code>delonix-launcher</code> executable receiving a typed spec, so these become
    use-case calls plus one spawn.</li>
@@ -1347,7 +1371,7 @@ answer "does A depend on B", and read the per-layer figures above to understand 
 <tr>
 <td><code>events.jsonl</code></td>
 <td>append-only event log</td>
-<td><code>delonix_runtime_core::<wbr>events</code></td>
+<td><code>delonix_node::events</code></td>
 </tr>
 </tbody>
 </table></div>
@@ -1355,13 +1379,13 @@ answer "does A depend on B", and read the per-layer figures above to understand 
 a supervisor) mutate the same records: writes are atomic (temporary file + <code>rename</code>,
 <code>delonix_state::write_atomic</code>), and read-modify-write goes through <code>Store::update</code> /
 <code>JsonStore::update</code>, which take an exclusive <code>flock</code> and <strong>refuse</strong> to proceed without it. All
-of that lives in the <code>delonix-state</code> adapter. The record types it stores are foundation types:
-<code>Container</code> and <code>Vm</code> in <code>delonix-runtime-core</code>, and the plain-data parts of a record (<code>Status</code>,
-<code>ContainerFw</code>/<code>FwRule</code>) in <code>delonix-model</code>, re-exported by <code>delonix-runtime-core</code>. The network
+of that lives in the <code>delonix-state</code> adapter. The record types it stores are defined elsewhere:
+<code>Container</code> and <code>Vm</code> in the <code>delonix-compute</code> context, and the plain-data parts of a record
+(<code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>) in the <code>delonix-model</code> foundation crate. The network
 infra has its own <code>FileLock</code> around <code>ensure_up</code>, <code>teardown</code>, <code>acquire</code>, <code>release</code> and the reapers.</p>
 <p>Because nothing resident watches processes, a record saying <code>Running</code> can be stale. Readers
 reconcile: <code>delonix_linux::reconcile_status</code> checks the pid together with its start time
-(<code>delonix_runtime_core::safe_to_signal</code>) so a recycled pid is never mistaken for the container.</p>
+(<code>delonix_node::safe_to_signal</code>) so a recycled pid is never mistaken for the container.</p>
 <h2 id="level-4-two-flows-as-sequences">Level 4 — Two flows, as sequences<a class="hanchor" href="#level-4-two-flows-as-sequences" aria-label="#">#</a></h2>
 <p>Level 4 is drawn only where the order of steps is the point. Both flows below are sequences
 rather than structure figures.</p>
@@ -1520,7 +1544,7 @@ code cannot be collected.</p>
 </tr>
 <tr>
 <td>Records, errors, persisted state</td>
-<td><code>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code> (<code>Container</code>, <code>Vm</code>), <code>delonix-model/<wbr>src/<wbr>{records,error,exitcode}.<wbr>rs</code>, <code>delonix-state/<wbr>src/<wbr>{store,secret}.<wbr>rs</code></td>
+<td><code>delonix-compute/<wbr>src/<wbr>record.<wbr>rs</code> (<code>Container</code>, <code>Vm</code>), <code>delonix-model/<wbr>src/<wbr>{records,error,exitcode}.<wbr>rs</code>, <code>delonix-state/<wbr>src/<wbr>{store,secret}.<wbr>rs</code></td>
 </tr>
 <tr>
 <td>CRI</td>
@@ -1540,6 +1564,8 @@ code cannot be collected.</p>
 </tr>
 </tbody>
 </table></div>
+<hr />
+<p><strong>Next:</strong> <a href="crates.html">The crates</a> — one section per crate: what it owns, its main types, where to start reading and the traps it has already paid for.</p>
 <nav class="pager"><a href="project-structure.html"><span>← Previous</span>Project structure</a><a class="next" href="crates.html"><span>Next →</span>The crates</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/architecture.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/architecture.md</code></footer>
 </div></main>
@@ -1558,7 +1584,7 @@ code cannot be collected.</p>
 <li><a href="#level-3-components-crates-by-layer">Level 3 — Components: crates by layer</a><ul>
 <li><a href="#layers-and-the-allowed-direction">Layers and the allowed direction</a></li>
 <li><a href="#where-the-restructuring-stands">Where the restructuring stands</a></li>
-<li><a href="#the-foundation-and-persisted-state-after-404-and-405">The foundation and persisted state, after #404 and #405</a></li>
+<li><a href="#records-node-helpers-and-persisted-state-after-406">Records, node helpers and persisted state, after #406</a></li>
 <li><a href="#compute-ports-and-the-adapters-behind-them">Compute ports and the adapters behind them</a></li>
 <li><a href="#interfaces-and-binaries">Interfaces and binaries</a></li>
 <li><a href="#every-crate-edge">Every crate edge</a></li>

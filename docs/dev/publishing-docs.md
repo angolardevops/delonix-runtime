@@ -1,8 +1,11 @@
 # Publishing the documentation
 
+**Before you read:** [Contribution workflow](contributing-workflow.md) and the [generated vs hand-written table](project-structure.md#generated-vs-hand-written) in Project structure.
+
 Documentation in this repository is either **generated from the code** (and then checked by a gate)
 or **written by hand** (and then reviewed). This page explains which is which, how each is
-published, and what you have to do when your change affects documentation.
+published, and what you have to do when your change affects documentation. After it you know,
+for any change, which generator to run and which files to commit with it.
 
 ## Where it is published
 
@@ -135,3 +138,7 @@ pull request for it. When nothing structural or procedural changed, the outcome 
 | A structural decision | an ADR in `docs/adr/` (see [Contribution workflow](contributing-workflow.md#when-to-write-an-adr)) |
 | A user-visible feature | describe it in the PR so it can go into the next release notes |
 | How contributors build, test or work | the relevant page of this handbook |
+
+---
+
+**Next:** [Cloud native standards, layer by layer](cloud-native-standards.md) — the reference part: each cloud native standard, what it requires, and the engine's conformance with dates.

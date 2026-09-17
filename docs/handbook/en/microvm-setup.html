@@ -210,8 +210,11 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Images &amp; microVMs</p>
 <h1 id="building-microvms">Building microVMs</h1>
+<p><strong>Before you read:</strong> <a href="environment.html">Preparing your environment</a>, <a href="build-and-test.html">Clone, build and test</a>, the <a href="cloud-native-primer.html#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init">virtualization section of the Cloud native primer</a>, and Part 2 of <a href="delonixfile-and-vmfile.html#part-2-vmfile">Delonixfile and VMfile</a>.</p>
 <p>This page takes a contributor from a bare Linux host to building, booting and testing VMs with
-Delonix, and shows where the code lives when something needs changing. It assumes you have
+Delonix, and shows where the code lives when something needs changing. After it you can prepare a
+host for Cloud Hypervisor and libvirt, predict which backend a VM gets, and test a VM change through
+the CLI. It assumes you have
 already read <a href="environment.html">Preparing your environment</a> and can build the tree
 (<a href="build-and-test.html">Clone, build and test</a>).</p>
 <blockquote>
@@ -924,6 +927,8 @@ dry-run without <code>--apply</code>). This is the one deliberate exception to r
   command a user would type, not the flags that are convenient for debugging (<code>--vnc</code> once masked a
   boot failure that only happened without a video device).</li>
 </ul>
+<hr />
+<p><strong>Next:</strong> <a href="coding-conventions.html">Coding conventions</a> — how code in this repository must be written, each rule tagged with the gate or decision behind it.</p>
 <nav class="pager"><a href="delonixfile-and-vmfile.html"><span>← Previous</span>Delonixfile and VMfile</a><a class="next" href="coding-conventions.html"><span>Next →</span>Coding conventions</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/microvm-setup.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/microvm-setup.md</code></footer>
 </div></main>

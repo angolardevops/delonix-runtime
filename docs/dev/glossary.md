@@ -1,12 +1,15 @@
 # Glossary
 
+**Before you read:** nothing — this is a reference. Keep it open next to any other page.
+
 The words a newcomer meets in this repository, with the meaning they have **in Delonix** — which is
 sometimes narrower than the general cloud-native meaning. Each entry points to where the term is
 explained or implemented. Paths are relative to the repository root; `file.rs::symbol` names a
 symbol inside that file.
 
-Terms are in alphabetical order. For the general background (namespaces, cgroups, OCI, CRI, CNI,
-KVM), start with [Cloud native primer](cloud-native-primer.md).
+Terms are in alphabetical order. For the general background, the kernel primitives (processes,
+namespaces, cgroups, file descriptors, signals) are taught in [Linux foundations](linux-foundations.md),
+and OCI, CRI, CNI and KVM as the engine uses them in [Cloud native primer](cloud-native-primer.md).
 
 ---
 
@@ -263,3 +266,7 @@ container|pod|vm|microvm` that lowers to the matching Kind at load time
 own branch. Every task here gets its own, created from `origin/main` in a persistent directory
 outside the repository (never `/tmp`), and is removed together with its branch at the end. See:
 [One worktree per task](contributing-workflow.md#one-worktree-per-task).
+
+---
+
+**Next:** [Overview and reading paths](README.md#reading-paths-by-role) — that is the end of the course; go back to the reading paths by role to pick what to deepen next.

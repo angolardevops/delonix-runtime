@@ -210,9 +210,14 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">环境与构建</p>
 <div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="clone-build-and-test">Clone, build and test</h1>
+<p><strong>Before you read:</strong> <a href="environment.html">Preparing your environment</a>: the pinned toolchain, <code>protoc</code>, and a host that passes its checks.</p>
 <p>This page assumes the host from <a href="environment.html">Preparing your environment</a>: the pinned
-Rust toolchain and <code>protoc</code>. Everything here runs from the root of your checkout — ideally a
-<strong>git worktree</strong>, see <a href="contributing-workflow.html">Contribution workflow</a>.</p>
+Rust toolchain and <code>protoc</code>. After it you can build and install your tree, run every CI gate
+locally, and run the E2E battery and the chaos harness without touching real engine state.</p>
+<p>Everything here runs from the root of your checkout — ideally a <strong>git worktree</strong>: a separate
+working directory with its own branch, one per task, created from <code>origin/main</code> (the command is in
+<a href="start-here.html#2-open-a-worktree-from-originmain">Start here, step 2</a>; the rules are in
+<a href="contributing-workflow.html#one-worktree-per-task">Contribution workflow</a>).</p>
 <h2 id="clone">Clone<a class="hanchor" href="#clone" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
 cd delonix-runtime
@@ -288,7 +293,7 @@ is the only way to tell your build from the released one.</p>
 different release refuses to start. It also passes itself in <code>DELONIX_BIN</code>, so the server calls back
 the same CLI. A server started directly (for example by a unit) finds the CLI through
 <code>DELONIX_BIN</code>, then a <code>delonix</code> next to itself, then <code>PATH</code> (<code>cli_bin</code> in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/dispatch.rs</code></a>). <strong>Keep the four binaries of one build
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/dispatch.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/dispatch.rs</code></a>). <strong>Keep the four binaries of one build
 together</strong>; a mix of your build and a release is refused, or runs code you did not mean to test.</p>
 <p><code>delonix cluster kubeadm</code> and <code>delonix image vm build</code> look for <code>delonix-cri</code> in their own order
 (<code>resolve_cri_bin</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmimage.rs</code></a>): <code>--cri-bin</code>, then next to
@@ -516,6 +521,11 @@ cgroups, the network holder or VM boot works — that needs a live run (see
 
 <p>Every job in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> can be reproduced locally. Run the ones that match what you
 touched before you push; run all of them before asking for review.</p>
+<p>You can run a gate before you understand the rule behind it; its failure message names what to fix.
+The rules are taught later in the course: layers, the dependency direction and the debt ratchets in
+<a href="architecture.html#layers-and-the-allowed-direction">Architecture</a>, the node contract in
+<a href="architecture.html#one-set-of-operations-several-interfaces">Architecture</a>, and LANG-01 and version
+alignment in <a href="contributing-workflow.html#language-english-in-the-code-lang-01">Contribution workflow</a>.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -667,6 +677,8 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 </ul>
 <p>Scratch directories under <code>/tmp</code> are fine for these throwaway sandboxes. Your <strong>worktrees</strong> are
 not — see <a href="contributing-workflow.html#one-worktree-per-task">Contribution workflow</a>.</p>
+<hr />
+<p><strong>Next:</strong> <a href="project-structure.html">Project structure</a> — the map of the repository: what each directory is, who changes it, and what is generated.</p>
 <nav class="pager"><a href="environment.html"><span>← 上一页</span>Preparing your environment</a><a class="next" href="project-structure.html"><span>下一页 →</span>Project structure</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/build-and-test.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/build-and-test.md</code></footer>
 </div></main>

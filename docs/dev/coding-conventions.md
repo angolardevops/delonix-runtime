@@ -1,7 +1,10 @@
 # Coding conventions
 
+**Before you read:** [Rust primer](rust-primer.md), [Architecture](architecture.md) and [The crates](crates.md) — the rules below refer to layers, ports and crates by name.
+
 This page tells you how to write code that passes review in this repository, so you don't have
-to guess the rules or make up your own. Every rule below carries a tag and a source:
+to guess the rules or make up your own. After it you can apply the review checklist at the end to
+your own diff before a reviewer does. Every rule below carries a tag and a source:
 
 - **Enforced (gate)**: a CI job fails if you break it. The gate is named, so you can run it
   locally (see [Build and test](build-and-test.md#the-gates-ci-runs)).
@@ -780,3 +783,7 @@ Before you open the PR, go through the list:
     aliases, and the schema regenerated. → [§3.6](#36-kinds-api-groups-and-manifest-fields)
 16. ADR, `AGENTS.md` and the generated docs are updated if a boundary moved. →
     [§10](#10-comments-and-documentation)
+
+---
+
+**Next:** [Contribution workflow](contributing-workflow.md) — how a change is sent: worktrees, version alignment, language rule, ADRs, commits and pull requests.

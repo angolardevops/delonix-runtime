@@ -211,11 +211,19 @@ th:first-child,td:first-child{white-space:nowrap}
 <p class="kicker">Get started</p>
 <h1 id="start-here">Start here</h1>
 <p>This page takes you from "I just cloned the repository" to "my first pull request is under review",
-one step at a time. Every step says what to do, what you should see, and which page explains the
+one step at a time. After it you will have a checkout that builds, a binary you can run against
+isolated state, and a map of where your change goes and which rules it must respect. Every step says what to do, what you should see, and which page explains the
 details. Every rule on this page links to where it is written down — if a rule is not linked, it is
 not a rule.</p>
 <p>If a word here is new to you, look it up in the <a href="glossary.html">glossary</a>.</p>
 <h2 id="day-0-in-30-minutes">Day 0 in 30 minutes<a class="hanchor" href="#day-0-in-30-minutes" aria-label="#">#</a></h2>
+<p>Day 0 follows the order of the handbook, but only takes what you need today from each part: the
+idea of the engine (<a href="iaas-and-cloud-native.html">IaaS and cloud native</a>), the host it needs
+(<a href="environment.html">Preparing your environment</a>, which leans on the primitives in
+<a href="linux-foundations.html">Linux foundations</a>), a build and an isolated run
+(<a href="build-and-test.html">Clone, build and test</a>, with every variable in
+<a href="environment-variables.html">Environment variables</a>), and where things are
+(<a href="project-structure.html">Project structure</a>). Come back to the full pages when a step sends you there.</p>
 <h3 id="what-delonix-is-5-minutes">What Delonix is (5 minutes)<a class="hanchor" href="#what-delonix-is-5-minutes" aria-label="#">#</a></h3>
 <p>Delonix Runtime is an engine that runs <strong>containers and microVMs on one node</strong>, together with the
 networking and storage they need. It is:</p>
@@ -227,13 +235,17 @@ networking and storage they need. It is:</p>
 <li><strong>rootless-first</strong> — the normal path runs as your own unprivileged user.</li>
 </ul>
 <p>It does <strong>not</strong> know who uses it: no platform, tenant, account or billing concept exists in the
-code. Read <a href="architecture.html#engine-identity-and-boundaries">Architecture</a> for the full
-picture; for now, those four sentences are enough.</p>
+code. Read <a href="iaas-and-cloud-native.html#where-delonix-runtime-fits-and-where-it-deliberately-stops">IaaS and cloud native</a>
+for where this places the engine in a cloud, and <a href="architecture.html#engine-identity-and-boundaries">Architecture</a>
+for how the boundary is enforced; for now, those four sentences are enough.</p>
 <h3 id="what-you-need-10-minutes">What you need (10 minutes)<a class="hanchor" href="#what-you-need-10-minutes" aria-label="#">#</a></h3>
 <p>A Linux host with cgroup v2 and unprivileged user namespaces, the pinned Rust toolchain from
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>, and <code>protoc</code> on your <code>PATH</code>. The full list, and the host traps that look like
 engine bugs, are in <a href="environment.html">Preparing your environment</a>. Read at least its
-<a href="environment.html#known-host-traps">Known host traps</a> section before step 5 below.</p>
+<a href="environment.html#known-host-traps">Known host traps</a> section before step 5 below. If "user
+namespace" or "cgroup delegation" are new words, the hands-on explanation is
+<a href="linux-foundations.html">Linux foundations</a> — you do not need it to finish Day 0, but you will the
+first time a limit does not apply.</p>
 <h3 id="five-commands-that-prove-your-setup-works-15-minutes">Five commands that prove your setup works (15 minutes)<a class="hanchor" href="#five-commands-that-prove-your-setup-works-15-minutes" aria-label="#">#</a></h3>
 <p>Run these from the root of your checkout. If one of them does not give the shape shown, stop and
 fix it before going further — every later step depends on it.</p>
@@ -270,7 +282,8 @@ installed release and is usually older (<a href="environment.html#a-stale-deloni
 <p><strong>5. Run one real command, fully isolated.</strong></p>
 <p>Anything beyond <code>--help</code> reads and writes engine state. Point <strong>both</strong> state variables at scratch
 directories first — half isolation is worse than none
-(<a href="build-and-test.html#isolating-the-engines-state">Clone, build and test</a>):</p>
+(<a href="build-and-test.html#isolating-the-engines-state">Clone, build and test</a>; what each variable
+does is in <a href="environment-variables.html#isolating-a-development-run">Environment variables</a>):</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">export DELONIX_ROOT=$HOME/scratch/dlx/root
 export DELONIX_NET_RUNTIME_DIR=/tmp/dlx-run      # keep it short: it holds unix sockets
 mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
@@ -332,7 +345,9 @@ git log --oneline -- &lt;path you will touch&gt;      # what was already decided
 were tried, measured and changed (<a href="contributing-workflow.html#start-from-the-latest-tag-not-from-memory">Start from the latest tag</a>).</p>
 <h3 id="3-find-where-the-change-goes">3. Find where the change goes<a class="hanchor" href="#3-find-where-the-change-goes" aria-label="#">#</a></h3>
 <p>Use the decision tree in <a href="#where-does-my-change-go">Where does my change go?</a> below, then read the
-section of <a href="crates.html">The crates</a> for that crate.</p>
+section of <a href="crates.html">The crates</a> for that crate. If a path in the table means nothing to you yet,
+<a href="project-structure.html">Project structure</a> explains every top-level directory, and why a crate's
+directory is its layer.</p>
 <h3 id="4-write-the-test-first">4. Write the test first<a class="hanchor" href="#4-write-the-test-first" aria-label="#">#</a></h3>
 <ul>
 <li>A new pure function (parser, validator, argument builder, plan) gets a unit test in the same file,
@@ -357,7 +372,8 @@ python3 scripts/dev_docs.py --check
 python3 scripts/version_gate.py
 </code></pre></div>
 <p>Add the ones that match what you touched (the CLI surface gates if you added a command, the contract
-gate if you touched <code>proto/</code>, the docs generator if help text changed) — the table in 02 says which.</p>
+gate if you touched <code>proto/</code>, the docs generator if help text changed) — the table in
+<a href="build-and-test.html#the-gates-ci-runs">The gates CI runs</a> says which.</p>
 <h3 id="6-write-the-pull-request">6. Write the pull request<a class="hanchor" href="#6-write-the-pull-request" aria-label="#">#</a></h3>
 <p>Open it against <code>main</code> and fill in every section of
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener"><code>.github/PULL_REQUEST_TEMPLATE.md</code></a>. The template has four
@@ -439,7 +455,7 @@ git branch -D &lt;topic&gt;/&lt;task&gt;
 </tr>
 <tr>
 <td><strong>Persisted state: a record field, a store, file locking, secrets at rest</strong></td>
-<td>Record types (<code>Container</code>, <code>Vm</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-runtime-core/<wbr>src/<wbr>lib.<wbr>rs</code></a>. How they are stored and locked (<code>Store</code>, <code>JsonStore</code>, <code>write_atomic*</code>, <code>SecretStore</code>, <code>CredVault</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr></code></a> (<code>store.rs</code>, <code>secret.rs</code>, <code>cred_vault.rs</code>)</td>
+<td>Record types (<code>Container</code>, <code>Vm</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>record.<wbr>rs</code></a>; plain-data parts (<code>Status</code>, <code>ContainerFw</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>records.<wbr>rs</code></a>. How they are stored and locked (<code>Store</code>, <code>JsonStore</code>, <code>write_atomic*</code>, <code>SecretStore</code>, <code>CredVault</code>): <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state/src" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr></code></a> (<code>store.rs</code>, <code>secret.rs</code>, <code>cred_vault.rs</code>)</td>
 <td><a href="crates.html#delonix-state"><code>delonix-state</code></a>, <a href="architecture.html#state-on-disk">State on disk</a>, <a href="rust-primer.html#38-concurrency-and-shared-state">Concurrency</a></td>
 <td>New record fields take <code>#[serde(default)]</code>; read-modify-write goes through <code>update</code> (<a href="coding-conventions.html#8-state-and-concurrency">State and concurrency</a>)</td>
 </tr>
@@ -579,6 +595,8 @@ round trip:</p>
 <li>[ ] My PR fills every section of the template, including what was <em>not</em> validated.</li>
 <li>[ ] After the merge, I removed my worktree and my branch.</li>
 </ul>
+<hr />
+<p><strong>Next:</strong> <a href="iaas-and-cloud-native.html">IaaS and cloud native — where the engine fits</a> — the mental model of an IaaS, which of its layers this engine is, and how cloud native principles show up in its files.</p>
 <nav class="pager"><a href="index.html"><span>← Previous</span>Delonix Runtime — Contributor Handbook</a><a class="next" href="iaas-and-cloud-native.html"><span>Next →</span>IaaS and cloud native — where the engine fits</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/start-here.md" target="_blank" rel="noopener">Edit this page</a><code>docs/dev/start-here.md</code></footer>
 </div></main>

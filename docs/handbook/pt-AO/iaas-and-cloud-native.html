@@ -210,13 +210,20 @@ th:first-child,td:first-child{white-space:nowrap}
 <main><div class="content">
 <p class="kicker">Começar</p>
 <div class="notice" role="note">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="iaas-and-cloud-native-where-the-engine-fits">IaaS and cloud native — where the engine fits</h1>
+<p><strong>Before you read:</strong> <a href="start-here.html#what-delonix-is-5-minutes">Start here</a> (the four sentences on what Delonix is). No kernel or Rust knowledge is needed yet.</p>
 <p>You may be a DevOps engineer, an SRE, a platform engineer or a cloud developer who has <em>used</em> an
 Infrastructure-as-a-Service cloud for years without ever building one. This page gives you the
 mental model you need before reading the engine's code: what an IaaS is made of, which of its
 layers this repository implements, which it deliberately leaves to others, and how the cloud native
-principles you already know show up in concrete files here.</p>
+principles you already know show up in concrete files here. After it you can say, for any IaaS
+responsibility, whether this repository owns it or leaves it to a control plane, and point to the
+file where each cloud native principle is applied.</p>
 <p>Every claim about the engine points to a file, a symbol or an ADR. When an ADR is cited, its
-status is given, because a <em>Proposed</em> ADR is a direction, not a fact about the code.</p>
+status is given, because a <em>Proposed</em> ADR is a direction, not a fact about the code. Paths such
+as <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> name the engine's crates; you do not need to know them yet — for
+now read a path as "the code for this lives here". The directory level (<code>foundation</code>, <code>contexts</code>,
+<code>adapters</code>, <code>providers</code>, <code>interfaces</code>) is the crate's layer, explained later in
+<a href="project-structure.html">Project structure</a> and <a href="architecture.html">Architecture</a>.</p>
 <p>If a word is new to you, look it up in the <a href="glossary.html">glossary</a>.</p>
 <h2 id="what-an-iaas-is">What an IaaS is<a class="hanchor" href="#what-an-iaas-is" aria-label="#">#</a></h2>
 <h3 id="the-service-models">The service models<a class="hanchor" href="#the-service-models" aria-label="#">#</a></h3>
@@ -709,12 +716,16 @@ follow each factor. Some factors are simply not the engine's business, and the t
 <h2 id="read-next">Read next<a class="hanchor" href="#read-next" aria-label="#">#</a></h2>
 <ul>
 <li><strong>Linux foundations</strong> (<a href="linux-foundations.html">linux-foundations.md</a>) — the kernel primitives all
-  of this rests on: namespaces, cgroups, capabilities, mounts and netfilter.</li>
-<li><strong>Cloud native primer</strong> (<a href="cloud-native-primer.html">cloud-native-primer.md</a>) — the standards the
-  engine implements (OCI, CRI, CNI, KVM/virtio, cloud-init) and where each appears in the code.</li>
-<li><strong>Architecture</strong> (<a href="architecture.html">architecture.md</a>) — the layers and processes in detail, once
-  the two pages above feel familiar.</li>
+  of this rests on: processes and <code>/proc</code>, namespaces, cgroups v2, file descriptors and signals.</li>
+<li><strong>Cloud native primer</strong> (<a href="cloud-native-primer.html">cloud-native-primer.md</a>) — how the engine uses
+  those primitives and the specifications on top of them (OCI, CRI, CNI, KVM/virtio, cloud-init),
+  with files and symbols.</li>
+<li><strong>Architecture</strong> (<a href="architecture.html">architecture.md</a>) — the structure behind this context: layers,
+  processes and crates in detail, once the two pages above and
+  <a href="project-structure.html">Project structure</a> feel familiar.</li>
 </ul>
+<hr />
+<p><strong>Next:</strong> <a href="linux-foundations.html">Linux foundations</a> — the kernel primitives every later page relies on, hands-on: processes, namespaces, cgroups v2, file descriptors and signals.</p>
 <nav class="pager"><a href="start-here.html"><span>← Anterior</span>Começa aqui</a><a class="next" href="linux-foundations.html"><span>Seguinte →</span>Linux foundations</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/iaas-and-cloud-native.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/iaas-and-cloud-native.md</code></footer>
 </div></main>
