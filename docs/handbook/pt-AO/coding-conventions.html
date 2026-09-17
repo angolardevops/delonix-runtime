@@ -209,9 +209,11 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a class="on" aria-current="page" href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Contribuir</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/coding-conventions.html">Ler a página em inglês</a></span></div><h1 id="coding-conventions">Convenções de código</h1>
+<h1 id="coding-conventions">Convenções de código</h1>
+<p><strong>Antes de leres:</strong> <a href="rust-primer.html">Introdução ao Rust</a>, <a href="architecture.html">Arquitectura</a> e <a href="crates.html">As crates</a> — as regras abaixo referem-se a camadas, portas e crates pelo nome.</p>
 <p>Esta página diz-te como escrever código que passa a revisão neste repositório, para não teres de
-adivinhar as regras nem de inventar as tuas. Cada regra abaixo leva uma etiqueta e uma fonte:</p>
+adivinhar as regras nem de inventar as tuas. Depois dela consegues aplicar a lista de verificação
+do fim ao teu próprio diff antes de um revisor o fazer. Cada regra abaixo leva uma etiqueta e uma fonte:</p>
 <ul>
 <li><strong>Imposto (gate)</strong>: um job de CI falha se a quebrares. O gate é nomeado, para o poderes correr
   localmente (vê <a href="build-and-test.html#the-gates-ci-runs">Construir e testar</a>).</li>
@@ -390,10 +392,10 @@ Err(Error::Invalid(super::po::tf(
 </table></div>
 <p>Um crate só existe se for um contexto delimitado, se isolar uma dependência pesada ou
   privilegiada, ou se for um binário instalado à parte. <strong>Sem sufixos <code>-core</code>, <code>-common</code>, <code>-utils</code>
-  ou <code>-types</code></strong> (o ADR-0040 D2.1 regista como um crate <code>-core</code> se tornou «the sink of everything»).
-  Alguns crates ainda têm nomes antigos: <code>delonix-runtime-core</code>, <code>delonix-proxmox</code>,
-  <code>delonix-truenas</code>, <code>delonix-security-runtime</code>. O ADR-0040 renomeia cada um na fase que o
-  reestrutura, «never twice». <strong>Não renomeies um crate fora da sua fase.</strong>
+  ou <code>-types</code></strong> (o ADR-0040 D2.1 regista como um crate <code>-core</code> se tornou «the sink of everything»;
+  esse crate, <code>delonix-runtime-core</code>, foi removido na #406). Alguns crates ainda têm nomes
+  antigos: <code>delonix-proxmox</code>, <code>delonix-truenas</code>, <code>delonix-security-runtime</code>. O ADR-0040 renomeia
+  cada um na fase que o reestrutura, «never twice». <strong>Não renomeies um crate fora da sua fase.</strong>
 - <strong>O caminho de cada crate escreve-se uma vez</strong>, em <code>[workspace.dependencies]</code> do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>
   raiz. Os membros dependem uns dos outros com <code>{ workspace = true }</code>. <strong>Decidido</strong>: AGENTS.md §
   «A direcção das dependências é um portão (ADR-0040, fase P0)», e o comentário no topo de
@@ -509,7 +511,7 @@ cpu_affinity: Option&lt;String&gt;,
   com elas (ADR-0007). O schema dos manifestos está declarado <strong>estável</strong>
   (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § «O schema dos manifestos»).
 - <strong>Os registos internos</strong> (o JSON debaixo do state root) mantêm os nomes de campo <code>snake_case</code> do
-  Rust. Vê <code>crates/foundation/delonix-runtime-core/src/lib.rs</code> (<code>net_mode</code>, <code>namespace</code>).
+  Rust. Vê <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>net_mode</code>, <code>namespace</code>).
   <strong>Convenção (observada)</strong>.</p>
 <h3 id="37-environment-variables">3.7 Variáveis de ambiente<a class="hanchor" href="#37-environment-variables" aria-label="#">#</a></h3>
 <ul>
@@ -631,9 +633,19 @@ crates que descrevem já existam.</p>
 <td>ADR-0040 D1</td>
 </tr>
 <tr>
-<td>Um tipo de registo persistido (<code>Container</code>, <code>Vm</code>, …)</td>
-<td><code>delonix-runtime-core</code> (foundation) — o que sobrou da divisão da P3 do ADR-0040. Acrescenta aqui só o que pertence a registos, nunca helpers gerais</td>
-<td>ADR-0040 D2.1 «no <code>-core</code>»</td>
+<td>Um tipo de registo de carga persistido (<code>Container</code>, <code>Vm</code>, <code>Mount</code>, …)</td>
+<td><code>delonix-compute</code> (context): <code>record.rs</code></td>
+<td>ADR-0040 D2.2; #406</td>
+</tr>
+<tr>
+<td>Um registo de dados simples sem mecanismo (<code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>, <code>typestate</code>)</td>
+<td><code>delonix-model</code> (foundation): <code>records.rs</code>, <code>typestate.rs</code></td>
+<td>ADR-0040 P3 (#405)</td>
+</tr>
+<tr>
+<td>Uma pergunta feita ao host ou a um processo (<code>now_unix</code>, vivacidade de pid, user namespace, geração de ids), o registo de eventos, a regra de despacho do servidor, <code>SO_PEERCRED</code></td>
+<td><code>delonix-node</code> (context)</td>
+<td>ADR-0040 D2.2; #406</td>
 </tr>
 <tr>
 <td>Uma regra pura do modelo de segredos (<code>Secret</code>, nomes e chaves válidos, análise de env-file)</td>
@@ -798,7 +810,7 @@ pub trait NetworkProvider {
   ADR-0040 P3.
   <strong>Imposto (gate)</strong>: o ratchet <code>shared_error_imports</code> no <code>arch_fitness.py</code> (<code>SHARED_ERROR</code>,
   limitado a <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> e <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) conta os imports
-  <code>use delonix_runtime_core::{…Error/Result…}</code> ou <code>use delonix_model::{…}</code> que tornam o tipo
+  <code>use delonix_model::{…Error/Result…}</code> que tornam o tipo
   partilhado o tipo de resultado do próprio crate. O tipo partilhado ainda pode ser nomeado dentro
   de um impl <code>From</code>. A implementação de referência é <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/error.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/error.rs</code></a>:</li>
 </ul>
@@ -947,7 +959,7 @@ let rc = unsafe {
   lhe fazer <code>chmod</code>, porque outro utilizador pode abri-lo nesse intervalo. <strong>Decidido</strong>: doc comment
   de <code>delonix-state/src/store.rs:write_atomic_mode</code>; AGENTS.md (TOCTOU do kubeconfig).
 - <strong>Antes de sinalizar um pid lido de um ficheiro, confirma que ainda é o mesmo processo.</strong> Usa
-  <code>delonix_runtime_core::safe_to_signal(pid, starttime)</code>, que compara o instante de arranque para um
+  <code>delonix_node::safe_to_signal(pid, starttime)</code>, que compara o instante de arranque para um
   pid reciclado não ser morto. <strong>Decidido</strong>: AGENTS.md § «A classe «X não é Y»» (as entradas de pid).
 - <strong>O argv de um processo não prova que ele é nosso.</strong> Outros state roots do mesmo utilizador, e
   outras ferramentas, correm com o mesmo argv. Verifica um token que só nós escolhemos: um caminho
@@ -989,7 +1001,7 @@ let c = store.update(id_or_name, |c| match f(c) {
 <li><strong>Os campos novos em registos persistidos levam <code>#[serde(default)]</code></strong> (ou <code>default = "fn"</code>), para
   os registos escritos por versões anteriores continuarem a carregar. A omissão tem de descrever o
   que os registos antigos eram de facto, não um palpite. <strong>Decidido</strong>: AGENTS.md (por exemplo
-  <code>Vm.namespace</code>, <code>VmImage.cloud_init</code>). <strong>Convenção (observada)</strong>: <code>delonix-runtime-core/src/lib.rs</code>,
+  <code>Vm.namespace</code>, <code>VmImage.cloud_init</code>). <strong>Convenção (observada)</strong>: <code>delonix-compute/src/record.rs</code>,
   o doc comment de <code>Vm.namespace</code> («the default is a statement of fact and not a guess»).</li>
 <li><strong>Tudo o que é preciso para reconstruir um recurso tem de ser persistido, não só usado na
   criação.</strong> Quando mexeres num caminho de <code>start</code>/<code>restart</code>, compara campo a campo o que a criação
@@ -1078,7 +1090,7 @@ let c = store.update(id_or_name, |c| match f(c) {
 <li><strong>Quando é aceitável um <code>#[allow(clippy::…)]</code>.</strong> É usado (<code>too_many_arguments</code>) sem uma política
   escrita.</li>
 <li><strong>O tipo <code>Result</code> das portas de compute de hoje.</strong> As portas em
-  <code>delonix-compute/src/ports.rs</code> devolvem <code>delonix_runtime_core::Result</code>, por isso os adapters que
+  <code>delonix-compute/src/ports.rs</code> devolvem <code>delonix_model::Result</code>, por isso os adapters que
   as implementam (<code>HostWorkload</code>, <code>HostNetwork</code>, …) importam o tipo de resultado partilhado, e esses
   imports contam para <code>shared_error_imports</code>. A P3 decide os erros por crate. Nenhum documento diz
   como muda a assinatura de uma porta, e acrescentar um import desses num ficheiro novo falha o
@@ -1129,6 +1141,8 @@ let c = store.update(id_or_name, |c| match f(c) {
 <li>O ADR, o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> e a documentação gerada estão actualizados se uma fronteira mudou. →
     <a href="#10-comments-and-documentation">§10</a></li>
 </ol>
+<hr />
+<p><strong>Seguinte:</strong> <a href="adding-a-kind.html">Acrescentar um Kind</a> — a tabela, o schema e a ligação ao reconciliador de que um Kind declarativo novo precisa, trabalhados através de um real.</p>
 <nav class="pager"><a href="troubleshooting.html"><span>← Anterior</span>Diagnóstico de problemas</a><a class="next" href="adding-a-kind.html"><span>Seguinte →</span>Acrescentar um Kind</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/coding-conventions.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/coding-conventions.md</code></footer>
 </div></main>

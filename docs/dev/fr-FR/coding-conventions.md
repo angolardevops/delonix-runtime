@@ -1,8 +1,10 @@
-<!-- translated-from: coding-conventions.md sha256:e8fa0aa20ecb042cbb42224bc761227f36f7876e1b9c0fca26a0a627050e4307 -->
+<!-- translated-from: coding-conventions.md sha256:5c91adc6b2f71d8a63325e98fe7cc34464469e6339179fb1178bf42d204ee147 -->
 # Conventions de code
 
+**Avant de lire :** [Introduction à Rust](rust-primer.md), [Architecture](architecture.md) et [Les crates](crates.md) — les règles ci-dessous font référence aux couches, aux ports et aux crates par leur nom.
+
 Cette page vous indique comment écrire du code qui passe la revue dans ce dépôt, afin que vous
-n'ayez pas à deviner les règles ni à inventer les vôtres. Chaque règle ci-dessous porte une
+n'ayez pas à deviner les règles ni à inventer les vôtres. Après elle, vous pouvez appliquer la liste de vérification de la fin à votre propre diff avant qu'un relecteur ne le fasse. Chaque règle ci-dessous porte une
 étiquette et une source :
 
 - **Imposé (gate)** : un job de CI échoue si vous l'enfreignez. Le gate (contrôle CI) est nommé,
@@ -133,7 +135,7 @@ commentaire `// why` à côté, comme pour toute autre exception (voir [§10](#1
   Un crate n'existe que s'il est un contexte délimité, s'il isole une dépendance lourde ou
   privilégiée, ou s'il est un binaire installé séparément. **Pas de suffixes `-core`, `-common`,
   `-utils` ni `-types`** (l'ADR-0040 D2.1 consigne comment un crate `-core` est devenu « le puits de
-  tout »). Certains crates portent encore d'anciens noms : `delonix-runtime-core`, `delonix-proxmox`,
+  tout ») ; ce crate, `delonix-runtime-core`, a été supprimé dans la #406). Certains crates portent encore d'anciens noms : `delonix-proxmox`,
   `delonix-truenas`, `delonix-security-runtime`. L'ADR-0040 renomme chacun d'eux dans la phase qui le
   restructure, « jamais deux fois ». **Ne renommez pas un crate en dehors de sa phase.**
 - **Le chemin de chaque crate est écrit une seule fois**, dans `[workspace.dependencies]` du
@@ -254,7 +256,7 @@ commentaire `// why` à côté, comme pour toute autre exception (voir [§10](#1
   correspond (ADR-0007). Le schéma des manifestes est déclaré **stable** (`docs/cli-stability.md` § « O
   schema dos manifestos »).
 - **Les enregistrements internes** (le JSON sous la racine d'état) gardent les noms de champs Rust en
-  `snake_case`. Voir `crates/foundation/delonix-runtime-core/src/lib.rs` (`net_mode`, `namespace`).
+  `snake_case`. Voir `crates/contexts/delonix-compute/src/record.rs` (`net_mode`, `namespace`).
   **Convention (observée)**.
 
 ### 3.7 Variables d'environnement
@@ -349,7 +351,9 @@ Proposed, même si les crates qu'ils décrivent existent déjà.
 |---|---|---|
 | Une règle pure sur les CIDR, les noms de bridge ou l'arithmétique IPAM que les deux côtés doivent calculer à l'identique | `delonix-net-rules` (foundation) | 06 ; AGENTS.md § Arquitetura |
 | Une nouvelle classe d'erreur, un code de sortie ou un code `DX_*` ; les noms générés | `delonix-model` (foundation) | ADR-0040 D1 |
-| Un type d'enregistrement persisté (`Container`, `Vm`, …) | `delonix-runtime-core` (foundation) — le reliquat du découpage de l'ADR-0040 P3. N'y ajoutez que ce qui relève des enregistrements, jamais des helpers généraux | ADR-0040 D2.1 « no `-core` » |
+| Un type d'enregistrement de charge persisté (`Container`, `Vm`, `Mount`, …) | `delonix-compute` (context) : `record.rs` | ADR-0040 D2.2 ; #406 |
+| Un enregistrement de données simples sans mécanisme (`Status`, `ContainerFw`/`FwRule`, `typestate`) | `delonix-model` (foundation) : `records.rs`, `typestate.rs` | ADR-0040 P3 (#405) |
+| Une question posée à l'hôte ou à un processus (`now_unix`, vivacité d'un pid, user namespace, génération d'ids), le journal d'événements, la règle de dispatch du serveur, `SO_PEERCRED` | `delonix-node` (context) | ADR-0040 D2.2 ; #406 |
 | Une règle pure du modèle des secrets (`Secret`, noms et clés valides, analyse de fichiers env) | `delonix-model` (foundation) : `secret.rs` | ADR-0040 P3 (la PR qui a déplacé les stores) |
 | Un store, le verrou de fichier, `write_atomic*`/`write_private_temp`, le store de secrets chiffré ou le coffre d'identifiants | `delonix-state` (adapter) | ADR-0040 D2.3 |
 | Les faits des Kinds, le planificateur/diff, les conditions, les révisions | `delonix-stack` (context) | AGENTS.md § Arquitetura |
@@ -449,7 +453,7 @@ Proposed, même si les crates qu'ils décrivent existent déjà.
   ADR-0040 P3.
   **Imposé (gate)** : le ratchet `shared_error_imports` de `arch_fitness.py` (`SHARED_ERROR`,
   limité à `crates/adapters/` et `crates/providers/`) compte les imports
-  `use delonix_runtime_core::{…Error/Result…}` ou `use delonix_model::{…}` qui font du type partagé le
+  `use delonix_model::{…Error/Result…}` qui font du type partagé le
   type de résultat propre du crate. Le type partagé peut toujours être nommé à l'intérieur d'une impl
   `From`. L'implémentation de référence est `crates/adapters/delonix-scanner/src/error.rs` :
 
@@ -612,7 +616,7 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   ensuite faire un `chmod`, car un autre utilisateur peut l'ouvrir entre-temps. **Décidé** :
   commentaire de documentation de `delonix-state/src/store.rs:write_atomic_mode` ; AGENTS.md (TOCTOU du kubeconfig).
 - **Avant de signaler un pid lu dans un fichier, vérifiez qu'il s'agit toujours du même processus.**
-  Utilisez `delonix_runtime_core::safe_to_signal(pid, starttime)`, qui compare l'heure de démarrage
+  Utilisez `delonix_node::safe_to_signal(pid, starttime)`, qui compare l'heure de démarrage
   afin qu'un pid recyclé ne soit pas tué. **Décidé** : AGENTS.md § « A classe «X não é Y» » (les
   entrées sur les pid).
 - **L'argv d'un processus ne prouve pas qu'il est à nous.** D'autres racines d'état du même
@@ -660,7 +664,7 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   `default = "fn"`), afin que les enregistrements écrits par des versions plus anciennes se chargent
   toujours. La valeur par défaut doit décrire ce qu'étaient réellement les anciens enregistrements, pas
   une supposition. **Décidé** : AGENTS.md (par exemple `Vm.namespace`, `VmImage.cloud_init`).
-  **Convention (observée)** : `delonix-runtime-core/src/lib.rs`, le commentaire de documentation de
+  **Convention (observée)** : `delonix-compute/src/record.rs`, le commentaire de documentation de
   `Vm.namespace` (« the default is a statement of fact and not a guess »).
 - **Tout ce qui est nécessaire pour reconstruire une ressource doit être persisté, et pas seulement
   utilisé à la création.** Lorsque vous touchez un chemin `start`/`restart`, comparez champ par champ
@@ -760,7 +764,7 @@ votre PR :
 - **Quand `#[allow(clippy::…)]` est acceptable.** Il est utilisé (`too_many_arguments`) sans politique
   écrite.
 - **Le type `Result` des ports de calcul actuels.** Les ports de
-  `delonix-compute/src/ports.rs` renvoient `delonix_runtime_core::Result`, donc les adaptateurs qui les
+  `delonix-compute/src/ports.rs` renvoient `delonix_model::Result`, donc les adaptateurs qui les
   implémentent (`HostWorkload`, `HostNetwork`, …) importent le type de résultat partagé, et ces imports
   comptent dans `shared_error_imports`. P3 décide des erreurs par crate. Aucun document ne dit comment
   la signature d'un port change, et ajouter un tel import dans un nouveau fichier fait échouer le
@@ -815,3 +819,7 @@ Avant d'ouvrir la PR, parcourez la liste :
     anciennes graphies en alias, et le schéma régénéré. → [§3.6](#36-kinds-api-groups-and-manifest-fields)
 16. L'ADR, `AGENTS.md` et la documentation générée sont mis à jour si une frontière a bougé. →
     [§10](#10-comments-and-documentation)
+
+---
+
+**Suivant :** [Ajouter un Kind](adding-a-kind.md) — la table, le schéma et le câblage du réconciliateur dont un nouveau Kind déclaratif a besoin, illustrés par un cas réel.
