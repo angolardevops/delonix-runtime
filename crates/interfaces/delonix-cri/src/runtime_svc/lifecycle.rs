@@ -348,7 +348,7 @@ fn engine_has(base: &Path, cri_id: &str) -> Option<bool> {
     let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
     match store.load(&format!("cri-{cri_id}")) {
         Ok(_) => Some(true),
-        Err(delonix_runtime_core::Error::NotFound(_)) => Some(false),
+        Err(e) if e.is_not_found() => Some(false),
         Err(_) => None,
     }
 }

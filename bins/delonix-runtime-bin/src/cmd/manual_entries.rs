@@ -693,6 +693,8 @@ pub static ENTRIES: &[Entry] = &[
             ("every field of a Kind, `kubectl explain` style, straight from the generated schema", "delonix explain Container"),
             ("drill into one field instead of reading the whole Kind", "delonix explain Container.ports"),
             ("a nested field of a pod member", "delonix explain Pod.containers.image"),
+            ("what a numbered code in an error means, and what to do about it", "delonix explain DX-4501"),
+            ("the whole dictionary of codes", "delonix explain codes"),
         ],
         see_also: &["manifest schema", "stack validate", "stack apply"],
     },

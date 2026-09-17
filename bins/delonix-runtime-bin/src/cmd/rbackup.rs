@@ -432,7 +432,7 @@ impl Drop for Scratch {
 fn load_vm(root: &Path, name: &str) -> Result<delonix_runtime_core::Vm> {
     let st: delonix_runtime_core::JsonStore<delonix_runtime_core::Vm> =
         delonix_runtime_core::JsonStore::open(root.join("vms"))?;
-    st.load(name).map_err(|e| match e {
+    st.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(_) => Error::VmNotFound(name.to_string()),
         e => e,
     })

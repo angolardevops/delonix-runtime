@@ -3269,7 +3269,11 @@ fn for_each_id(ids: &[String], mut f: impl FnMut(&str) -> Result<()>) -> Result<
             // (exits before `run()` ever returns), so it never went through
             // `po::t_dyn` — every batched `stop`/`rm`/... failure stayed in EN
             // even under `--l18n=pt`, unlike a single-id failure of the same command.
-            eprintln!("{id}: {}", super::po::t_dyn(&e.to_string()));
+            eprintln!(
+                "{id}: [{}] {}",
+                delonix_model::codes::label(e.number()),
+                super::po::t_dyn(&e.to_string())
+            );
             codes.push(super::exitcode::for_error(&e));
         }
     }
@@ -3881,7 +3885,7 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
     // Idempotent like docker: stopping an already-stopped container succeeds
     // (it broke the natural `stop X && rm X` idiom, RC=1 for a no-op).
     if let Err(e) = runtime::stop(store, &mut c, time) {
-        if matches!(e, delonix_runtime_core::Error::NotRunning(_)) {
+        if e.is_not_running() {
             println!("{}", c.name);
             return Ok(());
         }

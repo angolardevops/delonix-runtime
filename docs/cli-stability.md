@@ -114,6 +114,20 @@ case $? in
 esac
 ```
 
+### O número do dicionário: `DX-CDNN`
+
+O código de saída e o `DX_*` dizem a **classe**. O número `DX-CDNN` diz **qual falha**
+(ADR-0043): o milhar é a classe, a centena o domínio, os dois últimos a falha, e `00` a
+própria classe. A CLI imprime-o na linha de erro — `error[DX-4501] no such VM: dev` — e
+`delonix explain DX-4501` diz o que significa e o que fazer (`--json` para scripts). O
+dicionário completo está em `delonix explain codes` e na página
+[Dicionário de códigos](codigos.html), gerada da mesma tabela.
+
+**Um número nunca muda de significado nem é reutilizado**: pode acrescentar-se, e uma falha
+que deixe de existir fica com o número retirado. A mensagem ao lado pode ser reescrita e é
+traduzida; o número é o contrato. Enquanto um sítio do motor ainda não tem entrada própria,
+responde com a entrada genérica da sua classe (`DX-4000`, `DX-1000`, …).
+
 ### A identidade textual: `DX_*`
 
 O número serve quem lê `$?`. Quem lê **texto** — um cliente HTTP, um consumidor

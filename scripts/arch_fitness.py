@@ -145,6 +145,18 @@ SHARED_ERROR = re.compile(
     r"use\s+delonix_(?:runtime_core|model)::(?:\{[^}]*\b(?:Error|Result)\b[^}]*\}|(?:Error|Result)\b)"
 )
 SHARED_ERROR_DIRS = ("crates/adapters/", "crates/providers/")
+# A `match`/`matches!` on a variant of the shared error, outside the foundation
+# (ADR-0043 D4). A crate's error travels inside the shared class with its code, and
+# `Err(Error::NotFound(_))` stops matching it without a word from the compiler.
+# Ask `e.is_not_found()`/`e.class()`, or match on `e.root()` for a payload.
+_VARIANTS = r"(?:NotFound|VmNotFound|NotRunning|Invalid|Conflict|Unavailable|Timeout|Registry|Runtime|Io|Json)"
+RAW_VARIANT_MATCH = re.compile(
+    r"Err\(\s*(?:\w+::)*(?:Error|EngineError)::" + _VARIANTS
+    + r"\s*(?:\(\s*(?:_|\.\.)\s*\)|\{\s*\.\.\s*\}|\(\s*\w+\s*\)\)\s*(?:=>|if\b))"
+    + r"|matches!\(\s*(?:(?!\.(?:into_)?root\(\))[^;])*?,\s*(?:Err\()?\s*(?:\w+::)*(?:Error|EngineError)::"
+    + _VARIANTS + r"\b"
+)
+RAW_VARIANT_SKIP = ("crates/foundation/delonix-model/",)
 
 
 def crates() -> dict[str, Path]:
@@ -302,6 +314,8 @@ def count(
             continue
         if only and not rel.startswith(only):
             continue
+        if pattern is RAW_VARIANT_MATCH and rel.startswith(RAW_VARIANT_SKIP):
+            continue
         n = len(pattern.findall(f.read_text(encoding="utf-8", errors="replace")))
         if n:
             total += n
@@ -340,6 +354,7 @@ def main() -> int:
         "library_prints": prints,
         "env_writes": env_writes,
         "shared_error_imports": shared_err,
+        "raw_error_variant_matches": count(RAW_VARIANT_MATCH, skip_bin=False)[0],
     }
 
     if args.list:
