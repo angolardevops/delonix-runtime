@@ -34,10 +34,10 @@ what each crate holds in [06 — Crates](06-crates.md), the Rust idioms in
 | **`[workspace.lints]`** | The root `Cargo.toml` declares exactly one workspace lint: `[workspace.lints.clippy] undocumented_unsafe_blocks = "deny"`. Every member manifest has `[lints] workspace = true`. | **Enforced (gate)**: clippy. It was introduced by phase P0 of ADR-0040 ("`[workspace.lints]` (`undocumented_unsafe_blocks = deny`)"), an ADR that is still **Proposed**; the gate holds regardless. |
 | **cargo-deny** | RUSTSEC advisories and yanked crates, permissive licences only (no GPL/AGPL), crates.io as the only registry, no git sources. The `[bans]` section of `deny.toml` (duplicate versions and wildcards, set to warn) is **not** evaluated in CI. | **Enforced (gate)**: CI job `deny` runs `check advisories licenses sources` with `deny.toml`. **Convention (observed)**: every ignored advisory in `deny.toml` carries a comment with its reason — no gate checks that the comment exists. |
 | **`scripts/lang_ratchet.py`** | Portuguese in identifiers, comments and user-facing strings (LANG-01, see [§2](#2-language-of-the-code)). | **Enforced (gate)**: CI job `lang`, baseline in `scripts/lang_baseline.json`. |
-| **`scripts/arch_fitness.py`** | Layer direction, crate directory = layer, versions only in the root, consumer names, and four debt ratchets (see [§4](#4-structure-where-code-goes) and [§5](#5-internal-api-and-boundaries)). | **Enforced (gate)**: CI job `arch`, baseline in `scripts/arch_baseline.json`. |
+| **`scripts/arch_fitness.py`** | Layer direction, crate directory = layer, versions only in the root, consumer names, and the debt ratchets listed in [05](05-architecture.md#layers-and-the-allowed-direction) (see [§4](#4-structure-where-code-goes) and [§5](#5-internal-api-and-boundaries)). | **Enforced (gate)**: CI job `arch`, baseline in `scripts/arch_baseline.json`. |
 | **`scripts/contract_gate.py`** | The node contract under `proto/delonix/node/v1` (see [§5.4](#54-the-node-contract)). | **Enforced (gate)**: CI job `contract`. |
 
-Keep one mechanic in mind for **ratchets** (`lang_ratchet.py` and the four `arch_fitness.py`
+Keep one mechanic in mind for **ratchets** (`lang_ratchet.py` and the `arch_fitness.py`
 numbers). A ratchet fails when its number **rises**, and it **also** fails when the number falls
 without the baseline being lowered in the same commit (`arch_fitness.py` prints "debt was paid;
 lower the baseline in the same commit (--update)"). If you pay debt, run `--update` and commit the
@@ -452,6 +452,14 @@ already exist.
   conversion instead of keeping a second table; and a test (`the_code_is_the_code_of_the_class_it_converts_into`)
   keeps the two in step. The converted message is also kept byte-for-byte identical to what the CLI
   printed before (`the_converted_message_is_the_one_printed_before`).
+- **Ask the error its class; don't match on a variant of the shared error.** Outside the
+  foundation, write `e.is_not_found()` or `e.class()`, or match on `e.root()` when you need the
+  payload — never `Err(Error::NotFound(_))` or `matches!(…, Error::NotFound(_))`. A crate's own
+  error travels inside the shared class with its code, so a variant match stops matching it
+  without a word from the compiler. **Decided**: ADR-0043 D4 (Accepted).
+  **Enforced (gate)**: the `raw_error_variant_matches` ratchet in `arch_fitness.py`
+  (`RAW_VARIANT_MATCH`, skipping `crates/foundation/delonix-model/`), whose baseline is 0 — any
+  new raw match fails CI. The methods live in `crates/foundation/delonix-model/src/codes.rs`.
 
 ### 5.3 Visibility
 

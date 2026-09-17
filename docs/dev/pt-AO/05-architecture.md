@@ -54,12 +54,13 @@ Isto não são convenções; o `scripts/arch_fitness.py` impõe a metade estrutu
 | Ratchets que só podem descer (listados abaixo) — por ex. crates de biblioteca a re-executar o binário do próprio motor, `println!` em bibliotecas, escritas no ambiente do processo, adapters a importar o `Error` partilhado como se fosse seu | os padrões de ratchet (`SELF_EXEC`, `PRINTS`, `ENV_WRITES`, `SHARED_ERROR`, …), linha de base em `scripts/arch_baseline.json` |
 
 <!-- dev-docs:begin ratchets -->
-O `scripts/arch_fitness.py` mantém **4 ratchets de dívida** (linha de base em `scripts/arch_baseline.json`):
+O `scripts/arch_fitness.py` mantém **5 ratchets de dívida** (linha de base em `scripts/arch_baseline.json`):
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
+- `raw_error_variant_matches`
 <!-- dev-docs:end ratchets -->
 
 O `python3 scripts/arch_fitness.py --list` mostra o que cada ratchet conta hoje, ficheiro a ficheiro.

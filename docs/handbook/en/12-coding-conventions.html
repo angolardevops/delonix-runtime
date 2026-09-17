@@ -135,7 +135,7 @@ what each crate holds in <a href="06-crates.html">06 — Crates</a>, the Rust id
 </tr>
 <tr>
 <td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></strong></td>
-<td>Layer direction, crate directory = layer, versions only in the root, consumer names, and four debt ratchets (see <a href="#4-structure-where-code-goes">§4</a> and <a href="#5-internal-api-and-boundaries">§5</a>).</td>
+<td>Layer direction, crate directory = layer, versions only in the root, consumer names, and the debt ratchets listed in <a href="05-architecture.html#layers-and-the-allowed-direction">05</a> (see <a href="#4-structure-where-code-goes">§4</a> and <a href="#5-internal-api-and-boundaries">§5</a>).</td>
 <td><strong>Enforced (gate)</strong>: CI job <code>arch</code>, baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>.</td>
 </tr>
 <tr>
@@ -145,7 +145,7 @@ what each crate holds in <a href="06-crates.html">06 — Crates</a>, the Rust id
 </tr>
 </tbody>
 </table></div>
-<p>Keep one mechanic in mind for <strong>ratchets</strong> (<code>lang_ratchet.py</code> and the four <code>arch_fitness.py</code>
+<p>Keep one mechanic in mind for <strong>ratchets</strong> (<code>lang_ratchet.py</code> and the <code>arch_fitness.py</code>
 numbers). A ratchet fails when its number <strong>rises</strong>, and it <strong>also</strong> fails when the number falls
 without the baseline being lowered in the same commit (<code>arch_fitness.py</code> prints "debt was paid;
 lower the baseline in the same commit (--update)"). If you pay debt, run <code>--update</code> and commit the
@@ -662,7 +662,15 @@ pub trait NetworkProvider {
 <p>Three things in that file are the pattern: the conversion <strong>decides</strong> the class; <code>code()</code> asks the
   conversion instead of keeping a second table; and a test (<code>the_code_is_the_code_of_the_class_it_converts_into</code>)
   keeps the two in step. The converted message is also kept byte-for-byte identical to what the CLI
-  printed before (<code>the_converted_message_is_the_one_printed_before</code>).</p>
+  printed before (<code>the_converted_message_is_the_one_printed_before</code>).
+- <strong>Ask the error its class; don't match on a variant of the shared error.</strong> Outside the
+  foundation, write <code>e.is_not_found()</code> or <code>e.class()</code>, or match on <code>e.root()</code> when you need the
+  payload — never <code>Err(Error::NotFound(_))</code> or <code>matches!(…, Error::NotFound(_))</code>. A crate's own
+  error travels inside the shared class with its code, so a variant match stops matching it
+  without a word from the compiler. <strong>Decided</strong>: ADR-0043 D4 (Accepted).
+  <strong>Enforced (gate)</strong>: the <code>raw_error_variant_matches</code> ratchet in <code>arch_fitness.py</code>
+  (<code>RAW_VARIANT_MATCH</code>, skipping <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/</code></a>), whose baseline is 0 — any
+  new raw match fails CI. The methods live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>.</p>
 <h3 id="53-visibility">5.3 Visibility</h3>
 <ul>
 <li><strong>Default to private.</strong> Inside the CLI crate, use <code>pub(crate)</code> for something another <code>cmd</code>

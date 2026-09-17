@@ -53,12 +53,13 @@ Ce ne sont pas des conventions ; `scripts/arch_fitness.py` impose la moitié st
 | Des ratchets (cliquets) qui ne peuvent que descendre (listés ci-dessous) — par ex. des crates de bibliothèque qui ré-exécutent le binaire propre au moteur, `println!` dans des bibliothèques, des écritures dans l’environnement du processus, des adaptateurs qui importent l’`Error` partagée comme la leur | les motifs de ratchet (`SELF_EXEC`, `PRINTS`, `ENV_WRITES`, `SHARED_ERROR`, …), ligne de base dans `scripts/arch_baseline.json` |
 
 <!-- dev-docs:begin ratchets -->
-`scripts/arch_fitness.py` maintient **4 cliquets de dette** (référence dans `scripts/arch_baseline.json`) :
+`scripts/arch_fitness.py` maintient **5 cliquets de dette** (référence dans `scripts/arch_baseline.json`) :
 
 - `self_exec_sites`
 - `library_prints`
 - `env_writes`
 - `shared_error_imports`
+- `raw_error_variant_matches`
 <!-- dev-docs:end ratchets -->
 
 `python3 scripts/arch_fitness.py --list` montre ce que chaque ratchet compte aujourd’hui, fichier par fichier.
