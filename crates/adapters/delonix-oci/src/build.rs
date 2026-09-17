@@ -3,7 +3,7 @@
 
 use crate::cas::strip;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -219,7 +219,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
         if instr_up != "FROM" && instr_up != "ARG" && stages.is_empty() {
             // allow extensions/metadata before the 1st FROM to be ignored? No:
             // any step before FROM is an error (like in Docker).
-            return Err(Error::Invalid(format!(
+            return Err(Error::Dockerfile(format!(
                 "Dockerfile line {}: `{instr}` before any FROM",
                 n + 1
             )));
@@ -294,7 +294,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                     })
                     .collect();
                 if parts.len() < 2 {
-                    return Err(Error::Invalid(format!(
+                    return Err(Error::Dockerfile(format!(
                         "line {}: {instr} requires src and dst",
                         n + 1
                     )));
@@ -327,7 +327,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
             // compatibility: accepted but with no build effect (metadata)
             "LABEL" | "EXPOSE" | "MAINTAINER" | "VOLUME" | "STOPSIGNAL" | "SHELL" | "ONBUILD" => {}
             other => {
-                return Err(Error::Invalid(format!(
+                return Err(Error::Dockerfile(format!(
                     "Dockerfile line {}: unknown instruction `{other}`",
                     n + 1
                 )))
@@ -337,7 +337,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
     // The last stage is the final one (the resulting image); the earlier ones are intermediate.
     let last = stages
         .pop()
-        .ok_or_else(|| Error::Invalid("Dockerfile has no FROM instruction".into()))?;
+        .ok_or_else(|| Error::Dockerfile("Dockerfile has no FROM instruction".into()))?;
     df.last_name = last.name;
     df.from = last.from;
     df.steps = last.steps;
@@ -385,7 +385,7 @@ pub fn resolve_target_stage(df: &Dockerfile, target: &str) -> Result<Option<usiz
         .chain(df.last_name.clone())
         .collect();
     known.sort_unstable();
-    Err(Error::Invalid(format!(
+    Err(Error::Dockerfile(format!(
         "no stage named '{target}' in this Dockerfile — known stages: {}",
         if known.is_empty() {
             "none (this Dockerfile names no stages with `AS`)".to_string()
@@ -456,7 +456,7 @@ fn parse_run_flags(rest: &str) -> Result<(Vec<SecretMount>, String)> {
             mounts.push(parse_secret_mount(value)?);
             remaining = after;
         } else {
-            return Err(Error::Invalid(format!(
+            return Err(Error::Dockerfile(format!(
                 "RUN --{name}: flag não suportada (só --mount=type=secret,id=<nome>\
                  [,target=<caminho>][,required=true|false])"
             )));
@@ -477,26 +477,26 @@ fn parse_secret_mount(value: &str) -> Result<SecretMount> {
     match kv.get("type") {
         Some(&"secret") => {}
         Some(other) => {
-            return Err(Error::Invalid(format!(
+            return Err(Error::Dockerfile(format!(
                 "RUN --mount=type={other}: só type=secret é suportado (ssh/cache/bind ainda não)"
             )))
         }
         None => {
-            return Err(Error::Invalid(
+            return Err(Error::Dockerfile(
                 "RUN --mount=...: falta 'type=' (só type=secret é suportado)".into(),
             ))
         }
     }
     let id = kv
         .get("id")
-        .ok_or_else(|| Error::Invalid("RUN --mount=type=secret: falta 'id=<nome>'".into()))?
+        .ok_or_else(|| Error::Dockerfile("RUN --mount=type=secret: falta 'id=<nome>'".into()))?
         .to_string();
     let target = kv.get("target").map(|s| s.to_string());
     let required = match kv.get("required") {
         Some(&"true") => true,
         Some(&"false") | None => false,
         Some(other) => {
-            return Err(Error::Invalid(format!(
+            return Err(Error::Dockerfile(format!(
                 "RUN --mount=...,required={other}: espera 'true' ou 'false'"
             )))
         }
@@ -569,10 +569,10 @@ impl ImageStore {
             let mut builder = tar::Builder::new(&mut buf);
             builder
                 .append_dir_all(".", &upper)
-                .map_err(|e| Error::Invalid(format!("failed to pack the diff: {e}")))?;
+                .map_err(|e| Error::Layer(format!("failed to pack the diff: {e}")))?;
             builder
                 .finish()
-                .map_err(|e| Error::Invalid(format!("failed to close the tar: {e}")))?;
+                .map_err(|e| Error::Layer(format!("failed to close the tar: {e}")))?;
         }
         self.cas().write(&buf)
     }
@@ -689,10 +689,10 @@ impl ImageStore {
         {
             let mut b = tar::Builder::new(&mut buf);
             b.follow_symlinks(false);
-            let entries = std::fs::read_dir(rootfs)
-                .map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
+            let entries =
+                std::fs::read_dir(rootfs).map_err(|e| Error::Layer(format!("ler rootfs: {e}")))?;
             for entry in entries {
-                let entry = entry.map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
+                let entry = entry.map_err(|e| Error::Layer(format!("ler rootfs: {e}")))?;
                 let name = entry.file_name();
                 let in_tar = std::path::Path::new(&name);
                 let is_pseudo = name
@@ -700,7 +700,7 @@ impl ImageStore {
                     .is_some_and(|n| Self::PSEUDO_FS_DIRS.contains(&n));
                 let ft = entry
                     .file_type()
-                    .map_err(|e| Error::Invalid(format!("ler rootfs: {e}")))?;
+                    .map_err(|e| Error::Layer(format!("ler rootfs: {e}")))?;
                 let res = if is_pseudo && ft.is_dir() {
                     // The directory entry itself, none of its contents.
                     b.append_dir(in_tar, entry.path())
@@ -711,10 +711,10 @@ impl ImageStore {
                     // above makes this store the link, not what it points at.
                     b.append_path_with_name(entry.path(), in_tar)
                 };
-                res.map_err(|e| Error::Invalid(format!("empacotar rootfs: {e}")))?;
+                res.map_err(|e| Error::Layer(format!("empacotar rootfs: {e}")))?;
             }
             b.finish()
-                .map_err(|e| Error::Invalid(format!("fechar tar: {e}")))?;
+                .map_err(|e| Error::Layer(format!("fechar tar: {e}")))?;
         }
         Ok(buf)
     }

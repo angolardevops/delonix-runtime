@@ -46,7 +46,12 @@ pub(crate) fn resolve_or_pull_with_creds(
     reference: &str,
     creds: Option<(String, String)>,
 ) -> Result<Image> {
-    delonix_oci::registry::resolve_or_pull(images, reference, creds, &announce_pull)
+    Ok(delonix_oci::registry::resolve_or_pull(
+        images,
+        reference,
+        creds,
+        &announce_pull,
+    )?)
 }
 
 /// The line a pull prints before it starts. English in the source, Portuguese
@@ -89,11 +94,13 @@ pub(crate) fn resolve_or_pull_platform(
             &[("reference", reference), ("arch", arch)],
         )
     );
-    delonix_oci::registry::pull_from_registry_with_creds_platform(
-        images,
-        reference,
-        None,
-        Some(arch),
+    Ok(
+        delonix_oci::registry::pull_from_registry_with_creds_platform(
+            images,
+            reference,
+            None,
+            Some(arch),
+        )?,
     )
 }
 

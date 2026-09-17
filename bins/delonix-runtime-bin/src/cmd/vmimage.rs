@@ -1135,7 +1135,7 @@ pub(crate) fn resolve_official_ref(reference: &str) -> Result<String> {
             // tag: a private package answers 404 exactly like a missing one.
             // Reporting "nowhere" while one of the three never answered would
             // be the same class of lie this function exists to remove.
-            Err(e) => unreachable.push(format!("{}: {e}", r.repo)),
+            Err(e) => unreachable.push(format!("{}: {}", r.repo, delonix_model::Error::from(e))),
         }
     }
     match found.as_slice() {
@@ -3967,6 +3967,7 @@ fn preseed_k8s_images(work: &Path, kubeadm_deb: &Path) -> Option<PathBuf> {
     for img in &images {
         eprintln!("  pre-seeding {img}...");
         if let Err(e) = delonix_oci::registry::pull_from_registry_with_creds(&store, img, None) {
+            let e = delonix_model::Error::from(e);
             eprintln!(
                 "warning: could not pre-seed {img}: {e} (kubeadm will fetch it at runtime instead)"
             );

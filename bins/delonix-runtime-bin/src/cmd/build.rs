@@ -1084,7 +1084,7 @@ pub fn build_from_spec(
                 )));
             };
             let layer = images.commit_upper(&id)?;
-            images.build_image(base_image, layer, &df, tag, arch)
+            Ok(images.build_image(base_image, layer, &df, tag, arch)?)
         }
     })();
     // Fecha o passo do empacotamento em função do RESULTADO. Sem isto o `Drop`
@@ -1165,8 +1165,28 @@ fn commit_flat_rootless(
                     super::po::t("reading build tar (mapped userns)")
                 ))
             })?;
-            images.commit_flat_rootfs_from_tar(
-                bytes,
+            images
+                .commit_flat_rootfs_from_tar(
+                    bytes,
+                    cmd,
+                    entrypoint,
+                    env,
+                    workdir,
+                    user,
+                    tag,
+                    arch,
+                    healthcheck,
+                )
+                .map_err(Into::into)
+        }
+        Some(false) => Err(Error::Invalid(
+            super::po::t("packing rootfs inside the mapped userns failed (delonix __buildtar)")
+                .into(),
+        )),
+        // Without subuid (rootless single-uid): the RUN files are our uid's.
+        None => images
+            .commit_flat_rootfs(
+                Path::new(rootfs),
                 cmd,
                 entrypoint,
                 env,
@@ -1176,23 +1196,7 @@ fn commit_flat_rootless(
                 arch,
                 healthcheck,
             )
-        }
-        Some(false) => Err(Error::Invalid(
-            super::po::t("packing rootfs inside the mapped userns failed (delonix __buildtar)")
-                .into(),
-        )),
-        // Without subuid (rootless single-uid): the RUN files are our uid's.
-        None => images.commit_flat_rootfs(
-            Path::new(rootfs),
-            cmd,
-            entrypoint,
-            env,
-            workdir,
-            user,
-            tag,
-            arch,
-            healthcheck,
-        ),
+            .map_err(Into::into),
     };
     let _ = std::fs::remove_file(&tar_path); // best-effort, never hides the result
     result

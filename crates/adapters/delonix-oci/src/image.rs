@@ -1,7 +1,7 @@
 //! The model of an image and its local store.
 
 use crate::cas::{strip, Cas};
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
@@ -234,7 +234,7 @@ impl ImageStore {
                 return Ok(img);
             }
         }
-        Err(Error::NotFound(format!("image {name}")))
+        Err(Error::NoSuchImage(name.to_string()))
     }
 
     /// Ensures each tag of `img` points ONLY to `img`: removes it from
