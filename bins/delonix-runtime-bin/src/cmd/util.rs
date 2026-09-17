@@ -44,27 +44,18 @@ pub(crate) fn resolve_or_pull_with_creds(
     reference: &str,
     creds: Option<(String, String)>,
 ) -> Result<Image> {
-    match images.resolve(reference) {
-        Ok(img) => Ok(img),
-        Err(_) => {
-            // English in the source, Portuguese from the catalogue: written by
-            // hand in Portuguese, this line came out translated on a CLI the user
-            // had set to English — the debt v0.32.2 removed from 380 places, and
-            // that survived in these two.
-            eprintln!(
-                "{}",
-                super::po::tf("pulling {reference}…", &[("reference", reference)])
-            );
-            match creds {
-                None => delonix_image::pull_from_registry(images, reference),
-                Some(c) => delonix_image::registry::pull_from_registry_with_creds(
-                    images,
-                    reference,
-                    Some(c),
-                ),
-            }
-        }
-    }
+    delonix_image::registry::resolve_or_pull(images, reference, creds, &announce_pull)
+}
+
+/// The line a pull prints before it starts. English in the source, Portuguese
+/// from the catalogue: written by hand in Portuguese, this line came out
+/// translated on a CLI the user had set to English — the debt v0.32.2 removed
+/// from 380 places.
+pub(crate) fn announce_pull(reference: &str) {
+    eprintln!(
+        "{}",
+        super::po::tf("pulling {reference}…", &[("reference", reference)])
+    );
 }
 
 /// Like [`resolve_or_pull`], but arch-aware (`--platform`): `platform: None`
@@ -202,40 +193,6 @@ pub(crate) fn find(store: &Store, q: &str) -> Result<Container> {
     }
 }
 
-/// Prepares a new container's rootfs from an image: an overlay over the SHARED
-/// layer cache in both modes — mounted here in root mode, mounted by the
-/// container's own init in rootless (see `ImageStore::prepare_overlay`). Same
-/// rule used by `container run`.
-///
-/// Rootless used to take a FULL COPY of the image instead (`export_rootfs`), and
-/// the cost was not marginal: measured on this host, 21 containers of the same
-/// `kaeso-odoo:16` image held 21 separate physical copies of the same 2.1 GiB
-/// tree — every file at `nlink == 1`, ~39 GiB of byte-identical duplication —
-/// and every `run` paid 13 s of I/O to make one more. The layer cache under
-/// `layers/<hex>/` was already shared and already had the ownership the
-/// container's uid map wants; nothing pointed at it.
-///
-/// The `chown_tree(…, USERNS_UID_BASE)` that used to follow the copy is gone,
-/// and it never did anything: `lchown` to uid 100000 from an unprivileged uid is
-/// EPERM, and `lchown_tree` discards the error. Measured — both the extracted
-/// layers and every flat rootfs on this host are uniformly `1000:1000`. They
-/// work because the rootless map is `0 <euid> 1`, so uid 0 INSIDE the namespace
-/// IS the invoking uid on the host, and the files already read as `root` to the
-/// container. That is also what lets one extracted layer serve every container.
-pub(crate) fn prepare_rootfs(images: &ImageStore, img: &Image, id: &str) -> Result<String> {
-    let rootless = runtime::is_rootless();
-    if rootless {
-        // Does not mount — an unprivileged `mount(2)` on the host is EPERM. The
-        // mount happens inside the clone, where we own the user namespace.
-        Ok(images
-            .prepare_overlay(img, id)?
-            .to_string_lossy()
-            .into_owned())
-    } else {
-        Ok(images.mount_rootfs(img, id)?.to_string_lossy().into_owned())
-    }
-}
-
 /// Prepares a FLAT rootfs (full copy of the image) for a container whose tree
 /// the HOST has to read and write directly. Kept for `build` alone.
 ///
@@ -259,39 +216,10 @@ pub(crate) fn prepare_rootfs_flat(images: &ImageStore, img: &Image, id: &str) ->
     }
 }
 
-/// The rootfs path of a container that was ALREADY prepared, across the three
-/// layouts this engine has on disk, or `None` when nothing was prepared.
-///
-/// The order matters and is not arbitrary: the overlay marker is checked FIRST
-/// because a container can carry both shapes at once — a flat `rootfs/` written
-/// by a pre-overlay binary keeps living next to the `merged/` a newer `run`
-/// would use, and picking the stale copy would start the container against a
-/// tree that no longer receives its writes.
-///
-/// 1. `overlay-lowers` present → `merged/` (rootless overlay; the mount itself
-///    happens inside the container's clone, so this path is an empty directory
-///    out here and that is expected).
-/// 2. `rootfs/` present → the legacy rootless flat copy. Kept working on
-///    purpose: containers created by an older binary must survive the upgrade.
-/// 3. `merged/` present → root mode, where the overlay is mounted on the host.
-pub(crate) fn existing_rootfs_path(images: &ImageStore, id: &str) -> Option<PathBuf> {
-    let base = images.root().join("containers").join(id);
-    if base.join(ImageStore::LOWERS_FILE).exists() {
-        return Some(base.join("merged"));
-    }
-    for cand in ["rootfs", "merged"] {
-        let p = base.join(cand);
-        if p.exists() {
-            return Some(p);
-        }
-    }
-    None
-}
-
 /// Where a container's OWN writes live on disk — never the shared read-only
 /// lower layers a `container ls -s` SIZE column must not double-count across
 /// every container built from the same image. Same three-layout precedence as
-/// [`existing_rootfs_path`], but pointed at the writable layer instead of the
+/// [`ImageStore::existing_rootfs_path`], but pointed at the writable layer instead of the
 /// (empty-on-host) mountpoint:
 /// 1. `overlay-lowers` present → `upper/` (the writable layer; `merged/` is
 ///    only the mountpoint, shared/empty on the host).

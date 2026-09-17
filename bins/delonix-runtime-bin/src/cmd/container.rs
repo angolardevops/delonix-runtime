@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::output;
-use super::util::{container_writable_dir, find, open_stores, prepare_rootfs, resolve_or_pull};
+use super::util::{container_writable_dir, find, open_stores, resolve_or_pull};
 use delonix_net::run_network::{publish_with_retry, unpublish_ports};
 
 /// `spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,
@@ -2009,19 +2009,23 @@ fn ensure_apparmor(profile: &str) -> Result<()> {
 /// `--user <uid[:gid]|name[:group]>` resolved against the image rootfs
 /// ([`delonix_image::rootfs_user`]), worded for the terminal.
 fn resolve_run_user(rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
-    use delonix_image::rootfs_user::{resolve_user, UserLookupError};
-    resolve_user(std::path::Path::new(rootfs), spec).map_err(|e| {
-        Error::Invalid(match e {
-            UserLookupError::EmptyUser => super::po::t("--user: empty user").into(),
-            UserLookupError::NoSuchUser(user) => super::po::tf(
-                "--user: user '{user}' does not exist in the image (/etc/passwd)",
-                &[("user", &user)],
-            ),
-            UserLookupError::NoSuchGroup(group) => super::po::tf(
-                "--user: group '{group}' does not exist in the image (/etc/group)",
-                &[("group", &group)],
-            ),
-        })
+    delonix_image::rootfs_user::resolve_user(std::path::Path::new(rootfs), spec)
+        .map_err(user_lookup_error)
+}
+
+/// A `--user` the image cannot satisfy, in the operator's language.
+fn user_lookup_error(e: delonix_image::rootfs_user::UserLookupError) -> Error {
+    use delonix_image::rootfs_user::UserLookupError;
+    Error::Invalid(match e {
+        UserLookupError::EmptyUser => super::po::t("--user: empty user").into(),
+        UserLookupError::NoSuchUser(user) => super::po::tf(
+            "--user: user '{user}' does not exist in the image (/etc/passwd)",
+            &[("user", &user)],
+        ),
+        UserLookupError::NoSuchGroup(group) => super::po::tf(
+            "--user: group '{group}' does not exist in the image (/etc/group)",
+            &[("group", &group)],
+        ),
     })
 }
 
@@ -2277,52 +2281,6 @@ mod resource_limits_preflight_tests {
 struct CliRunPorts<'a> {
     images: &'a ImageStore,
     store: &'a Store,
-}
-
-impl delonix_compute::ports::ImageStore for CliRunPorts<'_> {
-    type Image = delonix_image::Image;
-
-    fn resolve(&self, reference: &str) -> Result<delonix_image::Image> {
-        resolve_or_pull(self.images, reference)
-    }
-
-    fn config(&self, img: &delonix_image::Image) -> delonix_compute::ports::ImageConfig {
-        delonix_compute::ports::ImageConfig {
-            entrypoint: img.config.entrypoint.clone(),
-            cmd: img.config.cmd.clone(),
-            env: img.config.env.clone(),
-            working_dir: img.config.working_dir.clone(),
-        }
-    }
-
-    fn prepare_rootfs(
-        &self,
-        img: &delonix_image::Image,
-        id: &str,
-        second_pass: bool,
-    ) -> Result<String> {
-        // The re-exec's second pass reuses the rootfs the first pass prepared: a
-        // full extraction again over a populated tree costs full price (measured).
-        if second_pass && runtime::is_rootless() {
-            return match super::util::existing_rootfs_path(self.images, id) {
-                Some(p) => Ok(p.to_string_lossy().into_owned()),
-                None => prepare_rootfs(self.images, img, id),
-            };
-        }
-        let mut prog = super::output::Progress::new();
-        prog.step_after(
-            super::po::t("unpacking the image"),
-            "📦",
-            std::time::Duration::from_millis(800),
-        );
-        let r = prepare_rootfs(self.images, img, id)?;
-        prog.ok();
-        Ok(r)
-    }
-
-    fn resolve_user(&self, rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)> {
-        resolve_run_user(rootfs, spec)
-    }
 }
 
 impl CliRunPorts<'_> {
@@ -2683,6 +2641,17 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     let register_expose = |name: &str, namespace: &str, ip: &str, port: u16| {
         super::ingress_proxy::auto_register(name, namespace, ip, port)
     };
+    let unpacking = |prepare: &mut dyn FnMut() -> Result<std::path::PathBuf>| {
+        let mut prog = super::output::Progress::new();
+        prog.step_after(
+            super::po::t("unpacking the image"),
+            "📦",
+            std::time::Duration::from_millis(800),
+        );
+        let path = prepare()?;
+        prog.ok();
+        Ok(path)
+    };
     let host_network = delonix_net::run_network::HostNetwork {
         state_root: super::util::state_root(),
         on_attached: &on_attached,
@@ -2704,7 +2673,12 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
         cname,
         namespace.clone(),
         reexec,
-        &read_ports,
+        &delonix_image::run_images::HostImages {
+            store: images,
+            announce_pull: &super::util::announce_pull,
+            unpacking: &unpacking,
+            user_error: &user_lookup_error,
+        },
         &delonix_volume::HostVolumes {
             root: super::util::state_root(),
         },
@@ -4111,7 +4085,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         super::util::migrate_flat_to_overlay(images, &c.id, &c.image);
         // Overlay (`merged/`, remounted by the container's own init) or the
         // legacy flat copy — `existing_rootfs_path` knows which this container is.
-        let rfs = super::util::existing_rootfs_path(images, &c.id).ok_or_else(|| {
+        let rfs = images.existing_rootfs_path(&c.id).ok_or_else(|| {
             Error::Invalid(format!(
                 "rootfs of {} no longer exists — use `run` again",
                 c.name

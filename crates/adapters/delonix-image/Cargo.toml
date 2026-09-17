@@ -6,6 +6,8 @@ license.workspace = true
 
 [dependencies]
 delonix-runtime-core = { workspace = true }
+# Implements the compute context's ImageStore port (ADR-0040).
+delonix-compute = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

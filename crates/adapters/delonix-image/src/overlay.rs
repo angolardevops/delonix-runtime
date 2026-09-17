@@ -390,6 +390,65 @@ impl ImageStore {
         Ok(base.join("merged"))
     }
 
+    /// Prepares a new container's rootfs from an image: an overlay over the SHARED
+    /// layer cache in both modes — mounted here in root mode, mounted by the
+    /// container's own init in rootless (see `ImageStore::prepare_overlay`). Same
+    /// rule used by `container run`.
+    ///
+    /// Rootless used to take a FULL COPY of the image instead (`export_rootfs`), and
+    /// the cost was not marginal: measured on this host, 21 containers of the same
+    /// `kaeso-odoo:16` image held 21 separate physical copies of the same 2.1 GiB
+    /// tree — every file at `nlink == 1`, ~39 GiB of byte-identical duplication —
+    /// and every `run` paid 13 s of I/O to make one more. The layer cache under
+    /// `layers/<hex>/` was already shared and already had the ownership the
+    /// container's uid map wants; nothing pointed at it.
+    ///
+    /// The `chown_tree(…, USERNS_UID_BASE)` that used to follow the copy is gone,
+    /// and it never did anything: `lchown` to uid 100000 from an unprivileged uid is
+    /// EPERM, and `lchown_tree` discards the error. Measured — both the extracted
+    /// layers and every flat rootfs on this host are uniformly `1000:1000`. They
+    /// work because the rootless map is `0 <euid> 1`, so uid 0 INSIDE the namespace
+    /// IS the invoking uid on the host, and the files already read as `root` to the
+    /// container. That is also what lets one extracted layer serve every container.
+    pub fn prepare_container_rootfs(&self, img: &Image, id: &str) -> Result<PathBuf> {
+        if delonix_runtime_core::is_rootless() {
+            // Does not mount — an unprivileged `mount(2)` on the host is EPERM. The
+            // mount happens inside the clone, where we own the user namespace.
+            self.prepare_overlay(img, id)
+        } else {
+            self.mount_rootfs(img, id)
+        }
+    }
+
+    /// The rootfs path of a container that was ALREADY prepared, across the three
+    /// layouts this engine has on disk, or `None` when nothing was prepared.
+    ///
+    /// The order matters and is not arbitrary: the overlay marker is checked FIRST
+    /// because a container can carry both shapes at once — a flat `rootfs/` written
+    /// by a pre-overlay binary keeps living next to the `merged/` a newer `run`
+    /// would use, and picking the stale copy would start the container against a
+    /// tree that no longer receives its writes.
+    ///
+    /// 1. `overlay-lowers` present → `merged/` (rootless overlay; the mount itself
+    ///    happens inside the container's clone, so this path is an empty directory
+    ///    out here and that is expected).
+    /// 2. `rootfs/` present → the legacy rootless flat copy. Kept working on
+    ///    purpose: containers created by an older binary must survive the upgrade.
+    /// 3. `merged/` present → root mode, where the overlay is mounted on the host.
+    pub fn existing_rootfs_path(&self, id: &str) -> Option<PathBuf> {
+        let base = self.container_dir(id);
+        if base.join(Self::LOWERS_FILE).exists() {
+            return Some(base.join("merged"));
+        }
+        for cand in ["rootfs", "merged"] {
+            let p = base.join(cand);
+            if p.exists() {
+                return Some(p);
+            }
+        }
+        None
+    }
+
     /// Does a (recursive) `chown` of the container's write layer (upper+work)
     /// to `uid:gid`. Needed with a user namespace: the container's root
     /// (mapped to `uid` on the host) needs to own its write layer.
