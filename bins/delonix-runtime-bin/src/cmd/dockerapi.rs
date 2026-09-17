@@ -433,7 +433,7 @@ pub(crate) const API_MATRIX: &[(&str, &str, &str)] = &[
     (
         "POST",
         "/containers/create",
-        "container run -d (creates AND starts; HostConfig.RestartPolicy is REFUSED)",
+        "container run -d (creates AND starts)",
     ),
     (
         "POST",
@@ -455,10 +455,9 @@ pub(crate) const API_MATRIX: &[(&str, &str, &str)] = &[
 /// the list" are different answers, and the second one saves someone the work
 /// of waiting for it.
 ///
-/// ROUTES ONLY. A caveat about one FIELD of an implemented route (say
-/// `HostConfig.RestartPolicy`, which `create` refuses) belongs in that route's
-/// own description — mixing the two granularities made the overlap check
-/// ambiguous, which is how this distinction got noticed.
+/// ROUTES ONLY. A caveat about one FIELD of an implemented route belongs in
+/// that route's own description — mixing the two granularities made the
+/// overlap check ambiguous, which is how this distinction got noticed.
 pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
     (
         "POST",
@@ -1100,22 +1099,14 @@ fn docker_config_to_run_opts(name: String, cfg: &serde_json::Value) -> Result<Ru
             }
         })
         .unwrap_or_else(|| "no".to_string());
-    // `always`/`unless-stopped`/`on-failure` need a **supervisor**
-    // (`container::run_supervised`), which does a raw `libc::fork()` on the
-    // assumption — true for the CLI, false here — that the calling process is
-    // single-threaded. Forking this multi-threaded tokio server is unsafe (a
-    // lock held by another thread at fork time stays held forever in the
-    // child, e.g. the malloc arena lock — a classic latent deadlock). Rather
-    // than risk that, fail closed with a clear message; the CLI remains the
-    // safe way to run a supervised container.
-    if super::container::policy_supervised(&restart) {
-        return Err(Error::Invalid(format!(
-            "HostConfig.RestartPolicy '{restart}' is not supported via the Docker API yet (the \
-             --restart supervisor needs to fork a single-threaded process, which this server \
-             isn't); use `delonix container run --restart {restart}` from the CLI, or create \
-             without a restart policy"
-        )));
-    }
+    // Supervised policies are served: the start runs in the `__apirun` re-exec, a
+    // fresh single-threaded process, where the supervisor's fork is safe — the
+    // same as a CLI `run -d --restart`. This used to be refused, from when the
+    // start ran on this multi-threaded server. The value goes through the CLI's
+    // own grammar, so a typo is refused here too instead of producing a container
+    // that never comes back.
+    let restart = super::container::parse_restart_policy(&restart)
+        .map_err(|e| Error::Invalid(format!("HostConfig.RestartPolicy: {e}")))?;
     // Docker's `Memory`/`NanoCpus` are raw bytes / nano-cpu-units (integers);
     // this engine's `--memory`/`--cpus` want a plain string (`"64M"`/`"0.5"`)
     // — an unsuffixed byte count is accepted as bytes, and dividing NanoCpus

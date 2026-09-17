@@ -3349,6 +3349,7 @@ pub(crate) fn parse_restart_policy(s: &str) -> std::result::Result<String, Strin
     }
 }
 
+#[cfg(test)]
 pub(crate) use delonix_compute::launch::policy_supervised;
 
 // Should this `run` fork a supervisor?

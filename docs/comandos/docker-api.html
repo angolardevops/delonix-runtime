@@ -158,8 +158,8 @@ estado REAL do delonix. Desde a v0.26.0, também o ciclo de vida completo de um 
 mesmas funções do CLI (<code>cmd_run</code>/<code>cmd_stop</code>/<code>cmd_kill</code>/...), zero
 lógica duplicada; é o suficiente para <code>docker compose up</code> apontado a este socket
 funcionar. Mesma postura de segurança do socket de gestão: 0600 + <code>SO_PEERCRED</code> (só o
-próprio utilizador). Fora de escopo: <code>exec</code>/attach interactivo (HTTP hijacking) e
-<code>--restart</code> (precisa de um supervisor <code>fork()</code> cru, recusado com erro claro);
+próprio utilizador). Fora de escopo: <code>exec</code>/attach interactivo (HTTP hijacking);
+<code>HostConfig.RestartPolicy</code> é servido (o arranque corre num processo novo, onde o supervisor é seguro);
 qualquer rota não implementada dá 404 claro.</p><p class='lang-en'>Serves enough of the real Docker Engine API (protocol captured live against a
 real <code>docker</code> CLI, version negotiated via the <code>Api-Version</code> header on the
 <code>/_ping</code> response) for <code>docker version</code>/<code>ps</code>/<code>images</code>/

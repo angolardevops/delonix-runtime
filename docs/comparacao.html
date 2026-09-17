@@ -194,9 +194,8 @@ real — para produção GPU hoje, prefere Docker/Podman</td></tr>
 ciclo de vida completo de um container via <code>DOCKER_HOST</code></td>
 <td><strong>Delonix</strong> — <code>delonix serve docker-api</code>, validado contra um
 <code>docker</code> CLI real, incl. <code>docker compose up</code> apontado ao socket</td></tr>
-<tr><td><code>docker exec</code>/attach interactivo via a API, ou <code>--restart</code> via a API</td>
-<td>Docker ou Podman — deliberadamente fora de escopo (hijacking HTTP / modelo de supervisor
-incompatível com um servidor multi-thread)</td></tr>
+<tr><td><code>docker exec</code>/attach interactivo via a API</td>
+<td>Docker ou Podman — deliberadamente fora de escopo (hijacking HTTP)</td></tr>
 <tr><td>Bootstrap de um cluster Kubernetes real sem instalar Docker/containerd</td>
 <td><strong>Delonix</strong> — CRI próprio, já validado com um control-plane v1.34 <code>Ready</code></td></tr>
 <tr><td>Um só motor para containers <strong>e</strong> microVMs <strong>e</strong> Kubernetes</td>
@@ -310,9 +309,8 @@ ordem declarada.</li>
 <code>type=cache</code>/<code>type=ssh</code> nem paralelismo de estágios.</li>
 <li><strong>GPU nunca validado num host real</strong> — o caminho CDI existe e usa a mesma fonte
 que Docker/Podman consomem, mas sem um host com GPU não há confirmação ao vivo.</li>
-<li><strong><code>docker exec</code>/attach interactivo e <code>--restart</code> via a API</strong> —
-deliberadamente fora de escopo (hijacking HTTP / modelo de supervisor incompatível com um servidor
-multi-thread).</li>
+<li><strong><code>docker exec</code>/attach interactivo via a API</strong> —
+deliberadamente fora de escopo (hijacking HTTP).</li>
 <li><strong><code>compose</code>: cobertura da spec ainda parcial</strong> — sem
 <code>profiles</code>/<code>extends</code>/<code>configs</code>/<code>secrets</code> top-level,
 multi-ficheiro, <code>build.target</code>, <code>deploy.replicas != 1</code>, IP fixo por rede, ou
@@ -389,10 +387,8 @@ real GPU host — for GPU production today, prefer Docker/Podman</td></tr>
 full lifecycle of a container via <code>DOCKER_HOST</code></td>
 <td><strong>Delonix</strong> — <code>delonix serve docker-api</code>, validated against a real
 <code>docker</code> CLI, including <code>docker compose up</code> pointed at the socket</td></tr>
-<tr><td>Interactive <code>docker exec</code>/attach via the API, or <code>--restart</code> via the
-API</td>
-<td>Docker or Podman — deliberately out of scope (HTTP hijacking / supervisor model incompatible
-with a multi-threaded server)</td></tr>
+<tr><td>Interactive <code>docker exec</code>/attach via the API</td>
+<td>Docker or Podman — deliberately out of scope (HTTP hijacking)</td></tr>
 <tr><td>Bootstrapping a real Kubernetes cluster with no Docker/containerd installed</td>
 <td><strong>Delonix</strong> — own CRI, already validated with a <code>Ready</code> v1.34
 control-plane</td></tr>
@@ -510,9 +506,8 @@ declared order.</li>
 <code>type=cache</code>/<code>type=ssh</code> or stage parallelism.</li>
 <li><strong>GPU never validated on a real host</strong> — the CDI path exists and uses the same
 source Docker/Podman consume, but with no GPU host there's no live confirmation.</li>
-<li><strong>Interactive <code>docker exec</code>/attach and <code>--restart</code> via the
-API</strong> — deliberately out of scope (HTTP hijacking / supervisor model incompatible with a
-multi-threaded server).</li>
+<li><strong>Interactive <code>docker exec</code>/attach via the API</strong> — deliberately out
+of scope (HTTP hijacking).</li>
 <li><strong><code>compose</code>: spec coverage still partial</strong> — no top-level
 <code>profiles</code>/<code>extends</code>/<code>configs</code>/<code>secrets</code>,
 multi-file, <code>build.target</code>, <code>deploy.replicas != 1</code>, fixed per-network IP, or

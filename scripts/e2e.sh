@@ -2713,6 +2713,19 @@ DID=$(curl -s --unix-socket "$DSOCK" --max-time 120 -X POST -H 'Content-Type: ap
 check "docker-api: POST /wait devolve o código real (7)" ok bash -c \
   "[ -n '$DID' ] && curl -s --unix-socket '$DSOCK' --max-time 60 -X POST 'http://localhost/containers/$DID/wait' | grep -q '\"StatusCode\":7'"
 curl -s --unix-socket "$DSOCK" --max-time 30 -X DELETE "http://localhost/containers/$DID?force=1" >/dev/null 2>&1
+# `HostConfig.RestartPolicy` era RECUSADO com o argumento do fork num servidor
+# multi-thread — que deixou de valer quando o arranque passou ao re-exec
+# `__apirun`. Agora é servido: `on-failure` com `MaximumRetryCount: 2` reinicia
+# duas vezes, e um nome de política errado continua a ser recusado.
+RID=$(curl -s --unix-socket "$DSOCK" --max-time 120 -X POST -H 'Content-Type: application/json' \
+  -d "{\"Image\":\"$IMG\",\"Cmd\":[\"sh\",\"-c\",\"exit 3\"],\"HostConfig\":{\"NetworkMode\":\"none\",\"RestartPolicy\":{\"Name\":\"on-failure\",\"MaximumRetryCount\":2}}}" \
+  "http://localhost/containers/create?name=drest-$PFX" | python3 -c "import sys,json; print(json.load(sys.stdin).get('Id',''))" 2>/dev/null)
+check "docker-api: RestartPolicy on-failure é aceite" ok bash -c "[ -n '$RID' ]"
+check "docker-api: MaximumRetryCount 2 dá RESTARTS 2" ok bash -c \
+  "for _ in \$(seq 1 30); do '$BIN' container ls -a -o json | python3 -c \"import json,sys; sys.exit(0 if any(c.get('names',c.get('name'))=='drest-$PFX' and c.get('restarts')==2 for c in json.load(sys.stdin)) else 1)\" && exit 0; sleep 1; done; exit 1"
+check "docker-api: uma política desconhecida é recusada" ok bash -c \
+  "curl -s --unix-socket '$DSOCK' --max-time 30 -X POST -H 'Content-Type: application/json' -d '{\"Image\":\"$IMG\",\"Cmd\":[\"true\"],\"HostConfig\":{\"RestartPolicy\":{\"Name\":\"alwayz\"}}}' 'http://localhost/containers/create?name=dbad-$PFX' | grep -q 'not a restart policy'"
+curl -s --unix-socket "$DSOCK" --max-time 30 -X DELETE "http://localhost/containers/$RID?force=1" >/dev/null 2>&1
 [ -n "$DPID" ] && kill "$DPID" 2>/dev/null
 for i in $(seq 1 40); do kill -0 "$DPID" 2>/dev/null || break; sleep 0.2; done
 rm -f "$DSOCK"
