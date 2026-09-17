@@ -29,6 +29,7 @@ ring = { workspace = true }
 proptest = { workspace = true }
 # Micro-benchmarks (dev-only, stable). Pre-blessed in dependency-map.md §4.
 criterion = { workspace = true }
+tempfile = { workspace = true }
 
 [[bench]]
 name = "parse_reference"
