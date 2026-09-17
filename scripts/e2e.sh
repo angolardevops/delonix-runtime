@@ -2363,13 +2363,16 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     # pause não prova nada: o que se lê é o REGISTO, e duas vezes, porque é a
     # reconciliação de um `ls` que o estragava.
     vm_status_is() {
-      "$BIN" vm ls -o json | python3 -c "import json,sys; sys.exit(0 if any(v['name']==sys.argv[1] and v['status']==sys.argv[2] for v in json.load(sys.stdin)) else 1)" "$1" "$2"
+      "$BIN" vm ls -A -o json | python3 -c "import json,sys; sys.exit(0 if any(v['name']==sys.argv[1] and v['status']==sys.argv[2] for v in json.load(sys.stdin)) else 1)" "$1" "$2"
     }
     check "vm pause" ok "$BIN" vm pause "$SVM"
     check "o libvirt confirma paused" ok bash -c \
       "[ \"\$(virsh -c qemu:///system domstate '$SVM')\" = paused ]"
     check "o vm ls diz Paused (não Stopped)" ok vm_status_is "$SVM" Paused
     check "e continua Paused num segundo ls" ok vm_status_is "$SVM" Paused
+    # Sem -A o `vm ls` mostra o que está de pé, e uma VM pausada está de pé.
+    check "o vm ls sem -A mostra a VM pausada" ok bash -c \
+      "'$BIN' vm ls -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$SVM' for v in json.load(sys.stdin)) else 1)\""
     check "vm unpause" ok "$BIN" vm unpause "$SVM"
     check "o vm ls volta a dizer Running" ok vm_status_is "$SVM" Running
     # Parar uma VM PAUSADA: o domínio tem de ir embora e o registo dizer Stopped.
