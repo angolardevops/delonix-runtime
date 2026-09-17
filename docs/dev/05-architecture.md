@@ -88,7 +88,7 @@ Declared exceptions (each one names the ADR-0040 phase that removes it):
 
 - `delonix-mcp` → `delonix-mgmt` — removed in **P5**
 - `delonix-proxmox` → `delonix-vm` — removed in **P4**
-- `delonix-scan` → `delonix-image` — removed in **P4**
+- `delonix-scanner` → `delonix-oci` — removed in **P4**
 <!-- dev-docs:end layers -->
 
 ### Where the restructuring stands
@@ -129,10 +129,10 @@ graph TB
     delonix_stack["delonix-stack"]
   end
   subgraph adapter["Adapters"]
-    delonix_image["delonix-image"]
-    delonix_net["delonix-net"]
-    delonix_runtime["delonix-runtime"]
-    delonix_scan["delonix-scan"]
+    delonix_linux["delonix-linux"]
+    delonix_oci["delonix-oci"]
+    delonix_scanner["delonix-scanner"]
+    delonix_sdn["delonix-sdn"]
     delonix_telemetry["delonix-telemetry"]
     delonix_vm["delonix-vm"]
     delonix_volume["delonix-volume"]
@@ -153,58 +153,58 @@ graph TB
   end
   delonix_compute --> delonix_runtime_core
   delonix_cri --> delonix_compute
-  delonix_cri --> delonix_image
-  delonix_cri --> delonix_net
-  delonix_cri --> delonix_runtime
+  delonix_cri --> delonix_linux
+  delonix_cri --> delonix_oci
   delonix_cri --> delonix_runtime_core
+  delonix_cri --> delonix_sdn
   delonix_cri --> delonix_telemetry
-  delonix_image --> delonix_compute
-  delonix_image --> delonix_runtime_core
+  delonix_linux --> delonix_compute
+  delonix_linux --> delonix_runtime_core
+  delonix_mcp --> delonix_linux
   delonix_mcp --> delonix_mgmt
-  delonix_mcp --> delonix_net
-  delonix_mcp --> delonix_runtime
   delonix_mcp --> delonix_runtime_core
+  delonix_mcp --> delonix_sdn
   delonix_mcp --> delonix_vm
   delonix_mcp --> delonix_volume
   delonix_mcp_bin --> delonix_mcp
   delonix_mcp_bin --> delonix_runtime_core
   delonix_mcp_bin --> delonix_telemetry
-  delonix_mgmt --> delonix_image
-  delonix_mgmt --> delonix_net
-  delonix_mgmt --> delonix_runtime
+  delonix_mgmt --> delonix_linux
+  delonix_mgmt --> delonix_oci
   delonix_mgmt --> delonix_runtime_core
-  delonix_mgmt --> delonix_scan
+  delonix_mgmt --> delonix_scanner
+  delonix_mgmt --> delonix_sdn
   delonix_mgmt --> delonix_telemetry
   delonix_mgmt --> delonix_vm
   delonix_mgmt --> delonix_volume
   delonix_mgmt_bin --> delonix_mgmt
   delonix_mgmt_bin --> delonix_runtime_core
   delonix_mgmt_bin --> delonix_telemetry
-  delonix_model --> delonix_runtime_core
-  delonix_net --> delonix_compute
-  delonix_net --> delonix_net_rules
-  delonix_net --> delonix_runtime_core
+  delonix_oci --> delonix_compute
+  delonix_oci --> delonix_runtime_core
   delonix_proxmox --> delonix_runtime_core
   delonix_proxmox --> delonix_vm
-  delonix_runtime --> delonix_compute
-  delonix_runtime --> delonix_runtime_core
   delonix_runtime_bin --> delonix_compute
-  delonix_runtime_bin --> delonix_image
+  delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
   delonix_runtime_bin --> delonix_model
-  delonix_runtime_bin --> delonix_net
+  delonix_runtime_bin --> delonix_oci
   delonix_runtime_bin --> delonix_proxmox
-  delonix_runtime_bin --> delonix_runtime
   delonix_runtime_bin --> delonix_runtime_core
-  delonix_runtime_bin --> delonix_scan
+  delonix_runtime_bin --> delonix_scanner
+  delonix_runtime_bin --> delonix_sdn
   delonix_runtime_bin --> delonix_security_runtime
   delonix_runtime_bin --> delonix_stack
   delonix_runtime_bin --> delonix_telemetry
   delonix_runtime_bin --> delonix_truenas
   delonix_runtime_bin --> delonix_vm
   delonix_runtime_bin --> delonix_volume
-  delonix_scan --> delonix_image
-  delonix_scan --> delonix_runtime_core
+  delonix_runtime_core --> delonix_model
+  delonix_scanner --> delonix_oci
+  delonix_scanner --> delonix_runtime_core
+  delonix_sdn --> delonix_compute
+  delonix_sdn --> delonix_net_rules
+  delonix_sdn --> delonix_runtime_core
   delonix_security_runtime --> delonix_runtime_core
   delonix_stack --> delonix_runtime_core
   delonix_truenas --> delonix_runtime_core
