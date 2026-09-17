@@ -137,6 +137,14 @@ PRINTS = re.compile(r"\b(?:e?println!|print!)\s*[(\[]")
 # remaining sites are the `delonix-sdn` test guard, the container init, and tests
 # not yet moved to injected values — this number only goes down.
 ENV_WRITES = re.compile(r"\benv::(?:set_var|remove_var)\s*\(")
+# An adapter or provider importing the SHARED error as its own (ADR-0040 P3: errors
+# per crate, each converting into the `DX_*` class the foundation owns). A crate
+# with its own `Error` still names `delonix_model::Error` — in its `From`, not in a
+# `use` that makes the shared type its result type.
+SHARED_ERROR = re.compile(
+    r"use\s+delonix_(?:runtime_core|model)::(?:\{[^}]*\b(?:Error|Result)\b[^}]*\}|(?:Error|Result)\b)"
+)
+SHARED_ERROR_DIRS = ("crates/adapters/", "crates/providers/")
 
 
 def crates() -> dict[str, Path]:
@@ -282,13 +290,17 @@ def inline_versions(pkgs: dict[str, dict]) -> list[str]:
     return bad
 
 
-def count(pattern: re.Pattern[str], skip_bin: bool = True) -> tuple[int, list[str]]:
+def count(
+    pattern: re.Pattern[str], skip_bin: bool = True, only: tuple[str, ...] = ()
+) -> tuple[int, list[str]]:
     total = 0
     where: list[str] = []
     files = sorted((ROOT / "crates").rglob("*.rs")) + sorted((ROOT / "bins").rglob("*.rs"))
     for f in files:
         rel = f.relative_to(ROOT).as_posix()
         if skip_bin and rel.startswith("bins/"):
+            continue
+        if only and not rel.startswith(only):
             continue
         n = len(pattern.findall(f.read_text(encoding="utf-8", errors="replace")))
         if n:
@@ -322,7 +334,13 @@ def main() -> int:
     self_exec, self_where = count(SELF_EXEC)
     prints, print_where = count(PRINTS)
     env_writes, env_where = count(ENV_WRITES, skip_bin=False)
-    current = {"self_exec_sites": self_exec, "library_prints": prints, "env_writes": env_writes}
+    shared_err, shared_err_where = count(SHARED_ERROR, only=SHARED_ERROR_DIRS)
+    current = {
+        "self_exec_sites": self_exec,
+        "library_prints": prints,
+        "env_writes": env_writes,
+        "shared_error_imports": shared_err,
+    }
 
     if args.list:
         print("self-exec sites (a library crate re-running the engine's own binary):")
@@ -333,6 +351,9 @@ def main() -> int:
             print(f"  {w}")
         print("\nprocess-environment writes (set_var/remove_var):")
         for w in env_where:
+            print(f"  {w}")
+        print("\nadapters/providers using the shared error as their own:")
+        for w in shared_err_where:
             print(f"  {w}")
         print("\nexceptions still standing:")
         for (kind, a, b), (phase, reason) in sorted(EXCEPTIONS.items()):
