@@ -3111,23 +3111,14 @@ struct ContainerLsRow {
     size_bytes: Option<u64>,
 }
 
-/// How many times a container has been explicitly (re)started, counted from
-/// the event log. Same source `cluster ls`'s LAST RESTART column already
-/// reads, read once for every container instead of once per row.
+/// How many times a container has been restarted, counted from the event log.
+/// Same source `cluster ls`'s LAST RESTART column already reads, read once for
+/// every container instead of once per row.
 ///
-/// **Scope, stated plainly rather than left to be discovered wrong**: `cmd_run`'s
-/// initial launch emits `"create"`, never `"start"` — only `cmd_start` (a
-/// `container start`/`restart` on an EXISTING container) emits `"start"`, and
-/// it does so exactly once per invocation (there is no separate `"restart"`
-/// verb — `restart` is just `stop`+`start`). So this counts manual restarts
-/// correctly, with no off-by-one to subtract. What it does **not** count is a
-/// `--restart always`/`on-failure` policy's own internal crash-loop: those
-/// iterations live entirely inside `run_supervised`'s forked loop, which
-/// records only `"die"` for each crash and never re-emits `"start"` (the
-/// mirror of Docker's own `RestartCount`, which likewise counts only
-/// policy-triggered restarts — but reads it from a live daemon that watched
-/// each one happen, which this engine's forked supervisor does not persist
-/// anywhere a listing command could read it back from).
+/// `cmd_run`'s initial launch emits `"create"`, never `"start"`, so there is no
+/// off-by-one to subtract. Two things emit `"start"`: `cmd_start` (a `container
+/// start`/`restart` on an EXISTING container), once per invocation, and the
+/// restart-policy supervisor, once for each restart it actually made.
 fn restart_counts(root: &std::path::Path) -> std::collections::HashMap<String, u32> {
     let mut counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
     for e in delonix_runtime_core::events::read(root) {
@@ -3332,6 +3323,20 @@ fn run_supervised(
         let mut first = true;
         loop {
             let started = runtime::create_with(store, c, rootfs, spec);
+            // A restart the policy made is a start like any other, and `container
+            // ls` counts starts from the event log. The loop used to record only
+            // the `die` of each run, so `RESTARTS` said 0 for a container that had
+            // restarted twice (measured: 3 runs of an `on-failure:2`).
+            if restarts > 0 && started.is_ok() {
+                delonix_runtime_core::events::emit(
+                    &super::util::state_root(),
+                    "container",
+                    "start",
+                    &c.id,
+                    &c.name,
+                    Some("restart policy"),
+                );
+            }
             if first {
                 // Handshake: 1 byte of status, and — when it failed — the REASON
                 // right behind it.
