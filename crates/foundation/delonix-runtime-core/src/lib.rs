@@ -9,7 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod cred_vault;
 pub mod dispatch;
-mod error;
 pub mod events;
 pub mod peer_cred;
 pub mod secret;
@@ -18,7 +17,7 @@ pub mod typestate;
 pub mod virt;
 pub mod workload_net;
 
-pub use error::{Error, Result};
+pub use delonix_model::{Error, Result};
 pub use secret::{Secret, SecretStore};
 pub use store::{write_atomic, write_atomic_mode, write_private_temp, JsonStore, Store};
 
