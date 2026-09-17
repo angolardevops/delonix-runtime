@@ -209,7 +209,8 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">15</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a class="on" aria-current="page" href="cloud-native-standards.html"><span class="n">20</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Référence</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/cloud-native-standards.html">Lire la page en anglais</a></span></div><h1 id="cloud-native-standards-layer-by-layer">Standards cloud native, couche par couche</h1>
+<h1 id="cloud-native-standards-layer-by-layer">Standards cloud native, couche par couche</h1>
+<p><strong>Avant de lire :</strong> <a href="cloud-native-primer.html">Introduction au cloud native</a> (comment le moteur utilise chaque mécanisme) et <a href="architecture.html">Architecture</a> (les crates nommés ci-dessous). C'est une page de référence : lisez la section du standard qui vous concerne.</p>
 <p>Un moteur de containers et de microVMs n'est pas une spécification unique. C'est un empilement de
 couches, et la plupart des couches ont un standard ouvert : certains viennent de l'<strong>OCI</strong> (Open
 Container Initiative), d'autres des SIG Kubernetes et de la <strong>CNCF</strong> (Cloud Native Computing
@@ -218,10 +219,10 @@ normalisation derrière elles.</p>
 <p>Cette page est organisée <strong>par standard et par couche</strong>. Pour chacun, elle répond à quatre questions :
 ce qu'est le standard, ce qu'il exige d'une implémentation, comment Delonix l'implémente aujourd'hui
 (crate, fichier, symbole), et ce que disent les éléments de preuve sur la conformité, lacunes
-comprises. Si vous cherchez « OCI, CRI, CNI, CSI, CDI », c'est cette page.</p>
-<p>Lisez d'abord <a href="cloud-native-primer.html">Introduction au cloud native</a> si les namespaces, les
+comprises. Si vous cherchez « OCI, CRI, CNI, CSI, CDI », c'est cette page. Une fois la section dont vous avez besoin lue, vous pouvez dire ce qu'un standard demande, où le moteur le satisfait, et quelle preuve de conformité existe — avec sa date et sa version.</p>
+<p>Lisez d'abord <a href="linux-foundations.html">Fondations Linux</a> et <a href="cloud-native-primer.html">Introduction au cloud native</a> si les namespaces, les
 cgroups, overlayfs ou le kubelet sont nouveaux pour vous. Cette page suppose ces bases acquises et ne
-les répète pas.</p>
+les répète pas : le primitif est enseigné dans la première, la façon dont le moteur l'utilise dans la deuxième, et le standard et sa conformité ici.</p>
 <p>Trois règles pour lire cette page :</p>
 <ul>
 <li><strong>« Compatible » n'apparaît jamais sans un nombre, une date et une version.</strong> Une affirmation de
@@ -436,7 +437,7 @@ runtime via <code>--container-runtime-endpoint</code>.</p>
   vides, et le kubelet tuait les pods en boucle.</li>
 <li><strong>Modèle de ressources du kubelet</strong> : <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0038-cri-follows-kubelet-resource-model.md" target="_blank" rel="noopener">ADR-0038</a>.
   Le <code>cgroup_parent</code> du kubelet est validé par <code>KubeCgroupParent::parse</code>
-  (<code>crates/foundation/delonix-runtime-core/src/lib.rs</code>) et consommé dans
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>) et consommé dans
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> ; <code>delonix-linux</code> dispose de <code>transient_scope_argv</code> pour
   placer un container dans un scope systemd sous une slice de pod.</li>
 <li><strong>Plafond de capabilities</strong> : <code>CapCeiling</code> (<code>src/cap_ceiling.rs</code>), configuré par
@@ -827,11 +828,12 @@ quelle partie de l'arborescence. Chaque runtime de containers dépend des deux.<
 <p><strong>Ce qu'une implémentation doit faire.</strong> N'écrire des limites que dans un sous-arbre qui lui est
 délégué, respecter la règle « no internal processes », et ne jamais supposer qu'un contrôleur listé à
 la racine est disponible pour la session appelante.</p>
-<p><strong>Comment Delonix l'implémente.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> :</p>
+<p><strong>Comment Delonix l'implémente.</strong> L'endroit où les containers sont placés (mode root sous
+<code>delonix.slice</code>, rootless sous <code>user@&lt;uid&gt;.service/dlx-containers</code>) est décrit dans le
+<a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">Manuel de cloud native 4.2</a> ; l'arborescence et la règle de délégation elles-mêmes sont dans
+<a href="linux-foundations.html#cgroups-v2">Fondations Linux</a>. Ce qui compte pour le contrat, dans
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> :</p>
 <ul>
-<li>Mode root : des feuilles sous <code>delonix.slice</code> (<code>DELONIX_SLICE</code> dans <code>delonix-runtime-core</code>).</li>
-<li>Rootless : <code>user_service_base</code> et <code>try_delegated_base</code> placent les containers sous
-  <code>user@&lt;uid&gt;.service/dlx-containers</code>.</li>
 <li><code>cgroup_limits_apply</code> répond à « les limites s'appliqueront-elles ici ? » sans démarrer de container.
   En rootless, il sonde le cgroup <em>courant</em> du processus (<code>delegated_base_usable</code>), et non le cgroup
   racine de l'hôte ; en root, il sonde <code>delonix.slice</code> et le crée s'il manque (<code>root_slice_writable</code>).</li>
@@ -1006,6 +1008,8 @@ vérifier l'affirmation, ce n'est pas une promesse.</p>
 request. Si vous réexécutez une suite de conformité, remplacez ensemble le nombre, la date et la
 version, et mettez d'abord à jour le document source (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener">docs/cri-conformance.md</a>
 pour le CRI).</p>
+<hr />
+<p><strong>Suivant :</strong> <a href="environment-variables.html">Variables d'environnement (<code>DELONIX_*</code>)</a> — chaque variable <code>DELONIX_*</code> lue par le code, sa valeur par défaut, et lesquelles abaissent une frontière.</p>
 <nav class="pager"><a href="publishing-docs.html"><span>← Précédent</span>Publier la documentation</a><a class="next" href="environment-variables.html"><span>Suivant →</span>Variables d’environnement (DELONIX_*)</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/fr-FR/cloud-native-standards.md" target="_blank" rel="noopener">Modifier cette page</a><code>docs/dev/fr-FR/cloud-native-standards.md</code></footer>
 </div></main>
