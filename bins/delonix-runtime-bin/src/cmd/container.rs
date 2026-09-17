@@ -7,7 +7,7 @@ use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
 use delonix_image::ImageStore;
 use delonix_net::infra;
-use delonix_runtime::{self as runtime, RunSpec};
+use delonix_runtime::{self as runtime};
 use delonix_runtime_core::{
     generate_id, Container, Error, Health, HealthConfig, HealthState, Result, Status, Store,
 };
@@ -2214,75 +2214,40 @@ mod resource_limits_preflight_tests {
     }
 }
 
-/// The `container run` read ports over this CLI's image store and host helpers
-/// (`docs/discovery/54_P2_COMPUTE_RUN.md`). Each method is the code `cmd_run`
-/// ran inline before, unchanged — progress line and messages included.
-struct CliRunPorts<'a> {
-    images: &'a ImageStore,
-    store: &'a Store,
-}
-
-impl CliRunPorts<'_> {
-    /// The engine's spawn specification for a [`delonix_compute::launch::Launch`]:
-    /// what the network decides (`run_network::launch_addresses`), then the one
-    /// builder (`delonix_runtime::launch_spec::run_spec`).
-    fn run_spec<'h>(
-        c: &Container,
-        l: &delonix_compute::launch::Launch,
-        slirp_hook: &'h runtime::StartedHook<'h>,
-    ) -> RunSpec<'h> {
-        let addrs = delonix_net::run_network::launch_addresses(l);
-        runtime::launch_spec::run_spec(c, l, addrs.dns, addrs.hosts_ip, slirp_hook)
-    }
-}
-
-impl delonix_compute::launch::WorkloadRuntime for CliRunPorts<'_> {
-    fn create(
-        &self,
-        c: &mut Container,
-        l: &delonix_compute::launch::Launch,
-    ) -> Result<delonix_runtime_core::Status> {
-        let hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &l.slirp_ports) };
-        let spec = Self::run_spec(c, l, &hook);
-        runtime::create_with(self.store, c, &l.rootfs, &spec)
-    }
-
-    fn supervise(
-        &self,
-        c: &mut Container,
-        l: &delonix_compute::launch::Launch,
-        policy: &str,
-    ) -> Result<()> {
-        let hook = |pid: i32| -> Result<()> { delonix_net::slirp_attach(pid, &l.slirp_ports) };
-        let spec = Self::run_spec(c, l, &hook);
-        let health = c.health.clone();
-        let on_first_start = |c: &Container| {
-            if let Some(cfg) = health.clone() {
-                spawn_health_monitor(c.id.clone(), cfg);
-            }
-        };
-        let state_root = super::util::state_root();
-        runtime::supervise::run_supervised(
-            self.store,
-            c,
-            &l.rootfs,
-            &spec,
-            policy,
-            &runtime::supervise::Supervision {
-                state_root: &state_root,
-                on_first_start: &on_first_start,
-                silent_death: super::po::t(
-                    "the container did not start, and the supervisor died before saying why",
-                ),
-            },
-        )?;
-        println!("{}", c.id);
-        Ok(())
-    }
-
-    fn discard_unstarted(&self, id: &str) {
-        discard_unstarted(self.images, self.store, id);
-    }
+/// Runs `f` with the host as the `container run` use case's `WorkloadRuntime`
+/// (`delonix_runtime::workload::HostWorkload`), composed with what this CLI owns:
+/// the network's answers, the health monitor, the printed id and the removal of
+/// what a refused start left behind.
+fn with_host_workload<R>(
+    images: &ImageStore,
+    store: &Store,
+    f: impl FnOnce(&runtime::workload::HostWorkload<'_>) -> R,
+) -> R {
+    let addresses = |l: &delonix_compute::launch::Launch| {
+        let a = delonix_net::run_network::launch_addresses(l);
+        (a.dns, a.hosts_ip)
+    };
+    let attach_slirp = |pid: i32, ports: &[String]| delonix_net::slirp_attach(pid, ports);
+    let on_first_start = |c: &Container| {
+        if let Some(cfg) = c.health.clone() {
+            spawn_health_monitor(c.id.clone(), cfg);
+        }
+    };
+    let on_supervised = |c: &Container| println!("{}", c.id);
+    let discard = |id: &str| discard_unstarted(images, store, id);
+    let state_root = super::util::state_root();
+    f(&runtime::workload::HostWorkload {
+        store,
+        state_root: &state_root,
+        addresses: &addresses,
+        attach_slirp: &attach_slirp,
+        on_first_start: &on_first_start,
+        silent_death: super::po::t(
+            "the container did not start, and the supervisor died before saying why",
+        ),
+        on_supervised: &on_supervised,
+        discard: &discard,
+    })
 }
 
 pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Result<()> {
@@ -2491,7 +2456,6 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // `--env-file`: read here, parsed by the builder (each file before `-e`).
     // Volumes, devices, image, rootfs, `--env-file`, `--user` — resolved through the
     // read ports (`delonix_compute::ports`), then the record is built from them.
-    let read_ports = CliRunPorts { images, store };
     let apparmor_disabled = |profile: &str| {
         Error::Invalid(super::po::tf(
             "--apparmor {p}: AppArmor is not enabled on this host, so nothing would confine this \
@@ -2675,18 +2639,19 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // A detached start gets a SUPERVISOR that becomes the container's parent, so the
     // exit code is not lost; see `delonix_compute::launch::start`.
     unstarted.armed = false;
-    let final_status =
-        match delonix_compute::launch::start(&opts_copy, &mut c, &launch, &read_ports)? {
-            delonix_compute::launch::Started::Supervised => {
-                // The supervisor takes the whole detached path, so this is where most
-                // `-d` runs end — and where `--wait` used to be silently ignored.
-                if wait_healthy {
-                    wait_until_healthy(images, store, &id, wait_timeout)?;
-                }
-                return Ok(());
+    let final_status = match with_host_workload(images, store, |w| {
+        delonix_compute::launch::start(&opts_copy, &mut c, &launch, w)
+    })? {
+        delonix_compute::launch::Started::Supervised => {
+            // The supervisor takes the whole detached path, so this is where most
+            // `-d` runs end — and where `--wait` used to be silently ignored.
+            if wait_healthy {
+                wait_until_healthy(images, store, &id, wait_timeout)?;
             }
-            delonix_compute::launch::Started::Created(status) => status,
-        };
+            return Ok(());
+        }
+        delonix_compute::launch::Started::Created(status) => status,
+    };
     if rm {
         if detach {
             spawn_rm_watcher(images, store, &c.id);
@@ -3803,7 +3768,6 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         apparmor: c.apparmor.clone(),
         log_path: Some(c.log_path.clone().unwrap_or(default_log)),
     };
-    let ports = CliRunPorts { images, store };
     let policy = c.restart_policy.clone().unwrap_or_default();
     if should_supervise(&policy, true, true) {
         delonix_runtime_core::events::emit(
@@ -3814,11 +3778,13 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
             &c.name,
             None,
         );
-        return delonix_compute::launch::WorkloadRuntime::supervise(
-            &ports, &mut c, &launch, &policy,
-        );
+        return with_host_workload(images, store, |w| {
+            delonix_compute::launch::WorkloadRuntime::supervise(w, &mut c, &launch, &policy)
+        });
     }
-    delonix_compute::launch::WorkloadRuntime::create(&ports, &mut c, &launch)?;
+    with_host_workload(images, store, |w| {
+        delonix_compute::launch::WorkloadRuntime::create(w, &mut c, &launch)
+    })?;
     delonix_runtime_core::events::emit(
         &super::util::state_root(),
         "container",
@@ -6178,6 +6144,20 @@ mod runspec_single_builder_tests {
             "container.rs builds the spawn specification in {builders} places — \
              build every start from a `Launch` through `launch_spec::run_spec`"
         );
+    }
+
+    #[test]
+    fn container_starts_workloads_only_through_the_host_workload() {
+        // `run` and `start` reach the engine through ONE `WorkloadRuntime`, the
+        // adapter's `HostWorkload`. A direct call here would be a second one.
+        let src = include_str!("container.rs");
+        for call in [concat!("create", "_with("), concat!("run_", "supervised(")] {
+            assert_eq!(
+                src.matches(call).count(),
+                0,
+                "container.rs calls `{call}` directly — start through `with_host_workload`"
+            );
+        }
     }
 }
 
