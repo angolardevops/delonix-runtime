@@ -828,7 +828,7 @@ dependencies = [
  "delonix-net",
  "delonix-runtime",
  "delonix-runtime-core",
- "delonix-scan",
+ "delonix-scanner",
  "delonix-telemetry",
  "delonix-vm",
  "delonix-volume",
@@ -920,7 +920,7 @@ dependencies = [
  "delonix-proxmox",
  "delonix-runtime",
  "delonix-runtime-core",
- "delonix-scan",
+ "delonix-scanner",
  "delonix-security-runtime",
  "delonix-stack",
  "delonix-telemetry",
@@ -961,7 +961,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "delonix-scan"
+name = "delonix-scanner"
 version = "3.1.0"
 dependencies = [
  "delonix-image",

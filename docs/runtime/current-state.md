@@ -9,7 +9,7 @@
 ## 1. Shape at a glance
 
 - **10 crates** (the `AGENTS.md` "8 crates" table undercounts — it omits `delonix-mgmt`
-  and `delonix-scan`, which are real workspace members).
+  and `delonix-scanner`, which are real workspace members).
 - **~71 000 LOC** of Rust under `crates/*/src`.
 - **2 binaries**: `delonix` (the CLI, in `delonix-runtime-bin`) and `delonix-cri` (the
   kubelet-facing CRI server, in `delonix-cri`).
@@ -33,7 +33,7 @@
 | `delonix-vm` | 2 437 | — | microVMs: the `VmBackend` trait (Cloud Hypervisor / libvirt). |
 | `delonix-mgmt` | 1 792 | — | Management HTTP server: `/metrics` (Prometheus) + `/v1/*` (dash, volumes, containers). |
 | `delonix-volume` | 1 227 | — | Named volumes and bind mounts. |
-| `delonix-scan` | 939 | — | Image/filesystem scanning (`pytree` language detection). |
+| `delonix-scanner` | 939 | — | Image/filesystem scanning (`pytree` language detection). |
 
 ## 3. What the runtime does today (confirmed)
 

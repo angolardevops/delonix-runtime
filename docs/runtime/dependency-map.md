@@ -18,7 +18,7 @@ graph TD
     vm[delonix-vm] --> core
     vm --> net
 
-    scan[delonix-scan] --> core
+    scan[delonix-scanner] --> core
     scan --> image
 
     cri[delonix-cri] --> core

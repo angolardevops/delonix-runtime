@@ -919,7 +919,7 @@ async fn sbom_image(State(s): State<AppState>, Query(q): Query<RefQuery>) -> Res
         let img = store.resolve(&q.reference)?;
         // `extract` fails → the image exists but has no readable package manager (empty
         // list), just as the old handler distinguished it from "not found".
-        Ok(delonix_scan::extract_sbom(store, &img).unwrap_or_default())
+        Ok(delonix_scanner::extract_sbom(store, &img).unwrap_or_default())
     })
     .await;
     match out {
