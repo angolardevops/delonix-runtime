@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnóstico de problemas · Delonix Runtime — Manual do contribuidor</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="Início do manual"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Manual do contribuidor</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Pesquisar no manual…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/troubleshooting.html">EN · English</option><option value="../pt-AO/troubleshooting.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/troubleshooting.html">FR-FR · Français</option><option value="../zh-CN/troubleshooting.html">ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a class="on" aria-current="page" href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">Operar e diagnosticar</p>
+<h1 id="troubleshooting">Diagnóstico de problemas</h1>
+<p><strong>Antes de leres:</strong> <a href="environment.html">Preparar o teu ambiente</a> (armadilhas do host) e <a href="build-and-test.html#the-gates-ci-runs">Clonar, compilar e testar</a> (os gates, e isolar o estado do motor).</p>
+<p>Esta página é um índice por <strong>sintoma</strong>: o texto literal que um gate ou uma corrida ao vivo
+imprime, o que significa de facto, e a correcção. Não volta a ensinar o que <a href="environment.html">Preparar o teu
+ambiente</a> e <a href="build-and-test.html">Clonar, compilar e testar</a> já cobrem em
+profundidade — aponta antes para a secção certa, para um clone acabado de fazer ir de "estou
+preso" a "sei que secção ler" sem ter de ler nenhuma das duas páginas de fio a pavio primeiro. Se
+um sintoma não estiver aqui, <a href="start-here.html#when-you-are-stuck">Começa aqui § Quando estás preso</a>
+é o sítio seguinte a olhar — esta página é um atalho para o caso específico em que a <em>própria
+ferramenta já te disse o que está errado</em>, num texto que ainda não reconheceste.</p>
+<h2 id="quick-index">Índice rápido<a class="hanchor" href="#quick-index" aria-label="#">#</a></h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Viste</th>
+<th>É</th>
+<th>Corrigido em</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FAIL &lt;name&gt;: N (baseline M) — new debt entered</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
+<td><a href="#a-debt-ratchet-moved-arch_fitnesspy">Um ratchet de dívida moveu-se</a></td>
+</tr>
+<tr>
+<td><code>FALHA &lt;kind&gt;: N &gt; M — entrou português novo.<wbr></code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></td>
+<td><a href="#new-portuguese-entered-lang_ratchetpy">O ratchet de língua</a></td>
+</tr>
+<tr>
+<td><code>&lt;nome&gt; (&lt;camada&gt;) → &lt;nome&gt; (&lt;camada&gt;): forbidden direction</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
+<td><a href="#a-dependency-goes-against-the-layer-direction">Uma dependência vai contra a direcção das camadas</a></td>
+</tr>
+<tr>
+<td><code>&lt;ficheiro&gt;:&lt;n&gt;: names a consumer (…) — the engine knows none</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
+<td><a href="#a-consumer-name-leaked-into-the-engine">Um nome de consumidor entrou no motor</a></td>
+</tr>
+<tr>
+<td><code>FAIL &lt;tag&gt; is published but this commit does not contain it</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
+<td><a href="#the-version-gate-refuses-your-branch">O ramo é anterior à tag mais recente</a></td>
+</tr>
+<tr>
+<td><code>FAIL Cargo.<wbr>toml says X, above Y, and docs/<wbr>releases/<wbr>vX.<wbr>md does not exist</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
+<td><a href="#the-version-gate-refuses-your-branch">Um bump de versão sem commit de release</a></td>
+</tr>
+<tr>
+<td><code>FAIL  buf format</code> / <code>buf lint</code> / <code>buf breaking against …</code> / <code>has no google.<wbr>api.<wbr>http mapping</code> / <code>openapi.<wbr>yaml is not the generated one</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
+<td><a href="#the-node-contract-gate">O gate do contrato do nó</a></td>
+</tr>
+<tr>
+<td><code>unshare()</code> falha, <code>EPERM</code></td>
+<td>AppArmor + user namespaces</td>
+<td><a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Preparar o teu ambiente § AppArmor</a></td>
+</tr>
+<tr>
+<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> recusados, saída <code>69</code></td>
+<td>delegação de cgroup</td>
+<td><a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Preparar o teu ambiente § Delegação de cgroup</a></td>
+</tr>
+<tr>
+<td><code>path must be shorter than SUN_LEN</code></td>
+<td><code>DELONIX_NET_RUNTIME_DIR</code> demasiado longo</td>
+<td><a href="build-and-test.html#isolating-the-engines-state">Clonar, compilar e testar § Isolar o estado do motor</a></td>
+</tr>
+<tr>
+<td>Um gate falha contra um diff que não escreveste, ou um build termina depressa demais</td>
+<td>uma cache de build partilhada ou obsoleta</td>
+<td><a href="#a-shared-or-stale-build-cache">Uma cache de build partilhada ou obsoleta</a></td>
+</tr>
+<tr>
+<td>O binário responde com uma versão antiga ou um comando que não existe</td>
+<td>um <code>delonix</code> obsoleto no <code>PATH</code></td>
+<td><a href="environment.html#a-stale-delonix-on-your-path">Preparar o teu ambiente § Um PATH obsoleto</a></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="ci-gates-with-a-reason-in-the-message">Gates de CI com a razão na mensagem<a class="hanchor" href="#ci-gates-with-a-reason-in-the-message" aria-label="#">#</a></h2>
+<p>Todo gate diz o que corrigir — a tabela abaixo só serve para reconheceres a <em>forma</em> da mensagem
+antes de a leres com atenção. Corre o comando local de <a href="build-and-test.html#the-gates-ci-runs">Clonar, compilar e testar § Os gates que a
+CI corre</a> para reproduzir qualquer um destes sem esperar
+pela CI.</p>
+<h3 id="new-portuguese-entered-lang_ratchetpy">Entrou português novo (<code>lang_ratchet.py</code>)<a class="hanchor" href="#new-portuguese-entered-lang_ratchetpy" aria-label="#">#</a></h3>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">FALHA identifiers: 1051 &gt; 1050 — entrou português novo.
+       `python3 scripts/lang_ratchet.py --list --only identifiers` mostra onde.
+</code></pre></div>
+<p>(As mensagens do próprio gate são em português — a LANG-01 é sobre o <em>código</em>, não sobre este
+script; vê <a href="contributing-workflow.html#language-english-in-the-code-lang-01">Fluxo de contribuição § Língua</a>.)
+A contagem de identificadores, comentários ou mensagens ao utilizador em português subiu.
+<code>--list --only &lt;kind&gt;</code> nomeia as linhas novas. Se <em>traduziste</em> alguma coisa e a contagem em vez
+disso <strong>desceu</strong> sem teres baixado a linha de base, a mensagem é a imagem espelhada ("traduziste,
+mas não baixaste a linha de base") — corre <code>python3 scripts/lang_ratchet.py --update</code> e comita
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a> no mesmo commit que a tradução.</p>
+<h3 id="a-debt-ratchet-moved-arch_fitnesspy">Um ratchet de dívida moveu-se (<code>arch_fitness.py</code>)<a class="hanchor" href="#a-debt-ratchet-moved-arch_fitnesspy" aria-label="#">#</a></h3>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">FAIL  self_exec_sites: 6 (baseline 5) — new debt entered
+</code></pre></div>
+<p>Um dos cinco números seguidos (<code>self_exec_sites</code>, <code>library_prints</code>, <code>env_writes</code>,
+<code>shared_error_imports</code>, <code>raw_error_variant_matches</code>) subiu. <code>python3 scripts/arch_fitness.py
+--list</code> imprime todos os sítios que cada um conta, com uma explicação curta do que a contagem
+significa ao lado — vê <a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Fluxo de contribuição § Regras de arquitectura que os gates
+impõem</a> para saber o que é cada um.
+Tal como no ratchet de língua, a mesma forma de mensagem aparece quando a contagem <strong>desce</strong> sem a
+linha de base se mover com ela no mesmo commit ("debt was paid; lower the baseline … <code>--update</code>").</p>
+<h3 id="a-dependency-goes-against-the-layer-direction">Uma dependência vai contra a direcção das camadas<a class="hanchor" href="#a-dependency-goes-against-the-layer-direction" aria-label="#">#</a></h3>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">FAIL  delonix-oci (adapters) → delonix-cri (interfaces): forbidden direction
+</code></pre></div>
+<p>Um crate importou outro crate de uma camada de que não pode depender — vê <a href="architecture.html#layers-and-the-allowed-direction">Arquitectura § Camadas
+e a direcção permitida</a> para a tabela de quem
+pode depender de quem. Ou a dependência está errada (o caso mais frequente — um adapter não tem
+nada que fazer a depender de uma interface), ou a mudança precisa mesmo de uma excepção declarada
+e faseada em <code>EXCEPTIONS</code> dentro de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, que o próprio gate se recusa a
+aceitar sem uma fase que a remova e uma razão.</p>
+<h3 id="a-consumer-name-leaked-into-the-engine">Um nome de consumidor entrou no motor<a class="hanchor" href="#a-consumer-name-leaked-into-the-engine" aria-label="#">#</a></h3>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">FAIL  crates/adapters/delonix-oci/src/registry.rs:42: names a consumer (&#x27;SomeControlPlaneName&#x27;) — the engine knows none
+</code></pre></div>
+<p>A fronteira canónica do motor — <em>«o motor não conhece nenhum consumidor»</em>, a secção no topo do
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> — é imposta por grep, não só pela revisão. Isto dispara sobre o
+nome de qualquer plataforma, control plane, consola ou agente que use o motor, no código <strong>ou nos
+comentários</strong>, em qualquer sítio dentro de <code>crates/</code>, <code>bins/</code> ou <code>proto/</code>. Generaliza o requisito
+para a capacidade genérica que ele de facto é, no vocabulário do próprio motor; a história que
+precisa do nome externo pertence a <code>docs/</code>, nunca ao código.</p>
+<h3 id="the-version-gate-refuses-your-branch">O gate de versão recusa o teu ramo<a class="hanchor" href="#the-version-gate-refuses-your-branch" aria-label="#">#</a></h3>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">FAIL  v1.4.2 is published but this commit does not contain it (newest contained: v1.4.0) —
+      merge origin/main first; merging a branch that predates a release undoes what it shipped
+</code></pre></div>
+<p>O teu ramo começou antes de uma release que entretanto saiu. <code>git fetch --tags origin &amp;&amp; git
+merge origin/main</code> (este repositório faz merge, não faz rebase de ramos de funcionalidade sobre
+releases — vê <a href="contributing-workflow.html#one-worktree-per-task">Fluxo de contribuição § Um worktree por
+tarefa</a> para saber porque é que um histórico
+linear continua a ser esperado dos teus próprios commits).</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">FAIL  Cargo.toml says 1.5.0, above 1.4.2, and docs/releases/v1.5.0.md does not exist —
+      a bump belongs only to the release commit
+</code></pre></div>
+<p>Fizeste bump ao <code>version</code> no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>. Não faças isso — isso só se faz no commit de release,
+junto com o ficheiro de notas da release. Reverte o bump; vê <a href="releases-and-stability.html#the-version-gate">Releases e estabilidade § O gate de
+versão</a>.</p>
+<h3 id="the-node-contract-gate">O gate do contrato do nó<a class="hanchor" href="#the-node-contract-gate" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> envolve cinco verificações independentes, e cada uma imprime a sua
+própria linha <code>FAIL</code> — corrê-lo localmente é a forma mais rápida de ver qual das cinco é a tua:</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="nohighlight">FAIL  buf format — run `buf format -w proto`
+FAIL  buf lint
+FAIL  buf breaking against v1.4.0
+&lt;segue o próprio stdout/stderr do buf, a nomear o campo ou o RPC que mudou de forma incompatível&gt;
+FAIL  node.proto: SomeRpc has no google.api.http mapping
+FAIL  docs/api/openapi.yaml is not the generated one — run `python3 scripts/contract_gate.py --update` and commit it
+</code></pre></div>
+<p>Precisa de <code>protoc</code>, <code>buf</code> (fixado na v1.73.0) e <code>protoc-gen-openapi</code> (fixado na v0.7.1) no
+<code>PATH</code>, e das tags do git — uma ferramenta em falta falha com o "command not found" mais familiar,
+mas uma tag em falta faz a verificação <code>buf breaking</code> imprimir <code>ok</code> a dizer explicitamente que
+ainda não há linha de base para comparar, em vez de a saltar em silêncio. Uma quebra genuína ao
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> precisa de um ADR primeiro, tal como qualquer mudança a um contrato de nó
+estável — vê <a href="contributing-workflow.html#when-to-write-an-adr">Fluxo de contribuição § Quando escrever um
+ADR</a>. Se o que de facto mudou é a saída do
+gerador (um campo novo, um RPC novo), <code>python3 scripts/contract_gate.py --update</code> regenera
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>; comita-o no mesmo commit que a mudança ao <code>.proto</code>.</p>
+<h2 id="a-shared-or-stale-build-cache">Uma cache de build partilhada ou obsoleta<a class="hanchor" href="#a-shared-or-stale-build-cache" aria-label="#">#</a></h2>
+<p><a href="build-and-test.html#build">Clonar, compilar e testar § Compilar</a> já nomeia o compromisso: apontar
+vários worktrees para um <code>CARGO_TARGET_DIR</code> partilhado poupa disco, mas dois builds a correr
+contra ele ao mesmo tempo esperam um pelo outro e <strong>podem invalidar os artefactos um do outro</strong>. O
+sintoma é específico e fácil de ler como uma falha a sério: um gate (em particular <code>test</code> ou
+<code>clippy</code>) falha contra código que parece não ter relação com a tua mudança, ou um build termina
+depressa demais a mais e o binário que produziu comporta-se como uma versão mais antiga —
+incluindo um hook local de pre-commit ou pre-push que reaproveita um directório de target
+partilhado entre sessões e liga contra o que quer que estejam lá os ficheiros objecto de um build
+diferente e concorrente.</p>
+<p>Isto não é um bug do gate: está genuinamente a compilar a coisa errada. Descarta uma cache
+obsoleta antes de depurares a "falha" em si:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">cargo clean -p delonix-runtime-bin   # ou o crate para onde a falha aponta
+cargo build -p delonix-runtime-bin   # recompila limpo, e corre outra vez o gate que falhou
+</code></pre></div>
+<p>Se trabalhas rotineiramente a partir de vários worktrees ao mesmo tempo, dar a cada um o seu
+próprio <code>CARGO_TARGET_DIR</code> (sem exportar o partilhado, ou exportando um caminho local ao
+worktree) remove esta classe de sintoma por inteiro, ao custo de um primeiro build mais lento em
+cada um — o mesmo compromisso que <a href="build-and-test.html#build">Clonar, compilar e testar</a> já
+enuncia.</p>
+<hr />
+<p><strong>A seguir:</strong> <a href="coding-conventions.html">Convenções de código</a> — como o código neste repositório tem de ser escrito, cada regra etiquetada com o gate ou a decisão que está por trás.</p>
+<nav class="pager"><a href="microvm-setup.html"><span>← Anterior</span>Construir microVMs</a><a class="next" href="coding-conventions.html"><span>Seguinte →</span>Convenções de código</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/troubleshooting.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/troubleshooting.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
+<ul>
+<li><a href="#quick-index">Índice rápido</a></li>
+<li><a href="#ci-gates-with-a-reason-in-the-message">Gates de CI com a razão na mensagem</a><ul>
+<li><a href="#new-portuguese-entered-lang_ratchetpy">Entrou português novo (lang_ratchet.py)</a></li>
+<li><a href="#a-debt-ratchet-moved-arch_fitnesspy">Um ratchet de dívida moveu-se (arch_fitness.py)</a></li>
+<li><a href="#a-dependency-goes-against-the-layer-direction">Uma dependência vai contra a direcção das camadas</a></li>
+<li><a href="#a-consumer-name-leaked-into-the-engine">Um nome de consumidor entrou no motor</a></li>
+<li><a href="#the-version-gate-refuses-your-branch">O gate de versão recusa o teu ramo</a></li>
+<li><a href="#the-node-contract-gate">O gate do contrato do nó</a></li>
+</ul>
+</li>
+<li><a href="#a-shared-or-stale-build-cache">Uma cache de build partilhada ou obsoleta</a></li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="Pesquisar">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="Pesquisar no manual…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copiar", "copied": "Copiado", "no_results": "Sem resultados"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily,
+      themeVariables:{fontSize:'17px'},
+      flowchart:{useMaxWidth:true, nodeSpacing:28, rankSpacing:44, padding:10},
+      sequence:{useMaxWidth:true}});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>
