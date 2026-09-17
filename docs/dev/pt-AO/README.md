@@ -7,7 +7,7 @@ antes pelo [README](../../../README.rst) e pelo
 [site de documentação do utilizador](https://angolardevops.github.io/delonix-runtime/).
 
 <!-- dev-docs:begin crate-count -->
-O workspace tem **21 crates** e produz **4 binários** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`).
+O workspace tem **22 crates** e produz **4 binários** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`).
 <!-- dev-docs:end crate-count -->
 
 ## O que o motor é — e o que não é

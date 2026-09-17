@@ -212,8 +212,10 @@ Kind that groups resources in one document. See:
 **State root** — The directory holding all engine state as files (there is no database): `DELONIX_ROOT`
 when set, otherwise `~/.local/share/delonix` (or `$XDG_DATA_HOME/delonix`) for a user and
 `/var/lib/delonix` for root. Network sockets live in a separate runtime directory
-(`DELONIX_NET_RUNTIME_DIR`). Always set both when testing. See:
+(`DELONIX_NET_RUNTIME_DIR`). Always set both when testing. Records under it are read, written and
+locked by the `delonix-state` adapter. See:
 `bins/delonix-runtime-bin/src/cmd/util.rs::state_root`,
+`crates/adapters/delonix-state/src/store.rs::Store::default_root`,
 [05 — State on disk](05-architecture.md#state-on-disk),
 [02 — Isolating the engine's state](02-build-and-test.md#isolating-the-engines-state).
 

@@ -98,9 +98,14 @@ A camada a que cada crate pertence, e a direcção em que pode depender:
 
 Excepções declaradas (cada uma nomeia a fase do ADR-0040 que a remove):
 
+- `delonix-linux` → `delonix-state` — removida na **P4**
 - `delonix-mcp` → `delonix-mgmt` — removida na **P5**
+- `delonix-oci` → `delonix-state` — removida na **P4**
 - `delonix-proxmox` → `delonix-vm` — removida na **P4**
 - `delonix-scanner` → `delonix-oci` — removida na **P4**
+- `delonix-sdn` → `delonix-state` — removida na **P4**
+- `delonix-vm` → `delonix-state` — removida na **P4**
+- `delonix-volume` → `delonix-state` — removida na **P4**
 <!-- dev-docs:end layers -->
 
 ### Em que ponto está a reestruturação
@@ -148,6 +153,7 @@ graph TB
     delonix_oci["delonix-oci"]
     delonix_scanner["delonix-scanner"]
     delonix_sdn["delonix-sdn"]
+    delonix_state["delonix-state"]
     delonix_telemetry["delonix-telemetry"]
     delonix_vm["delonix-vm"]
     delonix_volume["delonix-volume"]
@@ -166,19 +172,23 @@ graph TB
     delonix_mgmt_bin["delonix-mgmt-bin"]
     delonix_runtime_bin["delonix-runtime-bin"]
   end
+  delonix_compute --> delonix_model
   delonix_compute --> delonix_runtime_core
   delonix_cri --> delonix_compute
   delonix_cri --> delonix_linux
   delonix_cri --> delonix_oci
   delonix_cri --> delonix_runtime_core
   delonix_cri --> delonix_sdn
+  delonix_cri --> delonix_state
   delonix_cri --> delonix_telemetry
   delonix_linux --> delonix_compute
   delonix_linux --> delonix_runtime_core
+  delonix_linux --> delonix_state
   delonix_mcp --> delonix_linux
   delonix_mcp --> delonix_mgmt
   delonix_mcp --> delonix_runtime_core
   delonix_mcp --> delonix_sdn
+  delonix_mcp --> delonix_state
   delonix_mcp --> delonix_vm
   delonix_mcp --> delonix_volume
   delonix_mcp_bin --> delonix_mcp
@@ -189,6 +199,7 @@ graph TB
   delonix_mgmt --> delonix_runtime_core
   delonix_mgmt --> delonix_scanner
   delonix_mgmt --> delonix_sdn
+  delonix_mgmt --> delonix_state
   delonix_mgmt --> delonix_telemetry
   delonix_mgmt --> delonix_vm
   delonix_mgmt --> delonix_volume
@@ -197,6 +208,7 @@ graph TB
   delonix_mgmt_bin --> delonix_telemetry
   delonix_oci --> delonix_compute
   delonix_oci --> delonix_runtime_core
+  delonix_oci --> delonix_state
   delonix_proxmox --> delonix_runtime_core
   delonix_proxmox --> delonix_vm
   delonix_runtime_bin --> delonix_compute
@@ -210,6 +222,7 @@ graph TB
   delonix_runtime_bin --> delonix_sdn
   delonix_runtime_bin --> delonix_security_runtime
   delonix_runtime_bin --> delonix_stack
+  delonix_runtime_bin --> delonix_state
   delonix_runtime_bin --> delonix_telemetry
   delonix_runtime_bin --> delonix_truenas
   delonix_runtime_bin --> delonix_vm
@@ -220,15 +233,20 @@ graph TB
   delonix_sdn --> delonix_compute
   delonix_sdn --> delonix_net_rules
   delonix_sdn --> delonix_runtime_core
+  delonix_sdn --> delonix_state
   delonix_security_runtime --> delonix_runtime_core
   delonix_stack --> delonix_runtime_core
+  delonix_state --> delonix_model
+  delonix_state --> delonix_runtime_core
   delonix_truenas --> delonix_runtime_core
   delonix_vm --> delonix_compute
   delonix_vm --> delonix_net_rules
   delonix_vm --> delonix_runtime_core
+  delonix_vm --> delonix_state
   delonix_volume --> delonix_compute
   delonix_volume --> delonix_model
   delonix_volume --> delonix_runtime_core
+  delonix_volume --> delonix_state
 ```
 <!-- dev-docs:end crates-graph -->
 
