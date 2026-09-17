@@ -2218,7 +2218,7 @@ mod resource_limits_preflight_tests {
 /// (`delonix_runtime::workload::HostWorkload`), composed with what this CLI owns:
 /// the network's answers, the health monitor, the printed id and the removal of
 /// what a refused start left behind.
-fn with_host_workload<R>(
+pub(crate) fn with_host_workload<R>(
     images: &ImageStore,
     store: &Store,
     f: impl FnOnce(&runtime::workload::HostWorkload<'_>) -> R,
