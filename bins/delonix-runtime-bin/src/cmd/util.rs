@@ -386,7 +386,7 @@ mod tests {
         // ...and the id still works, as always.
         assert_eq!(find(&store, "bbb2").unwrap().name, "db");
         // A qualified name that does not exist is NotFound, not ambiguity.
-        assert!(matches!(find(&store, "teamC/db"), Err(Error::NotFound(_))));
+        assert!(find(&store, "teamC/db").is_err_and(|e| e.is_not_found()));
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -399,7 +399,7 @@ mod tests {
         store.save(&mk_ns("bbb2", "api", "teamA")).unwrap();
         assert_eq!(find(&store, "web").unwrap().id, "aaa1");
         assert_eq!(find(&store, "api").unwrap().id, "bbb2");
-        assert!(matches!(find(&store, "nope"), Err(Error::NotFound(_))));
+        assert!(find(&store, "nope").is_err_and(|e| e.is_not_found()));
         let _ = std::fs::remove_dir_all(dir);
     }
 

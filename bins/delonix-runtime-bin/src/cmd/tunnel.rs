@@ -1187,7 +1187,7 @@ pub(crate) fn cmd_ls(format: output::OutputFormat) -> Result<()> {
 
 pub(crate) fn cmd_describe(name: &str) -> Result<()> {
     let store = record_store()?;
-    let rec = store.load(name).map_err(|e| match e {
+    let rec = store.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(n) => {
             Error::Invalid(format!("no such tunnel: {n} (see `delonix get gateways`)"))
         }
@@ -1217,7 +1217,7 @@ pub(crate) fn cmd_describe(name: &str) -> Result<()> {
 
 pub(crate) fn cmd_rm(name: &str) -> Result<()> {
     let store = record_store()?;
-    let rec = store.load(name).map_err(|e| match e {
+    let rec = store.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(n) => {
             Error::Invalid(format!("no such tunnel: {n} (see `delonix get gateways`)"))
         }

@@ -3487,7 +3487,7 @@ pub(crate) fn cmd_rm(base: &std::path::Path, name: &str, force: bool) -> Result<
         // Backend cleanup refused: the local record was kept intact on
         // purpose (no orphan VMs in libvirt) — tell the user how to
         // force it, instead of leaving them in a dead end.
-        if !force && !matches!(e, Error::VmNotFound(_)) {
+        if !force && e.number() != 4501 {
             output::warn(&super::po::tf(
                 "the VM record was kept; `delonix delete vms {name} --force` discards it anyway",
                 &[("name", name)],

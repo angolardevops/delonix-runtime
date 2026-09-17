@@ -281,9 +281,9 @@ mod tests {
         let base = tmp_base();
         let v = CredVault::open(&base).unwrap();
         let evil = "../../../etc/passwd";
-        assert!(matches!(v.get(evil), Err(Error::Invalid(_))));
+        assert!(v.get(evil).is_err_and(|e| e.is_invalid_argument()));
         assert!(!v.exists(evil));
-        assert!(matches!(v.remove(evil), Err(Error::Invalid(_))));
+        assert!(v.remove(evil).is_err_and(|e| e.is_invalid_argument()));
         // Valid charset, simply missing — unchanged, documented behavior.
         assert_eq!(v.get("inexistente").unwrap(), None);
         assert!(!v.exists("inexistente"));

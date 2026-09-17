@@ -1583,7 +1583,7 @@ mod tests {
     /// A snapshot name already taken is a conflict (5), as on libvirt.
     #[test]
     fn a_taken_snapshot_name_is_a_conflict() {
-        assert!(matches!(taken_snapshot(100, "s1"), Error::Conflict(_)));
+        assert!(taken_snapshot(100, "s1").is_conflict());
     }
 
     /// Every key goes ONCE in the create body. `ipconfig0` went twice (fixed

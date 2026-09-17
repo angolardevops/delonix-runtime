@@ -546,7 +546,7 @@ impl Client {
                 // error is far more likely to be a 403/404/no-such-repo, and
                 // retrying those just delays an answer the caller already has.
                 Err(e) => {
-                    if from.is_none() || matches!(e, Error::NotFound(_)) {
+                    if from.is_none() || e.is_not_found() {
                         return Err(e);
                     }
                     last_err = e.to_string();
@@ -2020,10 +2020,7 @@ mod tests {
         let err = pull_with_token_answer(
             "HTTP/1.1 403 Forbidden\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
         );
-        assert!(
-            matches!(err, delonix_runtime_core::Error::NotFound(_)),
-            "{err:?}"
-        );
+        assert!(err.is_not_found(), "{err:?}");
     }
 
     /// A registry that is actually broken keeps saying so.
@@ -2032,10 +2029,7 @@ mod tests {
         let err = pull_with_token_answer(
             "HTTP/1.1 500 Internal Server Error\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
         );
-        assert!(
-            matches!(err, delonix_runtime_core::Error::Registry(_)),
-            "{err:?}"
-        );
+        assert!(err.number() == 9401, "{err:?}");
     }
 
     #[test]
