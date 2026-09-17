@@ -1100,7 +1100,7 @@ sequenceDiagram
   Stk->>Rec: reconcile::plan(desired, actual, stack) -> Vec of Change
   Stk->>Stk: refuse_unallowed (replacements need --replace)
   loop run_layers, in Kind order (kinds constants)
-    Stk->>Kind: <kind>::apply(docs)
+    Stk->>Kind: KIND::apply(docs)
     Kind->>Eng: create or ensure (e.g. container::apply calls cmd_run)
   end
   Stk->>Kind: converge_and_stamp: live updates (e.g. container::converge) and ownership label
