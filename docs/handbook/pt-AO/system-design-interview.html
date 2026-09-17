@@ -209,7 +209,9 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a class="on" aria-current="page" href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Arquitectura</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/system-design-interview.html">Ler a página em inglês</a></span></div><h1 id="system-design-interview-the-delonix-engine">System Design Interview — o Delonix Engine</h1>
+<h1 id="system-design-interview-the-delonix-engine">System Design Interview — o Delonix Engine</h1>
+<p><strong>Antes de leres:</strong> <a href="architecture.html">Arquitectura</a> e <a href="crates.html">As crates</a> — esta página defende
+<em>porque</em> é que a estrutura que elas descrevem tem esta forma.</p>
 <blockquote class="say say-interviewer"><p><span class="speaker">Entrevistador</span>Desenha um motor de containers e de microVMs para um único nó Linux. Tem de
 correr sem root por omissão, sem um daemon residente, e não pode saber quem o está a chamar.</p>
 </blockquote>
@@ -217,7 +219,10 @@ correr sem root por omissão, sem um daemon residente, e não pode saber quem o 
 resposta com o que o Delonix Engine faz de facto. Cada aprofundamento termina com <strong>Onde vive no
 código</strong>, que lista os ficheiros e símbolos lidos para esta página. Para o mapa estrutural (camadas,
 grafo de crates, processos, caminhos de estado) lê primeiro <a href="architecture.html">Arquitectura</a>;
-esta página é sobre <em>porque</em> é que o desenho tem esta forma.</p>
+esta página é sobre <em>porque</em> é que o desenho tem esta forma. Depois dela consegues defender — ou
+desafiar com evidência — as principais escolhas de desenho do motor: criação de processos rootless,
+o holder de rede, camadas de imagem partilhadas, a porta de VM e o reconciliador sem ficheiro de
+estado.</p>
 <p>Os números citados abaixo são <strong>medições registadas no repositório com a sua data ou release</strong>, não
 factos intemporais. Volta a medir antes de confiares num deles.</p>
 <hr />
@@ -299,7 +304,10 @@ listar as regras do kernel com que tenho de viver.</p>
 </table></div>
 <p>Duas políticas do host aparecem constantemente e parecem bugs do motor: o Ubuntu 23.10+ restringe os
 user namespaces sem privilégio através do AppArmor (um perfil é associado ao <em>caminho</em> do executável
-que cria o namespace), e uma sessão SSH simples não é um scope de cgroup delegado.</p>
+que cria o namespace), e uma sessão SSH simples não é um scope de cgroup delegado.
+Cada linha da tabela é um primitivo ensinado à mão em <a href="linux-foundations.html">Fundações de Linux</a>;
+as duas políticas do host estão em
+<a href="environment.html#known-host-traps">Preparar o teu ambiente — Armadilhas conhecidas do host</a>.</p>
 <hr />
 <h2 id="3-api">3. API<a class="hanchor" href="#3-api" aria-label="#">#</a></h2>
 <blockquote class="say say-candidate"><p><span class="speaker">Candidato</span>Um conjunto de operações, várias portas de entrada — e uma delas é o contrato para
@@ -368,43 +376,60 @@ gestão (<a class="src" href="https://github.com/angolardevops/delonix-runtime/t
 <h2 id="4-high-level-design">4. Desenho de alto nível<a class="hanchor" href="#4-high-level-design" aria-label="#">#</a></h2>
 <blockquote class="say say-candidate"><p><span class="speaker">Candidato</span>Vou organizá-lo em camadas para que as regras do domínio nunca importem o kernel, e
 vou fazer com que cada processo de vida longa seja dono de exactamente uma coisa.</p>
+<p><strong>Legenda</strong> — caixa branca com borda vermelha: bloco de construção do motor · região delineada:
+uma camada · cilindro, azul: estado em disco · seta sólida: chamada ou fluxo de dados, com
+etiqueta.</p>
 </blockquote>
-<pre class="mermaid">graph TB
-    subgraph IF[&quot;interfaces&quot;]
-        CLI[&quot;CLI&quot;]
-        CRI[&quot;CRI server&quot;]
-        API[&quot;local API server&quot;]
-        MCP[&quot;MCP server&quot;]
-    end
-    subgraph CX[&quot;contexts — use cases and ports&quot;]
-        COMPUTE[&quot;compute: RunOpts, resolve_run, launch, ports&quot;]
-        STACK[&quot;stack: Kind table, 3-way plan&quot;]
-    end
-    subgraph AD[&quot;adapters and providers — implement ports&quot;]
-        LINUX[&quot;kernel: clone, mounts, cgroups, seccomp&quot;]
-        SDN[&quot;SDN: pin, control, nftables, slirp&quot;]
-        OCI[&quot;OCI: registry, CAS, layers&quot;]
-        VMS[&quot;VM backends: Cloud Hypervisor, libvirt, Proxmox&quot;]
-    end
-    STATE[(&quot;files under one state root&quot;)]
-    IF --&gt; CX
-    AD -. implements .-&gt; CX
-    IF --&gt; AD
-    AD --- STATE
+<p>As regras do domínio nunca montam, arrancam nem configuram a rede, e um adaptador é dono de todos os
+ficheiros debaixo do state root.</p>
+<pre class="mermaid">flowchart TB
+  subgraph IF[&quot;interfaces — parse a request, present a result&quot;]
+    CLI[&quot;CLI&lt;br/&gt;&lt;small&gt;delonix&lt;/small&gt;&quot;]
+    CRI[&quot;CRI server&lt;br/&gt;&lt;small&gt;delonix-cri&lt;/small&gt;&quot;]
+    API[&quot;local API server&lt;br/&gt;&lt;small&gt;delonix-mgmt&lt;/small&gt;&quot;]
+    MCP[&quot;MCP server&lt;br/&gt;&lt;small&gt;delonix-mcp&lt;/small&gt;&quot;]
+  end
+  subgraph CX[&quot;contexts — use cases, ports and records&quot;]
+    COMPUTE[&quot;compute&lt;br/&gt;&lt;small&gt;Container, Vm, RunOpts, resolve_run, launch, ports&lt;/small&gt;&quot;]
+    STACK[&quot;stack&lt;br/&gt;&lt;small&gt;Kind table, 3-way plan&lt;/small&gt;&quot;]
+    NODE[&quot;node&lt;br/&gt;&lt;small&gt;event log, pid and host checks, server dispatch&lt;/small&gt;&quot;]
+  end
+  subgraph AD[&quot;adapters and providers — implement ports&quot;]
+    LINUX[&quot;kernel&lt;br/&gt;&lt;small&gt;clone, mounts, cgroups, seccomp&lt;/small&gt;&quot;]
+    SDN[&quot;SDN&lt;br/&gt;&lt;small&gt;pin, control, nftables, slirp&lt;/small&gt;&quot;]
+    OCI[&quot;OCI&lt;br/&gt;&lt;small&gt;registry, CAS, layers&lt;/small&gt;&quot;]
+    VMS[&quot;VM backends&lt;br/&gt;&lt;small&gt;Cloud Hypervisor, libvirt, Proxmox&lt;/small&gt;&quot;]
+    STA[&quot;state&lt;br/&gt;&lt;small&gt;stores, atomic writes, secret vault&lt;/small&gt;&quot;]
+  end
+  FILES[(&quot;files under one state root&quot;)]
+  IF --&gt;|&quot;call use cases&quot;| CX
+  AD --&gt;|&quot;implement ports&quot;| CX
+  IF --&gt;|&quot;call directly, today&quot;| AD
+  STA --&gt;|&quot;flock, temp file + rename&quot;| FILES
+  class CLI,CRI,API,MCP,COMPUTE,STACK,NODE,LINUX,SDN,OCI,VMS,STA block
+  class FILES store
+classDef person fill:#191513,stroke:#191513,color:#ffffff
+classDef engine fill:#cc2823,stroke:#8f1b17,color:#ffffff
+classDef block fill:#ffffff,stroke:#cc2823,color:#191513
+classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
+classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
 <ul>
 <li><strong>Camadas</strong> (ADR-0040 D1): fundação → contextos → adaptadores/providers → interfaces → binários,
   impostas por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.</li>
 <li>O <strong>estado</strong> são registos JSON e ficheiros endereçados por conteúdo debaixo de um só root, com
   escritas atómicas e <code>flock</code> à volta de cada ler-modificar-escrever — sem base de dados, porque não
-  há nenhum daemon para ser dono dela.</li>
+  há nenhum daemon para ser dono dela. Os <em>tipos</em> de registo são definidos à parte deles
+  (<code>Container</code>/<code>Vm</code> no contexto <code>delonix-compute</code>; <code>Status</code> e os registos de firewall no crate de
+  fundação <code>delonix-model</code>); os <em>ficheiros</em> só são abertos através do adaptador <code>delonix-state</code>.</li>
 <li>Os <strong>processos</strong> existem por carga (um supervisor que é o pai do container, o init, um shim de
   logs) e por nó quando a rede é usada (um <em>pin</em> que só segura namespaces, um processo de <em>controlo</em>
   reiniciável, um uplink <code>slirp4netns</code>). Mais nada fica de pé.</li>
 </ul>
 <p><strong>Onde vive no código:</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> (<code>Store::update</code>, <code>JsonStore::update</code>,
-<code>write_atomic</code>); <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code>;
+<code>write_atomic</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>Container</code>, <code>Vm</code>);
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a> (<code>Status</code>, <code>ContainerFw</code>, <code>FwRule</code>); <code>crates/contexts/delonix-compute/src/{ports,launch}.rs</code>;
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> (<code>run_supervised</code>).</p>
 <hr />
 <h2 id="5-deep-dives">5. Aprofundamentos<a class="hanchor" href="#5-deep-dives" aria-label="#">#</a></h2>
@@ -435,6 +460,13 @@ processo parado, configurá-lo de fora, e só o libertar quando estiver pronto.<
 <li><strong>Publicar o registo em último.</strong> O pai espera pelo byte «mounted» (<code>wait_for_mounts</code>), espera
    brevemente pelo resultado do exec, e só então faz <code>store.save</code> de <code>Running</code>.</li>
 </ol>
+<blockquote>
+<p><strong>Legenda</strong> — os participantes são processos; as setas sólidas são chamadas, linhas de socket,
+forks ou clones (a etiqueta diz qual); as setas tracejadas são respostas ou bytes devolvidos; uma
+auto-seta é trabalho dentro desse processo; as notas marcam estado ou esperas.</p>
+</blockquote>
+<p>O filho é criado bloqueado, configurado de fora, e o registo só é guardado depois de o filho
+reportar os seus mounts.</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix
     participant SV as supervisor
@@ -512,6 +544,13 @@ namespace) são aceites, e as ligações <strong>novas</strong> vindas de qualqu
 (<code>@dlxall</code>) são descartadas; as respostas continuam a fluir porque o drop só casa com <code>ct state new</code>.
 Uma política de ingress explícita substitui esse default. O IPv6 na SDN é recusado por omissão
 (<code>table ip6</code> com <code>policy drop</code>), porque todas as regras acima são IPv4.</p>
+<blockquote>
+<p><strong>Legenda</strong> — os participantes são processos; as setas sólidas são chamadas, linhas de socket,
+forks ou clones (a etiqueta diz qual); as setas tracejadas são respostas ou bytes devolvidos; uma
+auto-seta é trabalho dentro desse processo; as notas marcam estado ou esperas.</p>
+</blockquote>
+<p>Juntar-se a uma rede custom é uma linha no socket de controlo mais um re-exec para dentro dos
+namespaces do pin; publicar uma porta são duas escritas no dataplane.</p>
 <pre class="mermaid">sequenceDiagram
     participant CLI as delonix (1st pass)
     participant C as control
@@ -636,6 +675,13 @@ fazer do planeamento uma função pura.</p>
   namespaced, como é observada a presença) governa o planeador, a ordem de apply e a ordem de
   teardown, em vez de listas mantidas em sincronia à mão.</li>
 </ul>
+<blockquote>
+<p><strong>Legenda</strong> — os participantes são o operador, o comando <code>stack apply</code>, o planeador puro e os
+stores e o dataplane sobre os quais actua; as setas sólidas são chamadas; as setas tracejadas são
+respostas; as caixas <code>alt</code> e <code>opt</code> são o ramo de falha e a poda opcional.</p>
+</blockquote>
+<p>Nada é criado antes de o plano ser verificado, e uma falha a meio do apply é carimbada em vez de
+revertida.</p>
 <pre class="mermaid">sequenceDiagram
     participant U as operator
     participant A as stack apply
@@ -798,6 +844,9 @@ Quatro camadas, uma especificação de execução, portas de provider com capaci
 servido num servidor por socket activation, e um launcher dono de cada spawn que cria namespaces
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>,
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>).</p>
+<hr />
+<p><strong>Seguinte:</strong> <a href="delonixfile-and-vmfile.html">Delonixfile e VMfile</a> — as duas gramáticas de build —
+Delonixfile para imagens OCI e VMfile para discos arrancáveis — tal como os analisadores as aceitam.</p>
 <nav class="pager"><a href="crates.html"><span>← Anterior</span>Os crates</a><a class="next" href="delonixfile-and-vmfile.html"><span>Seguinte →</span>Delonixfile e VMfile</a></nav>
 <footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/system-design-interview.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/system-design-interview.md</code></footer>
 </div></main>
