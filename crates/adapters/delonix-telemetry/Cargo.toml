@@ -1,0 +1,18 @@
+[package]
+name = "delonix-telemetry"
+version.workspace = true
+edition.workspace = true
+license = "Apache-2.0"
+description = "Observabilidade do motor Delonix Runtime: logging estruturado, spans OpenTelemetry/OTLP e as métricas Prometheus partilhadas."
+
+[dependencies]
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+prometheus-client = { workspace = true }
+
+[lints]
+workspace = true

@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (18 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (19 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 18 crates)
+## C4 — Nível 3: Componentes (os 19 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-runtime-core` é a raiz comum.
@@ -144,7 +144,8 @@ graph TB
     VM2["delonix-vm<br>microVMs declarativas: trait VmBackend —<br>Cloud Hypervisor ou libvirt"]
     VOL["delonix-volume<br>volumes nomeados e bind mounts, sintaxe -v Docker,<br>driver local ou nfs"]
     CORE["delonix-runtime-core<br>Container, Vm, Status, Store e JsonStore, Mount,<br>typestate, virt, secret e cred_vault — Secret Manager"]
-    MGMT["delonix-mgmt<br>API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)<br>registo Prometheus partilhado e spans OpenTelemetry"]
+    MGMT["delonix-mgmt<br>API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)<br>expoe as metricas partilhadas em /metrics"]
+    TEL["delonix-telemetry<br>observabilidade: logging estruturado, spans OpenTelemetry/OTLP<br>e o registo Prometheus partilhado (saiu do core na P3)"]
     SCAN["delonix-scan<br>SBOM e varredura de CVE — image scan<br>e a imposicao de scan-on-pull"]
     SEC["delonix-security-runtime<br>decisoes de seguranca do no: politica, admissao<br>unica (container E VM), evento, score, redaccao<br>(ADR-0026) — puro, sem sensores e sem inquilino"]
     RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS"]
@@ -171,6 +172,7 @@ graph TB
     BIN --> MODEL
     BIN --> STACK
     BIN --> COMPUTE
+    BIN --> TEL
     COMPUTE --> CORE
     STACK --> CORE
 
@@ -181,6 +183,7 @@ graph TB
     MGMT --> NET
     MGMT --> SCAN
     MGMT --> CORE
+    MGMT --> TEL
 
     SCAN --> IMG
     SCAN --> CORE
@@ -189,8 +192,9 @@ graph TB
     CRI --> IMG
     CRI --> NET
     CRI --> CORE
+    CRI --> TEL
 
-    VM2 --> NET
+    VM2 --> COMPUTE
     VM2 --> CORE
 
     RT --> CORE
@@ -227,9 +231,12 @@ Notas de leitura do grafo (todas verificadas):
 - **`delonix-runtime` só depende de `core`** — o motor de containers não conhece
   rede: a integração faz-se por inversão de controlo, com o hook `on_started` do
   `RunSpec` (a CLI passa closures que chamam `delonix-net`).
-- **`delonix-vm` → `delonix-net`** existe porque o backend Cloud Hypervisor liga o
-  `tap` da VM à bridge do ingress (`infra::vm_attach`, doc-comment de
-  `crates/adapters/delonix-vm/src/lib.rs`).
+- **`delonix-vm` já não depende de `delonix-net`** (P3i): o backend Cloud Hypervisor liga o
+  `tap` da VM à bridge do ingress pela porta `VmNetwork` do `delonix-compute`, que o
+  `delonix-net` implementa (`vm_network::HostVmNetwork`) e o binário regista.
+- **`delonix-telemetry`** (P3j) tem o logging estruturado, os spans OTLP e o registo
+  Prometheus partilhado, que saíram do `delonix-runtime-core`: a fundação deixou de
+  carregar um exportador que todo o crate compilava só por precisar de um `Container`.
 - **`delonix-net-rules` não tem UMA dependência** — nem interna nem externa, e é isso
   que o torna atravessável: é o que o `delonix-net` e o control-plane do `delonix-paas`
   compilam os dois para responderem o MESMO nome de bridge, o mesmo IP dentro de um

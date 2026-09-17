@@ -291,7 +291,7 @@ async fn metrics(State(s): State<AppState>) -> impl IntoResponse {
             axum::http::header::CONTENT_TYPE,
             "application/openmetrics-text; version=1.0.0; charset=utf-8",
         )],
-        delonix_runtime_core::metrics::encode(),
+        delonix_telemetry::metrics::encode(),
     )
 }
 
