@@ -197,7 +197,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 ```
 crates/foundation/   delonix-runtime-core, delonix-net-rules
 crates/contexts/     delonix-security-runtime
-crates/adapters/     delonix-runtime, delonix-net, delonix-image, delonix-scan, delonix-volume, delonix-vm, delonix-telemetry
+crates/adapters/     delonix-runtime, delonix-net, delonix-image, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
@@ -953,7 +953,7 @@ scrape Prometheus nunca divergirem na aritmética.
   permite `inc`/`inc_by`, que não serve para isso.
 - **`delonix-mgmt` ganhou `GET /v1/dash`** (JSON do mesmo `DashSummary`) e
   passou a depender de `delonix-runtime`/`delonix-vm`/`delonix-net` (antes só
-  `delonix-volume`/`delonix-image`/`delonix-scan`) — mesma expansão que o
+  `delonix-volume`/`delonix-image`/`delonix-scanner`) — mesma expansão que o
   `delonix-cri` já tinha feito por uma razão análoga (visibilidade completa
   do motor), sem dependência circular nenhuma.
 - **`delonix dash --json`** (novo, ao lado do `--once` ANSI já existente):
@@ -6348,7 +6348,7 @@ antes de qualquer commit:
 | `delonix-volume` | volumes nomeados e bind mounts |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
 | `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |
-| `delonix-scan` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
+| `delonix-scanner` | SBOM + varredura de CVE (`image scan`, e a imposição de scan-on-pull) |
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-mcp-bin` | o executável `delonix-mcp` (P3l, ADR-0040 D2.4 emendado): `delonix mcp` faz `exec` dele, e o utilizador e a configuração de um cliente de IA só nomeiam `delonix`. Compõe uma só interface, o `delonix-mcp` |
 | `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |

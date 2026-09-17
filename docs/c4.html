@@ -314,7 +314,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     VOL[&quot;delonix-volume&lt;br&gt;volumes nomeados e bind mounts, sintaxe -v Docker,&lt;br&gt;driver local ou nfs&quot;]
     CORE[&quot;delonix-runtime-core&lt;br&gt;Container, Vm, Status, Store e JsonStore, Mount,&lt;br&gt;typestate, virt, secret e cred_vault — Secret Manager&quot;]
     MGMT[&quot;delonix-mgmt&lt;br&gt;API de gestao LOCAL (HTTP+JSON num socket unix, so o proprio uid)&lt;br&gt;registo Prometheus partilhado e spans OpenTelemetry&quot;]
-    SCAN[&quot;delonix-scan&lt;br&gt;SBOM e varredura de CVE — image scan&lt;br&gt;e a imposicao de scan-on-pull&quot;]
+    SCAN[&quot;delonix-scanner&lt;br&gt;SBOM e varredura de CVE — image scan&lt;br&gt;e a imposicao de scan-on-pull&quot;]
     SEC[&quot;delonix-security-runtime&lt;br&gt;decisoes de seguranca do no: politica, admissao&lt;br&gt;unica (container E VM), evento, score, redaccao&lt;br&gt;(ADR-0026) — puro, sem sensores e sem inquilino&quot;]
     RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS&quot;]
     PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]

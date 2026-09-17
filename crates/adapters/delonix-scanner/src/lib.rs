@@ -1,4 +1,4 @@
-//! `delonix-scan` — image vulnerability scanner (cloud-native).
+//! `delonix-scanner` — image vulnerability scanner (cloud-native).
 //!
 //! Two operations, without root and without running the image:
 //! 1. **SBOM** — extracts the list of installed packages (Alpine `apk`, Debian/Ubuntu

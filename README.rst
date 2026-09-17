@@ -546,7 +546,7 @@ Ten crates, one binary, no residing process:
      - CRI ``runtime.v1`` server — the kubelet talks to Delonix.
    * - ``delonix-mgmt``
      - Management API (HTTP+JSON over a unix socket) for external control-planes, plus the shared Prometheus registry and OpenTelemetry spans.
-   * - ``delonix-scan``
+   * - ``delonix-scanner``
      - SBOM + CVE scanning (``image scan`` and scan-on-pull enforcement).
 
 See the `architecture page
