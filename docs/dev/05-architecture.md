@@ -49,7 +49,16 @@ These are not conventions; `scripts/arch_fitness.py` enforces the structural hal
 | A crate must live in the directory of its layer | `LAYER_DIR`, `misplaced` |
 | A consumer's name anywhere under `crates/`, `bins/`, `proto/` (comments included) fails | `CONSUMER_NAMES`, `consumer_mentions` |
 | Dependency versions live only in the root `[workspace.dependencies]` | `inline_versions` |
-| Ratchets that may only go down: library crates re-running the engine's own binary, `println!` in libraries, process-environment writes | `SELF_EXEC`, `PRINTS`, `ENV_WRITES`, baseline in `scripts/arch_baseline.json` |
+| Ratchets that may only go down (listed below) — e.g. library crates re-running the engine's own binary, `println!` in libraries, process-environment writes, adapters importing the shared `Error` as their own | the ratchet patterns (`SELF_EXEC`, `PRINTS`, `ENV_WRITES`, `SHARED_ERROR`, …), baseline in `scripts/arch_baseline.json` |
+
+<!-- dev-docs:begin ratchets -->
+`scripts/arch_fitness.py` keeps **4 debt ratchets** (baseline in `scripts/arch_baseline.json`):
+
+- `self_exec_sites`
+- `library_prints`
+- `env_writes`
+- `shared_error_imports`
+<!-- dev-docs:end ratchets -->
 
 `python3 scripts/arch_fitness.py --list` shows what each ratchet counts today, file by file.
 
@@ -203,8 +212,8 @@ graph TB
   delonix_runtime_bin --> delonix_vm
   delonix_runtime_bin --> delonix_volume
   delonix_runtime_core --> delonix_model
+  delonix_scanner --> delonix_model
   delonix_scanner --> delonix_oci
-  delonix_scanner --> delonix_runtime_core
   delonix_sdn --> delonix_compute
   delonix_sdn --> delonix_net_rules
   delonix_sdn --> delonix_runtime_core
