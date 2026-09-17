@@ -259,7 +259,7 @@ pub(crate) struct Provisioned {
 /// Same convention as `tunnel::resolve_token` and `storage::resolve_password`:
 /// a literal wins, else the secret's named key.
 fn resolve_secret_key(name: &str, keys: &[&str]) -> Result<String> {
-    let store = delonix_runtime_core::SecretStore::open(state_root())?;
+    let store = delonix_state::SecretStore::open(state_root())?;
     let s = store.load(name)?;
     for k in keys {
         if let Some(v) = s.data.get(*k) {

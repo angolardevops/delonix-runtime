@@ -48,7 +48,8 @@ use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 use clap::Subcommand;
-use delonix_runtime_core::{Error, JsonStore, Result};
+use delonix_runtime_core::{Error, Result};
+use delonix_state::JsonStore;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
@@ -289,7 +290,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
 /// Presence for `stack ls`/`describe`/`wait` — same gap as `ShareVolume`: the
 /// Kind was applied and never listed, so nothing asked until now.
 pub(crate) fn presence_of(name: &str) -> (String, String) {
-    match record_store().and_then(|s| s.load(name)) {
+    match record_store().and_then(|s| Ok(s.load(name)?)) {
         Ok(rec) => (
             "yes".into(),
             rec.public_url.unwrap_or_else(|| rec.provider.clone()),
@@ -323,7 +324,7 @@ fn tunnels_dir() -> PathBuf {
 }
 
 fn record_store() -> Result<JsonStore<TunnelRecord>> {
-    JsonStore::open(tunnels_dir())
+    Ok(JsonStore::open(tunnels_dir())?)
 }
 
 /// Tunnel names, for shell autocompletion (`cmd::complete::tunnels`).
@@ -355,7 +356,7 @@ fn resolve_token(literal: Option<String>, secret_ref: Option<String>) -> Result<
     let token = if let Some(t) = literal {
         Some(t)
     } else if let Some(name) = secret_ref {
-        let store = delonix_runtime_core::SecretStore::open(state_root())?;
+        let store = delonix_state::SecretStore::open(state_root())?;
         let s = store.load(&name)?;
         Some(s.data.get("token").cloned().ok_or_else(|| {
             Error::Invalid(super::po::tf(

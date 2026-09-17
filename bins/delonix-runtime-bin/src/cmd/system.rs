@@ -9,7 +9,8 @@
 
 use clap::Subcommand;
 use delonix_linux::{self as runtime};
-use delonix_runtime_core::{events, Error, Result, Store};
+use delonix_runtime_core::{events, Error, Result};
+use delonix_state::Store;
 
 use super::util::{open_stores, state_root};
 
@@ -1381,7 +1382,7 @@ fn cmd_resources(output: super::output::OutputFormat, strict: bool) -> Result<()
     // container started before a delegation was fixed keeps running without the
     // ceiling it asked for, and nothing said so.
     let views: Vec<_> = open_stores()
-        .and_then(|(_, store)| store.list())
+        .and_then(|(_, store)| Ok(store.list()?))
         .map(|cs| {
             cs.into_iter()
                 .filter(|c| c.pid.is_some())
@@ -2305,7 +2306,7 @@ fn cmd_info() -> Result<()> {
 /// Shortcut for the `Store` — `system` deals in counts, not lifecycle.
 #[allow(dead_code)]
 fn store_only() -> Result<Store> {
-    Store::open(Store::default_root())
+    Ok(Store::open(Store::default_root())?)
 }
 
 /// Is this cgroup a LOGIN session scope — the case where the system-wide

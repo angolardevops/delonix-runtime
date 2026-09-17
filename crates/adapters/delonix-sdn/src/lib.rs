@@ -201,7 +201,7 @@ fn default_base() -> u8 {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    let _ = delonix_runtime_core::write_atomic(&path, base.to_string().as_bytes());
+    let _ = delonix_state::write_atomic(&path, base.to_string().as_bytes());
     base
 }
 
@@ -1086,7 +1086,7 @@ impl NetworkStore {
                 (hi - lo) as u16 + 1
             )));
         }
-        delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
+        delonix_state::write_atomic(&self.path(name), base.to_string().as_bytes())?;
         self.get(name)
     }
 
@@ -1317,7 +1317,7 @@ impl NetworkStore {
                 clash.name
             )));
         }
-        delonix_runtime_core::write_atomic(&self.path(name), base.to_string().as_bytes())?;
+        delonix_state::write_atomic(&self.path(name), base.to_string().as_bytes())?;
         self.get(name)
     }
 
@@ -1382,7 +1382,7 @@ impl NetworkStore {
         };
         upsert("label.", labels);
         upsert("annotation.", annotations);
-        delonix_runtime_core::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
+        delonix_state::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
         self.get(name)
     }
 
@@ -1440,7 +1440,7 @@ impl NetworkStore {
             "driver=overlay\nbase={base}\nvni={vni}\npeers={}\n{wgip_line}",
             peers.join(",")
         );
-        delonix_runtime_core::write_atomic(&self.path(name), body.as_bytes())?;
+        delonix_state::write_atomic(&self.path(name), body.as_bytes())?;
         self.get(name)
     }
 
@@ -1521,7 +1521,7 @@ impl NetworkStore {
         if !out.iter().any(|l| l.starts_with("peers=")) {
             out.push(new_line);
         }
-        delonix_runtime_core::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
+        delonix_state::write_atomic(&self.path(name), (out.join("\n") + "\n").as_bytes())?;
         self.get(name)
     }
 
@@ -1582,7 +1582,7 @@ impl NetworkStore {
         );
         let body =
             format!("driver={driver}\nparent={parent}\nsubnet={subnet}\ngateway={gateway}\n");
-        delonix_runtime_core::write_atomic(&self.path(name), body.as_bytes())?;
+        delonix_state::write_atomic(&self.path(name), body.as_bytes())?;
         self.get(name)
     }
 

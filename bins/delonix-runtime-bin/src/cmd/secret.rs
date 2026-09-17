@@ -1,5 +1,5 @@
 //! `delonix secret` — runtime secret vault (Secret Manager, docker/k8s
-//! style). Thin wrapper over `delonix_runtime_core::SecretStore`, which already
+//! style). Thin wrapper over `delonix_state::SecretStore`, which already
 //! encrypts at rest (XChaCha20-Poly1305 under a local master key).
 //!
 //! It is the producer of the secrets that `container run --secret <name>` consumes.
@@ -11,8 +11,9 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use clap::Subcommand;
-use delonix_runtime_core::secret::{parse_env_file, valid_name};
-use delonix_runtime_core::{Error, Result, Secret, SecretStore};
+use delonix_runtime_core::{Error, Result};
+use delonix_state::secret::{parse_env_file, valid_name};
+use delonix_state::{Secret, SecretStore};
 use serde::Deserialize;
 
 use super::manifest::{self, ManifestDoc};
@@ -36,7 +37,7 @@ struct SecretLsRow {
 /// same distinction `volume.rs`'s `volume_user_names`/`network.rs`'s
 /// `network_user_names` already draw.
 fn secret_user_names(name: &str) -> Option<Vec<String>> {
-    let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
+    let store = delonix_state::Store::open(state_root().join("containers")).ok()?;
     let cs = store.list().ok()?;
     Some(
         cs.into_iter()
@@ -502,10 +503,13 @@ pub fn run(action: SecretCmd) -> Result<()> {
             force,
         } => {
             if !valid_name(&name) {
-                return Err(Error::Invalid(super::po::tf(
-                    "invalid secret name: {name}",
-                    &[("name", &format!("{name:?}"))],
-                )));
+                return Err(Error::coded(
+                    1801,
+                    Error::Invalid(super::po::tf(
+                        "invalid secret name: {name}",
+                        &[("name", &format!("{name:?}"))],
+                    )),
+                ));
             }
             // Checked BEFORE parsing any input source, so a refusal is instant
             // and never depends on an `.env` file/env var actually resolving.
@@ -774,7 +778,7 @@ pub fn run(action: SecretCmd) -> Result<()> {
             // Distinct "no such secret" vs. "no such key" — same pattern as `Unset`.
             store.load(&name)?;
             let mut buf = vec![0u8; length];
-            delonix_runtime_core::cred_vault::random_bytes(&mut buf)?;
+            delonix_state::cred_vault::random_bytes(&mut buf)?;
             let value = hex_encode(&buf);
             let mut rotated = false;
             store.update(&name, |s| {
@@ -815,7 +819,7 @@ mod tests {
     use super::{
         hex_encode, inspect_view, parse_kv, read_env_keys, valid_env_name, FromEnv, Secret,
     };
-    use delonix_runtime_core::SecretStore;
+    use delonix_state::SecretStore;
     use std::collections::BTreeMap;
 
     #[test]
@@ -843,7 +847,7 @@ mod tests {
             .unwrap();
 
         let mut buf = [0u8; 16];
-        delonix_runtime_core::cred_vault::random_bytes(&mut buf).unwrap();
+        delonix_state::cred_vault::random_bytes(&mut buf).unwrap();
         let new_value = hex_encode(&buf);
         let mut rotated = false;
         store

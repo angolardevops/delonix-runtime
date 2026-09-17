@@ -45,7 +45,7 @@ fn cands<I: IntoIterator<Item = String>>(nomes: I) -> Vec<CompletionCandidate> {
 /// `exec`/`logs` the live ones. Filtering by state here would give a TAB that "hides"
 /// the container the user is actually trying to type.
 pub fn containers() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) else {
+    let Ok(store) = delonix_state::Store::open(state_root().join("containers")) else {
         return Vec::new();
     };
     cands(store.list().unwrap_or_default().into_iter().map(|c| c.name))
@@ -94,7 +94,7 @@ pub fn vms() -> Vec<CompletionCandidate> {
 /// Kind-mode clusters — derived from the nodes' label, which is the source of truth
 /// (there is no separate "cluster" record; see `cmd::kindmode::list`).
 pub fn clusters() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) else {
+    let Ok(store) = delonix_state::Store::open(state_root().join("containers")) else {
         return Vec::new();
     };
     let mut nomes: Vec<String> = store
@@ -130,7 +130,7 @@ pub fn cached_kubeconfigs() -> Vec<CompletionCandidate> {
 
 /// Names of the vault secrets.
 pub fn secrets() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_runtime_core::SecretStore::open(state_root()) else {
+    let Ok(store) = delonix_state::SecretStore::open(state_root()) else {
         return Vec::new();
     };
     cands(store.list().into_iter().map(|s| s.name))
@@ -140,7 +140,7 @@ pub fn secrets() -> Vec<CompletionCandidate> {
 /// where pod membership lives (there is no pod registry; see `cmd::pod`).
 /// Deduped, because a pod of N containers carries the label N times.
 pub fn pods() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) else {
+    let Ok(store) = delonix_state::Store::open(state_root().join("containers")) else {
         return Vec::new();
     };
     let mut nomes: Vec<String> = store
@@ -177,7 +177,7 @@ pub fn tunnels() -> Vec<CompletionCandidate> {
 /// not as the collision it is.
 pub fn workloads() -> Vec<CompletionCandidate> {
     let mut nomes: Vec<String> = Vec::new();
-    if let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) {
+    if let Ok(store) = delonix_state::Store::open(state_root().join("containers")) {
         nomes.extend(store.list().unwrap_or_default().into_iter().map(|c| c.name));
     }
     nomes.extend(
@@ -251,7 +251,7 @@ const NAMESPACE_SOURCES: &[(&str, NsSource)] = &[
 ];
 
 fn ns_from_containers(root: &std::path::Path) -> Vec<String> {
-    let Ok(store) = delonix_runtime_core::Store::open(root.join("containers")) else {
+    let Ok(store) = delonix_state::Store::open(root.join("containers")) else {
         return Vec::new();
     };
     store
@@ -358,7 +358,7 @@ pub fn containers_or_pods() -> Vec<CompletionCandidate> {
 /// the exact failure the rule at the top of this file forbids.
 pub fn netns() -> Vec<CompletionCandidate> {
     let mut names: Vec<String> = Vec::new();
-    if let Ok(store) = delonix_runtime_core::Store::open(state_root().join("containers")) {
+    if let Ok(store) = delonix_state::Store::open(state_root().join("containers")) {
         let all = store.list().unwrap_or_default();
         names.extend(
             all.iter()

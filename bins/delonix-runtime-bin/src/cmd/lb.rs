@@ -51,8 +51,8 @@ pub(crate) fn ensure_haproxy(target: &SshTarget, backend_ips: &[String]) -> Resu
     // Private temp file (O_EXCL + 0600), not a guessable name in world-writable
     // `/tmp`: the old form could be pre-planted as a symlink to redirect this
     // write, the same hole already closed elsewhere in this codebase.
-    let tmp = delonix_runtime_core::write_private_temp("delonix-haproxy.cfg", cfg.as_bytes())
-        .map_err(|e| {
+    let tmp =
+        delonix_state::write_private_temp("delonix-haproxy.cfg", cfg.as_bytes()).map_err(|e| {
             Error::Invalid(format!(
                 "{}: {e}",
                 super::po::t("writing local temporary haproxy.cfg")

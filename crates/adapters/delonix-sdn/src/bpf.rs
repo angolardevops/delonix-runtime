@@ -89,7 +89,7 @@ fn has_cap_bpf() -> bool {
 /// own BPF program loaded into the kernel by a privileged process.
 fn stage_object() -> Option<std::path::PathBuf> {
     let bytes = object_bytes()?;
-    delonix_runtime_core::write_private_temp("delonix_flow.bpf.o", bytes).ok()
+    delonix_state::write_private_temp("delonix_flow.bpf.o", bytes).ok()
 }
 
 /// Load the programs + shared map ONCE, pinned under [`PIN_DIR`]. Idempotent: if

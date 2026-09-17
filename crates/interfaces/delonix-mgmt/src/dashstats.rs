@@ -103,7 +103,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
     let mut containers_running = 0u64;
     let mut containers_total = 0u64;
     let mut running_ids: Vec<String> = Vec::new();
-    if let Ok(store) = delonix_runtime_core::Store::open(root.join("containers")) {
+    if let Ok(store) = delonix_state::Store::open(root.join("containers")) {
         if let Ok(list) = store.list() {
             containers_total = list.len() as u64;
             for mut c in list {
@@ -132,7 +132,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
         .and_then(|s| s.list())
         .map(|l| l.len() as u64)
         .unwrap_or(0);
-    let secrets_total = delonix_runtime_core::SecretStore::open(root)
+    let secrets_total = delonix_state::SecretStore::open(root)
         .map(|s| s.list().len() as u64)
         .unwrap_or(0);
 
@@ -204,7 +204,7 @@ pub fn collect(root: &Path, include_network: bool, include_storage: bool) -> Das
 /// `cmd/dash.rs`'s slow background refresh for the real caller.
 pub fn collect_container_net(root: &Path) -> std::collections::HashMap<String, (u64, u64)> {
     let mut out = std::collections::HashMap::new();
-    if let Ok(store) = delonix_runtime_core::Store::open(root.join("containers")) {
+    if let Ok(store) = delonix_state::Store::open(root.join("containers")) {
         if let Ok(list) = store.list() {
             for mut c in list {
                 delonix_linux::reconcile_status(&mut c);

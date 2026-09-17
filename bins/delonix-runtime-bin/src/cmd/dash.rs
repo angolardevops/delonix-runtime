@@ -278,7 +278,7 @@ impl DashData {
         let images = delonix_oci::ImageStore::open(root)
             .and_then(|s| s.list())
             .unwrap_or_default();
-        let secrets = delonix_runtime_core::SecretStore::open(root)
+        let secrets = delonix_state::SecretStore::open(root)
             .map(|s| s.list().len())
             .unwrap_or(0);
 

@@ -11,10 +11,9 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
-use serde::{Deserialize, Serialize};
-
 use crate::cred_vault::CredVault;
 use crate::{Error, Result};
+pub use delonix_model::secret::{parse_env_file, valid_env_key, valid_name, Secret};
 
 // The per-writer temp sequence that used to live here moved into
 // `crate::write_atomic_mode`, along with the `fsync` and the atomic mode that
@@ -52,41 +51,6 @@ impl Drop for FileLock {
         // depend on that.
         unsafe { libc::flock(self.0.as_raw_fd(), libc::LOCK_UN) };
     }
-}
-
-/// A named secret: a set of `KEY=value` pairs (env).
-#[derive(Serialize, Deserialize, Clone, Debug, Default)]
-pub struct Secret {
-    /// Secret name (reference used by `run --secret <name>`).
-    pub name: String,
-    /// key→value pairs. The keys are environment variable names.
-    #[serde(default)]
-    pub data: BTreeMap<String, String>,
-    /// Creation/update instant (Unix seconds).
-    #[serde(default)]
-    pub updated_unix: u64,
-}
-
-impl Secret {
-    /// The pairs in `KEY=value` format for injection as env.
-    pub fn env_pairs(&self) -> Vec<String> {
-        self.data.iter().map(|(k, v)| format!("{k}={v}")).collect()
-    }
-}
-
-/// Is an environment variable name valid? (`[A-Za-z_][A-Za-z0-9_]*`).
-pub fn valid_env_key(k: &str) -> bool {
-    let mut it = k.chars();
-    matches!(it.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
-        && it.all(|c| c.is_ascii_alphanumeric() || c == '_')
-}
-
-/// Valid secret name? (`[a-z0-9._-]`, non-empty, ≤ 64).
-pub fn valid_name(n: &str) -> bool {
-    !n.is_empty()
-        && n.len() <= 64
-        && n.chars()
-            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// Header of the encrypted files (distinguishes from the legacy plaintext JSON format).
@@ -140,11 +104,11 @@ impl SecretStore {
     /// per-writer-unique temp name (pid + atomic seq) `Store::save` uses.
     pub fn save(&self, s: &Secret) -> Result<()> {
         if !valid_name(&s.name) {
-            return Err(Error::Invalid(format!("invalid secret name: {:?}", s.name)));
+            return Err(Error::InvalidSecretName(s.name.clone()));
         }
         for k in s.data.keys() {
             if !valid_env_key(k) {
-                return Err(Error::Invalid(format!("invalid env key: {k:?}")));
+                return Err(Error::InvalidEnvKey(k.clone()));
             }
         }
         // value encrypted at-rest: header || nonce || ciphertext.
@@ -176,7 +140,7 @@ impl SecretStore {
         F: FnOnce(&mut Secret) -> bool,
     {
         if !valid_name(name) {
-            return Err(Error::Invalid(format!("invalid secret name: {name:?}")));
+            return Err(Error::InvalidSecretName(name.to_string()));
         }
         let _lock = FileLock::acquire(&self.lock_path(name));
         let mut s = self.load(name).unwrap_or_else(|_| Secret {
@@ -206,11 +170,11 @@ impl SecretStore {
     /// Secret JSON, injects its contents as container env.
     pub fn load(&self, name: &str) -> Result<Secret> {
         if !valid_name(name) {
-            return Err(Error::Invalid(format!("invalid secret name: {name:?}")));
+            return Err(Error::InvalidSecretName(name.to_string()));
         }
         let p = self.path(name);
         if !p.exists() {
-            return Err(Error::NotFound(format!("secret {name}")));
+            return Err(Error::NoSuchSecret(name.to_string()));
         }
         self.decode(&fs::read(p)?)
     }
@@ -240,11 +204,11 @@ impl SecretStore {
     /// bounded only by the invoking user's own permissions.
     pub fn remove(&self, name: &str) -> Result<()> {
         if !valid_name(name) {
-            return Err(Error::Invalid(format!("invalid secret name: {name:?}")));
+            return Err(Error::InvalidSecretName(name.to_string()));
         }
         let p = self.path(name);
         if !p.exists() {
-            return Err(Error::NotFound(format!("secret {name}")));
+            return Err(Error::NoSuchSecret(name.to_string()));
         }
         fs::remove_file(p)?;
         Ok(())
@@ -317,33 +281,6 @@ impl SecretStore {
         }
         Ok(())
     }
-}
-
-/// Parses a `.env` file (`KEY=value` lines; ignores empty ones and `#`).
-/// Accepts single/double quotes around the value. Returns the valid pairs.
-pub fn parse_env_file(content: &str) -> BTreeMap<String, String> {
-    let mut out = BTreeMap::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        let line = line.strip_prefix("export ").unwrap_or(line);
-        if let Some((k, v)) = line.split_once('=') {
-            let k = k.trim();
-            if !valid_env_key(k) {
-                continue;
-            }
-            let v = v.trim();
-            let v = v
-                .strip_prefix('"')
-                .and_then(|s| s.strip_suffix('"'))
-                .or_else(|| v.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')))
-                .unwrap_or(v);
-            out.insert(k.to_string(), v.to_string());
-        }
-    }
-    out
 }
 
 #[cfg(test)]

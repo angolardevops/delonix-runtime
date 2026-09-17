@@ -189,7 +189,7 @@ impl Streamer {
 /// already carries. This call site was left on the weaker test; the record here
 /// is the same `Container`, so the same guard applies unchanged.
 fn pod_sandbox_pid(base: &std::path::Path, sandbox_id: &str) -> Option<i32> {
-    let store = delonix_runtime_core::Store::open(base.join("containers")).ok()?;
+    let store = delonix_state::Store::open(base.join("containers")).ok()?;
     let c = store.load(&format!("pod-cri-{sandbox_id}")).ok()?;
     c.pid
         .filter(|p| delonix_linux::safe_to_signal(*p, c.pid_starttime))
@@ -716,7 +716,8 @@ pub(crate) fn write_all(fd: i32, mut data: &[u8]) {
 /// `pod_sandbox_pid` is ever weakened back to `is_alive`.
 #[cfg(test)]
 mod tests_sandbox_pid_identity {
-    use delonix_runtime_core::{Container, Store};
+    use delonix_runtime_core::Container;
+    use delonix_state::Store;
 
     fn store_with(tag: &str, pid: Option<i32>, starttime: Option<u64>) -> std::path::PathBuf {
         let base =

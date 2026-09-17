@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+delonix-model = { workspace = true }
 delonix-runtime-core = { workspace = true }
 serde = { workspace = true }
 # The spec types derive their JSON Schema next to their definition, so the

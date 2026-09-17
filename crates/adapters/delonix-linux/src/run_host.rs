@@ -56,9 +56,8 @@ impl delonix_compute::ports::RunHost for HostRuntime<'_> {
     }
 
     fn check_secret(&self, name: &str) -> Result<()> {
-        delonix_runtime_core::SecretStore::open(&self.state_root)?
-            .load(name)
-            .map(|_| ())
+        delonix_state::SecretStore::open(&self.state_root)?.load(name)?;
+        Ok(())
     }
 
     fn default_log_path(&self, id: &str) -> String {
@@ -86,8 +85,7 @@ fn ensure_apparmor(profile: &str, disabled: &dyn Fn(&str) -> Error) -> Result<()
         // the file and can rewrite it between our write and that read. Exactly
         // the class already fixed in `delonix-sdn::bpf` for the BPF object, and
         // the reason `write_private_temp` exists.
-        let path =
-            delonix_runtime_core::write_private_temp("delonix-default.aa", PROFILE.as_bytes())?;
+        let path = delonix_state::write_private_temp("delonix-default.aa", PROFILE.as_bytes())?;
         let out = std::process::Command::new("apparmor_parser")
             .arg("-r")
             .arg(&path)

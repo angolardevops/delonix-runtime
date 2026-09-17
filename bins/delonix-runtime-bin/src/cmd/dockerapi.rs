@@ -43,7 +43,8 @@ use serde_json::json;
 
 use delonix_oci::ImageStore;
 use delonix_runtime_core::peer_cred::peer_uid;
-use delonix_runtime_core::{Container, Error, Result, Status, Store};
+use delonix_runtime_core::{Container, Error, Result, Status};
+use delonix_state::Store;
 
 use super::container::RunOpts;
 use super::util::state_root;

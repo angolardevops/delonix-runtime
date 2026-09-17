@@ -531,7 +531,9 @@ Ten crates, one binary, no residing process:
    * - Crate
      - Responsibility
    * - ``delonix-runtime-core``
-     - Shared types: ``Container``, ``Vm``, ``Status`` (6-state), ``Store``, the secret vault.
+     - Shared types: ``Container``, ``Vm``, ``Status`` (6-state).
+   * - ``delonix-state``
+     - Persisted state: ``Store``/``JsonStore`` behind ``flock``, atomic writes, the encrypted secret vault.
    * - ``delonix-linux`` / ``delonix-runtime-bin``
      - The runtime (clone/namespaces/cgroups, create/stop/exec, reconcile) + the ``delonix`` CLI.
    * - ``delonix-sdn``

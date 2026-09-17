@@ -1120,7 +1120,7 @@ struct VolumeLsRow {
 /// already draw for the same reason: a view read before a destructive `rm`
 /// must not let the two collapse into the same cell.
 fn volume_user_names(mountpoint: &str) -> Option<Vec<String>> {
-    let store = delonix_runtime_core::Store::open(state_root().join("containers")).ok()?;
+    let store = delonix_state::Store::open(state_root().join("containers")).ok()?;
     let cs = store.list().ok()?;
     Some(
         cs.into_iter()

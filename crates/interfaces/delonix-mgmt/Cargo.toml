@@ -7,6 +7,7 @@ description = "API de gestão local do Delonix Runtime (HTTP+JSON sobre unix soc
 repository = "https://github.com/angolardevops/delonix-runtime"
 
 [dependencies]
+delonix-state = { workspace = true }
 delonix-runtime-core = { workspace = true }
 delonix-telemetry = { workspace = true }
 delonix-linux = { workspace = true }

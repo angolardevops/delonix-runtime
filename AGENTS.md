@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 21 crates.
+[README.md](README.md) para a arquitectura dos 22 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -197,7 +197,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 ```
 crates/foundation/   delonix-runtime-core, delonix-net-rules
 crates/contexts/     delonix-security-runtime
-crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-volume, delonix-vm, delonix-telemetry
+crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
 crates/providers/    delonix-proxmox, delonix-truenas
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
@@ -6329,11 +6329,12 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (21 crates)
+## Arquitetura (22 crates)
 
 | Crate | Responsabilidade |
 |---|---|
-| `delonix-runtime-core` | tipos partilhados: `Container`, `Vm`, `Status` (6 estados), `Store`/`JsonStore`, typestate, deteção de virtualização, Secret Manager |
+| `delonix-runtime-core` | tipos partilhados: `Container`, `Vm`, `Status` (6 estados), typestate, deteção de virtualização — os ficheiros que os guardam saíram para o `delonix-state` |
+| `delonix-state` | estado persistido (ADR-0040 P3): `Store`/`JsonStore` com `flock`, escrita atómica e o cofre de segredos cifrado em repouso (`SecretStore`/`CredVault`); erros próprios com número no dicionário (DX-4101, DX-18xx, DX-9003/9004). O modelo puro do segredo (`Secret`, validação de nomes, `.env`) ficou no `delonix-model` |
 | `delonix-telemetry` | observabilidade: logging estruturado (`tracing`), spans OpenTelemetry/OTLP e as métricas Prometheus partilhadas pelo CRI e pela `mgmt`. Saiu do `delonix-runtime-core` na P3 do ADR-0040: a fundação não carrega um exportador, e todo o crate que só precisava de um `Container` compilava um cliente OTLP |
 | `delonix-linux` / `delonix-runtime-bin` | runtime de containers (clone/namespaces/cgroups, create/stop/exec, reconcile_status) + a CLI `delonix` completa (container/image/build/vm/volumes/network — ver secção "CLI" acima) |
 | `delonix-model` | fundação PURA do ADR-0040: o que qualquer camada nomeia sem depender de mecanismo. Tem o tipo de erro partilhado e o código `DX_*` de cada classe (`error`, re-exportado pelo `delonix-runtime-core` com o mesmo caminho), os nomes gerados (`names`) e as classes de saída (`exitcode`: `Error` → código de saída); os ids e o `ResourceMeta` entram nas fatias seguintes da P2 |

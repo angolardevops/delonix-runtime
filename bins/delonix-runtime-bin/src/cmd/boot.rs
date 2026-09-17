@@ -10,7 +10,8 @@
 use clap::Subcommand;
 use delonix_linux::{self as runtime};
 use delonix_oci::ImageStore;
-use delonix_runtime_core::{Result, Store};
+use delonix_runtime_core::Result;
+use delonix_state::Store;
 
 use super::util::open_stores;
 
