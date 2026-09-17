@@ -163,7 +163,7 @@ context boundaries gives **one vocabulary** across YAML, proto, crates and docs.
 
 | Crate | Comes from | Implements |
 |---|---|---|
-| `delonix-linux` | `delonix-runtime` | `WorkloadRuntime`, `SandboxProvider` — namespaces, cgroups, mounts, capabilities, seccomp |
+| `delonix-linux` | `delonix-runtime` | `WorkloadRuntime`, `SandboxProvider`, `DeviceResolver` (CDI) — namespaces, cgroups, mounts, capabilities, seccomp, devices |
 | `delonix-sdn` | `delonix-net` | `NetworkProvider` — netns holder, nftables, slirp, DNS, DHCP, overlay, WireGuard, CNI client |
 | `delonix-oci` | `delonix-image` | `ImageRegistry`, `ImageStore` — registry client, CAS, layers, overlay, image layout |
 | `delonix-scanner` | `delonix-scan` | `Scanner` — SBOM, CVE |
@@ -230,7 +230,7 @@ The layer is readable from the path, and the D7 fitness test uses it: a crate un
 | Destination | Modules today (`bins/delonix-runtime-bin/src/cmd/`) |
 |---|---|
 | `delonix-model` | `names` (generated names, used by compute and cluster) |
-| `delonix-compute` | `container`, `pod`, `workload`, `vm` (use cases), `cdi` |
+| `delonix-compute` | `container`, `pod`, `workload`, `vm` (use cases) — `cdi` is an adapter, not domain: it reads `/etc/cdi` and parses YAML specs, so it lives in `delonix-linux` (today `delonix-runtime`) as the `DeviceResolver` |
 | `delonix-networking` | `network`, `netroute`, `firewall`, `network_access_rule`, `service`, `dependency`, `namespace`, `vlan`, `netns`, `flow`, `capture`, `vmbridge` (use cases; their dataplane halves are already in `delonix-sdn`) |
 | `delonix-gateway` | `httproute`, `tunnel` |
 | `delonix-storage` | `volume`, `storage`, `sharevolume`, `provision`, `backup`, `rbackup` |
