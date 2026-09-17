@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>1. Preparing your environment · Delonix Runtime — Contributor handbook</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
+--code-bg:#0f172a;--code-ink:#e2e8f0;--inline:#f1f3f5;--warn:#fff7db;--warn-line:#e0b400;--shadow:0 12px 40px rgba(0,0,0,.18)}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;--bg:#0d1117;--side:#10151c;
+--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;--inline:#1b212b;--warn:#2a2410;--warn-line:#8a6d00;--shadow:0 12px 40px rgba(0,0,0,.6)}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:290px minmax(0,1fr) 240px;max-width:1640px;margin:0 auto}
+nav.side{background:var(--side);border-right:1px solid var(--line);padding:1.1rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{font-weight:700;font-size:1.05rem}.subtitle{color:var(--muted);font-size:.82rem;margin-bottom:.8rem}
+.tools{display:flex;gap:.4rem;margin-bottom:1rem;flex-wrap:wrap}
+.searchbtn{flex:1;display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);background:var(--bg);color:var(--muted);
+border-radius:8px;padding:.35rem .55rem;font:inherit;font-size:.85rem;cursor:pointer;min-width:0}
+kbd{font:600 .72rem ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:.05rem .3rem;background:var(--side);color:var(--muted)}
+.searchbtn kbd{margin-left:auto}
+select.lang{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:.3rem .4rem;font:inherit;font-size:.85rem}
+nav.side a{display:block;padding:.3rem .55rem;border-radius:6px;color:var(--ink);font-size:.92rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{padding:2rem 3rem 5rem;min-width:0}
+aside.toc{position:sticky;top:0;height:100vh;overflow-y:auto;padding:2rem 1rem;font-size:.84rem;border-left:1px solid var(--line)}
+aside.toc h5{margin:0 0 .5rem;text-transform:uppercase;letter-spacing:.08em;font-size:.7rem;color:var(--muted)}
+aside.toc ul{list-style:none;padding-left:.7rem;margin:0}aside.toc>div>ul{padding-left:0}aside.toc a{color:var(--muted)}aside.toc li{margin:.2rem 0}
+h1{font-size:2rem;line-height:1.25;margin-top:0}h2{margin-top:2.4rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}h3{margin-top:1.8rem}
+h2,h3{scroll-margin-top:1rem}
+code{font:.87em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--inline);padding:.1em .35em;border-radius:5px}
+a.src code{color:var(--accent);text-decoration:underline dotted}
+.crate-src{font-size:.72rem;font-weight:600;vertical-align:middle;border:1px solid var(--accent);border-radius:99px;padding:.05rem .5rem;margin-left:.4rem}
+.code{position:relative;margin:1rem 0}
+.code pre{background:var(--code-bg);color:var(--code-ink);padding:2.1rem 1.1rem 1rem;border-radius:10px;overflow-x:auto;line-height:1.5;margin:0;color-scheme:dark;scrollbar-width:thin;scrollbar-color:#475569 transparent}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#475569;border-radius:8px}.code pre::-webkit-scrollbar-track{background:transparent}
+.code pre code{background:none;padding:0;color:inherit;font-size:.86em}.code pre code.hljs{background:none;padding:0}
+.copy{position:absolute;top:.45rem;right:.45rem;border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:6px;
+font:600 .72rem -apple-system,sans-serif;padding:.2rem .5rem;cursor:pointer;opacity:.75}.copy:hover,.copy:focus{opacity:1}
+pre.mermaid{background:var(--side);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:1rem;text-align:center;overflow-x:auto}
+.tablewrap{overflow-x:auto;margin:1rem 0}table{border-collapse:collapse;font-size:.9rem;width:100%}
+th,td{border:1px solid var(--line);padding:.45rem .6rem;vertical-align:top;text-align:left}th{background:var(--side)}
+blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);background:var(--accent-soft)}
+.notice{background:var(--warn);border:1px solid var(--warn-line);border-radius:8px;padding:.6rem .9rem;margin-bottom:1.4rem;font-size:.92rem}
+.pager{display:flex;justify-content:space-between;gap:1rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1rem;font-size:.92rem}
+.pager span{color:var(--muted);font-size:.78rem;display:block}.pager .next{text-align:right;margin-left:auto}
+.foot{font-size:.8rem;color:var(--muted);margin-top:1.5rem}
+#search{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding:10vh 1rem;z-index:50}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.sbox input{width:100%;border:0;border-bottom:1px solid var(--line);padding:1rem 1.1rem;font:inherit;font-size:1.05rem;background:var(--bg);color:var(--ink);outline:none}
+.sres{max-height:60vh;overflow-y:auto;margin:0;padding:.3rem;list-style:none}
+.sres a{display:block;padding:.55rem .7rem;border-radius:8px;color:var(--ink)}.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{font-size:.74rem;color:var(--muted)}.sres .sh{font-weight:600}.sres .st{font-size:.82rem;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sres mark{background:none;color:var(--accent);font-weight:700}.sempty{padding:1rem;color:var(--muted)}
+.shelp{display:flex;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--line);font-size:.75rem;color:var(--muted)}
+@media (max-width:1100px){.layout{grid-template-columns:250px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:760px){.layout{display:block}nav.side{position:static;height:auto}main{padding:1.2rem 1rem}}
+</style></head>
+<body><div class="layout">
+<nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Contributor handbook</div>
+<div class="tools"><button class="searchbtn" type="button">🔍 Search <kbd>Ctrl K</kbd></button>
+<select class="lang" aria-label="Language"><option value="../en/01-environment.html" selected>EN · English</option><option value="../pt-AO/01-environment.html">PT-AO · Português (Angola)</option><option value="../fr-FR/01-environment.html">FR-FR · Français</option></select></div>
+<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="00-start-here.html">0. Start here</a>
+<a class="on" href="01-environment.html">1. Preparing your environment</a>
+<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
+<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
+<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="05-architecture.html">5. Architecture</a>
+<a class="" href="06-crates.html">6. The crates</a>
+<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
+<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="12-coding-conventions.html">12. Coding conventions</a>
+<a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
+<a class="" href="14-glossary.html">14. Glossary</a></nav>
+<main><h1 id="1-preparing-your-environment">1. Preparing your environment</h1>
+<p>Delonix Runtime is <strong>Linux-only</strong>: every primitive it uses — namespaces, cgroups v2, nftables,
+<code>pivot_root</code>, the new mount API — lives in the Linux kernel. You can <em>compile</em> most of the
+workspace and run its pure-logic tests on any Linux box with the toolchain below; to <em>run</em>
+containers and exercise the live paths you need a host that satisfies the kernel and package
+requirements in this page.</p>
+<p>A lot of what looks like an engine bug on a fresh machine is a host prerequisite. Read the
+<a href="#known-host-traps">Known host traps</a> section before you open an issue.</p>
+<h2 id="toolchain">Toolchain</h2>
+<!-- dev-docs:begin toolchain -->
+<ul>
+<li><strong>Rust toolchain:</strong> <code>1.96.0</code> (pinned in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>; <code>rustup</code> installs it on the first <code>cargo</code> call)</li>
+<li><strong>Components:</strong> <code>rustfmt</code>, <code>clippy</code></li>
+</ul>
+<!-- dev-docs:end toolchain -->
+
+<p>Install <a href="https://rustup.rs/"><code>rustup</code></a> and let it pick up the pinned channel; do not override it
+with <code>stable</code>. CI uses exactly the same file (<code>rustup show</code> in every job).</p>
+<h3 id="protoc-required-to-build"><code>protoc</code> (required to build)</h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compiles the Kubernetes CRI protobuf with
+<code>tonic-build</code>/<code>prost</code>, which needs the Protocol Buffers compiler on <code>PATH</code>. The <code>delonix</code> binary
+depends on <code>delonix-cri</code>, so <strong>a plain <code>cargo build --workspace</code> fails without it</strong>:</p>
+<div class="code" data-shell><pre><code class="language-bash"># Debian / Ubuntu
+sudo apt install protobuf-compiler
+# Fedora / RHEL family
+sudo dnf install protobuf-compiler
+</code></pre></div>
+<p>Or download a release from <a href="https://github.com/protocolbuffers/protobuf/releases">https://github.com/protocolbuffers/protobuf/releases</a>. CI installs
+<code>protobuf-compiler</code> from apt in every job that compiles.</p>
+<h3 id="optional-tools-only-for-specific-gates">Optional tools, only for specific gates</h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Needed for</th>
+<th>Where it is pinned</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Python 3.11+</td>
+<td>every <code>scripts/*.py</code> gate (they use <code>tomllib</code>)</td>
+<td>—</td>
+</tr>
+<tr>
+<td><code>buf</code> v1.73.0 and <code>protoc-gen-openapi</code> v0.7.1 (Go toolchain to install them)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a></td>
+<td><code>contract</code> job in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a></td>
+</tr>
+<tr>
+<td><code>cargo-deny</code></td>
+<td>the supply-chain check</td>
+<td><code>deny</code> job, config in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
+</tr>
+<tr>
+<td>Python <code>markdown</code> module</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> (renders <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>)</td>
+<td><code>docs</code> job</td>
+</tr>
+<tr>
+<td><code>groff</code></td>
+<td>checking the generated man pages</td>
+<td><code>docs</code> job</td>
+</tr>
+</tbody>
+</table></div>
+<p>See <a href="02-build-and-test.html">02 — Clone, build and test</a> for how each one is run.</p>
+<h2 id="kernel-requirements">Kernel requirements</h2>
+<p>These are the kernel features the engine relies on. The installer (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>) and
+<code>delonix system doctor</code> check most of them for you.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Requirement</th>
+<th>Why</th>
+<th>How to check</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>cgroup v2</strong> (unified hierarchy)</td>
+<td>resource limits and accounting are written to <code>/sys/fs/cgroup</code></td>
+<td><code>stat -fc %T /sys/fs/cgroup</code> prints <code>cgroup2fs</code></td>
+</tr>
+<tr>
+<td><strong>Unprivileged user namespaces</strong></td>
+<td>the rootless model: the engine becomes "root" only inside its own user namespace</td>
+<td><code>unshare -r -n true</code> succeeds</td>
+</tr>
+<tr>
+<td><strong><code>/dev/net/tun</code></strong></td>
+<td><code>slirp4netns</code> (rootless networking) and VM taps</td>
+<td><code>test -e /dev/net/tun</code></td>
+</tr>
+<tr>
+<td><strong>overlayfs</strong> with the new mount API and <code>lowerdir+</code> (Linux <strong>6.5</strong> or newer)</td>
+<td>container root filesystems are overlay mounts built with <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>, one <code>lowerdir+</code> call per layer — see <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
+<td><code>uname -r</code></td>
+</tr>
+<tr>
+<td><strong><code>br_netfilter</code></strong> loaded, <code>net.bridge.bridge-nf-call-iptables=1</code></td>
+<td>namespace isolation is enforced in nftables <code>forward</code> chains; without this module traffic between two containers on the same bridge never reaches them, and isolation is silently inert</td>
+<td><code>delonix system doctor</code></td>
+</tr>
+<tr>
+<td><strong>KVM</strong> (<code>/dev/kvm</code>)</td>
+<td>only for microVMs — see <a href="09-microvm-setup.html">09</a></td>
+<td><code>test -w /dev/kvm</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>The 6.5 requirement has <strong>no preflight check</strong>: an older kernel fails when the first container
+rootfs is mounted, not at startup (ADR-0037 records this as a deliberate choice).</p>
+<p>On older Debian kernels unprivileged user namespaces are switched off by
+<code>kernel.unprivileged_userns_clone=0</code>; the installer sets it to <code>1</code>.</p>
+<h2 id="host-packages">Host packages</h2>
+<p>The source of truth is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, which is also the
+official installer (it is published as a release asset). It detects the package manager through
+<code>/etc/os-release</code> and supports <strong>apt</strong> (Debian, Ubuntu and derivatives), <strong>dnf</strong> (Fedora, RHEL,
+CentOS Stream, Rocky, AlmaLinux), <strong>zypper</strong> (openSUSE, SLES) and <strong>pacman</strong> (Arch and
+derivatives). Prebuilt binaries exist only for <strong>x86_64</strong>; on other architectures build from
+source.</p>
+<p>To run containers the engine needs:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Package (apt / dnf names)</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>slirp4netns</code></td>
+<td><code>slirp4netns</code></td>
+<td>rootless networking and published ports — without it <code>run -p</code> fails</td>
+</tr>
+<tr>
+<td><code>newuidmap</code> / <code>newgidmap</code></td>
+<td><code>uidmap</code> / <code>shadow-utils</code></td>
+<td>setuid helpers that map more than one uid into the user namespace; without them images with a non-root user fail in <code>chown()</code></td>
+</tr>
+<tr>
+<td><code>nft</code></td>
+<td><code>nftables</code></td>
+<td>SDN firewall, isolation and port DNAT</td>
+</tr>
+<tr>
+<td><code>ip</code></td>
+<td><code>iproute2</code> / <code>iproute</code></td>
+<td>veth, bridge and netns plumbing</td>
+</tr>
+<tr>
+<td><code>conntrack</code> (optional)</td>
+<td><code>conntrack</code> / <code>conntrack-tools</code></td>
+<td>cleaning up connections when a port is unpublished</td>
+</tr>
+</tbody>
+</table></div>
+<p>For VMs, <code>qemu-img</code>, <code>cloud-localds</code> (<code>cloud-image-utils</code>), <code>virsh</code> (libvirt) and/or
+Cloud Hypervisor with its firmware — see <a href="09-microvm-setup.html">09</a>. For building VM images,
+<code>libguestfs-tools</code> (<code>install.sh --with-image-build</code>).</p>
+<p>You also need a <strong>subordinate uid/gid range</strong> for your user in <code>/etc/subuid</code> and <code>/etc/subgid</code>;
+without it the user namespace can map only one uid.</p>
+<h3 id="the-quickest-way-to-a-working-host">The quickest way to a working host</h3>
+<p>You do not have to replicate the installer by hand. To install only the host dependencies and
+configuration, keeping the binary you build yourself:</p>
+<div class="code" data-shell><pre><code class="language-bash">bash scripts/install.sh --no-binary
+</code></pre></div>
+<p>Read the flag list at the top of the script first: some flags change host-wide security settings
+(<code>--low-ports</code> lets any local program bind ports from 80, <code>--with-image-build</code> makes
+<code>/boot/vmlinuz-*</code> world-readable), and <code>--no-tune</code> skips the kernel modules and sysctls, including
+<code>br_netfilter</code>.</p>
+<h3 id="memory-and-disk">Memory and disk</h3>
+<p>There is no fixed minimum. What costs resources is what you run: container images and layers,
+VM disks, and the Rust <code>target/</code> directory itself (debug builds of the whole workspace take
+several gigabytes). Keep an eye on free disk space — kubelets in a local cluster start evicting
+pods on disk pressure, which then looks like an engine problem.</p>
+<h2 id="diagnosing-the-host">Diagnosing the host</h2>
+<p>Build the binary (see <a href="02-build-and-test.html">02</a>) and ask it. The commands below are
+read-only unless you pass <code>--delegate</code>:</p>
+<div class="code" data-shell><pre><code class="language-bash">./target/debug/delonix system doctor          # is every prerequisite met? says how to fix each
+./target/debug/delonix system info            # rootless?, cgroup delegation, network infra, counts
+./target/debug/delonix system setup           # diagnose cgroup delegation
+./target/debug/delonix system resources       # which controllers are delegated, which flags are ignored
+</code></pre></div>
+<p><code>delonix system doctor --strict</code> exits non-zero when a check fails, which is useful in a
+provisioning script. If you run these on a machine that already has a Delonix installation in use,
+isolate the state first (see <a href="02-build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a>).</p>
+<h2 id="known-host-traps">Known host traps</h2>
+<h3 id="ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: AppArmor blocks user namespaces for your dev binary</h3>
+<p>Recent Ubuntu sets <code>kernel.apparmor_restrict_unprivileged_userns=1</code>. A binary without an AppArmor
+profile then cannot create a user namespace, and the engine dies at <code>unshare()</code> with <code>EPERM</code> —
+which reads like an engine bug.</p>
+<p><code>install.sh</code> installs a profile (<code>/etc/apparmor.d/delonix</code>, <code>flags=(unconfined)</code> with <code>userns</code>),
+but that profile is <strong>bound to one path</strong>: <code>&lt;install dir&gt;/delonix</code> (<code>/usr/local/bin/delonix</code> by
+default, <code>~/.local/bin/delonix</code> with <code>--user</code>). A binary you just built at
+<code>target/debug/delonix</code> — or copied to <code>/tmp</code> — is <strong>not</strong> covered.</p>
+<p>Options, from least to most invasive:</p>
+<ol>
+<li>Add a second profile for your development path (for example your worktree's
+   <code>target/debug/delonix</code>), following the same shape as the one the installer writes, and load it
+   with <code>sudo apparmor_parser -r &lt;file&gt;</code>. This touches nothing that is already running.</li>
+<li>Install your build to the profiled path (<code>sudo install -m 0755 target/debug/delonix /usr/local/bin/</code>)
+   — <strong>only on a machine where no Delonix workload is in use</strong>. The installed binary is what boot
+   units (<code>ExecStart=&lt;exe&gt; container start …</code>) and the servers re-execute, so on a host with live
+   workloads a debug build would silently become the production engine.</li>
+<li>Set <code>kernel.apparmor_restrict_unprivileged_userns=0</code> — this lowers a host-wide boundary; only
+   on a machine you own.</li>
+</ol>
+<h3 id="cgroup-delegation-limits-are-accepted-and-silently-ignored">cgroup delegation: limits are accepted and silently ignored</h3>
+<p><code>--memory</code>, <code>--cpus</code> and <code>--pids-limit</code> only work if the shell you run the engine from sits in a
+<strong>delegated</strong> cgroup. Without delegation the flags are parsed, accepted and inert: the container
+runs with no limit. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the
+same requirement.</p>
+<p>The common case is an <strong>SSH session</strong>: its <code>session-N.scope</code> is a <em>sibling</em> of
+<code>user@&lt;uid&gt;.service</code>, and moving a process between them requires writing to a cgroup owned by root.
+The per-command fix needs no root:</p>
+<div class="code" data-shell><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
+</code></pre></div>
+<p>For long-lived workloads, use a systemd <strong>user</strong> unit with <code>Delegate=yes</code>. Some hosts delegate only
+<code>cpu memory pids</code> to user sessions; <code>cpuset</code> and <code>io</code> may never be available rootless, and
+<code>delonix system resources</code> names the flags that will be ignored. <code>delonix system setup --delegate</code>
+writes a system-wide drop-in (needs root, takes effect at the next login) when the <code>cpu</code>
+controller itself is missing.</p>
+<h3 id="a-stale-delonix-on-your-path">A stale <code>delonix</code> on your <code>PATH</code></h3>
+<p>If Delonix is installed on the machine, <code>delonix</code> on your <code>PATH</code> is the installed release, not your
+tree. Always run <code>./target/debug/delonix</code> (or <code>target/release/delonix</code>) when you test a change.
+<code>--version</code> shows the commit and the distance from the last tag
+(<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>), because between releases two builds share the same
+version number.</p>
+<h3 id="other-traps-you-may-hit">Other traps you may hit</h3>
+<ul>
+<li><strong>Ports below 1024</strong> fail rootless with <code>slirp_add_hostfwd failed</code>: the port is bound by
+  <code>slirp4netns</code>, an unprivileged process. Use a high port, or opt in with <code>install.sh --low-ports</code>.</li>
+<li><strong>Hosted CI runners</strong> (GitHub-hosted) block unprivileged user namespaces. The chaos workflow
+  detects this and reports <code>skipped</code>, not <code>success</code>; to exercise the live paths you need a real
+  host, a self-hosted runner or a VM.</li>
+<li><strong>VM firmware and image-building traps</strong> (the Cloud Hypervisor firmware choice, an old <code>passt</code>
+  in libguestfs builds, <code>/boot/vmlinuz-*</code> permissions) are covered in <a href="09-microvm-setup.html">09</a>.</li>
+</ul>
+<div class="pager"><a href="00-start-here.html"><span>← Previous</span>0. Start here</a><a class="next" href="02-build-and-test.html"><span>Next →</span>2. Clone, build and test</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/01-environment.md" target="_blank" rel="noopener">Edit this page</a> · <code>docs/dev/01-environment.md</code></p></main>
+<aside class="toc"><h5>On this page</h5><div class="toc">
+<ul>
+<li><a href="#toolchain">Toolchain</a><ul>
+<li><a href="#protoc-required-to-build">protoc (required to build)</a></li>
+<li><a href="#optional-tools-only-for-specific-gates">Optional tools, only for specific gates</a></li>
+</ul>
+</li>
+<li><a href="#kernel-requirements">Kernel requirements</a></li>
+<li><a href="#host-packages">Host packages</a><ul>
+<li><a href="#the-quickest-way-to-a-working-host">The quickest way to a working host</a></li>
+<li><a href="#memory-and-disk">Memory and disk</a></li>
+</ul>
+</li>
+<li><a href="#diagnosing-the-host">Diagnosing the host</a></li>
+<li><a href="#known-host-traps">Known host traps</a><ul>
+<li><a href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: AppArmor blocks user namespaces for your dev binary</a></li>
+<li><a href="#cgroup-delegation-limits-are-accepted-and-silently-ignored">cgroup delegation: limits are accepted and silently ignored</a></li>
+<li><a href="#a-stale-delonix-on-your-path">A stale delonix on your PATH</a></li>
+<li><a href="#other-traps-you-may-hit">Other traps you may hit</a></li>
+</ul>
+</li>
+</ul>
+</div>
+</aside></div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-label="Search">
+<input type="search" placeholder="Search the handbook…" autocomplete="off"><ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span><span><kbd>Esc</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copy", "copied": "Copied", "no_results": "No results"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  // Copy buttons: shell blocks drop a leading "$ " prompt so the copied text runs as is.
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = document.createElement('button');
+    btn.className = 'copy'; btn.type = 'button'; btn.textContent = ui.copy;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.textContent = ui.copied; setTimeout(function(){ btn.textContent = ui.copy; }, 1400);
+      });
+    });
+    box.appendChild(btn);
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+  if (window.mermaid) mermaid.initialize({startOnLoad:true, securityLevel:'strict',
+    theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'});
+
+  // Search (Ctrl+K / Cmd+K): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){
+    const i = terms.length ? r.nt.indexOf(terms[0]) : -1;
+    const start = Math.max(0, i - 50);
+    return (start ? '…' : '') + r.t.slice(start, start + 160);
+  }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){
+        const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0);
+        if (!s) return; score += s;
+      }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + r.u + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span><br>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + ui.no_results + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape' && !modal.hidden) close();
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){
+    s.addEventListener('change', function(){ location.href = s.value; });
+  });
+})();
+</script>
+</body></html>

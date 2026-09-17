@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delonix Runtime — Contributor Handbook · Delonix Runtime — Contributor handbook</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
+--code-bg:#0f172a;--code-ink:#e2e8f0;--inline:#f1f3f5;--warn:#fff7db;--warn-line:#e0b400;--shadow:0 12px 40px rgba(0,0,0,.18)}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;--bg:#0d1117;--side:#10151c;
+--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;--inline:#1b212b;--warn:#2a2410;--warn-line:#8a6d00;--shadow:0 12px 40px rgba(0,0,0,.6)}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:290px minmax(0,1fr) 240px;max-width:1640px;margin:0 auto}
+nav.side{background:var(--side);border-right:1px solid var(--line);padding:1.1rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{font-weight:700;font-size:1.05rem}.subtitle{color:var(--muted);font-size:.82rem;margin-bottom:.8rem}
+.tools{display:flex;gap:.4rem;margin-bottom:1rem;flex-wrap:wrap}
+.searchbtn{flex:1;display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);background:var(--bg);color:var(--muted);
+border-radius:8px;padding:.35rem .55rem;font:inherit;font-size:.85rem;cursor:pointer;min-width:0}
+kbd{font:600 .72rem ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:.05rem .3rem;background:var(--side);color:var(--muted)}
+.searchbtn kbd{margin-left:auto}
+select.lang{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:.3rem .4rem;font:inherit;font-size:.85rem}
+nav.side a{display:block;padding:.3rem .55rem;border-radius:6px;color:var(--ink);font-size:.92rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{padding:2rem 3rem 5rem;min-width:0}
+aside.toc{position:sticky;top:0;height:100vh;overflow-y:auto;padding:2rem 1rem;font-size:.84rem;border-left:1px solid var(--line)}
+aside.toc h5{margin:0 0 .5rem;text-transform:uppercase;letter-spacing:.08em;font-size:.7rem;color:var(--muted)}
+aside.toc ul{list-style:none;padding-left:.7rem;margin:0}aside.toc>div>ul{padding-left:0}aside.toc a{color:var(--muted)}aside.toc li{margin:.2rem 0}
+h1{font-size:2rem;line-height:1.25;margin-top:0}h2{margin-top:2.4rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}h3{margin-top:1.8rem}
+h2,h3{scroll-margin-top:1rem}
+code{font:.87em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--inline);padding:.1em .35em;border-radius:5px}
+a.src code{color:var(--accent);text-decoration:underline dotted}
+.crate-src{font-size:.72rem;font-weight:600;vertical-align:middle;border:1px solid var(--accent);border-radius:99px;padding:.05rem .5rem;margin-left:.4rem}
+.code{position:relative;margin:1rem 0}
+.code pre{background:var(--code-bg);color:var(--code-ink);padding:2.1rem 1.1rem 1rem;border-radius:10px;overflow-x:auto;line-height:1.5;margin:0;color-scheme:dark;scrollbar-width:thin;scrollbar-color:#475569 transparent}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#475569;border-radius:8px}.code pre::-webkit-scrollbar-track{background:transparent}
+.code pre code{background:none;padding:0;color:inherit;font-size:.86em}.code pre code.hljs{background:none;padding:0}
+.copy{position:absolute;top:.45rem;right:.45rem;border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:6px;
+font:600 .72rem -apple-system,sans-serif;padding:.2rem .5rem;cursor:pointer;opacity:.75}.copy:hover,.copy:focus{opacity:1}
+pre.mermaid{background:var(--side);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:1rem;text-align:center;overflow-x:auto}
+.tablewrap{overflow-x:auto;margin:1rem 0}table{border-collapse:collapse;font-size:.9rem;width:100%}
+th,td{border:1px solid var(--line);padding:.45rem .6rem;vertical-align:top;text-align:left}th{background:var(--side)}
+blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);background:var(--accent-soft)}
+.notice{background:var(--warn);border:1px solid var(--warn-line);border-radius:8px;padding:.6rem .9rem;margin-bottom:1.4rem;font-size:.92rem}
+.pager{display:flex;justify-content:space-between;gap:1rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1rem;font-size:.92rem}
+.pager span{color:var(--muted);font-size:.78rem;display:block}.pager .next{text-align:right;margin-left:auto}
+.foot{font-size:.8rem;color:var(--muted);margin-top:1.5rem}
+#search{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding:10vh 1rem;z-index:50}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.sbox input{width:100%;border:0;border-bottom:1px solid var(--line);padding:1rem 1.1rem;font:inherit;font-size:1.05rem;background:var(--bg);color:var(--ink);outline:none}
+.sres{max-height:60vh;overflow-y:auto;margin:0;padding:.3rem;list-style:none}
+.sres a{display:block;padding:.55rem .7rem;border-radius:8px;color:var(--ink)}.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{font-size:.74rem;color:var(--muted)}.sres .sh{font-weight:600}.sres .st{font-size:.82rem;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sres mark{background:none;color:var(--accent);font-weight:700}.sempty{padding:1rem;color:var(--muted)}
+.shelp{display:flex;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--line);font-size:.75rem;color:var(--muted)}
+@media (max-width:1100px){.layout{grid-template-columns:250px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:760px){.layout{display:block}nav.side{position:static;height:auto}main{padding:1.2rem 1rem}}
+</style></head>
+<body><div class="layout">
+<nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Contributor handbook</div>
+<div class="tools"><button class="searchbtn" type="button">🔍 Search <kbd>Ctrl K</kbd></button>
+<select class="lang" aria-label="Language"><option value="../en/index.html" selected>EN · English</option><option value="../pt-AO/index.html">PT-AO · Português (Angola)</option><option value="../fr-FR/index.html">FR-FR · Français</option></select></div>
+<a class="on" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="00-start-here.html">0. Start here</a>
+<a class="" href="01-environment.html">1. Preparing your environment</a>
+<a class="" href="02-build-and-test.html">2. Clone, build and test</a>
+<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
+<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="05-architecture.html">5. Architecture</a>
+<a class="" href="06-crates.html">6. The crates</a>
+<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
+<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="12-coding-conventions.html">12. Coding conventions</a>
+<a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
+<a class="" href="14-glossary.html">14. Glossary</a></nav>
+<main><h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Contributor Handbook</h1>
+<p>This handbook is for people who want to <strong>change the engine</strong>: you cloned the repository today and
+want to send a first pull request without breaking your host or the engine. If you only want to
+<em>use</em> Delonix, start with the <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> and the
+<a href="https://angolardevops.github.io/delonix-runtime/">user documentation site</a> instead.</p>
+<!-- dev-docs:begin crate-count -->
+<p>The workspace has <strong>21 crates</strong> and ships <strong>4 binaries</strong> (<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>).</p>
+<!-- dev-docs:end crate-count -->
+
+<h2 id="what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not</h2>
+<p>Delonix Runtime is an execution abstraction for <strong>one node</strong>: it runs <strong>containers and microVMs</strong>
+and manages the networking and storage they need. It is declarative (its own Kinds, grouped by
+<code>apiVersion</code> — see <code>delonix api-resources</code>), and it talks to providers (the Linux kernel, libvirt,
+Cloud Hypervisor, Proxmox VE, the Kubernetes CRI) only through ports, never through
+<code>if provider == …</code> branches spread across the code.</p>
+<p>Three principles shape almost every review comment you will get:</p>
+<ul>
+<li><strong>Cloud native</strong> — plan / apply / drift, API-first (the CLI, the node API, the CRI and the MCP
+  server expose the same operations), observable through open standards.</li>
+<li><strong>Daemonless</strong> — no resident process by default. What must persist belongs to systemd or to a
+  per-workload process with a clear owner. A new daemon needs an ADR.</li>
+<li><strong>Rootless-first</strong> — the normal path runs without root; privilege is an explicit opt-in.</li>
+</ul>
+<p>And one boundary that is enforced by a CI gate: <strong>the engine knows no consumer.</strong> It does not know
+who calls it, and it has no notion of tenant, account, plan or billing. A requirement coming from a
+consumer enters as a generic engine capability, or it does not enter. The canonical text is the
+section <em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>.</p>
+<h2 id="two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative</h2>
+<p>Pages in this handbook mix two kinds of content:</p>
+<ul>
+<li><strong>Facts</strong> — which crates exist, their layer, who depends on whom, the binaries, the pinned
+  toolchain, the CI jobs. They live between <code>&lt;!-- dev-docs:begin &lt;key&gt; --&gt;</code> and
+  <code>&lt;!-- dev-docs:end &lt;key&gt; --&gt;</code> markers and are <strong>generated</strong> by <code>python3 scripts/dev_docs.py</code>
+  from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> and
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Never edit them by hand — CI runs <code>dev_docs.py --check</code> and fails.
+  If a fact is wrong, fix the source or the generator.</li>
+<li><strong>Narrative</strong> — why things are the way they are, how flows work, how to contribute. It is
+  written by hand and reviewed after each release. See <a href="11-publishing-docs.html">11 — Publishing the docs</a>.</li>
+</ul>
+<h2 id="reading-paths">Reading paths</h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>If you want to…</th>
+<th>Read, in order</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Start from zero, with no one to ask</strong></td>
+<td><a href="00-start-here.html">00</a> (keep <a href="14-glossary.html">14</a> open) → the path below that matches your change</td>
+</tr>
+<tr>
+<td><strong>Send a first PR</strong> (a CLI fix, a docs fix, a small feature)</td>
+<td><a href="00-start-here.html">00</a> → <a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="10-contributing-workflow.html">10</a> → <a href="12-coding-conventions.html">12</a> → <a href="06-crates.html">06</a> for the crate you touch</td>
+</tr>
+<tr>
+<td><strong>Understand the engine in depth</strong></td>
+<td><a href="03-rust-primer.html">03</a> → <a href="04-cloud-native-primer.html">04</a> → <a href="13-cloud-native-standards.html">13</a> → <a href="05-architecture.html">05</a> → <a href="06-crates.html">06</a> → <a href="07-system-design-interview.html">07</a></td>
+</tr>
+<tr>
+<td><strong>Work on VMs or VM images</strong></td>
+<td><a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="08-delonixfile-and-vmfile.html">08</a> → <a href="09-microvm-setup.html">09</a> → the <code>delonix-vm</code> section of <a href="06-crates.html">06</a></td>
+</tr>
+<tr>
+<td><strong>Change how documentation is produced</strong></td>
+<td><a href="11-publishing-docs.html">11</a></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="pages">Pages</h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>#</th>
+<th>Page</th>
+<th>What it answers</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>00</td>
+<td><a href="00-start-here.html">Start here</a></td>
+<td>Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck</td>
+</tr>
+<tr>
+<td>01</td>
+<td><a href="01-environment.html">Preparing your environment</a></td>
+<td>What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs</td>
+</tr>
+<tr>
+<td>02</td>
+<td><a href="02-build-and-test.html">Clone, build and test</a></td>
+<td>Building, running tests, every CI gate as a local command, E2E and chaos with isolation</td>
+</tr>
+<tr>
+<td>03</td>
+<td><a href="03-rust-primer.html">Rust primer</a></td>
+<td>The Rust this codebase actually uses</td>
+</tr>
+<tr>
+<td>04</td>
+<td><a href="04-cloud-native-primer.html">Cloud native primer</a></td>
+<td>Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — and where each appears in the engine</td>
+</tr>
+<tr>
+<td>05</td>
+<td><a href="05-architecture.html">Architecture</a></td>
+<td>Layers, the crate graph, control and data paths, state on disk</td>
+</tr>
+<tr>
+<td>06</td>
+<td><a href="06-crates.html">The crates</a></td>
+<td>One block per crate: responsibility, main types, where to start reading</td>
+</tr>
+<tr>
+<td>07</td>
+<td><a href="07-system-design-interview.html">System Design Interview</a></td>
+<td>The engine designed as an interview answer, then compared with what was built</td>
+</tr>
+<tr>
+<td>08</td>
+<td><a href="08-delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>The build file grammars and how they differ from a Dockerfile</td>
+</tr>
+<tr>
+<td>09</td>
+<td><a href="09-microvm-setup.html">Building microVMs</a></td>
+<td>KVM, Cloud Hypervisor and firmware, libvirt, VM images</td>
+</tr>
+<tr>
+<td>10</td>
+<td><a href="10-contributing-workflow.html">Contribution workflow</a></td>
+<td>Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs</td>
+</tr>
+<tr>
+<td>11</td>
+<td><a href="11-publishing-docs.html">Publishing the documentation</a></td>
+<td>How the site and this handbook are generated, gated and published</td>
+</tr>
+<tr>
+<td>12</td>
+<td><a href="12-coding-conventions.html">Coding conventions</a></td>
+<td>How code in this repository is written, and the checklist reviewers apply</td>
+</tr>
+<tr>
+<td>13</td>
+<td><a href="13-cloud-native-standards.html">Cloud native standards</a></td>
+<td>The cloud-native standards a change is measured against</td>
+</tr>
+<tr>
+<td>14</td>
+<td><a href="14-glossary.html">Glossary</a></td>
+<td>The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more</td>
+</tr>
+</tbody>
+</table></div>
+<p>Other references you will be pointed to: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (C4 diagrams),
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (architecture decisions), <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
+(private vulnerability reports) and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (the short front door).</p>
+<div class="pager"><a class="next" href="00-start-here.html"><span>Next →</span>0. Start here</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener">Edit this page</a> · <code>docs/dev/README.md</code></p></main>
+<aside class="toc"><h5>On this page</h5><div class="toc">
+<ul>
+<li><a href="#what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not</a></li>
+<li><a href="#two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative</a></li>
+<li><a href="#reading-paths">Reading paths</a></li>
+<li><a href="#pages">Pages</a></li>
+</ul>
+</div>
+</aside></div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-label="Search">
+<input type="search" placeholder="Search the handbook…" autocomplete="off"><ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span><span><kbd>Esc</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copy", "copied": "Copied", "no_results": "No results"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  // Copy buttons: shell blocks drop a leading "$ " prompt so the copied text runs as is.
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = document.createElement('button');
+    btn.className = 'copy'; btn.type = 'button'; btn.textContent = ui.copy;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.textContent = ui.copied; setTimeout(function(){ btn.textContent = ui.copy; }, 1400);
+      });
+    });
+    box.appendChild(btn);
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+  if (window.mermaid) mermaid.initialize({startOnLoad:true, securityLevel:'strict',
+    theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'});
+
+  // Search (Ctrl+K / Cmd+K): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){
+    const i = terms.length ? r.nt.indexOf(terms[0]) : -1;
+    const start = Math.max(0, i - 50);
+    return (start ? '…' : '') + r.t.slice(start, start + 160);
+  }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){
+        const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0);
+        if (!s) return; score += s;
+      }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + r.u + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span><br>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + ui.no_results + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape' && !modal.hidden) close();
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){
+    s.addEventListener('change', function(){ location.href = s.value; });
+  });
+})();
+</script>
+</body></html>

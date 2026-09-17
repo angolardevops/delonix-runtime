@@ -1,0 +1,454 @@
+<!doctype html>
+<html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>2. Clone, build and test · Delonix Runtime — Manual do contribuidor</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{--accent:#e8590c;--accent-soft:#fff0e6;--ink:#1a1a2e;--muted:#5a6472;--line:#e6e8ec;--bg:#fff;--side:#f7f8fa;
+--code-bg:#0f172a;--code-ink:#e2e8f0;--inline:#f1f3f5;--warn:#fff7db;--warn-line:#e0b400;--shadow:0 12px 40px rgba(0,0,0,.18)}
+@media (prefers-color-scheme: dark){:root{--ink:#e6e8ee;--muted:#9aa4b2;--line:#252a33;--bg:#0d1117;--side:#10151c;
+--accent-soft:#2a1810;--code-bg:#161b22;--code-ink:#dbe2ea;--inline:#1b212b;--warn:#2a2410;--warn-line:#8a6d00;--shadow:0 12px 40px rgba(0,0,0,.6)}}
+*{box-sizing:border-box}body{margin:0;font:16px/1.65 -apple-system,'Segoe UI',Roboto,Ubuntu,sans-serif;color:var(--ink);background:var(--bg)}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+.layout{display:grid;grid-template-columns:290px minmax(0,1fr) 240px;max-width:1640px;margin:0 auto}
+nav.side{background:var(--side);border-right:1px solid var(--line);padding:1.1rem 1rem 3rem;position:sticky;top:0;height:100vh;overflow-y:auto}
+.brand{font-weight:700;font-size:1.05rem}.subtitle{color:var(--muted);font-size:.82rem;margin-bottom:.8rem}
+.tools{display:flex;gap:.4rem;margin-bottom:1rem;flex-wrap:wrap}
+.searchbtn{flex:1;display:flex;align-items:center;gap:.4rem;border:1px solid var(--line);background:var(--bg);color:var(--muted);
+border-radius:8px;padding:.35rem .55rem;font:inherit;font-size:.85rem;cursor:pointer;min-width:0}
+kbd{font:600 .72rem ui-monospace,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:.05rem .3rem;background:var(--side);color:var(--muted)}
+.searchbtn kbd{margin-left:auto}
+select.lang{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:8px;padding:.3rem .4rem;font:inherit;font-size:.85rem}
+nav.side a{display:block;padding:.3rem .55rem;border-radius:6px;color:var(--ink);font-size:.92rem}
+nav.side a:hover{background:var(--accent-soft);text-decoration:none}nav.side a.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
+main{padding:2rem 3rem 5rem;min-width:0}
+aside.toc{position:sticky;top:0;height:100vh;overflow-y:auto;padding:2rem 1rem;font-size:.84rem;border-left:1px solid var(--line)}
+aside.toc h5{margin:0 0 .5rem;text-transform:uppercase;letter-spacing:.08em;font-size:.7rem;color:var(--muted)}
+aside.toc ul{list-style:none;padding-left:.7rem;margin:0}aside.toc>div>ul{padding-left:0}aside.toc a{color:var(--muted)}aside.toc li{margin:.2rem 0}
+h1{font-size:2rem;line-height:1.25;margin-top:0}h2{margin-top:2.4rem;padding-bottom:.3rem;border-bottom:1px solid var(--line)}h3{margin-top:1.8rem}
+h2,h3{scroll-margin-top:1rem}
+code{font:.87em ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--inline);padding:.1em .35em;border-radius:5px}
+a.src code{color:var(--accent);text-decoration:underline dotted}
+.crate-src{font-size:.72rem;font-weight:600;vertical-align:middle;border:1px solid var(--accent);border-radius:99px;padding:.05rem .5rem;margin-left:.4rem}
+.code{position:relative;margin:1rem 0}
+.code pre{background:var(--code-bg);color:var(--code-ink);padding:2.1rem 1.1rem 1rem;border-radius:10px;overflow-x:auto;line-height:1.5;margin:0;color-scheme:dark;scrollbar-width:thin;scrollbar-color:#475569 transparent}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#475569;border-radius:8px}.code pre::-webkit-scrollbar-track{background:transparent}
+.code pre code{background:none;padding:0;color:inherit;font-size:.86em}.code pre code.hljs{background:none;padding:0}
+.copy{position:absolute;top:.45rem;right:.45rem;border:1px solid #334155;background:#1e293b;color:#e2e8f0;border-radius:6px;
+font:600 .72rem -apple-system,sans-serif;padding:.2rem .5rem;cursor:pointer;opacity:.75}.copy:hover,.copy:focus{opacity:1}
+pre.mermaid{background:var(--side);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:1rem;text-align:center;overflow-x:auto}
+.tablewrap{overflow-x:auto;margin:1rem 0}table{border-collapse:collapse;font-size:.9rem;width:100%}
+th,td{border:1px solid var(--line);padding:.45rem .6rem;vertical-align:top;text-align:left}th{background:var(--side)}
+blockquote{margin:1rem 0;padding:.6rem 1rem;border-left:4px solid var(--accent);background:var(--accent-soft)}
+.notice{background:var(--warn);border:1px solid var(--warn-line);border-radius:8px;padding:.6rem .9rem;margin-bottom:1.4rem;font-size:.92rem}
+.pager{display:flex;justify-content:space-between;gap:1rem;margin-top:3rem;border-top:1px solid var(--line);padding-top:1rem;font-size:.92rem}
+.pager span{color:var(--muted);font-size:.78rem;display:block}.pager .next{text-align:right;margin-left:auto}
+.foot{font-size:.8rem;color:var(--muted);margin-top:1.5rem}
+#search{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:flex-start;justify-content:center;padding:10vh 1rem;z-index:50}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);overflow:hidden}
+.sbox input{width:100%;border:0;border-bottom:1px solid var(--line);padding:1rem 1.1rem;font:inherit;font-size:1.05rem;background:var(--bg);color:var(--ink);outline:none}
+.sres{max-height:60vh;overflow-y:auto;margin:0;padding:.3rem;list-style:none}
+.sres a{display:block;padding:.55rem .7rem;border-radius:8px;color:var(--ink)}.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{font-size:.74rem;color:var(--muted)}.sres .sh{font-weight:600}.sres .st{font-size:.82rem;color:var(--muted);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sres mark{background:none;color:var(--accent);font-weight:700}.sempty{padding:1rem;color:var(--muted)}
+.shelp{display:flex;gap:1rem;padding:.5rem 1rem;border-top:1px solid var(--line);font-size:.75rem;color:var(--muted)}
+@media (max-width:1100px){.layout{grid-template-columns:250px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:760px){.layout{display:block}nav.side{position:static;height:auto}main{padding:1.2rem 1rem}}
+</style></head>
+<body><div class="layout">
+<nav class="side"><div class="brand">Delonix Runtime</div><div class="subtitle">Manual do contribuidor</div>
+<div class="tools"><button class="searchbtn" type="button">🔍 Pesquisar <kbd>Ctrl K</kbd></button>
+<select class="lang" aria-label="Language"><option value="../en/02-build-and-test.html">EN · English</option><option value="../pt-AO/02-build-and-test.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/02-build-and-test.html">FR-FR · Français</option></select></div>
+<a class="" href="index.html">Delonix Runtime — Contributor Handbook</a>
+<a class="" href="00-start-here.html">0. Start here</a>
+<a class="" href="01-environment.html">1. Preparing your environment</a>
+<a class="on" href="02-build-and-test.html">2. Clone, build and test</a>
+<a class="" href="03-rust-primer.html">3. Rust primer for this codebase</a>
+<a class="" href="04-cloud-native-primer.html">4. Cloud native primer</a>
+<a class="" href="05-architecture.html">5. Architecture</a>
+<a class="" href="06-crates.html">6. The crates</a>
+<a class="" href="07-system-design-interview.html">7. System Design Interview — the Delonix Engine</a>
+<a class="" href="08-delonixfile-and-vmfile.html">8. Delonixfile and VMfile</a>
+<a class="" href="09-microvm-setup.html">9. Building microVMs</a>
+<a class="" href="10-contributing-workflow.html">10. Contribution workflow</a>
+<a class="" href="11-publishing-docs.html">11. Publishing the documentation</a>
+<a class="" href="12-coding-conventions.html">12. Coding conventions</a>
+<a class="" href="13-cloud-native-standards.html">13. Cloud native standards, layer by layer</a>
+<a class="" href="14-glossary.html">14. Glossary</a></nav>
+<main><div class="notice">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="2-clone-build-and-test">2. Clone, build and test</h1>
+<p>This page assumes the host from <a href="01-environment.html">01 — Preparing your environment</a>: the pinned
+Rust toolchain and <code>protoc</code>. Everything here runs from the root of your checkout — ideally a
+<strong>git worktree</strong>, see <a href="10-contributing-workflow.html">10 — Contribution workflow</a>.</p>
+<h2 id="clone">Clone</h2>
+<div class="code" data-shell><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
+cd delonix-runtime
+git fetch --tags origin      # several gates compare against the release tags
+</code></pre></div>
+<h2 id="build">Build</h2>
+<div class="code" data-shell><pre><code class="language-bash">cargo build --workspace                    # every crate and every binary
+cargo build -p delonix-runtime-bin         # just the `delonix` CLI
+cargo build --release -p delonix-runtime-bin   # what the docs generator and the CLI gates use
+</code></pre></div>
+<p>The workspace ships these binaries, from these packages:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Binary</th>
+<th>Package</th>
+<th>Output</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>delonix</code> (the CLI)</td>
+<td><code>delonix-runtime-bin</code></td>
+<td><code>target/debug/delonix</code> or <code>target/release/delonix</code></td>
+</tr>
+<tr>
+<td><code>delonix-cri</code></td>
+<td><code>delonix-cri</code></td>
+<td><code>target/&lt;profile&gt;/delonix-cri</code></td>
+</tr>
+<tr>
+<td><code>delonix-mcp</code></td>
+<td><code>delonix-mcp-bin</code></td>
+<td><code>target/&lt;profile&gt;/delonix-mcp</code></td>
+</tr>
+<tr>
+<td><code>delonix-mgmt</code></td>
+<td><code>delonix-mgmt-bin</code></td>
+<td><code>target/&lt;profile&gt;/delonix-mgmt</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>The release workflow builds exactly these four packages. If you set <code>CARGO_TARGET_DIR</code>, binaries
+land there instead of <code>target/</code>.</p>
+<p>Two practical notes:</p>
+<ul>
+<li><strong>Always test the binary you built</strong> (<code>./target/debug/delonix</code>), never a <code>delonix</code> on your
+  <code>PATH</code> — that is an installed release, often several versions behind.</li>
+<li>If you work in several worktrees, pointing them all at one shared <code>CARGO_TARGET_DIR</code> saves disk,
+  but two builds running at the same time on it will wait on each other and can invalidate each
+  other's artefacts. A target directory per worktree is slower the first time and predictable
+  afterwards.</li>
+</ul>
+<h2 id="run-the-tests">Run the tests</h2>
+<div class="code" data-shell><pre><code class="language-bash">cargo test --workspace                       # the whole suite
+cargo test -p delonix-sdn                    # one crate
+cargo test -p delonix-stack -- reconcile       # tests whose path contains &quot;reconcile&quot;
+cargo test -p delonix-stack -- --exact kinds::tests::nenhum_kind_aparece_duas_vezes
+</code></pre></div>
+<p>Tests that need privileges or a real host skip themselves instead of failing, so the suite is
+meaningful on a laptop and on CI. A few live tests are marked <code>#[ignore]</code> and name the command to
+run them in their doc comment (for example in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>); run those
+only on a machine you own:</p>
+<div class="code" data-shell><pre><code class="language-bash">cargo test -p &lt;crate&gt; -- --ignored &lt;test-name&gt;
+</code></pre></div>
+<p>A green <code>cargo test</code> proves the pure logic. It does <strong>not</strong> prove that a change to namespaces,
+cgroups, the network holder or VM boot works — that needs a live run (see
+<a href="#end-to-end-battery-scriptse2esh">End-to-end battery</a> and <a href="#chaos-harness-scriptschaossh">Chaos harness</a>).</p>
+<h2 id="the-gates-ci-runs">The gates CI runs</h2>
+<!-- dev-docs:begin ci-gates -->
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>CI job</th>
+<th>What it checks</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fmt</code></td>
+<td>rustfmt</td>
+</tr>
+<tr>
+<td><code>lang</code></td>
+<td>lang ratchet</td>
+</tr>
+<tr>
+<td><code>arch</code></td>
+<td>arch fitness</td>
+</tr>
+<tr>
+<td><code>contract</code></td>
+<td>contract gate</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td>version gate</td>
+</tr>
+<tr>
+<td><code>cli-surface</code></td>
+<td>cli surface</td>
+</tr>
+<tr>
+<td><code>clippy</code></td>
+<td>clippy -D warnings</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td>test</td>
+</tr>
+<tr>
+<td><code>deny</code></td>
+<td>cargo-deny</td>
+</tr>
+<tr>
+<td><code>docs</code></td>
+<td>generated docs and valid examples</td>
+</tr>
+</tbody>
+</table></div>
+<!-- dev-docs:end ci-gates -->
+
+<p>Every job in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> can be reproduced locally. Run the ones that match what you
+touched before you push; run all of them before asking for review.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Job</th>
+<th>Local command</th>
+<th>Fails when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>fmt</code></td>
+<td><code>cargo fmt --all --check</code></td>
+<td>the code is not rustfmt-formatted (default config)</td>
+</tr>
+<tr>
+<td><code>lang</code></td>
+<td><code>python3 scripts/lang_ratchet.py</code></td>
+<td>Portuguese identifiers, comments or messages <strong>increase</strong> — or decrease without lowering <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a> in the same commit (<code>--list</code> shows them, <code>--update</code> lowers the baseline)</td>
+</tr>
+<tr>
+<td><code>arch</code></td>
+<td><code>python3 scripts/arch_fitness.py</code></td>
+<td>a dependency goes against the layer direction, a crate sits in the wrong directory, a member crate pins a dependency version, a consumer name appears in code, or a debt ratchet moves (<code>--list</code>, <code>--update</code>)</td>
+</tr>
+<tr>
+<td><code>arch</code></td>
+<td><code>python3 scripts/dev_docs.py --check</code></td>
+<td>a generated fact in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> is stale — run <code>python3 scripts/dev_docs.py</code> and commit</td>
+</tr>
+<tr>
+<td><code>contract</code></td>
+<td><code>python3 scripts/contract_gate.py</code></td>
+<td>the node contract in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is not <code>buf format</code>-clean, fails <code>buf lint</code>, breaks compatibility with the last tag, lacks an HTTP mapping, or <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is not the generated one (<code>--update</code> rewrites it). Needs <code>protoc</code>, <code>buf</code> v1.73.0 and <code>protoc-gen-openapi</code> v0.7.1 on <code>PATH</code>, and the tags</td>
+</tr>
+<tr>
+<td><code>version</code></td>
+<td><code>python3 scripts/version_gate.py</code></td>
+<td>the workspace version is not the newest tag the commit contains (see <a href="10-contributing-workflow.html#version-alignment">10</a>) or the branch does not contain the newest tag. Needs the tags</td>
+</tr>
+<tr>
+<td><code>cli-surface</code></td>
+<td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; scripts/cli-tree.sh --gate</code></td>
+<td>a CLI leaf was added, removed or reclassified without updating <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/cli_baseline.tsv</code></a> in the same commit (<code>scripts/cli-tree.sh --update</code>)</td>
+</tr>
+<tr>
+<td><code>cli-surface</code></td>
+<td><code>python3 scripts/docs_cli_gate.py</code></td>
+<td>a <code>delonix …</code> command quoted in current documentation does not exist in the binary's tree</td>
+</tr>
+<tr>
+<td><code>clippy</code></td>
+<td><code>cargo clippy --workspace --all-targets --locked -- -D warnings</code></td>
+<td>any warning</td>
+</tr>
+<tr>
+<td><code>test</code></td>
+<td><code>cargo build --workspace --locked &amp;&amp; cargo test --workspace --locked --no-fail-fast</code></td>
+<td>any test fails</td>
+</tr>
+<tr>
+<td><code>deny</code></td>
+<td><code>cargo deny check advisories licenses sources</code></td>
+<td>a RUSTSEC advisory, a disallowed licence or source (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>)</td>
+</tr>
+<tr>
+<td><code>docs</code></td>
+<td><code>cargo build --release -p delonix-runtime-bin &amp;&amp; python3 docs/gen.py &amp;&amp; git diff --exit-code -- docs/</code></td>
+<td>the committed site is not what the generator produces from this binary</td>
+</tr>
+<tr>
+<td><code>docs</code></td>
+<td><code>./target/release/delonix stack apply -f examples/&lt;file&gt;.yaml --dry-run</code> and <code>./target/release/delonix stack validate -f examples/&lt;file&gt;.yaml</code></td>
+<td>a published example uses a deprecated form or has unresolved references</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>cli-tree.sh</code> and <code>docs_cli_gate.py</code> read the tree from the binary's real <code>--help</code>; set
+<code>DELONIX_BIN=/path/to/delonix</code> to choose which binary. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> defaults to
+<code>target/release/delonix</code> and needs the Python <code>markdown</code> module. The <code>docs</code> job also generates the
+man pages (<code>delonix man --dir &lt;dir&gt; --index</code>) and checks them with <code>groff -mandoc -ww -z</code>.</p>
+<p>Separate workflows, not required on every change: <code>chaos.yml</code> runs the chaos harness on a clean
+runner (and reports <code>skipped</code> when the runner blocks user namespaces), <code>release.yml</code> publishes a
+tag, and <code>vm-image.yml</code> / <code>vm-appliances.yml</code> build VM images.</p>
+<h2 id="isolating-the-engines-state">Isolating the engine's state</h2>
+<p>Anything beyond <code>--help</code> touches engine state. By default that is <strong>your real state</strong>: your
+containers, networks, volumes and the network holder. Before running the engine for testing —
+by hand, through <code>e2e.sh</code>, or through any script — point <strong>both</strong> state roots at a scratch
+directory:</p>
+<div class="code" data-shell><pre><code class="language-bash">export DELONIX_ROOT=$HOME/scratch/dlx/root          # containers, images, networks, IPAM, volumes
+export DELONIX_NET_RUNTIME_DIR=/tmp/dlx-run          # the holder&#x27;s control and slirp sockets
+mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
+</code></pre></div>
+<p><strong>Both, always. Half isolation is worse than none.</strong> The network sockets and the pidfiles are
+resolved separately: pidfiles live under the <em>state root</em>, while the holder's control and slirp
+sockets live in a <em>runtime directory</em> (by default <code>/tmp/delonix-net-&lt;uid&gt;</code>). When two state roots
+ended up on the same runtime directory, each read its own (absent) pidfile, concluded there was no
+network infra, and started or tore down infra on top of the other one's sockets. On a development
+host running live workloads this ended with the real root rebuilding its network infra and
+restarting real containers.</p>
+<p>The engine now derives a suffix from a non-default <code>DELONIX_ROOT</code> for the runtime directory
+(<code>runtime_dir</code>/<code>root_suffix</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>), which closes that
+collision for the common case. Keep exporting both anyway: it makes the isolation explicit, keeps
+the socket path short and under your control, and it is what <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> and
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> do (e2e fills in whichever variable you did not export).</p>
+<p>Keep <code>DELONIX_NET_RUNTIME_DIR</code> short: a unix socket path longer than about 108 bytes fails with
+<code>path must be shorter than SUN_LEN</code>. <code>e2e.sh</code> refuses a runtime dir longer than 80 bytes.</p>
+<p>When you are done, tear down the isolated network infra with the same two variables exported:</p>
+<div class="code" data-shell><pre><code class="language-bash">./target/debug/delonix net netns down
+</code></pre></div>
+<h2 id="end-to-end-battery-scriptse2esh">End-to-end battery (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)</h2>
+<p><code>e2e.sh</code> runs the CLI against the real kernel: every leaf's <code>--help</code>, plus real executions of a
+large part of the surface, and prints a PASS/FAIL/SKIP/XFAIL report (JSONL detail in
+<code>$OUT/results.jsonl</code>, default <code>OUT=/tmp/delonix-e2e</code>).</p>
+<div class="code" data-shell><pre><code class="language-bash">./scripts/e2e.sh                          # uses ./target/debug/delonix
+./scripts/e2e.sh ./target/release/delonix
+</code></pre></div>
+<ul>
+<li>It <strong>isolates itself by default</strong>: it sets <code>DELONIX_ROOT</code> and <code>DELONIX_NET_RUNTIME_DIR</code> to its own
+  directories (unless you export both first) and tears down the infra it started.
+  <code>E2E_SHARED_STATE=1</code> runs against the real machine state — only for diagnosing a host.</li>
+<li>Exit code is non-zero when a check fails, or when a check marked as a known defect (<code>XFAIL</code>)
+  unexpectedly passes. SKIPs do not fail the run but are listed in their own block: a skipped
+  check proved nothing.</li>
+<li>It needs network access to pull images; sections whose preconditions are missing skip with the
+  reason.</li>
+<li>A green run means the <code>--help</code> of every leaf was verified and <em>some</em> leaves were executed.
+  Read the header of the script for what is executed and what is not.</li>
+</ul>
+<h2 id="chaos-harness-scriptschaossh">Chaos harness (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)</h2>
+<p>The chaos harness breaks a running engine on purpose — killing the holder, filling the disk,
+concurrent attaches, partial applies — and reports whether it degraded the way it promises to.</p>
+<div class="code" data-shell><pre><code class="language-bash">scripts/chaos.sh                        # every scenario, ./target/debug/delonix
+scripts/chaos.sh holder_kill oom        # selected scenarios
+scripts/chaos.sh --keep scale           # leave the sandbox up for a post-mortem
+scripts/chaos.sh --clean                # tear the kept sandbox down
+</code></pre></div>
+<ul>
+<li>It always redirects both roots into its sandbox (<code>DELONIX_CHAOS_DIR</code>, default <code>/tmp/dlx-chaos</code>)
+  and never touches the real engine's containers, networks or records. The image directories
+  (<code>images</code>, <code>layers</code>, <code>blobs</code>) are <strong>symlinks to your real store</strong> to avoid downloads: the harness
+  only reads them in practice, but a scenario that wrote an image would write to the real store.</li>
+<li>It <strong>refuses to run on a busy machine</strong> (load above a threshold, shared with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bench.sh" target="_blank" rel="noopener"><code>scripts/bench.sh</code></a>
+  through <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/bancada.sh" target="_blank" rel="noopener"><code>scripts/bancada.sh</code></a>): under load, scenarios fail for reasons that belong to the bench,
+  not the product. <code>--max-load N</code> changes the threshold; <code>--force</code> runs anyway and marks the
+  verdict as not publishable.</li>
+<li>Exit code is 0 only when no scenario fails. SKIPs are listed separately.</li>
+<li>Some scenarios need external resources and skip without them (for example <code>truenas_destroy</code>
+  needs <code>DELONIX_CHAOS_TRUENAS_URL</code>/<code>_USER</code>/<code>_PASS</code>).</li>
+</ul>
+<p>Scratch directories under <code>/tmp</code> are fine for these throwaway sandboxes. Your <strong>worktrees</strong> are
+not — see <a href="10-contributing-workflow.html#one-worktree-per-task">10</a>.</p>
+<div class="pager"><a href="01-environment.html"><span>← Anterior</span>1. Preparing your environment</a><a class="next" href="03-rust-primer.html"><span>Seguinte →</span>3. Rust primer for this codebase</a></div>
+<p class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/02-build-and-test.md" target="_blank" rel="noopener">Editar esta página</a> · <code>docs/dev/02-build-and-test.md</code></p></main>
+<aside class="toc"><h5>Nesta página</h5><div class="toc">
+<ul>
+<li><a href="#clone">Clone</a></li>
+<li><a href="#build">Build</a></li>
+<li><a href="#run-the-tests">Run the tests</a></li>
+<li><a href="#the-gates-ci-runs">The gates CI runs</a></li>
+<li><a href="#isolating-the-engines-state">Isolating the engine's state</a></li>
+<li><a href="#end-to-end-battery-scriptse2esh">End-to-end battery (scripts/e2e.sh)</a></li>
+<li><a href="#chaos-harness-scriptschaossh">Chaos harness (scripts/chaos.sh)</a></li>
+</ul>
+</div>
+</aside></div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-label="Pesquisar">
+<input type="search" placeholder="Pesquisar no manual…" autocomplete="off"><ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span><span><kbd>Esc</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copiar", "copied": "Copiado", "no_results": "Sem resultados"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  // Copy buttons: shell blocks drop a leading "$ " prompt so the copied text runs as is.
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = document.createElement('button');
+    btn.className = 'copy'; btn.type = 'button'; btn.textContent = ui.copy;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.textContent = ui.copied; setTimeout(function(){ btn.textContent = ui.copy; }, 1400);
+      });
+    });
+    box.appendChild(btn);
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+  if (window.mermaid) mermaid.initialize({startOnLoad:true, securityLevel:'strict',
+    theme: matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'default'});
+
+  // Search (Ctrl+K / Cmd+K): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){
+    const i = terms.length ? r.nt.indexOf(terms[0]) : -1;
+    const start = Math.max(0, i - 50);
+    return (start ? '…' : '') + r.t.slice(start, start + 160);
+  }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){
+        const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0);
+        if (!s) return; score += s;
+      }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + r.u + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span><br>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + ui.no_results + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape' && !modal.hidden) close();
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){
+    s.addEventListener('change', function(){ location.href = s.value; });
+  });
+})();
+</script>
+</body></html>
