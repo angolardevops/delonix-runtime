@@ -7,7 +7,7 @@
 //! rootfs on disk, and at the end packages the result with
 //! `ImageStore::commit_flat_rootfs` (rootless) or `commit_upper`+`build_image`
 //! (root/overlay) — the same two "docker commit" functions that already exist
-//! in `delonix-image::build`.
+//! in `delonix-oci::build`.
 //!
 //! **Multi-stage** (`FROM ... AS <name>` + `COPY --from=<stage>`): each stage
 //! (including the final one) is built the same way — a working container, its
@@ -55,8 +55,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use clap::Args;
-use delonix_image::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
-use delonix_image::{Image, ImageStore};
+use delonix_oci::build::{parse_dockerfile_with_args, substitute_vars, RunStep, Step};
+use delonix_oci::{Image, ImageStore};
 use delonix_runtime as runtime;
 use delonix_runtime_core::{generate_id, Container, Error, Result, Store};
 use sha2::{Digest, Sha256};
@@ -831,11 +831,11 @@ pub fn build_from_spec(
     // as `docker build --target`). `None`: the default final stage (either
     // no `--target` was given, or it named the final stage explicitly).
     let target_idx: Option<usize> = match target {
-        Some(t) => delonix_image::build::resolve_target_stage(&df, t)?,
+        Some(t) => delonix_oci::build::resolve_target_stage(&df, t)?,
         None => None,
     };
     let rootless = runtime::is_rootless();
-    let arch = platform.unwrap_or_else(|| delonix_image::build::oci_arch());
+    let arch = platform.unwrap_or_else(|| delonix_oci::build::oci_arch());
 
     // Fail fast, before touching anything: a cross-arch build needs the
     // host's OWN binfmt_misc/qemu-user-static already registered (a separate,
@@ -844,7 +844,7 @@ pub fn build_from_spec(
     // Docker/buildx). Best-effort: unreadable `/proc` just skips the check —
     // never blocks a normal same-arch build over it.
     if let Some(requested) = platform {
-        if requested != delonix_image::build::oci_arch() {
+        if requested != delonix_oci::build::oci_arch() {
             let marker = format!("/proc/sys/fs/binfmt_misc/qemu-{requested}");
             if let Ok(contents) = std::fs::read_to_string(&marker) {
                 if !contents.contains("enabled") {
@@ -865,7 +865,7 @@ pub fn build_from_spec(
     // The stage actually being packaged — `df.stages[idx]` when `--target`
     // stops short of the Dockerfile's own final stage, else that final stage
     // itself (`df.from`/`df.steps`, unchanged from before `--target` existed).
-    let (final_from, final_steps): (&str, &[delonix_image::build::Step]) = match target_idx {
+    let (final_from, final_steps): (&str, &[delonix_oci::build::Step]) = match target_idx {
         Some(idx) => (df.stages[idx].from.as_str(), &df.stages[idx].steps),
         None => (df.from.as_str(), &df.steps),
     };
@@ -915,7 +915,7 @@ pub fn build_from_spec(
     // belong in the plan (a progress bar promising steps that never run is
     // its own kind of dishonest reporting).
     let stages_built = target_idx.map_or(df.stages.len(), |idx| idx + 1);
-    let final_stage_steps: &[delonix_image::build::Step] =
+    let final_stage_steps: &[delonix_oci::build::Step] =
         if target_idx.is_none() { &df.steps } else { &[] };
     let plano: Vec<String> = df.stages[..stages_built]
         .iter()
@@ -1061,7 +1061,7 @@ pub fn build_from_spec(
             // above explains are NOT necessarily the target stage's own.
             // Fixing that needs `build_image` itself to take the resolved
             // values `commit_flat_rootless` above already computes
-            // correctly, which is `delonix-image` surgery beyond this
+            // correctly, which is `delonix-oci` surgery beyond this
             // feature's scope — refuse rather than risk silently packaging
             // an intermediate stage with instructions from a later, unbuilt
             // one baked in.
@@ -1140,7 +1140,7 @@ pub fn build_from_spec(
 /// in-process path reads them just the same, so we fall back to `commit_flat_rootfs`.
 #[allow(clippy::too_many_arguments)]
 fn commit_flat_rootless(
-    images: &delonix_image::ImageStore,
+    images: &delonix_oci::ImageStore,
     rootfs: &str,
     id: &str,
     cmd: Vec<String>,
@@ -1371,7 +1371,7 @@ fn save_to_cache(hash: &str, rootfs: &str) {
 /// Resolves a `../`/absolute component safely: joins `base` only with
 /// the "normal" components of `rel` (rejects `..`/root/prefix — never lets it
 /// escape from `base`). Same pattern as `safe_rel` in
-/// `delonix-image/src/overlay.rs` (image-layer extraction), applied
+/// `delonix-oci/src/overlay.rs` (image-layer extraction), applied
 /// here to the `COPY` of the Dockerfile/Delonixfile. **Security-audit
 /// finding**: without this, `COPY ../../../etc/passwd x` read
 /// arbitrary host files into the image, and a `dst` with `..` wrote

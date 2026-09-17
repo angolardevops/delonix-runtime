@@ -1996,7 +1996,7 @@ mod tests {
         let handle = serve_one(tx, answer);
         let port = rx.recv().unwrap();
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-denied-test-{}-{}",
+            "delonix-oci-denied-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2050,7 +2050,7 @@ mod tests {
         let port = rx.recv().unwrap();
 
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-pull-creds-test-{}-{}",
+            "delonix-oci-pull-creds-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2088,7 +2088,7 @@ mod tests {
     fn push_e_pull_oci_artifact_round_trip() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-artifact-test-{}-{}",
+            "delonix-oci-artifact-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2125,7 +2125,7 @@ mod tests {
     fn pull_from_registry_with_creds_salta_blobs_ja_no_cas() {
         let (port, blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-cas-skip-test-{}-{}",
+            "delonix-oci-cas-skip-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2243,7 +2243,7 @@ mod tests {
     fn pull_oci_artifact_recusa_blob_adulterado() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-artifact-tamper-test-{}-{}",
+            "delonix-oci-artifact-tamper-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2298,7 +2298,7 @@ mod tests {
     fn pull_por_digest_recusa_manifesto_substituido() {
         let (port, blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-manifest-pin-test-{}-{}",
+            "delonix-oci-manifest-pin-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2364,7 +2364,7 @@ mod tests {
     fn pull_por_digest_correto_passa_a_verificacao_do_manifesto() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-manifest-pin-ok-test-{}-{}",
+            "delonix-oci-manifest-pin-ok-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
@@ -2694,7 +2694,7 @@ mod tests {
     fn o_progresso_agregado_do_pull_nao_inventa_bytes() {
         let (port, _blob_gets, _handle) = serve_anon_registry();
         let tmp = std::env::temp_dir().join(format!(
-            "delonix-image-progress-test-{}-{}",
+            "delonix-oci-progress-test-{}-{}",
             std::process::id(),
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)

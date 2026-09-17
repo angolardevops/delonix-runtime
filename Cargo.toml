@@ -4,7 +4,7 @@ members = [
     "crates/foundation/delonix-runtime-core",
     "crates/adapters/delonix-runtime",
     "bins/delonix-runtime-bin",
-    "crates/adapters/delonix-image",
+    "crates/adapters/delonix-oci",
     "crates/adapters/delonix-net",
     "crates/foundation/delonix-net-rules",
     "crates/adapters/delonix-vm",
@@ -38,7 +38,7 @@ repository = "https://github.com/angolardevops/delonix-runtime"
 delonix-runtime-core = { path = "crates/foundation/delonix-runtime-core" }
 delonix-runtime = { path = "crates/adapters/delonix-runtime" }
 delonix-runtime-bin = { path = "bins/delonix-runtime-bin" }
-delonix-image = { path = "crates/adapters/delonix-image" }
+delonix-oci = { path = "crates/adapters/delonix-oci" }
 delonix-net = { path = "crates/adapters/delonix-net" }
 delonix-net-rules = { path = "crates/foundation/delonix-net-rules" }
 delonix-telemetry = { path = "crates/adapters/delonix-telemetry" }

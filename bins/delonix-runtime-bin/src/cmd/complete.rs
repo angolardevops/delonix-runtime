@@ -55,7 +55,7 @@ pub fn containers() -> Vec<CompletionCandidate> {
 /// is a tag — see `output::display_ref`; a 71-char digest is not completed with
 /// TAB, you type it).
 pub fn images() -> Vec<CompletionCandidate> {
-    let Ok(store) = delonix_image::ImageStore::open(state_root()) else {
+    let Ok(store) = delonix_oci::ImageStore::open(state_root()) else {
         return Vec::new();
     };
     cands(
@@ -405,7 +405,7 @@ pub fn man_commands() -> Vec<CompletionCandidate> {
 /// Registries this node is logged in to (`<root>/auth.json`) — the only ones
 /// `image logout` has anything to remove.
 pub fn registries() -> Vec<CompletionCandidate> {
-    cands(delonix_image::auth::hosts(&state_root()))
+    cands(delonix_oci::auth::hosts(&state_root()))
 }
 
 #[cfg(test)]

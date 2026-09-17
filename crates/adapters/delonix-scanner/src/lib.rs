@@ -9,7 +9,7 @@
 //! Designed to run **before the build** (analyzing the `FROM` base) and on **already
 //! existing images** — exactly like `trivy`/`grype`, but embedded in the engine.
 
-use delonix_image::{Image, ImageStore};
+use delonix_oci::{Image, ImageStore};
 use delonix_runtime_core::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::io::Read;
