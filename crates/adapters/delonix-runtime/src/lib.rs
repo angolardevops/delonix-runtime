@@ -16,6 +16,7 @@ pub mod capabilities;
 pub mod cdi;
 pub mod regulate;
 pub mod resource_advice;
+pub mod run_host;
 pub mod seccomp_profile;
 pub mod workload_view;
 
