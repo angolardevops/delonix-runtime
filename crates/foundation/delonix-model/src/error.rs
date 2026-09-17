@@ -100,6 +100,21 @@ pub enum Error {
     /// is still coming up.
     #[error("timed out: {0}")]
     Timeout(String),
+
+    /// A failure with its own entry in the code dictionary (ADR-0043 D4).
+    ///
+    /// A crate's own error converts into the class it belongs to and wraps it
+    /// here with its specific number, so the number travels to whoever prints or
+    /// reports it. It shows, classifies and exits exactly as `inner` does; only
+    /// [`Error::number`] is finer. Built with [`Error::coded`], which refuses a
+    /// number whose class digit is not `inner`'s class.
+    #[error("{inner}")]
+    Coded {
+        /// The dictionary number, `CDNN`.
+        number: u16,
+        /// The class this failure belongs to, with its message.
+        inner: Box<Error>,
+    },
 }
 
 impl Error {
@@ -126,6 +141,7 @@ impl Error {
     /// under a catch-all nobody ever revisits.
     pub fn code(&self) -> &'static str {
         match self {
+            Error::Coded { inner, .. } => inner.code(),
             Error::NotFound(_) | Error::VmNotFound(_) => "DX_NOT_FOUND",
             Error::NotRunning(_) => "DX_NOT_RUNNING",
             Error::Conflict(_) => "DX_CONFLICT",

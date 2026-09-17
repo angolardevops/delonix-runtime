@@ -137,7 +137,7 @@ fn list_vms(base: &Path) -> Result<Vec<delonix_runtime_core::Vm>, ErrorData> {
 fn list_volumes(base: &Path) -> Result<Vec<delonix_volume::Volume>, ErrorData> {
     delonix_volume::VolumeStore::open(base)
         .and_then(|s| s.list())
-        .map_err(from_engine_error)
+        .map_err(|e| from_engine_error(e.into()))
 }
 
 fn list_kind(base: &Path, kind: ResourceKind) -> Result<serde_json::Value, ErrorData> {

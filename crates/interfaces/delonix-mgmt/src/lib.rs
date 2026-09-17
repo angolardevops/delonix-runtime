@@ -373,11 +373,11 @@ fn err_response(e: Error) -> Response {
 async fn with_store<T, F>(base: PathBuf, f: F) -> Result<T, Error>
 where
     T: Send + 'static,
-    F: FnOnce(&VolumeStore) -> Result<T, Error> + Send + 'static,
+    F: FnOnce(&VolumeStore) -> Result<T, delonix_volume::Error> + Send + 'static,
 {
-    tokio::task::spawn_blocking(move || {
+    tokio::task::spawn_blocking(move || -> Result<T, Error> {
         let store = VolumeStore::open(&base)?;
-        f(&store)
+        Ok(f(&store)?)
     })
     .await
     .map_err(|e| Error::Runtime {
