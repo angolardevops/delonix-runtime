@@ -89,7 +89,7 @@ struct CdiMount {
 /// What a resolved CDI device (or the synthesized `=all`) contributes to a
 /// container being created — already in the shape `cmd_run` needs.
 #[derive(Debug, Default)]
-pub(crate) struct CdiEdits {
+pub struct CdiEdits {
     /// `host[:container]` — same format `bind_devices`/`--device` already parse.
     pub devices: Vec<String>,
     pub mounts: Vec<Mount>,
@@ -104,7 +104,7 @@ pub(crate) struct CdiEdits {
 /// verbatim rather than inventing a delonix-specific one) — as opposed to a
 /// plain host device path (`/dev/foo` or `/dev/foo:/dev/bar`), which never
 /// starts with a non-`/` vendor segment containing a dot before the `/`.
-pub(crate) fn is_cdi_qualified(spec: &str) -> bool {
+pub fn is_cdi_qualified(spec: &str) -> bool {
     let Some((vendor_class, name)) = spec.split_once('=') else {
         return false;
     };
@@ -157,7 +157,7 @@ fn which(bin: &str) -> bool {
 /// to the raw `/dev/nvidia*` glob: without the real driver libraries
 /// injected, CUDA/cuDNN fails at runtime with a confusing dlopen error, not
 /// a clear one.
-pub(crate) fn ensure_cdi_available() -> Result<()> {
+pub fn ensure_cdi_available() -> Result<()> {
     if !discover_cdi_specs().is_empty() {
         return Ok(());
     }
@@ -187,7 +187,7 @@ pub(crate) fn ensure_cdi_available() -> Result<()> {
 /// EVERY device this vendor/class declares (not a separate spec-level
 /// entry — real CDI specs synthesize `=all` as just another `devices[]`
 /// entry, but resolving it generically here doesn't depend on that).
-pub(crate) fn resolve_cdi_device(qualified_name: &str, out: &mut CdiEdits) -> Result<()> {
+pub fn resolve_cdi_device(qualified_name: &str, out: &mut CdiEdits) -> Result<()> {
     resolve_cdi_device_in(&discover_cdi_specs(), qualified_name, out)
 }
 
@@ -294,9 +294,86 @@ fn apply_edits(edits: &ContainerEdits, out: &mut CdiEdits) {
     }
 }
 
+/// The raw device nodes a `--gpus` value names, globbed from the host:
+/// `/dev/nvidia*` for `nvidia`, `/dev/dri/*` for `dri`, both for `all`.
+pub fn expand_gpu_devices(spec: &str) -> Vec<String> {
+    let want_nvidia = spec == "all" || spec.contains("nvidia");
+    let want_dri = spec == "all" || spec.contains("dri");
+    let mut out = Vec::new();
+    let mut add_glob = |dir: &str, prefix: &str| {
+        if let Ok(rd) = std::fs::read_dir(dir) {
+            for e in rd.flatten() {
+                let name = e.file_name().to_string_lossy().into_owned();
+                if prefix.is_empty() || name.starts_with(prefix) {
+                    out.push(format!("{dir}/{name}"));
+                }
+            }
+        }
+    };
+    if want_nvidia {
+        add_glob("/dev", "nvidia"); // /dev/nvidia0, /dev/nvidiactl, /dev/nvidia-uvm, …
+    }
+    if want_dri {
+        add_glob("/dev/dri", ""); // /dev/dri/card0, /dev/dri/renderD128, …
+    }
+    out
+}
+
+/// This host's devices, as the `container run` use case's `DeviceResolver`.
+pub struct HostDevices;
+
+impl delonix_compute::ports::DeviceResolver for HostDevices {
+    fn resolve(
+        &self,
+        gpus: Option<&str>,
+        devices: &[String],
+    ) -> Result<delonix_compute::ports::DeviceEdits> {
+        // `--gpus nvidia|all` and `--device vendor.com/class=name` resolve via CDI
+        // before anything is created; `--gpus dri` stays the raw `/dev/dri/*` glob
+        // (Mesa/VAAPI is open source and normally already inside the image).
+        let mut devices = devices.to_vec();
+        let mut edits = CdiEdits::default();
+        if let Some(g) = gpus {
+            if g == "all" || g.contains("nvidia") {
+                ensure_cdi_available()?;
+                resolve_cdi_device("nvidia.com/gpu=all", &mut edits)?;
+            }
+            if g == "all" || g.contains("dri") {
+                devices.extend(expand_gpu_devices("dri"));
+            }
+        }
+        for d in devices.iter().filter(|d| is_cdi_qualified(d)) {
+            ensure_cdi_available()?;
+            resolve_cdi_device(d, &mut edits)?;
+        }
+        devices.retain(|d| !is_cdi_qualified(d));
+        devices.extend(edits.devices);
+        let mut notices = Vec::new();
+        if edits.had_unexecuted_hooks {
+            notices.push(delonix_compute::Notice::new(
+                "warning: the CDI spec declares hooks that this engine does not execute (uses \
+                 `ldconfig -r` instead) — if something does not load at runtime, manually check \
+                 the hook steps",
+                &[],
+            ));
+        }
+        Ok(delonix_compute::ports::DeviceEdits {
+            devices,
+            mounts: edits.mounts,
+            env: edits.env,
+            notices,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpus_with_no_matching_devices_on_the_host_give_an_empty_list() {
+        assert!(expand_gpu_devices("none-of-these").is_empty());
+    }
 
     #[test]
     fn is_cdi_qualified_distingue_de_um_caminho_de_dev() {

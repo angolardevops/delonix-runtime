@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 delonix-runtime-core = { workspace = true }
+delonix-compute = { workspace = true }
 nix = { workspace = true }
 libc = { workspace = true }
 seccompiler = { workspace = true }
@@ -18,6 +19,9 @@ seccompiler = { workspace = true }
 rustix = { workspace = true, features = ["mount", "fs"] }
 # Already in the tree (the Store uses it) — no new supply-chain surface.
 serde_json = { workspace = true }
+# CDI specs (`cdi` module): JSON or YAML, both already in the tree.
+serde = { workspace = true }
+serde_yaml = { workspace = true }
 
 [lints]
 workspace = true
