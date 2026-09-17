@@ -951,12 +951,13 @@ dependencies = [
 name = "delonix-scanner"
 version = "3.1.0"
 dependencies = [
+ "delonix-model",
  "delonix-oci",
- "delonix-runtime-core",
  "flate2",
  "serde",
  "serde_json",
  "tar",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
