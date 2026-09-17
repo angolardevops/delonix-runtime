@@ -226,6 +226,7 @@ graph TB
   delonix_vm --> delonix_net_rules
   delonix_vm --> delonix_runtime_core
   delonix_volume --> delonix_compute
+  delonix_volume --> delonix_model
   delonix_volume --> delonix_runtime_core
 ```
 <!-- dev-docs:end crates-graph -->

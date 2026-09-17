@@ -205,7 +205,7 @@ ao que estás a fazer, não a página inteira.</p>
 </ul>
 <p>A maioria das variáveis é lida pelo processo que precisa delas e <strong>não</strong> é passada adiante
 automaticamente. Algumas são definidas pelo próprio motor nos processos que arranca; essas estão em
-<a href="#set-by-the-engine-itself--internal">Definidas pelo próprio motor</a> e não as deves definir.</p>
+<a href="#set-by-the-engine-itself-internal">Definidas pelo próprio motor</a> e não as deves definir.</p>
 <p><strong>Esta tabela é verificada pela CI nos dois sentidos.</strong> <code>python3 scripts/dev_docs.py --check</code>
 (função <code>env_var_problems</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) extrai todos os nomes <code>DELONIX_*</code> dos literais
 de string Rust em <code>crates/</code> e <code>bins/</code> (incluindo <code>build.rs</code> e <code>env!()</code>) e do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>,

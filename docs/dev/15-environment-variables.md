@@ -17,7 +17,7 @@ Each row of the variable tables has five columns:
 
 Most variables are read by the process that needs them, **not** passed on automatically. A few are
 set by the engine itself on the processes it starts; those are in
-[Set by the engine itself](#set-by-the-engine-itself--internal) and you should not set them.
+[Set by the engine itself](#set-by-the-engine-itself-internal) and you should not set them.
 
 **This table is checked by CI in both directions.** `python3 scripts/dev_docs.py --check`
 (function `env_var_problems` in `scripts/dev_docs.py`) extracts every `DELONIX_*` name from Rust

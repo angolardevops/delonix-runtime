@@ -1,4 +1,4 @@
-<!-- translated-from: 15-environment-variables.md sha256:8f9058f66ff75686e1a2f4996655b3eaef19b6185c3211700977d9cf6304c27f -->
+<!-- translated-from: 15-environment-variables.md sha256:98d2dffc919bb39ce797db194254c9ed7a7fb6353ccfa22cb70e8b405e7f611f -->
 # 15. Variables d’environnement (`DELONIX_*`)
 
 Cette page recense chaque nom `DELONIX_*` qui apparaît dans le code du moteur, avec l’endroit où il est lu,
@@ -18,7 +18,7 @@ Chaque ligne des tableaux de variables a cinq colonnes :
 
 La plupart des variables sont lues par le processus qui en a besoin, et **ne sont pas** transmises automatiquement. Quelques-unes sont
 définies par le moteur lui-même sur les processus qu’il démarre ; elles figurent dans
-[Définies par le moteur lui-même](#set-by-the-engine-itself--internal) et vous ne devez pas les définir.
+[Définies par le moteur lui-même](#set-by-the-engine-itself-internal) et vous ne devez pas les définir.
 
 **Ce tableau est contrôlé par la CI dans les deux sens.** `python3 scripts/dev_docs.py --check`
 (fonction `env_var_problems` dans `scripts/dev_docs.py`) extrait chaque nom `DELONIX_*` des littéraux de chaîne

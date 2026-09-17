@@ -34,7 +34,7 @@ Deux conventions que vous rencontrerez partout :
 <!-- dev-docs:begin crates-table -->
 | Crate | Couche | Chemin | Binaires | Dépend de (crates du moteur) | Utilisé par |
 |---|---|---|---|---|---|
-| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-runtime-bin`, `delonix-runtime-core`, `delonix-scanner` |
+| `delonix-model` | Foundation | `crates/foundation/delonix-model` | — | — | `delonix-runtime-bin`, `delonix-runtime-core`, `delonix-scanner`, `delonix-volume` |
 | `delonix-net-rules` | Foundation | `crates/foundation/delonix-net-rules` | — | — | `delonix-sdn`, `delonix-vm` |
 | `delonix-runtime-core` | Foundation | `crates/foundation/delonix-runtime-core` | — | `delonix-model` | `delonix-compute`, `delonix-cri`, `delonix-linux`, `delonix-mcp`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-oci`, `delonix-proxmox`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-security-runtime`, `delonix-stack`, `delonix-truenas`, `delonix-vm`, `delonix-volume` |
 | `delonix-compute` | Contexts | `crates/contexts/delonix-compute` | — | `delonix-runtime-core` | `delonix-cri`, `delonix-linux`, `delonix-oci`, `delonix-runtime-bin`, `delonix-sdn`, `delonix-vm`, `delonix-volume` |
@@ -46,7 +46,7 @@ Deux conventions que vous rencontrerez partout :
 | `delonix-sdn` | Adapters | `crates/adapters/delonix-sdn` | — | `delonix-compute`, `delonix-net-rules`, `delonix-runtime-core` | `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
 | `delonix-telemetry` | Adapters | `crates/adapters/delonix-telemetry` | — | — | `delonix-cri`, `delonix-mcp-bin`, `delonix-mgmt`, `delonix-mgmt-bin`, `delonix-runtime-bin` |
 | `delonix-vm` | Adapters | `crates/adapters/delonix-vm` | — | `delonix-compute`, `delonix-net-rules`, `delonix-runtime-core` | `delonix-mcp`, `delonix-mgmt`, `delonix-proxmox`, `delonix-runtime-bin` |
-| `delonix-volume` | Adapters | `crates/adapters/delonix-volume` | — | `delonix-compute`, `delonix-runtime-core` | `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
+| `delonix-volume` | Adapters | `crates/adapters/delonix-volume` | — | `delonix-compute`, `delonix-model`, `delonix-runtime-core` | `delonix-mcp`, `delonix-mgmt`, `delonix-runtime-bin` |
 | `delonix-proxmox` | Providers | `crates/providers/delonix-proxmox` | — | `delonix-runtime-core`, `delonix-vm` | `delonix-runtime-bin` |
 | `delonix-truenas` | Providers | `crates/providers/delonix-truenas` | — | `delonix-runtime-core` | `delonix-runtime-bin` |
 | `delonix-cri` | Interfaces | `crates/interfaces/delonix-cri` | `delonix-cri` | `delonix-compute`, `delonix-linux`, `delonix-oci`, `delonix-runtime-core`, `delonix-sdn`, `delonix-telemetry` | — |

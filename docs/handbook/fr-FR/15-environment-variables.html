@@ -205,7 +205,7 @@ correspond à ce que vous faites, pas la page entière.</p>
 </ul>
 <p>La plupart des variables sont lues par le processus qui en a besoin, et <strong>ne sont pas</strong> transmises automatiquement. Quelques-unes sont
 définies par le moteur lui-même sur les processus qu’il démarre ; elles figurent dans
-<a href="#set-by-the-engine-itself--internal">Définies par le moteur lui-même</a> et vous ne devez pas les définir.</p>
+<a href="#set-by-the-engine-itself-internal">Définies par le moteur lui-même</a> et vous ne devez pas les définir.</p>
 <p><strong>Ce tableau est contrôlé par la CI dans les deux sens.</strong> <code>python3 scripts/dev_docs.py --check</code>
 (fonction <code>env_var_problems</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) extrait chaque nom <code>DELONIX_*</code> des littéraux de chaîne
 Rust sous <code>crates/</code> et <code>bins/</code> (y compris <code>build.rs</code> et <code>env!()</code>) et de
