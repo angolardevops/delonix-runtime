@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:9d58690e3c8b7c4a6a264d05da96633eb7003ec33861758a95656935f59dc13d -->
+<!-- translated-from: README.md sha256:16bc925163a0f88ba4af46214d9a1ab7bbdd2860e46d2560626905e05d074659 -->
 # Delonix Runtime — Manuel du contributeur
 
 Ce manuel s’adresse aux personnes qui veulent **modifier le moteur** : vous avez cloné le dépôt
@@ -49,10 +49,11 @@ Les pages de ce manuel mélangent deux types de contenu :
 | Si vous voulez… | Lisez, dans l’ordre |
 |---|---|
 | **Partir de zéro, sans personne à qui demander** | [00](00-start-here.md) (gardez [14](14-glossary.md) ouvert) → le parcours ci-dessous qui correspond à votre modification |
-| **Envoyer une première PR** (un correctif de CLI, un correctif de doc, une petite fonctionnalité) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) pour le crate que vous touchez |
+| **Envoyer une première PR** (un correctif de CLI, un correctif de doc, une petite fonctionnalité) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) (gardez [15](15-environment-variables.md) sous la main) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) pour le crate que vous touchez |
 | **Comprendre le moteur en profondeur** | [03](03-rust-primer.md) → [04](04-cloud-native-primer.md) → [13](13-cloud-native-standards.md) → [05](05-architecture.md) → [06](06-crates.md) → [07](07-system-design-interview.md) |
-| **Travailler sur les VM ou les images de VM** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → la section `delonix-vm` de [06](06-crates.md) |
+| **Travailler sur les VM ou les images de VM** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → la section `delonix-vm` de [06](06-crates.md) → la section de réglage des VM de [15](15-environment-variables.md) |
 | **Changer la façon dont la documentation est produite** | [11](11-publishing-docs.md) |
+| **Configurer, isoler ou régler une exécution** (racines d’état, logs, échappatoires, providers) | [02 — Isoler l’état du moteur](02-build-and-test.md#isolating-the-engines-state) → [15](15-environment-variables.md) |
 
 ## Pages
 
@@ -73,6 +74,7 @@ Les pages de ce manuel mélangent deux types de contenu :
 | 12 | [Conventions de code](12-coding-conventions.md) | Comment le code de ce dépôt est écrit, et la liste de contrôle qu’appliquent les relecteurs |
 | 13 | [Standards cloud native](13-cloud-native-standards.md) | Les standards cloud native à l’aune desquels une modification est mesurée |
 | 14 | [Glossaire](14-glossary.md) | Les termes du moteur et du cloud native que vous rencontrez ici, avec leur sens dans Delonix et où en lire davantage |
+| 15 | [Variables d’environnement](15-environment-variables.md) | Chaque variable `DELONIX_*` que lit le code : qui la lit, ce qu’elle change, sa valeur par défaut, et lesquelles abaissent une frontière |
 
 Autres références vers lesquelles on vous renverra : [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) (diagrammes C4),
 [`docs/adr/`](../../adr/README.md) (décisions d’architecture), [`SECURITY.md`](../../../SECURITY.md)

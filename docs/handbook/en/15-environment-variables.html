@@ -194,7 +194,7 @@ td code{font-size:.82em}
 what it changes, and whether you should ever set it. It is a reference: read the section that
 matches what you are doing, not the whole page.</p>
 <h2 id="how-to-read-this-page">How to read this page<a class="hanchor" href="#how-to-read-this-page" aria-label="#">#</a></h2>
-<p>Each table row has five columns:</p>
+<p>Each row of the variable tables has five columns:</p>
 <ul>
 <li><strong>Read by</strong> — the crate or binary and the <code>path:symbol</code> where the value is read (or written).
   Paths are relative to the repository root.</li>
@@ -218,7 +218,7 @@ sections so the check stays exact.</p>
 <code>DELONIX_CHAOS_TRUENAS_*</code> family in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> — are documented in the header of each
 script and in <a href="02-build-and-test.html">02</a>, not here.</p>
 <h3 id="precedence">Precedence<a class="hanchor" href="#precedence" aria-label="#">#</a></h3>
-<p>Where the code has a precedence rule, it is always <strong>flag &gt; environment &gt; default</strong>:</p>
+<p>Where the code has a precedence rule it is usually <strong>flag &gt; environment &gt; default</strong>; the table shows each case as the code resolves it, including the ones with an extra level or no flag:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>

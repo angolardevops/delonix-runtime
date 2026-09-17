@@ -186,10 +186,10 @@ td code{font-size:.82em}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a class="on" aria-current="page" href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="00-start-here.html"><span class="n">00</span><span>Commencer ici</span></a><a href="01-environment.html"><span class="n">01</span><span>Préparer votre environnement</span></a><a href="02-build-and-test.html"><span class="n">02</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="03-rust-primer.html"><span class="n">03</span><span>Initiation à Rust pour cette base de code</span></a><a href="04-cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="05-architecture.html"><span class="n">05</span><span>Architecture</span></a><a href="06-crates.html"><span class="n">06</span><span>Les crates</span></a><a href="07-system-design-interview.html"><span class="n">07</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="08-delonixfile-and-vmfile.html"><span class="n">08</span><span>Delonixfile et VMfile</span></a><a href="09-microvm-setup.html"><span class="n">09</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="10-contributing-workflow.html"><span class="n">10</span><span>Flux de contribution</span></a><a href="11-publishing-docs.html"><span class="n">11</span><span>Publier la documentation</span></a><a href="12-coding-conventions.html"><span class="n">12</span><span>Conventions de code</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="13-cloud-native-standards.html"><span class="n">13</span><span>Standards cloud native, couche par couche</span></a><a href="14-glossary.html"><span class="n">14</span><span>Glossaire</span></a><a href="15-environment-variables.html"><span class="n">15</span><span>Environment variables (DELONIX_*)</span></a></div></nav>
+<nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a class="on" aria-current="page" href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="00-start-here.html"><span class="n">00</span><span>Commencer ici</span></a><a href="01-environment.html"><span class="n">01</span><span>Préparer votre environnement</span></a><a href="02-build-and-test.html"><span class="n">02</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="03-rust-primer.html"><span class="n">03</span><span>Initiation à Rust pour cette base de code</span></a><a href="04-cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="05-architecture.html"><span class="n">05</span><span>Architecture</span></a><a href="06-crates.html"><span class="n">06</span><span>Les crates</span></a><a href="07-system-design-interview.html"><span class="n">07</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="08-delonixfile-and-vmfile.html"><span class="n">08</span><span>Delonixfile et VMfile</span></a><a href="09-microvm-setup.html"><span class="n">09</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="10-contributing-workflow.html"><span class="n">10</span><span>Flux de contribution</span></a><a href="11-publishing-docs.html"><span class="n">11</span><span>Publier la documentation</span></a><a href="12-coding-conventions.html"><span class="n">12</span><span>Conventions de code</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="13-cloud-native-standards.html"><span class="n">13</span><span>Standards cloud native, couche par couche</span></a><a href="14-glossary.html"><span class="n">14</span><span>Glossaire</span></a><a href="15-environment-variables.html"><span class="n">15</span><span>Variables d’environnement (DELONIX_*)</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Vue d&#x27;ensemble</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/index.html">Lire la page en anglais</a></span></div><h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Manuel du contributeur</h1>
+<h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Manuel du contributeur</h1>
 <p>Ce manuel s’adresse aux personnes qui veulent <strong>modifier le moteur</strong> : vous avez cloné le dépôt
 aujourd’hui et vous voulez envoyer une première pull request sans casser votre hôte ni le moteur. Si vous voulez seulement
 <em>utiliser</em> Delonix, commencez plutôt par le <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> et le
@@ -243,7 +243,7 @@ section <em>«Identidade e fronteira do motor»</em> en tête de <a href="https:
 </tr>
 <tr>
 <td><strong>Envoyer une première PR</strong> (un correctif de CLI, un correctif de doc, une petite fonctionnalité)</td>
-<td><a href="00-start-here.html">00</a> → <a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="10-contributing-workflow.html">10</a> → <a href="12-coding-conventions.html">12</a> → <a href="06-crates.html">06</a> pour le crate que vous touchez</td>
+<td><a href="00-start-here.html">00</a> → <a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> (gardez <a href="15-environment-variables.html">15</a> sous la main) → <a href="10-contributing-workflow.html">10</a> → <a href="12-coding-conventions.html">12</a> → <a href="06-crates.html">06</a> pour le crate que vous touchez</td>
 </tr>
 <tr>
 <td><strong>Comprendre le moteur en profondeur</strong></td>
@@ -251,11 +251,15 @@ section <em>«Identidade e fronteira do motor»</em> en tête de <a href="https:
 </tr>
 <tr>
 <td><strong>Travailler sur les VM ou les images de VM</strong></td>
-<td><a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="08-delonixfile-and-vmfile.html">08</a> → <a href="09-microvm-setup.html">09</a> → la section <code>delonix-vm</code> de <a href="06-crates.html">06</a></td>
+<td><a href="01-environment.html">01</a> → <a href="02-build-and-test.html">02</a> → <a href="08-delonixfile-and-vmfile.html">08</a> → <a href="09-microvm-setup.html">09</a> → la section <code>delonix-vm</code> de <a href="06-crates.html">06</a> → la section de réglage des VM de <a href="15-environment-variables.html">15</a></td>
 </tr>
 <tr>
 <td><strong>Changer la façon dont la documentation est produite</strong></td>
 <td><a href="11-publishing-docs.html">11</a></td>
+</tr>
+<tr>
+<td><strong>Configurer, isoler ou régler une exécution</strong> (racines d’état, logs, échappatoires, providers)</td>
+<td><a href="02-build-and-test.html#isolating-the-engines-state">02 — Isoler l’état du moteur</a> → <a href="15-environment-variables.html">15</a></td>
 </tr>
 </tbody>
 </table></div>
@@ -343,6 +347,11 @@ section <em>«Identidade e fronteira do motor»</em> en tête de <a href="https:
 <td>14</td>
 <td><a href="14-glossary.html">Glossaire</a></td>
 <td>Les termes du moteur et du cloud native que vous rencontrez ici, avec leur sens dans Delonix et où en lire davantage</td>
+</tr>
+<tr>
+<td>15</td>
+<td><a href="15-environment-variables.html">Variables d’environnement</a></td>
+<td>Chaque variable <code>DELONIX_*</code> que lit le code : qui la lit, ce qu’elle change, sa valeur par défaut, et lesquelles abaissent une frontière</td>
 </tr>
 </tbody>
 </table></div>

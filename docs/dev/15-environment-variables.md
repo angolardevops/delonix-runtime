@@ -6,7 +6,7 @@ matches what you are doing, not the whole page.
 
 ## How to read this page
 
-Each table row has five columns:
+Each row of the variable tables has five columns:
 
 - **Read by** — the crate or binary and the `path:symbol` where the value is read (or written).
   Paths are relative to the repository root.
@@ -34,7 +34,7 @@ script and in [02](02-build-and-test.md), not here.
 
 ### Precedence
 
-Where the code has a precedence rule, it is always **flag > environment > default**:
+Where the code has a precedence rule it is usually **flag > environment > default**; the table shows each case as the code resolves it, including the ones with an extra level or no flag:
 
 | Setting | Order (first wins) | Where |
 |---|---|---|

@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:9d58690e3c8b7c4a6a264d05da96633eb7003ec33861758a95656935f59dc13d -->
+<!-- translated-from: README.md sha256:16bc925163a0f88ba4af46214d9a1ab7bbdd2860e46d2560626905e05d074659 -->
 # Delonix Runtime — Manual do Contribuidor
 
 Este manual é para quem quer **mudar o motor**: clonaste o repositório hoje e queres enviar um
@@ -49,10 +49,11 @@ As páginas deste manual misturam dois tipos de conteúdo:
 | Se queres… | Lê, por esta ordem |
 |---|---|
 | **Começar do zero, sem ninguém a quem perguntar** | [00](00-start-here.md) (mantém o [14](14-glossary.md) aberto) → o percurso abaixo que corresponde à tua mudança |
-| **Enviar um primeiro PR** (uma correcção na CLI, uma correcção na documentação, uma feature pequena) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) para o crate em que mexes |
+| **Enviar um primeiro PR** (uma correcção na CLI, uma correcção na documentação, uma feature pequena) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) (mantém o [15](15-environment-variables.md) à mão) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) para o crate em que mexes |
 | **Compreender o motor em profundidade** | [03](03-rust-primer.md) → [04](04-cloud-native-primer.md) → [13](13-cloud-native-standards.md) → [05](05-architecture.md) → [06](06-crates.md) → [07](07-system-design-interview.md) |
-| **Trabalhar em VMs ou imagens de VM** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → a secção `delonix-vm` do [06](06-crates.md) |
+| **Trabalhar em VMs ou imagens de VM** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → a secção `delonix-vm` do [06](06-crates.md) → a secção de afinação de VMs do [15](15-environment-variables.md) |
 | **Mudar a forma como a documentação é produzida** | [11](11-publishing-docs.md) |
+| **Configurar, isolar ou afinar uma corrida** (state roots, logs, escapatórias, providers) | [02 — Isolar o estado do motor](02-build-and-test.md#isolating-the-engines-state) → [15](15-environment-variables.md) |
 
 ## Páginas
 
@@ -73,6 +74,7 @@ As páginas deste manual misturam dois tipos de conteúdo:
 | 12 | [Convenções de código](12-coding-conventions.md) | Como se escreve código neste repositório, e a lista de verificação que os revisores aplicam |
 | 13 | [Padrões cloud native](13-cloud-native-standards.md) | Os padrões cloud native pelos quais uma mudança é avaliada |
 | 14 | [Glossário](14-glossary.md) | Os termos do motor e do cloud native que encontras aqui, com o seu significado no Delonix e onde ler mais |
+| 15 | [Variáveis de ambiente](15-environment-variables.md) | Todas as variáveis `DELONIX_*` que o código lê: quem as lê, o que mudam, a sua omissão, e quais baixam uma fronteira |
 
 Outras referências para onde vais ser encaminhado: [`ARCHITECTURE.md`](../../../ARCHITECTURE.md) (diagramas C4),
 [`docs/adr/`](../../adr/README.md) (decisões de arquitectura), [`SECURITY.md`](../../../SECURITY.md)
