@@ -197,8 +197,17 @@ pub fn run_supervised(
             // the record over the flag the stop had just written). A `start` in the
             // same window left TWO incarnations running, one of them surviving
             // `rm -f`.
-            if !resume_restart(store.load(&c.id).ok().as_ref()) {
+            let current = store.load(&c.id).ok();
+            if !resume_restart(current.as_ref()) {
                 std::process::exit(0);
+            }
+            // Restart from the record as it is NOW, not from the copy this
+            // supervisor has carried since the first start: `create_with` writes
+            // the whole record, so a stale copy undid whatever changed during the
+            // wait. Measured: a `rename` in the backoff window was reverted by the
+            // next restart.
+            if let Some(cur) = current {
+                *c = cur;
             }
         }
     }

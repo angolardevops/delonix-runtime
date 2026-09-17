@@ -1121,6 +1121,20 @@ fi
 sleep 2
 check "e o rm -f não deixa nenhuma encarnação para trás" ok bash -c "[ \"\$(pgrep -f -x 'sleep $RS_SLEEP' | wc -l)\" = 0 ]"
 
+# Um `rename` feito na espera entre reinícios fica. O supervisor arrancava da
+# cópia do registo que trazia desde o primeiro arranque, e o `create_with` grava o
+# registo inteiro: o reinício seguinte repunha o nome antigo.
+"$BIN" container run -d --net none --restart always --name "rn-$PFX" "$IMG" sh -c 'sleep 1; exit 1' >/dev/null 2>&1
+if e2e_in_backoff "rn-$PFX" 0; then
+  RN0=$(e2e_restarts "rn-$PFX")
+  "$BIN" container rename "rn-$PFX" "rn2-$PFX" >/dev/null 2>&1
+  check "um rename na espera entre reinícios sobrevive ao reinício" ok bash -c \
+    "for _ in \$(seq 1 40); do n=\$('$BIN' container ls -a -o json | python3 -c \"import json,sys; print(next((c.get('restarts') for c in json.load(sys.stdin) if c.get('name')=='rn2-$PFX'),-1))\"); [ \"\$n\" -gt '$RN0' ] 2>/dev/null && exit 0; sleep 0.5; done; exit 1"
+else
+  skip "um rename na espera entre reinícios sobrevive ao reinício" "não apanhei o container entre reinícios"
+fi
+"$BIN" container rm -f "rn-$PFX" "rn2-$PFX" >/dev/null 2>&1
+
 # `stop` seguido de `start` enquanto o supervisor da encarnação anterior ainda não
 # registou a morte: gravava `pid = None` por cima do pid que o `start` acabara de
 # gravar. O registo perdia o processo novo — `stop` já não o alcançava, cada `start`
