@@ -2353,6 +2353,43 @@ if "$BIN" pod create -f "$PODY" >/dev/null 2>"$OUT/pod-$PFX.err"; then
 else
   skip "pod create + aviso de cgroup" "o pod create falhou (holder/SDN indisponível)"
 fi
+
+# As portas de um membro de pod vivem no ingress partilhado, e o registo de um
+# membro não tem `network` (a pertença é o campo `pod`). O `stop`/`rm` só olhavam
+# para `network`: o hostfwd ficava no ingress depois do `rm -f`, e um pod novo na
+# mesma porta era recusado com «already in use». E o `start` não republicava.
+PPORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+PPY="$OUT/podport-$PFX.yaml"
+cat > "$PPY" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: pp$PFX }
+spec:
+  containers:
+    - name: web
+      image: $IMG
+      command: ["sh", "-c", "while true; do printf 'HTTP/1.0 200 OK\\\\r\\\\n\\\\r\\\\nhi\\\\n' | nc -l -p 8080; done"]
+      ports: [{ containerPort: 8080, hostPort: $PPORT }]
+YAML
+pp_code() { curl -s -m 5 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PPORT/"; }
+pp_wait() {  # $1 = código esperado
+  local i
+  for i in $(seq 1 30); do [ "$(pp_code)" = "$1" ] && return 0; sleep 0.5; done
+  return 1
+}
+if "$BIN" pod create -f "$PPY" >/dev/null 2>&1 && pp_wait 200; then
+  "$BIN" container stop -t 1 "pp$PFX-web" >/dev/null 2>&1
+  check "o stop de um membro de pod liberta a porta" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$PPORT')\" ]"
+  "$BIN" container start "pp$PFX-web" >/dev/null 2>&1
+  check "o start de um membro de pod volta a publicar a porta" ok bash -c \
+    "for _ in \$(seq 1 30); do [ \"\$(curl -s -m 5 -o /dev/null -w '%{http_code}' http://127.0.0.1:$PPORT/)\" = 200 ] && exit 0; sleep 0.5; done; exit 1"
+  "$BIN" container rm -f "pp$PFX-web" >/dev/null 2>&1
+  check "o rm -f de um membro de pod liberta a porta" ok bash -c "[ -z \"\$(ss -tlnH 'sport = :$PPORT')\" ]"
+  check "e um pod novo na mesma porta é aceite" ok "$BIN" pod create -f "$PPY"
+  "$BIN" container rm -f "pp$PFX-web" >/dev/null 2>&1
+else
+  skip "portas de um membro de pod" "o pod create com porta falhou (holder/SDN indisponível)"
+fi
 check "secret ls" ok "$BIN" secret ls
 check "secret inspect inexistente recusa" fail "$BIN" secret inspect "nao-existe-$PFX"
 
