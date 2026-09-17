@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>IaaS and cloud native — where the engine fits · Delonix Runtime — Manual do contribuidor</title>
+<title>IaaS e cloud native — onde o motor encaixa · Delonix Runtime — Manual do contribuidor</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,123 +206,124 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a class="on" aria-current="page" href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
+<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a class="on" aria-current="page" href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">15</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Começar</p>
-<div class="notice" role="note">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="iaas-and-cloud-native-where-the-engine-fits">IaaS and cloud native — where the engine fits</h1>
-<p><strong>Before you read:</strong> <a href="start-here.html#what-delonix-is-5-minutes">Start here</a> (the four sentences on what Delonix is). No kernel or Rust knowledge is needed yet.</p>
-<p>You may be a DevOps engineer, an SRE, a platform engineer or a cloud developer who has <em>used</em> an
-Infrastructure-as-a-Service cloud for years without ever building one. This page gives you the
-mental model you need before reading the engine's code: what an IaaS is made of, which of its
-layers this repository implements, which it deliberately leaves to others, and how the cloud native
-principles you already know show up in concrete files here. After it you can say, for any IaaS
-responsibility, whether this repository owns it or leaves it to a control plane, and point to the
-file where each cloud native principle is applied.</p>
-<p>Every claim about the engine points to a file, a symbol or an ADR. When an ADR is cited, its
-status is given, because a <em>Proposed</em> ADR is a direction, not a fact about the code. Paths such
-as <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> name the engine's crates; you do not need to know them yet — for
-now read a path as "the code for this lives here". The directory level (<code>foundation</code>, <code>contexts</code>,
-<code>adapters</code>, <code>providers</code>, <code>interfaces</code>) is the crate's layer, explained later in
-<a href="project-structure.html">Project structure</a> and <a href="architecture.html">Architecture</a>.</p>
-<p>If a word is new to you, look it up in the <a href="glossary.html">glossary</a>.</p>
-<h2 id="what-an-iaas-is">What an IaaS is<a class="hanchor" href="#what-an-iaas-is" aria-label="#">#</a></h2>
-<h3 id="the-service-models">The service models<a class="hanchor" href="#the-service-models" aria-label="#">#</a></h3>
-<p>The reference definitions are in <strong>NIST SP 800-145</strong>, <em>The NIST Definition of Cloud Computing</em>
-(<a href="https://csrc.nist.gov/pubs/sp/800/145/final">csrc.nist.gov/pubs/sp/800/145/final</a>). In short:</p>
+<h1 id="iaas-and-cloud-native-where-the-engine-fits">IaaS e cloud native — onde o motor encaixa</h1>
+<p><strong>Antes de leres:</strong> <a href="start-here.html#what-delonix-is-5-minutes">Começa aqui</a> (as quatro frases sobre o que é o Delonix). Ainda não precisas de conhecimento de kernel nem de Rust.</p>
+<p>Podes ser um engenheiro DevOps, um SRE, um engenheiro de plataforma ou um programador cloud que
+<em>usou</em> uma cloud Infrastructure-as-a-Service durante anos sem alguma vez construir uma. Esta página
+dá-te o modelo mental de que precisas antes de leres o código do motor: do que é feita uma IaaS,
+que camadas dela este repositório implementa, quais deixa deliberadamente para outros, e como os
+princípios cloud native que já conheces aparecem em ficheiros concretos aqui. Depois dela consegues
+dizer, para qualquer responsabilidade de uma IaaS, se este repositório a possui ou a deixa para um
+control plane, e apontar para o ficheiro onde cada princípio cloud native é aplicado.</p>
+<p>Toda a afirmação sobre o motor aponta para um ficheiro, um símbolo ou um ADR. Quando um ADR é
+citado, o seu estado é dado, porque um ADR <em>Proposed</em> é uma direcção, não um facto sobre o código.
+Caminhos como <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> nomeiam os crates do motor; ainda não precisas de os
+conhecer — por agora lê um caminho como "o código disto vive aqui". O nível do directório
+(<code>foundation</code>, <code>contexts</code>, <code>adapters</code>, <code>providers</code>, <code>interfaces</code>) é a camada do crate, explicada mais
+à frente em <a href="project-structure.html">Estrutura do projecto</a> e <a href="architecture.html">Arquitectura</a>.</p>
+<p>Se uma palavra for nova para ti, procura-a no <a href="glossary.html">glossário</a>.</p>
+<h2 id="what-an-iaas-is">O que é uma IaaS<a class="hanchor" href="#what-an-iaas-is" aria-label="#">#</a></h2>
+<h3 id="the-service-models">Os modelos de serviço<a class="hanchor" href="#the-service-models" aria-label="#">#</a></h3>
+<p>As definições de referência estão em <strong>NIST SP 800-145</strong>, <em>The NIST Definition of Cloud Computing</em>
+(<a href="https://csrc.nist.gov/pubs/sp/800/145/final">csrc.nist.gov/pubs/sp/800/145/final</a>). Em resumo:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Model</th>
-<th>The consumer gets</th>
-<th>The consumer manages</th>
-<th>The provider manages</th>
+<th>Modelo</th>
+<th>O consumidor recebe</th>
+<th>O consumidor gere</th>
+<th>O fornecedor gere</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>IaaS</strong> — Infrastructure as a Service</td>
-<td>processing, storage, networks and other fundamental computing resources</td>
-<td>operating systems, storage use, deployed applications, and limited control of some networking (e.g. host firewalls)</td>
-<td>the underlying physical and virtual infrastructure</td>
+<td>processamento, armazenamento, redes e outros recursos computacionais fundamentais</td>
+<td>sistemas operativos, uso do armazenamento, aplicações implantadas, e controlo limitado de alguma rede (ex.: firewalls do host)</td>
+<td>a infra-estrutura física e virtual subjacente</td>
 </tr>
 <tr>
 <td><strong>PaaS</strong> — Platform as a Service</td>
-<td>a place to deploy applications built with the provider's languages, libraries and tools</td>
-<td>the applications and their configuration</td>
-<td>everything underneath, including OS and runtime</td>
+<td>um sítio para implantar aplicações construídas com as linguagens, bibliotecas e ferramentas do fornecedor</td>
+<td>as aplicações e a sua configuração</td>
+<td>tudo por baixo, incluindo o SO e o runtime</td>
 </tr>
 <tr>
 <td><strong>SaaS</strong> — Software as a Service</td>
-<td>a running application</td>
-<td>at most user-specific settings</td>
-<td>everything, including the application</td>
+<td>uma aplicação a correr</td>
+<td>no máximo definições específicas do utilizador</td>
+<td>tudo, incluindo a aplicação</td>
 </tr>
 </tbody>
 </table></div>
-<p>The same NIST document lists the five essential characteristics — on-demand self-service, broad
-network access, resource pooling, rapid elasticity and measured service. Keep the last three in
-mind: they are exactly the properties that live <strong>above</strong> a single node, in a control plane.</p>
-<h3 id="the-building-blocks-every-iaas-has">The building blocks every IaaS has<a class="hanchor" href="#the-building-blocks-every-iaas-has" aria-label="#">#</a></h3>
-<p>Whatever the vendor, an IaaS is assembled from the same pieces:</p>
+<p>O mesmo documento NIST lista as cinco características essenciais — self-service on-demand, acesso
+amplo à rede, pooling de recursos, elasticidade rápida e serviço medido. Guarda as três últimas:
+são exactamente as propriedades que vivem <strong>acima</strong> de um único nó, num control plane.</p>
+<h3 id="the-building-blocks-every-iaas-has">Os blocos de construção que toda IaaS tem<a class="hanchor" href="#the-building-blocks-every-iaas-has" aria-label="#">#</a></h3>
+<p>Seja qual for o fornecedor, uma IaaS é montada a partir das mesmas peças:</p>
 <ul>
-<li><strong>Regions and zones</strong> — a region is a geographic location; a zone is a failure domain inside it
-  (separate power, cooling, network). Placement decisions are made against them.</li>
-<li><strong>Compute</strong> — virtual machines, and increasingly containers and lightweight microVMs, placed on
-  physical hosts.</li>
-<li><strong>Storage</strong> — <em>block</em> (a disk attached to one machine), <em>file</em> (a shared filesystem such as NFS
-  or SMB), and <em>object</em> (an HTTP API over buckets and keys).</li>
-<li><strong>Virtual networks</strong> — a private network per customer (often called a VPC), subnets inside it,
-  security groups or firewall rules, NAT for outbound traffic, load balancers for inbound traffic,
-  and internal DNS.</li>
-<li><strong>Identity and tenancy</strong> — who is calling, which organization or account they belong to, what
-  they may do, and how their resources are isolated from everyone else's.</li>
-<li><strong>Metering</strong> — counting what each tenant consumes, so it can be limited (quotas) and charged
-  (billing).</li>
-<li><strong>A control plane and a data plane</strong> — the <em>control plane</em> accepts API requests, stores desired
-  state, decides placement and drives changes; the <em>data plane</em> is where workloads actually run
-  and packets actually flow. A healthy IaaS keeps serving running workloads even when its control
-  plane is briefly unavailable.</li>
-<li><strong>A node agent or runtime on each host</strong> — the piece of software on every physical machine that
-  turns "run this VM with this network and this disk" into kernel, hypervisor and storage calls,
-  and reports back what is really there.</li>
+<li><strong>Regiões e zonas</strong> — uma região é uma localização geográfica; uma zona é um domínio de falha
+  dentro dela (energia, arrefecimento e rede separados). As decisões de colocação são tomadas
+  contra elas.</li>
+<li><strong>Computação</strong> — máquinas virtuais, e cada vez mais containers e microVMs leves, colocadas em
+  hosts físicos.</li>
+<li><strong>Armazenamento</strong> — <em>block</em> (um disco ligado a uma máquina), <em>file</em> (um sistema de ficheiros
+  partilhado como NFS ou SMB), e <em>object</em> (uma API HTTP sobre buckets e chaves).</li>
+<li><strong>Redes virtuais</strong> — uma rede privada por cliente (muitas vezes chamada VPC), subnets dentro dela,
+  security groups ou regras de firewall, NAT para tráfego de saída, load balancers para tráfego de
+  entrada, e DNS interno.</li>
+<li><strong>Identidade e inquilinato</strong> — quem está a chamar, a que organização ou conta pertence, o que
+  pode fazer, e como os seus recursos são isolados dos de todos os outros.</li>
+<li><strong>Medição</strong> — contar o que cada inquilino consome, para poder ser limitado (quotas) e cobrado
+  (facturação).</li>
+<li><strong>Um control plane e um data plane</strong> — o <em>control plane</em> aceita pedidos de API, guarda o estado
+  desejado, decide a colocação e conduz as mudanças; o <em>data plane</em> é onde os workloads realmente
+  correm e os pacotes realmente fluem. Uma IaaS saudável continua a servir workloads a correr mesmo
+  quando o seu control plane fica brevemente indisponível.</li>
+<li><strong>Um agente de nó ou runtime em cada host</strong> — a peça de software em cada máquina física que
+  transforma "corre esta VM com esta rede e este disco" em chamadas ao kernel, ao hipervisor e ao
+  armazenamento, e reporta de volta o que realmente lá está.</li>
 </ul>
-<p>This repository is the last bullet. The rest of the page explains exactly how far that goes.</p>
-<h2 id="the-layers-of-an-iaas">The layers of an IaaS<a class="hanchor" href="#the-layers-of-an-iaas" aria-label="#">#</a></h2>
-<p><strong>Legend</strong></p>
+<p>Este repositório é o último ponto. O resto da página explica exactamente até onde isso vai.</p>
+<h2 id="the-layers-of-an-iaas">As camadas de uma IaaS<a class="hanchor" href="#the-layers-of-an-iaas" aria-label="#">#</a></h2>
+<p><strong>Legenda</strong></p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Shape</th>
-<th>Meaning</th>
+<th>Forma</th>
+<th>Significado</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>box, dark</td>
-<td>person or external actor</td>
+<td>caixa, escura</td>
+<td>pessoa ou actor externo</td>
 </tr>
 <tr>
-<td>box, red</td>
-<td>the Delonix engine (this repository)</td>
+<td>caixa, vermelha</td>
+<td>o motor Delonix (este repositório)</td>
 </tr>
 <tr>
-<td>box, light</td>
-<td>a building block of the engine</td>
+<td>caixa, clara</td>
+<td>um bloco de construção do motor</td>
 </tr>
 <tr>
-<td>box, grey</td>
-<td>an external system — something this repository does not implement</td>
+<td>caixa, cinzenta</td>
+<td>um sistema externo — algo que este repositório não implementa</td>
 </tr>
 <tr>
-<td>box, blue</td>
-<td>state on disk</td>
+<td>caixa, azul</td>
+<td>estado em disco</td>
 </tr>
 </tbody>
 </table></div>
-<p>Solid arrows are calls or data flows, and the label says what flows.</p>
-<p><em>Caption: a request travels from an operator, through a multi-tenant control plane that is not in
-this repository, to a node-local client, into the engine on one node, and down to the kernel,
-hypervisors and storage the engine drives through its provider ports.</em></p>
+<p>As setas sólidas são chamadas ou fluxos de dados, e a etiqueta diz o que flui.</p>
+<p><em>Legenda da figura: um pedido viaja de um operador, através de um control plane multi-inquilino que
+não está neste repositório, até um cliente local ao nó, entra no motor num nó, e desce até ao
+kernel, aos hipervisores e ao armazenamento que o motor conduz através das suas portas de provider.</em></p>
 <pre class="mermaid">flowchart TB
   OP[&quot;Operator / tenant user&lt;br/&gt;&lt;small&gt;asks for a VM, a network, a disk&lt;/small&gt;&quot;]
   CP[&quot;IaaS control plane&lt;br/&gt;&lt;small&gt;tenancy, scheduling, quotas, billing — NOT this repository&lt;/small&gt;&quot;]
@@ -358,404 +359,409 @@ hypervisors and storage the engine drives through its provider ports.</em></p>
   class DOORS block
   class ST store
 </pre>
-<p>Where each element lives in the code:</p>
+<p>Onde cada elemento vive no código:</p>
 <ul>
-<li><strong>Interfaces</strong> — the CLI binary (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>), the Kubernetes CRI server
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>, <code>delonix serve cri</code>), the local management socket
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>), the MCP server (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>,
-  <code>delonix mcp serve</code>) and the node contract (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>). See
-  <a href="architecture.html#one-set-of-operations-several-interfaces">One set of operations, several interfaces</a>.</li>
-<li><strong>State root</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state" target="_blank" rel="noopener"><code>crates/adapters/delonix-state</code></a> (JSON records behind <code>flock</code>, atomic writes, the
-  encrypted secret vault) and the image store in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a> (<code>cas.rs</code>).</li>
-<li><strong>Kernel</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> (process, namespaces, cgroups, mounts) and
+<li><strong>Interfaces</strong> — o binário da CLI (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>), o servidor CRI do Kubernetes
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>, <code>delonix serve cri</code>), o socket de gestão local
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>), o servidor MCP (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>,
+  <code>delonix mcp serve</code>) e o contrato de nó (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>). Ver
+  <a href="architecture.html#one-set-of-operations-several-interfaces">Um conjunto de operações, várias interfaces</a>.</li>
+<li><strong>State root</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-state" target="_blank" rel="noopener"><code>crates/adapters/delonix-state</code></a> (registos JSON atrás de <code>flock</code>, escritas
+  atómicas, o cofre de segredos cifrado) e o image store em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a>
+  (<code>cas.rs</code>).</li>
+<li><strong>Kernel</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> (processos, namespaces, cgroups, mounts) e
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a> (bridges, nftables, DNS).</li>
-<li><strong>Hypervisors</strong> — the <code>VmBackend</code> trait in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
-<li><strong>Remote providers</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (ADR-0008, Accepted and implemented)
-  and <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a> (ADR-0009, Accepted). An OpenStack backend is only a
-  proposal (ADR-0039, Proposed, gated on a spike).</li>
-<li><strong>Registry</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>.</li>
+<li><strong>Hipervisores</strong> — o trait <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
+<li><strong>Providers remotos</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-proxmox" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox</code></a> (ADR-0008, Accepted e implementado)
+  e <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers/delonix-truenas" target="_blank" rel="noopener"><code>crates/providers/delonix-truenas</code></a> (ADR-0009, Accepted). Um backend OpenStack é ainda só uma
+  proposta (ADR-0039, Proposed, condicionado a um spike).</li>
+<li><strong>Registo</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/registry.rs</code></a>.</li>
 </ul>
-<p>The control plane and the node-local client are grey on purpose: they are not in this repository,
-and nothing in <code>crates/</code>, <code>bins/</code> or <code>proto/</code> is allowed to name one. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>
-(<code>CONSUMER_NAMES</code>, <code>consumer_mentions</code>) fails CI when it finds such a name.</p>
-<h2 id="where-delonix-runtime-fits-and-where-it-deliberately-stops">Where delonix-runtime fits, and where it deliberately stops<a class="hanchor" href="#where-delonix-runtime-fits-and-where-it-deliberately-stops" aria-label="#">#</a></h2>
-<h3 id="what-it-is">What it is<a class="hanchor" href="#what-it-is" aria-label="#">#</a></h3>
-<p>Delonix Runtime is the <strong>node execution layer</strong> of the picture above. On one node it:</p>
+<p>O control plane e o cliente local ao nó estão a cinzento de propósito: não estão neste
+repositório, e nada em <code>crates/</code>, <code>bins/</code> ou <code>proto/</code> pode nomear um. O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>
+(<code>CONSUMER_NAMES</code>, <code>consumer_mentions</code>) falha a CI quando encontra um nome desses.</p>
+<h2 id="where-delonix-runtime-fits-and-where-it-deliberately-stops">Onde o delonix-runtime encaixa, e onde pára deliberadamente<a class="hanchor" href="#where-delonix-runtime-fits-and-where-it-deliberately-stops" aria-label="#">#</a></h2>
+<h3 id="what-it-is">O que é<a class="hanchor" href="#what-it-is" aria-label="#">#</a></h3>
+<p>O Delonix Runtime é a <strong>camada de execução de nó</strong> da figura acima. Num nó, ele:</p>
 <ul>
-<li>runs <strong>containers and microVMs</strong> — containers through <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a>, VMs
-  through the registrable <code>VmBackend</code> implementations in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm</code></a>;</li>
-<li>manages the <strong>network</strong> those workloads need — rootless bridges, per-workload firewall chains,
-  internal DNS (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a>) — and their <strong>storage</strong> — named volumes, bind
-  mounts and network shares (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume</code></a>);</li>
-<li>is <strong>declarative</strong>, with its own Kinds grouped by <code>apiVersion</code> (list them with
-  <code>delonix api-resources</code>; the table behind them is <code>KindFacts</code> in
+<li>corre <strong>containers e microVMs</strong> — containers através de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a>, VMs
+  através das implementações registáveis de <code>VmBackend</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm</code></a>;</li>
+<li>gere a <strong>rede</strong> de que esses workloads precisam — bridges rootless, chains de firewall por
+  workload, DNS interno (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn</code></a>) — e o seu <strong>armazenamento</strong> — volumes
+  nomeados, bind mounts e partilhas de rede (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/adapters/delonix-volume</code></a>);</li>
+<li>é <strong>declarativo</strong>, com os seus próprios Kinds agrupados por <code>apiVersion</code> (lista-os com
+  <code>delonix api-resources</code>; a tabela por trás deles é <code>KindFacts</code> em
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>);</li>
-<li>talks to providers only through <strong>ports</strong> — traits such as <code>NetworkProvider</code>, <code>ImageStore</code> and
-  <code>StorageProvider</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>, and <code>VmBackend</code> — never
-  through <code>if provider == …</code> branches. This layering is ADR-0040 (<strong>Proposed</strong>), and its rules are
-  already enforced by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);</li>
-<li>exposes the <strong>same operations through several doors</strong>: the CLI, the node contract, the CRI and
-  MCP.</li>
+<li>fala com os providers só através de <strong>portas</strong> — traits como <code>NetworkProvider</code>, <code>ImageStore</code> e
+  <code>StorageProvider</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>, e <code>VmBackend</code> — nunca
+  através de ramos <code>if provider == …</code>. Esta divisão em camadas é o ADR-0040 (<strong>Proposed</strong>), e as
+  suas regras já são impostas por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (<code>LAYERS</code>, <code>ALLOWED</code>);</li>
+<li>expõe as <strong>mesmas operações através de várias portas</strong>: a CLI, o contrato de nó, o CRI e o MCP.</li>
 </ul>
-<p>One caveat on the node contract, so you do not go looking for a server that is not there:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> is marked <em>DRAFT contract for ADR-0040</em>. The contract, its
-generated <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> and its CI gate (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>) exist; no crate
-serves <code>NodeService</code> yet. ADR-0042 (<strong>Accepted</strong>, steps A and B delivered) fixes how that API is
-versioned and documented when the server lands.</p>
-<h3 id="what-it-deliberately-does-not-do">What it deliberately does not do<a class="hanchor" href="#what-it-deliberately-does-not-do" aria-label="#">#</a></h3>
-<p>The canonical rule is the section <em>«Identidade e fronteira do motor»</em> at the top of
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: the engine knows <strong>no consumer</strong> — no platforms, control planes,
-consoles or agents — and has no notion of <strong>tenant, account, plan, quota or billing</strong>. A
-requirement coming from a consumer enters only as a generic engine capability that makes sense for
-any client.</p>
-<p>ADR-0010 (<strong>Rejected</strong>, 2026-08-10) is the decision that keeps the management API <strong>local</strong>: a
-unix socket, with the peer required to have the same uid as the server (<code>SO_PEERCRED</code>). A remote,
-multi-tenant management API would need identity, authorization and audit, and those belong on the
-other side of the boundary. ADR-0025 (<strong>Accepted</strong>) applies the same reasoning to MCP: stdio only,
-one local principal, no tenant, no OAuth.</p>
-<p>Two words overlap between the two worlds and cause confusion in review:</p>
+<p>Uma ressalva sobre o contrato de nó, para não ires à procura de um servidor que não existe:
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/delonix/node/v1/node.proto" target="_blank" rel="noopener"><code>proto/delonix/node/v1/node.proto</code></a> está marcado como <em>DRAFT contract for ADR-0040</em>. O contrato, o
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> gerado a partir dele, e o seu gate de CI (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>)
+existem; nenhum crate serve ainda o <code>NodeService</code>. O ADR-0042 (<strong>Accepted</strong>, passos A e B
+entregues) fixa como essa API é versionada e documentada quando o servidor chegar.</p>
+<h3 id="what-it-deliberately-does-not-do">O que deliberadamente não faz<a class="hanchor" href="#what-it-deliberately-does-not-do" aria-label="#">#</a></h3>
+<p>A regra canónica é a secção <em>«Identidade e fronteira do motor»</em> no topo do
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: o motor não conhece <strong>nenhum consumidor</strong> — nem plataformas,
+control planes, consolas ou agentes — e não tem noção de <strong>inquilino, conta, plano, quota ou
+facturação</strong>. Um requisito vindo de um consumidor só entra como uma capacidade genérica do motor
+que faça sentido para qualquer cliente.</p>
+<p>O ADR-0010 (<strong>Rejected</strong>, 2026-08-10) é a decisão que mantém a API de gestão <strong>local</strong>: um socket
+unix, com o peer obrigado a ter o mesmo uid que o servidor (<code>SO_PEERCRED</code>). Uma API de gestão
+remota e multi-inquilino precisaria de identidade, autorização e auditoria, e essas coisas
+pertencem ao outro lado da fronteira. O ADR-0025 (<strong>Accepted</strong>) aplica o mesmo raciocínio ao MCP:
+só stdio, um único principal local, sem inquilino, sem OAuth.</p>
+<p>Duas palavras sobrepõem-se entre os dois mundos e causam confusão em revisão:</p>
 <ul>
-<li><strong>namespace</strong> — in the engine, <code>metadata.namespace</code> is an <em>isolation</em> boundary between workloads
-  on one node (containers in different namespaces cannot reach each other). It is not a tenant or
-  an account: nothing in the engine knows who owns a namespace.</li>
-<li><strong>quota</strong> — the engine enforces <em>per-resource</em> limits it is told about (cgroup memory and CPU
-  limits, a volume quota). A per-account quota ("this customer may have 20 vCPUs") is a
-  control-plane decision.</li>
+<li><strong>namespace</strong> — no motor, <code>metadata.namespace</code> é uma fronteira de <em>isolamento</em> entre workloads
+  num nó (containers em namespaces diferentes não se conseguem alcançar). Não é um inquilino nem
+  uma conta: nada no motor sabe quem possui um namespace.</li>
+<li><strong>quota</strong> — o motor impõe limites <em>por-recurso</em> que lhe são dados (limites de memória e CPU do
+  cgroup, uma quota de volume). Uma quota por-conta ("este cliente pode ter 20 vCPUs") é uma
+  decisão de control plane.</li>
 </ul>
-<h3 id="who-owns-what">Who owns what<a class="hanchor" href="#who-owns-what" aria-label="#">#</a></h3>
+<h3 id="who-owns-what">Quem possui o quê<a class="hanchor" href="#who-owns-what" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>IaaS responsibility</th>
-<th>Control plane above</th>
-<th>Delonix engine on the node</th>
-<th>Host and kernel</th>
+<th>Responsabilidade de IaaS</th>
+<th>Control plane acima</th>
+<th>Motor Delonix no nó</th>
+<th>Host e kernel</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Regions, zones, placement, scheduling across nodes</td>
-<td>yes</td>
-<td>no</td>
+<td>Regiões, zonas, colocação, escalonamento entre nós</td>
+<td>sim</td>
+<td>não</td>
 <td>—</td>
 </tr>
 <tr>
-<td>Identity, tenants, accounts, IAM</td>
-<td>yes</td>
-<td>no (local uid only — ADR-0010, ADR-0025)</td>
+<td>Identidade, inquilinos, contas, IAM</td>
+<td>sim</td>
+<td>não (só uid local — ADR-0010, ADR-0025)</td>
 <td>—</td>
 </tr>
 <tr>
-<td>Quotas per account, metering for billing, billing</td>
-<td>yes</td>
-<td>no; it only exposes per-node metrics (<code>/metrics</code> in <code>delonix-mgmt</code> and <code>delonix-cri</code>)</td>
+<td>Quotas por conta, medição para facturação, facturação</td>
+<td>sim</td>
+<td>não; só expõe métricas por-nó (<code>/metrics</code> em <code>delonix-mgmt</code> e <code>delonix-cri</code>)</td>
 <td>—</td>
 </tr>
 <tr>
-<td>Fleet management (add/drain nodes remotely)</td>
-<td>yes</td>
-<td>no — the remote API was rejected (ADR-0010)</td>
+<td>Gestão de frota (acrescentar/drenar nós remotamente)</td>
+<td>sim</td>
+<td>não — a API remota foi rejeitada (ADR-0010)</td>
 <td>—</td>
 </tr>
 <tr>
-<td>Running a container</td>
-<td>asks for it</td>
-<td>yes — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux</code></a></td>
+<td>Correr um container</td>
+<td>pede-o</td>
+<td>sim — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux</code></a></td>
 <td>namespaces, cgroups v2, seccomp</td>
 </tr>
 <tr>
-<td>Running a microVM</td>
-<td>asks for it</td>
-<td>yes — <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm</code></a>)</td>
+<td>Correr uma microVM</td>
+<td>pede-o</td>
+<td>sim — <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-vm" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm</code></a>)</td>
 <td>KVM</td>
 </tr>
 <tr>
-<td>Virtual network on the node (bridge, firewall, DNS, port publishing)</td>
-<td>defines the intent</td>
-<td>yes — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn</code></a></td>
+<td>Rede virtual no nó (bridge, firewall, DNS, publicação de portas)</td>
+<td>define a intenção</td>
+<td>sim — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-sdn" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn</code></a></td>
 <td>nftables, netns</td>
 </tr>
 <tr>
-<td>Block/file storage attached to a workload</td>
-<td>defines the intent</td>
-<td>yes — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume</code></a>, NAS provisioning via <code>delonix-truenas</code> (ADR-0009, Accepted)</td>
-<td>filesystems, NFS/SMB clients</td>
+<td>Armazenamento block/file ligado a um workload</td>
+<td>define a intenção</td>
+<td>sim — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume</code></a>, provisionamento de NAS via <code>delonix-truenas</code> (ADR-0009, Accepted)</td>
+<td>sistemas de ficheiros, clientes NFS/SMB</td>
 </tr>
 <tr>
-<td>Object storage service (buckets over HTTP)</td>
-<td>yes, or a separate service</td>
-<td>not provided</td>
+<td>Serviço de object storage (buckets sobre HTTP)</td>
+<td>sim, ou um serviço separado</td>
+<td>não fornecido</td>
 <td>—</td>
 </tr>
 <tr>
-<td>Images: pull, verify, store</td>
-<td>chooses the image</td>
-<td>yes — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci</code></a></td>
+<td>Imagens: pull, verificação, armazenamento</td>
+<td>escolhe a imagem</td>
+<td>sim — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci</code></a></td>
 <td>overlayfs</td>
 </tr>
 <tr>
-<td>Desired state for one node: plan, apply, drift</td>
-<td>sends the manifest</td>
-<td>yes — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-stack" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack</code></a></td>
+<td>Estado desejado para um nó: plan, apply, deriva</td>
+<td>envia o manifesto</td>
+<td>sim — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-stack" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-stack</code></a></td>
 <td>—</td>
 </tr>
 <tr>
-<td>Surviving a host reboot</td>
+<td>Sobreviver a um reboot do host</td>
 <td>—</td>
-<td>writes systemd units (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>boot.<wbr>rs</code></a>, <code>delonix system boot enable</code>)</td>
+<td>escreve units systemd (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>boot.<wbr>rs</code></a>, <code>delonix system boot enable</code>)</td>
 <td>systemd</td>
 </tr>
 <tr>
-<td>Hardware, firmware, host OS patching</td>
+<td>Hardware, firmware, patches do SO do host</td>
 <td>—</td>
-<td>no</td>
-<td>the operator</td>
+<td>não</td>
+<td>o operador</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="cloud-native-principles-and-how-the-engine-applies-each">Cloud native principles, and how the engine applies each<a class="hanchor" href="#cloud-native-principles-and-how-the-engine-applies-each" aria-label="#">#</a></h2>
-<p>The Cloud Native Computing Foundation's definition (v1.1, approved 2024-02-26) says cloud native
-practices let organizations "develop, build, and deploy workloads … in a programmatic and repeatable
-manner", and that cloud native is "characterized by loosely coupled systems that interoperate in a
-manner that is secure, resilient, manageable, sustainable, and observable". It names containers,
-service meshes, multi-tenancy, microservices, immutable infrastructure, serverless and declarative
-APIs as typical ingredients. Read the full text at
+<h2 id="cloud-native-principles-and-how-the-engine-applies-each">Princípios cloud native, e como o motor aplica cada um<a class="hanchor" href="#cloud-native-principles-and-how-the-engine-applies-each" aria-label="#">#</a></h2>
+<p>A definição da Cloud Native Computing Foundation (v1.1, aprovada em 2024-02-26) diz que as práticas
+cloud native permitem às organizações "desenvolver, construir e implantar workloads … de forma
+programática e repetível", e que cloud native é "caracterizado por sistemas fracamente acoplados
+que interoperam de forma segura, resiliente, gerível, sustentável e observável". Nomeia containers,
+service meshes, multi-tenancy, microserviços, infra-estrutura imutável, serverless e APIs
+declarativas como ingredientes típicos. Lê o texto completo em
 <a href="https://github.com/cncf/toc/blob/main/DEFINITION.md">github.com/cncf/toc/blob/main/DEFINITION.md</a>.
-Note that <em>multi-tenancy</em> is on that list, and in this architecture it is provided by the control
-plane above the engine, not by the engine.</p>
-<p>Below, each principle gets three short parts: what it means in general, where it lives in Delonix,
-and one habit it asks of you.</p>
-<h3 id="declarative-and-convergent">Declarative and convergent<a class="hanchor" href="#declarative-and-convergent" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> You describe the state you want; the system compares it with what exists, shows you
-the difference, and changes only what differs. Running the same description twice changes nothing
-the second time. A tool that only creates is not declarative, however YAML-shaped its input.</p>
-<p><strong>In Delonix.</strong> <code>delonix stack plan</code> and <code>delonix stack apply</code> run the reconciler in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a> (<code>plan</code>, <code>Change</code>, <code>Action</code>). It is a <strong>pure
-function</strong> over an already-read snapshot, and it is a <strong>three-way diff</strong>: the last applied spec is
-stored on the resource itself (<code>encode_last_applied</code>, the <code>delonix.io/last-applied</code> annotation), so
-it can tell "you removed this field" from "someone set this by hand". A change that cannot be
-applied live is refused unless <code>--replace &lt;Kind&gt;/&lt;name&gt;</code> authorizes the destruction, and
-<code>--detailed-exitcode</code> (0 = no changes, 2 = changes, 1 = error) turns a plan into a drift gate in CI.
-ADR-0019 (<strong>Accepted</strong>) adds a revision history, explicitly as a record and never as a source of
-truth.</p>
-<p><strong>What it asks of you.</strong> If you add or change a Kind, its apply must converge: a changed field must
-either be updated live or appear in the plan as a replacement. The module doc of <code>reconcile.rs</code>
-records why — <code>stack apply</code> once printed <code>already exists, nothing to do</code> and returned 0 while
-ignoring the change the user had made. A new converging Kind also needs its row in <code>KindFacts</code>
-(<code>kinds.rs</code>); the tests in that crate check the table.</p>
+Repara que <em>multi-tenancy</em> está nessa lista, e nesta arquitectura é fornecida pelo control plane
+acima do motor, não pelo motor.</p>
+<p>Abaixo, cada princípio ganha três partes curtas: o que significa em geral, onde vive no Delonix, e
+um hábito que te pede.</p>
+<h3 id="declarative-and-convergent">Declarativo e convergente<a class="hanchor" href="#declarative-and-convergent" aria-label="#">#</a></h3>
+<p><strong>Em geral.</strong> Descreves o estado que queres; o sistema compara-o com o que existe, mostra-te a
+diferença, e muda só o que difere. Correr a mesma descrição duas vezes não muda nada da segunda
+vez. Uma ferramenta que só cria não é declarativa, por mais forma de YAML que o seu input tenha.</p>
+<p><strong>No Delonix.</strong> <code>delonix stack plan</code> e <code>delonix stack apply</code> correm o reconciliador em
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a> (<code>plan</code>, <code>Change</code>, <code>Action</code>). É uma <strong>função
+pura</strong> sobre um snapshot já lido, e é um <strong>diff de três vias</strong>: o último spec aplicado é guardado
+no próprio recurso (<code>encode_last_applied</code>, a anotação <code>delonix.io/last-applied</code>), para conseguir
+distinguir "tiraste este campo" de "alguém pôs isto à mão". Uma mudança que não possa ser aplicada
+a quente é recusada a não ser que <code>--replace &lt;Kind&gt;/&lt;name&gt;</code> autorize a destruição, e o
+<code>--detailed-exitcode</code> (0 = sem mudanças, 2 = mudanças, 1 = erro) transforma um plano num gate de
+deriva em CI. O ADR-0019 (<strong>Accepted</strong>) acrescenta um histórico de revisões, explicitamente como
+um registo e nunca como fonte de verdade.</p>
+<p><strong>O que te pede.</strong> Se acrescentares ou mudares um Kind, o seu apply tem de convergir: um campo
+mudado tem de ser actualizado a quente ou aparecer no plano como uma substituição. O doc-comment do
+módulo de <code>reconcile.rs</code> regista porquê — o <code>stack apply</code> já imprimiu <code>already exists, nothing to
+do</code> e devolveu 0 enquanto ignorava a mudança que o utilizador tinha feito. Um Kind convergente novo
+precisa também da sua linha em <code>KindFacts</code> (<code>kinds.rs</code>); os testes desse crate verificam a tabela.</p>
 <h3 id="api-first">API-first<a class="hanchor" href="#api-first" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> Every operation is available through a programmatic interface, and humans use the
-same interface that automation uses. A capability that exists only behind one button or one
-command is not a platform capability.</p>
-<p><strong>In Delonix.</strong> The same operations are exposed by the CLI, the CRI (<code>delonix serve cri</code>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>), the local management socket (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>),
-the MCP server (<code>delonix mcp serve</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>) and the node contract
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, draft). The contract is the source of truth for both its gRPC and its
-HTTP/JSON encodings, and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is generated from it, never edited by hand
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>). ADR-0040 (<strong>Proposed</strong>) records today's gap honestly: several of
-these doors still re-run the CLI binary as a subprocess instead of calling a use case — a count
-that <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> tracks as the <code>self_exec_sites</code> ratchet.</p>
-<p><strong>What it asks of you.</strong> Do not add a capability to only one door, and do not add a new
-subprocess call to the engine's own binary from a library — call the use case instead. The
-ratchet fails if <code>self_exec_sites</code> goes up. Details in
-<a href="architecture.html#one-set-of-operations-several-interfaces">Architecture</a>.</p>
-<h3 id="observable-through-open-standards">Observable through open standards<a class="hanchor" href="#observable-through-open-standards" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> A system tells you what it is doing through formats every tool understands —
-structured logs, traces and metrics — instead of a custom dashboard or a log you have to parse by
-eye.</p>
-<p><strong>In Delonix.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry</code></a> holds structured logging
-(<code>DELONIX_LOG_FORMAT=json</code>), OpenTelemetry spans exported over OTLP (<code>DELONIX_OTLP_ENDPOINT</code>,
-<code>OTEL_SERVICE_NAME</code> honoured by <code>telemetry.rs</code>) and the shared Prometheus registry (<code>metrics.rs</code>),
-served at <code>/metrics</code> by <code>delonix-mgmt</code> and <code>delonix-cri</code>. Engine events are available with
-<code>delonix system events</code>.</p>
-<p><strong>What it asks of you.</strong> A library crate does not print: it emits <code>tracing</code> events and the
-interface decides what to show. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> counts <code>println!</code>/<code>eprintln!</code> in library
-crates as the <code>library_prints</code> ratchet, and fails if the number rises.</p>
-<h3 id="immutable-artefacts">Immutable artefacts<a class="hanchor" href="#immutable-artefacts" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> What you deploy is a versioned, content-addressed artefact built once and never
-modified in place. You change a deployment by pointing it at a different artefact, and you can
-prove which bytes are running.</p>
-<p><strong>In Delonix.</strong> Images follow the OCI image and distribution specifications
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a>). Blobs live in a content-addressed store (<code>cas.rs</code>), and a pull by
-digest verifies the manifest itself against the digest you asked for
-(<code>verify_manifest_digest</code> in <code>registry.rs</code>), not only each blob against the manifest. Containers
-share read-only image layers through overlayfs and write only to their own upper layer.</p>
-<p><strong>What it asks of you.</strong> Never accept downloaded bytes without verifying them against a digest or a
-published checksum, and never weaken a check to make a slow or odd registry work — a check that
-can be skipped is not a check. See
-<a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">Cloud native primer</a>.</p>
-<h3 id="loosely-coupled-ports-and-adapters">Loosely coupled: ports and adapters<a class="hanchor" href="#loosely-coupled-ports-and-adapters" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> Components depend on narrow interfaces, not on each other's internals, so one part
-can be replaced without rewriting the rest. For an infrastructure engine this mostly means: a new
-provider should be a new implementation, not a new branch everywhere.</p>
-<p><strong>In Delonix.</strong> ADR-0040 (<strong>Proposed</strong>) sorts crates into foundation, contexts, adapters, providers,
-interfaces and binaries, and the directory is the layer (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, <code>bins/</code>). The allowed direction is
-written once, in <code>ALLOWED</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, and CI enforces it. Ports are traits in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> and <code>VmBackend</code> in <code>delonix-vm</code>; ADR-0008
-(<strong>Accepted</strong>) made VM backends registrable, which is how a remote Proxmox node became one more
-backend.</p>
-<p><strong>What it asks of you.</strong> A new provider enters as an implementation of a port. A new crate enters
-the <code>LAYERS</code> table and the directory of its layer in the same commit, and it may only depend in the
-allowed direction. See <a href="architecture.html#layers-and-the-allowed-direction">Architecture</a>.</p>
-<h3 id="disposable-and-idempotent">Disposable and idempotent<a class="hanchor" href="#disposable-and-idempotent" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> Any process can be stopped and started again quickly and safely, and repeating an
-operation does not make things worse. That is what lets a scheduler move, restart or replace
-workloads without a human.</p>
-<p><strong>In Delonix.</strong> <code>delonix container stop</code> sends SIGTERM, waits up to <code>--time</code> seconds, then SIGKILL
-(<code>stop</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>), and stopping an already stopped container
-succeeds (<code>cmd_stop</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). A requested stop is
-recorded before signalling (<code>stopped_by_user</code>), so a restart supervisor does not resurrect what the
-operator stopped. On the declarative side, applying an unchanged manifest yields a plan with no
-changes.</p>
-<p><strong>What it asks of you.</strong> Every new command should be safe to run twice. Decide explicitly what
-"already done" returns — success, or the conflict class (<code>Error::Conflict</code>, mapped to an exit code
-by <code>for_error</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>) — and never destroy anything
-before you know the object is yours to destroy.</p>
-<h3 id="secure-by-default-rootless-first-least-privilege">Secure by default: rootless-first, least privilege<a class="hanchor" href="#secure-by-default-rootless-first-least-privilege" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> The normal path grants the smallest set of privileges that works. Extra privilege
-is something an operator asks for explicitly and can see, never a silent default.</p>
-<p><strong>In Delonix.</strong> Containers run inside a user namespace without root on the normal path, and keep
-only the default capability set <code>KEPT_CAPS</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/capabilities.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/capabilities.rs</code></a>,
-resolved by <code>resolve_cap_keep</code>). On the CRI path the node can put a ceiling on capabilities that
-no pod spec can exceed (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/cap_ceiling.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/cap_ceiling.rs</code></a>). Security decisions —
-policy, admission for containers and VMs, redaction of secrets — are gathered in
+<p><strong>Em geral.</strong> Toda a operação está disponível através de uma interface programática, e os humanos
+usam a mesma interface que a automação usa. Uma capacidade que só existe atrás de um botão ou um
+comando não é uma capacidade de plataforma.</p>
+<p><strong>No Delonix.</strong> As mesmas operações são expostas pela CLI, pelo CRI (<code>delonix serve cri</code>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>), pelo socket de gestão local (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mgmt" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mgmt</code></a>),
+pelo servidor MCP (<code>delonix mcp serve</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a>) e pelo contrato de nó
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, rascunho). O contrato é a fonte de verdade tanto para as suas
+codificações gRPC como HTTP/JSON, e o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> é gerado a partir dele, nunca editado
+à mão (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>). O ADR-0040 (<strong>Proposed</strong>) regista honestamente a lacuna de
+hoje: várias destas portas ainda voltam a correr o binário da CLI como subprocesso em vez de
+chamar um caso de uso — uma contagem que <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> acompanha como o ratchet
+<code>self_exec_sites</code>.</p>
+<p><strong>O que te pede.</strong> Não acrescentes uma capacidade só a uma porta, e não acrescentes uma chamada de
+subprocesso nova ao próprio binário do motor a partir de uma biblioteca — chama o caso de uso em
+vez disso. O ratchet falha se <code>self_exec_sites</code> subir. Detalhes em
+<a href="architecture.html#one-set-of-operations-several-interfaces">Arquitectura</a>.</p>
+<h3 id="observable-through-open-standards">Observável através de padrões abertos<a class="hanchor" href="#observable-through-open-standards" aria-label="#">#</a></h3>
+<p><strong>Em geral.</strong> Um sistema diz-te o que está a fazer através de formatos que qualquer ferramenta
+entende — logs estruturados, traces e métricas — em vez de um dashboard próprio ou um log que tens
+de ler à mão.</p>
+<p><strong>No Delonix.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry</code></a> tem logging estruturado
+(<code>DELONIX_LOG_FORMAT=json</code>), spans OpenTelemetry exportados por OTLP (<code>DELONIX_OTLP_ENDPOINT</code>,
+<code>OTEL_SERVICE_NAME</code> respeitado por <code>telemetry.rs</code>) e o registo Prometheus partilhado
+(<code>metrics.rs</code>), servido em <code>/metrics</code> pelo <code>delonix-mgmt</code> e pelo <code>delonix-cri</code>. Os eventos do
+motor estão disponíveis com <code>delonix system events</code>.</p>
+<p><strong>O que te pede.</strong> Um crate de biblioteca não imprime: emite eventos <code>tracing</code> e a interface decide
+o que mostrar. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> conta <code>println!</code>/<code>eprintln!</code> em crates de biblioteca como
+o ratchet <code>library_prints</code>, e falha se o número subir.</p>
+<h3 id="immutable-artefacts">Artefactos imutáveis<a class="hanchor" href="#immutable-artefacts" aria-label="#">#</a></h3>
+<p><strong>Em geral.</strong> O que implantas é um artefacto versionado, endereçado por conteúdo, construído uma
+vez e nunca modificado no lugar. Mudas uma implantação apontando-a para um artefacto diferente, e
+consegues provar que bytes estão a correr.</p>
+<p><strong>No Delonix.</strong> As imagens seguem as especificações OCI de imagem e de distribuição
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci</code></a>). Os blobs vivem num store endereçado por conteúdo (<code>cas.rs</code>), e um
+pull por digest verifica o próprio manifesto contra o digest que pediste
+(<code>verify_manifest_digest</code> em <code>registry.rs</code>), não só cada blob contra o manifesto. Os containers
+partilham layers de imagem só-de-leitura através do overlayfs e escrevem só na sua própria upper
+layer.</p>
+<p><strong>O que te pede.</strong> Nunca aceites bytes descarregados sem os verificar contra um digest ou um
+checksum publicado, e nunca enfraqueças uma verificação para fazer funcionar um registo lento ou
+estranho — uma verificação que pode ser saltada não é uma verificação. Ver
+<a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">Introdução ao cloud native</a>.</p>
+<h3 id="loosely-coupled-ports-and-adapters">Fracamente acoplado: ports e adapters<a class="hanchor" href="#loosely-coupled-ports-and-adapters" aria-label="#">#</a></h3>
+<p><strong>Em geral.</strong> Os componentes dependem de interfaces estreitas, não dos internos uns dos outros,
+para uma parte poder ser substituída sem reescrever o resto. Para um motor de infra-estrutura isto
+significa sobretudo: um provider novo deve ser uma implementação nova, não um ramo novo
+espalhado por todo o lado.</p>
+<p><strong>No Delonix.</strong> O ADR-0040 (<strong>Proposed</strong>) organiza os crates em foundation, contexts, adapters,
+providers, interfaces e binários, e o directório é a camada (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>,
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, <code>bins/</code>). A
+direcção permitida está escrita uma vez, em <code>ALLOWED</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, e a CI
+impõe-na. As portas são traits em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> e <code>VmBackend</code> em
+<code>delonix-vm</code>; o ADR-0008 (<strong>Accepted</strong>) tornou os backends de VM registáveis, que é como um nó
+Proxmox remoto se tornou mais um backend.</p>
+<p><strong>O que te pede.</strong> Um provider novo entra como implementação de uma porta. Um crate novo entra na
+tabela <code>LAYERS</code> e no directório da sua camada no mesmo commit, e só pode depender na direcção
+permitida. Ver <a href="architecture.html#layers-and-the-allowed-direction">Arquitectura</a>.</p>
+<h3 id="disposable-and-idempotent">Descartável e idempotente<a class="hanchor" href="#disposable-and-idempotent" aria-label="#">#</a></h3>
+<p><strong>Em geral.</strong> Qualquer processo pode ser parado e arrancado de novo rapidamente e em segurança, e
+repetir uma operação não piora as coisas. É isso que permite a um escalonador mover, reiniciar ou
+substituir workloads sem um humano.</p>
+<p><strong>No Delonix.</strong> <code>delonix container stop</code> envia SIGTERM, espera até <code>--time</code> segundos, e depois
+SIGKILL (<code>stop</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>), e parar um container já parado tem
+sucesso (<code>cmd_stop</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). Um stop pedido é
+registado antes de sinalizar (<code>stopped_by_user</code>), para um supervisor de restart não ressuscitar o
+que o operador parou. Do lado declarativo, aplicar um manifesto inalterado produz um plano sem
+mudanças.</p>
+<p><strong>O que te pede.</strong> Todo comando novo deve ser seguro correr duas vezes. Decide explicitamente o
+que "já feito" devolve — sucesso, ou a classe de conflito (<code>Error::Conflict</code>, mapeada para um
+código de saída por <code>for_error</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>) — e nunca
+destruas nada antes de saberes que o objecto é teu para destruir.</p>
+<h3 id="secure-by-default-rootless-first-least-privilege">Seguro por omissão: rootless-first, menor privilégio<a class="hanchor" href="#secure-by-default-rootless-first-least-privilege" aria-label="#">#</a></h3>
+<p><strong>Em geral.</strong> O caminho normal concede o conjunto mínimo de privilégios que funciona. Privilégio
+extra é algo que um operador pede explicitamente e consegue ver, nunca uma omissão silenciosa.</p>
+<p><strong>No Delonix.</strong> Os containers correm dentro de um user namespace sem root no caminho normal, e
+mantêm só o conjunto de capabilities por omissão <code>KEPT_CAPS</code>
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/capabilities.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/capabilities.rs</code></a>, resolvido por <code>resolve_cap_keep</code>). No
+caminho do CRI o nó pode pôr um tecto às capabilities que nenhum spec de pod pode ultrapassar
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/cap_ceiling.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/cap_ceiling.rs</code></a>). As decisões de segurança — política,
+admissão para containers e VMs, redacção de segredos — estão reunidas em
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts/delonix-security-runtime" target="_blank" rel="noopener"><code>crates/contexts/delonix-security-runtime</code></a> (ADR-0026, <strong>Proposed</strong>).</p>
-<p><strong>What it asks of you.</strong> Do not make a feature work by requiring root or <code>--privileged</code> on the
-normal path. If privilege is truly needed, make it an explicit opt-in that says so to the operator,
-and refuse — with a clear message — rather than silently degrading when it is missing.</p>
+<p><strong>O que te pede.</strong> Não faças uma funcionalidade funcionar exigindo root ou <code>--privileged</code> no
+caminho normal. Se o privilégio for mesmo preciso, torna-o um opt-in explícito que o diz ao
+operador, e recusa — com uma mensagem clara — em vez de degradar em silêncio quando falta.</p>
 <h3 id="daemonless">Daemonless<a class="hanchor" href="#daemonless" aria-label="#">#</a></h3>
-<p><strong>In general.</strong> Many container engines run a resident daemon that owns all state. A daemonless
-engine keeps state in files and does its work in short-lived processes, so there is no central
-process whose crash or upgrade takes every workload down.</p>
-<p><strong>In Delonix.</strong> Each CLI command is a process that does its work and exits. What must persist
-belongs to systemd or to a per-workload process with a clear owner: <code>delonix system boot enable</code>
-writes one systemd unit per container or VM whose <code>ExecStart</code> is a <code>delonix … start</code>
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>). The rule — a new daemon needs an ADR with evidence of
-what the alternative could not solve — is in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. ADR-0021 (<strong>Proposed</strong>) shows the rule
-applied: even a pull reconciler is designed to run from a systemd timer rather than as a resident
-process.</p>
-<p><strong>What it asks of you.</strong> Before adding a long-lived process, check whether a systemd unit, a timer,
-socket activation or a per-workload supervisor solves the problem. If none does, write the ADR
-first. See <a href="cloud-native-primer.html#410-daemonless-in-one-paragraph">Cloud native primer</a>.</p>
-<h2 id="the-twelve-factor-lens-from-the-provider-side">The twelve-factor lens, from the provider side<a class="hanchor" href="#the-twelve-factor-lens-from-the-provider-side" aria-label="#">#</a></h2>
-<p>The Twelve-Factor App (<a href="https://12factor.net/">12factor.net</a>) is written for application
-developers. An engine sits on the other side: it must <em>provide</em> the mechanisms that let a workload
-follow each factor. Some factors are simply not the engine's business, and the table says so.</p>
+<p><strong>Em geral.</strong> Muitos motores de containers correm um daemon residente que possui todo o estado. Um
+motor daemonless guarda o estado em ficheiros e faz o seu trabalho em processos de vida curta, por
+isso não há nenhum processo central cujo crash ou actualização derrube todos os workloads.</p>
+<p><strong>No Delonix.</strong> Cada comando da CLI é um processo que faz o seu trabalho e sai. O que tem de
+persistir pertence ao systemd ou a um processo por workload com um dono claro: <code>delonix system
+boot enable</code> escreve uma unit systemd por container ou VM cujo <code>ExecStart</code> é um <code>delonix … start</code>
+(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/boot.rs</code></a>). A regra — um daemon novo precisa de um ADR com a
+evidência do que a alternativa não conseguiu resolver — está no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. O ADR-0021
+(<strong>Proposed</strong>) mostra a regra aplicada: até um reconciliador de pull está desenhado para correr a
+partir de um timer systemd em vez de um processo residente.</p>
+<p><strong>O que te pede.</strong> Antes de acrescentar um processo de vida longa, verifica se uma unit systemd, um
+timer, activação por socket ou um supervisor por workload resolve o problema. Se nenhum resolver,
+escreve o ADR primeiro. Ver <a href="cloud-native-primer.html#410-daemonless-in-one-paragraph">Introdução ao cloud native</a>.</p>
+<h2 id="the-twelve-factor-lens-from-the-provider-side">A lente dos doze factores, do lado do fornecedor<a class="hanchor" href="#the-twelve-factor-lens-from-the-provider-side" aria-label="#">#</a></h2>
+<p>A Twelve-Factor App (<a href="https://12factor.net/">12factor.net</a>) é escrita para programadores de
+aplicações. Um motor está do outro lado: tem de <em>fornecer</em> os mecanismos que deixam um workload
+seguir cada factor. Alguns factores simplesmente não são da conta do motor, e a tabela di-lo.</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Factor</th>
-<th>What the engine must provide</th>
-<th>Where Delonix does it</th>
+<th>O que o motor tem de fornecer</th>
+<th>Onde o Delonix o faz</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>I. Codebase</td>
-<td>nothing — one codebase per app is the developer's choice</td>
-<td>not applicable</td>
+<td>nada — um codebase por app é escolha do programador</td>
+<td>não aplicável</td>
 </tr>
 <tr>
 <td>II. Dependencies</td>
-<td>a way to ship an app with its dependencies isolated</td>
-<td>OCI images (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci</code></a>); building them with <code>delonix build</code> from a Dockerfile or Delonixfile (<a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a>)</td>
+<td>uma forma de enviar uma app com as suas dependências isoladas</td>
+<td>imagens OCI (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci</code></a>); construí-las com <code>delonix build</code> a partir de um Dockerfile ou Delonixfile (<a href="delonixfile-and-vmfile.html">Delonixfile e VMfile</a>)</td>
 </tr>
 <tr>
 <td>III. Config</td>
-<td>inject configuration and secrets at start, not at build</td>
-<td><code>-e</code>, <code>--env-file</code>, <code>--secret</code> on <code>delonix container run</code>; environment merge in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>run.<wbr>rs</code></a>; <code>parse_env_file</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/secret.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>secret.<wbr>rs</code></a>; secrets encrypted at rest in <code>delonix-state</code></td>
+<td>injectar configuração e segredos no arranque, não no build</td>
+<td><code>-e</code>, <code>--env-file</code>, <code>--secret</code> em <code>delonix container run</code>; fusão de ambiente em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-compute/<wbr>src/<wbr>run.<wbr>rs</code></a>; <code>parse_env_file</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/secret.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>secret.<wbr>rs</code></a>; segredos cifrados em repouso em <code>delonix-state</code></td>
 </tr>
 <tr>
 <td>IV. Backing services</td>
-<td>attach a service by name, swappable without code change</td>
-<td>internal DNS <code>&lt;name&gt;.<wbr>&lt;namespace&gt;.<wbr>delonix.<wbr>internal</code> (<code>dns_resolve_for</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a>); a <code>Service</code> Kind resolving to several backends (ADR-0032, <strong>Accepted</strong>)</td>
+<td>ligar um serviço pelo nome, substituível sem mudar código</td>
+<td>DNS interno <code>&lt;name&gt;.<wbr>&lt;namespace&gt;.<wbr>delonix.<wbr>internal</code> (<code>dns_resolve_for</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a>); um Kind <code>Service</code> que resolve para vários backends (ADR-0032, <strong>Accepted</strong>)</td>
 </tr>
 <tr>
 <td>V. Build, release, run</td>
-<td>separate the three stages, with an immutable release</td>
-<td><code>delonix build</code> → an image identified by digest → <code>container run</code> / <code>stack apply</code>; stack revision history (ADR-0019, <strong>Accepted</strong>)</td>
+<td>separar as três fases, com uma release imutável</td>
+<td><code>delonix build</code> → uma imagem identificada por digest → <code>container run</code> / <code>stack apply</code>; histórico de revisões do stack (ADR-0019, <strong>Accepted</strong>)</td>
 </tr>
 <tr>
 <td>VI. Processes</td>
-<td>stateless processes, with state in attached storage</td>
-<td><code>--read-only</code> root filesystem; named volumes and shares (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume</code></a>)</td>
+<td>processos sem estado, com o estado em armazenamento ligado</td>
+<td>raiz <code>--read-only</code>; volumes nomeados e partilhas (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-volume" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume</code></a>)</td>
 </tr>
 <tr>
 <td>VII. Port binding</td>
-<td>expose a port the app binds itself</td>
-<td><code>-p [hostIp:]hostPort:containerPort</code> (<code>parse_publish_addr</code>, <code>slirp_add_hostfwd</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs</code></a>)</td>
+<td>expor uma porta que a própria app liga</td>
+<td><code>-p [hostIp:]hostPort:containerPort</code> (<code>parse_publish_addr</code>, <code>slirp_add_hostfwd</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>lib.<wbr>rs</code></a>)</td>
 </tr>
 <tr>
 <td>VIII. Concurrency</td>
-<td>run more copies of a process type</td>
-<td>several containers per compose service (<code>deploy.replicas</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/compose.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>compose.<wbr>rs</code></a>) and DNS round-robin through <code>Service</code> (ADR-0032). <strong>Not provided:</strong> autoscaling, and scaling across nodes (that is a control-plane decision)</td>
+<td>correr mais cópias de um tipo de processo</td>
+<td>vários containers por serviço compose (<code>deploy.replicas</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/compose.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>compose.<wbr>rs</code></a>) e round-robin de DNS através de <code>Service</code> (ADR-0032). <strong>Não fornecido:</strong> autoscaling, e escala entre nós (isso é uma decisão de control plane)</td>
 </tr>
 <tr>
 <td>IX. Disposability</td>
-<td>fast start, graceful stop on a signal</td>
-<td>SIGTERM then SIGKILL after <code>--time</code> (<code>stop</code> in <code>delonix-linux</code>); restart policies with <code>--restart</code></td>
+<td>arranque rápido, paragem graciosa a um sinal</td>
+<td>SIGTERM depois SIGKILL após <code>--time</code> (<code>stop</code> em <code>delonix-linux</code>); políticas de restart com <code>--restart</code></td>
 </tr>
 <tr>
 <td>X. Dev/prod parity</td>
-<td>the same artefacts and runtime in every environment</td>
-<td>the same binary and Kinds on a laptop and on a node, rootless on both. <strong>Partly:</strong> parity with <em>another</em> production runtime (for example a managed Kubernetes cluster) depends on that runtime</td>
+<td>os mesmos artefactos e runtime em todos os ambientes</td>
+<td>o mesmo binário e Kinds num portátil e num nó, rootless nos dois. <strong>Em parte:</strong> a paridade com <em>outro</em> runtime de produção (por exemplo um cluster Kubernetes gerido) depende desse runtime</td>
 </tr>
 <tr>
 <td>XI. Logs</td>
-<td>capture stdout/stderr as an event stream, not files the app manages</td>
-<td>a per-container log shim (<code>log_shim</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a>); <code>delonix container logs --follow</code>; timestamped lines with <code>--log-cri</code></td>
+<td>capturar stdout/stderr como um fluxo de eventos, não ficheiros que a app gere</td>
+<td>um shim de log por-container (<code>log_shim</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a>); <code>delonix container logs --follow</code>; linhas com timestamp com <code>--log-cri</code></td>
 </tr>
 <tr>
 <td>XII. Admin processes</td>
-<td>run one-off tasks in the same environment as the app</td>
+<td>correr tarefas pontuais no mesmo ambiente que a app</td>
 <td><code>delonix container exec</code></td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="read-next">Read next<a class="hanchor" href="#read-next" aria-label="#">#</a></h2>
+<h2 id="read-next">Lê a seguir<a class="hanchor" href="#read-next" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Linux foundations</strong> (<a href="linux-foundations.html">linux-foundations.md</a>) — the kernel primitives all
-  of this rests on: processes and <code>/proc</code>, namespaces, cgroups v2, file descriptors and signals.</li>
-<li><strong>Cloud native primer</strong> (<a href="cloud-native-primer.html">cloud-native-primer.md</a>) — how the engine uses
-  those primitives and the specifications on top of them (OCI, CRI, CNI, KVM/virtio, cloud-init),
-  with files and symbols.</li>
-<li><strong>Architecture</strong> (<a href="architecture.html">architecture.md</a>) — the structure behind this context: layers,
-  processes and crates in detail, once the two pages above and
-  <a href="project-structure.html">Project structure</a> feel familiar.</li>
+<li><strong>Fundações de Linux</strong> (<a href="linux-foundations.html">linux-foundations.md</a>) — os primitivos do kernel
+  em que tudo isto assenta: processos e <code>/proc</code>, namespaces, cgroups v2, descritores de ficheiro e
+  sinais.</li>
+<li><strong>Introdução ao cloud native</strong> (<a href="cloud-native-primer.html">cloud-native-primer.md</a>) — como o motor
+  usa esses primitivos e as especificações por cima deles (OCI, CRI, CNI, KVM/virtio, cloud-init),
+  com ficheiros e símbolos.</li>
+<li><strong>Arquitectura</strong> (<a href="architecture.html">architecture.md</a>) — a estrutura por trás deste contexto:
+  camadas, processos e crates em detalhe, depois de as duas páginas acima e
+  <a href="project-structure.html">Estrutura do projecto</a> te serem familiares.</li>
 </ul>
 <hr />
-<p><strong>Next:</strong> <a href="linux-foundations.html">Linux foundations</a> — the kernel primitives every later page relies on, hands-on: processes, namespaces, cgroups v2, file descriptors and signals.</p>
+<p><strong>Seguinte:</strong> <a href="linux-foundations.html">Fundações de Linux</a> — os primitivos do kernel de que todas as páginas seguintes dependem, à mão: processos, namespaces, cgroups v2, descritores de ficheiro e sinais.</p>
 <nav class="pager"><a href="start-here.html"><span>← Anterior</span>Começa aqui</a><a class="next" href="linux-foundations.html"><span>Seguinte →</span>Linux foundations</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/iaas-and-cloud-native.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/iaas-and-cloud-native.md</code></footer>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/iaas-and-cloud-native.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/iaas-and-cloud-native.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>
-<li><a href="#what-an-iaas-is">What an IaaS is</a><ul>
-<li><a href="#the-service-models">The service models</a></li>
-<li><a href="#the-building-blocks-every-iaas-has">The building blocks every IaaS has</a></li>
+<li><a href="#what-an-iaas-is">O que é uma IaaS</a><ul>
+<li><a href="#the-service-models">Os modelos de serviço</a></li>
+<li><a href="#the-building-blocks-every-iaas-has">Os blocos de construção que toda IaaS tem</a></li>
 </ul>
 </li>
-<li><a href="#the-layers-of-an-iaas">The layers of an IaaS</a></li>
-<li><a href="#where-delonix-runtime-fits-and-where-it-deliberately-stops">Where delonix-runtime fits, and where it deliberately stops</a><ul>
-<li><a href="#what-it-is">What it is</a></li>
-<li><a href="#what-it-deliberately-does-not-do">What it deliberately does not do</a></li>
-<li><a href="#who-owns-what">Who owns what</a></li>
+<li><a href="#the-layers-of-an-iaas">As camadas de uma IaaS</a></li>
+<li><a href="#where-delonix-runtime-fits-and-where-it-deliberately-stops">Onde o delonix-runtime encaixa, e onde pára deliberadamente</a><ul>
+<li><a href="#what-it-is">O que é</a></li>
+<li><a href="#what-it-deliberately-does-not-do">O que deliberadamente não faz</a></li>
+<li><a href="#who-owns-what">Quem possui o quê</a></li>
 </ul>
 </li>
-<li><a href="#cloud-native-principles-and-how-the-engine-applies-each">Cloud native principles, and how the engine applies each</a><ul>
-<li><a href="#declarative-and-convergent">Declarative and convergent</a></li>
+<li><a href="#cloud-native-principles-and-how-the-engine-applies-each">Princípios cloud native, e como o motor aplica cada um</a><ul>
+<li><a href="#declarative-and-convergent">Declarativo e convergente</a></li>
 <li><a href="#api-first">API-first</a></li>
-<li><a href="#observable-through-open-standards">Observable through open standards</a></li>
-<li><a href="#immutable-artefacts">Immutable artefacts</a></li>
-<li><a href="#loosely-coupled-ports-and-adapters">Loosely coupled: ports and adapters</a></li>
-<li><a href="#disposable-and-idempotent">Disposable and idempotent</a></li>
-<li><a href="#secure-by-default-rootless-first-least-privilege">Secure by default: rootless-first, least privilege</a></li>
+<li><a href="#observable-through-open-standards">Observável através de padrões abertos</a></li>
+<li><a href="#immutable-artefacts">Artefactos imutáveis</a></li>
+<li><a href="#loosely-coupled-ports-and-adapters">Fracamente acoplado: ports e adapters</a></li>
+<li><a href="#disposable-and-idempotent">Descartável e idempotente</a></li>
+<li><a href="#secure-by-default-rootless-first-least-privilege">Seguro por omissão: rootless-first, menor privilégio</a></li>
 <li><a href="#daemonless">Daemonless</a></li>
 </ul>
 </li>
-<li><a href="#the-twelve-factor-lens-from-the-provider-side">The twelve-factor lens, from the provider side</a></li>
-<li><a href="#read-next">Read next</a></li>
+<li><a href="#the-twelve-factor-lens-from-the-provider-side">A lente dos doze factores, do lado do fornecedor</a></li>
+<li><a href="#read-next">Lê a seguir</a></li>
 </ul>
 </div>
 </aside>
