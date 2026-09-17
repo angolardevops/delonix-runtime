@@ -661,11 +661,11 @@ pub fn run_pod_sandbox(
     let mut cni_conf = String::new();
     if !host_network {
         let pod = format!("cri-{id}");
-        let cni = delonix_net::cni::enabled_conf();
+        let cni = delonix_sdn::cni::enabled_conf();
         if let Some(conf) = cni.filter(|_| delonix_runtime::is_rootless()) {
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
-            match delonix_net::infra::cni_attach_container(&pod, &conf_json) {
+            match delonix_sdn::infra::cni_attach_container(&pod, &conf_json) {
                 Ok((_netns, cidr)) => {
                     cni_ip = cidr.split('/').next().unwrap_or("").to_string();
                 }
@@ -693,9 +693,9 @@ pub fn run_pod_sandbox(
             // all (`control socket: No such file or directory`). The CRI in root
             // never had a working non-`hostNetwork` pod; `NetworkReady` pinned to
             // `BridgeMissing` hid it, because no such pod was ever scheduled.
-            let dirs = delonix_net::cni::plugin_dirs();
+            let dirs = delonix_sdn::cni::plugin_dirs();
             let conf = match super::root_cni_readiness(&dirs) {
-                delonix_net::cni::Readiness::Ready(conf) => conf,
+                delonix_sdn::cni::Readiness::Ready(conf) => conf,
                 other => {
                     let (_, why) = other.not_ready(&dirs).unwrap_or_default();
                     return Err(Status::failed_precondition(format!(
@@ -705,28 +705,28 @@ pub fn run_pod_sandbox(
             };
             let conf_json = serde_json::to_string(&conf)
                 .map_err(|e| Status::internal(format!("serializing conflist: {e}")))?;
-            let cidr = delonix_net::cni::attach_named_netns(
+            let cidr = delonix_sdn::cni::attach_named_netns(
                 &conf,
                 &pod,
                 &pod,
-                delonix_net::cni::DEFAULT_IFNAME,
+                delonix_sdn::cni::DEFAULT_IFNAME,
             )
             .map_err(|e| Status::internal(format!("CNI ADD of sandbox {pod}: {e}")))?;
             cni_ip = cidr.split('/').next().unwrap_or("").to_string();
             if cni_ip.is_empty() {
                 // A pod without an address reads as networked and is not.
-                delonix_net::cni::detach_named_netns(
+                delonix_sdn::cni::detach_named_netns(
                     Some(&conf),
                     &pod,
                     &pod,
-                    delonix_net::cni::DEFAULT_IFNAME,
+                    delonix_sdn::cni::DEFAULT_IFNAME,
                 );
                 return Err(Status::internal(format!(
                     "CNI ADD of sandbox {pod} returned no IP address (network `{}`)",
                     conf.name
                 )));
             }
-            cni_netns = delonix_net::cni::named_netns_path(&pod);
+            cni_netns = delonix_sdn::cni::named_netns_path(&pod);
             // The pod's `net.*` sysctls belong to the pod's netns, and here the
             // containers join it with `--net host`, where the engine (rightly)
             // refuses `net.*`. So they are set HERE, once, on top of the two
@@ -736,12 +736,12 @@ pub fn run_pod_sandbox(
             // first, the kubeadm CoreDNS (uid 65532, `drop: ALL`) died on
             // `listen tcp :53: bind: permission denied` — measured 2026-09-15.
             let sysctls = pod_netns_sysctls(&sysctls);
-            if let Err(e) = delonix_net::cni::set_netns_sysctls(&cni_netns, &sysctls) {
-                delonix_net::cni::detach_named_netns(
+            if let Err(e) = delonix_sdn::cni::set_netns_sysctls(&cni_netns, &sysctls) {
+                delonix_sdn::cni::detach_named_netns(
                     Some(&conf),
                     &pod,
                     &pod,
-                    delonix_net::cni::DEFAULT_IFNAME,
+                    delonix_sdn::cni::DEFAULT_IFNAME,
                 );
                 return Err(Status::internal(format!(
                     "sysctls of the pod sandbox {pod}: {e}"
@@ -882,18 +882,18 @@ pub fn remove_pod_sandbox(
             if !sb.cni_netns.is_empty() {
                 // ROOT + CNI: the chain it was configured with, then the netns.
                 let pod = format!("cri-{id}");
-                let conf = delonix_net::cni::parse_config(&sb.cni_conf).ok();
-                delonix_net::cni::detach_named_netns(
+                let conf = delonix_sdn::cni::parse_config(&sb.cni_conf).ok();
+                delonix_sdn::cni::detach_named_netns(
                     conf.as_ref(),
                     &pod,
                     &pod,
-                    delonix_net::cni::DEFAULT_IFNAME,
+                    delonix_sdn::cni::DEFAULT_IFNAME,
                 );
             } else if !sb.cni_ip.is_empty() {
                 // CNI-configured sandbox (rootless): plugin DEL in the holder.
-                if let Some(conf) = delonix_net::cni::enabled_conf() {
+                if let Some(conf) = delonix_sdn::cni::enabled_conf() {
                     let cj = serde_json::to_string(&conf).unwrap_or_default();
-                    let _ = delonix_net::infra::cni_detach_container(&format!("cri-{id}"), &cj);
+                    let _ = delonix_sdn::infra::cni_detach_container(&format!("cri-{id}"), &cj);
                 }
             } else if delonix_runtime::is_rootless() {
                 let _ = delonix(base, &["net", "netns", "detach", &format!("cri-{id}")]);
@@ -974,7 +974,7 @@ pub fn pod_sandbox_status(
         r.cni_ip.clone()
     } else if delonix_runtime::is_rootless() {
         // ROOTLESS: IP of the pod's shared netns in the ingress (deterministic).
-        delonix_net::infra::container_ip(&format!("cri-{}", r.id))
+        delonix_sdn::infra::container_ip(&format!("cri-{}", r.id))
     } else {
         delonix_runtime_core::Store::open(base.join("containers"))
             .ok()

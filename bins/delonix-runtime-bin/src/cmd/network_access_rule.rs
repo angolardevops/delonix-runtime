@@ -30,7 +30,7 @@
 //!
 //! **No new dataplane primitive.** The holder already rebuilds a container's
 //! whole firewall chain from its full rule list on every apply, in one atomic
-//! `nft -f` (`delonix-net/src/infra.rs::do_firewall`) — there is no per-rule
+//! `nft -f` (`delonix-sdn/src/infra.rs::do_firewall`) — there is no per-rule
 //! nft add/delete to build. The only thing this module adds is *which* Rust
 //! rule list to hand it when several documents target the same container.
 //!

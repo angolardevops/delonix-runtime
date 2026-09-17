@@ -744,10 +744,10 @@ version = "3.1.0"
 dependencies = [
  "axum",
  "delonix-compute",
- "delonix-net",
  "delonix-oci",
  "delonix-runtime",
  "delonix-runtime-core",
+ "delonix-sdn",
  "delonix-telemetry",
  "flate2",
  "futures-util",
@@ -770,9 +770,9 @@ name = "delonix-mcp"
 version = "3.1.0"
 dependencies = [
  "delonix-mgmt",
- "delonix-net",
  "delonix-runtime",
  "delonix-runtime-core",
+ "delonix-sdn",
  "delonix-vm",
  "delonix-volume",
  "libc",
@@ -801,11 +801,11 @@ name = "delonix-mgmt"
 version = "0.1.0"
 dependencies = [
  "axum",
- "delonix-net",
  "delonix-oci",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scanner",
+ "delonix-sdn",
  "delonix-telemetry",
  "delonix-vm",
  "delonix-volume",
@@ -835,20 +835,6 @@ version = "3.1.0"
 dependencies = [
  "delonix-runtime-core",
  "serde_json",
-]
-
-[[package]]
-name = "delonix-net"
-version = "3.1.0"
-dependencies = [
- "delonix-compute",
- "delonix-net-rules",
- "delonix-runtime-core",
- "libc",
- "proptest",
- "serde",
- "serde_json",
- "tracing",
 ]
 
 [[package]]
@@ -915,12 +901,12 @@ dependencies = [
  "delonix-compute",
  "delonix-mgmt",
  "delonix-model",
- "delonix-net",
  "delonix-oci",
  "delonix-proxmox",
  "delonix-runtime",
  "delonix-runtime-core",
  "delonix-scanner",
+ "delonix-sdn",
  "delonix-security-runtime",
  "delonix-stack",
  "delonix-telemetry",
@@ -970,6 +956,20 @@ dependencies = [
  "serde",
  "serde_json",
  "tar",
+]
+
+[[package]]
+name = "delonix-sdn"
+version = "3.1.0"
+dependencies = [
+ "delonix-compute",
+ "delonix-net-rules",
+ "delonix-runtime-core",
+ "libc",
+ "proptest",
+ "serde",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

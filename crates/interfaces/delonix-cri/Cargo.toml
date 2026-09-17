@@ -17,7 +17,7 @@ delonix-telemetry = { workspace = true }
 delonix-compute = { workspace = true }
 delonix-runtime = { workspace = true }
 delonix-oci = { workspace = true }
-delonix-net = { workspace = true }
+delonix-sdn = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }

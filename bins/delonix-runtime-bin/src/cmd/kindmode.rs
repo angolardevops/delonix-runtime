@@ -645,7 +645,7 @@ pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> R
     std::fs::create_dir_all(cluster_dir(&cfg.name))?;
     // The cluster network: the nodes must all be born on it.
     let net = cluster_net(&cfg.name);
-    let nstore = delonix_net::NetworkStore::open(super::util::state_root())?;
+    let nstore = delonix_sdn::NetworkStore::open(super::util::state_root())?;
     if nstore.get(&net).is_err() {
         // `create_network` (and not `infra::network_create`) because there are TWO
         // coordinated stores: the declarative registry + the holder's physical plan, with the
@@ -1388,10 +1388,10 @@ pub(crate) fn prune(store: &Store) -> Result<usize> {
         let _ = std::fs::remove_file(kubeconfig_path(&name));
         let _ = std::fs::remove_dir_all(cluster_dir(&name));
         let net = cluster_net(&name);
-        if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+        if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
             if nstore.get(&net).is_ok() {
                 let _ = nstore.remove(&net);
-                delonix_net::infra::network_remove(&net);
+                delonix_sdn::infra::network_remove(&net);
             }
         }
         if let Err(e) = remove_kubecontext(&name) {
@@ -1434,14 +1434,14 @@ pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<(
     // This way the subnet/bridge become free to reuse. Volumes are NOT touched:
     // they are explicit, like in docker.
     let net = cluster_net(name);
-    if let Ok(nstore) = delonix_net::NetworkStore::open(super::util::state_root()) {
+    if let Ok(nstore) = delonix_sdn::NetworkStore::open(super::util::state_root()) {
         if nstore.get(&net).is_ok() {
             p.step(
                 &format!("{} '{net}'", super::po::t("Freeing network")),
                 "🌐",
             );
             let _ = nstore.remove(&net);
-            delonix_net::infra::network_remove(&net);
+            delonix_sdn::infra::network_remove(&net);
             p.ok();
         }
     }
@@ -1708,7 +1708,7 @@ pub(crate) fn list(store: &Store, all: bool) -> Result<()> {
         let api = cp
             .first()
             .and_then(|c| c.ports.first())
-            .and_then(|p| delonix_net::parse_publish(p).ok())
+            .and_then(|p| delonix_sdn::parse_publish(p).ok())
             .map(|(hp, _, _)| hp)
             .unwrap_or_else(|| "-".into());
 
@@ -1903,7 +1903,7 @@ pub(crate) fn describe(store: &Store, name: &str) -> Result<()> {
     let api = cp
         .first()
         .and_then(|c| c.ports.first())
-        .and_then(|p| delonix_net::parse_publish(p).ok())
+        .and_then(|p| delonix_sdn::parse_publish(p).ok())
         .map(|(hp, _, _)| hp)
         .unwrap_or_else(|| "-".into());
     let uptime = cp

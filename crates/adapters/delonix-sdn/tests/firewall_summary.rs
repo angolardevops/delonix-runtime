@@ -4,7 +4,7 @@
 //! protocolo de controlo e exige um netns de pé; o que erra é a interpretação
 //! das linhas do `nft`, e isso testa-se com listagens reais.
 
-use delonix_net::infra::{parse_dnat, parse_set_elements};
+use delonix_sdn::infra::{parse_dnat, parse_set_elements};
 
 /// Uma listagem `nft list chain` como o holder a devolve, com o prefixo de
 /// handle que o `-a` acrescenta.

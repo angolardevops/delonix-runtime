@@ -153,7 +153,7 @@ impl Mount {
 
 /// An L4 per-container firewall rule (shape from the Console UI). It is the
 /// CANONICAL type: persisted in the [`Container`] and (de)serialized both on write
-/// (`POST .../firewall`) and on read (`GET .../firewall`). `delonix-net`
+/// (`POST .../firewall`) and on read (`GET .../firewall`). `delonix-sdn`
 /// re-exports it to apply via nftables.
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
 pub struct FwRule {

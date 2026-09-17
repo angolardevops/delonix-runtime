@@ -1,4 +1,4 @@
-//! `delonix-net` — Delonix Engine networking and firewall.
+//! `delonix-sdn` — Delonix Engine networking and firewall.
 //!
 //! Philosophy (from the architecture): **native netfilter, don't reinvent the firewall**.
 //! This crate orchestrates the kernel tools — `ip` (iproute2) for
@@ -1601,7 +1601,7 @@ impl NetworkStore {
 /// CANONICAL types of the per-container L4 firewall, defined in
 /// `delonix-runtime-core` (where they are also persisted in the `Container` record).
 /// Re-exported here so that `apply_container_firewall` and the management API keep
-/// using `delonix_net::ContainerFw`.
+/// using `delonix_sdn::ContainerFw`.
 pub use delonix_runtime_core::{ContainerFw, FwRule};
 
 /// Default slirp4netns IP/gateway/DNS (rootless network).

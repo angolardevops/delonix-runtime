@@ -62,16 +62,16 @@ fn dir_de_redes() -> std::path::PathBuf {
 #[test]
 fn nomes_com_os_mesmos_12_caracteres_nao_partilham_registo() {
     raiz();
-    let a = delonix_net::infra::network_create("producao-alpha").expect("alpha");
-    let b = delonix_net::infra::network_create("producao-alpine").expect("alpine");
+    let a = delonix_sdn::infra::network_create("producao-alpha").expect("alpha");
+    let b = delonix_sdn::infra::network_create("producao-alpine").expect("alpine");
 
     assert_ne!(a.prefix, b.prefix, "duas redes no mesmo /16");
     assert_ne!(a.bridge, b.bridge, "duas redes na mesma bridge");
 
     // E cada nome resolve para o SEU registo — antes, o segundo `network_get`
     // devolvia o primeiro, com a bridge errada.
-    let ga = delonix_net::infra::network_get("producao-alpha").expect("get alpha");
-    let gb = delonix_net::infra::network_get("producao-alpine").expect("get alpine");
+    let ga = delonix_sdn::infra::network_get("producao-alpha").expect("get alpha");
+    let gb = delonix_sdn::infra::network_get("producao-alpine").expect("get alpine");
     assert_eq!(
         (ga.name.as_str(), ga.bridge.as_str()),
         ("producao-alpha", a.bridge.as_str())
@@ -81,7 +81,7 @@ fn nomes_com_os_mesmos_12_caracteres_nao_partilham_registo() {
         ("producao-alpine", b.bridge.as_str())
     );
 
-    let listadas: Vec<String> = delonix_net::infra::network_list()
+    let listadas: Vec<String> = delonix_sdn::infra::network_list()
         .into_iter()
         .map(|d| d.name)
         .filter(|n| n.starts_with("producao-"))
@@ -92,28 +92,28 @@ fn nomes_com_os_mesmos_12_caracteres_nao_partilham_registo() {
 #[test]
 fn remover_uma_nao_destroi_a_vizinha_de_nome_parecido() {
     raiz();
-    let manter = delonix_net::infra::network_create("contabilidade-a").expect("a");
-    delonix_net::infra::network_create("contabilidade-b").expect("b");
+    let manter = delonix_sdn::infra::network_create("contabilidade-a").expect("a");
+    delonix_sdn::infra::network_create("contabilidade-b").expect("b");
 
-    delonix_net::infra::network_remove("contabilidade-b");
+    delonix_sdn::infra::network_remove("contabilidade-b");
 
     // O `rm` da segunda mandava `netdel` à bridge da PRIMEIRA e apagava-lhe o
     // registo — a rede que ninguém pediu para remover ficava sem bridge e sem
     // ficheiro, e o operador só descobria quando os workloads dela calassem.
-    let sobrevivente = delonix_net::infra::network_get("contabilidade-a")
+    let sobrevivente = delonix_sdn::infra::network_get("contabilidade-a")
         .expect("a rede que não foi removida desapareceu");
     assert_eq!(sobrevivente.bridge, manter.bridge);
     assert_eq!(sobrevivente.prefix, manter.prefix);
-    assert!(delonix_net::infra::network_get("contabilidade-b").is_none());
+    assert!(delonix_sdn::infra::network_get("contabilidade-b").is_none());
 }
 
 #[test]
 fn remover_um_nome_inexistente_nao_toca_em_nada() {
     raiz();
-    let antes = delonix_net::infra::network_create("logistica-primaria").expect("cria");
+    let antes = delonix_sdn::infra::network_create("logistica-primaria").expect("cria");
     // Partilha os 12 primeiros caracteres com a de cima, e nunca foi criada.
-    delonix_net::infra::network_remove("logistica-primaria-2");
-    let depois = delonix_net::infra::network_get("logistica-primaria").expect("continua lá");
+    delonix_sdn::infra::network_remove("logistica-primaria-2");
+    let depois = delonix_sdn::infra::network_get("logistica-primaria").expect("continua lá");
     assert_eq!(depois.bridge, antes.bridge);
 }
 
@@ -131,13 +131,13 @@ fn registo_legado_continua_a_ser_lido_e_migra_a_escrita() {
     )
     .unwrap();
 
-    let lido = delonix_net::infra::network_get("arquivo-antigo").expect("o legado devia ser lido");
+    let lido = delonix_sdn::infra::network_get("arquivo-antigo").expect("o legado devia ser lido");
     assert_eq!(lido.bridge, "dlxnaaaabbbb");
     assert_eq!(lido.prefix, "10.249");
 
     // Uma rede, não duas, mesmo a meio da migração.
     assert_eq!(
-        delonix_net::infra::network_list()
+        delonix_sdn::infra::network_list()
             .iter()
             .filter(|d| d.name == "arquivo-antigo")
             .count(),
@@ -146,7 +146,7 @@ fn registo_legado_continua_a_ser_lido_e_migra_a_escrita() {
 
     // A escrita seguinte migra-o: `network_create` é idempotente por nome, por
     // isso devolve o registo existente sem lhe mudar o prefixo.
-    let de_novo = delonix_net::infra::network_create("arquivo-antigo").expect("idempotente");
+    let de_novo = delonix_sdn::infra::network_create("arquivo-antigo").expect("idempotente");
     assert_eq!(
         de_novo.prefix, "10.249",
         "a idempotência não pode renumerar a rede"
@@ -154,11 +154,11 @@ fn registo_legado_continua_a_ser_lido_e_migra_a_escrita() {
 
     // O ficheiro legado só desaparece quando algo o reescreve — força-o por um
     // caminho que escreve mesmo (declarar o gateway).
-    delonix_net::infra::network_create_with_gateway("arquivo-antigo", "10.249", Some("10.249.0.9"))
+    delonix_sdn::infra::network_create_with_gateway("arquivo-antigo", "10.249", Some("10.249.0.9"))
         .expect("declara gateway");
     assert!(!legado.exists(), "o registo legado ficou para trás");
     assert_eq!(
-        delonix_net::infra::network_get("arquivo-antigo")
+        delonix_sdn::infra::network_get("arquivo-antigo")
             .unwrap()
             .bridge,
         "dlxnaaaabbbb",
@@ -182,5 +182,5 @@ fn um_registo_de_outra_rede_nao_e_aceite_como_este() {
         r#"{"name":"outra-qualquer","bridge":"dlxn00000000","prefix":"10.248"}"#,
     )
     .unwrap();
-    assert!(delonix_net::infra::network_get("intruso").is_none());
+    assert!(delonix_sdn::infra::network_get("intruso").is_none());
 }

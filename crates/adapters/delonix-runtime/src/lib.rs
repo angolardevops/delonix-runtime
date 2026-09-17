@@ -2022,7 +2022,7 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     // container started at all under `unshare --user --map-root-user`.
     //
     // Third place in this workspace where `geteuid()` was mistaken for "real
-    // root" (after `is_rootless` and `delonix-net::runtime_dir`). Same predicate,
+    // root" (after `is_rootless` and `delonix-sdn::runtime_dir`). Same predicate,
     // same fix: map the single uid we actually hold.
     let (uid_map, gid_map) = if euid == 0 && delonix_runtime_core::in_initial_userns() {
         let m = format!("0 {USERNS_UID_BASE} {USERNS_RANGE}\n");
@@ -5115,7 +5115,7 @@ pub struct RunSpec<'a> {
     /// **Rootless ingress:** the process already runs INSIDE the ingress holder's
     /// user+network namespace (re-exec via `nsenter … ip netns exec`). It does not create
     /// `CLONE_NEWUSER` nor `CLONE_NEWNET` (inherits the holder's, already as uid 0), but
-    /// treats the rootfs as `userns` (it is root in the inherited userns). See `delonix-net::infra`.
+    /// treats the rootfs as `userns` (it is root in the inherited userns). See `delonix-sdn::infra`.
     pub inherit_userns: bool,
     /// image `USER`: uid/gid to switch to BEFORE the `exec` (Docker `User`).
     /// `None` or `Some(0)` = runs as root (uid 0) — the historical behavior.
@@ -7583,7 +7583,7 @@ fn remove_cgroup_tree(cgroup: &str) {
 
 /// Path of the marker [`setup_node_cgroup_ns`] leaves behind recording the
 /// EXACT leaf it created for a Kind node — `<temp>/delonix-node-cgroup-<id>`,
-/// same convention as `delonix_net::slirp_container_sock` (a small file keyed
+/// same convention as `delonix_sdn::slirp_container_sock` (a small file keyed
 /// by id, for a LATER, possibly different process to read once). See
 /// `remove_container_cgroup` for why guessing the path instead does not work.
 fn node_cgroup_leaf_marker(cid: &str) -> std::path::PathBuf {
@@ -8043,7 +8043,7 @@ pub fn live_cgroup(container: &Container) -> String {
 /// Per-container resource usage read directly from its live cgroup v2 leaf —
 /// three cheap file reads (`memory.current`/`cpu.stat`/`io.stat`), no
 /// subprocess. Safe to call every dashboard tick for every container, unlike
-/// network bytes (`delonix_net::infra::container_net_bytes`, one `nsenter`+
+/// network bytes (`delonix_sdn::infra::container_net_bytes`, one `nsenter`+
 /// `cat` per container — see `cmd/dash.rs`'s slow background refresh).
 ///
 /// `cpu_usage_usec` is the RAW monotonic counter from `cpu.stat`

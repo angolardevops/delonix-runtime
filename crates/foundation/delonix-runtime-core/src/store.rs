@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// Exclusive file lock (`flock`) — sequences the **read-modify-write**
-/// of a container BETWEEN PROCESSES. Same pattern as `delonix-net::infra`.
+/// of a container BETWEEN PROCESSES. Same pattern as `delonix-sdn::infra`.
 ///
 /// Why it is needed: this runtime is daemonless — N processes (`delonix` on the CLI,
 /// the `delonix-cri` server that the kubelet calls, and this one is CONCURRENT by
@@ -103,7 +103,7 @@ impl Drop for FileLock {
 ///
 /// The consequence is not theoretical for a daemonless engine whose entire
 /// notion of "what exists" lives in these JSON files. The worst case is
-/// `delonix-net`'s IPAM lease registry: lose that file and every `id → ip`
+/// `delonix-sdn`'s IPAM lease registry: lose that file and every `id → ip`
 /// lease goes with it, dropping the allocator back to the bare hash — which its
 /// own module doc measures as colliding with ~50 % probability at ~300
 /// containers, i.e. two containers on one IP, with the firewall and DNAT rules
@@ -136,7 +136,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
 /// * If the attacker creates the file first, THEY own it, and in a sticky `/tmp`
 ///   we cannot unlink it — they can then rewrite it between our write and
 ///   whatever reads it back. That last one is why this matters most for
-///   `delonix-net`'s BPF object: the file is handed to `bpftool prog loadall`,
+///   `delonix-sdn`'s BPF object: the file is handed to `bpftool prog loadall`,
 ///   so winning that race means an unprivileged user gets their own BPF program
 ///   loaded into the kernel by a privileged process.
 ///
@@ -761,7 +761,7 @@ mod tests {
     /// REGRESSÃO (auditoria de segurança): um ficheiro temporário em `/tmp` não
     /// pode ser sequestrável por outro utilizador local.
     ///
-    /// O caso que motivou isto: `delonix-net::bpf` escrevia o objecto BPF no
+    /// O caso que motivou isto: `delonix-sdn::bpf` escrevia o objecto BPF no
     /// caminho FIXO `/tmp/delonix_flow.bpf.o` com `fs::write`, e esse ficheiro é
     /// depois carregado no kernel por um processo com `CAP_BPF`/root. Quem
     /// pré-criasse o caminho ficava DONO dele (num `/tmp` sticky nem sequer o

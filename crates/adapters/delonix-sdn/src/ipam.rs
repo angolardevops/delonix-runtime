@@ -546,7 +546,7 @@ mod tests {
         // The PID in the path, not just the tag. `ENV_LOCK` above serializes
         // within the PROCESS; nothing serializes across processes, and this
         // workspace runs several sessions at once (one worktree per task). With
-        // a fixed path, two `cargo test -p delonix-net` runs delete each other's
+        // a fixed path, two `cargo test -p delonix-sdn` runs delete each other's
         // directory in the entry and exit `remove_dir_all`, and whichever is
         // midway through this test's 2000 allocations dies writing.
         //

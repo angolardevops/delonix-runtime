@@ -4,7 +4,7 @@
 //!
 //! BUG FOUND (code review): this exact `unsafe`/`getsockopt` block was
 //! copy-pasted verbatim into `delonix-cri`, `delonix-mgmt`,
-//! `delonix-net::infra`, and `cmd/dockerapi.rs` — all four already depend on
+//! `delonix-sdn::infra`, and `cmd/dockerapi.rs` — all four already depend on
 //! this crate, so there was no crate-boundary reason for the duplication
 //! (unlike e.g. `dir_size`, which really can't be shared without a circular
 //! dependency). A future fix to this logic meant touching 4 sites and

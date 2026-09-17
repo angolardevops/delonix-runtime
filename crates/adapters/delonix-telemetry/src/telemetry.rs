@@ -51,7 +51,7 @@ static OTLP_PROVIDER: std::sync::OnceLock<opentelemetry_sdk::trace::SdkTracerPro
 ///
 /// Control via environment (no new flags on the CLI):
 /// - **`DELONIX_LOG`** (or `RUST_LOG` as an alternative) — filter by level/target,
-///   `env_filter` syntax (e.g.: `info`, `delonix_net=debug,warn`). Default `info`.
+///   `env_filter` syntax (e.g.: `info`, `delonix_sdn=debug,warn`). Default `info`.
 /// - **`DELONIX_LOG_FORMAT=json`** — emits structured JSON (one line per event,
 ///   for ingestion by Loki/ELK); any other value (or absent) → readable text.
 /// - **`DELONIX_OTLP_ENDPOINT`** — when set (and non-empty), adds an OTLP

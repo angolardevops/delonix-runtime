@@ -3,14 +3,14 @@
 //! `ADR-0020` named `Service` as one of the six Kinds the CLI restructuring's
 //! Phase CLI-2 needed before it could even start; five of the six shipped, this
 //! is the sixth. It selects containers by label (`spec.selector.matchLabels`,
-//! reusing `delonix_net::matches_labels` — the same pure function
+//! reusing `delonix_sdn::matches_labels` — the same pure function
 //! `FirewallPolicy`'s own planned selector, ADR-0024, is meant to share rather
 //! than grow a second implementation of) and publishes the matched set as
 //! MULTIPLE DNS `A` records under `<name>.<namespace>.delonix.internal`,
 //! round-robin rotated per query.
 //!
 //! **No VIP, no L4 dataplane, no new daemon.** The membership computation and
-//! the DNS answer itself live in `delonix_net::infra` (`ServiceDef` registry +
+//! the DNS answer itself live in `delonix_sdn::infra` (`ServiceDef` registry +
 //! `build_dns_index`'s Service pass + `dns_resolve_multi_for`) — this module is
 //! the thin Kind-dispatch layer: parse the spec, write the registry entry,
 //! answer the reconciler's questions. See `docs/adr/0032-service-kind-dns-round-robin.md`
@@ -89,7 +89,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
 /// Every `Service` this node has declared — the enumeration `--prune` needs,
 /// same reasoning as `netroute::actual`/`network_access_rule::actual`.
 pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
-    Ok(delonix_net::infra::service_list()
+    Ok(delonix_sdn::infra::service_list()
         .into_iter()
         .map(|def| {
             let mut f = BTreeMap::new();
@@ -123,7 +123,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 /// directly carries none of that Kind's risk).
 pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) -> Result<()> {
     let namespace = doc_namespace_of(name)?;
-    delonix_net::infra::service_set_metadata(
+    delonix_sdn::infra::service_set_metadata(
         &namespace,
         name,
         &[
@@ -146,7 +146,7 @@ pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) 
 /// `--prune`/`stack destroy`'s teardown.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let namespace = doc_namespace_of(name)?;
-    delonix_net::infra::service_remove(&namespace, name)
+    delonix_sdn::infra::service_remove(&namespace, name)
 }
 
 /// Finds which namespace an already-registered `Service` NAMED `name` lives
@@ -156,7 +156,7 @@ pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
 /// `Service`'s identity is `metadata.name` (not a derived key like a route's
 /// pair) but its FILE is keyed by `(namespace, name)`.
 fn doc_namespace_of(name: &str) -> Result<String> {
-    delonix_net::infra::service_list()
+    delonix_sdn::infra::service_list()
         .into_iter()
         .find(|d| d.name == name)
         .map(|d| d.namespace)
@@ -177,7 +177,7 @@ pub(crate) fn presence_of(doc: &ManifestDoc) -> (String, String) {
         .as_deref()
         .unwrap_or("default")
         .to_string();
-    if delonix_net::infra::service_get(&namespace, &doc.metadata.name).is_none() {
+    if delonix_sdn::infra::service_get(&namespace, &doc.metadata.name).is_none() {
         return ("no".into(), "-".into());
     }
     let count = match_count(&namespace, &spec.selector.match_labels);
@@ -196,7 +196,7 @@ pub(crate) fn presence_of(doc: &ManifestDoc) -> (String, String) {
 /// Live count of containers this selector currently matches, in `namespace` —
 /// the same match `build_dns_index`'s Service pass computes, done here on the
 /// CLI's OWN container store read (not a second implementation of the match:
-/// `delonix_net::matches_labels` is the one function, this is just a second
+/// `delonix_sdn::matches_labels` is the one function, this is just a second
 /// CALLER of it, over a store this process already has open).
 fn match_count(namespace: &str, match_labels: &BTreeMap<String, String>) -> usize {
     let Ok((_images, store)) = open_stores() else {
@@ -208,12 +208,12 @@ fn match_count(namespace: &str, match_labels: &BTreeMap<String, String>) -> usiz
     containers
         .iter()
         .filter(|c| c.namespace.eq_ignore_ascii_case(namespace))
-        .filter(|c| delonix_net::matches_labels(&c.labels, match_labels))
+        .filter(|c| delonix_sdn::matches_labels(&c.labels, match_labels))
         .count()
 }
 
 /// Applies one document — writes the selector+port to the registry
-/// (`delonix_net::infra::service_set`), preserving any existing ownership
+/// (`delonix_sdn::infra::service_set`), preserving any existing ownership
 /// stamp (the reconciler's `stamp` runs separately, after `apply`, same
 /// two-step order every other ownable Kind here follows).
 fn apply_one(containers: &[delonix_runtime_core::Container], doc: &ManifestDoc) -> Result<()> {
@@ -224,7 +224,7 @@ fn apply_one(containers: &[delonix_runtime_core::Container], doc: &ManifestDoc) 
         .as_deref()
         .unwrap_or("default")
         .to_string();
-    delonix_net::infra::service_set(
+    delonix_sdn::infra::service_set(
         &namespace,
         &doc.metadata.name,
         &spec.selector.match_labels,
@@ -233,7 +233,7 @@ fn apply_one(containers: &[delonix_runtime_core::Container], doc: &ManifestDoc) 
     let matched = containers
         .iter()
         .filter(|c| c.namespace.eq_ignore_ascii_case(&namespace))
-        .filter(|c| delonix_net::matches_labels(&c.labels, &spec.selector.match_labels))
+        .filter(|c| delonix_sdn::matches_labels(&c.labels, &spec.selector.match_labels))
         .count();
     if matched == 0 {
         // Deliberately a warning, not an error (ADR-0032): refusing would
@@ -304,7 +304,7 @@ struct ServiceLsRow {
 
 pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
     let format = super::config::resolve_output(&super::util::state_root(), format);
-    let mut defs = delonix_net::infra::service_list();
+    let mut defs = delonix_sdn::infra::service_list();
     defs.sort_by(|a, b| (&a.namespace, &a.name).cmp(&(&b.namespace, &b.name)));
 
     let rows: Vec<ServiceLsRow> = defs
@@ -342,7 +342,7 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
 /// `delonix describe services <name>` — the generic verb's target.
 pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
     for name in names {
-        let Some(def) = delonix_net::infra::service_list()
+        let Some(def) = delonix_sdn::infra::service_list()
             .into_iter()
             .find(|d| d.name == *name)
         else {

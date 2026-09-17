@@ -1,7 +1,7 @@
 //! The rootless SDN as the VM engine's [`VmNetwork`] port.
 //!
 //! The VM engine used to call [`crate::infra`] directly, which made one adapter
-//! depend on another (ADR-0040's `delonix-vm → delonix-net` exception). It now
+//! depend on another (ADR-0040's `delonix-vm → delonix-sdn` exception). It now
 //! asks the port, and the composition root registers this implementation.
 
 use delonix_compute::ports::VmNetwork;

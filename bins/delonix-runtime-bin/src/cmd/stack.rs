@@ -1214,7 +1214,7 @@ fn presence(
                 Err(e) => ("?".into(), e.to_string()),
             }
         }
-        k::NETWORK => match delonix_net::NetworkStore::open(&root).and_then(|s| s.list()) {
+        k::NETWORK => match delonix_sdn::NetworkStore::open(&root).and_then(|s| s.list()) {
             Ok(ns) => yes_no(ns.iter().any(|n| n.name == name)),
             Err(e) => ("?".into(), e.to_string()),
         },
@@ -2439,7 +2439,7 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
     // Resources already present on the machine count as resolved (a manifest may
     // reference a network created in a previous apply). Best-effort: if a store does
     // not open, we proceed with only what the manifest declares.
-    let existing_networks: Vec<String> = delonix_net::NetworkStore::open(&root)
+    let existing_networks: Vec<String> = delonix_sdn::NetworkStore::open(&root)
         .and_then(|s| s.list())
         .map(|ns| ns.into_iter().map(|n| n.name).collect())
         .unwrap_or_default();
