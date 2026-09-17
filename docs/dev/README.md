@@ -41,39 +41,39 @@ Pages in this handbook mix two kinds of content:
   `.github/workflows/ci.yml`. Never edit them by hand — CI runs `dev_docs.py --check` and fails.
   If a fact is wrong, fix the source or the generator.
 - **Narrative** — why things are the way they are, how flows work, how to contribute. It is
-  written by hand and reviewed after each release. See [11 — Publishing the docs](11-publishing-docs.md).
+  written by hand and reviewed after each release. See [Publishing the docs](publishing-docs.md).
 
 ## Reading paths
 
 | If you want to… | Read, in order |
 |---|---|
-| **Start from zero, with no one to ask** | [00](00-start-here.md) (keep [14](14-glossary.md) open) → the path below that matches your change |
-| **Send a first PR** (a CLI fix, a docs fix, a small feature) | [00](00-start-here.md) → [01](01-environment.md) → [02](02-build-and-test.md) (keep [15](15-environment-variables.md) at hand) → [10](10-contributing-workflow.md) → [12](12-coding-conventions.md) → [06](06-crates.md) for the crate you touch |
-| **Understand the engine in depth** | [03](03-rust-primer.md) → [04](04-cloud-native-primer.md) → [13](13-cloud-native-standards.md) → [05](05-architecture.md) → [06](06-crates.md) → [07](07-system-design-interview.md) |
-| **Work on VMs or VM images** | [01](01-environment.md) → [02](02-build-and-test.md) → [08](08-delonixfile-and-vmfile.md) → [09](09-microvm-setup.md) → the `delonix-vm` section of [06](06-crates.md) → the VM tuning section of [15](15-environment-variables.md) |
-| **Change how documentation is produced** | [11](11-publishing-docs.md) |
-| **Configure, isolate or tune a run** (state roots, logging, escape hatches, providers) | [02 — Isolating the engine's state](02-build-and-test.md#isolating-the-engines-state) → [15](15-environment-variables.md) |
+| **Start from zero, with no one to ask** | [Start here](start-here.md) (keep [Glossary](glossary.md) open) → the path below that matches your change |
+| **Send a first PR** (a CLI fix, a docs fix, a small feature) | [Start here](start-here.md) → [Preparing your environment](environment.md) → [Clone, build and test](build-and-test.md) (keep [Environment variables (`DELONIX_*`)](environment-variables.md) at hand) → [Contribution workflow](contributing-workflow.md) → [Coding conventions](coding-conventions.md) → [The crates](crates.md) for the crate you touch |
+| **Understand the engine in depth** | [Rust primer for this codebase](rust-primer.md) → [Cloud native primer](cloud-native-primer.md) → [Cloud native standards, layer by layer](cloud-native-standards.md) → [Architecture](architecture.md) → [The crates](crates.md) → [System Design Interview — the Delonix Engine](system-design-interview.md) |
+| **Work on VMs or VM images** | [Preparing your environment](environment.md) → [Clone, build and test](build-and-test.md) → [Delonixfile and VMfile](delonixfile-and-vmfile.md) → [Building microVMs](microvm-setup.md) → the `delonix-vm` section of [The crates](crates.md) → the VM tuning section of [Environment variables (`DELONIX_*`)](environment-variables.md) |
+| **Change how documentation is produced** | [Publishing the documentation](publishing-docs.md) |
+| **Configure, isolate or tune a run** (state roots, logging, escape hatches, providers) | [Isolating the engine's state](build-and-test.md#isolating-the-engines-state) → [Environment variables (`DELONIX_*`)](environment-variables.md) |
 
 ## Pages
 
 | # | Page | What it answers |
 |---|---|---|
-| 00 | [Start here](00-start-here.md) | Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck |
-| 01 | [Preparing your environment](01-environment.md) | What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs |
-| 02 | [Clone, build and test](02-build-and-test.md) | Building, running tests, every CI gate as a local command, E2E and chaos with isolation |
-| 03 | [Rust primer](03-rust-primer.md) | The Rust this codebase actually uses |
-| 04 | [Cloud native primer](04-cloud-native-primer.md) | Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — and where each appears in the engine |
-| 05 | [Architecture](05-architecture.md) | Layers, the crate graph, control and data paths, state on disk |
-| 06 | [The crates](06-crates.md) | One block per crate: responsibility, main types, where to start reading |
-| 07 | [System Design Interview](07-system-design-interview.md) | The engine designed as an interview answer, then compared with what was built |
-| 08 | [Delonixfile and VMfile](08-delonixfile-and-vmfile.md) | The build file grammars and how they differ from a Dockerfile |
-| 09 | [Building microVMs](09-microvm-setup.md) | KVM, Cloud Hypervisor and firmware, libvirt, VM images |
-| 10 | [Contribution workflow](10-contributing-workflow.md) | Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs |
-| 11 | [Publishing the documentation](11-publishing-docs.md) | How the site and this handbook are generated, gated and published |
-| 12 | [Coding conventions](12-coding-conventions.md) | How code in this repository is written, and the checklist reviewers apply |
-| 13 | [Cloud native standards](13-cloud-native-standards.md) | The cloud-native standards a change is measured against |
-| 14 | [Glossary](14-glossary.md) | The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more |
-| 15 | [Environment variables](15-environment-variables.md) | Every `DELONIX_*` variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary |
+| 00 | [Start here](start-here.md) | Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck |
+| 01 | [Preparing your environment](environment.md) | What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs |
+| 02 | [Clone, build and test](build-and-test.md) | Building, running tests, every CI gate as a local command, E2E and chaos with isolation |
+| 03 | [Rust primer](rust-primer.md) | The Rust this codebase actually uses |
+| 04 | [Cloud native primer](cloud-native-primer.md) | Namespaces, cgroups v2, OCI, CRI, CNI, nftables, KVM — and where each appears in the engine |
+| 05 | [Architecture](architecture.md) | Layers, the crate graph, control and data paths, state on disk |
+| 06 | [The crates](crates.md) | One block per crate: responsibility, main types, where to start reading |
+| 07 | [System Design Interview](system-design-interview.md) | The engine designed as an interview answer, then compared with what was built |
+| 08 | [Delonixfile and VMfile](delonixfile-and-vmfile.md) | The build file grammars and how they differ from a Dockerfile |
+| 09 | [Building microVMs](microvm-setup.md) | KVM, Cloud Hypervisor and firmware, libvirt, VM images |
+| 10 | [Contribution workflow](contributing-workflow.md) | Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs |
+| 11 | [Publishing the documentation](publishing-docs.md) | How the site and this handbook are generated, gated and published |
+| 12 | [Coding conventions](coding-conventions.md) | How code in this repository is written, and the checklist reviewers apply |
+| 13 | [Cloud native standards](cloud-native-standards.md) | The cloud-native standards a change is measured against |
+| 14 | [Glossary](glossary.md) | The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more |
+| 15 | [Environment variables](environment-variables.md) | Every `DELONIX_*` variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary |
 
 Other references you will be pointed to: [`ARCHITECTURE.md`](../../ARCHITECTURE.md) (C4 diagrams),
 [`docs/adr/`](../adr/README.md) (architecture decisions), [`SECURITY.md`](../../SECURITY.md)

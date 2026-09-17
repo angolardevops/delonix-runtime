@@ -1,0 +1,1026 @@
+<!doctype html>
+<html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Delonixfile e VMfile · Delonix Runtime — Manual do contribuidor</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="Início do manual"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Manual do contribuidor</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Pesquisar no manual…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/delonixfile-and-vmfile.html">EN · English</option><option value="../pt-AO/delonixfile-and-vmfile.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/delonixfile-and-vmfile.html">FR-FR · Français</option><option value="../zh-CN/delonixfile-and-vmfile.html">ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="cloud-native-primer.html"><span class="n">02</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">03</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">04</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">05</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="architecture.html"><span class="n">06</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">07</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">08</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a class="on" aria-current="page" href="delonixfile-and-vmfile.html"><span class="n">09</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">10</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">11</span><span>Convenções de código</span></a><a href="contributing-workflow.html"><span class="n">12</span><span>Fluxo de contribuição</span></a><a href="publishing-docs.html"><span class="n">13</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">14</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">15</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">16</span><span>Glossário</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">Imagens e microVMs</p>
+<h1 id="delonixfile-and-vmfile">Delonixfile e VMfile</h1>
+<p>O Delonix tem dois ficheiros de build, e são parecidos de propósito: quem já escreveu um Dockerfile
+consegue ler os dois. O que constroem é diferente.</p>
+<ul>
+<li>Um <strong>Delonixfile</strong> constrói uma <strong>imagem de container OCI</strong> (camadas de um sistema de ficheiros).
+  É uma gramática de Dockerfile com algumas instruções Delonix por cima, construída por
+  <code>delonix build</code>.</li>
+<li>Um <strong>VMfile</strong> constrói um <strong>disco qcow2 arrancável</strong> para uma VM. Pede emprestada a <em>forma</em> do
+  Dockerfile, mas o mecanismo é <code>qemu-img</code> + <code>virt-customize</code> sobre um disco inteiro, construído por
+  <code>delonix image vm build</code>.</li>
+</ul>
+<p>Esta página descreve o que os parsers deste repositório aceitam de facto — não o que o Docker
+aceita. Cada regra abaixo aponta para o código que a impõe.</p>
+<blockquote>
+<p>Os exemplos marcados como <em>verificados pelo parser</em> foram corridos contra um binário construído a
+partir desta árvore, com <code>DELONIX_ROOT</code>, <code>DELONIX_NET_RUNTIME_DIR</code> e <code>TMPDIR</code> apontados para um
+directório de rascunho, até ao ponto em que o build começaria a fazer pull de imagens ou a
+descarregar discos base. Builds completos <strong>não foram executados nesta revisão</strong> (precisam de
+acesso ao registo/à rede e, para VMs, de libguestfs e de vários GB de RAM e de disco).</p>
+</blockquote>
+<hr />
+<h2 id="part-1-delonixfile">Parte 1 — Delonixfile<a class="hanchor" href="#part-1-delonixfile" aria-label="#">#</a></h2>
+<h3 id="where-the-code-lives">Onde vive o código<a class="hanchor" href="#where-the-code-lives" aria-label="#">#</a></h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Assunto</th>
+<th>Ficheiro</th>
+<th>Símbolo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gramática (parser)</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
+<td><code>parse_dockerfile_with_args</code>, <code>parse_run_flags</code>, <code>parse_secret_mount</code>, <code>resolve_target_stage</code></td>
+</tr>
+<tr>
+<td>Orquestração do build</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>build.<wbr>rs</code></a></td>
+<td><code>run</code>, <code>build_from_spec</code>, <code>build_one_stage</code>, <code>default_build_file</code></td>
+</tr>
+<tr>
+<td>Commit da imagem</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
+<td><code>ImageStore::<wbr>commit_flat_rootfs</code> (rootless), <code>commit_upper</code> + <code>build_image</code> (root)</td>
+</tr>
+<tr>
+<td>Templates de projecto</td>
+<td><code>bins/<wbr>delonix-runtime-bin/<wbr>templates/<wbr>&lt;name&gt;/<wbr>Delonixfile</code></td>
+<td>renderizados por <code>delonix init</code> / <code>stack init</code></td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="file-lookup">Procura do ficheiro<a class="hanchor" href="#file-lookup" aria-label="#">#</a></h3>
+<p><code>delonix build [CONTEXT]</code> sem <code>-f</code> chama <code>default_build_file</code> (<code>cmd/build.rs</code>): usa
+<code>&lt;context&gt;/Delonixfile</code> se existir, caso contrário <code>&lt;context&gt;/Dockerfile</code>. <strong>A gramática é a mesma
+para os dois nomes</strong> — as instruções Delonix abaixo também são aceites num ficheiro chamado
+<code>Dockerfile</code>. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> é só o nome que é descoberto primeiro. <code>-t/--tag</code> é obrigatório.</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">delonix build -t myapp:dev .                 # Delonixfile, else Dockerfile
+delonix build -t myapp:dev -f build/Other .  # explicit file
+</code></pre></div>
+<h3 id="instructions-the-parser-accepts">Instruções que o parser aceita<a class="hanchor" href="#instructions-the-parser-accepts" aria-label="#">#</a></h3>
+<p>O <code>parse_dockerfile_with_args</code> <strong>falha fechado</strong>: uma instrução que não conhece é um erro com o
+número da linha, e qualquer instrução excepto <code>ARG</code> antes do primeiro <code>FROM</code> é um erro. As linhas
+que terminam em <code>\</code> são juntadas; as linhas que começam por <code>#</code> são comentários. Os nomes das
+instruções não distinguem maiúsculas de minúsculas.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Instrução</th>
+<th>O que acontece</th>
+<th>Notas</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ARG NAME[=default]</code></td>
+<td>Declara uma variável de build; <code>${NAME}</code>/<code>$NAME</code> é substituído em todas as linhas seguintes</td>
+<td>Permitido antes de <code>FROM</code> (para o parametrizar). <code>--build-arg NAME=VALUE</code> só sobrepõe um <code>ARG</code> declarado. Simplificação: os args vivem num <strong>único</strong> âmbito para o ficheiro inteiro, não por estágio. Sem formas <code>${NAME:-default}</code> (<code>substitute_vars</code>).</td>
+</tr>
+<tr>
+<td><code>FROM &lt;image&gt; [AS &lt;name&gt;]</code></td>
+<td>Abre um estágio</td>
+<td>Um estágio posterior também pode dizer <code>FROM &lt;earlier-stage&gt;</code> (ver multi-stage).</td>
+</tr>
+<tr>
+<td><code>RUN &lt;shell&gt;</code></td>
+<td>Corre num container de trabalho via <code>exec</code></td>
+<td>Só <code>--mount=type=secret,...</code> é aceite como flag (abaixo).</td>
+</tr>
+<tr>
+<td><code>COPY [--from=&lt;stage&gt;] &lt;src&gt; &lt;dst&gt;</code></td>
+<td>Escreve no rootfs do estágio em disco</td>
+<td>Confinado ao contexto/rootfs (<code>safe_join</code>, <code>confine_to</code>): <code>..</code>, fugas absolutas e symlinks que saem da base são recusados.</td>
+</tr>
+<tr>
+<td><code>ADD</code></td>
+<td><strong>Igual a <code>COPY</code></strong></td>
+<td>Sem download de URL, sem extracção automática de arquivos.</td>
+</tr>
+<tr>
+<td><code>ENV K=V [K2="v 2" …]</code> ou <code>ENV K V</code></td>
+<td>Afecta os <code>RUN</code>s seguintes; o <code>ENV</code> do estágio final vai para a config da imagem</td>
+<td>Os valores são expandidos contra <code>ENV</code>s anteriores (<code>expand_env_value</code>).</td>
+</tr>
+<tr>
+<td><code>WORKDIR &lt;dir&gt;</code></td>
+<td>Directório de trabalho dos <code>RUN</code>s seguintes; o valor final vai para a config da imagem</td>
+<td></td>
+</tr>
+<tr>
+<td><code>USER &lt;name|uid[:gid]&gt;</code></td>
+<td>Registado na config da imagem</td>
+<td>Vazio → herda o da imagem base.</td>
+</tr>
+<tr>
+<td><code>CMD</code>, <code>ENTRYPOINT</code></td>
+<td>Registados na config da imagem</td>
+<td>Formas exec (JSON) e shell.</td>
+</tr>
+<tr>
+<td><code>HEALTHCHECK [opts] CMD &lt;cmd&gt;</code> / <code>HEALTHCHECK NONE</code></td>
+<td>A parte depois de <code>CMD</code> é guardada como o comando de saúde da imagem</td>
+<td>As opções antes de <code>CMD</code> são ignoradas. Usado por <code>delonix container healthcheck &lt;id&gt;</code> e pelo <code>depends_on: condition: service_healthy</code> do compose.</td>
+</tr>
+<tr>
+<td><code>LABEL</code>, <code>EXPOSE</code>, <code>MAINTAINER</code>, <code>VOLUME</code>, <code>STOPSIGNAL</code>, <code>SHELL</code>, <code>ONBUILD</code></td>
+<td><strong>Aceites e ignoradas</strong></td>
+<td>Só metadados; nenhum efeito no build.</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>Extensões Delonix</strong> (analisadas para campos de <code>Dockerfile</code> no mesmo ficheiro):</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Instrução</th>
+<th>Analisada para</th>
+<th>Efeito nesta árvore</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>SCAN fail-on=&lt;sev&gt;</code></td>
+<td><code>scan_fail_on</code> (por omissão <code>high</code> se não houver <code>fail-on=</code>)</td>
+<td><strong>Analisada mas não imposta pelo <code>delonix build</code></strong> — nenhum chamador lê o campo. Faz de gate às imagens explicitamente com <code>delonix image scan --fail-on &lt;sev&gt; &lt;image&gt;</code>.</td>
+</tr>
+<tr>
+<td><code>CPUS &lt;n&gt;</code></td>
+<td><code>cpus</code></td>
+<td>Escrita na config da imagem (chave não normalizada <code>Cpus</code>); herdada da base se ausente. Nenhum consumidor em runtime foi encontrado nesta revisão.</td>
+</tr>
+<tr>
+<td><code>MEMORY &lt;n&gt;</code></td>
+<td><code>memory</code></td>
+<td>Igual a <code>CPUS</code> (chave <code>Memory</code>).</td>
+</tr>
+<tr>
+<td><code>SECURITY &lt;opt&gt;...</code></td>
+<td><code>security</code></td>
+<td>Igual a <code>CPUS</code> (chave <code>Security</code>).</td>
+</tr>
+</tbody>
+</table></div>
+<p>Trata <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> como <em>intenção registada</em>; define os limites reais em runtime
+(<code>container run -m/--cpus</code>, ou <code>resources</code> num manifesto). Se os ligares, actualiza esta tabela.</p>
+<p>Comportamento do parser que convém conhecer (lido no código, não uma promessa de desenho):</p>
+<ul>
+<li><code>COPY a b c /dst</code> mantém só a <strong>primeira</strong> origem e o <strong>último</strong> argumento; as origens do meio são
+  descartadas em silêncio.</li>
+<li><code>COPY --chown=…</code>/<code>--chmod=…</code> não são reconhecidas; o token da flag seria tomado como caminho de
+  origem.</li>
+<li><code>RUN --network=…</code>, <code>RUN --security=…</code> e qualquer outro <code>RUN --&lt;flag&gt;</code> são recusados.</li>
+</ul>
+<h3 id="multi-stage-copy-from-and-target">Multi-stage, <code>COPY --from</code> e <code>--target</code><a class="hanchor" href="#multi-stage-copy-from-and-target" aria-label="#">#</a></h3>
+<p>Cada estágio (o final incluído) tem o seu <strong>próprio container de trabalho e rootfs</strong>
+(<code>build_one_stage</code>). O container de trabalho (<code>sleep infinity</code> sobre o rootfs do estágio) é criado
+por <code>ensure_container</code> através do mesmo <code>WorkloadRuntime</code> que o <code>container run</code> e o <code>start</code> usam
+(<code>container::with_host_workload</code>), por isso um build não pode divergir da especificação de arranque
+de um container. Os estágios intermédios ficam em disco até o build inteiro terminar, por isso:</p>
+<ul>
+<li><code>COPY --from=&lt;name-or-index&gt; &lt;src&gt; &lt;dst&gt;</code> lê directamente do rootfs desse estágio
+  (<code>resolve_copy_source</code>, <code>copy_into_rootfs</code>).</li>
+<li><code>FROM &lt;earlier-stage&gt;</code> clona o rootfs desse estágio com <code>cp -a --reflink=auto</code>
+  (<code>clone_rootfs</code>) — <code>cp -a</code> para que symlinks como <code>/bin -&gt; usr/bin</code> continuem a ser symlinks.</li>
+<li><code>--target &lt;name-or-index&gt;</code> (<code>resolve_target_stage</code>) pára nesse estágio e empacota-o; os estágios
+  seguintes não são construídos. Um nome desconhecido é recusado e o erro lista os estágios que
+  existem. Com <code>--target</code> num estágio intermédio, <code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code>/<code>WORKDIR</code>/<code>HEALTHCHECK</code>
+  vêm <strong>desse</strong> estágio, não do estágio final do ficheiro.</li>
+</ul>
+<p>Duas restrições do modo root (overlay), ambas recusadas logo à partida com uma mensagem clara: o
+estágio final não pode ser <code>FROM &lt;earlier-stage&gt;</code> (o commit OCI precisa de uma imagem base real para
+a linhagem), e <code>--target</code> num estágio intermédio é recusado. O rootless não tem nenhuma das duas
+restrições.</p>
+<h3 id="build-secrets">Segredos de build<a class="hanchor" href="#build-secrets" aria-label="#">#</a></h3>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">delonix build -t app:dev --secret id=npmrc,src=$HOME/.npmrc .
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-dockerfile">RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
+</code></pre></div>
+<ul>
+<li><code>--secret id=&lt;name&gt;,src=&lt;path&gt;</code> é repetível; uma entrada malformada ou um ficheiro <code>src</code> em falta é
+  um erro duro (<code>parse_build_secrets</code>).</li>
+<li>No ficheiro: <code>--mount=type=secret,id=&lt;name&gt;[,target=&lt;path&gt;][,required=true|false]</code>. <code>target</code> é por
+  omissão <code>/run/secrets/&lt;id&gt;</code>; <code>required</code> é por omissão <code>false</code> (um segredo opcional em falta é
+  saltado, como no Docker).</li>
+<li><code>type=ssh</code>, <code>type=cache</code> e <code>type=bind</code> são <strong>recusados</strong> (<code>parse_secret_mount</code>).</li>
+<li>O segredo é montado ao vivo por bind (<code>mount_run_secrets</code>) dentro do mount namespace do container
+  de trabalho só durante esse único <code>RUN</code>, e depois desmontado — a vista do rootfs do lado do host
+  que o commit e a cache de camadas lêem nunca o contém. O material do segredo também não entra no
+  hash da chave da cache.</li>
+</ul>
+<h3 id="-platform-and-binfmt"><code>--platform</code> e binfmt<a class="hanchor" href="#-platform-and-binfmt" aria-label="#">#</a></h3>
+<p><code>--platform linux/&lt;arch&gt;</code> (<code>parse_platform</code>: só <code>linux/</code> é aceite) resolve a imagem base para essa
+arquitectura e carimba a arch no resultado. <strong>Correr</strong> um <code>RUN</code> de arquitectura estrangeira precisa
+do registo <code>binfmt_misc</code> + <code>qemu-user-static</code> do próprio host, que o Delonix não gere. O
+<code>build_from_spec</code> verifica <code>/proc/sys/fs/binfmt_misc/qemu-&lt;arch&gt;</code> antes de construir e recusa com o
+nome do interpretador se estiver em falta ou desactivado.</p>
+<h3 id="rootless-vs-root-and-the-layer-cache">Rootless vs root, e a cache de camadas<a class="hanchor" href="#rootless-vs-root-and-the-layer-cache" aria-label="#">#</a></h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th></th>
+<th>Rootless (caminho normal)</th>
+<th>Root</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Rootfs de um estágio</td>
+<td>directório flat (<code>prepare_rootfs_flat</code>)</td>
+<td>overlay</td>
+</tr>
+<tr>
+<td>Commit</td>
+<td><code>commit_flat_rootfs</code> — uma camada achatada por cima das camadas da base</td>
+<td><code>commit_upper</code> (tar do upperdir) + <code>build_image</code></td>
+</tr>
+<tr>
+<td>Cache de camadas</td>
+<td><strong>sim</strong></td>
+<td><strong>nunca</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>A cache (<code>&lt;DELONIX_ROOT&gt;/build-cache/&lt;hash&gt;/rootfs</code>, <code>--no-cache</code> para a contornar) é uma cadeia de
+hashes encadeados, um elo por instrução. <code>RUN</code>/<code>COPY</code> tiram um snapshot do rootfs completo depois de
+correrem; <code>ENV</code>/<code>WORKDIR</code> entram na cadeia sem snapshot. Um elo de <code>COPY</code> faz hash dos <strong>bytes</strong> que
+estão a ser copiados, por isso um ficheiro alterado invalida tudo o que vem depois dele. Num acerto,
+o snapshot em cache é clonado para o rootfs de um container novo — nunca sincronizado para um que
+esteja vivo (isso corrompia os mounts de <code>/proc</code>/<code>/sys</code>/<code>/dev</code> e foi abandonado). Compromissos
+declarados no doc do módulo: snapshots do rootfs completo, não diffs por camada (mitigado por
+<code>--reflink=auto</code>), e <strong>sem GC da cache</strong> — <code>build-cache/</code> só cresce.</p>
+<p>Como cada <code>RUN</code> executa num container real, os pré-requisitos do host de
+<a href="environment.html">Preparar o ambiente</a> (user namespaces, subuid/subgid, AppArmor no Ubuntu)
+aplicam-se também aos builds.</p>
+<h3 id="worked-example-a-template">Exemplo trabalhado: um template<a class="hanchor" href="#worked-example-a-template" aria-label="#">#</a></h3>
+<p><code>delonix init -t &lt;template&gt; [DIR]</code> (ou <code>delonix stack init --template &lt;template&gt;</code>) renderiza
+<code>bins/delonix-runtime-bin/templates/&lt;template&gt;/</code>, substituindo <code>__NAME__</code>, <code>__PORT__</code> e
+<code>__TEMPLATE_VERSION__</code> (o default <code>version=</code> em <code>template.meta</code>, ou <code>-v/--template-version</code>). Num
+directório vazio escreve o projecto completo; num que não esteja vazio só acrescenta a cola Delonix
+(Delonixfile, manifesto, ficheiros de CI). Gerado num directório de rascunho a partir de <code>httpd</code>
+(<em>corrido</em>):</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">$ delonix init -t httpd web
+detected an empty directory → stack init --template httpd
+  created: web/.dockerignore
+  created: web/Delonixfile
+  ...
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-dockerfile"># Delonixfile — production-ready Apache httpd.
+# Build with:  delonix build -t web:dev .
+FROM httpd:2.4-alpine
+# Listen on 8080 and harden a little (no version banner).
+RUN sed -i &#x27;s/^Listen 80$/Listen 8080/&#x27; /usr/local/apache2/conf/httpd.conf &amp;&amp; \
+    printf &#x27;\nServerTokens Prod\nServerSignature Off\nTraceEnable Off\n&#x27; &gt;&gt; /usr/local/apache2/conf/httpd.conf
+COPY public /usr/local/apache2/htdocs
+EXPOSE 8080
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+CMD [&quot;httpd-foreground&quot;]
+</code></pre></div>
+<p>O <code>delonix-manifest.yaml</code> gerado passa o <code>delonix manifest validate</code> (<em>corrido</em>). O <code>--up</code>
+construiria, faria <code>stack apply</code> e esperaria pela saúde — não executado aqui.</p>
+<p>Um ficheiro multi-stage que usa a maior parte da gramática, <em>verificado pelo parser</em> (o erro de
+<code>--target nosuch</code> prova que o ficheiro foi analisado e lista os seus estágios, antes de qualquer
+pull):</p>
+<div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-dockerfile">ARG GO_VERSION=1.23
+FROM golang:${GO_VERSION}-alpine AS builder
+WORKDIR /src
+COPY go.mod ./
+RUN --mount=type=secret,id=netrc,target=/root/.netrc go mod download
+COPY . .
+RUN CGO_ENABLED=0 go build -o /out/app ./cmd/app
+
+FROM alpine:3.20
+COPY --from=builder /out/app /usr/local/bin/app
+USER 65534
+HEALTHCHECK CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
+CMD [&quot;/usr/local/bin/app&quot;]
+</code></pre></div>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">$ delonix build -t demo:dev --target nosuch .
+error invalid argument: no stage named &#x27;nosuch&#x27; in this Dockerfile — known stages: builder
+$ delonix build -t d -f Dockerfile.cache .        # RUN --mount=type=cache,...
+error invalid argument: RUN --mount=type=cache: só type=secret é suportado (ssh/cache/bind ainda não)
+$ delonix build -t d --platform windows/amd64 .
+error invalid argument: --platform &#x27;windows/amd64&#x27;: only &#x27;linux/&lt;arch&gt;&#x27; is supported (this engine does not run another OS)
+</code></pre></div>
+<p>(Alguns erros do parser ainda estão em português; contam como dívida LANG-01 — ver
+<a href="contributing-workflow.html">Fluxo de contribuição</a>.)</p>
+<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">O próprio <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> do repositório não é construído pelo <code>delonix</code><a class="hanchor" href="#the-repositorys-own-delonixfile-is-not-built-by-delonix" aria-label="#">#</a></h3>
+<p>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> na raiz do repositório empacota a CLI <code>delonix</code> numa imagem de container. É
+construído com <strong>Docker ou Podman</strong> (<code>docker build -f Delonixfile …</code>, ou <code>make image</code>), não com
+<code>delonix build</code>: usa <code># syntax=docker/dockerfile:1</code> e <code>RUN --mount=type=cache</code>, que o
+<code>delonix build</code> recusa. Não o uses como exemplo da gramática Delonix; usa os templates.</p>
+<hr />
+<h2 id="part-2-vmfile">Parte 2 — VMfile<a class="hanchor" href="#part-2-vmfile" aria-label="#">#</a></h2>
+<h3 id="where-the-code-lives_1">Onde vive o código<a class="hanchor" href="#where-the-code-lives_1" aria-label="#">#</a></h3>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Assunto</th>
+<th>Ficheiro</th>
+<th>Símbolo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Gramática, scaffold, builder</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
+<td><code>parse</code>, <code>classify_base</code>, <code>resolve_base</code>, <code>stage_ops</code>, <code>build</code>, <code>finalize</code>, <code>scaffold</code></td>
+</tr>
+<tr>
+<td>Entrada da CLI, receita dourada</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
+<td><code>VmImageCmd::Build</code>, <code>VmImageStore</code>, <code>VmImage</code>, <code>customize_args</code>, <code>tool_failure_hint</code></td>
+</tr>
+<tr>
+<td>Build declarativo</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
+<td><code>VmBuildSpec</code> (<code>spec.build</code> de <code>kind: VirtualMachine</code>)</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="scaffold">Scaffold<a class="hanchor" href="#scaffold" aria-label="#">#</a></h3>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">delonix vm init --vmfile [DIR] [--name &lt;n&gt;]   # or: delonix image vm init &lt;name&gt; [-d DIR]
+</code></pre></div>
+<p>Os dois escrevem <code>VMfile</code> e <code>cloud-init/user-data.yaml</code> (<em>corrido</em> num directório de rascunho). O
+scaffold pretende ser uma receita que funciona, e o teste <code>parseia_o_scaffold_que_escrevemos</code>
+mantém-no analisável. Duas coisas a corrigir à mão na dica «Next:» que ele imprime: a flag é
+<code>vm create --disk</code>, não <code>--disk-image</code>; e vê a nota sobre <code>CLOUDINIT</code> abaixo quanto ao nome do
+ficheiro.</p>
+<h3 id="building">Construir<a class="hanchor" href="#building" aria-label="#">#</a></h3>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">delonix image vm build -t web:1.0 [-f VMfile] [--network] [--no-compress] [CONTEXT]
+</code></pre></div>
+<p>Não há <code>delonix vm build</code>; o build vive em <code>image vm</code>. Sem <code>-f</code>, um <code>VMfile</code> no contexto é apanhado
+automaticamente (tal como um <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> ganha a um <code>Dockerfile</code>); sem <code>VMfile</code>, o mesmo comando
+corre em vez disso a receita dourada embutida (ver <a href="microvm-setup.html">Construir microVMs</a>). As flags da receita
+dourada (<code>--k8s-version</code>, <code>--extra-package</code>, <code>--extra-run</code>, <code>--offline</code>, <code>--no-k8s</code>, <code>--cri-bin</code>,
+<code>--delonix-bin</code>) são <strong>recusadas</strong> com um VMfile, e <code>--network</code> é recusada sem um.</p>
+<h3 id="instructions">Instruções<a class="hanchor" href="#instructions" aria-label="#">#</a></h3>
+<p>O <code>parse</code> falha fechado: uma instrução desconhecida é um erro que nomeia o conjunto suportado. Só
+<code>FROM</code> pode vir primeiro. As continuações com <code>\</code> são juntadas; um <code>#</code> só começa um comentário no
+início de uma linha (por isso <code>RUN sed 's/#x/y/'</code> não é estragado).</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Instrução</th>
+<th>Âmbito</th>
+<th>Efeito (<code>stage_ops</code> → <code>virt-customize</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>FROM &lt;ref&gt; [AS &lt;name&gt;]</code></td>
+<td>abre um estágio</td>
+<td>Ver <em>O que <code>FROM</code> aceita</em>. <code>as</code> não distingue maiúsculas de minúsculas.</td>
+</tr>
+<tr>
+<td><code>RUN &lt;shell&gt;</code></td>
+<td>passo</td>
+<td><code>--run-command</code> dentro do convidado; <strong>offline</strong> a menos que seja dado <code>--network</code>.</td>
+</tr>
+<tr>
+<td><code>COPY &lt;src&gt; &lt;dst&gt;</code></td>
+<td>passo</td>
+<td>Copy-in a partir do contexto de build; <code>src</code> confinado ao contexto (<code>build::safe_join</code>). Exactamente dois argumentos.</td>
+</tr>
+<tr>
+<td><code>COPY --from=&lt;stage&gt; &lt;src&gt; &lt;dst&gt;</code></td>
+<td>passo</td>
+<td><code>virt-copy-out</code> do disco desse estágio para um directório de staging do host, e depois copy-in. O estágio tem de ter <strong>nome e ser declarado antes</strong> — verificado na análise.</td>
+</tr>
+<tr>
+<td><code>ENV KEY=value</code></td>
+<td>passo</td>
+<td>Acrescenta <code>KEY=value</code> a <code>/etc/environment</code> (uma VM não tem config de imagem). Um par por linha; a chave e o valor são passados a uma shell <strong>sem aspas</strong>, por isso evita espaços e metacaracteres da shell.</td>
+</tr>
+<tr>
+<td><code>USER &lt;name&gt;</code></td>
+<td>passo</td>
+<td><code>useradd -m -s /<wbr>bin/<wbr>bash &lt;name&gt;</code> se a conta não existir.</td>
+</tr>
+<tr>
+<td><code>PASSWORD &lt;user&gt;:&lt;password&gt;</code></td>
+<td>passo</td>
+<td>Define a password dessa conta. Fica gravada em todas as cópias da imagem.</td>
+</tr>
+<tr>
+<td><code>ROOTPASSWORD &lt;password&gt;</code></td>
+<td>passo</td>
+<td>Define a password do root. A mesma ressalva.</td>
+</tr>
+<tr>
+<td><code>SSHKEY &lt;user&gt; &lt;path-or-key&gt;</code></td>
+<td>passo</td>
+<td>Acrescenta a <code>/<wbr>home/<wbr>&lt;user&gt;/<wbr>.<wbr>ssh/<wbr>authorized_keys</code> (<code>~/</code> é expandido). O valor tem de ser um ficheiro legível ou uma chave a começar por <code>ssh-</code>/<code>ecdsa-</code>. A conta tem de existir (cria-a primeiro com <code>USER</code>).</td>
+</tr>
+<tr>
+<td><code>CLOUDINIT &lt;path&gt;</code></td>
+<td>passo</td>
+<td>Copia esse ficheiro (confinado ao contexto) para <code>/etc/cloud/cloud.cfg.d/</code>, <strong>mantendo o nome do ficheiro</strong>. O cloud-init só carrega desse directório ficheiros terminados em <code>.cfg</code>, por isso dá-lhe um nome como <code>99-myimage.cfg</code> — o nome <code>user-data.yaml</code> do scaffold não é apanhado tal como está escrito (não executado nesta revisão; a partir do caminho do código e do comportamento documentado do cloud-init). O <code>vm create</code> continua a acrescentar por cima o seu próprio seed NoCloud por instância.</td>
+</tr>
+<tr>
+<td><code>SIZE &lt;n&gt;G</code></td>
+<td>propriedade do estágio</td>
+<td><code>qemu-img resize</code> <strong>antes</strong> de qualquer passo correr — crescer depois de um <code>RUN</code> ter enchido o disco seria tarde demais, e é por isso que não é um passo.</td>
+</tr>
+<tr>
+<td><code>HOSTNAME &lt;name&gt;</code></td>
+<td>propriedade do estágio</td>
+<td>Escreve <code>/etc/hostname</code> (primeira operação do estágio).</td>
+</tr>
+<tr>
+<td><code>VCPUS &lt;n&gt;</code></td>
+<td>imagem</td>
+<td>Registado como <code>default_vcpus</code>.</td>
+</tr>
+<tr>
+<td><code>MEMORY &lt;n&gt;</code></td>
+<td>imagem</td>
+<td>Registado como <code>default_memory</code>.</td>
+</tr>
+<tr>
+<td><code>HYPERVISOR &lt;backend&gt;</code></td>
+<td>imagem</td>
+<td>Validado e canonicalizado por <code>delonix_vm::<wbr>valid_backend_name</code> (<code>ch</code> → <code>cloud-hypervisor</code>); registado como <code>default_backend</code>.</td>
+</tr>
+<tr>
+<td><code>LABEL k=v</code></td>
+<td>imagem</td>
+<td><strong>Analisado mas não registado</strong> nos metadados da imagem nesta árvore.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Não há <code>CMD</code>/<code>ENTRYPOINT</code>: uma VM arranca um init. O <code>CLOUDINIT</code> é o equivalente mais próximo.</p>
+<h3 id="what-from-accepts">O que <code>FROM</code> aceita<a class="hanchor" href="#what-from-accepts" aria-label="#">#</a></h3>
+<p>O <code>classify_base</code> é puro e decide o tipo de referência:</p>
+<ol>
+<li><strong>Um estágio anterior com nome</strong> — ganha a tudo (<code>resolve_base</code>).</li>
+<li><strong><code>ubuntu:&lt;rel&gt;</code>, <code>debian:&lt;rel&gt;</code>, <code>rocky:&lt;rel&gt;</code>, <code>fedora:&lt;rel&gt;</code></strong> — primeiro a imagem base do
+   próprio projecto para essa distro/release (cópia local, depois o registo oficial —
+   <code>vmimage::official_distro_base</code>); se não houver nenhuma, a cloud image da própria distro,
+   descarregada e verificada contra o ficheiro de checksum do publicador (<code>vmimage::download_base</code>).</li>
+<li><strong>URL <code>http://</code> / <code>https://</code></strong> — descarregado; verificado contra <code>&lt;url&gt;.sha256</code> quando o
+   publicador oferece um, caso contrário confiado só pelo TLS, e o build di-lo.</li>
+<li><strong>Qualquer outra coisa</strong> — uma imagem de VM que já esteja no store local (<code>delonix image vm ls</code>).
+   Qualquer outro <code>name:tag</code> é tratado como uma tag local, não como uma distro desconhecida.</li>
+</ol>
+<h3 id="what-a-stage-is-and-where-the-result-lands">O que é um estágio, e onde vai parar o resultado<a class="hanchor" href="#what-a-stage-is-and-where-the-result-lands" aria-label="#">#</a></h3>
+<p>Um estágio é um <strong>disco inteiro</strong>, não uma camada (<code>build</code>):</p>
+<ol>
+<li>A base é <strong>achatada</strong> para <code>&lt;work&gt;/&lt;stage&gt;.qcow2</code> com <code>qemu-img convert</code> (sem backing file, para
+   que o artefacto nunca dependa de a base ainda estar presente).</li>
+<li>O <code>SIZE</code> é aplicado, e depois todos os passos correm numa só chamada a <code>virt-customize</code>
+   (<code>--no-network</code> a menos que seja dado <code>--network</code>). O <code>vmimage::customize_args</code> acrescenta sempre
+   um relabel de SELinux como último comando (e desliga o relabel adiado do próprio libguestfs), para
+   que os convidados SELinux não arranquem com ficheiros sem etiqueta.</li>
+<li>Os estágios com nome são mantidos para <code>COPY --from</code>; os sem nome não são endereçáveis. Só o
+   <strong>último</strong> estágio se torna uma imagem.</li>
+<li>A menos que seja dado <code>--no-compress</code>: <code>virt-sparsify --in-place</code> (melhor esforço), e depois
+   <code>qemu-img convert -c -o compression_type=zstd</code>. zstd porque a imagem se torna o backing file só de
+   leitura de cada VM criada a partir dela, por isso a velocidade de descompressão é uma propriedade
+   de runtime.</li>
+<li>O qcow2 é movido para <code>VmImageStore::qcow2_path(tag)</code> em <code>&lt;DELONIX_ROOT&gt;/vm-images/</code>, e um
+   registo de metadados <code>VmImage</code> é guardado ao lado dele.</li>
+</ol>
+<p>Metadados registados: <code>digest</code> e <code>size</code>; <code>default_vcpus</code>/<code>default_memory</code>/<code>default_backend</code> a partir
+do ficheiro; <code>cloud_init: true</code>; <code>built_by: "delonix &lt;version&gt;"</code>; <code>distro</code> e <code>kernel_version</code>
+<strong>herdados</strong> só quando o <code>FROM</code> final é uma imagem local (um URL não dá nada para herdar, e o código
+recusa-se a adivinhar).</p>
+<p>O <code>vm create</code> aplica os defaults registados só onde quem chama não decidiu: as flags
+<code>--vcpus</code>/<code>--memory</code> ganham a <code>VCPUS</code>/<code>MEMORY</code>; para o backend, <code>--backend</code> &gt; o <code>HYPERVISOR</code> da
+imagem &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; auto-detecção (<code>resolve_vm_defaults</code> em
+<code>cmd/vm.rs</code>, e <code>delonix_vm::create_with</code>).</p>
+<p><strong>Offline por omissão, e porquê.</strong> Um <code>RUN</code> que chega à internet produz uma imagem diferente
+conforme a altura em que correu. O <code>--network</code> é opt-in porque a coisa mais comum que um VMfile quer
+é instalar um pacote. Com <code>--network</code>, o appliance do libguestfs obtém a rede através do <code>passt</code>, que
+tem armadilhas de host documentadas em <a href="microvm-setup.html#6-troubleshooting">Construir microVMs</a>.</p>
+<p><strong>Espaço de rascunho.</strong> O directório de trabalho é criado em <code>std::env::temp_dir()</code>
+(<code>delonix-vmfile-&lt;pid&gt;</code>), ou seja <code>$TMPDIR</code> ou <code>/tmp</code>, e contém um disco achatado completo por
+estágio. Aponta o <code>TMPDIR</code> para um sistema de ficheiros com espaço — o <code>/tmp</code> é muitas vezes um tmpfs
+pequeno e é esvaziado no reinício. Um build que falha deixa esse directório para trás (observado
+durante esta revisão); remove-o à mão.</p>
+<h3 id="declarative-build">Build declarativo<a class="hanchor" href="#declarative-build" aria-label="#">#</a></h3>
+<p>O <code>kind: VirtualMachine</code> pode construir o seu próprio disco com <code>spec.build</code> (<code>VmBuildSpec</code>):
+<code>context</code> (relativo ao directório do <strong>manifesto</strong>), <code>file</code> (por omissão <code>&lt;context&gt;/VMfile</code>), <code>tag</code>
+(por omissão <code>&lt;metadata.name&gt;:latest</code>), <code>compress</code>, <code>network</code>. O <code>apply</code> chama o mesmo
+<code>vmfile::build</code>. <code>disk</code> e <code>build</code> são mutuamente exclusivos.</p>
+<h3 id="worked-example-parse-checked">Exemplo trabalhado (verificado pelo parser)<a class="hanchor" href="#worked-example-parse-checked" aria-label="#">#</a></h3>
+<div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-dockerfile">FROM my-base:1.0 AS builder
+RUN make -C /src
+
+FROM my-base:1.0
+SIZE 20G
+HOSTNAME web
+COPY --from=builder /src/app /usr/local/bin/app
+ENV APP_ENV=production
+USER app
+VCPUS 2
+MEMORY 2G
+HYPERVISOR ch
+LABEL org.opencontainers.image.title=web
+</code></pre></div>
+<p>Sem nenhuma imagem chamada <code>my-base:1.0</code> no store de rascunho, o ficheiro é analisado e o build pára
+na resolução da base — antes de qualquer trabalho em disco:</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">$ delonix image vm build -t web:1.0 .
+[1/2] builder: FROM my-base:1.0
+error invalid argument: FROM my-base:1.0: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm ls`
+</code></pre></div>
+<p>E as recusas do parser:</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text">VMfile:2: unknown instruction &#x27;CMD&#x27; — supported: FROM RUN COPY ENV USER PASSWORD ROOTPASSWORD CLOUDINIT SSHKEY SIZE HOSTNAME VCPUS MEMORY HYPERVISOR LABEL
+VMfile:2: no earlier stage named &#x27;nope&#x27;
+VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
+--offline belong to the built-in golden recipe and mean nothing with a VMfile — the VMfile describes all of that itself
+</code></pre></div>
+<p>Um build completo (<code>virt-customize</code>, downloads, compressão) <strong>não foi executado nesta revisão</strong>.</p>
+<hr />
+<h2 id="comparison">Comparação<a class="hanchor" href="#comparison" aria-label="#">#</a></h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th></th>
+<th>Dockerfile (Docker/BuildKit)</th>
+<th>Delonixfile (<code>delonix build</code>)</th>
+<th>VMfile (<code>delonix image vm build</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Resultado</td>
+<td>imagem OCI</td>
+<td>imagem OCI (pode fazer push, e pull pelo Docker)</td>
+<td>qcow2 arrancável + metadados <code>VmImage</code></td>
+</tr>
+<tr>
+<td>Unidade de um estágio</td>
+<td>camadas de sistema de ficheiros</td>
+<td>um container de trabalho + rootfs</td>
+<td>um disco inteiro achatado</td>
+</tr>
+<tr>
+<td><code>FROM</code></td>
+<td>imagem</td>
+<td>imagem ou estágio anterior</td>
+<td>distro:release, URL, imagem de VM local, ou estágio anterior</td>
+</tr>
+<tr>
+<td><code>RUN</code> executa em</td>
+<td>container de build</td>
+<td>container de trabalho via <code>exec</code> (userns rootless)</td>
+<td>convidado, via <code>virt-customize</code> (offline por omissão)</td>
+</tr>
+<tr>
+<td><code>COPY --from</code></td>
+<td>sim</td>
+<td>sim (nome ou índice)</td>
+<td>sim (só estágios anteriores com nome; <code>virt-copy-out</code>)</td>
+</tr>
+<tr>
+<td>Flags de <code>COPY</code> <code>--chown/--chmod</code></td>
+<td>sim</td>
+<td>não</td>
+<td>não</td>
+</tr>
+<tr>
+<td><code>ADD</code> de URL / extracção de arquivos</td>
+<td>sim</td>
+<td>não (<code>ADD</code> = <code>COPY</code>)</td>
+<td>sem <code>ADD</code></td>
+</tr>
+<tr>
+<td><code>RUN --mount</code></td>
+<td>secret, ssh, cache, bind, tmpfs</td>
+<td>só <code>type=secret</code></td>
+<td>nenhum</td>
+</tr>
+<tr>
+<td><code>--target</code></td>
+<td>sim</td>
+<td>sim</td>
+<td>não</td>
+</tr>
+<tr>
+<td><code>--platform</code></td>
+<td>sim</td>
+<td><code>linux/&lt;arch&gt;</code>, binfmt do host necessário</td>
+<td>não (as imagens ficam amd64 — <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>)</td>
+</tr>
+<tr>
+<td>Cache de camadas</td>
+<td>sim</td>
+<td>só rootless, sem GC</td>
+<td>nenhuma</td>
+</tr>
+<tr>
+<td><code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code></td>
+<td>config da imagem</td>
+<td>config da imagem</td>
+<td>sem <code>CMD</code>; <code>USER</code> cria uma conta; <code>ENV</code> → <code>/etc/environment</code></td>
+</tr>
+<tr>
+<td>Indicações de recursos</td>
+<td>—</td>
+<td><code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> registados, não aplicados</td>
+<td><code>VCPUS</code>/<code>MEMORY</code>/<code>HYPERVISOR</code> aplicados pelo <code>vm create</code> como defaults</td>
+</tr>
+<tr>
+<td>Gate de vulnerabilidades</td>
+<td>—</td>
+<td><code>SCAN</code> analisado, não imposto (usa <code>image scan --fail-on</code>)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>Contas / chaves / passwords</td>
+<td>—</td>
+<td>—</td>
+<td><code>USER</code>, <code>SSHKEY</code>, <code>PASSWORD</code>, <code>ROOTPASSWORD</code></td>
+</tr>
+<tr>
+<td>Tamanho do disco</td>
+<td>—</td>
+<td>—</td>
+<td><code>SIZE</code> (antes de qualquer passo)</td>
+</tr>
+<tr>
+<td>Instrução desconhecida</td>
+<td>erro</td>
+<td>erro</td>
+<td>erro</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="if-you-change-a-grammar">Se mudares uma gramática<a class="hanchor" href="#if-you-change-a-grammar" aria-label="#">#</a></h2>
+<ul>
+<li>Mantém os dois parsers a <strong>falhar fechado</strong>: uma instrução desconhecida é um erro, nunca uma linha
+  saltada.</li>
+<li>Uma instrução nova entra com um teste unitário no <code>mod tests</code> do parser, uma linha nesta página e —
+  se o scaffold a usar — com o teste do scaffold ainda a passar.</li>
+<li>Se uma instrução for analisada mas ainda não estiver ligada a um efeito (como estão hoje <code>SCAN</code>,
+  <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> e o <code>LABEL</code> do VMfile), di-lo aqui; um campo que o utilizador escreve e o
+  motor ignora tem de ser documentado como tal ou removido.</li>
+<li>O parser do Delonixfile vive num crate de biblioteca (<code>delonix-oci</code>), por isso não pode imprimir; o
+  parser do VMfile está no binário da CLI. Ver <a href="crates.html">Crates</a>.</li>
+</ul>
+<nav class="pager"><a href="system-design-interview.html"><span>← Anterior</span>System Design Interview — o Delonix Engine</a><a class="next" href="microvm-setup.html"><span>Seguinte →</span>Construir microVMs</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/delonixfile-and-vmfile.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/delonixfile-and-vmfile.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
+<ul>
+<li><a href="#part-1-delonixfile">Parte 1 — Delonixfile</a><ul>
+<li><a href="#where-the-code-lives">Onde vive o código</a></li>
+<li><a href="#file-lookup">Procura do ficheiro</a></li>
+<li><a href="#instructions-the-parser-accepts">Instruções que o parser aceita</a></li>
+<li><a href="#multi-stage-copy-from-and-target">Multi-stage, COPY --from e --target</a></li>
+<li><a href="#build-secrets">Segredos de build</a></li>
+<li><a href="#-platform-and-binfmt">--platform e binfmt</a></li>
+<li><a href="#rootless-vs-root-and-the-layer-cache">Rootless vs root, e a cache de camadas</a></li>
+<li><a href="#worked-example-a-template">Exemplo trabalhado: um template</a></li>
+<li><a href="#the-repositorys-own-delonixfile-is-not-built-by-delonix">O próprio Delonixfile do repositório não é construído pelo delonix</a></li>
+</ul>
+</li>
+<li><a href="#part-2-vmfile">Parte 2 — VMfile</a><ul>
+<li><a href="#where-the-code-lives_1">Onde vive o código</a></li>
+<li><a href="#scaffold">Scaffold</a></li>
+<li><a href="#building">Construir</a></li>
+<li><a href="#instructions">Instruções</a></li>
+<li><a href="#what-from-accepts">O que FROM aceita</a></li>
+<li><a href="#what-a-stage-is-and-where-the-result-lands">O que é um estágio, e onde vai parar o resultado</a></li>
+<li><a href="#declarative-build">Build declarativo</a></li>
+<li><a href="#worked-example-parse-checked">Exemplo trabalhado (verificado pelo parser)</a></li>
+</ul>
+</li>
+<li><a href="#comparison">Comparação</a></li>
+<li><a href="#if-you-change-a-grammar">Se mudares uma gramática</a></li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="Pesquisar">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="Pesquisar no manual…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copiar", "copied": "Copiado", "no_results": "Sem resultados"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>

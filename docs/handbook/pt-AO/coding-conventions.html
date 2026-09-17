@@ -1,0 +1,1292 @@
+<!doctype html>
+<html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Convenções de código · Delonix Runtime — Manual do contribuidor</title>
+<script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+:root{
+  /* The NgolaCloud design system (delonix-web packages/ui/src/tokens.css):
+     light theme by default, dark as the secondary theme. */
+  --bg:#fcfaf8;--surface:#f5f3f1;--surface-2:#eeeae8;--card:#ffffff;--ink:#191513;--ink-2:#524b49;--muted:#675e59;
+  --line:#e1ddda;--line-soft:#ece8e5;
+  --accent:#cc2823;--accent-ink:#b70000;--accent-soft:#ffe2dc;--focus:#cc2823;
+  --code-bg:#1a1614;--code-ink:#ede7e3;--code-line:#2e2825;--code-label:#a39993;
+  --warn-bg:rgba(239,168,49,.16);--warn-line:#c9820f;--warn-ink:#6b4400;
+  --topbar:rgba(255,255,255,.82);
+  --shadow:0 4px 12px rgba(38,28,22,.08),0 1px 3px rgba(38,28,22,.06);
+  --f-display:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Noto Sans SC","Microsoft YaHei",sans-serif;
+  --f-body:var(--f-display);
+  --f-mono:"JetBrains Mono",ui-monospace,"SF Mono","Cascadia Mono",Menlo,Consolas,monospace;
+  --r-sm:4px;--r:6px;--r-lg:8px;
+  --header:60px;color-scheme:light;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#0b0b0c;--surface:#131315;--surface-2:#19191c;--card:#161618;--ink:#ededee;--ink-2:#b6b6ba;--muted:#87878c;
+  --line:#262629;--line-soft:#1d1d20;
+  --accent:#ee5a24;--accent-ink:#ff6c39;--accent-soft:rgba(238,90,36,.18);--focus:#ee5a24;
+  --code-bg:#101012;--code-ink:#dedee2;--code-line:#26262a;--code-label:#87878c;
+  --warn-bg:rgba(226,161,58,.12);--warn-line:#8a6a2a;--warn-ink:#e2c07a;
+  --topbar:rgba(11,11,12,.82);
+  --shadow:0 8px 24px rgba(0,0,0,.5),0 1px 4px rgba(0,0,0,.4);color-scheme:dark;
+}
+*{box-sizing:border-box}
+html{scroll-padding-top:calc(var(--header) + 16px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--f-body);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:var(--accent-ink);text-decoration:none}
+a:hover{text-decoration:underline;text-underline-offset:3px}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*{scroll-behavior:auto!important;transition:none!important}}
+
+/* Header */
+.top{position:sticky;top:0;z-index:30;height:var(--header);display:flex;align-items:center;gap:16px;
+  padding-inline:20px;background:var(--topbar);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;color:var(--ink);font:700 16px/1 var(--f-display);white-space:nowrap}
+.brand:hover{text-decoration:none}
+.brand .mark{width:26px;height:26px;border-radius:var(--r);background:var(--accent);display:grid;place-items:center;color:#fff;font:800 13px/1 var(--f-display)}
+.brand .sub{font:500 14px/1 var(--f-body);color:var(--muted)}
+.brand .sep{width:1px;height:18px;background:var(--line)}
+.searchbtn{flex:1;max-width:460px;margin-inline:auto;display:flex;align-items:center;gap:10px;height:38px;padding-inline:12px;
+  border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--muted);font:15px var(--f-body);cursor:pointer;min-width:0}
+.searchbtn:hover{border-color:color-mix(in srgb,var(--accent) 45%,var(--line))}
+.searchbtn svg{flex:none}
+.searchbtn .label{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.searchbtn kbd{margin-left:auto}
+kbd{font:600 11px/1 var(--f-mono);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:3px 6px;background:var(--bg);color:var(--muted);white-space:nowrap}
+.actions{display:flex;align-items:center;gap:6px}
+select.lang{height:36px;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink);font:14px var(--f-body);padding-inline:8px}
+.iconbtn{height:36px;width:36px;display:grid;place-items:center;border:1px solid var(--line);border-radius:9px;background:var(--bg);color:var(--ink-2);cursor:pointer}
+.iconbtn:hover{color:var(--accent-ink);border-color:color-mix(in srgb,var(--accent) 45%,var(--line));text-decoration:none}
+.menubtn{display:none}
+
+/* Frame */
+.frame{display:grid;grid-template-columns:280px minmax(0,1fr) 240px}
+nav.side{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:24px 16px 48px 20px;border-right:1px solid var(--line)}
+nav.side,aside.toc,.sres{scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+nav.side .group{margin-bottom:18px}
+nav.side .gtitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:0 10px 8px}
+nav.side a{display:flex;gap:10px;align-items:baseline;padding:6px 10px;border-radius:8px;color:var(--ink-2);font-size:15px;line-height:1.35}
+nav.side a:hover{background:var(--surface);text-decoration:none;color:var(--ink)}
+nav.side a .n{flex:none;width:18px;font:500 12px/1.35 var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+nav.side a.on{background:var(--accent-soft);color:var(--accent-ink);font-weight:600}
+nav.side a.on .n{color:var(--accent-ink)}
+main{min-width:0;padding:40px clamp(20px,3.5vw,56px) 80px}
+.content{max-width:1120px;margin-inline:auto}
+
+aside.toc{position:sticky;top:var(--header);height:calc(100vh - var(--header));overflow-y:auto;padding:40px 20px 40px 8px;font-size:13.5px}
+aside.toc .ttitle{font:700 11px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin:0 0 12px}
+aside.toc ul{list-style:none;margin:0;padding:0}
+aside.toc ul ul{padding-left:12px}
+aside.toc li{margin:0}
+aside.toc a{display:block;padding:4px 0 4px 12px;border-left:2px solid var(--line);color:var(--muted);line-height:1.4}
+aside.toc a:hover{color:var(--ink);text-decoration:none}
+aside.toc a.active{color:var(--accent-ink);border-left-color:var(--accent);font-weight:600}
+
+/* Type */
+.kicker{font:700 12px/1 var(--f-display);letter-spacing:.09em;text-transform:uppercase;color:var(--accent-ink);margin:0 0 12px}
+h1,h2,h3,h4{font-family:var(--f-display);color:var(--ink);text-wrap:balance;letter-spacing:-.01em}
+h1{font-size:2.35rem;line-height:1.15;font-weight:800;margin:0 0 20px}
+h2{font-size:1.55rem;line-height:1.25;font-weight:700;margin:56px 0 14px}
+h3{font-size:1.18rem;line-height:1.3;font-weight:700;margin:36px 0 10px}
+h4{font-size:1rem;margin:28px 0 8px}
+h2 code,h3 code{font-size:.9em}
+.hanchor{margin-left:8px;color:var(--muted);opacity:0;font-weight:500;text-decoration:none}
+h2:hover .hanchor,h3:hover .hanchor,.hanchor:focus-visible{opacity:1}
+p,ul,ol{margin:0 0 16px}
+li{margin:4px 0}li>p{margin:0 0 8px}
+strong{font-weight:650;color:var(--ink)}
+hr{border:0;height:1px;background:var(--line);margin:40px 0}
+code{font:.86em/1.5 var(--f-mono);background:var(--surface-2);border:1px solid var(--line);padding:.08em .38em;border-radius:6px;overflow-wrap:break-word}
+a code{color:inherit}
+a.src code{border-color:color-mix(in srgb,var(--accent) 30%,var(--line));background:var(--accent-soft)}
+a.src:hover{text-decoration:none}a.src:hover code{border-color:var(--accent)}
+.crate-src{margin-left:10px;vertical-align:middle;font:600 11px/1 var(--f-display);letter-spacing:.04em;text-transform:uppercase;
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted)}
+.crate-src:hover{color:var(--accent-ink);border-color:var(--accent);text-decoration:none}
+
+/* Blocks */
+blockquote{margin:20px 0;padding:2px 0 2px 18px;border-left:3px solid var(--line);color:var(--ink-2)}
+blockquote p:last-child{margin-bottom:0}
+blockquote.say{border:1px solid var(--line-soft);padding:14px 18px;border-radius:var(--r-lg);background:var(--card);margin:18px 0}
+blockquote.say .speaker{display:inline-block;margin-right:8px;font:700 11px/1 var(--f-display);letter-spacing:.08em;text-transform:uppercase;
+  padding:5px 8px;border-radius:999px;vertical-align:1px}
+blockquote.say-interviewer .speaker{background:var(--surface-2);color:var(--muted);border:1px solid var(--line)}
+blockquote.say-candidate{background:var(--accent-soft)}
+blockquote.say-candidate .speaker{background:var(--accent);color:#fff}
+.notice{display:flex;gap:10px;align-items:baseline;background:var(--warn-bg);border:1px solid var(--warn-line);color:var(--warn-ink);
+  border-radius:12px;padding:12px 16px;margin:0 0 28px;font-size:15px}
+.notice a{color:inherit;font-weight:600;text-decoration:underline}
+.code{margin:18px 0 22px;border-radius:var(--r-lg);background:var(--code-bg);border:1px solid var(--code-line);overflow:hidden}
+.code-head{display:flex;align-items:center;justify-content:space-between;gap:8px;height:36px;padding:0 8px 0 14px;border-bottom:1px solid var(--code-line)}
+.code-head .lang{font:600 11px/1 var(--f-mono);letter-spacing:.06em;text-transform:uppercase;color:var(--code-label)}
+.copy{display:flex;align-items:center;gap:6px;height:26px;padding:0 9px;border:1px solid var(--code-line);border-radius:7px;background:transparent;
+  color:var(--code-label);font:600 12px var(--f-body);cursor:pointer}
+.copy:hover{color:#fff;border-color:#3a4555}
+.copy.done{color:#7ee2a8;border-color:#2f5d45}
+.code pre{margin:0;padding:14px 16px 22px;overflow-x:auto;color:var(--code-ink);font:13.5px/1.6 var(--f-mono);
+  scrollbar-width:thin;scrollbar-color:#3a4555 transparent;color-scheme:dark}
+.code pre::-webkit-scrollbar{height:8px}.code pre::-webkit-scrollbar-thumb{background:#3a4555;border-radius:8px}
+.code pre code{background:none;border:0;padding:0;font:inherit;color:inherit;overflow-wrap:normal}
+.code pre code.hljs{background:none;padding:0}
+pre.mermaid{margin:22px 0;padding:18px;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card);text-align:center;overflow-x:auto;font-family:var(--f-body)}
+.tablewrap{margin:18px 0 24px;overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14.5px;line-height:1.5}
+th,td{padding:10px 14px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}
+th{background:var(--surface);font:700 12.5px/1.3 var(--f-display);letter-spacing:.02em;color:var(--ink-2);white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--surface) 60%,transparent)}
+td code{font-size:.82em;overflow-wrap:normal}
+/* A table's first column names the thing (a variable, a crate, a flag): never break it. */
+td:first-child code{white-space:nowrap}
+th:first-child,td:first-child{white-space:nowrap}
+
+/* Pager + footer */
+.pager{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:64px}
+.pager a{display:block;padding:14px 16px;border:1px solid var(--line);border-radius:12px;color:var(--ink);font:600 15px/1.35 var(--f-display)}
+.pager a:hover{border-color:var(--accent);text-decoration:none}
+.pager a span{display:block;font:500 12px/1 var(--f-body);color:var(--muted);margin-bottom:6px}
+.pager .next{text-align:right;grid-column:2}
+.foot{margin-top:28px;padding-top:18px;border-top:1px solid var(--line);display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13.5px;color:var(--muted)}
+
+/* Search */
+#search{position:fixed;inset:0;z-index:60;background:rgba(10,13,18,.45);display:flex;align-items:flex-start;justify-content:center;padding:12vh 16px 16px}
+#search[hidden]{display:none}
+.sbox{width:min(680px,100%);background:var(--bg);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}
+.sfield{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--line);color:var(--muted)}
+.sfield input{flex:1;height:56px;border:0;outline:0;background:transparent;color:var(--ink);font:17px var(--f-body)}
+.sres{list-style:none;margin:0;padding:8px;max-height:56vh;overflow-y:auto}
+.sres a{display:block;padding:10px 12px;border-radius:10px;color:var(--ink)}
+.sres a:hover,.sres a.sel{background:var(--accent-soft);text-decoration:none}
+.sres .sp{display:block;font:600 11px/1 var(--f-display);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:5px}
+.sres .sh{font:600 15px/1.35 var(--f-display)}
+.sres .st{display:block;margin-top:3px;font-size:13.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sres mark{background:none;color:var(--accent-ink);font-weight:700}
+.sempty{padding:18px;color:var(--muted)}
+.shelp{display:flex;gap:16px;padding:10px 16px;border-top:1px solid var(--line);font-size:12.5px;color:var(--muted)}
+
+/* Narrow screens */
+@media (max-width:1280px){.frame{grid-template-columns:256px minmax(0,1fr)}aside.toc{display:none}}
+@media (max-width:860px){
+  .frame{display:block}.menubtn{display:grid}.brand .sub,.brand .sep{display:none}
+  nav.side{position:fixed;top:var(--header);left:0;bottom:0;width:min(300px,86vw);height:auto;z-index:40;background:var(--bg);
+    transform:translateX(-102%);transition:transform .2s ease;box-shadow:var(--shadow)}
+  body.nav-open nav.side{transform:none}
+  main{padding:28px 16px 64px}
+  h1{font-size:1.9rem}h2{font-size:1.35rem}
+  .searchbtn kbd,.searchbtn .label{display:none}.searchbtn{flex:none;width:38px;justify-content:center;margin-inline:auto 0;padding:0}
+  .pager{grid-template-columns:1fr}.pager .next{grid-column:1}
+  .top{gap:8px;padding-inline:12px}
+  .brand{font-size:15px;min-width:0}
+  select.lang{width:78px;padding-inline:4px;text-overflow:ellipsis}
+}
+@media (max-width:480px){
+  .actions .ghbtn{display:none}
+  .brand .word{display:none}
+}
+</style></head>
+<body>
+<header class="top">
+  <button class="iconbtn menubtn" type="button" aria-label="Menu"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+  <a class="brand" href="index.html" aria-label="Início do manual"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">Manual do contribuidor</span></a>
+  <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">Pesquisar no manual…</span><kbd>Ctrl K</kbd></button>
+  <div class="actions">
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/coding-conventions.html">EN · English</option><option value="../pt-AO/coding-conventions.html" selected>PT-AO · Português (Angola)</option><option value="../fr-FR/coding-conventions.html">FR-FR · Français</option><option value="../zh-CN/coding-conventions.html">ZH-CN · 简体中文</option></select>
+    <button class="iconbtn themebtn" type="button" aria-label="Alternar tema de cor" title="Alternar tema de cor"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
+    <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
+  </div>
+</header>
+<div class="frame">
+<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="cloud-native-primer.html"><span class="n">02</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">03</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">04</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">05</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="architecture.html"><span class="n">06</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">07</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">08</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">09</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">10</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a class="on" aria-current="page" href="coding-conventions.html"><span class="n">11</span><span>Convenções de código</span></a><a href="contributing-workflow.html"><span class="n">12</span><span>Fluxo de contribuição</span></a><a href="publishing-docs.html"><span class="n">13</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">14</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">15</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">16</span><span>Glossário</span></a></div></nav>
+<main><div class="content">
+<p class="kicker">Contribuir</p>
+<h1 id="coding-conventions">Convenções de código</h1>
+<p>Esta página diz-te como escrever código que passa a revisão neste repositório, para não teres de
+adivinhar as regras nem de inventar as tuas. Cada regra abaixo leva uma etiqueta e uma fonte:</p>
+<ul>
+<li><strong>Imposto (gate)</strong>: um job de CI falha se a quebrares. O gate é nomeado, para o poderes correr
+  localmente (vê <a href="build-and-test.html#the-gates-ci-runs">Construir e testar</a>).</li>
+<li><strong>Decidido (ADR/AGENTS.md)</strong>: um Architecture Decision Record <strong>Aceite</strong> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> ou uma
+  secção do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> resolve-o. Nenhum gate o verifica ainda, por isso verifica-o a revisão.</li>
+<li><strong>Proposto (ADR, ainda não decidido)</strong>: a única fonte escrita é um ADR cujo estado ainda é
+  <strong>Proposto</strong> (vê a coluna de estado de <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>). É a direcção
+  para onde o código caminha, e a revisão aplica-o, mas ainda pode mudar; quando o ADR for aceite ou
+  rejeitado, a etiqueta muda com ele.</li>
+<li><strong>Convenção (observada)</strong>: o código fá-lo de forma consistente e nada o escreveu. Os exemplos são
+  referências <code>path:symbol</code> reais. Copia-os.</li>
+</ul>
+<p>Se uma pergunta não tiver resposta aqui, e o código à volta da tua mudança também não lha der, a
+resposta honesta é <strong>«não decidido — segue o código à volta»</strong>. A lista das perguntas em aberto
+conhecidas está em <a href="#undecided">Por decidir</a>. Não transformes uma preferência pessoal numa regra
+num PR.</p>
+<p>Páginas relacionadas: as camadas e as razões por trás delas em <a href="architecture.html">Arquitectura</a>,
+o que cada crate contém em <a href="crates.html">Crates</a>, os idiomas de Rust em
+<a href="rust-primer.html">Introdução ao Rust</a>, e o fluxo de trabalho (worktree, versão, ADRs, PRs) em
+<a href="contributing-workflow.html">Fluxo de contribuição</a>.</p>
+<hr />
+<h2 id="1-the-tooling-that-enforces-style">1. As ferramentas que impõem o estilo<a class="hanchor" href="#1-the-tooling-that-enforces-style" aria-label="#">#</a></h2>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Ferramenta</th>
+<th>O que verifica</th>
+<th>Etiqueta e fonte</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>rustfmt</strong></td>
+<td>Formatação. <strong>Sem ficheiro de configuração</strong>: não há <code>rustfmt.toml</code> nem <code>.rustfmt.toml</code> na raiz, por isso aplicam-se as omissões.</td>
+<td><strong>Imposto (gate)</strong>: o job de CI <code>fmt</code> corre <code>cargo fmt --all --check</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a>). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style: «<code>cargo fmt</code> defaults, no custom config».</td>
+</tr>
+<tr>
+<td><strong>clippy</strong></td>
+<td>Todo o lint do clippy <strong>e todo o aviso do rustc</strong> falham o build, testes incluídos (<code>--all-targets</code>). Sem <code>clippy.toml</code>, por isso aplicam-se as omissões dos lints.</td>
+<td><strong>Imposto (gate)</strong>: o job de CI <code>clippy</code> corre <code>cargo clippy --workspace --all-targets --locked -- -D warnings</code>.</td>
+</tr>
+<tr>
+<td><strong><code>[workspace.lints]</code></strong></td>
+<td>O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz declara exactamente um lint de workspace: <code>[workspace.<wbr>lints.<wbr>clippy] undocumented_unsafe_blocks = "deny"</code>. Todo o manifesto de membro tem <code>[lints] workspace = true</code>.</td>
+<td><strong>Imposto (gate)</strong>: clippy. Foi introduzido pela fase P0 do ADR-0040 («<code>[workspace.lints]</code> (<code>undocumented_unsafe_blocks = deny</code>)»), um ADR que ainda está <strong>Proposto</strong>; o gate vale na mesma.</td>
+</tr>
+<tr>
+<td><strong>cargo-deny</strong></td>
+<td>Avisos RUSTSEC e crates retirados (yanked), só licenças permissivas (sem GPL/AGPL), crates.io como único registo, sem fontes git. A secção <code>[bans]</code> do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> (versões duplicadas e wildcards, em modo aviso) <strong>não</strong> é avaliada na CI.</td>
+<td><strong>Imposto (gate)</strong>: o job de CI <code>deny</code> corre <code>check advisories licenses sources</code> com o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>. <strong>Convenção (observada)</strong>: todo o aviso ignorado no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> leva um comentário com a sua razão — nenhum gate verifica que o comentário existe.</td>
+</tr>
+<tr>
+<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></strong></td>
+<td>Português em identificadores, comentários e strings visíveis ao utilizador (LANG-01, vê <a href="#2-language-of-the-code">§2</a>).</td>
+<td><strong>Imposto (gate)</strong>: job de CI <code>lang</code>, linha de base em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>.</td>
+</tr>
+<tr>
+<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></strong></td>
+<td>Direcção das camadas, directório do crate = camada, versões só na raiz, nomes de consumidores, e os ratchets de dívida listados em <a href="architecture.html#layers-and-the-allowed-direction">Arquitectura</a> (vê <a href="#4-structure-where-code-goes">§4</a> e <a href="#5-internal-api-and-boundaries">§5</a>).</td>
+<td><strong>Imposto (gate)</strong>: job de CI <code>arch</code>, linha de base em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a>.</td>
+</tr>
+<tr>
+<td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></strong></td>
+<td>O contrato de nó em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> (vê <a href="#54-the-node-contract">§5.4</a>).</td>
+<td><strong>Imposto (gate)</strong>: job de CI <code>contract</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Tem presente uma mecânica dos <strong>ratchets</strong> (<code>lang_ratchet.py</code> e os números do
+<code>arch_fitness.py</code>). Um ratchet falha quando o seu número <strong>sobe</strong>, e <strong>também</strong> falha quando o
+número desce sem a linha de base ser baixada no mesmo commit (o <code>arch_fitness.py</code> imprime «debt was
+paid; lower the baseline in the same commit (--update)»). Se pagares dívida, corre <code>--update</code> e faz
+commit da nova linha de base juntamente com a correcção. Uma verificação <code>&lt;=</code> deixaria a dívida a
+ler-se como verde para sempre (docstrings de módulo dos dois scripts).</p>
+<p>Uma consequência com que vais dar: <strong>Imposto (gate)</strong>. Como o <code>-D warnings</code> cobre os lints do
+próprio rustc, os lints de nomes do rustc (<code>non_snake_case</code>, <code>non_camel_case_types</code>,
+<code>non_upper_case_globals</code>) também são impostos. Funções e variáveis em <code>snake_case</code>, tipos em
+<code>UpperCamelCase</code> e constantes em <code>SCREAMING_SNAKE_CASE</code> não são aqui uma escolha de estilo.</p>
+<p>Existe <code>#[allow(clippy::…)]</code> na árvore, por exemplo <code>#[allow(clippy::too_many_arguments)]</code> em
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>.
+<strong>Não decidido</strong>: nenhuma regra diz quando um <code>allow</code> é aceitável. Se acrescentares um, põe um
+comentário <code>// why</code> ao lado, como farias para qualquer outra excepção (vê <a href="#10-comments-and-documentation">§10</a>).</p>
+<hr />
+<h2 id="2-language-of-the-code">2. Língua do código<a class="hanchor" href="#2-language-of-the-code" aria-label="#">#</a></h2>
+<ul>
+<li><strong>Identificadores, comentários e mensagens escrevem-se em inglês.</strong> <strong>Imposto (gate)</strong>:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>. <strong>Decidido</strong>: AGENTS.md § «Língua do código: inglês (LANG-01)». O
+  ratchet percorre todo o ficheiro <code>.rs</code>, <code>.py</code>, <code>.ts</code>, <code>.go</code> e <code>.yml</code>/<code>.yaml</code> fora de <code>target/</code>,
+  <code>third_party/</code> e semelhantes. Conta três coisas:</li>
+<li><strong>identificadores</strong>: qualquer nome declarado por <code>fn</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>const</code>,
+    <code>static</code>, <code>type</code>, <code>mod</code>, <code>union</code> ou <code>let</code> cujos segmentos <code>snake_case</code>/<code>camelCase</code> contenham uma
+    palavra de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_pt_lexicon.txt" target="_blank" rel="noopener"><code>scripts/lang_pt_lexicon.txt</code></a>;</li>
+<li><strong>comentários</strong>: linhas <code>//</code>, <code>///</code> e <code>//!</code> que contenham uma palavra do léxico;</li>
+<li><strong>texto ao utilizador</strong>: literais de 8 ou mais caracteres dentro de <code>format!</code>, <code>println!</code>,
+    <code>eprintln!</code>, <code>panic!</code>, <code>anyhow!</code>, <code>bail!</code>, <code>expect</code> ou <code>unimplemented!</code>.</li>
+<li><strong>O português chega ao operador só pelo catálogo.</strong> <strong>Decidido</strong>: AGENTS.md §
+  «i18n (fonte EN + catálogo pt.po embutido)» e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § «If you add or change a CLI
+  command». O texto em inglês vai no código-fonte. O português vai em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, que <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> embute com
+  <code>include_str!</code>.</li>
+<li><code>po::t("…")</code> para uma string fixa.</li>
+<li>
+<p><code>po::tf("… {name} …", &amp;[("name", value)])</code> para texto interpolado. Usa placeholders
+    <strong>nomeados</strong>: uma tradução pode reordená-los, e o <code>format!</code> precisa de um literal em tempo de
+    compilação, por isso o template é traduzido primeiro e os valores são substituídos depois
+    (<code>po.rs</code>, doc comment do <code>tf</code>).</p>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/config.rs — refuse_unknown_key
+Err(Error::Invalid(super::po::tf(
+    &quot;&#x27;{key}&#x27; is not a config key — known: {known}&quot;,
+    &amp;[(&quot;key&quot;, key), (&quot;known&quot;, &amp;KNOWN_KEYS.join(&quot;, &quot;))],
+)))
+</code></pre></div>
+</li>
+<li>
+<p>O texto do <code>--help</code> também está em inglês no código-fonte, traduzido em runtime por
+    <code>po::translate_help</code>. <strong>Imposto (gate)</strong>: <code>help_i18n_tests</code> em
+    <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a>. <code>todo_o_help_de_comando_tem_traducao_pt</code> é estrito para
+    o help dos comandos, e <code>o_help_dos_argumentos_so_pode_encolher</code> é um ratchet sobre
+    <code>ARG_HELP_PENDING</code> para o help das flags. Um comando ou flag novo precisa de uma entrada no
+    <code>pt.po</code>.</p>
+</li>
+<li>Uma entrada em falta cai para o inglês, por isso a UI nunca fica em branco (<code>po::t</code>). Uma
+    string em português escrita directamente no código é um bug, não um atalho.</li>
+<li>Não reutilizes um <code>msgid</code> cujo português dependa do género gramatical do sujeito. «created»
+    pode ser <em>criada</em> para uma rede e <em>criado</em> para um volume, por isso usa chaves separadas.
+    <strong>Decidido</strong>: AGENTS.md § «v0.32.2 — 380+ strings PT hardcoded».</li>
+<li><strong>Armadilhas do léxico.</strong> <strong>Decidido</strong>: AGENTS.md § LANG-01.</li>
+<li><strong>Não chames <code>num</code> a nada.</strong> Está no léxico de propósito, porque apanha português real
+    («num apply falhado»). Um identificador <code>num</code> conta por isso como dívida portuguesa e falha o
+    gate. Usa <code>count</code> ou <code>number</code>.</li>
+<li>Acrescentar uma palavra ao léxico <strong>sobe</strong> a contagem e falha o gate. Baixa a linha de base no
+    mesmo commit. Os homógrafos (<code>data</code>, <code>base</code>, <code>no</code>, <code>nas</code>…) ficam de fora, a menos que uma
+    medição mostre que apanham português real; <code>num</code> é a excepção registada (AGENTS.md § LANG-01).</li>
+</ul>
+<hr />
+<h2 id="3-naming">3. Nomes<a class="hanchor" href="#3-naming" aria-label="#">#</a></h2>
+<h3 id="31-crates-and-directories">3.1 Crates e directórios<a class="hanchor" href="#31-crates-and-directories" aria-label="#">#</a></h3>
+<ul>
+<li><strong>O directório é a camada.</strong> Um crate vive em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> ou <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, ou é um binário em <code>bins/</code>. O
+  directório tem de bater com a entrada do crate na tabela <code>LAYERS</code>. <strong>Imposto (gate)</strong>:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>misplaced()</code> / <code>LAYER_DIR</code>. Um crate novo entra na <code>LAYERS</code> <strong>e</strong> no
+  directório certo no mesmo commit.</li>
+<li><strong>Convenção de nomes alvo para crates novos ou reestruturados.</strong> <strong>Proposto (ADR, ainda não
+  decidido)</strong>: ADR-0040 D2.1.</li>
+</ul>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Papel</th>
+<th>Nome</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fundação pura partilhada</td>
+<td><code>delonix-model</code></td>
+</tr>
+<tr>
+<td>Contexto delimitado (bounded context)</td>
+<td><code>delonix-&lt;context&gt;</code>, com o nome do grupo de API publicado (D2.2): <code>delonix-compute</code>, <code>delonix-stack</code></td>
+</tr>
+<tr>
+<td>Adapter de tecnologia</td>
+<td><code>delonix-&lt;technology&gt;</code>: <code>delonix-linux</code>, <code>delonix-sdn</code>, <code>delonix-oci</code></td>
+</tr>
+<tr>
+<td>Provider conectável</td>
+<td><code>delonix-provider-&lt;technology&gt;</code></td>
+</tr>
+<tr>
+<td>Biblioteca de interface</td>
+<td><code>delonix-&lt;protocol&gt;</code>: <code>delonix-cri</code>, <code>delonix-mcp</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Um crate só existe se for um contexto delimitado, se isolar uma dependência pesada ou
+  privilegiada, ou se for um binário instalado à parte. <strong>Sem sufixos <code>-core</code>, <code>-common</code>, <code>-utils</code>
+  ou <code>-types</code></strong> (o ADR-0040 D2.1 regista como um crate <code>-core</code> se tornou «the sink of everything»).
+  Alguns crates ainda têm nomes antigos: <code>delonix-runtime-core</code>, <code>delonix-proxmox</code>,
+  <code>delonix-truenas</code>, <code>delonix-security-runtime</code>. O ADR-0040 renomeia cada um na fase que o
+  reestrutura, «never twice». <strong>Não renomeies um crate fora da sua fase.</strong>
+- <strong>O caminho de cada crate escreve-se uma vez</strong>, em <code>[workspace.dependencies]</code> do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>
+  raiz. Os membros dependem uns dos outros com <code>{ workspace = true }</code>. <strong>Decidido</strong>: AGENTS.md §
+  «A direcção das dependências é um portão (ADR-0040, fase P0)», e o comentário no topo de
+  <code>[workspace.dependencies]</code>.</p>
+<h3 id="32-modules-and-files">3.2 Módulos e ficheiros<a class="hanchor" href="#32-modules-and-files" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Grupos de comandos da CLI</strong>: um módulo por grupo em <code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code>,
+  com um <code>pub enum &lt;Group&gt;Cmd</code> (subcomandos clap), um despachante
+  <code>pub fn run(action: &lt;Group&gt;Cmd) -&gt; Result&lt;()&gt;</code>, e uma função <code>cmd_&lt;verb&gt;</code> por subcomando.
+  <strong>Convenção (observada)</strong>: <code>cmd/volume.rs:VolumeCmd</code> + <code>run</code> + <code>cmd_create</code>/<code>cmd_ls</code>/<code>cmd_describe</code>;
+  <code>cmd/secret.rs:SecretCmd</code> + <code>run</code>; <code>cmd/container.rs:cmd_run</code>/<code>cmd_start</code>/<code>cmd_stop</code>.
+  O AGENTS.md § «CLI (<code>delonix</code>)» enuncia a parte de um módulo por grupo.</li>
+<li><strong>Adapters de uma porta de compute</strong> vão num ficheiro com o nome da preocupação da porta, não da
+  tecnologia: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>, <code>.../run_host.rs</code>,
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a>, <code>.../vm_network.rs</code>,
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a>. <strong>Convenção (observada)</strong>.</li>
+</ul>
+<h3 id="33-types-traits-functions-constants">3.3 Tipos, traits, funções, constantes<a class="hanchor" href="#33-types-traits-functions-constants" aria-label="#">#</a></h3>
+<ul>
+<li><strong>As portas têm o nome da capacidade, não da tecnologia.</strong> <strong>Proposto (ADR, ainda não
+  decidido)</strong>: o ADR-0040 D3 enumera as portas: <code>WorkloadRuntime</code>, <code>SandboxProvider</code>, <code>VmProvider</code>,
+  <code>NetworkProvider</code>, <code>StorageProvider</code>, <code>ImageRegistry</code>, <code>ImageStore</code>, … As que existem hoje estão
+  em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>,
+  <code>DeviceResolver</code>, <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>) e em <code>.../launch.rs</code>
+  (<code>WorkloadRuntime</code>). O <code>VmBackend</code> mais antigo em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> deve
+  passar a <code>VmProvider</code> na P4.</li>
+<li><strong>As implementações de host de uma porta chamam-se <code>Host&lt;Thing&gt;</code>.</strong> <strong>Convenção (observada)</strong>:
+  <code>delonix-linux/src/workload.rs:HostWorkload</code> (implementa <code>WorkloadRuntime</code>),
+  <code>delonix-sdn/src/run_network.rs:HostNetwork</code> (implementa <code>NetworkProvider</code>),
+  <code>delonix-oci/src/run_images.rs:HostImages</code>, <code>delonix-volume/src/lib.rs:HostVolumes</code>,
+  <code>delonix-linux/src/cdi.rs:HostDevices</code>.</li>
+<li><strong>Funções de decisão puras</strong> são verbos ou perguntas: <code>resolve_*</code>, <code>parse_*</code>, <code>valid_*</code>, <code>is_*</code>,
+  <code>*_plan</code>. <strong>Convenção (observada)</strong>: <code>cmd/vm.rs:resolve_vm_defaults</code>,
+  <code>delonix-oci/src/registry.rs:parse_content_range</code>, <code>cmd/stack.rs:is_pending</code>,
+  <code>delonix-net-rules/src/lib.rs:bridge_name</code>.</li>
+<li><strong>As constantes</strong> são <code>SCREAMING_SNAKE_CASE</code> (<strong>Imposto (gate)</strong>, lint do rustc sob o clippy
+  <code>-D warnings</code>). <strong>Os nomes de Kind também são constantes, nunca literais de string repetidos</strong>
+  (<strong>Decidido</strong>: AGENTS.md § «Os Kinds ganham grupos e nomes definitivos»; as constantes estão em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>: <code>pub const VM: &amp;str = "VirtualMachine";</code>).</li>
+</ul>
+<h3 id="34-test-names">3.4 Nomes de testes<a class="hanchor" href="#34-test-names" aria-label="#">#</a></h3>
+<ul>
+<li><strong>O ratchet conta os nomes de testes.</strong> O <code>lang_ratchet.py</code> casa toda a declaração <code>fn</code> e não
+  salta <code>#[cfg(test)]</code>, por isso um nome de teste em português sobe <code>identifiers</code> e falha o gate.
+  <strong>Imposto (gate)</strong>.</li>
+<li>Muitos testes existentes têm nomes de frase em português, por exemplo
+  <code>delonix-model/src/exitcode.rs:nao_existe_e_rebentou_deixam_de_ser_o_mesmo_numero</code>. Isso é dívida
+  contada, não um estilo a copiar. Os testes novos são <strong>frases em inglês que enunciam o
+  comportamento que se prova</strong>, como os testes mais recentes do mesmo ficheiro:
+  <code>a_missing_capability_is_not_a_wrong_argument</code> e <code>the_text_class_and_the_number_cannot_diverge</code>.
+  <strong>Decidido</strong>: LANG-01 (AGENTS.md); a forma de «frase» é uma <strong>Convenção (observada)</strong>.</li>
+<li>Se traduzires o nome de um teste existente, a contagem desce, por isso corre
+  <code>python3 scripts/lang_ratchet.py --update</code> no mesmo commit.</li>
+</ul>
+<h3 id="35-cli-commands-and-flags">3.5 Comandos e flags da CLI<a class="hanchor" href="#35-cli-commands-and-flags" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Comandos agrupados, <code>delonix &lt;group&gt; &lt;verb&gt;</code>.</strong> Sem atalhos planos de topo. <strong>Decidido</strong>:
+  AGENTS.md § «Reorganização da raiz da CLI (v0.30.0)»; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> (os atalhos de
+  topo foram removidos na v1.0.0).</li>
+<li><strong>Os verbos seguem o Docker/Podman/kubectl</strong> quando esse verbo existe. <strong>Decidido</strong>: AGENTS.md §
+  os sprints de «Reestruturação da CLI (semântica Docker/Podman/kubectl)»; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a>
+  § «Estável».</li>
+<li>Os verbos de listagem usam <code>ls</code> (<code>network ls</code>, <code>volume ls</code>, <code>image ls</code>…). O <code>image list</code> voltou
+    a <code>ls</code> na v2.0.0 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a>).</li>
+<li><code>create</code> só cria, e recusa um nome existente com exit 5 a menos que haja <code>--force</code>. O upsert é
+    um verbo à parte (<code>secret set</code>). <code>apply</code> é o idempotente «garante presente». <strong>Decidido</strong>:
+    AGENTS.md § «Sprint 1: <code>secret create</code> vs <code>secret set</code>».</li>
+<li><code>describe</code> é para humanos (estilo kubectl), <code>inspect</code> é JSON para scripts. <strong>Decidido</strong>:
+    AGENTS.md § «Output: <code>ls</code> estilo docker, <code>describe</code> estilo kubectl».</li>
+<li>A ordem e os nomes das flags copiam o Docker onde o Docker tem o conceito:
+    <code>network connect &lt;NETWORK&gt; &lt;CONTAINER&gt;</code>, <code>-p [hostIp:]hostPort:containerPort</code>,
+    <code>volume create --driver … --opt k=v</code>. <strong>Decidido</strong>: AGENTS.md § Sprints 5 e 6.</li>
+<li><strong>As mudanças incompatíveis são cortes limpos, sem aliases.</strong> A grafia antiga tem de falhar com
+  <code>unrecognized subcommand</code>, nunca fazer outra coisa em silêncio. Antes de cortares, faz grep dos
+  chamadores internos em <strong>todo</strong> o workspace. <strong>Decidido</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § «Como uma
+  quebra é feita». Os grupos listados como estáveis nesse ficheiro só podem quebrar numa release
+  major.</li>
+<li><strong>Um comando alcançável por vários caminhos tem de estar ligado em todos eles</strong> (por exemplo
+  <code>vm pull</code> / <code>image vm pull</code> / <code>image --vm pull</code>). <strong>Decidido</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>; vê
+  <a href="contributing-workflow.html#adding-or-changing-a-cli-command">Fluxo de contribuição</a>.</li>
+<li><strong>As mudanças de folhas actualizam a linha de base da CLI</strong> (<code>scripts/cli-tree.sh --update</code>) no
+  mesmo commit. <strong>Imposto (gate)</strong>: vê <a href="contributing-workflow.html#adding-or-changing-a-cli-command">Fluxo de contribuição</a>.</li>
+</ul>
+<h3 id="36-kinds-api-groups-and-manifest-fields">3.6 Kinds, grupos de API e campos de manifesto<a class="hanchor" href="#36-kinds-api-groups-and-manifest-fields" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Os Kinds são substantivos <code>UpperCamelCase</code></strong> num dos grupos publicados
+  <code>core</code>, <code>compute</code>, <code>networking</code>, <code>gateway</code>, <code>storage</code>, <code>artifact</code>, <code>infrastructure</code>
+  (<code>&lt;group&gt;.delonix.io/v1alpha1</code>). <strong>Decidido</strong>: AGENTS.md § «Identidade e fronteira do
+  motor» e § «Os Kinds ganham grupos» (o ADR-0020, que introduziu os grupos, ainda está
+  <strong>Proposto</strong>). Cada Kind é <strong>uma linha</strong> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (<code>KindFacts</code>: <code>kind</code>, <code>plural</code>, <code>short</code>,
+  <code>api_version</code>, <code>domain</code>, <code>form</code>, <code>in_stack</code>, <code>converges</code>, …). O <code>delonix api-resources</code> imprime
+  essa tabela. Acrescentar um Kind também mexe em tabelas que nada deriva do <code>kinds.rs</code>
+  (<code>hot_fields</code>, <code>NAMESPACE_SOURCES</code>, <code>TYPED_KINDS</code>, o schema gerado). Os testes falham até cada
+  uma estar feita. <strong>Imposto (gate)</strong>: o AGENTS.md § «<code>kind: Service</code>» lista que teste apanhou cada
+  tabela.</li>
+<li><strong>Um Kind renomeado mantém o nome antigo como alias silencioso e insensível a maiúsculas.</strong> Uma
+  <strong>fusão</strong> avisa, porque o significado mudou. <strong>Decidido</strong>: AGENTS.md § «Os Kinds ganham grupos e
+  nomes definitivos» («Alias silencioso, não depreciação»); implementado em
+  <code>cmd/manifest.rs:KIND_ALIASES</code>. O ADR-0020 ainda está <strong>Proposto</strong>.</li>
+<li><strong>Os campos de manifesto são <code>camelCase</code>.</strong> Se um campo tinha antes uma grafia <code>snake_case</code>, essa
+  grafia continua aceite como <code>alias</code> do <code>serde</code>. <strong>Convenção (observada)</strong>, campo a campo em vez de
+  <code>rename_all</code>:</li>
+</ul>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/vm.rs — VmSpec
+/// Canonical `cpuAffinity`; `cpu_affinity` stays accepted (back-compat).
+#[serde(rename = &quot;cpuAffinity&quot;, alias = &quot;cpu_affinity&quot;)]
+cpu_affinity: Option&lt;String&gt;,
+</code></pre></div>
+<p>Outros exemplos: <code>delonix-compute/src/pod.rs:PodSpec.restart_policy</code> (<code>rename = "restartPolicy"</code>),
+  <code>cmd/service.rs:ServiceSelector.match_labels</code> (<code>rename = "matchLabels"</code>). O schema publicado
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>) é <strong>gerado</strong> a partir destas structs e há testes a exigir que bata
+  com elas (ADR-0007). O schema dos manifestos está declarado <strong>estável</strong>
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § «O schema dos manifestos»).
+- <strong>Os registos internos</strong> (o JSON debaixo do state root) mantêm os nomes de campo <code>snake_case</code> do
+  Rust. Vê <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-runtime-core/src/lib.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-runtime-core/src/lib.rs</code></a> (<code>net_mode</code>, <code>namespace</code>).
+  <strong>Convenção (observada)</strong>.</p>
+<h3 id="37-environment-variables">3.7 Variáveis de ambiente<a class="hanchor" href="#37-environment-variables" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Prefixo <code>DELONIX_</code></strong>, em maiúsculas: <code>DELONIX_ROOT</code>, <code>DELONIX_NET_RUNTIME_DIR</code>, <code>DELONIX_L18N</code>,
+  <code>DELONIX_LOG_FORMAT</code>, <code>DELONIX_CRI_CAP_CEILING</code>. <strong>Convenção (observada)</strong> em <code>crates/</code> e
+  <code>bins/</code>.</li>
+<li><strong>Para a telemetria, lê as variáveis padrão <code>OTEL_*</code></strong>, não um alias <code>DELONIX_*</code> novo.
+  <strong>Proposto (ADR, ainda não decidido)</strong>: ADR-0040 D6. Isto é o alvo, não o código de hoje:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> lê <code>DELONIX_OTLP_ENDPOINT</code> para o exporter
+  OTLP, e do conjunto padrão só <code>OTEL_SERVICE_NAME</code>. Não acrescentes uma variável de telemetria
+  <code>DELONIX_*</code> nova, e não removas <code>DELONIX_OTLP_ENDPOINT</code> fora da fase que a migra.</li>
+<li><strong>Uma escapatória que enfraquece uma omissão de segurança é ruidosa e explícita.</strong> Está desligada
+  a menos que valha <code>1</code>, e avisa: <code>DELONIX_ENABLE_IPV6=1</code>, <code>DELONIX_ALLOW_LINK_LOCAL=1</code>.
+  <strong>Decidido</strong>: AGENTS.md § «Bloco 0 do plano 33 (v0.37.1)».</li>
+<li>Uma flag ganha à variável de ambiente, que ganha à omissão (<code>serve cri --cap-ceiling</code> vs
+  <code>DELONIX_CRI_CAP_CEILING</code>). <strong>Decidido</strong>: AGENTS.md § «Tecto de capabilities no CRI».</li>
+</ul>
+<h3 id="38-exit-codes-and-dx_-codes">3.8 Códigos de saída e códigos <code>DX_*</code><a class="hanchor" href="#38-exit-codes-and-dx_-codes" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Os códigos de saída derivam do tipo de erro num só sítio</strong>: o exaustivo
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs:for_error</code></a>. As classes são 1 genérico,
+  2 uso, 3 <code>NOT_RUNNING</code>, 4 <code>NOT_FOUND</code>, 5 <code>CONFLICT</code>, 69 <code>UNAVAILABLE</code>, 74 <code>IO</code>,
+  77 <code>NO_PERMISSION</code>, 124 <code>TIMEOUT</code>. Cada erro tem também uma identidade textual estável,
+  <code>Error::code()</code>, que devolve uma string <code>DX_*</code>. <strong>Imposto (gate)</strong>: o match não tem braço <code>_ =&gt;</code>,
+  por isso uma variante nova pára o build até alguém a classificar. O teste
+  <code>the_text_class_and_the_number_cannot_diverge</code> mantém os dois em sintonia. <strong>Decidido</strong>: AGENTS.md
+  § «Códigos de saída com classe (v0.49.0)»; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § «Códigos de saída».</li>
+<li><strong>Não escolhes um número, devolves a variante certa.</strong> «Não existe» é <code>Error::NotFound</code>, «já
+  existe» é <code>Error::Conflict</code>, «falta uma ferramenta a este host» é <code>Error::Unavailable</code>. Um número
+  novo precisa de um produtor real. <strong>Decidido</strong>: docs de módulo do <code>exitcode.rs</code> («every extra
+  number is a promise»).</li>
+</ul>
+<hr />
+<h2 id="4-structure-where-code-goes">4. Estrutura: onde vai o código<a class="hanchor" href="#4-structure-where-code-goes" aria-label="#">#</a></h2>
+<h3 id="41-the-layers-and-the-direction">4.1 As camadas e a direcção<a class="hanchor" href="#41-the-layers-and-the-direction" aria-label="#">#</a></h3>
+<p>A direcção permitida está escrita num só sítio, <code>ALLOWED</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.
+<strong>Imposto (gate)</strong>:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Camada</th>
+<th>Pode depender de</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>foundation</td>
+<td>foundation</td>
+</tr>
+<tr>
+<td>context</td>
+<td>foundation, context</td>
+</tr>
+<tr>
+<td>adapter / provider</td>
+<td>foundation, context</td>
+</tr>
+<tr>
+<td>interface</td>
+<td>foundation, context, adapter, provider</td>
+</tr>
+<tr>
+<td>bin</td>
+<td>tudo</td>
+</tr>
+</tbody>
+</table></div>
+<p>As dependências de desenvolvimento e de build não contam. Uma excepção declarada tem de nomear a
+fase do ADR-0040 que a remove, e uma excepção que já não se aplica também falha (<code>EXCEPTIONS</code>). A
+tabela de camadas gerada e as excepções actuais estão em <a href="architecture.html#layers-and-the-allowed-direction">Arquitectura</a>.</p>
+<p>Mais regras estruturais, cada uma <strong>Imposto (gate)</strong> pelo <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>:</p>
+<ul>
+<li><strong>A fundação e os contextos ficam livres de dependências pesadas.</strong> <code>tokio</code>, <code>axum</code>, <code>hyper</code>,
+  <code>tonic</code>, <code>reqwest</code>, <code>clap</code>, <code>ratatui</code>, <code>serde_yaml</code>, <code>rmcp</code>, OpenTelemetry e <code>prometheus-client</code>
+  são recusados aí (<code>HEAVY</code>).</li>
+<li><strong>Um binário compõe exactamente uma interface.</strong> Imposto em <code>rule_failures()</code> (introduzido pelo
+  ADR-0040 D2.4, ainda <strong>Proposto</strong>; também escrito no AGENTS.md § «A direcção das dependências é
+  um portão»).</li>
+<li><strong>As versões das dependências vivem só no <code>[workspace.dependencies]</code> raiz.</strong> Um membro escreve
+  <code>{ workspace = true, features = [...] }</code> e nada mais. O <code>default-features = false</code> fica na raiz,
+  porque um membro não consegue desligar o que a raiz liga (<code>inline_versions()</code>).</li>
+<li><strong>As bibliotecas não imprimem.</strong> O ratchet <code>library_prints</code> conta <code>println!</code>/<code>eprintln!</code>/<code>print!</code>
+  fora de <code>bins/</code>. Emite antes <code>tracing</code> (por exemplo <code>tracing::warn!</code> em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>) e deixa a interface apresentar a saída.
+  <strong>Decidido</strong>: AGENTS.md § «A direcção das dependências é um portão (ADR-0040, fase P0)» («Uma
+  biblioteca não escreve para o terminal; emite <code>tracing</code>»).</li>
+<li><strong>As bibliotecas não voltam a correr o binário do próprio motor.</strong> O ratchet <code>self_exec_sites</code>
+  conta <code>current_exe()</code>, <code>cli_bin()</code> e <code>delonix_bin()</code> fora de <code>bins/</code>. Chama antes uma função ou
+  um caso de uso. <code>Command::new("ip")</code>, <code>nft</code>, <code>qemu-img</code> e <code>ssh</code> <strong>não</strong> são contados, porque
+  correr essas ferramentas é exactamente para o que um adapter existe (comentário acima de
+  <code>SELF_EXEC</code>).</li>
+<li><strong>Não escrevas no ambiente do processo.</strong> O ratchet <code>env_writes</code> conta <code>env::set_var</code>/<code>remove_var</code>
+  em todo o lado, testes incluídos. Os testes correm em threads paralelas e uma escrita entra em
+  corrida com todos os leitores. Passa antes os valores como argumento (comentário acima de
+  <code>ENV_WRITES</code>).</li>
+</ul>
+<h3 id="42-my-change-is-x-it-goes-in-y">4.2 «A minha mudança é X → vai para Y»<a class="hanchor" href="#42-my-change-is-x-it-goes-in-y" aria-label="#">#</a></h3>
+<p>Esta tabela usa os crates tal como existem hoje. Consulta <a href="crates.html">Os crates</a> para ver o conteúdo de
+cada crate antes de lhe acrescentares algo. Onde a coluna de fonte cita o ADR-0040 ou o ADR-0026, a
+etiqueta é <strong>Proposto (ADR, ainda não decidido)</strong>: os dois ADRs ainda estão Propostos, embora os
+crates que descrevem já existam.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>A tua mudança</th>
+<th>Crate (camada)</th>
+<th>Fonte</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Uma regra pura sobre CIDRs, nomes de bridge ou aritmética de IPAM que os dois lados têm de calcular de forma idêntica</td>
+<td><code>delonix-net-rules</code> (foundation)</td>
+<td>06; AGENTS.md § Arquitetura</td>
+</tr>
+<tr>
+<td>Uma classe de erro, código de saída ou código <code>DX_*</code> nova; nomes gerados</td>
+<td><code>delonix-model</code> (foundation)</td>
+<td>ADR-0040 D1</td>
+</tr>
+<tr>
+<td>Um tipo de registo persistido (<code>Container</code>, <code>Vm</code>, …)</td>
+<td><code>delonix-runtime-core</code> (foundation) — o que sobrou da divisão da P3 do ADR-0040. Acrescenta aqui só o que pertence a registos, nunca helpers gerais</td>
+<td>ADR-0040 D2.1 «no <code>-core</code>»</td>
+</tr>
+<tr>
+<td>Uma regra pura do modelo de segredos (<code>Secret</code>, nomes e chaves válidos, análise de env-file)</td>
+<td><code>delonix-model</code> (foundation): <code>secret.rs</code></td>
+<td>ADR-0040 P3 (o PR que moveu os stores)</td>
+</tr>
+<tr>
+<td>Um store, o lock de ficheiro, <code>write_atomic*</code>/<code>write_private_temp</code>, o store de segredos cifrado ou o cofre de credenciais</td>
+<td><code>delonix-state</code> (adapter)</td>
+<td>ADR-0040 D2.3</td>
+</tr>
+<tr>
+<td>Factos de Kind, o planeador/diff, condições, revisões</td>
+<td><code>delonix-stack</code> (context)</td>
+<td>AGENTS.md § Arquitetura</td>
+</tr>
+<tr>
+<td>A especificação de execução, a sua validação pura, uma porta de que o caso de uso de run precisa</td>
+<td><code>delonix-compute</code> (context): <code>run_opts.rs</code>, <code>preflight.rs</code>, <code>ports.rs</code></td>
+<td>ADR-0040 D2.2</td>
+</tr>
+<tr>
+<td>Política de segurança, admissão, score, redacção</td>
+<td><code>delonix-security-runtime</code> (context)</td>
+<td>ADR-0026</td>
+</tr>
+<tr>
+<td>Namespaces, cgroups, mounts, capabilities, seccomp, dispositivos</td>
+<td><code>delonix-linux</code> (adapter)</td>
+<td>ADR-0040 D2.3</td>
+</tr>
+<tr>
+<td>netns holder, nftables, slirp, DNS, DHCP, overlay, WireGuard, CNI</td>
+<td><code>delonix-sdn</code> (adapter)</td>
+<td>ADR-0040 D2.3</td>
+</tr>
+<tr>
+<td>Cliente de registo, CAS, layers, overlay, build de imagens</td>
+<td><code>delonix-oci</code> (adapter)</td>
+<td>ADR-0040 D2.3</td>
+</tr>
+<tr>
+<td>SBOM / CVE</td>
+<td><code>delonix-scanner</code> (adapter)</td>
+<td>ADR-0040 D2.3</td>
+</tr>
+<tr>
+<td>Tracing, OpenTelemetry, configuração do registo Prometheus</td>
+<td><code>delonix-telemetry</code> (adapter)</td>
+<td>ADR-0040 D2.3</td>
+</tr>
+<tr>
+<td>Um backend de VM local (Cloud Hypervisor, libvirt)</td>
+<td><code>delonix-vm</code> (adapter)</td>
+<td>ADR-0008</td>
+</tr>
+<tr>
+<td>Um provider remoto ou conectável (API de hypervisor, API de NAS)</td>
+<td>um crate de provider em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>. <strong>Escreve primeiro um ADR</strong></td>
+<td>ADR-0008, ADR-0009; <a href="contributing-workflow.html#when-to-write-an-adr">Fluxo de contribuição</a></td>
+</tr>
+<tr>
+<td>Um RPC do CRI</td>
+<td><code>delonix-cri</code> (interface)</td>
+<td>AGENTS.md</td>
+</tr>
+<tr>
+<td>A API de gestão local, <code>/metrics</code></td>
+<td><code>delonix-mgmt</code> (interface)</td>
+<td>ADR-0010</td>
+</tr>
+<tr>
+<td>Uma tool MCP</td>
+<td><code>delonix-mcp</code> (interface)</td>
+<td>ADR-0025</td>
+</tr>
+<tr>
+<td>Um comando da CLI, a sua apresentação e traduções</td>
+<td><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;group&gt;.<wbr>rs</code> + <code>data/pt.po</code></td>
+<td>AGENTS.md § CLI</td>
+</tr>
+<tr>
+<td>Que adapter serve que porta (composição)</td>
+<td>a raiz de composição do binário. Sem lógica de negócio aí</td>
+<td>ADR-0040 D1 «Binaries»</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="43-pure-core-io-at-the-edges">4.3 Núcleo puro, I/O nas pontas<a class="hanchor" href="#43-pure-core-io-at-the-edges" aria-label="#">#</a></h3>
+<ul>
+<li><strong>As decisões são funções puras sobre dados já lidos.</strong> Não recebem store, não correm comandos e
+  não precisam de privilégio, por isso um teste pode chamá-las com valores simples. <strong>Proposto (ADR,
+  ainda não decidido)</strong>: ADR-0040 D1 (o <code>domain/</code> de um contexto não tem «no I/O, no <code>tokio</code>,
+  <code>libc</code>, <code>nix</code>, <code>std::fs</code>»). <strong>Convenção (observada)</strong>: <code>delonix-stack/src/reconcile.rs</code> («decides
+  it WITHOUT touching the machine»), <code>cmd/vm.rs:resolve_vm_defaults</code>,
+  <code>delonix-sdn/src/infra.rs:vmtap_line</code>, <code>delonix-oci/src/registry.rs:parse_content_range</code>.</li>
+</ul>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/stack.rs — is_pending
+fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
+    match present {
+        // Declarative: nothing to observe, so nothing to wait for.
+        &quot;-&quot; =&gt; false,
+        &quot;yes&quot; =&gt; !ready_status(kind, status),
+        // &quot;no&quot; (absent) and &quot;?&quot; (unknown/unreadable) both keep waiting.
+        _ =&gt; true,
+    }
+}
+</code></pre></div>
+<ul>
+<li><strong>Se uma função pura precisar de algo de fora, recebe-o como parâmetro.</strong> Por exemplo,
+  <code>resolve_image_ref</code> recebe o store de imagens em vez de abrir o real, para o teste poder passar
+  um directório temporário. <strong>Decidido</strong>: AGENTS.md § «O manifesto de VM resolvia a imagem de outra
+  maneira que a CLI».</li>
+<li><strong>Uma regra, um dono.</strong> Quando dois pontos de chamada precisam da mesma derivação, extrai uma
+  função e chama-a dos dois. Uma segunda cópia deriva. Exemplos: <code>delonix_net_rules::bridge_name</code>,
+  reexportada pelo <code>delonix-sdn</code> (o nome da bridge tinha duas fórmulas e imprimia um dispositivo
+  que não existia), <code>infra::dhcp_lease_ip</code>, <code>effective_entrypoints</code>. <strong>Decidido</strong>: AGENTS.md §
+  «<code>delonix network</code>», § «Isolamento de namespace», § «Reverse-proxy L7».</li>
+</ul>
+<hr />
+<h2 id="5-internal-api-and-boundaries">5. API interna e fronteiras<a class="hanchor" href="#5-internal-api-and-boundaries" aria-label="#">#</a></h2>
+<h3 id="51-ports-and-adapters">5.1 Portas e adapters<a class="hanchor" href="#51-ports-and-adapters" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Um backend novo implementa uma porta. Nunca é um <code>if provider == …</code> noutro sítio qualquer.</strong>
+  <strong>Decidido</strong>: AGENTS.md § «Identidade e fronteira do motor» («Um provider novo entra como
+  implementação de uma porta, nunca como um <code>if provider == …</code>»). O ADR-0040 D3 regra 3 («No string
+  matching on provider names outside the composition root») reafirma-o e ainda está <strong>Proposto</strong>.
+  A D3 planeia um fitness test para isto, mas <strong>ainda não existe no <code>arch_fitness.py</code></strong>, por isso
+  por agora é a revisão que o impõe.</li>
+<li><strong>O conhecimento específico de um backend vive no backend.</strong> Por exemplo,
+  <code>VmBackend::ip_is_predicted()</code> responde se o IP de uma VM foi previsto, em vez de o ponto de
+  chamada verificar <code>backend.contains("cloud-hypervisor")</code>. <strong>Decidido</strong>: ADR-0008, citado no doc
+  comment em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
+<li><strong>Um adapter não depende de outro adapter.</strong> O que precisa de outra preocupação entra como hook ou
+  como porta, ligado pela raiz de composição. <strong>Imposto (gate)</strong>: <code>ALLOWED</code> (adapter → foundation,
+  context). <strong>Convenção (observada)</strong>: o doc comment de
+  <code>delonix-linux/src/workload.rs:HostWorkload</code> explica os seus hooks <code>addresses</code>/<code>attach_slirp</code>
+  desta forma.</li>
+</ul>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/ports.rs — NetworkProvider (excerpt)
+pub trait NetworkProvider {
+    /// Refuses a network that does not exist.
+    fn check_network(&amp;self, name: &amp;str) -&gt; Result&lt;()&gt;;
+    /// Undoes an attach; best effort, used on the way out of a failure.
+    fn detach(&amp;self, id: &amp;str, ip: &amp;str);
+    /// Publishes one `-p` specification on a container&#x27;s address.
+    fn publish(&amp;self, ip: &amp;str, spec: &amp;str) -&gt; Result&lt;()&gt;;
+}
+</code></pre></div>
+<ul>
+<li><strong>Um trait precisa de um consumidor real quando entra.</strong> Não escrevas andaimes à espera do
+  primeiro chamador. Todo o método tem de ter um chamador. <strong>Decidido</strong>: AGENTS.md § «<code>delonix
+  workload</code>» (ADR-0002). Uma função pública sem chamadores é também um perigo conhecido: várias
+  revelaram esconder um bug latente (<code>mount_live</code>, <code>set_net_rate</code>, <code>update_limits</code>,
+  <code>publish_port_allow</code>), e algumas foram apagadas em vez de ligadas (AGENTS.md § «Endurecimento do
+  ingress/egress»).</li>
+</ul>
+<h3 id="52-errors-per-crate-adr-0040-p3">5.2 Erros por crate (ADR-0040 P3)<a class="hanchor" href="#52-errors-per-crate-adr-0040-p3" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Um adapter ou provider define o seu próprio <code>Error</code> e converte-o na classe partilhada</strong>
+  (<code>delonix_model::Error</code>), que carrega o código <code>DX_*</code>. <strong>Proposto (ADR, ainda não decidido)</strong>:
+  ADR-0040 P3.
+  <strong>Imposto (gate)</strong>: o ratchet <code>shared_error_imports</code> no <code>arch_fitness.py</code> (<code>SHARED_ERROR</code>,
+  limitado a <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> e <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) conta os imports
+  <code>use delonix_runtime_core::{…Error/Result…}</code> ou <code>use delonix_model::{…}</code> que tornam o tipo
+  partilhado o tipo de resultado do próprio crate. O tipo partilhado ainda pode ser nomeado dentro
+  de um impl <code>From</code>. A implementação de referência é <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/error.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/error.rs</code></a>:</li>
+</ul>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">impl From&lt;Error&gt; for Dx {
+    fn from(e: Error) -&gt; Self {
+        match e {
+            e @ (Error::EmptySbom | Error::OsvShape | /* … */ Error::NoModule) =&gt; Dx::Invalid(e.to_string()),
+            Error::ModuleScan(io) =&gt; Dx::Runtime { context: &quot;module scan&quot;, message: io.to_string() },
+            Error::Engine(e) =&gt; e,
+        }
+    }
+}
+</code></pre></div>
+<p>Três coisas nesse ficheiro são o padrão: a conversão <strong>decide</strong> a classe; o <code>code()</code> pergunta à
+  conversão em vez de manter uma segunda tabela; e um teste
+  (<code>the_code_is_the_code_of_the_class_it_converts_into</code>) mantém os dois em sintonia. A mensagem
+  convertida também se mantém byte a byte idêntica ao que a CLI imprimia antes
+  (<code>the_converted_message_is_the_one_printed_before</code>).
+- <strong>Pergunta ao erro a sua classe; não faças match numa variante do erro partilhado.</strong> Fora da
+  fundação, escreve <code>e.is_not_found()</code> ou <code>e.class()</code>, ou faz match em <code>e.root()</code> quando precisas
+  do conteúdo — nunca <code>Err(Error::NotFound(_))</code> nem <code>matches!(…, Error::NotFound(_))</code>. O erro
+  próprio de um crate viaja dentro da classe partilhada com o seu código, por isso um match numa
+  variante deixa de o apanhar sem uma palavra do compilador. <strong>Decidido</strong>: ADR-0043 D4 (Accepted).
+  <strong>Imposto (gate)</strong>: o ratchet <code>raw_error_variant_matches</code> do <code>arch_fitness.py</code>
+  (<code>RAW_VARIANT_MATCH</code>, que salta <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/</code></a>), com linha de base 0 —
+  qualquer match novo deste tipo faz falhar o CI. Os métodos estão em
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>.</p>
+<h3 id="53-visibility">5.3 Visibilidade<a class="hanchor" href="#53-visibility" aria-label="#">#</a></h3>
+<ul>
+<li><strong>Privado por omissão.</strong> Dentro do crate da CLI, usa <code>pub(crate)</code> para algo que outro módulo
+  <code>cmd</code> precise de chamar. <strong>Convenção (observada)</strong>: <code>cmd/container.rs:cmd_run</code>, <code>cmd_start</code> e
+  <code>cmd_stop</code> são <code>pub(crate)</code> para que <code>pod</code>, <code>compose</code> e <code>stack</code> lhes possam delegar;
+  <code>cmd/firewall.rs:update_locked</code>; <code>cmd/manifest.rs:KIND_ALIASES</code>.</li>
+<li><strong><code>pub</code> num crate de biblioteca é uma promessa a outros crates.</strong> Remover um item público é uma
+  mudança incompatível para quem usa a biblioteca, mesmo com zero chamadores neste workspace. O lint
+  <code>dead_code</code> do rustc não vê itens <code>pub</code> sem uso, por isso quando apagares um, conta à mão os itens
+  públicos órfãos. <strong>Decidido</strong>: AGENTS.md § «<code>delonix_sdn::Net</code> foi APAGADO — e é breaking para
+  quem usa a biblioteca».</li>
+</ul>
+<h3 id="54-the-node-contract">5.4 O contrato de nó<a class="hanchor" href="#54-the-node-contract" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> é a fonte de verdade das duas codificações, gRPC e HTTP/JSON.
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> é gerado a partir dele. <strong>Nunca edites o ficheiro OpenAPI à mão.</strong>
+<strong>Imposto (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> corre <code>buf format</code>, <code>buf lint</code>, <code>buf breaking</code>
+contra a última tag que contenha <code>proto/</code>, verifica o mapeamento HTTP de cada RPC, e verifica que o
+ficheiro OpenAPI é igual ao gerado. <strong>Decidido</strong>: AGENTS.md § «O contrato de nó é um portão» (que
+cita o ADR-0040 P1; o ADR-0040 D4 ainda está <strong>Proposto</strong>).</p>
+<ul>
+<li><strong>Uma mensagem de pedido por RPC</strong>, com o nome <code>&lt;Rpc&gt;Request</code>. <strong>Imposto (gate)</strong>: <code>buf lint</code>
+  <code>RPC_REQUEST_STANDARD_NAME</code> (vê <code>buf.yaml</code>). Um pedido partilhado deixa um campo pensado para um
+  método aparecer em cinco.</li>
+<li><strong>Identidade explícita no pedido</strong>: campos <code>name</code> e <code>namespace</code>, nunca uma mensagem genérica de
+  metadados com campos que o motor ignoraria. <strong>Decidido</strong>: AGENTS.md. <strong>Convenção (observada)</strong>:
+  <code>compute.proto:GetContainerRequest { string name = 1; string namespace = 2; }</code>.</li>
+<li><strong>As imagens são endereçadas por query, não no caminho</strong>, porque num caminho como <code>alpine:3.20</code> o
+  <code>:</code> seria lido como verbo personalizado. <strong>Decidido</strong>: AGENTS.md. <strong>Convenção (observada)</strong>:
+  <code>infra.proto</code> <code>GetImage</code> → <code>get: "/v1/images:get"</code>, com <code>GetImageRequest { string reference = 1; }</code>.</li>
+<li><strong>As respostas</strong> devolvem o recurso, ou uma <code>Operation</code> para mutações longas. As regras de nomes
+  de resposta do <code>buf lint</code> estão desligadas de propósito (comentário no <code>buf.yaml</code>).</li>
+<li><strong>Todo o RPC tem um mapeamento HTTP excepto os streams bidireccionais</strong> (<code>Exec</code>, <code>Console</code>), que
+  não o podem ter. <strong>Imposto (gate)</strong>: verificação 4 do <code>contract_gate.py</code>.</li>
+</ul>
+<h3 id="55-the-engine-knows-no-consumer">5.5 O motor não conhece nenhum consumidor<a class="hanchor" href="#55-the-engine-knows-no-consumer" aria-label="#">#</a></h3>
+<p>O motor não sabe quem o usa. Nenhum nome de plataforma, control plane, consola ou agente, e nenhuma
+noção de inquilino, conta, plano ou faturação, pode aparecer em <code>crates/</code>, <code>bins/</code>, <code>proto/</code>, no
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> raiz ou no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a>, <strong>comentários incluídos</strong>.</p>
+<ul>
+<li><strong>Nomes de consumidores.</strong> <strong>Imposto (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>consumer_mentions()</code>
+  casa a expressão regular <code>CONSUMER_NAMES</code>, uma lista fixa de nomes, nesses caminhos. Um nome que
+  não esteja na lista não é apanhado.</li>
+<li><strong>Conceitos de inquilino, conta, plano e faturação.</strong> <strong>Decidido</strong>: AGENTS.md § «Identidade e
+  fronteira do motor». Nenhum gate os casa; verifica-o a revisão.</li>
+</ul>
+<p>Se um consumidor precisar de algo, escreve-o como uma capacidade
+genérica no vocabulário próprio do motor (Kinds e recursos), e acrescenta-o só se fizer sentido
+para qualquer cliente. O motor valida o seu próprio contrato e nunca confia num chamador para
+recusar o que ele próprio não suporta.</p>
+<hr />
+<h2 id="6-error-handling-and-messages">6. Tratamento de erros e mensagens<a class="hanchor" href="#6-error-handling-and-messages" aria-label="#">#</a></h2>
+<ul>
+<li><strong>Nenhuma falha silenciosa.</strong> Se uma opção é aceite e depois ignorada, isso é pior que uma
+  funcionalidade em falta, porque o utilizador julga que teve efeito. Recusa-a com um erro claro, e
+  nomeia a flag. <strong>Decidido</strong>: AGENTS.md § «Falhas silenciosas corrigidas (fail-closed)»; a
+  auditoria da v0.37.0 (§ «Auditoria sistemática dos 208 subcomandos») chama a esta classe «relato
+  desonesto». Os padrões que essa secção lista são:</li>
+<li><strong>Não destruas nada antes de saberes que o objecto é teu para destruir, e apaga a contabilidade
+    em último lugar.</strong> Se o registo é removido primeiro e a remoção dos dados falha a seguir, os
+    dados ficam órfãos e um <code>create</code> posterior entrega-os a outra pessoa.</li>
+<li><strong>Uma medição ilegível é <em>desconhecida</em>, nunca zero.</strong> Um <code>read_dir</code> que falha não é um
+    directório vazio. É por isso que existe <code>Usage { bytes, unreadable }</code>.</li>
+<li><strong>Atenção aos padrões que transformam falhas em sucesso</strong>: <code>let _ =</code> sobre um resultado que
+    importa (entropia, uma leitura de socket), <code>as u64</code> sobre um <code>f64</code> (satura), <code>capture()</code> lido
+    pelo seu <code>Result</code> em vez da sua saída. O AGENTS.md § «A classe «X não é Y»» cataloga-os.</li>
+<li><strong>Desconhecido ou impossível de medir não é um palpite.</strong> Quando o motor não consegue ler um
+  valor, reporta que não sabe, ou recusa. Não escolhe a resposta mais provável. Exemplo: o
+  <code>system prune --auto</code> recusa se a ocupação do disco não puder ser lida, e o ceifador do IPAM falha
+  fechado quando um store é ilegível (uma lista vazia ler-se-ia como «nada está vivo»).
+  <strong>Decidido</strong>: AGENTS.md § CLI (<code>system prune</code>), § «O IPAM vaza».</li>
+<li><strong>Forma da mensagem: o facto primeiro, depois o que fazer</strong>, com o comando exacto quando existe.
+  <strong>Decidido</strong>: AGENTS.md § «<code>-p 80:80</code> respondia com o JSON cru do slirp» («facto primeiro, depois
+  os comandos prontos a copiar»). <strong>Convenção (observada)</strong>:
+  <code>delonix-model/src/error.rs:Error::VmNotFound</code> → <code>"no such VM: {0} (see \</code>delonix vm ls`)"<code>;</code>cmd/config.rs:refuse_unknown_key<code>nomeia as chaves válidas. Nomeia a **ferramenta em falta e o
+  seu pacote** em vez de passar um</code>ENOENT<code>cru, que se lê como um ficheiro em falta (AGENTS.md §
+  «A bateria mede o</code>--help` de tudo», achado 1).</li>
+<li><strong>Uma medição parcial não é um sucesso.</strong> O <code>--wait</code> tem de observar o que afirma, e o
+  <code>✓ … is up</code> só é impresso depois de verificar. <strong>Decidido</strong>: AGENTS.md § «O <code>--wait</code> de uma VM CH».</li>
+<li><strong>Nunca faças parsing de uma mensagem de erro para decidir o que fazer.</strong> As mensagens são
+  traduzidas (<code>--l18n=pt</code>/<code>DELONIX_L18N</code>), por isso um <code>grep 'no such'</code> classifica numa máquina e
+  deixa em silêncio de classificar noutra. Usa a classe de saída ou o código <code>DX_*</code>. <strong>Decidido</strong>:
+  docs de módulo de <code>delonix-model/src/exitcode.rs</code>.</li>
+<li><strong>Devolve a variante que corresponde à classe</strong> (<code>NotFound</code>, <code>Conflict</code>, <code>NotRunning</code>,
+  <code>Unavailable</code>, <code>Timeout</code>), não <code>Invalid</code> para tudo. <strong>Decidido</strong>: AGENTS.md § «Códigos de
+  saída com classe»: o <code>util::find</code> a devolver <code>Invalid</code> para «não encontrado» tornava o recurso
+  mais usado impossível de classificar.</li>
+</ul>
+<hr />
+<h2 id="7-unsafe-syscalls-and-processes">7. <code>unsafe</code>, syscalls e processos<a class="hanchor" href="#7-unsafe-syscalls-and-processes" aria-label="#">#</a></h2>
+<ul>
+<li><strong>Todo o bloco <code>unsafe</code> tem um comentário <code>// SAFETY:</code> imediatamente acima.</strong> <strong>Imposto (gate)</strong>:
+  <code>undocumented_unsafe_blocks = "deny"</code> em <code>[workspace.lints.clippy]</code>.</li>
+</ul>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-linux/src/lib.rs — apply_filter_logged
+// SAFETY: `fprog` points to a valid BPF program; NO_NEW_PRIVS is already set.
+let rc = unsafe {
+    libc::syscall(libc::SYS_seccomp, SET_MODE_FILTER, FLAG_LOG, &amp;fprog as *const _)
+};
+</code></pre></div>
+<p>O comentário tem de enunciar o invariante que torna a chamada correcta. «same» só é aceitável
+  imediatamente a seguir a uma chamada idêntica e justificada (como em <code>delonix-linux/src/lib.rs</code>
+  logo a seguir ao primeiro <code>_exit(126)</code>).
+- <strong>Nenhum <code>clone()</code>/<code>fork()</code> cru num processo multi-thread</strong> (os servidores tokio, o shim da API
+  Docker). O <code>clone</code> não corre os handlers <code>pthread_atfork</code>, por isso o filho pode ficar em deadlock
+  no lock do malloc. Re-executa antes um spec tipado, entregue por um ficheiro <code>0600</code>/<code>O_EXCL</code> em
+  vez do argv. <strong>Decidido</strong>: AGENTS.md § «Auditoria de segurança #3», item 5. Contexto:
+  <a href="rust-primer.html#why-forkclone-in-a-multi-threaded-process-is-dangerous">Introdução ao Rust para esta base de código</a>.
+- <strong>Um hook <code>pre_exec</code> não pode bloquear à espera de algo que o pai faz depois de o <code>spawn</code>
+  devolver.</strong> O <code>Command::spawn</code> só devolve depois do <code>exec</code>, por isso os dois processos esperam um
+  pelo outro para sempre. Usa um <code>fork</code> cru para handshakes. <strong>Decidido</strong>: AGENTS.md § «A classe
+  «X não é Y»» (a entrada do <code>reexec_mapped_hold</code>).
+- <strong>Ficheiros temporários: usa <code>delonix_state::write_private_temp</code>.</strong> Abre com um nome
+  único, <code>O_EXCL</code> e modo <code>0600</code>, por isso nunca segue um symlink plantado. Não uses um nome fixo ou
+  derivado do pid em <code>/tmp</code>. <strong>Decidido</strong>: AGENTS.md § «Auditoria de segurança #3», passagem 2; doc
+  comment em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>. <strong>Convenção (observada)</strong>: <code>delonix-sdn/src/bpf.rs</code>,
+  <code>delonix-linux/src/run_host.rs</code>.
+- <strong>Ficheiros que têm de ser privados ou atómicos: usa <code>write_atomic_mode(path, bytes, Some(0o600))</code>.</strong>
+  Define o modo na criação e publica com um rename atómico. Nunca escrevas o ficheiro para depois
+  lhe fazer <code>chmod</code>, porque outro utilizador pode abri-lo nesse intervalo. <strong>Decidido</strong>: doc comment
+  de <code>delonix-state/src/store.rs:write_atomic_mode</code>; AGENTS.md (TOCTOU do kubeconfig).
+- <strong>Antes de sinalizar um pid lido de um ficheiro, confirma que ainda é o mesmo processo.</strong> Usa
+  <code>delonix_runtime_core::safe_to_signal(pid, starttime)</code>, que compara o instante de arranque para um
+  pid reciclado não ser morto. <strong>Decidido</strong>: AGENTS.md § «A classe «X não é Y»» (as entradas de pid).
+- <strong>O argv de um processo não prova que ele é nosso.</strong> Outros state roots do mesmo utilizador, e
+  outras ferramentas, correm com o mesmo argv. Verifica um token que só nós escolhemos: um caminho
+  derivado da nossa raiz, ou uma variável de ambiente que pinámos no spawn. <strong>Decidido</strong>: AGENTS.md
+  § «A classe «X não é Y»» (a entrada «o argv de um processo»).
+- <strong>Passa <code>--</code> antes dos argumentos posicionais que vêm de input</strong> no argv de ferramentas externas
+  (<code>ssh</code>, <code>scp</code>, <code>virsh</code>, <code>mount</code>, <code>qemu-img</code>), e valida contra uma whitelist de caracteres
+  qualquer valor que acabe numa shell remota. O <code>shell_quote</code> não sanitiza o conteúdo.
+  <strong>Decidido</strong>: AGENTS.md § «Auditoria de segurança (skill <code>delonix-runtime-sec</code>)» e § «#2».
+- <strong>Os caminhos construídos a partir de nomes vindos do utilizador ou do manifesto são
+  confinados.</strong> Usa uma verificação de nome <code>valid_*</code> na fronteira do motor
+  (<code>delonix_vm::valid_vm_name</code>), e uma junção segura que recuse componentes <code>..</code>/absolutos e
+  symlinks (<code>safe_join</code>, <code>safe_bind_target</code>). <strong>Decidido</strong>: as mesmas secções do AGENTS.md.</p>
+<hr />
+<h2 id="8-state-and-concurrency">8. Estado e concorrência<a class="hanchor" href="#8-state-and-concurrency" aria-label="#">#</a></h2>
+<ul>
+<li><strong>Ler–modificar–escrever passa por <code>update</code>, nunca por <code>load</code> → mutar → <code>save</code>.</strong>
+  <code>Store::update</code> e <code>JsonStore::update</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>)
+  tomam um <code>flock</code>, <strong>voltam a ler debaixo do lock</strong>, aplicam o teu closure e escrevem de forma
+  atómica. Um closure que devolve <code>false</code> aborta a escrita. A CLI, o servidor CRI e as actualizações
+  em background mexem todos nos mesmos registos em concorrência, e sem o lock uma escrita perde-se
+  em silêncio. <strong>Decidido</strong>: doc comments das duas funções; AGENTS.md § «Revisão ampla de
+  código/arquitectura (2026-07-27)», bugs 5 e o item do <code>JsonStore</code>. <strong>Convenção (observada)</strong>: uma
+  mutação que pode ela própria falhar é embrulhada assim:</li>
+</ul>
+<div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/firewall.rs — update_locked
+let c = store.update(id_or_name, |c| match f(c) {
+    Ok(commit) =&gt; commit,
+    Err(e) =&gt; {
+        err = Some(e);
+        false
+    }
+})?;
+</code></pre></div>
+<ul>
+<li><strong>Persiste cada passo assim que o dataplane o confirma.</strong> Se uma mudança de vários passos falhar a
+  meio, o registo tem de continuar a bater com o que o kernel tem de facto. <strong>Decidido</strong>: AGENTS.md §
+  «Reconfiguração a quente» («Persistência»).</li>
+<li><strong>Os campos novos em registos persistidos levam <code>#[serde(default)]</code></strong> (ou <code>default = "fn"</code>), para
+  os registos escritos por versões anteriores continuarem a carregar. A omissão tem de descrever o
+  que os registos antigos eram de facto, não um palpite. <strong>Decidido</strong>: AGENTS.md (por exemplo
+  <code>Vm.namespace</code>, <code>VmImage.cloud_init</code>). <strong>Convenção (observada)</strong>: <code>delonix-runtime-core/src/lib.rs</code>,
+  o doc comment de <code>Vm.namespace</code> («the default is a statement of fact and not a guess»).</li>
+<li><strong>Tudo o que é preciso para reconstruir um recurso tem de ser persistido, não só usado na
+  criação.</strong> Quando mexeres num caminho de <code>start</code>/<code>restart</code>, compara campo a campo o que a criação
+  usa com o que o registo guarda. <strong>Decidido</strong>: AGENTS.md § «BUG GRAVE corrigido… <code>-v</code> nunca era
+  persistido» (listado aí como o terceiro bug da mesma família).</li>
+<li><strong>Os ficheiros de lock nunca são apagados.</strong> Apagar um abre uma janela em que dois processos
+  bloqueiam inodes diferentes. <strong>Decidido</strong>: doc comment de <code>store.rs:lock_path</code> (<code>delonix-state</code>).</li>
+<li><strong>O <code>SecretStore::update</code> é o único <code>update</code> cujo lock é best-effort.</strong> O seu <code>FileLock::acquire</code>
+  devolve <code>Option</code> e avança sem lock se o ficheiro de lock não puder ser aberto, ao contrário do <code>Store</code> e
+  do <code>JsonStore</code>. <strong>Não decidido</strong>: se deve recusar como os outros; segue o código à volta e
+  di-lo no PR se lhe tocares.</li>
+</ul>
+<hr />
+<h2 id="9-tests">9. Testes<a class="hanchor" href="#9-tests" aria-label="#">#</a></h2>
+<ul>
+<li><strong>Onde vão.</strong> Os testes unitários vão num <code>#[cfg(test)] mod tests</code> no fim do ficheiro. Os testes
+  de integração vão em <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/</code> e usam só a API pública. Os testes contra
+  providers vivos são opt-in. <strong>Convenção (observada)</strong>; detalhes em <a href="rust-primer.html#39-tests">03 § 3.9</a>.</li>
+<li><strong>Primeiro o puro.</strong> Põe a decisão numa função pura e testa-a como dados. Tudo o que precise de
+  namespaces, cgroups ou de um holder de rede reais valida-se ao vivo ou com <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>.
+  <strong>Decidido</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> («Write a unit test for any new pure function»); AGENTS.md §
+  «IaC nativo» (o <code>reconcile.rs</code> é puro para poder ser testado como dados).</li>
+<li><strong>Nomes</strong>: frases em inglês que enunciam o comportamento (vê <a href="#34-test-names">§3.4</a>).</li>
+<li><strong>Os testes nunca mexem no estado real do host.</strong> Dá aos stores uma raiz temporária. Não chames
+  código que resolva o state root real. Não faças <code>set_var</code> (o ratchet <code>env_writes</code>,
+  <a href="#41-the-layers-and-the-direction">§4.1</a>).
+  <strong>Decidido</strong>: AGENTS.md § «IaC nativo», a nota da fusão do <code>ShareVolume</code> («Nota de método: um
+  teste que chamasse <code>apply_share</code> … escreveria no estado REAL da máquina»). <strong>Convenção
+  (observada)</strong>: os testes de <code>delonix-state/src/store.rs</code> usam um helper <code>tmp_dir(tag)</code>.
+  Para corridas manuais e E2E, isola <strong>os dois</strong>, <code>DELONIX_ROOT</code> e <code>DELONIX_NET_RUNTIME_DIR</code>. Isolar
+  só um é pior que nenhum (AGENTS.md § «Meia-isolação é pior que nenhuma»;
+  <a href="build-and-test.html#isolating-the-engines-state">Clonar, compilar e testar</a>).</li>
+<li><strong>Um teste de regressão tem de falhar com a correcção revertida.</strong> Reverte a correcção, vê o teste
+  falhar, e repõe a correcção. Um teste que passa nos dois casos não prova nada, e o AGENTS.md
+  regista vários (uma verificação de código de saída que o <code>1</code> não conseguia distinguir; um cenário
+  de caos que ficou verde com uma reversão). <strong>Decidido</strong>: AGENTS.md, «verificado pela regra do
+  repo» ao longo de todo o ficheiro, por exemplo § «IaC nativo» (<code>stack_converge</code>) e § «A bateria
+  mede o <code>--help</code>».</li>
+<li><strong>Testa o caminho que a produção usa.</strong> Se a produção passa caminhos relativos, o teste usa
+  caminhos relativos. Um teste pode codificar o bug. <strong>Decidido</strong>: AGENTS.md § «Auditoria
+  sistemática dos 208 subcomandos» (<code>default_project_name</code>).</li>
+<li><strong>Os bugs de concorrência levam uma corrida real.</strong> Usa threads e um sleep explícito dentro da
+  janela crítica. <strong>Convenção (observada)</strong>: <code>delonix-state/src/store.rs:jsonstore_update_concorrente_nao_perde_escritas</code>.</li>
+<li><strong>Prefere propriedades a tempos amostrados.</strong> Quando uma corrida só pode ser amostrada, gera carga
+  e repete. <strong>Decidido</strong>: AGENTS.md § «Um <code>exec</code> logo a seguir ao <code>run -d</code> corria no HOST».</li>
+<li><strong>As regiões geradas não levam contagens voláteis</strong> (linhas, testes, commits). <strong>Decidido</strong>:
+  docstring do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> («Deliberately NOT generated: line counts, test counts, commit
+  counts»). Uma <strong>medição escrita à mão</strong> cita o valor medido juntamente com a data em que foi
+  medido, nunca um total corrente. <strong>Decidido</strong>: AGENTS.md § «A bateria mede o <code>--help</code> de tudo e
+  EXECUTA um quarto» («Cita-se a fracção medida e a data, nunca o total»). Se as contagens podem de
+  todo aparecer na prosa ou em comentários de código <strong>não está decidido</strong> — segue o texto à volta.</li>
+</ul>
+<hr />
+<h2 id="10-comments-and-documentation">10. Comentários e documentação<a class="hanchor" href="#10-comments-and-documentation" aria-label="#">#</a></h2>
+<ul>
+<li><strong>Os comentários explicam o <em>porquê</em>, não o <em>quê</em>.</strong> Escreve um para uma restrição escondida, um
+  contorno de um bug concreto, ou um invariante que o código não torna óbvio. Os comentários que
+  repetem o código são removidos na revisão. <strong>Decidido</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
+<li><strong>Quando uma decisão foi medida, diz o que foi medido.</strong> «Medido: …» vale mais que «deveria». As
+  docs de módulo em <code>exitcode.rs</code> e <code>reconcile.rs</code> são o modelo. <strong>Convenção (observada)</strong>.</li>
+<li><strong>Os doc comments (<code>///</code>, <code>//!</code>) em itens públicos e cabeçalhos de módulo</strong> dizem o que o item
+  promete e porque existe. <strong>Convenção (observada)</strong>: todas as portas em
+  <code>delonix-compute/src/ports.rs</code>, <code>delonix-state/src/store.rs:write_private_temp</code>, <code>exitcode.rs</code>. <strong>Não decidido</strong>:
+  nenhum lint <code>missing_docs</code> está activo.</li>
+<li><strong>Os comentários estão em inglês e não nomeiam nenhum consumidor.</strong> O ratchet de língua e o gate
+  de consumidores percorrem ambos os comentários. <strong>Imposto (gate)</strong>.</li>
+<li><strong>Não acrescentes abstracções, flags de configuração nem tratamento de erros para casos que não
+  podem acontecer.</strong> <strong>Decidido</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
+<li><strong>Quando moves uma fronteira, actualiza os seus registos na mesma mudança</strong>:</li>
+<li>um ADR <strong>antes</strong> do código, para um provider, porta ou daemon novo, uma dependência externa num
+    crate de motor, uma fronteira de privilégio, ou uma mudança ao contrato ou às camadas. Os ADRs
+    aceites nunca são reescritos; um novo substitui-os (<strong>Decidido</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>;
+    <a href="contributing-workflow.html#when-to-write-an-adr">Fluxo de contribuição</a>);</li>
+<li>a secção do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> que descreve a área. Uma secção desactualizada aí engana a próxima
+    pessoa, e <strong>os conflitos no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> resolvem-se mantendo os dois lados</strong> (<strong>Decidido</strong>:
+    AGENTS.md § «Método: um worktree por sessão»);</li>
+<li>os artefactos gerados: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>, a linha de base
+    da CLI, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, e as regiões geradas de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> via
+    <code>python3 scripts/dev_docs.py</code> (<strong>Imposto (gate)</strong>; vê
+    <a href="publishing-docs.html">Publicar a documentação</a>).</li>
+</ul>
+<hr />
+<h2 id="undecided">Por decidir<a class="hanchor" href="#undecided" aria-label="#">#</a></h2>
+<p>Nada no repositório resolve estas questões. Segue o código à volta e menciona a escolha no teu PR:</p>
+<ul>
+<li><strong>Quando é aceitável um <code>#[allow(clippy::…)]</code>.</strong> É usado (<code>too_many_arguments</code>) sem uma política
+  escrita.</li>
+<li><strong>O tipo <code>Result</code> das portas de compute de hoje.</strong> As portas em
+  <code>delonix-compute/src/ports.rs</code> devolvem <code>delonix_runtime_core::Result</code>, por isso os adapters que
+  as implementam (<code>HostWorkload</code>, <code>HostNetwork</code>, …) importam o tipo de resultado partilhado, e esses
+  imports contam para <code>shared_error_imports</code>. A P3 decide os erros por crate. Nenhum documento diz
+  como muda a assinatura de uma porta, e acrescentar um import desses num ficheiro novo falha o
+  ratchet. Se a tua mudança precisar de um, levanta a questão no PR. Não contornes a regex.</li>
+<li><strong>Nomes de crates durante a transição.</strong> O ADR-0040 D2 (ainda Proposto) fixa os nomes alvo, mas um
+  crate totalmente novo que entre antes de o seu contexto existir (por exemplo um segundo provider
+  antes das renomeações <code>delonix-provider-*</code>) não tem regra escrita. Pergunta primeiro na issue.</li>
+<li><strong>Doc comments obrigatórios.</strong> Não há lint <code>missing_docs</code>, só o hábito observado.</li>
+<li><strong>O fitness test para o casamento de nomes de provider</strong> (ADR-0040 D3 regra 3) está proposto mas
+  ainda não implementado.</li>
+</ul>
+<hr />
+<h2 id="review-checklist">Lista de verificação da revisão<a class="hanchor" href="#review-checklist" aria-label="#">#</a></h2>
+<p>Antes de abrires o PR, percorre a lista:</p>
+<ol>
+<li><code>cargo fmt --all --check</code> e <code>cargo clippy --workspace --all-targets --locked -- -D warnings</code>
+   estão limpos. → <a href="#1-the-tooling-that-enforces-style">§1</a></li>
+<li><code>python3 scripts/lang_ratchet.py</code> e <code>python3 scripts/arch_fitness.py</code> passam, e qualquer linha de
+   base que baixaste está neste commit. → <a href="#1-the-tooling-that-enforces-style">§1</a></li>
+<li>Os identificadores, comentários, mensagens <strong>e nomes de testes</strong> novos estão em inglês. O texto ao
+   utilizador passa por <code>po::t</code>/<code>po::tf</code>, com entradas no <code>pt.po</code>. Nada de <code>num</code>. →
+   <a href="#2-language-of-the-code">§2</a>, <a href="#34-test-names">§3.4</a></li>
+<li>O código está no crate e na camada certos, as versões estão só na raiz, a biblioteca não tem
+   <code>println!</code> e não volta a correr o seu próprio binário. → <a href="#4-structure-where-code-goes">§4</a></li>
+<li>As decisões são funções puras com testes unitários, e o I/O fica nas pontas. →
+   <a href="#43-pure-core-io-at-the-edges">§4.3</a></li>
+<li>Os backends novos implementam uma porta, sem casamento de nomes de provider. Os adapters não
+   dependem de adapters. → <a href="#51-ports-and-adapters">§5.1</a></li>
+<li>As falhas de adapter/provider usam um <code>Error</code> do crate que converte em <code>delonix_model::Error</code>. →
+   <a href="#52-errors-per-crate-adr-0040-p3">§5.2</a></li>
+<li>Se mexeste em <code>proto/</code>: o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> passa, com um pedido por RPC, identidade
+   explícita, e um OpenAPI regenerado. → <a href="#54-the-node-contract">§5.4</a></li>
+<li>Nenhum nome de consumidor em lado nenhum de <code>crates/</code>, <code>bins/</code> ou <code>proto/</code>, comentários
+   incluídos. → <a href="#55-the-engine-knows-no-consumer">§5.5</a></li>
+<li>Nada é aceite para depois ser ignorado. Os erros enunciam o facto e depois a correcção, e usam a
+    variante da classe certa. → <a href="#6-error-handling-and-messages">§6</a>, <a href="#38-exit-codes-and-dx_-codes">§3.8</a></li>
+<li>Todo o bloco <code>unsafe</code> tem um comentário <code>// SAFETY:</code>. Não há fork cru num processo
+    multi-thread, os ficheiros temporários usam <code>write_private_temp</code>, e os segredos usam
+    <code>write_atomic_mode</code>. → <a href="#7-unsafe-syscalls-and-processes">§7</a></li>
+<li>As mutações de registos passam por <code>update</code>, e os campos novos de registos têm
+    <code>#[serde(default)]</code>. → <a href="#8-state-and-concurrency">§8</a></li>
+<li>Os testes usam raízes isoladas, o teste de regressão falha com a correcção revertida, e um
+    número medido leva a sua data. → <a href="#9-tests">§9</a></li>
+<li>Mudanças na CLI: todos os pontos de entrada estão ligados, os verbos alinham com o Docker, os
+    cortes não têm aliases, e a linha de base da CLI está actualizada. → <a href="#35-cli-commands-and-flags">§3.5</a></li>
+<li>Kinds e campos de manifesto: uma linha em <code>kinds.rs</code>, campos <code>camelCase</code> com as grafias antigas
+    como aliases, e o schema regenerado. → <a href="#36-kinds-api-groups-and-manifest-fields">§3.6</a></li>
+<li>O ADR, o <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> e a documentação gerada estão actualizados se uma fronteira mudou. →
+    <a href="#10-comments-and-documentation">§10</a></li>
+</ol>
+<nav class="pager"><a href="microvm-setup.html"><span>← Anterior</span>Construir microVMs</a><a class="next" href="contributing-workflow.html"><span>Seguinte →</span>Fluxo de contribuição</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/coding-conventions.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/coding-conventions.md</code></footer>
+</div></main>
+<aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
+<ul>
+<li><a href="#1-the-tooling-that-enforces-style">1. As ferramentas que impõem o estilo</a></li>
+<li><a href="#2-language-of-the-code">2. Língua do código</a></li>
+<li><a href="#3-naming">3. Nomes</a><ul>
+<li><a href="#31-crates-and-directories">3.1 Crates e directórios</a></li>
+<li><a href="#32-modules-and-files">3.2 Módulos e ficheiros</a></li>
+<li><a href="#33-types-traits-functions-constants">3.3 Tipos, traits, funções, constantes</a></li>
+<li><a href="#34-test-names">3.4 Nomes de testes</a></li>
+<li><a href="#35-cli-commands-and-flags">3.5 Comandos e flags da CLI</a></li>
+<li><a href="#36-kinds-api-groups-and-manifest-fields">3.6 Kinds, grupos de API e campos de manifesto</a></li>
+<li><a href="#37-environment-variables">3.7 Variáveis de ambiente</a></li>
+<li><a href="#38-exit-codes-and-dx_-codes">3.8 Códigos de saída e códigos DX_*</a></li>
+</ul>
+</li>
+<li><a href="#4-structure-where-code-goes">4. Estrutura: onde vai o código</a><ul>
+<li><a href="#41-the-layers-and-the-direction">4.1 As camadas e a direcção</a></li>
+<li><a href="#42-my-change-is-x-it-goes-in-y">4.2 «A minha mudança é X → vai para Y»</a></li>
+<li><a href="#43-pure-core-io-at-the-edges">4.3 Núcleo puro, I/O nas pontas</a></li>
+</ul>
+</li>
+<li><a href="#5-internal-api-and-boundaries">5. API interna e fronteiras</a><ul>
+<li><a href="#51-ports-and-adapters">5.1 Portas e adapters</a></li>
+<li><a href="#52-errors-per-crate-adr-0040-p3">5.2 Erros por crate (ADR-0040 P3)</a></li>
+<li><a href="#53-visibility">5.3 Visibilidade</a></li>
+<li><a href="#54-the-node-contract">5.4 O contrato de nó</a></li>
+<li><a href="#55-the-engine-knows-no-consumer">5.5 O motor não conhece nenhum consumidor</a></li>
+</ul>
+</li>
+<li><a href="#6-error-handling-and-messages">6. Tratamento de erros e mensagens</a></li>
+<li><a href="#7-unsafe-syscalls-and-processes">7. unsafe, syscalls e processos</a></li>
+<li><a href="#8-state-and-concurrency">8. Estado e concorrência</a></li>
+<li><a href="#9-tests">9. Testes</a></li>
+<li><a href="#10-comments-and-documentation">10. Comentários e documentação</a></li>
+<li><a href="#undecided">Por decidir</a></li>
+<li><a href="#review-checklist">Lista de verificação da revisão</a></li>
+</ul>
+</div>
+</aside>
+</div>
+<div id="search" hidden><div class="sbox" role="dialog" aria-modal="true" aria-label="Pesquisar">
+<div class="sfield"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="search-input" type="search" placeholder="Pesquisar no manual…" autocomplete="off"><kbd>Esc</kbd></div>
+<ul class="sres"></ul>
+<div class="shelp"><span><kbd>↑</kbd> <kbd>↓</kbd></span><span><kbd>Enter</kbd></span></div></div></div>
+<script>window.HANDBOOK_UI={"copy": "Copiar", "copied": "Copiado", "no_results": "Sem resultados"};</script>
+<script src="search-index.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/rust.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/bash.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/yaml.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/ini.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/dockerfile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/python.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/protobuf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/diff.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/makefile.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/xml.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js"></script>
+<script>
+(function(){
+  const ui = window.HANDBOOK_UI;
+  const root = document.documentElement;
+
+  // Theme: system by default; the toggle cycles light/dark and remembers the choice.
+  function effectiveDark(){ const t = root.getAttribute('data-theme'); return t ? t === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches; }
+  document.querySelectorAll('.themebtn').forEach(function(b){
+    b.addEventListener('click', function(){
+      const next = effectiveDark() ? 'light' : 'dark';
+      root.setAttribute('data-theme', next);
+      try { localStorage.setItem('delonix-handbook-theme', next); } catch (e) {}
+      renderMermaid();
+    });
+  });
+
+  // Mobile navigation drawer.
+  document.querySelectorAll('.menubtn').forEach(function(b){
+    b.addEventListener('click', function(){ document.body.classList.toggle('nav-open'); });
+  });
+  document.querySelectorAll('nav.side a').forEach(function(a){ a.addEventListener('click', function(){ document.body.classList.remove('nav-open'); }); });
+
+  // Copy buttons live in each code block's header; shell blocks drop a leading "$ ".
+  document.querySelectorAll('.code').forEach(function(box){
+    const btn = box.querySelector('.copy'); if (!btn) return;
+    btn.addEventListener('click', function(){
+      let text = box.querySelector('pre code').innerText;
+      if (box.hasAttribute('data-shell')) text = text.split('\n').map(function(l){ return l.replace(/^\$ /, ''); }).join('\n');
+      navigator.clipboard.writeText(text.replace(/\n$/, '')).then(function(){
+        btn.lastChild.textContent = ui.copied; btn.classList.add('done');
+        setTimeout(function(){ btn.lastChild.textContent = ui.copy; btn.classList.remove('done'); }, 1500);
+      });
+    });
+  });
+  if (window.hljs) document.querySelectorAll('.code pre code:not(.nohighlight)').forEach(function(el){ hljs.highlightElement(el); });
+
+  // Mermaid follows the effective theme, and re-renders when it changes.
+  const diagrams = Array.prototype.slice.call(document.querySelectorAll('pre.mermaid'));
+  diagrams.forEach(function(d){ d.setAttribute('data-src', d.textContent); });
+  function renderMermaid(){
+    if (!window.mermaid || !diagrams.length) return;
+    diagrams.forEach(function(d){ d.removeAttribute('data-processed'); d.textContent = d.getAttribute('data-src'); });
+    mermaid.initialize({startOnLoad:false, securityLevel:'strict', theme: effectiveDark() ? 'dark' : 'neutral',
+      fontFamily:getComputedStyle(document.body).fontFamily});
+    mermaid.run({nodes: diagrams});
+  }
+  renderMermaid();
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function(){ if (!root.getAttribute('data-theme')) renderMermaid(); });
+
+  // "On this page": highlight the section being read.
+  const tocLinks = Array.prototype.slice.call(document.querySelectorAll('aside.toc a'));
+  const byId = {}; tocLinks.forEach(function(a){ byId[decodeURIComponent(a.getAttribute('href').slice(1))] = a; });
+  const heads = Array.prototype.slice.call(document.querySelectorAll('.content h2[id], .content h3[id]')).filter(function(h){ return byId[h.id]; });
+  function spy(){
+    let current = heads.length ? heads[0] : null;
+    const line = 120;
+    heads.forEach(function(h){ if (h.getBoundingClientRect().top <= line) current = h; });
+    tocLinks.forEach(function(a){ a.classList.remove('active'); });
+    if (current) byId[current.id].classList.add('active');
+  }
+  if (heads.length){ document.addEventListener('scroll', spy, {passive:true}); spy(); }
+
+  // Search (Ctrl+K / Cmd+K / "/"): a static index of this language, scored in the browser.
+  const modal = document.getElementById('search'), input = modal.querySelector('input'), list = modal.querySelector('.sres');
+  let selected = 0;
+  function norm(s){ return s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''); }
+  const index = (window.HANDBOOK_INDEX || []).map(function(r){ return Object.assign({nh: norm(r.h), np: norm(r.p), nt: norm(r.t)}, r); });
+  function esc(s){ return s.replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function mark(s, terms){ let out = esc(s); terms.forEach(function(t){ if (t.length > 1) out = out.replace(new RegExp('(' + t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'ig'), '<mark>$1</mark>'); }); return out; }
+  function snippet(r, terms){ const i = terms.length ? r.nt.indexOf(terms[0]) : -1; const start = Math.max(0, i - 50); return (start ? '…' : '') + r.t.slice(start, start + 170); }
+  function run(){
+    const terms = norm(input.value).split(/\s+/).filter(Boolean);
+    if (!terms.length){ list.innerHTML = ''; return; }
+    const hits = [];
+    index.forEach(function(r){
+      let score = 0;
+      for (const t of terms){ const s = (r.nh.includes(t) ? 10 : 0) + (r.np.includes(t) ? 3 : 0) + (r.nt.includes(t) ? 1 : 0); if (!s) return; score += s; }
+      hits.push([score, r]);
+    });
+    hits.sort(function(a, b){ return b[0] - a[0]; });
+    selected = 0;
+    list.innerHTML = hits.length ? hits.slice(0, 30).map(function(h, i){
+      const r = h[1];
+      return '<li><a href="' + esc(r.u) + '"' + (i === 0 ? ' class="sel"' : '') + '><span class="sp">' + esc(r.p) + '</span>' +
+        '<span class="sh">' + mark(r.h, terms) + '</span><span class="st">' + mark(snippet(r, terms), terms) + '</span></a></li>';
+    }).join('') : '<li class="sempty">' + esc(ui.no_results) + '</li>';
+  }
+  function open(){ modal.hidden = false; input.value = ''; list.innerHTML = ''; input.focus(); }
+  function close(){ modal.hidden = true; }
+  document.querySelectorAll('.searchbtn').forEach(function(b){ b.addEventListener('click', open); });
+  modal.addEventListener('click', function(e){ if (e.target === modal) close(); });
+  input.addEventListener('input', run);
+  input.addEventListener('keydown', function(e){
+    const links = list.querySelectorAll('a');
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp'){
+      e.preventDefault(); if (!links.length) return;
+      links[selected].classList.remove('sel');
+      selected = (selected + (e.key === 'ArrowDown' ? 1 : links.length - 1)) % links.length;
+      links[selected].classList.add('sel'); links[selected].scrollIntoView({block:'nearest'});
+    } else if (e.key === 'Enter' && links.length){ e.preventDefault(); close(); location.href = links[selected].getAttribute('href'); }
+  });
+  document.addEventListener('keydown', function(e){
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k'){ e.preventDefault(); modal.hidden ? open() : close(); }
+    else if (e.key === 'Escape'){ if (!modal.hidden) close(); document.body.classList.remove('nav-open'); }
+    else if (e.key === '/' && modal.hidden && !/input|textarea|select/i.test(document.activeElement.tagName)){ e.preventDefault(); open(); }
+  });
+  document.querySelectorAll('select.lang').forEach(function(s){ s.addEventListener('change', function(){ location.href = s.value + location.hash; }); });
+})();
+</script>
+</body></html>

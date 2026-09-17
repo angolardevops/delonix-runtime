@@ -12,8 +12,8 @@ file is the short version.
 ## Before you start
 
 - Skim [README.rst](README.rst) for the shape of the project, and
-  [docs/dev/05-architecture.md](docs/dev/05-architecture.md) and
-  [docs/dev/06-crates.md](docs/dev/06-crates.md) for the layers and the crate layout. The engine
+  [docs/dev/architecture.md](docs/dev/architecture.md) and
+  [docs/dev/crates.md](docs/dev/crates.md) for the layers and the crate layout. The engine
   runs containers and microVMs on one node, daemonless and rootless-first, and knows no consumer —
   read «Identidade e fronteira do motor» at the top of [AGENTS.md](AGENTS.md) before proposing a
   change to its boundaries.
@@ -34,23 +34,23 @@ You need the pinned Rust toolchain (`rust-toolchain.toml`) and `protoc` on `PATH
 compiles the CRI protobuf with `tonic-build` (`sudo apt install protobuf-compiler` on
 Debian/Ubuntu). Running containers also needs a Linux host with cgroup v2, unprivileged user
 namespaces, a subuid range and `slirp4netns`/`nftables`/`iproute2`/`uidmap`; see
-[docs/dev/01-environment.md](docs/dev/01-environment.md) for the full list and the host traps
+[docs/dev/environment.md](docs/dev/environment.md) for the full list and the host traps
 (AppArmor on recent Ubuntu, cgroup delegation over SSH).
 
 Always test the binary you built (`./target/debug/delonix`), not a `delonix` installed on your
 `PATH`. Before running anything beyond `--help`, isolate the engine's state by exporting **both**
 `DELONIX_ROOT` and `DELONIX_NET_RUNTIME_DIR` to scratch directories — see
-[docs/dev/02-build-and-test.md](docs/dev/02-build-and-test.md#isolating-the-engines-state).
+[docs/dev/build-and-test.md](docs/dev/build-and-test.md#isolating-the-engines-state).
 
 ## Before opening a PR
 
 CI runs more than build, clippy, fmt and test: a language ratchet, the architecture fitness gate,
 the node contract gate, the version gate, the CLI surface and documentation gates, `cargo-deny` and
 the generated site. Each one, with the command to run it locally, is listed in
-[docs/dev/02-build-and-test.md](docs/dev/02-build-and-test.md#the-gates-ci-runs). Zero clippy
+[docs/dev/build-and-test.md](docs/dev/build-and-test.md#the-gates-ci-runs). Zero clippy
 warnings is enforced, not a suggestion. How to work (one worktree per task, version alignment,
 English-only code, when to write an ADR) is in
-[docs/dev/10-contributing-workflow.md](docs/dev/10-contributing-workflow.md).
+[docs/dev/contributing-workflow.md](docs/dev/contributing-workflow.md).
 
 **If you touch runtime/namespace/cgroup code**, unit tests alone don't prove much — validate live
 against a real container on a Linux host before opening the PR, and say what you tested in the PR
