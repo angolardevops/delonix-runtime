@@ -9,8 +9,8 @@
 //! says so explicitly. Only a synced OSV feed (`scan --update`) gives a
 //! trustworthy answer.
 
+use delonix_model::{Error, Result};
 use delonix_oci::{Image, ImageStore};
-use delonix_runtime_core::{Error, Result};
 use delonix_scanner::{AdvisoryDb, Severity};
 
 use super::output;
@@ -27,7 +27,7 @@ struct Provenance {
     placeholder: bool,
 }
 
-use delonix_runtime_core::now_unix;
+use delonix_node::now_unix;
 
 /// Loads the advisory database: the synced one (`<root>/advisories.json`) takes
 /// precedence; otherwise `$DELONIX_ADVISORIES`; otherwise the embedded placeholder.

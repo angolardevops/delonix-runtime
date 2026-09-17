@@ -19,7 +19,7 @@ use clap::Subcommand;
 use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// `delonix httproute` — inspect/tear down the L7 reverse-proxy of the HTTPRoutes.
 /// (`apply` is done via `stack apply`/`<kind> apply` — this group is operational.)

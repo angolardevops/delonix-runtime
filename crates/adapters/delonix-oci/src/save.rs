@@ -17,7 +17,7 @@
 use crate::cas::strip;
 use crate::image::{Image, ImageStore};
 use crate::registry::build_manifest;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 use std::collections::HashMap;
 use std::path::Path;
 

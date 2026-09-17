@@ -73,7 +73,7 @@ impl WorkloadView {
 /// `cpu.max` period — is done by the same functions the container-start path
 /// uses.
 pub fn expected_limits(
-    c: &delonix_runtime_core::Container,
+    c: &delonix_compute::Container,
 ) -> Vec<(&'static str, String, &'static str, String)> {
     let mut out = Vec::new();
     if !c.memory_max.is_empty() && c.memory_max != "0" {
@@ -111,7 +111,7 @@ pub fn expected_limits(
 }
 
 /// Reads one workload's cgroup and pairs every request with what is there.
-pub fn view(c: &delonix_runtime_core::Container) -> WorkloadView {
+pub fn view(c: &delonix_compute::Container) -> WorkloadView {
     let cgroup = crate::live_cgroup(c);
     let limits = expected_limits(c)
         .into_iter()
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn only_what_the_user_actually_asked_for_is_checked() {
-        let mut c = delonix_runtime_core::Container::new(
+        let mut c = delonix_compute::Container::new(
             "id".into(),
             "db".into(),
             "img".into(),
@@ -200,7 +200,7 @@ mod tests {
 
     #[test]
     fn the_expected_value_comes_from_the_engines_own_converters() {
-        let mut c = delonix_runtime_core::Container::new(
+        let mut c = delonix_compute::Container::new(
             "id".into(),
             "db".into(),
             "img".into(),

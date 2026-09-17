@@ -9,7 +9,7 @@
 //! The `-v` syntax follows Docker: `name:/target` (volume) or
 //! `/host/path:/target` (bind), with an optional `:ro` for read-only.
 
-use delonix_runtime_core::Mount;
+use delonix_compute::Mount;
 use delonix_state::write_atomic;
 
 mod error;
@@ -31,7 +31,7 @@ impl delonix_compute::ports::StorageProvider for HostVolumes {
         &self,
         volumes: &[String],
         namespace: &str,
-    ) -> delonix_runtime_core::Result<Vec<Mount>> {
+    ) -> delonix_model::Result<Vec<Mount>> {
         // No store is opened (or created) for a container without volumes.
         if volumes.is_empty() {
             return Ok(Vec::new());
@@ -1208,7 +1208,7 @@ fn quota_state_of(used: u64, quota_bytes: Option<u64>, alert_pct: Option<u8>) ->
     }
 }
 
-use delonix_runtime_core::now_unix;
+use delonix_node::now_unix;
 
 /// Safe snapshot name: `[A-Za-z0-9._-]+`, no path traversal.
 pub fn safe_snapshot_name(s: &str) -> bool {

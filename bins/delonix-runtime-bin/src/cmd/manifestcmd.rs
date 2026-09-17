@@ -9,7 +9,7 @@
 //! They route to the existing implementations. A second validator beside the
 //! first is how the two start disagreeing about what a valid manifest is.
 
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 use std::path::PathBuf;
 
 #[derive(clap::Subcommand)]

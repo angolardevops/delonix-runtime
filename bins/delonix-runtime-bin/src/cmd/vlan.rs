@@ -34,7 +34,7 @@
 //! running. `ip link add` is a one-shot state change on the host, the same shape
 //! as `vm bridge`'s veth, and `--rm` takes it back out.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 use super::output;
 

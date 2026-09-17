@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 fn run() -> Result<(), String> {
-    delonix_runtime_core::dispatch::check_version("delonix-mgmt", env!("CARGO_PKG_VERSION"))?;
+    delonix_node::dispatch::check_version("delonix-mgmt", env!("CARGO_PKG_VERSION"))?;
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut addr = None;
     let mut it = args.iter();

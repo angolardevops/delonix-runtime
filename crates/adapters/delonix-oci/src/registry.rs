@@ -8,7 +8,7 @@
 
 use crate::cas::sha256_hex;
 use crate::image::{now_unix, Image, ImageConfig, ImageStore};
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 // Canonical OCI types (crate `oci-spec`, feature `image`) — replace the hand-rolled
 // structs of the OCI/distribution schema that used to be here (C3-IMG).
 use oci_spec::image::{
@@ -1991,7 +1991,7 @@ mod tests {
         })
     }
 
-    fn pull_with_token_answer(answer: &'static str) -> delonix_runtime_core::Error {
+    fn pull_with_token_answer(answer: &'static str) -> delonix_model::Error {
         let (tx, rx) = std::sync::mpsc::channel();
         let handle = serve_one(tx, answer);
         let port = rx.recv().unwrap();

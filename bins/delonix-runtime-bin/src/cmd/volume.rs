@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_volume::{parse_size_bytes, VolumeStore};
 use serde::{Deserialize, Serialize};
 
@@ -758,7 +758,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 match &p.truenas {
                     Some(t) => Some(super::provision::run_truenas(t)?),
                     None => {
-                        return Err(delonix_runtime_core::Error::Invalid(
+                        return Err(delonix_model::Error::Invalid(
                             super::po::t("spec.provision needs a target block (today: `truenas:`)")
                                 .into(),
                         ))
@@ -828,7 +828,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             // ends up mounted somewhere nothing was provisioned.
             (Some(p), Some((kind, block))) => {
                 if block.server != p.server || block.share != p.share {
-                    return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                    return Err(delonix_model::Error::Invalid(super::po::tf(
                         "volume '{name}': spec.{kind} points at {given}, but spec.provision made {made} — remove the server/share from the block and let it be derived, or provision what you are mounting",
                         &[
                             ("name", name),
@@ -910,7 +910,7 @@ fn create_volume(
     // volume, and the quota it asked for is silently absent forever.
     let quota_bytes = match quota {
         Some(q) => Some(parse_size_bytes(&q).ok_or_else(|| {
-            delonix_runtime_core::Error::Invalid(super::po::tf("invalid quota: {q}", &[("q", &q)]))
+            delonix_model::Error::Invalid(super::po::tf("invalid quota: {q}", &[("q", &q)]))
         })?),
         None => None,
     };
@@ -924,7 +924,7 @@ fn create_volume(
         store.set_quota(name, quota_bytes, alert_pct, false)?;
     }
     if !existed {
-        delonix_runtime_core::events::emit(
+        delonix_node::events::emit(
             &state_root(),
             "volume",
             "create",
@@ -2026,7 +2026,7 @@ pub(crate) fn cmd_rm_with(
             });
         }
     }
-    delonix_runtime_core::events::emit(
+    delonix_node::events::emit(
         &state_root(),
         "volume",
         "remove",

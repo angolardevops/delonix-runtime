@@ -1,6 +1,5 @@
 //! The records the engine persists that are plain data: a container's status and
-//! its firewall rules (ADR-0040 D2.1, foundation). Pure — no I/O. They came out of
-//! `delonix-runtime-core`, which re-exports them under their old paths.
+//! its firewall rules (ADR-0040 D2.1, foundation). Pure — no I/O.
 
 use serde::{Deserialize, Serialize};
 

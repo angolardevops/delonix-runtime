@@ -5,7 +5,7 @@
 //! image is pulled, an address is leased or a process exists.
 
 use crate::RunOpts;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// The custom network a `--net` value names: `host` and `none` are the two
 /// built-in modes, anything else is a network. PURE.

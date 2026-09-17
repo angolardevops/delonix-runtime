@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use clap::Subcommand;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
@@ -4016,7 +4016,7 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
 
-pub(crate) use delonix_runtime_core::now_unix;
+pub(crate) use delonix_node::now_unix;
 
 // ---------------------------------------------------------------------------
 // Resolution of the `delonix-cri` binary to install in the guest

@@ -9,7 +9,7 @@
 //! large by nature, so we silence `result_large_err` across the whole crate.
 #![allow(clippy::result_large_err)]
 
-use delonix_runtime_core::peer_cred::peer_uid;
+use delonix_node::peer_cred::peer_uid;
 use std::path::PathBuf;
 use tokio_stream::StreamExt as _;
 use tonic::{Request, Response, Status};
@@ -242,7 +242,7 @@ fn blob_path(_img: &delonix_oci::Image, hex: &str) -> PathBuf {
 /// Starts the CRI server on a **unix socket** (`addr` = path, or
 /// `unix:///path`). Blocks the thread (creates the Tokio runtime).
 /// `GET /metrics` — body in OpenMetrics format (what `prometheus-client`
-/// produces), from the shared registry in `delonix-runtime-core`.
+/// produces), from the shared registry in `delonix-telemetry`.
 async fn metrics_handler() -> impl axum::response::IntoResponse {
     (
         [(
@@ -259,19 +259,19 @@ pub fn serve_blocking(
     base: PathBuf,
     addr: &str,
     ceiling: CapCeiling,
-) -> Result<(), delonix_runtime_core::Error> {
+) -> Result<(), delonix_model::Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
-        .map_err(|e| delonix_runtime_core::Error::Runtime {
+        .map_err(|e| delonix_model::Error::Runtime {
             context: "tokio",
             message: e.to_string(),
         })?;
     rt.block_on(async move {
         let _ = std::fs::remove_file(&path); // clean up an old socket
         let uds = tokio::net::UnixListener::bind(&path).map_err(|e| {
-            delonix_runtime_core::Error::Runtime {
+            delonix_model::Error::Runtime {
                 context: "bind",
                 message: e.to_string(),
             }
@@ -313,14 +313,14 @@ pub fn serve_blocking(
         // loopback port. The RPCs return URLs pointing here.
         let stream_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
-            .map_err(|e| delonix_runtime_core::Error::Runtime {
+            .map_err(|e| delonix_model::Error::Runtime {
                 context: "bind-stream",
                 message: e.to_string(),
             })?;
         let stream_port = stream_listener
             .local_addr()
             .map(|a| a.port())
-            .map_err(|e| delonix_runtime_core::Error::Runtime {
+            .map_err(|e| delonix_model::Error::Runtime {
                 context: "stream-addr",
                 message: e.to_string(),
             })?;
@@ -370,7 +370,7 @@ pub fn serve_blocking(
             .add_service(ImageServiceServer::new(img))
             .serve_with_incoming(incoming)
             .await
-            .map_err(|e| delonix_runtime_core::Error::Runtime {
+            .map_err(|e| delonix_model::Error::Runtime {
                 context: "serve",
                 message: e.to_string(),
             })

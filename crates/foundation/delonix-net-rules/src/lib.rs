@@ -29,12 +29,12 @@
 //! no que elas chamam):
 //!
 //!   `alloc_ip_in`/`alloc_ip`   delegam no `ipam::lookup`, que LÊ o registo
-//!   `parse_net_rate`           devolve o `Error` do `delonix-runtime-core`
+//!   `parse_net_rate`           devolve o `Error` do `delonix-model`
 //!
 //! O primeiro par é mecanismo a sério — atribuir um endereço exige ver quais já
 //! estão atribuídos, e isso é estado partilhado, não aritmética. Esse pertence à
 //! API. O `parse_net_rate` é puro, e só espera por um tipo de erro que este
-//! crate possa devolver sem depender do runtime-core.
+//! crate possa devolver sem depender do delonix-model.
 
 /// Parses an overlay peer entry: `<node_ip>` (flat VXLAN) OR
 /// `<node_ip>=<wg_pubkey>=<wg_ip>` (encrypted). Returns (node_ip, Option<(pubkey, wg_ip)>).

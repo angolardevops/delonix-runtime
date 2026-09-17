@@ -5,7 +5,7 @@
 //! asks the port, and the composition root registers this implementation.
 
 use delonix_compute::ports::VmNetwork;
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 
 /// The host's rootless infra.
 pub struct HostVmNetwork;

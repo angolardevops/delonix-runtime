@@ -19,7 +19,7 @@
 use super::kinds::{self, KindFacts};
 use super::output::OutputFormat;
 use super::resource::resolve_kind;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 
 /// The Kinds each verb can route today, as DATA — so the gate below can ask
 /// the question without running the verb. The first version of that gate called

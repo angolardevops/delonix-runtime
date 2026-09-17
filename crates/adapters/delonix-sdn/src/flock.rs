@@ -14,7 +14,7 @@
 //! isso `acquire` devolve `Option` e quem chama tem de RECUSAR a operação —
 //! nunca continuar sem ela.
 
-use delonix_runtime_core::Error;
+use delonix_model::Error;
 use std::path::Path;
 
 /// Fechadura exclusiva viva enquanto o valor existir. Larga no `Drop`.

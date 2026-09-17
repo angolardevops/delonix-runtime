@@ -24,7 +24,7 @@
 //! matters: a file that will not parse means somebody's intent is UNKNOWN, and
 //! running anyway is silent degradation. No file means no ceiling.
 
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::admission::Workload;

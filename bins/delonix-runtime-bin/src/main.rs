@@ -14,7 +14,7 @@
 mod cmd;
 
 use clap::{Parser, Subcommand, ValueEnum};
-use delonix_runtime_core::Result;
+use delonix_model::Result;
 
 /// Shells supported by `delonix completion`.
 #[derive(Clone, Copy, ValueEnum)]

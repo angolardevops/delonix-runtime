@@ -9,7 +9,8 @@ license.workspace = true
 # dependency it grows is supply-chain surface on the highest-privilege path of a
 # container runtime — see ADR-0026, "Consequences".
 [dependencies]
-delonix-runtime-core = { workspace = true }
+delonix-node = { workspace = true }
+delonix-model = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 

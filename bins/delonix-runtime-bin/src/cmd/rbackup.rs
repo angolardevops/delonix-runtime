@@ -61,7 +61,7 @@
 use super::backup::{safe_rel, timestamp};
 use super::po;
 use super::util::state_root;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use std::path::{Path, PathBuf};
 
 /// The resource kinds a backup can name.
@@ -429,8 +429,8 @@ impl Drop for Scratch {
 
 /// Reads a VM record. `delonix_vm::load_vm` is private, and the store is the
 /// same one `cmd/vm.rs` opens for exactly this.
-fn load_vm(root: &Path, name: &str) -> Result<delonix_runtime_core::Vm> {
-    let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+fn load_vm(root: &Path, name: &str) -> Result<delonix_compute::Vm> {
+    let st: delonix_state::JsonStore<delonix_compute::Vm> =
         delonix_state::JsonStore::open(root.join("vms"))?;
     st.load(name).map_err(|e| match e.into_root() {
         Error::NotFound(_) => Error::VmNotFound(name.to_string()),
@@ -438,8 +438,8 @@ fn load_vm(root: &Path, name: &str) -> Result<delonix_runtime_core::Vm> {
     })
 }
 
-fn save_vm(root: &Path, vm: &delonix_runtime_core::Vm) -> Result<()> {
-    let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+fn save_vm(root: &Path, vm: &delonix_compute::Vm) -> Result<()> {
+    let st: delonix_state::JsonStore<delonix_compute::Vm> =
         delonix_state::JsonStore::open(root.join("vms"))?;
     Ok(st.save(&vm.name, vm)?)
 }
@@ -473,7 +473,7 @@ fn hostname() -> String {
 /// A container the operator had ALREADY paused is left paused: thawing it would
 /// be this command deciding to resume a workload it was only asked to archive.
 struct Freeze {
-    thaw: Vec<delonix_runtime_core::Container>,
+    thaw: Vec<delonix_compute::Container>,
 }
 
 impl Freeze {
@@ -483,12 +483,12 @@ impl Freeze {
     /// has that state in RAM and the archive still will not have it — the only
     /// honest way to get it is to let the application shut down and write it.
     fn stop(
-        containers: &[delonix_runtime_core::Container],
+        containers: &[delonix_compute::Container],
         store: &delonix_state::Store,
     ) -> Result<Stopped> {
         let mut restart = Vec::new();
         for c in containers {
-            if !matches!(c.status, delonix_runtime_core::Status::Running) {
+            if !matches!(c.status, delonix_model::records::Status::Running) {
                 continue;
             }
             super::container::cmd_stop(store, &c.id, 10)?;
@@ -497,10 +497,10 @@ impl Freeze {
         Ok(Stopped { restart })
     }
 
-    fn hold(containers: &[delonix_runtime_core::Container]) -> Self {
+    fn hold(containers: &[delonix_compute::Container]) -> Self {
         let mut thaw = Vec::new();
         for c in containers {
-            if !matches!(c.status, delonix_runtime_core::Status::Running) {
+            if !matches!(c.status, delonix_model::records::Status::Running) {
                 continue; // stopped: nothing writes, nothing to freeze
             }
             if delonix_linux::is_frozen(c) {
@@ -619,7 +619,7 @@ impl Drop for Stopped {
 /// directory matches nothing and is deliberately left out: it is not this
 /// engine's data to back up, and copying somebody's `/home` into an archive
 /// because they bind-mounted it is a surprise, not a service.
-fn volumes_of(root: &Path, mounts: &[delonix_runtime_core::Mount]) -> Vec<(String, String)> {
+fn volumes_of(root: &Path, mounts: &[delonix_compute::Mount]) -> Vec<(String, String)> {
     let store = match delonix_volume::VolumeStore::open(root) {
         Ok(s) => s,
         Err(_) => return Vec::new(),
@@ -639,7 +639,7 @@ fn volumes_of(root: &Path, mounts: &[delonix_runtime_core::Mount]) -> Vec<(Strin
 /// Packs one container's record and volume data into `out`.
 fn write_container_archive(
     root: &Path,
-    c: &delonix_runtime_core::Container,
+    c: &delonix_compute::Container,
     out: &Path,
     tmp: &Path,
     stop: bool,
@@ -709,7 +709,7 @@ fn to_json<T: serde::Serialize>(v: &T) -> Result<Vec<u8>> {
 /// content-addressed somewhere else.
 fn write_vm_archive(
     root: &Path,
-    vm: &delonix_runtime_core::Vm,
+    vm: &delonix_compute::Vm,
     out: &Path,
     tmp: &Path,
     quiesce: bool,
@@ -728,7 +728,7 @@ fn write_vm_archive(
     // stopped to be backed up is a VM nobody backs up — the copy goes through
     // libvirt's external-snapshot dance, which leaves the guest running and its
     // PID unchanged. See `delonix_vm::backup_disk_live`.
-    let running = matches!(vm.status, delonix_runtime_core::Status::Running);
+    let running = matches!(vm.status, delonix_model::records::Status::Running);
     let staged = tmp.join("overlay.qcow2");
     let mut _restart_vm = None;
     let disk: &Path = if running && stop {
@@ -1584,9 +1584,9 @@ fn restore_from(path: &Path, meta: &Meta, root: &Path, force: bool) -> Result<()
 }
 
 fn restore_vm(unpacked: &Path, meta: &Meta, root: &Path) -> Result<()> {
-    let rec: delonix_runtime_core::Vm = read_json(&unpacked.join("config/vm.json"))?;
+    let rec: delonix_compute::Vm = read_json(&unpacked.join("config/vm.json"))?;
     if let Ok(live) = load_vm(root, &rec.name) {
-        if matches!(live.status, delonix_runtime_core::Status::Running) {
+        if matches!(live.status, delonix_model::records::Status::Running) {
             return Err(Error::Invalid(po::tf(
                 "restore: VM '{name}' is running — stop it first (`delonix vm stop {name}`)",
                 &[("name", &rec.name)],
@@ -1625,7 +1625,7 @@ fn restore_containers(unpacked: &Path, meta: &Meta, root: &Path, force: bool) ->
 
     // Every record in the archive: one file for a container, a directory for a
     // pod or a stack.
-    let mut records: Vec<delonix_runtime_core::Container> = Vec::new();
+    let mut records: Vec<delonix_compute::Container> = Vec::new();
     let single = unpacked.join("config/container.json");
     if single.is_file() {
         records.push(read_json(&single)?);
@@ -1654,7 +1654,7 @@ fn restore_containers(unpacked: &Path, meta: &Meta, root: &Path, force: bool) ->
     let mut was_running = Vec::new();
     for r in &records {
         if let Ok(live) = super::util::find(&store, &r.name) {
-            if matches!(live.status, delonix_runtime_core::Status::Running) {
+            if matches!(live.status, delonix_model::records::Status::Running) {
                 if !force {
                     return Err(Error::Invalid(po::tf(
                         "restore: '{name}' is running — stop it first, or pass --force to have \
@@ -1712,7 +1712,7 @@ fn restore_containers(unpacked: &Path, meta: &Meta, root: &Path, force: bool) ->
                 let img = super::util::resolve_or_pull(&images, &r.image)?;
                 images.prepare_container_rootfs(&img, &r.id)?;
                 let mut rec = r.clone();
-                rec.status = delonix_runtime_core::Status::Stopped;
+                rec.status = delonix_model::records::Status::Stopped;
                 rec.pid = None;
                 store.save(&rec)?;
                 println!(

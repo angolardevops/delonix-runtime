@@ -6,7 +6,7 @@ use std::process::Command;
 
 use clap::Subcommand;
 use clap_complete::engine::ArgValueCandidates;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use delonix_vm::VmConfig;
 use delonix_volume::VolumeStore;
 use serde::{Deserialize, Serialize};
@@ -1191,7 +1191,7 @@ fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
     if stopped {
         let doomed: Vec<String> = delonix_vm::list(base)?
             .into_iter()
-            .filter(|vm| !matches!(vm.status, delonix_runtime_core::Status::Running))
+            .filter(|vm| !matches!(vm.status, delonix_model::records::Status::Running))
             .map(|vm| vm.name)
             .collect();
         if !doomed.is_empty() {
@@ -1245,7 +1245,7 @@ pub(crate) fn stamp(
     stack: &str,
     fields: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
-    let st: delonix_state::JsonStore<delonix_runtime_core::Vm> =
+    let st: delonix_state::JsonStore<delonix_compute::Vm> =
         delonix_state::JsonStore::open(state_root().join("vms"))?;
     let encoded = super::reconcile::encode_last_applied(fields);
     st.update(name, |vm| {
@@ -2033,7 +2033,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             let output = super::config::resolve_output(&base, output);
             // One filter, applied once, before either renderer sees a row —
             // table and JSON cannot disagree about what `--namespace` means.
-            let filter = |vms: Vec<delonix_runtime_core::Vm>| -> Vec<delonix_runtime_core::Vm> {
+            let filter = |vms: Vec<delonix_compute::Vm>| -> Vec<delonix_compute::Vm> {
                 vms.into_iter()
                     .filter(|vm| match namespace.as_deref() {
                         None => true,
@@ -2050,8 +2050,8 @@ pub fn run(action: VmCmd) -> Result<()> {
                     .filter(|vm| {
                         all || matches!(
                             vm.status,
-                            delonix_runtime_core::Status::Running
-                                | delonix_runtime_core::Status::Paused
+                            delonix_model::records::Status::Running
+                                | delonix_model::records::Status::Paused
                         )
                     })
                     .collect()
@@ -2441,8 +2441,8 @@ fn fmt_vm_image(disk: &str) -> String {
         .unwrap_or_else(|| disk.to_string())
 }
 
-fn fmt_vm_status(status: &delonix_runtime_core::Status) -> String {
-    use delonix_runtime_core::Status as S;
+fn fmt_vm_status(status: &delonix_model::records::Status) -> String {
+    use delonix_model::records::Status as S;
     match status {
         S::Created => "Created".to_string(),
         S::Running => "Running".to_string(),
@@ -2504,7 +2504,7 @@ pub(crate) fn workload_describe(name: &str) -> Result<()> {
 }
 
 /// UPTIME column: "Up X" since the CURRENT boot (`started_unix`, distinct
-/// from `created_unix` — see the field doc in `delonix-runtime-core`), or
+/// from `created_unix` — see the field doc on `Vm` in `delonix-compute`), or
 /// "-" for a stopped VM / an old record predating this field.
 fn fmt_vm_uptime(started_unix: Option<u64>) -> String {
     match started_unix {
@@ -2878,7 +2878,7 @@ fn cmd_migrate(
     remove_source: bool,
 ) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
-    if vm.status == delonix_runtime_core::Status::Running {
+    if vm.status == delonix_model::records::Status::Running {
         eprintln!(
             "{}",
             super::po::tf(
@@ -2967,7 +2967,7 @@ fn migrate_transfer_and_create(
     backend: Option<&str>,
     vcpus: Option<u32>,
     memory: Option<&str>,
-    vm: &delonix_runtime_core::Vm,
+    vm: &delonix_compute::Vm,
 ) -> Result<()> {
     let target = SshTarget {
         host: host.to_string(),
@@ -3107,7 +3107,7 @@ const GUEST_SSH_USER: &str = "delonix";
 /// account that does not exist, which is indistinguishable from a wrong
 /// password. Reported exactly that way against a Proxmox VE guest: three
 /// `Permission denied` in a row, for a user the image never had.
-fn default_ssh_user(vm: &delonix_runtime_core::Vm) -> &'static str {
+fn default_ssh_user(vm: &delonix_compute::Vm) -> &'static str {
     match super::vmimage::image_of_disk(&vm.disk).and_then(|i| i.cloud_init) {
         Some(false) => "root",
         _ => GUEST_SSH_USER,
@@ -3169,7 +3169,7 @@ fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool, ssh_user: Op
 /// local tty (raw mode); libvirt: delegates to `virsh console` (which does it).
 fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Result<()> {
     let vm = delonix_vm::status(base, name)?;
-    if !matches!(vm.status, delonix_runtime_core::Status::Running) {
+    if !matches!(vm.status, delonix_model::records::Status::Running) {
         return Err(Error::Invalid(super::po::tf(
             "VM '{name}' is not running — start it first",
             &[("name", name)],
@@ -3506,7 +3506,7 @@ fn file_size(path: &str) -> Option<u64> {
     std::fs::metadata(path).ok().map(|m| m.len())
 }
 
-fn describe_one(vm: &delonix_runtime_core::Vm) {
+fn describe_one(vm: &delonix_compute::Vm) {
     let mut d = output::Describe::new();
     d.field("Name", &vm.name);
     d.field("Status", fmt_vm_status(&vm.status));
@@ -3876,7 +3876,7 @@ mod tests {
         parse_ip_gateways, parse_ss_binds, resolve_vm_defaults, unconverged_fields_condition,
         vm_cluster_member, vm_role, ManifestDoc, VmSpec, RECONCILED_VM_FIELDS,
     };
-    use delonix_runtime_core::Status;
+    use delonix_model::records::Status;
 
     fn image_with_defaults(
         vcpus: Option<u32>,

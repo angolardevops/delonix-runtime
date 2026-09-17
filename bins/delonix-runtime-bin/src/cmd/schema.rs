@@ -26,7 +26,7 @@
 //! than discovered.
 
 use clap::Subcommand;
-use delonix_runtime_core::{Error, Result};
+use delonix_model::{Error, Result};
 use schemars::generate::SchemaSettings;
 
 use super::kinds as k;

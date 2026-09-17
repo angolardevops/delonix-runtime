@@ -176,13 +176,13 @@ pub(crate) struct FeaturesArgs {
     pub output: super::output::OutputFormat,
 }
 
-pub(crate) fn run(mut args: FeaturesArgs) -> delonix_runtime_core::Result<()> {
+pub(crate) fn run(mut args: FeaturesArgs) -> delonix_model::Result<()> {
     args.output = super::config::resolve_output(&super::util::state_root(), args.output);
     let min = match &args.min {
         Some(s) => match Level::parse(s) {
             Some(l) => Some(l),
             None => {
-                return Err(delonix_runtime_core::Error::Invalid(super::po::tf(
+                return Err(delonix_model::Error::Invalid(super::po::tf(
                     "--min '{value}': expected experimental, preview, stable, production-ready or certified",
                     &[("value", s)],
                 )))

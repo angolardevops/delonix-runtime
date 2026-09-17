@@ -4,9 +4,10 @@
 
 use std::path::{Path, PathBuf};
 
+use delonix_compute::Container;
 use delonix_linux::{self as runtime};
+use delonix_model::{Error, Result};
 use delonix_oci::{Image, ImageStore};
-use delonix_runtime_core::{Container, Error, Result};
 use delonix_state::Store;
 
 /// The runtime's state root: `$DELONIX_ROOT` or the `ImageStore` default.

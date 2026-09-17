@@ -41,8 +41,8 @@
 //!   that may not be configured at all, and auto-detection is not a place to
 //!   make HTTP requests.
 
-use delonix_runtime_core::Vm;
-use delonix_runtime_core::{Error, Result};
+use delonix_compute::Vm;
+use delonix_model::{Error, Result};
 // `mem_mib` comes from the engine and is NOT re-implemented here. The copy that
 // used to live in this file did not know the k8s `Gi`/`Mi` suffix the engine
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
@@ -780,7 +780,7 @@ pub fn validate_target_url(url: &str) -> Result<()> {
 ///
 /// Matched on the rendered message because that is where `send` puts the
 /// status, and the alternative — a typed status on `Error` — would mean a new
-/// variant in `delonix-runtime-core` for one caller. `401` on its own would be
+/// variant in the shared `Error` of `delonix-model` for one caller. `401` on its own would be
 /// too loose (a body can contain any number); the prefix `send` writes is not.
 fn is_unauthorized(e: &Error) -> bool {
     e.to_string().contains("returned HTTP 401")

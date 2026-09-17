@@ -9,8 +9,8 @@
 
 use clap::Subcommand;
 use delonix_linux::{self as runtime};
+use delonix_model::Result;
 use delonix_oci::ImageStore;
-use delonix_runtime_core::Result;
 use delonix_state::Store;
 
 use super::util::open_stores;
@@ -241,7 +241,7 @@ fn vm_unit(name: &str, rp: &str, root: &str, exe: &str, wanted_by: &str) -> Stri
 /// the legacy fallback — a member with no index sorts last and the name decides,
 /// which for those pods is the answer this function always gave.
 fn pod_anchors(
-    containers: &[delonix_runtime_core::Container],
+    containers: &[delonix_compute::Container],
 ) -> std::collections::BTreeMap<String, String> {
     let mut first: std::collections::BTreeMap<String, (u32, String)> = Default::default();
     for c in containers {
@@ -311,7 +311,7 @@ fn enable(
     // VM podem ter o mesmo nome — são stores diferentes — e dois units com o
     // mesmo ficheiro seria um a apagar o outro em silêncio.
     for vm in delonix_vm::list(&std::path::PathBuf::from(root)).unwrap_or_default() {
-        let alive = vm.status == delonix_runtime_core::Status::Running;
+        let alive = vm.status == delonix_model::records::Status::Running;
         if !alive && !wants_to_be_up(vm.restart_policy.as_deref()) {
             continue;
         }
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn os_membros_de_um_pod_arrancam_atras_do_primeiro() {
         let c = |nome: &str, pod: Option<&str>| {
-            let mut c = delonix_runtime_core::Container::new(
+            let mut c = delonix_compute::Container::new(
                 nome.into(),
                 nome.into(),
                 "alpine".into(),
@@ -545,7 +545,7 @@ mod tests {
     #[test]
     fn the_anchor_is_manifest_member_zero_not_the_smallest_name() {
         let member = |name: &str, pod: &str, idx: usize| {
-            let mut c = delonix_runtime_core::Container::new(
+            let mut c = delonix_compute::Container::new(
                 name.into(),
                 name.into(),
                 "alpine".into(),
