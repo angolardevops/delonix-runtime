@@ -11354,3 +11354,131 @@ msgstr "A leitura do directório de módulos falhou: uma permissão, um caminho 
 msgid "Check the path in the message is readable by this user."
 msgstr "Confirma que o caminho na mensagem é legível por este utilizador."
 
+
+# dicionário: entradas do volume (ADR-0043)
+msgid "invalid volume name"
+msgstr "nome de volume inválido"
+
+msgid "A volume name may only use letters, digits, dot, dash and underscore, and cannot start with a dot."
+msgstr "O nome de um volume só pode ter letras, dígitos, ponto, hífen e sublinhado, e não pode começar por ponto."
+
+msgid "Pick a name made of [A-Za-z0-9._-] that does not start with a dot."
+msgstr "Escolhe um nome feito de [A-Za-z0-9._-] que não comece por ponto."
+
+msgid "network volume without a device"
+msgstr "volume de rede sem dispositivo"
+
+msgid "An nfs, cifs or webdav volume was asked for without the share to mount."
+msgstr "Foi pedido um volume nfs, cifs ou webdav sem a partilha a montar."
+
+msgid "Pass the share: --opt server=<host> --opt share=<path>."
+msgstr "Indica a partilha: --opt server=<host> --opt share=<caminho>."
+
+msgid "network volume record without a device"
+msgstr "registo de volume de rede sem dispositivo"
+
+msgid "A network volume is registered but its record lost the device to mount."
+msgstr "Um volume de rede está registado mas o registo perdeu o dispositivo a montar."
+
+msgid "Recreate the volume with its server and share."
+msgstr "Recria o volume com o seu servidor e partilha."
+
+msgid "invalid snapshot name"
+msgstr "nome de snapshot inválido"
+
+msgid "A snapshot name may only use letters, digits, dot, dash and underscore, with no slash or double dot."
+msgstr "O nome de um snapshot só pode ter letras, dígitos, ponto, hífen e sublinhado, sem barra nem ponto duplo."
+
+msgid "Pick a name made of [A-Za-z0-9._-]."
+msgstr "Escolhe um nome feito de [A-Za-z0-9._-]."
+
+msgid "hard quota on a volume with data"
+msgstr "quota rígida num volume com dados"
+
+msgid "A hard quota (loopback) can only be set on an empty volume: it would hide the data already there."
+msgstr "Uma quota rígida (loopback) só pode ser posta num volume vazio: esconderia os dados que já lá estão."
+
+msgid "Create the volume with --quota, or empty it first."
+msgstr "Cria o volume com --quota, ou esvazia-o primeiro."
+
+msgid "quota below current usage"
+msgstr "quota abaixo da utilização actual"
+
+msgid "The new quota is smaller than what the volume already holds."
+msgstr "A nova quota é menor do que o que o volume já guarda."
+
+msgid "Free space in the volume first, or ask for a larger quota."
+msgstr "Liberta espaço no volume primeiro, ou pede uma quota maior."
+
+msgid "volume in use"
+msgstr "volume em uso"
+
+msgid "Shrinking a quota needs the volume unmounted, and a container is using it."
+msgstr "Reduzir uma quota exige o volume desmontado, e há um container a usá-lo."
+
+msgid "Stop the containers that mount it, then change the quota."
+msgstr "Pára os containers que o montam e depois muda a quota."
+
+msgid "ambiguous volume name"
+msgstr "nome de volume ambíguo"
+
+msgid "The name is both a volume in the workload's namespace and a global volume."
+msgstr "O nome é ao mesmo tempo um volume no namespace do workload e um volume global."
+
+msgid "Rename one of the two."
+msgstr "Muda o nome de um dos dois."
+
+msgid "invalid volume spec"
+msgstr "especificação de volume inválida"
+
+msgid "A -v value is not source:/target[:options]."
+msgstr "Um valor de -v não tem a forma origem:/destino[:opções]."
+
+msgid "Write it as source:/target, optionally with :ro."
+msgstr "Escreve-o como origem:/destino, opcionalmente com :ro."
+
+msgid "unsupported bind option"
+msgstr "opção de bind não suportada"
+
+msgid "The third field of -v names an option this engine does not implement (SELinux :z/:Z, :U)."
+msgstr "O terceiro campo de -v nomeia uma opção que este motor não implementa (SELinux :z/:Z, :U)."
+
+msgid "Use :ro, :rw or a propagation option (:rprivate, :rslave, :rshared)."
+msgstr "Usa :ro, :rw ou uma opção de propagação (:rprivate, :rslave, :rshared)."
+
+msgid "mount target is not absolute"
+msgstr "o destino da montagem não é absoluto"
+
+msgid "The path inside the container must start with a slash."
+msgstr "O caminho dentro do container tem de começar por barra."
+
+msgid "Write the target as an absolute path, like /data."
+msgstr "Escreve o destino como caminho absoluto, por exemplo /data."
+
+msgid "no such volume"
+msgstr "esse volume não existe"
+
+msgid "There is no volume with that name in this scope."
+msgstr "Não existe nenhum volume com esse nome neste âmbito."
+
+msgid "List them with `delonix volume ls` (-A for every namespace), or create it with `delonix volume create`."
+msgstr "Lista-os com `delonix volume ls` (-A para todos os namespaces), ou cria-o com `delonix volume create`."
+
+msgid "no such snapshot"
+msgstr "esse snapshot não existe"
+
+msgid "The volume has no snapshot with that name."
+msgstr "O volume não tem nenhum snapshot com esse nome."
+
+msgid "List its snapshots with `delonix volume snapshot ls <volume>`."
+msgstr "Lista os snapshots dele com `delonix volume snapshot ls <volume>`."
+
+msgid "a storage tool failed"
+msgstr "uma ferramenta de armazenamento falhou"
+
+msgid "A host tool the volume needs (mount, mkfs.ext4, resize2fs, losetup…) failed or is missing. The message carries its own error."
+msgstr "Uma ferramenta do host de que o volume precisa (mount, mkfs.ext4, resize2fs, losetup…) falhou ou não existe. A mensagem traz o erro dela."
+
+msgid "Read the tool's error in the message; mounting network volumes and hard quotas need CAP_SYS_ADMIN."
+msgstr "Lê o erro da ferramenta na mensagem; montar volumes de rede e quotas rígidas exige CAP_SYS_ADMIN."
+

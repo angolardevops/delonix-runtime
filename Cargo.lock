@@ -1031,9 +1031,11 @@ name = "delonix-volume"
 version = "3.1.0"
 dependencies = [
  "delonix-compute",
+ "delonix-model",
  "delonix-runtime-core",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
 ]
 
 [[package]]
