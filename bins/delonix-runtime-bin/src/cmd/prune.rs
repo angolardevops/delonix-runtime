@@ -1070,7 +1070,10 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
                         "{}",
                         po::tf(
                             "volume '{name}' could not be removed: {err}",
-                            &[("name", &v.qualified()), ("err", &e.to_string())],
+                            &[
+                                ("name", &v.qualified()),
+                                ("err", &delonix_runtime_core::Error::from(e).to_string())
+                            ],
                         )
                     );
                     continue;
@@ -1101,7 +1104,10 @@ pub(crate) fn sweep_volumes(store: &VolumeStore, take: &[VolumeFacts]) -> Volume
                     "{}",
                     po::tf(
                         "volume '{name}' could not be removed: {err}",
-                        &[("name", &v.qualified()), ("err", &e.to_string())],
+                        &[
+                            ("name", &v.qualified()),
+                            ("err", &delonix_runtime_core::Error::from(e).to_string())
+                        ],
                     )
                 );
             }

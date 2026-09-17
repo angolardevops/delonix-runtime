@@ -9,7 +9,10 @@
 //! The `-v` syntax follows Docker: `name:/target` (volume) or
 //! `/host/path:/target` (bind), with an optional `:ro` for read-only.
 
-use delonix_runtime_core::{write_atomic, Error, Mount, Result};
+use delonix_runtime_core::{write_atomic, Mount};
+
+mod error;
+pub use error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
@@ -23,7 +26,11 @@ pub struct HostVolumes {
 }
 
 impl delonix_compute::ports::StorageProvider for HostVolumes {
-    fn resolve_mounts(&self, volumes: &[String], namespace: &str) -> Result<Vec<Mount>> {
+    fn resolve_mounts(
+        &self,
+        volumes: &[String],
+        namespace: &str,
+    ) -> delonix_runtime_core::Result<Vec<Mount>> {
         // No store is opened (or created) for a container without volumes.
         if volumes.is_empty() {
             return Ok(Vec::new());
@@ -33,7 +40,7 @@ impl delonix_compute::ports::StorageProvider for HostVolumes {
         // global volume of the same name, and a name in BOTH is refused, not guessed.
         volumes
             .iter()
-            .map(|spec| store.resolve_spec_in(spec, namespace))
+            .map(|spec| store.resolve_spec_in(spec, namespace).map_err(Into::into))
             .collect()
     }
 }
@@ -206,7 +213,7 @@ pub fn measure(path: &std::path::Path) -> Usage {
 /// is therefore free for the next `create` to take, handing the previous
 /// owner's data to whoever mounts it next.
 fn write_meta(path: &std::path::Path, vol: &Volume) -> Result<()> {
-    write_atomic(path, &serde_json::to_vec_pretty(vol)?)
+    Ok(write_atomic(path, &serde_json::to_vec_pretty(vol)?)?)
 }
 
 /// A [`Volume`] together with the namespace that owns it.
@@ -419,7 +426,7 @@ impl VolumeStore {
         parent: Option<&str>,
     ) -> Result<Volume> {
         if !Self::valid_name(name) {
-            return Err(Error::Invalid(format!("invalid volume name: {name:?}")));
+            return Err(Error::InvalidName(name.to_string()));
         }
         fs::create_dir_all(mountpoint)?;
         fs::create_dir_all(self.dir(name))?; // this store's own per-name bookkeeping dir
@@ -461,7 +468,7 @@ impl VolumeStore {
         options: Option<String>,
     ) -> Result<Volume> {
         if !Self::valid_name(name) {
-            return Err(Error::Invalid(format!("invalid volume name: {name:?}")));
+            return Err(Error::InvalidName(name.to_string()));
         }
         if self.meta_path(name).exists() {
             let v = self.inspect(name)?;
@@ -471,9 +478,7 @@ impl VolumeStore {
         // Network drivers require a `device` (the mount target): nfs
         // `server:/export`, cifs `//server/share`, webdav `https://…`.
         if is_network_driver(driver) && device.as_deref().unwrap_or("").is_empty() {
-            return Err(Error::Invalid(format!(
-                "{driver} volume requires a device (the mount target)"
-            )));
+            return Err(Error::MissingDevice(driver.to_string()));
         }
         let data = self.data_dir(name);
         fs::create_dir_all(&data)?;
@@ -567,11 +572,9 @@ impl VolumeStore {
             return Ok(());
         }
         let fstype = mount_fstype(&vol.driver);
-        let device = vol.device.as_ref().ok_or_else(|| {
-            Error::Invalid(format!(
-                "{} volume '{}' has no device",
-                vol.driver, vol.name
-            ))
+        let device = vol.device.as_ref().ok_or_else(|| Error::NoDevice {
+            driver: vol.driver.clone(),
+            name: vol.name.clone(),
         })?;
         // `--` before the positional device/mountpoint: `device` is built from a
         // `kind: Storage` manifest (`<server>:<share>`), and a server starting
@@ -596,12 +599,12 @@ impl VolumeStore {
         let out = std::process::Command::new("mount")
             .args(&args)
             .output()
-            .map_err(|e| Error::Runtime {
+            .map_err(|e| Error::Command {
                 context: ctx,
                 message: e.to_string(),
             })?;
         if !out.status.success() {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: ctx,
                 message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
             });
@@ -631,7 +634,7 @@ impl VolumeStore {
     pub fn inspect(&self, name: &str) -> Result<Volume> {
         let meta = self.meta_path(name);
         if !meta.exists() {
-            return Err(Error::NotFound(format!("volume {name}")));
+            return Err(Error::NoSuchVolume(name.to_string()));
         }
         Ok(serde_json::from_slice(&fs::read(meta)?)?)
     }
@@ -652,9 +655,7 @@ impl VolumeStore {
     /// The file path of a snapshot (validates the name first).
     pub fn snapshot_path(&self, volume: &str, snap: &str) -> Result<PathBuf> {
         if !safe_snapshot_name(snap) {
-            return Err(Error::Invalid(format!(
-                "invalid snapshot name: '{snap}' (use [a-zA-Z0-9._-], no '/' or '..')"
-            )));
+            return Err(Error::InvalidSnapshotName(snap.to_string()));
         }
         Ok(self.snapshots_dir(volume).join(format!("{snap}.tar.gz")))
     }
@@ -691,9 +692,10 @@ impl VolumeStore {
     pub fn remove_snapshot(&self, volume: &str, snap: &str) -> Result<()> {
         let p = self.snapshot_path(volume, snap)?;
         if !p.exists() {
-            return Err(Error::NotFound(format!(
-                "snapshot {snap} of volume {volume}"
-            )));
+            return Err(Error::NoSuchSnapshot {
+                snap: snap.to_string(),
+                volume: volume.to_string(),
+            });
         }
         fs::remove_file(p)?;
         Ok(())
@@ -737,7 +739,7 @@ impl VolumeStore {
     pub fn remove_with(&self, name: &str, rmtree: Option<&dyn Fn(&std::path::Path)>) -> Result<()> {
         let dir = self.dir(name);
         if !dir.exists() {
-            return Err(Error::NotFound(format!("volume {name}")));
+            return Err(Error::NoSuchVolume(name.to_string()));
         }
         if let Ok(v) = self.inspect(name) {
             // unmount nfs OR the hard-quota loopback before deleting the data.
@@ -854,12 +856,12 @@ impl VolumeStore {
         let out = std::process::Command::new(cmd)
             .args(args)
             .output()
-            .map_err(|e| Error::Runtime {
+            .map_err(|e| Error::Command {
                 context: "quota",
                 message: format!("{cmd}: {e}"),
             })?;
         if !out.status.success() {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "quota",
                 message: format!(
                     "{cmd} {}: {}",
@@ -894,9 +896,7 @@ impl VolumeStore {
         if !img.exists() {
             // we only create a loopback over an EMPTY `_data` (otherwise we'd hide data).
             if self.usage(name) > 0 {
-                return Err(Error::Invalid(
-                    "hard quota (loopback) only on an empty volume; create with --quota or empty it first".into(),
-                ));
+                return Err(Error::QuotaOnNonEmpty);
             }
             // sparse image the size of the quota → ext4 → loop mount.
             Self::run(
@@ -922,7 +922,7 @@ impl VolumeStore {
                 "truncate",
                 &["-s", &quota.to_string(), &img.to_string_lossy()],
             )?;
-            let dev = Self::loop_dev(&img).ok_or_else(|| Error::Runtime {
+            let dev = Self::loop_dev(&img).ok_or_else(|| Error::Command {
                 context: "quota",
                 message: "loop device not found".into(),
             })?;
@@ -932,9 +932,7 @@ impl VolumeStore {
             // SHRINK: ext4 does not shrink online — do it offline (unmount/resize/mount).
             // Refuses if busy (container in use) or if the quota < current usage.
             if self.usage(name) > quota {
-                return Err(Error::Invalid(
-                    "the new quota is smaller than the current usage — free up space first".into(),
-                ));
+                return Err(Error::QuotaBelowUsage);
             }
             if std::process::Command::new("umount")
                 .arg(&data_s)
@@ -942,9 +940,7 @@ impl VolumeStore {
                 .map(|o| !o.status.success())
                 .unwrap_or(true)
             {
-                return Err(Error::Invalid(
-                    "volume in use — stop the containers to shrink the quota".into(),
-                ));
+                return Err(Error::InUse);
             }
             let blocks = format!("{}s", quota / 512); // resize2fs accepts size in sectors
                                                       // resize2fs needs e2fsck before shrinking; temporary loop.
@@ -1005,11 +1001,10 @@ impl VolumeStore {
         let named = !src.is_empty() && !src.starts_with('/') && !src.starts_with('.');
         if named && self.scoped_exists(namespace, src) {
             if self.meta_path(src).exists() {
-                return Err(Error::Invalid(format!(
-                    "volume {src:?} is ambiguous in namespace {namespace:?}: a namespaced \
-                     volume and a global one of the same name both exist. Rename one, or \
-                     finish the migration with `delonix sharevolume migrate`"
-                )));
+                return Err(Error::Ambiguous {
+                    src: src.to_string(),
+                    namespace: namespace.to_string(),
+                });
             }
             let scoped = Self {
                 root: self.root.join(Self::NS_SUBTREE).join(namespace),
@@ -1029,9 +1024,7 @@ impl VolumeStore {
     pub fn resolve_spec(&self, spec: &str) -> Result<Mount> {
         let parts: Vec<&str> = spec.split(':').collect();
         if parts.len() < 2 || parts.len() > 3 {
-            return Err(Error::Invalid(format!(
-                "invalid volume spec: {spec:?} (use source:/target[:ro])"
-            )));
+            return Err(Error::InvalidSpec(spec.to_string()));
         }
         let src = parts[0];
         let target = parts[1];
@@ -1051,16 +1044,10 @@ impl VolumeStore {
             Some(&"ro,rslave") => (true, Some("rslave".to_string())),
             Some(&"ro,rshared") => (true, Some("rshared".to_string())),
             Some(&"ro,rprivate") | Some(&"ro,private") => (true, Some("private".to_string())),
-            Some(other) => {
-                return Err(Error::Invalid(format!(
-                    "unsupported bind option ':{other}' — supported: ':ro'/':rw', ':rprivate'/':rslave'/':rshared' (and 'ro,<propagation>'); SELinux ':z'/':Z' and ':U' are not implemented"
-                )))
-            }
+            Some(other) => return Err(Error::UnsupportedBindOption(other.to_string())),
         };
         if !target.starts_with('/') {
-            return Err(Error::Invalid(format!(
-                "target must be absolute: {target:?}"
-            )));
+            return Err(Error::RelativeTarget(target.to_string()));
         }
 
         let source = if src.starts_with('/') || src.starts_with('.') {
@@ -1068,8 +1055,9 @@ impl VolumeStore {
             // `canonicalize` also fails with EACCES on a parent directory and
             // with ELOOP; "does not exist" would send the operator to the wrong
             // question in both.
-            let p = fs::canonicalize(src)
-                .map_err(|e| Error::not_found_or_io(e, || format!("bind path {src}")))?;
+            let p = fs::canonicalize(src).map_err(|e| {
+                delonix_model::Error::not_found_or_io(e, || format!("bind path {src}"))
+            })?;
             p.to_string_lossy().into_owned()
         } else {
             // named volume (creates on demand, like Docker; mounts the NFS if applicable)
@@ -1616,14 +1604,16 @@ mod tests {
         let v2 = vs.create_with("app_data", "local", None, None).unwrap();
         assert_eq!(v2.name, "app_data");
         assert_eq!(vs.list().unwrap().len(), 1);
-        // invalid name → Error::Invalid
-        assert!(vs
-            .create_with("bad name!", "local", None, None)
-            .is_err_and(|e| e.is_invalid_argument()));
-        // nfs without device → Error::Invalid
-        assert!(vs
-            .create_with("nas", "nfs", None, None)
-            .is_err_and(|e| e.is_invalid_argument()));
+        // invalid name → Error::InvalidName
+        assert!(matches!(
+            vs.create_with("bad name!", "local", None, None),
+            Err(Error::InvalidName(_))
+        ));
+        // nfs without device → Error::MissingDevice
+        assert!(matches!(
+            vs.create_with("nas", "nfs", None, None),
+            Err(Error::MissingDevice(_))
+        ));
         fs::remove_dir_all(&base).ok();
     }
 
