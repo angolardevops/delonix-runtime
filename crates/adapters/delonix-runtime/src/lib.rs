@@ -7391,7 +7391,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     if !safe_to_signal(pid, st) {
         container.status = Status::Stopped;
         container.pid = None;
-        persist_stop(store, container)?;
+        persist_stop(store, container, pid, st)?;
         remove_container_cgroup(container);
         return Ok(());
     }
@@ -7410,7 +7410,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
     // needed (it is not a crash: it was a requested stop).
     container.status = Status::Stopped;
     container.pid = None;
-    persist_stop(store, container)?;
+    persist_stop(store, container, pid, st)?;
     remove_container_cgroup(container);
     Ok(())
 }
@@ -7436,9 +7436,22 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
 /// supervisor's `wait_and_record` classified an intentional SIGKILL as
 /// `Crashed`, so `ps -a` said `Dead` and `dash` counted a PROBLEM for a
 /// container the operator had asked to stop.
-fn persist_stop(store: &Store, container: &Container) -> Result<()> {
+fn persist_stop(
+    store: &Store,
+    container: &Container,
+    stopped_pid: i32,
+    stopped_starttime: Option<u64>,
+) -> Result<()> {
     let status = container.status.clone();
     store.update(&container.id, |cur| {
+        // Only the incarnation this stop signalled. A `start` that ran while the
+        // stop waited saved a newer process; writing `pid = None` over it lost
+        // that process from the record — measured: the stop resumed, the record
+        // said `Stopped` with no pid while the new process ran, and it survived
+        // `rm -f`. Same guard as the supervisor's `wait_and_record`.
+        if !describes_incarnation(cur, stopped_pid, stopped_starttime) {
+            return false;
+        }
         cur.status = status.clone();
         cur.pid = None;
         true
