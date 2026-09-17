@@ -1075,6 +1075,16 @@ check "run -d --net-bps sem rede custom recusa" 1 "$BIN" container run -d --name
 check "run -d --net-bps recusado não deixa container" 4 "$BIN" container inspect "nbd-$PFX"
 check "run --ip sem rede custom recusa" 1 "$BIN" container run -d --name "nip-$PFX" --ip 10.1.1.1 "$IMG" true
 
+# Uma recusa DEPOIS de preparar o rootfs (aqui um `--user` que a imagem não tem)
+# deixava o directório do container para trás, sem registo por onde o `rm` ou o
+# `prune` o encontrassem: um por tentativa, medido. Conta-se o directório, não o
+# registo — o registo nunca chegou a existir, e era isso que tornava a fuga invisível.
+dirs_before=$(ls "$DELONIX_ROOT/containers" 2>/dev/null | wc -l)
+check "run -u com utilizador inexistente recusa" 1 "$BIN" container run --rm --net none -u "ghost-$PFX" "$IMG" true
+check "run -d -u com grupo inexistente recusa" 1 "$BIN" container run -d --net none -u "root:ghost-$PFX" "$IMG" sleep 5
+check "run recusado não deixa directório em containers/" ok bash -c \
+  "test \$(ls '$DELONIX_ROOT/containers' 2>/dev/null | wc -l) -eq $dirs_before"
+
 ########################################
 section "container em rede custom: hot reconfig pelo ingress"
 ########################################
