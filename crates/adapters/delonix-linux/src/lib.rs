@@ -3696,8 +3696,46 @@ fn cpu_max_value(cpus: &str) -> String {
 fn write_limit(cgroup: &str, file: &str, value: &str) -> Result<()> {
     std::fs::write(format!("{cgroup}/{file}"), value).map_err(|e| Error::Runtime {
         context: "cgroup limit",
-        message: format!("{file}={value}: {e}"),
+        message: limit_failure_message(cgroup, file, value, &e),
     })
+}
+
+/// The operator-facing reason a [`write_limit`] failed.
+///
+/// WHY A MISSING FILE REPORTS «PERMISSION DENIED». `std::fs::write` opens with
+/// `O_CREAT`, and `cgroupfs` (kernfs) implements no `->create` for regular
+/// files, so the VFS answers `-EACCES` before the cgroup code is ever reached.
+/// The errno therefore says «permission» about a file that was never there.
+///
+/// Observed on an Ubuntu aarch64 VM (2026-09-18), `run --memory 128M --cpus 1`:
+///
+/// ```text
+/// error[DX-9000] system call `cgroup limit` failed:
+///     cpu.max=100000 100000: Permission denied (os error 13)
+/// ```
+///
+/// `setup_cgroup` writes `memory.max` BEFORE `cpu.max`, and `memory.max`
+/// succeeded. Same directory, same uid, one write accepted and the next
+/// refused: the access was never the problem. The `cpu` controller was not
+/// delegated, so the leaf had no `cpu.max` to write, and the operator spent the
+/// afternoon looking for a permission fault that does not exist.
+///
+/// So: when the file is missing, name the controller and give the command that
+/// repairs the host. When it exists, keep the errno — there it IS the answer,
+/// and inventing a delegation story would hide the real one.
+fn limit_failure_message(cgroup: &str, file: &str, value: &str, e: &std::io::Error) -> String {
+    if std::path::Path::new(&format!("{cgroup}/{file}")).exists() {
+        return format!("{file}={value}: {e}");
+    }
+    let ctrl = file.split('.').next().unwrap_or(file);
+    let parent = std::path::Path::new(cgroup)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| cgroup.to_string());
+    format!(
+        "{file}={value}: the `{ctrl}` controller is not delegated to {cgroup} — there is no \
+         {file} there. Enable it with: echo +{ctrl} > {parent}/cgroup.subtree_control"
+    )
 }
 
 /// Creates a dedicated cgroup and applies MANDATORY memory, CPU and PID limits,
@@ -3956,7 +3994,28 @@ pub fn cgroup_limits_apply() -> bool {
         return current_cgroup_v2()
             .is_some_and(|cur| delegated_base_usable(std::path::Path::new(&cur)));
     }
-    root_slice_writable(std::path::Path::new(delonix_compute::DELONIX_SLICE))
+    // ROOT: two questions, as the rootless leg above has always asked.
+    //
+    // BUG FIXED HERE: this asked only the FIRST — «can I create a cgroup under
+    // the slice?» — and answered «there is delegation» for a slice that
+    // delegates nothing. Creating the leaf is necessary and NOT sufficient: the
+    // leaf has `memory.max`/`cpu.max`/`pids.max` only when the slice hands the
+    // controller down, and `setup_cgroup` treats all three writes as hard
+    // errors. Callers use this to warn ONCE before starting N nodes, so a wrong
+    // «yes» here is not one failure — it is N identical ones, later, each one
+    // reporting a permission fault that does not exist.
+    //
+    // `ensure_delonix_slice()` runs BETWEEN the two questions. That is not a
+    // side effect smuggled into a probe: `root_slice_writable` below already
+    // creates the slice on purpose, `admission_check` already opens with this
+    // same call, and the function is idempotent. Asking before it ran would
+    // report «no delegation» on every fresh node — the exact false negative
+    // `root_slice_writable` documents below.
+    if !root_slice_writable(std::path::Path::new(delonix_compute::DELONIX_SLICE)) {
+        return false;
+    }
+    ensure_delonix_slice();
+    slice_missing_controllers(delonix_compute::DELONIX_SLICE).is_empty()
 }
 
 /// Root mode: can the engine create a container cgroup under `slice`?
@@ -4088,10 +4147,93 @@ pub fn ensure_delonix_slice() {
             );
         }
     }
-    // enable the controllers for the children (ONE by one — if some do not exist on the
-    // host, the others stay active anyway).
-    for ctrl in ["+memory", "+cpu", "+pids", "+io"] {
-        let _ = std::fs::write(format!("{slice}/cgroup.subtree_control"), ctrl);
+    enable_slice_controllers(slice);
+}
+
+/// The controllers `setup_cgroup` needs before it writes its MANDATORY
+/// ceilings. The leaf has `memory.max`, `cpu.max` and `pids.max` only when the
+/// slice hands the matching controller down.
+///
+/// Three, and not five. `cpuset` and `io` stay out on purpose: a leaf writes
+/// `cpuset.cpus`/`cpu.weight`/`io.weight` only when the operator asked for
+/// them, and `io.max` is an AGGREGATE ceiling on the slice itself, never a leaf
+/// limit. A pre-flight that demanded those two would answer «no delegation» on
+/// hosts where every container this engine actually starts would have run.
+const LEAF_CONTROLLERS: [&str; 3] = ["memory", "cpu", "pids"];
+
+/// Which of [`LEAF_CONTROLLERS`] `slice` does NOT hand down to its children.
+///
+/// Reads `cgroup.subtree_control`, and NOT `cgroup.controllers`. The difference
+/// between those two files IS this bug: `controllers` is what the slice COULD
+/// enable, `subtree_control` is what the children really receive, and
+/// `setup_cgroup` fails on exactly the gap. A probe that read `controllers`
+/// would answer «all delegated» on the very host this function exists to catch.
+///
+/// A file that is absent or unreadable yields every controller as missing. A
+/// slice that is not there delegates nothing, and «no» is the honest answer.
+fn slice_missing_controllers(slice: &str) -> Vec<&'static str> {
+    let enabled =
+        std::fs::read_to_string(format!("{slice}/cgroup.subtree_control")).unwrap_or_default();
+    let present = controllers_to_enable(&enabled, &LEAF_CONTROLLERS);
+    LEAF_CONTROLLERS
+        .into_iter()
+        .filter(|want| !present.iter().any(|have| have.as_str() == *want))
+        .collect()
+}
+
+/// Hands the controllers down to the slice's children, and repairs the level
+/// ABOVE when the slice never received one.
+///
+/// BUG FIXED HERE: every write here was `let _ =`. A slice that could not hand
+/// `cpu` down therefore said nothing; `setup_cgroup` went on to write `cpu.max`
+/// on a leaf that had no such file, and the operator read «Permission denied».
+/// [`limit_failure_message`] carries the full chain and the measurement.
+///
+/// **This can write to the PARENT's `cgroup.subtree_control`, which in root
+/// mode is `/sys/fs/cgroup` itself — a host-wide change.** Deliberate, and
+/// bounded three ways:
+///
+///   * it runs ONLY after the slice's own write failed, which means the
+///     controller was never delegated to us in the first place;
+///   * it asks only for what the parent's `cgroup.controllers` really offers —
+///     `+<name>` for a controller this kernel does not have returns `EINVAL`
+///     and teaches nothing;
+///   * it ENABLES a controller for the parent's children. It sets no limit,
+///     moves no process, and takes nothing away from anything already running.
+///
+/// The engine already owns this level: `ensure_delonix_slice` puts an 85%
+/// `memory.max` on a top-level slice, which is the larger claim by far.
+///
+/// cgroup-v2 exempts the root cgroup from the no-internal-processes rule, so
+/// the write is legal there even with the host's own processes sitting in it.
+/// Rootless solves the same problem the other way, by moving itself into a
+/// `dlx-mgr` child first (`try_delegated_base`); a slice at `/sys/fs/cgroup`
+/// never needs that. In rootless this parent write simply fails and costs
+/// nothing: above the delegation boundary the files stay `root:root`.
+fn enable_slice_controllers(slice: &str) {
+    let enable = |dir: &str, ctrl: &str| {
+        std::fs::write(format!("{dir}/cgroup.subtree_control"), format!("+{ctrl}")).is_ok()
+    };
+    let parent = std::path::Path::new(slice)
+        .parent()
+        .map(|p| p.to_string_lossy().into_owned());
+    // ONE by one, as `setup_kube_cgroup` does: a controller the host does not
+    // have must not stop the others from being enabled.
+    for ctrl in ["memory", "cpu", "pids", "io"] {
+        if enable(slice, ctrl) {
+            continue;
+        }
+        let Some(parent) = parent.as_deref() else {
+            continue; // `/sys/fs/cgroup` itself has no parent to ask
+        };
+        let offered =
+            std::fs::read_to_string(format!("{parent}/cgroup.controllers")).unwrap_or_default();
+        if controllers_to_enable(&offered, &[ctrl]).is_empty() {
+            continue; // this kernel does not offer it at this level at all
+        }
+        if enable(parent, ctrl) {
+            let _ = enable(slice, ctrl); // now that we have it, hand it down
+        }
     }
 }
 
@@ -10028,6 +10170,76 @@ mod root_slice_probe_tests {
         assert!(!root_slice_writable(std::path::Path::new(
             "/proc/delonix.slice"
         )));
+    }
+}
+
+#[cfg(test)]
+mod cgroup_delegation_tests {
+    use super::{limit_failure_message, slice_missing_controllers};
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("dlx-{name}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    /// The probe reads what the children RECEIVE and not what the slice COULD
+    /// enable: a slice with `memory pids` in its `subtree_control` gives its
+    /// leaves no `cpu.max`, whatever `cgroup.controllers` offers.
+    #[test]
+    fn a_slice_without_cpu_reports_cpu_as_missing() {
+        let dir = tmp("missing-ctrl");
+        std::fs::write(dir.join("cgroup.subtree_control"), "memory pids\n").unwrap();
+        assert_eq!(
+            slice_missing_controllers(&dir.to_string_lossy()),
+            vec!["cpu"]
+        );
+        std::fs::write(
+            dir.join("cgroup.subtree_control"),
+            "cpuset cpu io memory pids\n",
+        )
+        .unwrap();
+        assert!(slice_missing_controllers(&dir.to_string_lossy()).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// No `cgroup.subtree_control` at all (nothing was created) means EVERY
+    /// controller is missing — never «all fine» by accident.
+    #[test]
+    fn a_slice_that_does_not_exist_is_missing_everything() {
+        assert_eq!(
+            slice_missing_controllers("/proc/delonix-does-not-exist").len(),
+            3
+        );
+    }
+
+    /// THE regression this pair exists for: a missing `cpu.max` must not reach
+    /// the operator as «Permission denied».
+    #[test]
+    fn a_missing_limit_file_names_the_controller_and_not_the_errno() {
+        let dir = tmp("limit-msg");
+        let cg = dir.to_string_lossy().into_owned();
+        let eacces = std::io::Error::from_raw_os_error(13);
+        let msg = limit_failure_message(&cg, "cpu.max", "100000 100000", &eacces);
+        assert!(msg.contains("`cpu` controller is not delegated"), "{msg}");
+        assert!(msg.contains("cgroup.subtree_control"), "{msg}");
+        assert!(!msg.contains("Permission denied"), "{msg}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A file that DOES exist keeps the kernel's own answer: the errno is the
+    /// real reason there, and a delegation story would hide it.
+    #[test]
+    fn an_existing_limit_file_keeps_the_errno() {
+        let dir = tmp("limit-errno");
+        std::fs::write(dir.join("cpu.max"), "max 100000").unwrap();
+        let cg = dir.to_string_lossy().into_owned();
+        let ebusy = std::io::Error::from_raw_os_error(16);
+        let msg = limit_failure_message(&cg, "cpu.max", "100000 100000", &ebusy);
+        assert!(msg.contains("cpu.max=100000 100000"), "{msg}");
+        assert!(!msg.contains("not delegated"), "{msg}");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
