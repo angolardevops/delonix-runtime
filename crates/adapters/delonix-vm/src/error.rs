@@ -192,6 +192,12 @@ impl From<std::io::Error> for Error {
     }
 }
 
+impl From<crate::cloudinit::Error> for Error {
+    fn from(e: crate::cloudinit::Error) -> Self {
+        Error::Engine(e.into())
+    }
+}
+
 impl From<delonix_state::Error> for Error {
     fn from(e: delonix_state::Error) -> Self {
         Error::Engine(e.into())

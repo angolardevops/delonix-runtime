@@ -15,8 +15,8 @@ use thiserror::Error;
 pub enum Error {
     /// A VM name that fails the same validation `create()` enforces — checked
     /// again here because this function writes to disk before `create()` ever
-    /// runs. Shares [`crate::error::Error::InvalidName`]'s number: it is the
-    /// same failure, just caught from a different call site.
+    /// runs. Shares [`crate::Error::InvalidName`]'s number (DX-1507): it is
+    /// the same failure, just caught from a different call site.
     #[error("{0}")]
     InvalidName(String),
 
