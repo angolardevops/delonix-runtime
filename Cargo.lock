@@ -1057,6 +1057,7 @@ dependencies = [
  "delonix-node",
  "delonix-state",
  "libc",
+ "thiserror 2.0.19",
  "tracing",
 ]
 

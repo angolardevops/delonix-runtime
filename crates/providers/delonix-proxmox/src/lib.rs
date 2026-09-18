@@ -1437,23 +1437,25 @@ pub fn register(target: Target) -> Result<()> {
     validate_node_name(&target.node)?;
 
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_vm::register_backend(delonix_vm::BackendRegistration {
-        id: "proxmox",
-        aliases: &["pve"],
-        auto_selectable: false,
-        new: Box::new(move || {
-            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(c) = slot.as_ref() {
-                return Ok(Box::new(ProxmoxBackend::sharing(c.clone())));
-            }
-            // A failed connect is NOT cached: a node that was down when the
-            // first VM was listed must not stay "down" for the rest of the
-            // process.
-            let c = std::sync::Arc::new(Client::connect(&target)?);
-            *slot = Some(c.clone());
-            Ok(Box::new(ProxmoxBackend::sharing(c)))
-        }),
-    })
+    Ok(delonix_vm::register_backend(
+        delonix_vm::BackendRegistration {
+            id: "proxmox",
+            aliases: &["pve"],
+            auto_selectable: false,
+            new: Box::new(move || {
+                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(c) = slot.as_ref() {
+                    return Ok(Box::new(ProxmoxBackend::sharing(c.clone())));
+                }
+                // A failed connect is NOT cached: a node that was down when the
+                // first VM was listed must not stay "down" for the rest of the
+                // process.
+                let c = std::sync::Arc::new(Client::connect(&target)?);
+                *slot = Some(c.clone());
+                Ok(Box::new(ProxmoxBackend::sharing(c)))
+            }),
+        },
+    )?)
 }
 
 #[cfg(test)]

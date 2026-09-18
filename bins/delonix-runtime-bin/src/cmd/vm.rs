@@ -1264,7 +1264,7 @@ pub(crate) fn stamp(
 /// goes with it** — everything the guest wrote. That is the whole reason a VM
 /// change is refused without `--replace`.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
-    delonix_vm::remove_force(&state_root(), name)
+    Ok(delonix_vm::remove_force(&state_root(), name)?)
 }
 
 /// Looks a disk REFERENCE up in the VM image store: a name this engine knows
@@ -1923,7 +1923,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     if let Some(dir) = &seed_to_clean {
                         let _ = std::fs::remove_dir_all(dir);
                     }
-                    return Err(e);
+                    return Err(e.into());
                 }
             };
             // "started" and not "is up": everything that has happened by this
@@ -2787,7 +2787,7 @@ fn cmd_ssh(
             }
         },
         Err(_) if looks_like_address(target) => (target.to_string(), None),
-        Err(e) => return Err(e),
+        Err(e) => return Err(e.into()),
     };
     // An explicit `-l` always wins; otherwise the IMAGE decides, because the
     // answer is a property of the guest and not of this command.
@@ -3493,7 +3493,7 @@ pub(crate) fn cmd_rm(base: &std::path::Path, name: &str, force: bool) -> Result<
                 &[("name", name)],
             ));
         }
-        return Err(e);
+        return Err(e.into());
     }
     println!("{name}");
     Ok(())

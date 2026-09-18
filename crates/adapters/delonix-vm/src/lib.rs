@@ -38,15 +38,17 @@ fn network() -> Result<&'static dyn VmNetwork> {
     NETWORK
         .get()
         .map(|n| n.as_ref())
-        .ok_or_else(|| Error::Runtime {
+        .ok_or_else(|| Error::Command {
             context: "vm",
             message: "no VM network provider is registered in this process".into(),
         })
 }
 use delonix_compute::{Vm, VmBootSpec};
 use delonix_model::records::Status;
-use delonix_model::{Error, Result};
 use delonix_state::JsonStore;
+
+mod error;
+pub use error::{Error, Result};
 
 /// The VM shapes that [`Vm`] persists. They are DEFINED in
 /// `delonix-compute` — the record lives there and the dependency cannot
@@ -460,15 +462,12 @@ fn admission_verdict(
     let reserve = reserve_raw.and_then(|v| v.parse().ok()).unwrap_or(2048u64);
     let want = mem_mib(&cfg.memory);
     if want.saturating_add(reserve) > avail {
-        return Err(Error::Runtime {
-            context: "VM admission",
-            message: format!(
-                "host protection: VM '{}' asks for {want} MiB but the host only has {avail} MiB \
-                 available (reserve {reserve} MiB). Stop VMs/containers, reduce the memory, \
-                 or lower DELONIX_VM_RESERVE_MIB (at your own risk).",
-                cfg.name
-            ),
-        });
+        return Err(Error::AdmissionRefused(format!(
+            "host protection: VM '{}' asks for {want} MiB but the host only has {avail} MiB \
+             available (reserve {reserve} MiB). Stop VMs/containers, reduce the memory, \
+             or lower DELONIX_VM_RESERVE_MIB (at your own risk).",
+            cfg.name
+        )));
     }
     Ok(())
 }
@@ -610,14 +609,14 @@ fn run_quiet(prog: &str, args: &[&str]) -> Result<()> {
     let out = stable_cmd(prog)
         .args(args)
         .output()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "vm-tool",
             message: format!("{prog}: {e}"),
         })?;
     if !out.status.success() {
         let err = String::from_utf8_lossy(&out.stderr);
         let err = err.trim().trim_start_matches("error: ").trim();
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "vm-tool",
             message: if err.is_empty() {
                 format!("{prog} failed")
@@ -808,7 +807,7 @@ pub trait VmBackend {
         cfg: &VmConfig,
         overlay: &str,
         on: &dyn Fn(CreateStage),
-    ) -> Result<Boot>;
+    ) -> delonix_model::Result<Boot>;
     /// Is the VM still alive?
     fn is_running(&self, vm: &Vm) -> bool;
     /// Current IP of the VM (may change/resolve later via DHCP).
@@ -833,7 +832,7 @@ pub trait VmBackend {
     /// REFUSED the cleanup (e.g. libvirt) — the caller decides whether to abort (so as not to
     /// delete the local record of a VM that is still defined in the hypervisor) or
     /// to ignore it (`vm rm --force`).
-    fn stop(&self, vmdir: &Path, vm: &Vm) -> Result<()>;
+    fn stop(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()>;
 
     /// Releases everything the VM owns, because its record is going away
     /// (`vm rm`). Default: [`Self::stop`] — which is exactly right for the two
@@ -850,7 +849,7 @@ pub trait VmBackend {
     ///
     /// A backend that owns nothing beyond what `stop` releases should leave
     /// this alone.
-    fn destroy(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+    fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         self.stop(vmdir, vm)
     }
 
@@ -859,11 +858,11 @@ pub trait VmBackend {
     /// (which persists a checkpoint to disk; this never touches storage).
     /// Default: unsupported (fail closed) — a backend overrides this only
     /// once it actually has a mechanism, never as a silent no-op.
-    fn pause(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+    fn pause(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
         Err(unsupported_pause(self.id(), "pause"))
     }
     /// Resumes a VM suspended with [`VmBackend::pause`]. Default: unsupported.
-    fn unpause(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+    fn unpause(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
         Err(unsupported_pause(self.id(), "unpause"))
     }
 
@@ -879,7 +878,7 @@ pub trait VmBackend {
     /// engine controls can repair that; what it owes the operator is not
     /// making them discover it three commands later from an unrelated
     /// `restore`/`snapshot` error.
-    fn disk_health(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+    fn disk_health(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
         Ok(())
     }
 
@@ -897,7 +896,7 @@ pub trait VmBackend {
     /// can start the VM its record already names.
     ///
     /// Called only when a record exists and the VM is not running.
-    fn resume(&self, _vmdir: &Path, _vm: &Vm) -> Result<Option<Boot>> {
+    fn resume(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<Option<Boot>> {
         Ok(None)
     }
 
@@ -905,12 +904,12 @@ pub trait VmBackend {
     /// (`virsh snapshot-create-as`): for a running domain it captures memory + disk
     /// state; `restore` reverts to it. Default: unsupported — a backend that does not
     /// override this fails closed with a clear message (never a silent no-op).
-    fn snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> Result<()> {
+    fn snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> delonix_model::Result<()> {
         Err(unsupported_snapshot(self.id(), "snapshot"))
     }
     /// Reverts the VM to a named snapshot (libvirt: `virsh snapshot-revert`).
     /// Default: unsupported (fail closed).
-    fn restore(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> Result<()> {
+    fn restore(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> delonix_model::Result<()> {
         Err(unsupported_snapshot(self.id(), "restore"))
     }
     /// Lists the VM's snapshot names. Default: unsupported (fail closed).
@@ -919,12 +918,12 @@ pub trait VmBackend {
     /// side: libvirt's metadata does not survive the undefine that [`stop`]
     /// does, so the list of a stopped VM is read from what
     /// [`VmBackend::preserve_snapshots`] wrote there.
-    fn snapshots(&self, _vmdir: &Path, _vm: &Vm) -> Result<Vec<String>> {
+    fn snapshots(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<Vec<String>> {
         Err(unsupported_snapshot(self.id(), "snapshots"))
     }
     /// Deletes a named snapshot — the state in the disk AND whatever metadata
     /// points at it. Default: unsupported (fail closed).
-    fn delete_snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> Result<()> {
+    fn delete_snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> delonix_model::Result<()> {
         Err(unsupported_snapshot(self.id(), "snapshot rm"))
     }
 
@@ -939,7 +938,7 @@ pub trait VmBackend {
     /// bookkeeping is deleted — so a `vm stop`/`vm start` left `vm snapshots`
     /// empty with rc=0 and `vm restore` answering "Domain snapshot not found",
     /// for snapshots that were still there on the disk the whole time.
-    fn preserve_snapshots(&self, _vmdir: &Path, _vm: &Vm) -> Result<Vec<String>> {
+    fn preserve_snapshots(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<Vec<String>> {
         Ok(Vec::new())
     }
 
@@ -979,17 +978,22 @@ pub trait VmBackend {
 }
 
 /// Fail-closed error for a backend that does not implement pause/unpause.
-fn unsupported_pause(backend: &str, op: &str) -> Error {
-    Error::Invalid(format!("{op} is not supported on the '{backend}' backend"))
+///
+/// Returns the SHARED type directly (not this crate's own `Result`): its two
+/// callers are `VmBackend` default method bodies, and that trait's signatures
+/// stay on `delonix_model::Result` — see the module doc comment on why.
+fn unsupported_pause(backend: &str, op: &str) -> delonix_model::Error {
+    Error::UnsupportedByBackend(format!("{op} is not supported on the '{backend}' backend")).into()
 }
 
 /// Fail-closed error for a backend that does not implement snapshot/restore
 /// (today: cloud-hypervisor — its restore relaunches a fresh vmm, a different
 /// lifecycle than libvirt's in-place revert, and needs `ch-remote`; deferred).
-fn unsupported_snapshot(backend: &str, op: &str) -> Error {
-    Error::Invalid(format!(
+fn unsupported_snapshot(backend: &str, op: &str) -> delonix_model::Error {
+    Error::UnsupportedByBackend(format!(
         "{op} is not supported on the '{backend}' backend yet — use the libvirt backend"
     ))
+    .into()
 }
 
 /// How a registered backend is built when somebody selects it.
@@ -1098,11 +1102,13 @@ fn with_backends<T>(f: impl FnOnce(&[BackendRegistration]) -> T) -> T {
 ///   third-party backend is selected by name or not at all.
 pub fn register_backend(reg: BackendRegistration) -> Result<()> {
     if reg.id.trim().is_empty() {
-        return Err(Error::Invalid("a backend registration needs an id".into()));
+        return Err(Error::BackendRegistrationRefused(
+            "a backend registration needs an id".into(),
+        ));
     }
     let builtin_ids: Vec<&str> = builtin_backends().iter().map(|b| b.id).collect();
     if reg.auto_selectable && !builtin_ids.contains(&reg.id) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::BackendRegistrationRefused(format!(
             "backend '{}' cannot be auto-selectable: auto-detection asks every candidate \
              `available()`, and a backend registered from outside this crate may only be able to \
              answer that over the network. Register it with `auto_selectable: false` and select it \
@@ -1120,7 +1126,7 @@ pub fn register_backend(reg: BackendRegistration) -> Result<()> {
             .iter()
             .find(|b| b.id != reg.id && (b.id == want || b.aliases.contains(&want.as_str())))
         {
-            return Err(Error::Invalid(format!(
+            return Err(Error::BackendRegistrationRefused(format!(
                 "backend '{}' cannot claim the name '{}': it already belongs to '{}'",
                 reg.id, name, clash.id
             )));
@@ -1188,12 +1194,12 @@ const KNOWN_UNREGISTERED: &[(&str, &str)] = &[(
 fn unknown_backend(name: &str) -> Error {
     let want = name.trim().to_lowercase();
     if let Some((_, why)) = KNOWN_UNREGISTERED.iter().find(|(id, _)| *id == want) {
-        return Error::Invalid(format!(
+        return Error::BackendNotConfigured(format!(
             "VM backend '{}' is not available in this build: {why}",
             name.trim()
         ));
     }
-    Error::Invalid(format!(
+    Error::UnknownBackend(format!(
         "unknown VM backend: '{}' (use {})",
         name.trim(),
         registered_backend_ids()
@@ -1252,7 +1258,7 @@ fn auto_detect(entries: &[BackendRegistration]) -> Result<Box<dyn VmBackend>> {
             }
         }
     }
-    Err(Error::Invalid(
+    Err(Error::NoBackendAvailable(
         "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
     ))
 }
@@ -1354,7 +1360,7 @@ pub fn clear_default_backend(base: &Path) -> Result<()> {
 /// VM and the value, not a guess.
 fn backend_for(vm: &Vm) -> Result<Box<dyn VmBackend>> {
     make_backend(&vm.backend).unwrap_or_else(|| {
-        Err(Error::Invalid(format!(
+        Err(Error::UnregisteredBackendInRecord(format!(
             "vm '{}': its record names backend '{}', which this process does not have registered \
              (it has {})",
             vm.name,
@@ -1409,17 +1415,17 @@ impl VmBackend for CloudHypervisorBackend {
         cfg: &VmConfig,
         overlay: &str,
         on: &dyn Fn(CreateStage),
-    ) -> Result<Boot> {
+    ) -> delonix_model::Result<Boot> {
         // Cloud Hypervisor does not support virtio-9p (only virtio-fs, which requires the
         // virtiofsd daemon, not yet wired up). `spec.volumes` on a CH VM is a
         // clear error instead of a silently ignored mount — the bin
         // auto-selects libvirt when there are volumes, so this only fires
         // if the user FORCES `backend: cloud-hypervisor` with volumes.
         if !cfg.volumes.is_empty() {
-            return Err(Error::Invalid(format!(
+            return Err(Error::RequiresLibvirtBackend(format!(
                 "VM '{}': spec.volumes requires the libvirt backend (Cloud Hypervisor does not do virtio-9p) — remove `backend: cloud-hypervisor` or the volumes",
                 cfg.name
-            )));
+            )).into());
         }
         // Before the network is touched: a socket path the kernel will refuse
         // kills the VMM at startup, so it is a clear error here instead.
@@ -1443,7 +1449,7 @@ impl VmBackend for CloudHypervisorBackend {
             Ok(p) => p,
             Err(e) => {
                 net.detach_tap(&cfg.name, lease.as_deref());
-                return Err(e);
+                return Err(e.into());
             }
         };
         let sock = vmdir.join(format!("{}.sock", cfg.name));
@@ -1473,7 +1479,7 @@ impl VmBackend for CloudHypervisorBackend {
         true
     }
 
-    fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+    fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         // `pid > 0` was the ONLY condition here, which is not an identity: a
         // record left behind by a VMM that died — or by a reboot — names a
         // number the kernel is free to hand to anything, and this path then
@@ -1507,7 +1513,7 @@ impl VmBackend for CloudHypervisorBackend {
             let graceful = ch_api_put(&vm.api_socket, "/api/v1/vmm.shutdown").is_ok()
                 && wait_vmm_left(pid, vm.pid_starttime, VMM_TERM_GRACE);
             if !graceful && !terminate_vmm(pid, vm.pid_starttime, VMM_TERM_GRACE, VMM_KILL_GRACE) {
-                return Err(Error::Runtime {
+                return Err(Error::Command {
                     context: "vm",
                     message: format!(
                         "cloud-hypervisor (pid {pid}) of VM '{}' did not exit after SIGTERM and \
@@ -1516,7 +1522,8 @@ impl VmBackend for CloudHypervisorBackend {
                         vm.name,
                         (VMM_TERM_GRACE + VMM_KILL_GRACE).as_secs()
                     ),
-                });
+                }
+                .into());
             }
         }
         // The record's own address if it learned one; otherwise the lease its MAC
@@ -1527,25 +1534,23 @@ impl VmBackend for CloudHypervisorBackend {
         Ok(())
     }
 
-    fn disk_health(&self, vmdir: &Path, vm: &Vm) -> Result<()> {
+    fn disk_health(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         let disk = ch_overlay(vmdir, vm);
         if !disk_looks_corrupt(&disk) {
             return Ok(());
         }
-        Err(Error::Runtime {
-            context: "vm",
-            message: format!(
-                "VM '{}' stopped, but `qemu-img check` now finds its disk corrupted \
-                 (BUG-VM-001) — measured live to happen even through a graceful \
-                 `vmm.shutdown`, with a real guest write in flight at the moment of \
-                 `stop`, which points at Cloud Hypervisor's own qcow2 writer under host \
-                 memory pressure, not at anything `stop` controls. Do NOT run `snapshot \
-                 restore` against it — try `qemu-img check -r all {}` first, and consider \
-                 `--backend libvirt` for VMs that need reliable disk snapshots.",
-                vm.name,
-                disk.display()
-            ),
-        })
+        Err(Error::DiskCorrupted(format!(
+            "VM '{}' stopped, but `qemu-img check` now finds its disk corrupted \
+             (BUG-VM-001) — measured live to happen even through a graceful \
+             `vmm.shutdown`, with a real guest write in flight at the moment of \
+             `stop`, which points at Cloud Hypervisor's own qcow2 writer under host \
+             memory pressure, not at anything `stop` controls. Do NOT run `snapshot \
+             restore` against it — try `qemu-img check -r all {}` first, and consider \
+             `--backend libvirt` for VMs that need reliable disk snapshots.",
+            vm.name,
+            disk.display()
+        ))
+        .into())
     }
 
     // ---- pause/unpause -----------------------------------------------------
@@ -1557,12 +1562,12 @@ impl VmBackend for CloudHypervisorBackend {
     // none of the "who holds the qcow2 lock" conflict that keeps snapshot
     // offline instead.
 
-    fn pause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
-        ch_api_put(&vm.api_socket, "/api/v1/vm.pause")
+    fn pause(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        Ok(ch_api_put(&vm.api_socket, "/api/v1/vm.pause")?)
     }
 
-    fn unpause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
-        ch_api_put(&vm.api_socket, "/api/v1/vm.resume")
+    fn unpause(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        Ok(ch_api_put(&vm.api_socket, "/api/v1/vm.resume")?)
     }
 
     // ---- snapshots -------------------------------------------------------
@@ -1585,7 +1590,7 @@ impl VmBackend for CloudHypervisorBackend {
     // kind of quiet divergence between backends this engine refuses to ship.
     // A `vm suspend`/`vm resume` pair is where that capability belongs.
 
-    fn snapshots(&self, vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
+    fn snapshots(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<Vec<String>> {
         // `-U` (force-share) because this has to answer while the VM RUNS, and
         // the vmm holds the write lock: `qemu-img info` opens read-only, which
         // is the only mode force-share allows. Plain `snapshot -l` opens
@@ -1594,35 +1599,37 @@ impl VmBackend for CloudHypervisorBackend {
             "qemu-img",
             &["info", "-U", "--", &ch_overlay(vmdir, vm).to_string_lossy()],
         )
-        .ok_or_else(|| Error::Runtime {
-            context: "qemu-img info",
-            message: format!("could not read the disk of VM '{}'", vm.name),
+        .ok_or_else(|| {
+            delonix_model::Error::from(Error::Command {
+                context: "qemu-img info",
+                message: format!("could not read the disk of VM '{}'", vm.name),
+            })
         })?;
         Ok(parse_qemu_snapshot_list(&out))
     }
 
-    fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+    fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
         self.offline_snapshot_op(vmdir, vm, "take a snapshot of")?;
         if self.snapshots(vmdir, vm)?.iter().any(|s| s == name) {
             return Err(taken_snapshot(&vm.name, name));
         }
-        qemu_img_snapshot(vmdir, vm, "-c", name)
+        Ok(qemu_img_snapshot(vmdir, vm, "-c", name)?)
     }
 
-    fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+    fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
         self.offline_snapshot_op(vmdir, vm, "restore")?;
         if !self.snapshots(vmdir, vm)?.iter().any(|s| s == name) {
             return Err(missing_snapshot(&vm.name, name));
         }
-        qemu_img_snapshot(vmdir, vm, "-a", name)
+        Ok(qemu_img_snapshot(vmdir, vm, "-a", name)?)
     }
 
-    fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
+    fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
         self.offline_snapshot_op(vmdir, vm, "delete a snapshot of")?;
         if !self.snapshots(vmdir, vm)?.iter().any(|s| s == name) {
             return Err(missing_snapshot(&vm.name, name));
         }
-        qemu_img_snapshot(vmdir, vm, "-d", name)
+        Ok(qemu_img_snapshot(vmdir, vm, "-d", name)?)
     }
 }
 
@@ -1632,20 +1639,18 @@ impl CloudHypervisorBackend {
     /// vmm holds the qcow2 exclusively, so there is no way to checkpoint the
     /// disk under it. Silence here would be worse than the refusal: the write
     /// simply would not happen.
-    fn offline_snapshot_op(&self, _vmdir: &Path, vm: &Vm, what: &str) -> Result<()> {
+    fn offline_snapshot_op(&self, _vmdir: &Path, vm: &Vm, what: &str) -> delonix_model::Result<()> {
         if !self.is_running(vm) {
             return Ok(());
         }
-        Err(Error::Runtime {
-            context: "vm",
-            message: format!(
-                "cloud-hypervisor cannot {what} a RUNNING VM: the vmm holds its disk exclusively \
-                 and CH has no live disk-snapshot API. Stop it first (`delonix vm stop {}`) — the \
-                 snapshot is then taken in the disk itself and survives everything. A VM that \
-                 needs checkpoints while it runs belongs on `--backend libvirt`.",
-                vm.name
-            ),
-        })
+        Err(Error::SnapshotNeedsStopped(format!(
+            "cloud-hypervisor cannot {what} a RUNNING VM: the vmm holds its disk exclusively \
+             and CH has no live disk-snapshot API. Stop it first (`delonix vm stop {}`) — the \
+             snapshot is then taken in the disk itself and survives everything. A VM that \
+             needs checkpoints while it runs belongs on `--backend libvirt`.",
+            vm.name
+        ))
+        .into())
     }
 }
 
@@ -1663,7 +1668,7 @@ fn qemu_img_snapshot(vmdir: &Path, vm: &Vm, flag: &str, name: &str) -> Result<()
         &["snapshot", flag, name, "--", &disk.to_string_lossy()],
     )
     .map(|_| ())
-    .map_err(|e| Error::Runtime {
+    .map_err(|e| Error::Command {
         context: "qemu-img snapshot",
         message: e,
     })
@@ -1794,17 +1799,14 @@ fn ch_api_put(sock: &str, path: &str) -> Result<()> {
     if http_status_is_2xx(&status_line) {
         Ok(())
     } else {
-        Err(Error::Runtime {
-            context: "vm",
-            message: format!(
-                "cloud-hypervisor api {path}: {}",
-                if status_line.is_empty() {
-                    "no response"
-                } else {
-                    &status_line
-                }
-            ),
-        })
+        Err(Error::CloudHypervisorApi(format!(
+            "cloud-hypervisor api {path}: {}",
+            if status_line.is_empty() {
+                "no response"
+            } else {
+                &status_line
+            }
+        )))
     }
 }
 
@@ -1823,17 +1825,13 @@ fn ch_api_call(
 ) -> Result<(String, Vec<u8>)> {
     use std::io::{Read, Write};
     use std::os::unix::net::UnixStream;
-    let mut s = UnixStream::connect(sock).map_err(|e| Error::Runtime {
-        context: "vm",
-        message: format!("cloud-hypervisor api socket: {e}"),
-    })?;
+    let mut s = UnixStream::connect(sock)
+        .map_err(|e| Error::CloudHypervisorApi(format!("cloud-hypervisor api socket: {e}")))?;
     let _ = s.set_read_timeout(Some(timeout));
     let _ = s.set_write_timeout(Some(timeout));
     let req = format!("{method} {path} HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n");
-    s.write_all(req.as_bytes()).map_err(|e| Error::Runtime {
-        context: "vm",
-        message: format!("cloud-hypervisor api write: {e}"),
-    })?;
+    s.write_all(req.as_bytes())
+        .map_err(|e| Error::CloudHypervisorApi(format!("cloud-hypervisor api write: {e}")))?;
     let mut buf = Vec::new();
     let mut chunk = [0u8; 512];
     let mut want: Option<usize> = None;
@@ -1850,10 +1848,9 @@ fn ch_api_call(
         if buf.len() > 65536 {
             break;
         }
-        let n = s.read(&mut chunk).map_err(|e| Error::Runtime {
-            context: "vm",
-            message: format!("cloud-hypervisor api read: {e}"),
-        })?;
+        let n = s
+            .read(&mut chunk)
+            .map_err(|e| Error::CloudHypervisorApi(format!("cloud-hypervisor api read: {e}")))?;
         if n == 0 {
             break;
         }
@@ -1908,7 +1905,7 @@ fn ch_serial_dest(capture: bool, serial: &Path, console: &Path) -> String {
 }
 
 fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) -> Result<i32> {
-    let join = network()?.join_argv().ok_or_else(|| Error::Runtime {
+    let join = network()?.join_argv().ok_or_else(|| Error::Command {
         context: "vm",
         message: "the ingress (rootless infra) is not up".into(),
     })?;
@@ -1946,7 +1943,7 @@ fn boot_ch(vmdir: &Path, cfg: &VmConfig, overlay: &str, tap: &str, mac: &str) ->
         ch.push("--firmware".into());
         ch.push(fw);
     } else {
-        return Err(Error::Invalid(
+        return Err(Error::NoFirmware(
             "VM without 'kernel' or 'firmware' and no rust-hypervisor-fw found — reinstall (curl install.sh) to fetch it, pass `--firmware <path>`, or use `--backend libvirt`".into(),
         ));
     }
@@ -2034,12 +2031,12 @@ fn launch_vmm(
         .args(["sh", "-c", script])
         .env("DELONIX_INTERNAL", "1")
         .status()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "cloud-hypervisor",
             message: e.to_string(),
         })?;
     if !st.success() {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "vm",
             message: "failed to launch cloud-hypervisor (KVM/binary available?)".into(),
         });
@@ -2056,7 +2053,7 @@ fn launch_vmm(
         .and_then(|s| s.trim().parse::<i32>().ok())
         .unwrap_or(0);
     if pid <= 0 {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "vm",
             message: format!(
                 "cloud-hypervisor did not report a PID{}",
@@ -2085,7 +2082,7 @@ fn wait_vmm_ready(pid: i32, sock: &Path, log: &Path, ready: Duration) -> Result<
     let deadline = Instant::now() + ready;
     loop {
         if starttime.is_none() || vmm_left(pid, starttime) {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "vm",
                 message: format!(
                     "cloud-hypervisor exited during startup{}",
@@ -2107,7 +2104,7 @@ fn wait_vmm_ready(pid: i32, sock: &Path, log: &Path, ready: Duration) -> Result<
         }
         if Instant::now() >= deadline {
             let _ = terminate_vmm(pid, starttime, VMM_KILL_GRACE, VMM_KILL_GRACE);
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "vm",
                 message: format!(
                     "cloud-hypervisor did not report the VM running within {}s (terminated){}",
@@ -2162,7 +2159,7 @@ fn ch_socket_paths_fit(vmdir: &Path, cfg: &VmConfig) -> Result<()> {
     for s in socks {
         let len = s.as_os_str().len();
         if len > SUN_PATH_MAX {
-            return Err(Error::Invalid(format!(
+            return Err(Error::SocketPathTooLong(format!(
                 "VM '{}': socket path {} is {len} bytes, and a UNIX socket path is limited to {SUN_PATH_MAX} — use a shorter VM name or a shorter DELONIX_ROOT",
                 cfg.name,
                 s.display()
@@ -2255,17 +2252,22 @@ fn libvirt_revert_argv(uri: &str, domain: &str, snap: &str) -> Vec<String> {
 /// the exit code is the part a script reads: 4 means «it is not there», 1 means
 /// «something broke», and a caller that has to tell them apart cannot parse the
 /// message (it is translated).
-fn missing_snapshot(vm: &str, snap: &str) -> Error {
-    Error::NotFound(format!("snapshot of VM '{vm}': {snap}"))
+///
+/// Returns the SHARED type directly, like [`unsupported_pause`]: every caller
+/// is a `VmBackend` trait method body, and that trait stays on
+/// `delonix_model::Result`.
+fn missing_snapshot(vm: &str, snap: &str) -> delonix_model::Error {
+    Error::SnapshotNotFound(format!("snapshot of VM '{vm}': {snap}")).into()
 }
 
 /// The name is TAKEN — `Conflict` (exit 5), the class whose next move is «pick
 /// another name or remove that one», as opposed to «create it» (4) or
 /// «something broke» (1).
-fn taken_snapshot(vm: &str, snap: &str) -> Error {
-    Error::Conflict(format!(
+fn taken_snapshot(vm: &str, snap: &str) -> delonix_model::Error {
+    Error::SnapshotTaken(format!(
         "VM '{vm}' already has a snapshot named '{snap}' (see `delonix vm snapshot ls {vm}`)"
     ))
+    .into()
 }
 
 /// Where a VM's snapshot metadata is kept on OUR side, under the per-VM
@@ -2363,7 +2365,7 @@ fn libvirt_reserve_ip(uri: &str, net: &str, mac: &str, ip: &str) -> Result<()> {
     let msg = quiet("virsh", &args("add-last"))
         .err()
         .unwrap_or_else(|| "unknown error".into());
-    Err(Error::Invalid(format!(
+    Err(Error::StaticIpReservationFailed(format!(
         "could not reserve static IP {ip} on libvirt network '{net}': {msg}"
     )))
 }
@@ -2424,7 +2426,7 @@ fn libvirt_poweroff(uri: &str, name: &str) -> Result<()> {
     }
     quiet("virsh", &["-c", uri, "destroy", "--", name])
         .map(|_| ())
-        .map_err(|msg| Error::Runtime {
+        .map_err(|msg| Error::Command {
             context: "vm",
             message: format!("could not power off VM '{name}': {msg}"),
         })
@@ -2463,7 +2465,7 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
     // common case (without managed save).
     quiet("virsh", &["-c", uri, "undefine", "--", name])
         .map(|_| ())
-        .map_err(|msg| Error::Runtime {
+        .map_err(|msg| Error::Command {
             context: "vm",
             message: format!("could not remove VM '{name}' from libvirt ({uri}): {msg}"),
         })
@@ -3189,7 +3191,7 @@ fn ensure_antispoof_filter(uri: &str) -> Result<()> {
     ) {
         return Ok(());
     }
-    Err(Error::Runtime {
+    Err(Error::Command {
         context: "libvirt",
         message: format!(
             "could not define the '{ANTISPOOF_FILTER}' network filter on {uri} — refusing to \
@@ -3278,7 +3280,7 @@ impl VmBackend for LibvirtBackend {
         cfg: &VmConfig,
         overlay: &str,
         on: &dyn Fn(CreateStage),
-    ) -> Result<Boot> {
+    ) -> delonix_model::Result<Boot> {
         // Effective net mode: with no explicit `--net-mode`, prefer `nat`
         // whenever the SYSTEM connection is usable (libvirt group) — user-mode
         // (session) NEVER yields a reachable/visible IP, and silently landing
@@ -3291,17 +3293,18 @@ impl VmBackend for LibvirtBackend {
         let cfg = &cfg;
         if let Some(ip) = cfg.static_ip.as_deref() {
             if !matches!(cfg.net_mode.as_deref(), Some("nat") | Some("network")) {
-                return Err(Error::Invalid(format!(
+                return Err(Error::StaticIpRequiresNat(format!(
                     "VM '{}': --ip (static IP) requires the libvirt `nat` mode — this VM resolved to '{}' (on a host bridge, reserve the IP on your LAN's DHCP instead)",
                     cfg.name,
                     cfg.net_mode.as_deref().unwrap_or("user")
-                )));
+                )).into());
             }
             if ip.parse::<std::net::Ipv4Addr>().is_err() {
-                return Err(Error::Invalid(format!(
+                return Err(Error::InvalidStaticIp(format!(
                     "VM '{}': invalid static IP '{ip}'",
                     cfg.name
-                )));
+                ))
+                .into());
             }
         }
         let mac = mac_for(&cfg.name);
@@ -3370,16 +3373,19 @@ impl VmBackend for LibvirtBackend {
         let out = stable_cmd("virsh")
             .args(["-c", uri, "start", "--", &cfg.name])
             .output()
-            .map_err(|e| Error::Runtime {
-                context: "libvirt",
-                message: format!("virsh start: {e}"),
+            .map_err(|e| {
+                delonix_model::Error::from(Error::Command {
+                    context: "libvirt",
+                    message: format!("virsh start: {e}"),
+                })
             })?;
         // 'start' fails if it is already running — we tolerate that (auto-heal).
         if !out.status.success() && !self.is_running_uri(uri, &cfg.name) {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "vm",
                 message: "failed to start the libvirt domain (KVM/permissions/image?)".into(),
-            });
+            }
+            .into());
         }
         Ok(Boot {
             pid: None, // managed by libvirtd — liveness via virsh domstate
@@ -3414,7 +3420,7 @@ impl VmBackend for LibvirtBackend {
         }
     }
 
-    fn stop(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
+    fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         libvirt_cleanup(&vm.name)?;
         // The domain XML that `boot` wrote STAYS. It used to be deleted here,
         // which is tidy right up to the moment something needs the domain back:
@@ -3425,37 +3431,48 @@ impl VmBackend for LibvirtBackend {
         Ok(())
     }
 
-    fn pause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
-        let uri = libvirt_domain_uri(&vm.name).ok_or_else(|| Error::VmNotFound(vm.name.clone()))?;
+    fn pause(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        let uri = libvirt_domain_uri(&vm.name)
+            .ok_or_else(|| delonix_model::Error::from(Error::VmNotFound(vm.name.clone())))?;
         quiet("virsh", &["-c", uri, "suspend", "--", &vm.name])
             .map(|_| ())
-            .map_err(|e| Error::Runtime {
-                context: "virsh suspend",
-                message: e,
+            .map_err(|e| {
+                Error::Command {
+                    context: "virsh suspend",
+                    message: e,
+                }
+                .into()
             })
     }
 
-    fn unpause(&self, _vmdir: &Path, vm: &Vm) -> Result<()> {
-        let uri = libvirt_domain_uri(&vm.name).ok_or_else(|| Error::VmNotFound(vm.name.clone()))?;
+    fn unpause(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        let uri = libvirt_domain_uri(&vm.name)
+            .ok_or_else(|| delonix_model::Error::from(Error::VmNotFound(vm.name.clone())))?;
         quiet("virsh", &["-c", uri, "resume", "--", &vm.name])
             .map(|_| ())
-            .map_err(|e| Error::Runtime {
-                context: "virsh resume",
-                message: e,
+            .map_err(|e| {
+                Error::Command {
+                    context: "virsh resume",
+                    message: e,
+                }
+                .into()
             })
     }
 
-    fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
-        let take = |uri: &str| -> Result<()> {
+    fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
+        let take = |uri: &str| -> delonix_model::Result<()> {
             let argv = libvirt_snapshot_argv(uri, &vm.name, name);
             quiet(
                 "virsh",
                 &argv.iter().map(String::as_str).collect::<Vec<_>>(),
             )
             .map(|_| ())
-            .map_err(|e| Error::Runtime {
-                context: "virsh snapshot-create-as",
-                message: e,
+            .map_err(|e| {
+                Error::Command {
+                    context: "virsh snapshot-create-as",
+                    message: e,
+                }
+                .into()
             })
         };
         match libvirt_domain_uri(&vm.name) {
@@ -3489,17 +3506,20 @@ impl VmBackend for LibvirtBackend {
         }
     }
 
-    fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
-        let revert = |uri: &str| -> Result<()> {
+    fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
+        let revert = |uri: &str| -> delonix_model::Result<()> {
             let argv = libvirt_revert_argv(uri, &vm.name, name);
             quiet(
                 "virsh",
                 &argv.iter().map(String::as_str).collect::<Vec<_>>(),
             )
             .map(|_| ())
-            .map_err(|e| Error::Runtime {
-                context: "virsh snapshot-revert",
-                message: e,
+            .map_err(|e| {
+                Error::Command {
+                    context: "virsh snapshot-revert",
+                    message: e,
+                }
+                .into()
             })
         };
         let Some(uri) = libvirt_domain_uri(&vm.name) else {
@@ -3540,8 +3560,8 @@ impl VmBackend for LibvirtBackend {
         revert(uri)
     }
 
-    fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> Result<()> {
-        let del = |uri: &str| -> Result<()> {
+    fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
+        let del = |uri: &str| -> delonix_model::Result<()> {
             quiet(
                 "virsh",
                 &[
@@ -3555,9 +3575,12 @@ impl VmBackend for LibvirtBackend {
                 ],
             )
             .map(|_| ())
-            .map_err(|e| Error::Runtime {
-                context: "virsh snapshot-delete",
-                message: e,
+            .map_err(|e| {
+                Error::Command {
+                    context: "virsh snapshot-delete",
+                    message: e,
+                }
+                .into()
             })
         };
         let done = match libvirt_domain_uri(&vm.name) {
@@ -3589,7 +3612,7 @@ impl VmBackend for LibvirtBackend {
         done
     }
 
-    fn snapshots(&self, vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
+    fn snapshots(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<Vec<String>> {
         // No domain in libvirt = the VM is stopped, and libvirt knows nothing
         // about its snapshots (the undefine took the metadata). Answering from
         // the live query alone printed an EMPTY list with rc=0 for a VM whose
@@ -3601,7 +3624,7 @@ impl VmBackend for LibvirtBackend {
         }
     }
 
-    fn preserve_snapshots(&self, vmdir: &Path, vm: &Vm) -> Result<Vec<String>> {
+    fn preserve_snapshots(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<Vec<String>> {
         let Some(uri) = libvirt_domain_uri(&vm.name) else {
             return Ok(Vec::new()); // no domain: nothing for the undefine to destroy
         };
@@ -3620,7 +3643,7 @@ impl VmBackend for LibvirtBackend {
             // made directly with virsh — refuse rather than write outside the
             // directory, and rather than let the undefine eat it in silence.
             if !valid_vm_name(n) {
-                return Err(Error::Runtime {
+                return Err(Error::Command {
                     context: "vm",
                     message: format!(
                         "VM '{}': cannot preserve the snapshot '{n}' across a stop (its name is \
@@ -3628,7 +3651,8 @@ impl VmBackend for LibvirtBackend {
                          snapshot-delete --domain {} --snapshotname '{n}'`",
                         vm.name, vm.name
                     ),
-                });
+                }
+                .into());
             }
             let xml = capture(
                 "virsh",
@@ -3642,13 +3666,15 @@ impl VmBackend for LibvirtBackend {
                     n,
                 ],
             )
-            .ok_or_else(|| Error::Runtime {
-                context: "virsh snapshot-dumpxml",
-                message: format!(
-                    "VM '{}': could not read the snapshot '{n}' to preserve it across the stop \
-                     (nothing was stopped — the metadata would be lost by the undefine)",
-                    vm.name
-                ),
+            .ok_or_else(|| {
+                delonix_model::Error::from(Error::Command {
+                    context: "virsh snapshot-dumpxml",
+                    message: format!(
+                        "VM '{}': could not read the snapshot '{n}' to preserve it across the \
+                         stop (nothing was stopped — the metadata would be lost by the undefine)",
+                        vm.name
+                    ),
+                })
             })?;
             delonix_state::write_atomic(&dir.join(format!("{n}.xml")), xml.as_bytes())?;
         }
@@ -3693,20 +3719,18 @@ impl LibvirtBackend {
         &self,
         vmdir: &Path,
         vm: &Vm,
-        op: &dyn Fn(&str) -> Result<()>,
-    ) -> Result<bool> {
+        op: &dyn Fn(&str) -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<bool> {
         let xml = vmdir.join(format!("{}.xml", vm.name));
         if !xml.exists() {
-            return Err(Error::Runtime {
-                context: "vm",
-                message: format!(
-                    "VM '{}' is stopped and its libvirt domain description is not on disk ({}) \
-                     — start it once (`delonix vm start {}`) and it stays there from then on",
-                    vm.name,
-                    xml.display(),
-                    vm.name
-                ),
-            });
+            return Err(Error::NoStoppedDomainXml(format!(
+                "VM '{}' is stopped and its libvirt domain description is not on disk ({}) \
+                 — start it once (`delonix vm start {}`) and it stays there from then on",
+                vm.name,
+                xml.display(),
+                vm.name
+            ))
+            .into());
         }
         // The connection `boot` would pick: `vm.tap` holds the EFFECTIVE net
         // mode of the last boot (see the `tap: cfg.net_mode…` assignment), and
@@ -3908,8 +3932,11 @@ fn prepare_local_overlay(
     cfg: &VmConfig,
     on: &dyn Fn(CreateStage),
 ) -> Result<(std::path::PathBuf, std::path::PathBuf)> {
-    let disk_path = std::fs::canonicalize(&cfg.disk)
-        .map_err(|e| Error::not_found_or_io(e, || format!("VM image {}", cfg.disk)))?;
+    let disk_path = std::fs::canonicalize(&cfg.disk).map_err(|e| {
+        Error::from(delonix_model::Error::not_found_or_io(e, || {
+            format!("VM image {}", cfg.disk)
+        }))
+    })?;
     let overlay = vmdir.join(format!("{}.qcow2", cfg.name));
     if !overlay.exists() {
         on(CreateStage::Disk);
@@ -3936,7 +3963,7 @@ fn prepare_local_overlay(
             // números é a diferença entre um erro e um mistério.
             if let Some(base_bytes) = disk_virtual_size_bytes(&disk_path) {
                 if pedido < base_bytes {
-                    return Err(Error::Invalid(format!(
+                    return Err(Error::DiskTooSmall(format!(
                         "--disk-size {gib}G é menor que a imagem base ({} GiB): um overlay qcow2 \
                          não encolhe o seu backing file",
                         base_bytes / (1024 * 1024 * 1024)
@@ -3955,7 +3982,7 @@ fn prepare_local_overlay(
 
 pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Result<Vm> {
     if !valid_vm_name(&cfg.name) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidName(format!(
             "invalid VM name '{}' — use letters, digits, '.', '_' or '-' (no '/', '..', or leading '-')",
             cfg.name
         )));
@@ -3969,7 +3996,7 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
     // `<name>.json` that does NOT parse as a declarative Vm already exists, it is a direct-QEMU
     // record (`vm run`) — refuse instead of overwriting it and leaving that VM orphaned.
     if restarting.is_none() && vmdir.join(format!("{}.json", cfg.name)).exists() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::RecordConflict(format!(
             "a VM '{}' created by `vm run` (direct-QEMU) already exists. Remove it first \
              (`vm rm {}`) or use another name — the two subsystems share the vms/ folder.",
             cfg.name, cfg.name
@@ -4040,7 +4067,7 @@ libvirt+qemu"
     // Refuse rather than accept-and-ignore — see `vm_namespace_supported`.
     let ns = vm_namespace_of(cfg);
     if ns != "default" && !vm_namespace_supported(backend.id()) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::NamespaceUnsupported(format!(
             "namespace '{ns}' is not enforceable on the '{}' backend: its VMs live on the host's \
              libvirt bridge, outside the Delonix SDN, so nothing here can isolate them. Use \
              `--backend cloud-hypervisor` (its VMs share the containers' SDN), or drop \
@@ -4129,7 +4156,7 @@ libvirt+qemu"
                 if restarting.is_none() && !own_storage {
                     let _ = std::fs::remove_file(&overlay);
                 }
-                return Err(e);
+                return Err(e.into());
             }
         },
     };
@@ -4222,7 +4249,9 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
             // backend still owns has to go with it. They are the same call for
             // the local backends (the default), and deliberately not for a
             // remote one, whose disk lives on the node.
-            if let Err(e) = backend_for(&vm).and_then(|b| b.destroy(&vmdir, &vm)) {
+            if let Err(e) =
+                backend_for(&vm).and_then(|b| b.destroy(&vmdir, &vm).map_err(Error::from))
+            {
                 if !force {
                     return Err(e); // record intact — the rm can be retried
                 }
@@ -4308,15 +4337,15 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
     // so correctly either way — an `Err` from here is a diagnosis on top of a
     // stop that already happened, never a reason to leave the record lying
     // about a dead vmm being `Running`. See `VmBackend::disk_health`.
-    backend.disk_health(&vmdir, &vm)
+    Ok(backend.disk_health(&vmdir, &vm)?)
 }
 
 /// Loads a VM record, mapping the shared `NotFound` to the VM-specific
 /// `VmNotFound` ("no such VM: …") — same idiom as `stop`/`status`.
 fn load_vm(base: &Path, name: &str) -> Result<Vm> {
     store(base)?.load(name).map_err(|e| match e.into_root() {
-        Error::NotFound(_) => Error::VmNotFound(name.to_string()),
-        e => e,
+        delonix_model::Error::NotFound(_) => Error::VmNotFound(name.to_string()),
+        e => e.into(),
     })
 }
 
@@ -4328,7 +4357,7 @@ pub fn pause(base: &Path, name: &str) -> Result<()> {
     let st = store(base)?;
     let mut vm = load_vm(base, name)?;
     if vm.status != Status::Running {
-        return Err(Error::Invalid(format!(
+        return Err(Error::NotRunningForOp(format!(
             "VM '{name}' is not running (status: {:?}) — nothing to pause",
             vm.status
         )));
@@ -4345,7 +4374,7 @@ pub fn unpause(base: &Path, name: &str) -> Result<()> {
     let st = store(base)?;
     let mut vm = load_vm(base, name)?;
     if vm.status != Status::Paused {
-        return Err(Error::Invalid(format!(
+        return Err(Error::NotRunningForOp(format!(
             "VM '{name}' is not paused (status: {:?}) — nothing to resume",
             vm.status
         )));
@@ -4359,17 +4388,21 @@ pub fn unpause(base: &Path, name: &str) -> Result<()> {
 /// running VM's snapshot is a system checkpoint (memory + disk).
 pub fn snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
     if !valid_vm_name(snap) {
-        return Err(Error::Invalid(format!("invalid snapshot name: {snap}")));
+        return Err(Error::InvalidSnapshotName(format!(
+            "invalid snapshot name: {snap}"
+        )));
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    backend_for(&vm)?.snapshot(&vmdir, &vm, snap)
+    Ok(backend_for(&vm)?.snapshot(&vmdir, &vm, snap)?)
 }
 
 /// Reverts VM `name` to the named snapshot (see [`VmBackend::restore`]).
 pub fn restore(base: &Path, name: &str, snap: &str) -> Result<()> {
     if !valid_vm_name(snap) {
-        return Err(Error::Invalid(format!("invalid snapshot name: {snap}")));
+        return Err(Error::InvalidSnapshotName(format!(
+            "invalid snapshot name: {snap}"
+        )));
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
@@ -4441,7 +4474,7 @@ fn blockcommit_argv(uri: &str, name: &str, dev: &str, top: &str, base: &str) -> 
 pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> Result<()> {
     let vm = load_vm(base, name)?;
     if vm.backend != "libvirt" {
-        return Err(Error::Invalid(format!(
+        return Err(Error::LiveBackupNeedsLibvirt(format!(
             "live disk backup needs the libvirt backend (this VM runs on {}); stop it first, or \
              use `delonix vm snapshot create {name} <label>`",
             vm.backend
@@ -4454,7 +4487,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
     // would act on a different disk of the same domain.
     let blklist =
         quiet("virsh", &["-c", uri, "domblklist", "--details", "--", name]).map_err(|e| {
-            Error::Invalid(format!("live backup: cannot list the disks of {name}: {e}"))
+            Error::LiveBackupFailed(format!("live backup: cannot list the disks of {name}: {e}"))
         })?;
     let target = blklist
         .lines()
@@ -4466,7 +4499,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
         })
         .next()
         .ok_or_else(|| {
-            Error::Invalid(format!(
+            Error::LiveBackupFailed(format!(
                 "live backup: {name} has no file-backed disk to copy"
             ))
         })?;
@@ -4503,7 +4536,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
             "create", "-q", "-f", "qcow2", "-b", &source, "-F", &fmt, "--", &tmp_s,
         ],
     )
-    .map_err(|e| Error::Invalid(format!("live backup: cannot stage the overlay: {e}")))?;
+    .map_err(|e| Error::LiveBackupFailed(format!("live backup: cannot stage the overlay: {e}")))?;
 
     let mut args = vec![
         "-c",
@@ -4524,7 +4557,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
         args.push("--quiesce");
     }
     quiet("virsh", &args).map_err(|e| {
-        Error::Invalid(format!(
+        Error::LiveBackupFailed(format!(
             "live backup: could not snapshot {name}: {e}{}",
             if quiesce {
                 " (--quiesce needs qemu-guest-agent running INSIDE the guest)"
@@ -4538,7 +4571,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
     // do NOT return early on failure: the pivot has to happen either way, or the
     // VM is left running on a temporary file.
     let copied = std::fs::copy(&source, dest)
-        .map_err(|e| Error::Invalid(format!("live backup: copying {source}: {e}")));
+        .map_err(|e| Error::LiveBackupFailed(format!("live backup: copying {source}: {e}")));
 
     // `--top` and `--base` are NOT optional here, and leaving them out is a
     // disaster that reports success. A bare `blockcommit --active --pivot`
@@ -4561,7 +4594,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
             // into a refusal, and it costs one `domblklist`.
             let now = quiet("virsh", &["-c", uri, "domblklist", "--", name]).unwrap_or_default();
             if !now.contains(source.as_str()) {
-                return Err(Error::Invalid(format!(
+                return Err(Error::LiveBackupFailed(format!(
                     "live backup: {name} pivoted onto the WRONG disk — it should be writing to \
                      {source}. Stop it NOW (virsh -c {uri} destroy {name}) and check the chain \
                      with qemu-img info before starting it again; its backing image may be \
@@ -4573,7 +4606,7 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
         }
         Err(e) => {
             let _ = std::fs::remove_file(dest); // the archive would be half a story
-            return Err(Error::Invalid(format!(
+            return Err(Error::LiveBackupFailed(format!(
                 "live backup: {name} could NOT be put back on its own disk ({e}). It is still \
                  running, but writing to {tmp_s}, which must not be deleted. Recover with: \
                  virsh -c {uri} blockcommit --domain {name} --path {dev} --active --pivot --wait"
@@ -4586,17 +4619,19 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
 /// Lists VM `name`'s snapshot names (see [`VmBackend::snapshots`]).
 pub fn snapshots(base: &Path, name: &str) -> Result<Vec<String>> {
     let vm = load_vm(base, name)?;
-    backend_for(&vm)?.snapshots(&vms_dir(base), &vm)
+    Ok(backend_for(&vm)?.snapshots(&vms_dir(base), &vm)?)
 }
 
 /// Deletes VM `name`'s snapshot `snap` (see [`VmBackend::delete_snapshot`]).
 pub fn delete_snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
     if !valid_vm_name(snap) {
-        return Err(Error::Invalid(format!("invalid snapshot name: {snap}")));
+        return Err(Error::InvalidSnapshotName(format!(
+            "invalid snapshot name: {snap}"
+        )));
     }
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
-    backend_for(&vm)?.delete_snapshot(&vmdir, &vm, snap)
+    Ok(backend_for(&vm)?.delete_snapshot(&vmdir, &vm, snap)?)
 }
 
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a
@@ -4768,8 +4803,8 @@ fn config_from(vm: &Vm) -> VmConfig {
 pub fn start(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
     let vm = st.load(name).map_err(|e| match e.into_root() {
-        Error::NotFound(n) => Error::VmNotFound(n),
-        e => e,
+        delonix_model::Error::NotFound(n) => Error::VmNotFound(n),
+        e => e.into(),
     })?;
     create(base, &config_from(&vm))
 }
@@ -4780,8 +4815,8 @@ pub fn start(base: &Path, name: &str) -> Result<Vm> {
 pub fn restart(base: &Path, name: &str) -> Result<Vm> {
     let st = store(base)?;
     let vm = st.load(name).map_err(|e| match e.into_root() {
-        Error::NotFound(n) => Error::VmNotFound(n),
-        e => e,
+        delonix_model::Error::NotFound(n) => Error::VmNotFound(n),
+        e => e.into(),
     })?;
     if backend_for(&vm)?.is_running(&vm) {
         stop(base, name)?;
@@ -4795,8 +4830,8 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     // load() first just to resolve the NotFound->VmNotFound mapping before
     // taking the lock (update() would otherwise surface the generic NotFound).
     st.load(name).map_err(|e| match e.into_root() {
-        Error::NotFound(n) => Error::VmNotFound(n),
-        e => e,
+        delonix_model::Error::NotFound(n) => Error::VmNotFound(n),
+        e => e.into(),
     })?;
     // Everything from the backend query to the decision runs INSIDE the
     // locked read-modify-write (`JsonStore::update`) — this used to be a bare
@@ -5324,7 +5359,7 @@ Format specific information:
                 _: &VmConfig,
                 _: &str,
                 _: &dyn Fn(CreateStage),
-            ) -> Result<Boot> {
+            ) -> delonix_model::Result<Boot> {
                 unimplemented!()
             }
             fn is_running(&self, _: &Vm) -> bool {
@@ -5333,7 +5368,7 @@ Format specific information:
             fn ip(&self, _: &Vm) -> Option<String> {
                 None
             }
-            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 Ok(())
             }
         }
@@ -5442,7 +5477,7 @@ Format specific information:
                 _: &VmConfig,
                 _: &str,
                 _: &dyn Fn(CreateStage),
-            ) -> Result<Boot> {
+            ) -> delonix_model::Result<Boot> {
                 unreachable!()
             }
             fn is_running(&self, _: &Vm) -> bool {
@@ -5451,7 +5486,7 @@ Format specific information:
             fn ip(&self, _: &Vm) -> Option<String> {
                 None
             }
-            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 Ok(())
             }
         }
@@ -6610,7 +6645,7 @@ Format specific information:
             _cfg: &VmConfig,
             _overlay: &str,
             _on: &dyn Fn(CreateStage),
-        ) -> Result<Boot> {
+        ) -> delonix_model::Result<Boot> {
             unreachable!("these tests never boot")
         }
         fn is_running(&self, _vm: &Vm) -> bool {
@@ -6619,7 +6654,7 @@ Format specific information:
         fn ip(&self, _vm: &Vm) -> Option<String> {
             None
         }
-        fn stop(&self, _vmdir: &Path, _vm: &Vm) -> Result<()> {
+        fn stop(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
             Ok(())
         }
         fn manages_own_storage(&self) -> bool {
@@ -6866,8 +6901,8 @@ Format specific information:
                 _: &VmConfig,
                 _: &str,
                 _: &dyn Fn(CreateStage),
-            ) -> Result<Boot> {
-                Err(Error::Invalid("the node refused".into()))
+            ) -> delonix_model::Result<Boot> {
+                Err(delonix_model::Error::Invalid("the node refused".into()))
             }
             fn is_running(&self, _: &Vm) -> bool {
                 false
@@ -6875,7 +6910,7 @@ Format specific information:
             fn ip(&self, _: &Vm) -> Option<String> {
                 None
             }
-            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 Ok(())
             }
         }
@@ -6956,7 +6991,7 @@ Format specific information:
                 _: &VmConfig,
                 _: &str,
                 _: &dyn Fn(CreateStage),
-            ) -> Result<Boot> {
+            ) -> delonix_model::Result<Boot> {
                 unreachable!()
             }
             fn is_running(&self, _: &Vm) -> bool {
@@ -6965,11 +7000,11 @@ Format specific information:
             fn ip(&self, _: &Vm) -> Option<String> {
                 None
             }
-            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 STOPS.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }
-            fn destroy(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn destroy(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 DESTROYS.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }
@@ -7036,7 +7071,7 @@ Format specific information:
                 _: &VmConfig,
                 _: &str,
                 _: &dyn Fn(CreateStage),
-            ) -> Result<Boot> {
+            ) -> delonix_model::Result<Boot> {
                 unreachable!()
             }
             fn is_running(&self, _: &Vm) -> bool {
@@ -7045,7 +7080,7 @@ Format specific information:
             fn ip(&self, _: &Vm) -> Option<String> {
                 None
             }
-            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 STOPS.fetch_add(1, Ordering::SeqCst);
                 Ok(())
             }
@@ -7093,7 +7128,7 @@ Format specific information:
                 _: &VmConfig,
                 _: &str,
                 _: &dyn Fn(CreateStage),
-            ) -> Result<Boot> {
+            ) -> delonix_model::Result<Boot> {
                 BOOTS.fetch_add(1, Ordering::SeqCst);
                 Ok(Boot {
                     pid: None,
@@ -7104,7 +7139,7 @@ Format specific information:
                     lease_floor: None,
                 })
             }
-            fn resume(&self, _: &Path, vm: &Vm) -> Result<Option<Boot>> {
+            fn resume(&self, _: &Path, vm: &Vm) -> delonix_model::Result<Option<Boot>> {
                 RESUMES.fetch_add(1, Ordering::SeqCst);
                 Ok(Some(Boot {
                     pid: None,
@@ -7121,7 +7156,7 @@ Format specific information:
             fn ip(&self, _: &Vm) -> Option<String> {
                 None
             }
-            fn stop(&self, _: &Path, _: &Vm) -> Result<()> {
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
                 Ok(())
             }
         }
