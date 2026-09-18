@@ -2227,7 +2227,8 @@ pub(crate) fn with_host_workload<R>(
         (a.dns, a.hosts_ip)
     };
     let attach_slirp = |pid: i32, ports: &[String]| -> delonix_linux::Result<()> {
-        delonix_sdn::slirp_attach(pid, ports).map_err(Into::into)
+        delonix_sdn::slirp_attach(pid, ports)
+            .map_err(|e| delonix_linux::Error::Engine(delonix_model::Error::from(e)))
     };
     let on_first_start = |c: &Container| {
         if let Some(cfg) = c.health.clone() {
@@ -2308,7 +2309,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // stored `ports`) is keyed on a single port and stays that way.
     let ports: Vec<String> = ports
         .iter()
-        .map(|s| delonix_sdn::expand_publish_range(s))
+        .map(|s| delonix_sdn::expand_publish_range(s).map_err(delonix_model::Error::from))
         .collect::<Result<Vec<_>>>()?
         .concat();
     // Validate the `-p`s BEFORE creating anything (clear error, no leftovers).
@@ -3505,7 +3506,7 @@ pub(crate) fn apply_firewall_everywhere(
 ) -> Result<()> {
     let ips = container_ips(c);
     let refs: Vec<&str> = ips.iter().map(|s| s.as_str()).collect();
-    infra::apply_firewall_all(&c.id, &refs, fw)
+    infra::apply_firewall_all(&c.id, &refs, fw).map_err(Into::into)
 }
 
 /// Which LIVE container is publishing this host port? `None` = free.
@@ -3606,7 +3607,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
                     // Custom network: cleanup in the ingress, no own slirp.
                     unpublish_ports(&c, None);
                     infra::detach_container(&c.id, &ip);
-                    return Err(e);
+                    return Err(e.into());
                 }
             }
             // Re-attach the ADDITIONAL networks. The record kept them across the stop,

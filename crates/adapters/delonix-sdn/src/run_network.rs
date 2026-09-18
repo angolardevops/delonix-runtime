@@ -26,6 +26,10 @@ use delonix_model::Result;
 /// port we want fails, and only touches that one. With no conflict, nothing is
 /// deleted — and a state-read error can no longer destroy what's working.
 pub fn publish_with_retry(ip: &str, spec: &str) -> Result<()> {
+    publish_with_retry_local(ip, spec).map_err(Into::into)
+}
+
+fn publish_with_retry_local(ip: &str, spec: &str) -> crate::Result<()> {
     match crate::infra::publish_port(ip, spec) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -173,9 +177,9 @@ pub struct HostNetwork<'a> {
 
 impl delonix_compute::ports::NetworkProvider for HostNetwork<'_> {
     fn check_network(&self, name: &str) -> Result<()> {
-        crate::NetworkStore::open(&self.state_root)?
-            .get(name)
-            .map(|_| ())
+        let store =
+            crate::NetworkStore::open(&self.state_root).map_err(delonix_model::Error::from)?;
+        store.get(name).map(|_| ()).map_err(Into::into)
     }
 
     fn attach(
@@ -186,9 +190,10 @@ impl delonix_compute::ports::NetworkProvider for HostNetwork<'_> {
         fixed_ip: Option<&str>,
     ) -> Result<(String, String)> {
         let attached = match fixed_ip {
-            Some(fixed) => crate::infra::attach_container_on_ip(id, network, fixed, namespace)?,
-            None => crate::infra::attach_container(id, network, namespace)?,
-        };
+            Some(fixed) => crate::infra::attach_container_on_ip(id, network, fixed, namespace),
+            None => crate::infra::attach_container(id, network, namespace),
+        }
+        .map_err(delonix_model::Error::from)?;
         (self.on_attached)(namespace);
         Ok(attached)
     }
@@ -206,12 +211,12 @@ impl delonix_compute::ports::NetworkProvider for HostNetwork<'_> {
     }
 
     fn apply_firewall(&self, id: &str, ip: &str, fw: &ContainerFw) -> Result<()> {
-        crate::infra::apply_firewall(id, ip, fw)
+        crate::infra::apply_firewall(id, ip, fw).map_err(Into::into)
     }
 
     fn shape(&self, id: &str, bps: &str, burst: Option<&str>) -> Result<()> {
-        let rate = crate::parse_net_rate(bps, burst)?;
-        crate::infra::set_net_rate(id, rate.rate_bit, rate.burst_bytes)
+        let rate = crate::parse_net_rate(bps, burst).map_err(delonix_model::Error::from)?;
+        crate::infra::set_net_rate(id, rate.rate_bit, rate.burst_bytes).map_err(Into::into)
     }
 
     fn register_expose(&self, name: &str, namespace: &str, ip: &str, port: u16) -> Result<()> {

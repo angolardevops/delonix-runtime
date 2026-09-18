@@ -244,7 +244,7 @@ fn reseed_overlay_fdb(store: &NetworkStore, name: &str) -> Result<()> {
             // died with it. The registry is the whole truth until it comes back.
             Ok(())
         }
-        r => r,
+        r => r.map_err(Into::into),
     }
 }
 
@@ -278,7 +278,7 @@ fn remove_peer_everywhere(store: &NetworkStore, name: &str, peer: &str) -> Resul
         let dst = peer_fdb_dst(&parsed);
         if let Err(e) = infra::del_vxlan_peer(&dev, &dst) {
             if !holder_is_down(&e) {
-                return Err(e);
+                return Err(e.into());
             }
             println!(
                 "{}",
@@ -288,7 +288,10 @@ fn remove_peer_everywhere(store: &NetworkStore, name: &str, peer: &str) -> Resul
                     &[("name", name), ("peer", peer)],
                 )
             );
-            return store.remove_overlay_peer(name, peer).map(|_| ());
+            return store
+                .remove_overlay_peer(name, peer)
+                .map(|_| ())
+                .map_err(Into::into);
         }
         // The tunnel only exists on an encrypted overlay, and only for a peer
         // that carried a key.
@@ -296,13 +299,15 @@ fn remove_peer_everywhere(store: &NetworkStore, name: &str, peer: &str) -> Resul
             if let Some((pubkey, _)) = &parsed.1 {
                 if let Err(e) = infra::del_wg_peer(&wg_iface_name(vni), pubkey) {
                     if !holder_is_down(&e) {
-                        return Err(e);
+                        return Err(e.into());
                     }
                 }
             }
         }
     }
-    store.remove_overlay_peer(name, peer)?;
+    store
+        .remove_overlay_peer(name, peer)
+        .map_err(delonix_model::Error::from)?;
     Ok(())
 }
 
@@ -311,7 +316,7 @@ fn remove_peer_everywhere(store: &NetworkStore, name: &str, peer: &str) -> Resul
 /// Matched on the error the control socket produces, because the two mean
 /// opposite things here: one says the work is already done, the other says it
 /// was not done and nobody noticed.
-fn holder_is_down(e: &delonix_model::Error) -> bool {
+fn holder_is_down(e: &delonix_sdn::Error) -> bool {
     let s = e.to_string();
     s.contains("holder is down") || s.contains("control socket")
 }
@@ -1099,7 +1104,7 @@ pub(crate) fn create_network(
                 infra::network_create_with_gateway(name, &net.prefix, declared_gw.as_deref())
             {
                 let _ = store.remove(name);
-                return Err(e);
+                return Err(e.into());
             }
             Ok(net)
         }

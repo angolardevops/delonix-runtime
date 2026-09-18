@@ -10,14 +10,14 @@
 //! Validated end-to-end (two rootless netns): ping through the tunnel + `tcpdump` on the
 //! underlay = only encrypted WireGuard UDP, no ICMP in the clear; full handshake.
 
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use std::io::Write;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 fn rt(ctx: &'static str, e: impl std::fmt::Display) -> Error {
-    Error::Runtime {
+    Error::Command {
         context: ctx,
         message: e.to_string(),
     }
@@ -32,7 +32,7 @@ fn rt(ctx: &'static str, e: impl std::fmt::Display) -> Error {
 /// already refused with an actionable message. Fixed at the boundary so every
 /// caller of this module inherits it. Same class as `vmimage::tool_package`.
 fn missing_wg() -> Error {
-    Error::Unavailable(
+    Error::WgMissing(
         "'wg' is not available on this host — install wireguard-tools (Debian/Ubuntu: \
          `apt install wireguard-tools`; Fedora/RHEL: `dnf install wireguard-tools`; \
          Arch: `pacman -S wireguard-tools`). It is only needed for WireGuard node keys \
@@ -51,7 +51,7 @@ fn out(prog: &str, args: &[&str]) -> Result<String> {
         }
     })?;
     if !o.status.success() {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "cmd",
             message: String::from_utf8_lossy(&o.stderr).trim().to_string(),
         });
@@ -206,7 +206,7 @@ pub fn set_peer(name: &str, p: &Peer) -> Result<()> {
 /// crypto channel.
 pub fn remove_peer(name: &str, public: &str) -> Result<()> {
     if !valid_wg_key(public) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidWgKey(format!(
             "not a WireGuard public key: '{public}'"
         )));
     }

@@ -22,7 +22,9 @@
 //! `infra::attach_container` asks the **holder** for the wiring over a control
 //! socket.
 
-use delonix_model::{Error, Result};
+mod error;
+
+pub use error::{Error, Result};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -259,12 +261,12 @@ fn run(prog: &str, args: &[&str]) -> Result<()> {
     let out = Command::new(prog)
         .args(args)
         .output()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "spawn",
             message: format!("{prog}: {e}"),
         })?;
     if !out.status.success() {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "net cmd",
             message: format!(
                 "{prog} {}: {}",
@@ -286,7 +288,7 @@ fn capture(prog: &str, args: &[&str]) -> Result<String> {
     let out = Command::new(prog)
         .args(args)
         .output()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "spawn",
             message: format!("{prog}: {e}"),
         })?;
@@ -334,7 +336,7 @@ pub fn parse_publish_addr(spec: &str) -> Result<(Option<String>, String, String,
         None => (spec, "tcp".to_string()),
     };
     if proto != "tcp" && proto != "udp" {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidPublishSpec(format!(
             "invalid protocol in '{spec}' (tcp|udp)"
         )));
     }
@@ -366,12 +368,14 @@ pub fn parse_publish_addr(spec: &str) -> Result<(Option<String>, String, String,
         } else {
             " (e.g. 8080:80)"
         };
-        return Err(Error::Invalid(format!("invalid port in '{spec}'{hint}")));
+        return Err(Error::InvalidPublishSpec(format!(
+            "invalid port in '{spec}'{hint}"
+        )));
     }
     let host_addr = match host_addr {
         Some(a) if a.parse::<std::net::Ipv4Addr>().is_ok() => Some(a.to_string()),
         Some(a) => {
-            return Err(Error::Invalid(format!(
+            return Err(Error::InvalidPublishSpec(format!(
                 "invalid host address '{a}' in '{spec}' (an IPv4 literal, e.g. 0.0.0.0:8080:80)"
             )))
         }
@@ -411,7 +415,7 @@ pub fn expand_publish_range(spec: &str) -> Result<Vec<String>> {
     // Split off the container port from the right, exactly like `parse_publish_addr`,
     // so a `hostIp:` head keeps working (`0.0.0.0:8000-8002:9000-9002`).
     let Some((head, cont)) = mapping.rsplit_once(':') else {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidPortRange(format!(
             "invalid port range in '{spec}' (expected hostStart-hostEnd:contStart-contEnd)"
         )));
     };
@@ -429,17 +433,17 @@ pub fn expand_publish_range(spec: &str) -> Result<Vec<String>> {
         }
     };
     let (Some((hs, he)), Some((cs, ce))) = (bounds(host), bounds(cont)) else {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidPortRange(format!(
             "invalid port range in '{spec}' (ports must be numbers)"
         )));
     };
     if hs > he || cs > ce || he > 65535 || ce > 65535 || hs == 0 || cs == 0 {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidPortRange(format!(
             "invalid port range in '{spec}' (start must be <= end, within 1-65535)"
         )));
     }
     if he - hs != ce - cs {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidPortRange(format!(
             "port range mismatch in '{spec}': {} host port(s) for {} container port(s) — both sides must be the same width",
             he - hs + 1,
             ce - cs + 1
@@ -559,11 +563,14 @@ fn parse_rate_bits(s: &str) -> Result<u64> {
     let n: f64 = num
         .trim()
         .parse()
-        .map_err(|_| Error::Invalid(format!("invalid --net-bps: '{s}'")))?;
+        .map_err(|_| Error::InvalidNetRate(format!("invalid --net-bps: '{s}'")))?;
     if !n.is_finite() || n <= 0.0 {
-        return Err(Error::Invalid(format!("--net-bps must be positive: '{s}'")));
+        return Err(Error::InvalidNetRate(format!(
+            "--net-bps must be positive: '{s}'"
+        )));
     }
-    scaled(n, mult).ok_or_else(|| Error::Invalid(format!("--net-bps is out of range: '{s}'")))
+    scaled(n, mult)
+        .ok_or_else(|| Error::InvalidNetRate(format!("--net-bps is out of range: '{s}'")))
 }
 
 /// `value * mult` as a `u64`, or `None` if it does not fit.
@@ -602,9 +609,9 @@ pub fn parse_net_rate(rate: &str, burst: Option<&str>) -> Result<NetRate> {
     let burst_bytes = match burst {
         Some(b) => {
             let v = parse_size_bytes(b)
-                .ok_or_else(|| Error::Invalid(format!("invalid --net-burst: '{b}'")))?;
+                .ok_or_else(|| Error::InvalidNetRate(format!("invalid --net-burst: '{b}'")))?;
             if v == 0 {
-                return Err(Error::Invalid("--net-burst cannot be zero".into()));
+                return Err(Error::InvalidNetRate("--net-burst cannot be zero".into()));
             }
             v
         }
@@ -898,8 +905,11 @@ impl NetworkStore {
         if name.is_empty() || name == DEFAULT_NET {
             return Ok(Network::default_bridge());
         }
-        let body = std::fs::read_to_string(self.path(name))
-            .map_err(|e| Error::not_found_or_io(e, || format!("network {name}")))?;
+        let body = std::fs::read_to_string(self.path(name)).map_err(|e| {
+            Error::from(delonix_model::Error::not_found_or_io(e, || {
+                format!("network {name}")
+            }))
+        })?;
         let trimmed = body.trim();
         // Old format: just the base octet → bridge network.
         if let Ok(base) = trimmed.parse::<u8>() {
@@ -959,21 +969,24 @@ impl NetworkStore {
         let mut net = match driver {
             DRIVER_MACVLAN | DRIVER_IPVLAN => {
                 let parent = kv.get("parent").cloned().ok_or_else(|| {
-                    Error::Invalid(format!("network '{name}' ({driver}) has no parent"))
+                    Error::NetworkRecordCorrupted(format!(
+                        "network '{name}' ({driver}) has no parent"
+                    ))
                 })?;
                 let subnet = kv.get("subnet").cloned().ok_or_else(|| {
-                    Error::Invalid(format!("network '{name}' ({driver}) has no subnet"))
+                    Error::NetworkRecordCorrupted(format!(
+                        "network '{name}' ({driver}) has no subnet"
+                    ))
                 })?;
                 let gateway = kv.get("gateway").cloned().unwrap_or_default();
                 Network::lan(name, driver, &parent, &subnet, &gateway)
             }
             DRIVER_OVERLAY => {
-                let base: u8 = kv
-                    .get("base")
-                    .and_then(|b| b.parse().ok())
-                    .ok_or_else(|| Error::Invalid(format!("network '{name}' is corrupted")))?;
+                let base: u8 = kv.get("base").and_then(|b| b.parse().ok()).ok_or_else(|| {
+                    Error::NetworkRecordCorrupted(format!("network '{name}' is corrupted"))
+                })?;
                 let vni: u32 = kv.get("vni").and_then(|v| v.parse().ok()).ok_or_else(|| {
-                    Error::Invalid(format!("network '{name}' (overlay) has no vni"))
+                    Error::NetworkRecordCorrupted(format!("network '{name}' (overlay) has no vni"))
                 })?;
                 let peers: Vec<String> = kv
                     .get("peers")
@@ -991,10 +1004,9 @@ impl NetworkStore {
                 Network::overlay_with_base(name, base, vni, peers, wg_ip)
             }
             _ => {
-                let base: u8 = kv
-                    .get("base")
-                    .and_then(|b| b.parse().ok())
-                    .ok_or_else(|| Error::Invalid(format!("network '{name}' is corrupted")))?;
+                let base: u8 = kv.get("base").and_then(|b| b.parse().ok()).ok_or_else(|| {
+                    Error::NetworkRecordCorrupted(format!("network '{name}' is corrupted"))
+                })?;
                 Network::user_with_base(name, base)
             }
         };
@@ -1022,7 +1034,7 @@ impl NetworkStore {
     /// Creates a user network (free subnet, no collision with existing ones).
     pub fn create(&self, name: &str) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid(
+            return Err(Error::ReservedNetworkName(
                 "'bridge' is the default network (reserved)".into(),
             ));
         }
@@ -1030,7 +1042,9 @@ impl NetworkStore {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
+            return Err(Error::InvalidNetworkName(format!(
+                "invalid network name: '{name}'"
+            )));
         }
         // Serializado: escolher um octeto livre é ler o registo INTEIRO, decidir,
         // e escrever. Sem fechadura, duas criações concorrentes cujos nomes
@@ -1052,7 +1066,9 @@ impl NetworkStore {
         // Re-verificado DEBAIXO da fechadura: entre o teste acima e o trinco,
         // outra criação com este nome pode ter passado.
         if self.path(name).exists() {
-            return Err(Error::Conflict(format!("network '{name}' already exists")));
+            return Err(Error::NetworkAlreadyExists(format!(
+                "network '{name}' already exists"
+            )));
         }
         let used: Vec<u8> = self
             .list()?
@@ -1079,7 +1095,7 @@ impl NetworkStore {
         // à mesma: a rede nº 56 ficava em silêncio no `/16` de outra. Um limite
         // atingido é uma resposta legítima; entregar uma rede que colide não é.
         if !livre {
-            return Err(Error::Conflict(format!(
+            return Err(Error::NoFreeSubnet(format!(
                 "no free /16 left for network '{name}': the workload space \
                  10.{lo}.0.0-10.{hi}.255.255 holds {} networks and all are taken \
                  — remove one (`delonix network rm <name>`) to free a subnet",
@@ -1111,7 +1127,7 @@ impl NetworkStore {
         let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
         let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         let unsupported = |why: &str| {
-            Error::Invalid(format!(
+            Error::SubnetNotSupported(format!(
                 "subnet '{subnet}': {why}. A bridge network is always \
                  `10.<{lo}-{hi}>.0.0/16` (the record holds one octet, and the \
                  gateway/IPAM are derived from it) — pass one of those, or omit \
@@ -1166,7 +1182,7 @@ impl NetworkStore {
     /// função impossível de testar sem um.
     pub fn validate_subnet(subnet: &str) -> Result<Cidr> {
         let porque = |why: &str| {
-            Error::Invalid(format!(
+            Error::SubnetInvalid(format!(
                 "subnet '{subnet}': {why}. Use a private range — `10.0.0.0/8`, \
                  `172.16.0.0/12` or `192.168.0.0/16` — with a prefix between /8 \
                  and /28, or omit --subnet to let the engine pick a free one"
@@ -1200,7 +1216,7 @@ impl NetworkStore {
     /// o broadcast.
     pub fn validate_gateway(cidr: &Cidr, gw: &str) -> Result<()> {
         let porque = |why: &str| {
-            Error::Invalid(format!(
+            Error::InvalidGateway(format!(
                 "gateway '{gw}': {why}. It must be an address INSIDE {} that a workload on that \
                  network actually answers on (a firewall/appliance) — the holder keeps owning the \
                  bridge and routing; what changes is the default route the containers get",
@@ -1225,7 +1241,7 @@ impl NetworkStore {
     /// containers com o mesmo IP e uma rede que funciona para um deles.
     pub fn create_with_cidr(&self, name: &str, cidr: Cidr) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid(
+            return Err(Error::ReservedNetworkName(
                 "'bridge' is the default network (reserved)".into(),
             ));
         }
@@ -1250,7 +1266,7 @@ impl NetworkStore {
         for outra in self.list().unwrap_or_default() {
             if let Some(c) = Cidr::parse(&outra.subnet) {
                 if c.overlaps(&cidr) {
-                    return Err(Error::Conflict(format!(
+                    return Err(Error::SubnetOverlap(format!(
                         "subnet {} overlaps network '{}' ({})",
                         cidr.to_string_cidr(),
                         outra.name,
@@ -1270,7 +1286,7 @@ impl NetworkStore {
     /// prefix. Idempotent: if the network already exists, returns it as-is.
     pub fn create_with_base(&self, name: &str, base: u8) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid(
+            return Err(Error::ReservedNetworkName(
                 "'bridge' is the default network (reserved)".into(),
             ));
         }
@@ -1278,7 +1294,9 @@ impl NetworkStore {
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
+            return Err(Error::InvalidNetworkName(format!(
+                "invalid network name: '{name}'"
+            )));
         }
         if self.path(name).exists() {
             let existing = self.get(name)?;
@@ -1289,7 +1307,7 @@ impl NetworkStore {
             // addressed on it. Say so instead of returning the old one as if
             // the request had been honoured.
             if existing.prefix != format!("10.{base}") {
-                return Err(Error::Invalid(format!(
+                return Err(Error::NetworkSubnetImmutable(format!(
                     "network '{name}' already exists as {} — a subnet cannot be \
                      changed in place (workloads are addressed on it); remove it \
                      and create it again if that is what you want",
@@ -1301,7 +1319,7 @@ impl NetworkStore {
         let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
         let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
         if !(lo..=hi).contains(&base) {
-            return Err(Error::Invalid(format!(
+            return Err(Error::InvalidBaseOctet(format!(
                 "invalid /16 base octet: {base} (workload space is 10.{lo}..10.{hi})"
             )));
         }
@@ -1312,7 +1330,7 @@ impl NetworkStore {
             .into_iter()
             .find(|n| n.prefix == format!("10.{base}"))
         {
-            return Err(Error::Invalid(format!(
+            return Err(Error::BaseOctetTaken(format!(
                 "10.{base}.0.0/16 is already used by network '{}'",
                 clash.name
             )));
@@ -1343,25 +1361,30 @@ impl NetworkStore {
         if name.is_empty() || name == DEFAULT_NET {
             // The default bridge has no record on disk — there is nothing to stamp,
             // and silently succeeding would make a stack believe it owns it.
-            return Err(Error::Invalid(
+            return Err(Error::NoRecordToAnnotate(
                 "the default 'bridge' network has no record to annotate".into(),
             ));
         }
         for (k, v) in labels.iter().chain(annotations.iter()) {
             if k.is_empty() || k.contains('=') || k.contains('\n') {
-                return Err(Error::Invalid(format!("invalid metadata key: {k:?}")));
+                return Err(Error::InvalidMetadataKey(format!(
+                    "invalid metadata key: {k:?}"
+                )));
             }
             // A literal newline would split the record into two lines and the
             // second one would read back as a key of its own. Refuse instead of
             // writing a record that means something else than what was asked.
             if v.as_deref().is_some_and(|v| v.contains('\n')) {
-                return Err(Error::Invalid(format!(
+                return Err(Error::InvalidMetadataKey(format!(
                     "metadata value for {k:?} contains a newline"
                 )));
             }
         }
-        let raw = std::fs::read_to_string(self.path(name))
-            .map_err(|e| Error::not_found_or_io(e, || format!("network {name}")))?;
+        let raw = std::fs::read_to_string(self.path(name)).map_err(|e| {
+            Error::from(delonix_model::Error::not_found_or_io(e, || {
+                format!("network {name}")
+            }))
+        })?;
         // Legacy form: the whole record is the base octet.
         let mut out: Vec<String> = if let Ok(base) = raw.trim().parse::<u8>() {
             vec![format!("base={base}")]
@@ -1415,24 +1438,30 @@ impl NetworkStore {
         wg_ip: Option<&str>,
     ) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid(
+            return Err(Error::ReservedNetworkName(
                 "'bridge' is the default network (reserved)".into(),
             ));
         }
         if name == "host" || name == "none" {
-            return Err(Error::Invalid(format!("'{name}' is a reserved driver")));
+            return Err(Error::ReservedNetworkName(format!(
+                "'{name}' is a reserved driver"
+            )));
         }
         if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
+            return Err(Error::InvalidNetworkName(format!(
+                "invalid network name: '{name}'"
+            )));
         }
         if self.path(name).exists() {
-            return Err(Error::Conflict(format!("network '{name}' already exists")));
+            return Err(Error::NetworkAlreadyExists(format!(
+                "network '{name}' already exists"
+            )));
         }
         if vni == 0 || vni > 0x00ff_ffff {
-            return Err(Error::Invalid("invalid VNI (1..16777215)".into()));
+            return Err(Error::InvalidVni("invalid VNI (1..16777215)".into()));
         }
         let base = self.free_base(name)?;
         let wgip_line = wg_ip.map(|w| format!("wgip={w}\n")).unwrap_or_default();
@@ -1451,11 +1480,13 @@ impl NetworkStore {
     pub fn add_overlay_peer(&self, name: &str, peer: &str) -> Result<Network> {
         let net = self.get(name)?;
         if net.driver != DRIVER_OVERLAY {
-            return Err(Error::Invalid(format!("'{name}' is not an overlay")));
+            return Err(Error::NotAnOverlay(format!("'{name}' is not an overlay")));
         }
         let (new_ip, _) = parse_overlay_peer(peer);
         if new_ip.is_empty() {
-            return Err(Error::Invalid("invalid peer (missing node_ip)".into()));
+            return Err(Error::InvalidOverlayPeer(
+                "invalid peer (missing node_ip)".into(),
+            ));
         }
         let mut peers: Vec<String> = net
             .peers
@@ -1482,11 +1513,13 @@ impl NetworkStore {
     pub fn remove_overlay_peer(&self, name: &str, peer: &str) -> Result<Network> {
         let net = self.get(name)?;
         if net.driver != DRIVER_OVERLAY {
-            return Err(Error::Invalid(format!("'{name}' is not an overlay")));
+            return Err(Error::NotAnOverlay(format!("'{name}' is not an overlay")));
         }
         let (gone, _) = parse_overlay_peer(peer);
         if gone.is_empty() {
-            return Err(Error::Invalid("invalid peer (missing node_ip)".into()));
+            return Err(Error::InvalidOverlayPeer(
+                "invalid peer (missing node_ip)".into(),
+            ));
         }
         let peers: Vec<String> = net
             .peers
@@ -1503,7 +1536,7 @@ impl NetworkStore {
     /// line is how the two versions come to disagree — the discipline the
     /// `set_metadata` line-by-line rewrite already follows for the same reason.
     fn rewrite_peers_line(&self, name: &str, peers: &[String]) -> Result<Network> {
-        let raw = std::fs::read_to_string(self.path(name)).map_err(|e| Error::Runtime {
+        let raw = std::fs::read_to_string(self.path(name)).map_err(|e| Error::Command {
             context: "read overlay",
             message: e.to_string(),
         })?;
@@ -1537,32 +1570,38 @@ impl NetworkStore {
         gateway: &str,
     ) -> Result<Network> {
         if name.is_empty() || name == DEFAULT_NET {
-            return Err(Error::Invalid(
+            return Err(Error::ReservedNetworkName(
                 "'bridge' is the default network (reserved)".into(),
             ));
         }
         if name == "host" || name == "none" {
-            return Err(Error::Invalid(format!("'{name}' is a reserved driver")));
+            return Err(Error::ReservedNetworkName(format!(
+                "'{name}' is a reserved driver"
+            )));
         }
         if !name
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            return Err(Error::Invalid(format!("invalid network name: '{name}'")));
+            return Err(Error::InvalidNetworkName(format!(
+                "invalid network name: '{name}'"
+            )));
         }
         if driver != DRIVER_MACVLAN && driver != DRIVER_IPVLAN {
-            return Err(Error::Invalid(format!("unknown driver: '{driver}'")));
+            return Err(Error::UnknownDriver(format!("unknown driver: '{driver}'")));
         }
         if self.path(name).exists() {
-            return Err(Error::Conflict(format!("network '{name}' already exists")));
+            return Err(Error::NetworkAlreadyExists(format!(
+                "network '{name}' already exists"
+            )));
         }
         if !link_exists(parent) {
-            return Err(Error::Invalid(format!(
+            return Err(Error::ParentNicMissing(format!(
                 "parent NIC '{parent}' does not exist on the host"
             )));
         }
         if alloc_ip_cidr(subnet, "deadbeef").is_none() {
-            return Err(Error::Invalid(format!(
+            return Err(Error::InvalidLanSubnet(format!(
                 "invalid subnet: '{subnet}' (e.g. 192.168.1.0/24)"
             )));
         }
@@ -1592,8 +1631,11 @@ impl NetworkStore {
         // `get` one line above already proved the record is there, so a
         // failure here is almost certainly NOT absence — saying "no such
         // network" would send the operator to look for what they just read.
-        std::fs::remove_file(self.path(name))
-            .map_err(|e| Error::not_found_or_io(e, || format!("network {name}")))?;
+        std::fs::remove_file(self.path(name)).map_err(|e| {
+            Error::from(delonix_model::Error::not_found_or_io(e, || {
+                format!("network {name}")
+            }))
+        })?;
         Ok(net)
     }
 }
@@ -1651,7 +1693,7 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
     let mut fds = [0i32; 2];
     // SAFETY: pipe() fills 2 fds.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "pipe",
             message: "slirp ready-fd".into(),
         });
@@ -1720,7 +1762,7 @@ pub fn slirp_attach(pid: i32, publish: &[String]) -> Result<()> {
         Err(e) => {
             // SAFETY: closes the read-end on error.
             unsafe { libc::close(rd) };
-            Err(Error::Runtime {
+            Err(Error::Command {
                 context: "slirp4netns",
                 message: e.to_string(),
             })
@@ -1961,7 +2003,7 @@ pub fn slirp_add_hostfwd(
                 s.write_all(cmd.as_bytes()).map_err(|e| reg_io(&e))?;
                 let mut resp = String::new();
                 if let Err(e) = s.read_to_string(&mut resp) {
-                    return Err(Error::Runtime {
+                    return Err(Error::Command {
                         context: "slirp hostfwd",
                         message: format!(
                             "port {host_port}: no reply from the slirp api-socket ({e}) - \
@@ -1996,7 +2038,7 @@ pub fn slirp_add_hostfwd(
                         ),
                         _ => String::new(),
                     };
-                    return Err(Error::Runtime {
+                    return Err(Error::Command {
                         context: "slirp hostfwd",
                         message: format!("port {host_port}: {}{hint}", resp.trim()),
                     });
@@ -2009,14 +2051,14 @@ pub fn slirp_add_hostfwd(
             }
         }
     }
-    Err(Error::Runtime {
+    Err(Error::Command {
         context: "slirp api-socket",
         message: last,
     })
 }
 
 fn reg_io(e: &std::io::Error) -> Error {
-    Error::Runtime {
+    Error::Command {
         context: "slirp hostfwd",
         message: e.to_string(),
     }

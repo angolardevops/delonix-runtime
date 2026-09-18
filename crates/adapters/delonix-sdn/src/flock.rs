@@ -14,7 +14,7 @@
 //! isso `acquire` devolve `Option` e quem chama tem de RECUSAR a operação —
 //! nunca continuar sem ela.
 
-use delonix_model::Error;
+use crate::Error;
 use std::path::Path;
 
 /// Fechadura exclusiva viva enquanto o valor existir. Larga no `Drop`.
@@ -52,7 +52,7 @@ impl ExclusiveLock {
     /// consequência importa: «não consegui trancar» lê-se como um aborrecimento
     /// passageiro, quando o que evita é duas redes no mesmo `/16`.
     pub(crate) fn unavailable(path: &Path, consequencia: &str) -> Error {
-        Error::Runtime {
+        Error::Command {
             context: "lock",
             message: format!(
                 "could not lock {} — refusing to continue, since {consequencia}",
