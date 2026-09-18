@@ -1,7 +1,7 @@
 //! The compute context's `RunHost` port: what resolving a run needs to know about
 //! this node — its defaults, its confinement, and where state lives.
 
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use std::path::PathBuf;
 
 pub struct HostRuntime<'a> {
@@ -51,11 +51,12 @@ impl delonix_compute::ports::RunHost for HostRuntime<'_> {
         Ok((json, unknown))
     }
 
-    fn ensure_apparmor(&self, profile: &str) -> Result<()> {
-        ensure_apparmor(profile, self.apparmor_disabled)
+    fn ensure_apparmor(&self, profile: &str) -> delonix_model::Result<()> {
+        ensure_apparmor(profile, self.apparmor_disabled)?;
+        Ok(())
     }
 
-    fn check_secret(&self, name: &str) -> Result<()> {
+    fn check_secret(&self, name: &str) -> delonix_model::Result<()> {
         delonix_state::SecretStore::open(&self.state_root)?.load(name)?;
         Ok(())
     }
@@ -91,14 +92,14 @@ fn ensure_apparmor(profile: &str, disabled: &dyn Fn(&str) -> Error) -> Result<()
             .arg(&path)
             .output()
             .map_err(|_| {
-                Error::Invalid(
+                Error::ApparmorUnavailable(
                     "apparmor_parser unavailable (AppArmor not supported on this host?)".into(),
                 )
             });
         let _ = std::fs::remove_file(&path);
         let out = out?;
         if !out.status.success() {
-            return Err(Error::Invalid(format!(
+            return Err(Error::ApparmorUnavailable(format!(
                 "failed to load AppArmor profile: {}",
                 String::from_utf8_lossy(&out.stderr).trim()
             )));

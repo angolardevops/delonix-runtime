@@ -23,8 +23,8 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::{Error, Result};
 use delonix_compute::Mount;
-use delonix_model::{Error, Result};
 use serde::Deserialize;
 
 /// A parsed CDI spec (`cdi.k8s.io/v0.x.x` — only the fields this consumer
@@ -179,7 +179,7 @@ pub fn ensure_cdi_available() -> Result<()> {
         "Install nvidia-container-toolkit and generate the CDI spec, then retry:\n  \
          sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml"
     };
-    Err(Error::Invalid(format!("{head}{fix}")))
+    Err(Error::NoCdiSpec(format!("{head}{fix}")))
 }
 
 /// Resolves one CDI-qualified device name (`nvidia.com/gpu=0`, or the
@@ -203,12 +203,12 @@ fn resolve_cdi_device_in(
     out: &mut CdiEdits,
 ) -> Result<()> {
     let (vendor_class, name) = qualified_name.split_once('=').ok_or_else(|| {
-        Error::Invalid(format!(
+        Error::InvalidCdiDeviceName(format!(
             "invalid CDI device name: '{qualified_name}' (expected vendor.com/class=name)"
         ))
     })?;
     if specs.is_empty() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::NoCdiSpec(format!(
             "'{qualified_name}': no CDI spec found (checked /etc/cdi, /var/run/cdi)"
         )));
     }
@@ -244,7 +244,7 @@ fn resolve_cdi_device_in(
     }
     out.dedupe();
     if !found {
-        return Err(Error::Invalid(format!(
+        return Err(Error::CdiDeviceNotFound(format!(
             "'{qualified_name}': not found in any discovered CDI spec"
         )));
     }
@@ -328,7 +328,7 @@ impl delonix_compute::ports::DeviceResolver for HostDevices {
         &self,
         gpus: Option<&str>,
         devices: &[String],
-    ) -> Result<delonix_compute::ports::DeviceEdits> {
+    ) -> delonix_model::Result<delonix_compute::ports::DeviceEdits> {
         // `--gpus nvidia|all` and `--device vendor.com/class=name` resolve via CDI
         // before anything is created; `--gpus dri` stays the raw `/dev/dri/*` glob
         // (Mesa/VAAPI is open source and normally already inside the image).

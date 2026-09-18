@@ -14,10 +14,10 @@
 
 use std::path::Path;
 
+use crate::Result;
 use delonix_compute::launch::{Launch, WorkloadRuntime};
 use delonix_compute::Container;
 use delonix_model::records::Status;
-use delonix_model::Result;
 use delonix_state::Store;
 
 /// The resolver and the `/etc/hosts` address a start gets from the network.
@@ -43,14 +43,14 @@ pub struct HostWorkload<'a> {
 }
 
 impl WorkloadRuntime for HostWorkload<'_> {
-    fn create(&self, c: &mut Container, l: &Launch) -> Result<Status> {
+    fn create(&self, c: &mut Container, l: &Launch) -> delonix_model::Result<Status> {
         let hook = |pid: i32| (self.attach_slirp)(pid, &l.slirp_ports);
         let (dns, hosts_ip) = (self.addresses)(l);
         let spec = crate::launch_spec::run_spec(c, l, dns, hosts_ip, &hook);
-        crate::create_with(self.store, c, &l.rootfs, &spec)
+        Ok(crate::create_with(self.store, c, &l.rootfs, &spec)?)
     }
 
-    fn supervise(&self, c: &mut Container, l: &Launch, policy: &str) -> Result<()> {
+    fn supervise(&self, c: &mut Container, l: &Launch, policy: &str) -> delonix_model::Result<()> {
         let hook = |pid: i32| (self.attach_slirp)(pid, &l.slirp_ports);
         let (dns, hosts_ip) = (self.addresses)(l);
         let spec = crate::launch_spec::run_spec(c, l, dns, hosts_ip, &hook);

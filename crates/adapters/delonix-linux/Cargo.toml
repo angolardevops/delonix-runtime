@@ -24,6 +24,9 @@ serde_json = { workspace = true }
 # CDI specs (`cdi` module): JSON or YAML, both already in the tree.
 serde = { workspace = true }
 serde_yaml = { workspace = true }
+# Local error type per crate (ADR-0043) — already the workspace-wide pattern
+# for this exact purpose (`delonix-vm`, `delonix-truenas`, `delonix-proxmox`).
+thiserror = { workspace = true }
 
 [lints]
 workspace = true

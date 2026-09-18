@@ -157,7 +157,7 @@ const NODE_SHARED: &str = "/kind/delonix";
 /// [`node_exec_capture`].
 fn node_exec(c: &Container, script: &str) -> Result<i32> {
     let argv = vec!["/bin/sh".to_string(), "-c".to_string(), script.to_string()];
-    delonix_linux::exec(c, &argv, false)
+    Ok(delonix_linux::exec(c, &argv, false)?)
 }
 
 /// Like [`node_exec`], but **captures** the output instead of dumping it to the terminal.
