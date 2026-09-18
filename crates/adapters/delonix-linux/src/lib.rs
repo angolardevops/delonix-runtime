@@ -14,6 +14,7 @@ use std::time::Duration;
 
 pub mod capabilities;
 pub mod cdi;
+mod error;
 pub mod launch_spec;
 pub mod regulate;
 pub mod resource_advice;
@@ -23,10 +24,11 @@ pub mod supervise;
 pub mod workload;
 pub mod workload_view;
 
+pub use error::{Error, Result};
+
 use capabilities::{all_caps_mask, resolve_cap_keep};
 use delonix_compute::{Container, KubeCgroupDriver, KubeCgroupParent, Mount};
 use delonix_model::records::Status;
-use delonix_model::{Error, Result};
 use delonix_state::Store;
 
 /// RFC3339 with nanosecond precision, for the *logging shim* (timestamped
@@ -74,7 +76,7 @@ use seccompiler::{
 pub type StartedHook<'a> = dyn Fn(i32) -> Result<()> + 'a;
 
 fn syserr(context: &'static str) -> impl Fn(nix::Error) -> Error {
-    move |e| Error::Runtime {
+    move |e| Error::Syscall {
         context,
         message: e.to_string(),
     }
@@ -2031,11 +2033,11 @@ fn write_userns_maps(pid: i32, want_range: bool) -> Result<()> {
     } else {
         (format!("0 {euid} 1\n"), format!("0 {egid} 1\n"))
     };
-    std::fs::write(format!("/proc/{pid}/uid_map"), &uid_map).map_err(|e| Error::Runtime {
+    std::fs::write(format!("/proc/{pid}/uid_map"), &uid_map).map_err(|e| Error::Syscall {
         context: "uid_map",
         message: e.to_string(),
     })?;
-    std::fs::write(format!("/proc/{pid}/gid_map"), &gid_map).map_err(|e| Error::Runtime {
+    std::fs::write(format!("/proc/{pid}/gid_map"), &gid_map).map_err(|e| Error::Syscall {
         context: "gid_map",
         message: e.to_string(),
     })?;
@@ -2061,12 +2063,12 @@ fn run_idmap(tool: &str, pid: i32, map: &str) -> Result<()> {
     for tok in map.split_whitespace() {
         cmd.arg(tok);
     }
-    let st = cmd.status().map_err(|e| Error::Runtime {
+    let st = cmd.status().map_err(|e| Error::Syscall {
         context: "idmap",
         message: format!("{tool}: {e}"),
     })?;
     if !st.success() {
-        return Err(Error::Runtime {
+        return Err(Error::Syscall {
             context: "idmap",
             message: format!(
                 "{tool} failed (code {:?}) — check /etc/subuid and /etc/subgid",
@@ -3694,7 +3696,7 @@ fn cpu_max_value(cpus: &str) -> String {
 /// Writes a limit into the cgroup; failing is an ERROR (limits are MANDATORY — a
 /// container should never run without a resource ceiling).
 fn write_limit(cgroup: &str, file: &str, value: &str) -> Result<()> {
-    std::fs::write(format!("{cgroup}/{file}"), value).map_err(|e| Error::Runtime {
+    std::fs::write(format!("{cgroup}/{file}"), value).map_err(|e| Error::Syscall {
         context: "cgroup limit",
         message: format!("{file}={value}: {e}"),
     })
@@ -4114,7 +4116,7 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
     if let (Some(cap), Some(cur)) = (read("memory.max"), read("memory.current")) {
         let want = parse_mem_bytes(memory_max);
         if cur.saturating_add(want) > cap {
-            return Err(Error::Runtime {
+            return Err(Error::Syscall {
                 context: "admission",
                 message: format!(
                     "host protection: Delonix memory budget exhausted \
@@ -4130,7 +4132,7 @@ pub fn admission_check(memory_max: &str) -> Result<()> {
     if let Some(load1) = host_load1() {
         let limit = host_ncpu() as f64 * 4.0;
         if load1 > limit {
-            return Err(Error::Runtime {
+            return Err(Error::Syscall {
                 context: "admission",
                 message: format!(
                     "host protection: load average too high ({load1:.1} > {limit:.0}) — try again later"
@@ -4875,13 +4877,13 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
     // got is the failure this repo names as its worst — the record, `inspect` and
     // `describe` all agree, and the kernel is the only one telling the truth.
     if mem_limit_write_value(&c.memory_max).is_none() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidMemoryLimit(format!(
             "--memory {}: not a size — use bytes (67108864) or a suffix (64M, 64Mi, 1G, 1Gi)",
             c.memory_max
         )));
     }
     if !c.cpus.is_empty() && try_cpu_max_value(&c.cpus).is_none() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidCpuLimit(format!(
             "--cpus {}: not a number of cores — use a decimal (0.5, 2). Millicores (500m) are a Kubernetes spelling this flag does not take",
             c.cpus
         )));
@@ -4980,7 +4982,7 @@ fn setup_cgroup(c: &Container, pid: i32) -> Result<()> {
             }
             return Ok(());
         }
-        return Err(Error::Runtime {
+        return Err(Error::Syscall {
             context: "cgroup",
             message: format!("could not create {cg}"),
         });
@@ -5513,11 +5515,12 @@ fn spawn(
         .command
         .iter()
         .map(|a| {
-            CString::new(a.as_str()).map_err(|_| Error::Invalid(format!("invalid argument: {a:?}")))
+            CString::new(a.as_str())
+                .map_err(|_| Error::InvalidCommandArgv(format!("invalid argument: {a:?}")))
         })
         .collect::<Result<_>>()?;
     if argv.is_empty() {
-        return Err(Error::Invalid("empty command".into()));
+        return Err(Error::EmptyCommand("empty command".into()));
     }
 
     let rootfs_owned = rootfs.to_string();
@@ -5678,7 +5681,7 @@ fn spawn(
         let mut fds = [0i32; 2];
         // SAFETY: pipe() fills the 2-fd array.
         if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-            return Err(Error::Runtime {
+            return Err(Error::Syscall {
                 context: "pipe",
                 message: "failed to create pipe".into(),
             });
@@ -5704,7 +5707,7 @@ fn spawn(
                     libc::close(w);
                 }
             }
-            return Err(Error::Runtime {
+            return Err(Error::Syscall {
                 context: "pipe",
                 message: "failed to create the readiness pipe".into(),
             });
@@ -6137,7 +6140,7 @@ fn spawn(
     if let Some(reason) = exec_failure {
         let code = waitpid(pid, None).map(wait_to_code).unwrap_or(-1);
         remove_container_cgroup(container);
-        return Err(Error::Runtime {
+        return Err(Error::Syscall {
             context: "container start",
             message: format!(
                 "{}: the container's command did not start ({reason}), exit code {code}",
@@ -6166,7 +6169,7 @@ fn spawn(
             })
             .filter(|s| !s.trim().is_empty())
             .unwrap_or_else(|| "it printed nothing".to_string());
-        return Err(Error::Runtime {
+        return Err(Error::Syscall {
             context: "container start",
             message: format!(
                 "{}: the container's init exited with code {code} before its root filesystem \
@@ -6710,7 +6713,8 @@ pub fn exec_with(
     let cargv: Vec<CString> = argv
         .iter()
         .map(|a| {
-            CString::new(a.as_str()).map_err(|_| Error::Invalid(format!("invalid argument: {a:?}")))
+            CString::new(a.as_str())
+                .map_err(|_| Error::InvalidCommandArgv(format!("invalid argument: {a:?}")))
         })
         .collect::<Result<_>>()?;
 
@@ -7157,14 +7161,19 @@ fn open_container_ns(pid: i32, ns: &str) -> Result<Option<OwnedFd>> {
 /// module comment for the setns/unshare/open_tree/move_mount sequence.
 pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     if !mount_target_safe(&m.target) {
-        return Err(Error::Invalid(format!("unsafe mount target: {}", m.target)));
+        return Err(Error::UnsafeMountPath(format!(
+            "unsafe mount target: {}",
+            m.target
+        )));
     }
     let pid = container
         .pid
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
     let src_is_dir = std::fs::metadata(&m.source)
-        .map_err(|_| Error::Invalid(format!("mount source does not exist: {}", m.source)))?
+        .map_err(|_| {
+            Error::MountSourceMissing(format!("mount source does not exist: {}", m.source))
+        })?
         .is_dir();
 
     // namespace fds (opened in the PARENT, in the host context; inherited by the fork).
@@ -7179,7 +7188,9 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     // (see the `ns_list` comment in `exec`).
     let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?.ok_or_else(|| {
-        Error::Invalid("container shares the host mnt ns — nothing to mount".into())
+        Error::SharesHostMountNamespace(
+            "container shares the host mnt ns — nothing to mount".into(),
+        )
     })?;
 
     let mut attr = MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV;
@@ -7250,11 +7261,11 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
             let status = waitpid(child, None).map_err(syserr("waitpid"))?;
             match status {
                 WaitStatus::Exited(_, 0) => Ok(()),
-                WaitStatus::Exited(_, code) => Err(Error::Invalid(format!(
+                WaitStatus::Exited(_, code) => Err(Error::LiveMountFailed(format!(
                     "failed to mount {} → {} in the live container (code {code})",
                     m.source, m.target
                 ))),
-                _ => Err(Error::Invalid("live mount interrupted".into())),
+                _ => Err(Error::LiveMountFailed("live mount interrupted".into())),
             }
         }
     }
@@ -7264,7 +7275,9 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
 /// mnt ns and does `umount2(target, MNT_DETACH)` (lazy: does not fail if busy).
 pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
     if !mount_target_safe(target) {
-        return Err(Error::Invalid(format!("unsafe unmount target: {target}")));
+        return Err(Error::UnsafeMountPath(format!(
+            "unsafe unmount target: {target}"
+        )));
     }
     let pid = container
         .pid
@@ -7274,8 +7287,9 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
     // note in `mount_live`: `container.userns` is not the same as "is in a
     // userns different from mine".
     let user_fd = open_container_ns(pid, "user")?;
-    let mnt_fd = open_container_ns(pid, "mnt")?
-        .ok_or_else(|| Error::Invalid("container shares the host mnt ns".into()))?;
+    let mnt_fd = open_container_ns(pid, "mnt")?.ok_or_else(|| {
+        Error::SharesHostMountNamespace("container shares the host mnt ns".into())
+    })?;
     let target = target.to_string();
 
     // SAFETY: the child only does simple syscalls and `_exit`.
@@ -7312,7 +7326,7 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
             let status = waitpid(child, None).map_err(syserr("waitpid"))?;
             match status {
                 WaitStatus::Exited(_, 0) => Ok(()),
-                _ => Err(Error::Invalid(format!(
+                _ => Err(Error::LiveUnmountFailed(format!(
                     "failed to unmount {target} in the live container"
                 ))),
             }
@@ -7384,7 +7398,7 @@ pub fn set_priority(container: &Container, nice: i32) -> Result<(usize, usize)> 
     let _ = pid;
     let pids = container_pids(container);
     if pids.is_empty() {
-        return Err(Error::Invalid("no processes in the container".into()));
+        return Err(Error::NoProcesses("no processes in the container".into()));
     }
     let mut applied = 0usize;
     for p in &pids {
@@ -7532,7 +7546,7 @@ pub fn send_signal(container: &Container, signal: i32) -> Result<()> {
     // SAFETY: `pid` confirmed alive and ours by `safe_to_signal`; `signal` is a
     // plain signal number.
     if unsafe { libc::kill(pid, signal) } != 0 {
-        return Err(Error::Runtime {
+        return Err(Error::Syscall {
             context: "kill",
             message: std::io::Error::last_os_error().to_string(),
         });
@@ -7612,17 +7626,15 @@ struct KubeLimits {
 fn kube_limits(c: &Container) -> Result<KubeLimits> {
     let memory_bytes = match mem_limit_write_value(&c.memory_max).as_deref() {
         None => {
-            return Err(Error::Invalid(format!(
+            return Err(Error::InvalidMemoryLimit(format!(
                 "--memory {}: not a size",
                 c.memory_max
             )));
         }
         Some("max") => None,
-        Some(bytes) => Some(
-            bytes
-                .parse::<u64>()
-                .map_err(|_| Error::Invalid(format!("--memory {}: not a size", c.memory_max)))?,
-        ),
+        Some(bytes) => Some(bytes.parse::<u64>().map_err(|_| {
+            Error::InvalidMemoryLimit(format!("--memory {}: not a size", c.memory_max))
+        })?),
     };
     let cpus = c.cpus.trim();
     let cpu_quota_usec = if cpus.is_empty() || cpus.eq_ignore_ascii_case("max") {
@@ -7632,7 +7644,9 @@ fn kube_limits(c: &Container) -> Result<KubeLimits> {
             .parse()
             .ok()
             .filter(|v: &f64| v.is_finite() && *v > 0.0)
-            .ok_or_else(|| Error::Invalid(format!("--cpus {cpus}: not a number of cores")))?;
+            .ok_or_else(|| {
+                Error::InvalidCpuLimit(format!("--cpus {cpus}: not a number of cores"))
+            })?;
         Some(((cores * 1_000_000.0).round() as u64).max(10_000))
     };
     let weight = |v: &Option<String>, what: &str| -> Result<Option<u64>> {
@@ -7642,7 +7656,9 @@ fn kube_limits(c: &Container) -> Result<KubeLimits> {
                     .parse::<u64>()
                     .ok()
                     .filter(|n| (1..=10_000).contains(n))
-                    .ok_or_else(|| Error::Invalid(format!("--{what} {w}: weight must be 1–10000")))
+                    .ok_or_else(|| {
+                        Error::InvalidCgroupWeight(format!("--{what} {w}: weight must be 1–10000"))
+                    })
             })
             .transpose()
     };
@@ -7720,7 +7736,7 @@ fn transient_scope_argv(
     }
     if let Some(set) = &l.cpuset {
         let mask = cpuset_to_mask(set)
-            .ok_or_else(|| Error::Invalid(format!("--cpuset {set}: not a CPU list")))?;
+            .ok_or_else(|| Error::InvalidCpuset(format!("--cpuset {set}: not a CPU list")))?;
         let mut p = vec![
             "AllowedCPUs".to_string(),
             "ay".to_string(),
@@ -7763,7 +7779,7 @@ fn controllers_to_enable(available: &str, wanted: &[&str]) -> Vec<String> {
 /// Places a container in the kubelet's hierarchy — ADR 0038.
 fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()> {
     if is_rootless() || in_userns() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::KubeCgroupNeedsRoot(format!(
             "cgroup parent {}: placing a container in the kubelet's cgroup hierarchy needs the root runtime",
             k.parent
         )));
@@ -7780,12 +7796,12 @@ fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()
             let out = std::process::Command::new("busctl")
                 .args(&argv)
                 .output()
-                .map_err(|e| Error::Runtime {
+                .map_err(|e| Error::Syscall {
                     context: "cgroup",
                     message: format!("busctl (needed for the systemd cgroup driver): {e}"),
                 })?;
             if !out.status.success() {
-                return Err(Error::Runtime {
+                return Err(Error::Syscall {
                     context: "cgroup",
                     message: format!(
                         "systemd refused scope {unit} under {}: {}",
@@ -7805,7 +7821,7 @@ fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()
                     break;
                 }
                 if std::time::Instant::now() >= deadline {
-                    return Err(Error::Runtime {
+                    return Err(Error::Syscall {
                         context: "cgroup",
                         message: format!(
                             "container {pid} never entered scope {unit} under {}",
@@ -7837,13 +7853,13 @@ fn setup_kube_cgroup(c: &Container, k: &KubeCgroupParent, pid: i32) -> Result<()
                 // The kubelet creates the pod cgroup before it asks for containers; one
                 // that is missing is a kubelet/runtime disagreement to surface, not a
                 // directory to invent outside its hierarchy.
-                return Err(Error::Runtime {
+                return Err(Error::Syscall {
                     context: "cgroup",
                     message: format!("cgroup parent {} does not exist ({parent})", k.parent),
                 });
             }
             let leaf = format!("{parent}/delonix-{}", c.id);
-            std::fs::create_dir_all(&leaf).map_err(|e| Error::Runtime {
+            std::fs::create_dir_all(&leaf).map_err(|e| Error::Syscall {
                 context: "cgroup",
                 message: format!("could not create {leaf}: {e}"),
             })?;
@@ -8156,7 +8172,7 @@ pub fn set_frozen(container: &Container, frozen: bool) -> Result<()> {
         return Err(Error::NotRunning(container.short_id().to_string()));
     }
     let path = format!("{}/cgroup.freeze", live_cgroup(container));
-    std::fs::write(&path, if frozen { "1" } else { "0" }).map_err(|e| Error::Runtime {
+    std::fs::write(&path, if frozen { "1" } else { "0" }).map_err(|e| Error::Syscall {
         context: "cgroup.freeze",
         message: format!("{path}: {e}"),
     })?;
@@ -8299,7 +8315,7 @@ pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
     if let Some(pid) = container.pid {
         if safe_to_signal(pid, container.pid_starttime) {
             if !force {
-                return Err(Error::Conflict(format!(
+                return Err(Error::AlreadyRunning(format!(
                     "container {} is running (use --force)",
                     container.short_id()
                 )));

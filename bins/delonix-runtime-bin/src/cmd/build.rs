@@ -745,7 +745,7 @@ fn mount_run_secrets(
             for t in &mounted {
                 let _ = runtime::unmount_live(container, t);
             }
-            return Err(e);
+            return Err(e.into());
         }
         mounted.push(target);
     }

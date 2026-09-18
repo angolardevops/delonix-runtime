@@ -2226,7 +2226,9 @@ pub(crate) fn with_host_workload<R>(
         let a = delonix_sdn::run_network::launch_addresses(l);
         (a.dns, a.hosts_ip)
     };
-    let attach_slirp = |pid: i32, ports: &[String]| delonix_sdn::slirp_attach(pid, ports);
+    let attach_slirp = |pid: i32, ports: &[String]| -> delonix_linux::Result<()> {
+        delonix_sdn::slirp_attach(pid, ports).map_err(Into::into)
+    };
     let on_first_start = |c: &Container| {
         if let Some(cfg) = c.health.clone() {
             spawn_health_monitor(c.id.clone(), cfg);
@@ -2456,7 +2458,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // Volumes, devices, image, rootfs, `--env-file`, `--user` — resolved through the
     // read ports (`delonix_compute::ports`), then the record is built from them.
     let apparmor_disabled = |profile: &str| {
-        Error::Invalid(super::po::tf(
+        delonix_linux::Error::ApparmorUnavailable(super::po::tf(
             "--apparmor {p}: AppArmor is not enabled on this host, so nothing would confine this \
              container",
             &[("p", profile)],
@@ -3888,7 +3890,7 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
             println!("{}", c.name);
             return Ok(());
         }
-        return Err(e);
+        return Err(e.into());
     }
     unpublish_ports(&c, pid);
     delonix_node::events::emit(

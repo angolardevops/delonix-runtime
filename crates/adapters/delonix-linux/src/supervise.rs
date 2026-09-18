@@ -6,9 +6,8 @@
 //! multi-threaded caller (a server) must re-exec a fresh process first, as the
 //! Docker API and the CRI do with `__apirun`.
 
-use crate::RunSpec;
+use crate::{Error, Result, RunSpec};
 use delonix_compute::Container;
-use delonix_model::{Error, Result};
 use delonix_state::Store;
 use std::path::Path;
 
@@ -36,8 +35,8 @@ const START_CONTEXT: &str = "container start";
 /// here exits 1.
 fn handshake_reason(e: &Error) -> String {
     match e {
-        Error::Runtime { context, message } if *context == START_CONTEXT => message.clone(),
-        Error::Runtime { context, message } => format!("{context}: {message}"),
+        Error::Syscall { context, message } if *context == START_CONTEXT => message.clone(),
+        Error::Syscall { context, message } => format!("{context}: {message}"),
         other => other.to_string(),
     }
 }
@@ -81,7 +80,7 @@ pub fn run_supervised(
     let mut fds = [0i32; 2];
     // SAFETY: pipe() fills 2 fds; used only for the startup handshake.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return Err(Error::Runtime {
+        return Err(Error::Syscall {
             context: "pipe",
             message: "handshake do supervisor".into(),
         });
@@ -238,7 +237,7 @@ pub fn run_supervised(
         // path.
         unsafe { libc::close(rd) };
         let reason = String::from_utf8_lossy(&reason).trim().to_string();
-        return Err(Error::Runtime {
+        return Err(Error::Syscall {
             context: START_CONTEXT,
             message: if reason.is_empty() {
                 sup.silent_death.to_string()
@@ -258,7 +257,7 @@ mod tests {
 
     #[test]
     fn a_start_failure_is_said_once() {
-        let e = Error::Runtime {
+        let e = Error::Syscall {
             context: START_CONTEXT,
             message: "nb: the container's command did not start".into(),
         };
@@ -266,7 +265,7 @@ mod tests {
             handshake_reason(&e),
             "nb: the container's command did not start"
         );
-        let rebuilt = Error::Runtime {
+        let rebuilt = Error::Syscall {
             context: START_CONTEXT,
             message: handshake_reason(&e),
         };
@@ -305,14 +304,14 @@ mod tests {
 
     #[test]
     fn another_operation_keeps_its_name() {
-        let e = Error::Runtime {
+        let e = Error::Syscall {
             context: "clone",
             message: "EPERM".into(),
         };
         assert_eq!(handshake_reason(&e), "clone: EPERM");
         assert_eq!(
-            handshake_reason(&Error::Invalid("bad".into())),
-            Error::Invalid("bad".into()).to_string()
+            handshake_reason(&Error::EmptyCommand("bad".into())),
+            Error::EmptyCommand("bad".into()).to_string()
         );
     }
 }
