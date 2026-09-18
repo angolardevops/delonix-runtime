@@ -540,12 +540,20 @@ session) already implements. What has to change in that crate, concretely:
   `send_authed` re-authentication — none of this changes. It is the HTTP client and the
   Proxmox-specific mechanics ADR-0008's spike proved; D1–D3 only change the shape of what
   arrives at the crate's boundary, not what the crate does with it.
-- `network`/`namespace` (D1's finding) go from silently unread to **required decisions**:
-  either `delonix-provider-proxmox` gains real support for at least `bridge`-shaped network
-  attachment honouring `namespace` (it already reads `bridge`, so this may be closer than it
-  looks), or it refuses both explicitly, by name, the same way it refuses `tpm` today. Either
-  is acceptable; silently continuing to ignore them is not, and this ADR treats closing that
-  gap as part of the migration, not a follow-up.
+- `network`/`namespace` (D1's finding) go from silently unread to **required decisions —
+  and, measured live 2026-09-18** (spike nº5, `docs/discovery/
+  58_P4_D1_D8_PROXMOX_NETWORK_NAMESPACE_LIVE.md`), **`namespace`'s half is already done**:
+  `delonix-vm::vm_namespace_supported` already refuses it for Proxmox (and libvirt) today,
+  from a month before this ADR — D8's job for `namespace` is to carry that same refusal
+  into `Extensions`/`refuse_unsupported`'s new home, not invent it. `network`'s half is
+  still open and is a genuine decision, not a formality: the live form sent to a real
+  `pve92` node shows `net0=virtio,bridge=vmbr0` regardless of what `--network` named, and
+  the topology (`pve92`'s only bridge rides this host's own `virbr0` NAT, structurally
+  disjoint from the rootless SDN inside the netns holder) means "real support" is not a
+  small addition — it needs the same class of privileged bridging `vm bridge`
+  (EXPERIMENTAL, libvirt-only today) already does, extended to reach a remote node, which
+  is its own ADR. **Refusing `network` explicitly, the same way `tpm` is refused today, is
+  the D8-sized answer**; building the bridge is not.
 
 `delonix-provider-cloud-hypervisor` and `delonix-provider-libvirt` change the least: they
 are the two backends `VmConfig` was originally shaped around, so most of D1's "universal"
@@ -622,10 +630,11 @@ scanner stops depending on the OCI adapter's internals to read a layer.
 2. **The two-binary launcher/holder split has never been measured**, only the same-path
    variant. P1b's own "not validated" list already says so; P4d's gate exists because of
    it, not despite it.
-3. **`network`/`namespace` on Proxmox is a real gap this ADR is choosing to close during
-   the migration rather than carry forward silently** (D8) — that is more work in P4c than
-   "just rename the trait", and is the honest cost of D1's finding rather than something
-   this ADR can defer without repeating the mistake it just found.
+3. **Smaller than this section first estimated.** `namespace` was already closed a month
+   before this ADR (spike nº5, D8 addendum) — P4c's job there is relocation, not new
+   behaviour. `network` is still real cost: an explicit refusal (the honest, D8-sized
+   answer) is a small addition; anything more ("real support") is the scope of a
+   follow-on ADR for a privileged remote bridge, not this migration.
 4. **Distribution**, again: P4d adds an eighth-ish executable to what ADR-0040's own
    Consequences section already counted going from two to eight; `install.sh` and
    `delonix-deploy` change with each provider crate rename.
@@ -704,11 +713,22 @@ alone.
    through the port itself), and `delonix-sdn`/`delonix-oci`/`delonix-volume`, which the
    spike found do not reach the port through the same mechanism at all (D6 addendum) and
    need their own spike once someone decides how each one adopts it.
-5. **The `network`/`namespace` gap on Proxmox, confirmed live, not by grep.** D1's finding
-   is a static read; before P4c ships either a real fix or a refusal, run `delonix vm
-   create --backend proxmox --network <sdn-net> --namespace teamA` against the
-   `proxmox-ve:9.2` appliance and observe what actually happens to the resulting VM's
-   network reachability from a container in a different namespace on this node.
+5. **The `network`/`namespace` gap on Proxmox, confirmed live, not by grep.** DONE —
+   2026-09-18, `docs/discovery/58_P4_D1_D8_PROXMOX_NETWORK_NAMESPACE_LIVE.md`, against the
+   `pve92` appliance already on this host (Proxmox VE 9.2.2). **`namespace` was already
+   half of D1's own finding, wrong**: `--namespace teamA` is REFUSED before any API call
+   reaches the node — `delonix-vm::vm_namespace_supported` (landed `c1ed34ec8`,
+   2026-08-05, a month before this ADR's Context section) returns `true` only for
+   `"cloud-hypervisor"`, so libvirt and Proxmox both refuse today. D1's grep was scoped to
+   `crates/providers/delonix-proxmox/src/lib.rs` and never reached this guard, which lives
+   a layer up in `delonix-vm::create_with` — right file to grep, wrong crate. `network`
+   is confirmed exactly as D1 read it: accepted, silently ignored — the real HTTP form
+   sent to the node carries `net0=virtio,bridge=vmbr0` (the node's own default), never the
+   SDN network name, and the local `Vm` record misleadingly shows `Network: p4spike-net`
+   for a VM that is not on it. No guest reachability test was needed to settle this: `pve92`'s
+   only bridge (`vmbr0`) is wired to its own `eth0`, itself on this host's `virbr0`
+   (192.168.122.0/24) — structurally disjoint from the rootless SDN inside the netns
+   holder, with or without a `namespace`. See the D8 addendum below.
 
 ## Proven vs not validated
 
@@ -727,12 +747,15 @@ do not reach `delonix-state` through `Store`/`JsonStore` today, by reading each 
 by the fitness script's shared exception text; that the inherited-fd `LaunchSpec`
 transport (D5) closes a crash-before-`unlink` window the file-based precedent cannot,
 against a real `execve` and 50 concurrent pairs, confirmed by `strace` (spike nº3,
-`docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`).
+`docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`); that `namespace` on Proxmox is
+already refused (`delonix-vm::vm_namespace_supported`, landed a month before this ADR)
+and that `network` is silently ignored exactly as Context first read, confirmed against a
+real `pve92` node's HTTP form and its network topology, not by grep (spike nº5,
+`docs/discovery/58_P4_D1_D8_PROXMOX_NETWORK_NAMESPACE_LIVE.md`).
 
 **Not validated:** everything else under Decision — no other code was written for this ADR, no build
-or test was run, and every spike in the section above is exactly that, not yet run. The
-`network`/`namespace` finding in Context is a static read, flagged as needing live
-confirmation before D8 treats it as more than a strong signal. Whether `Extensions`'
+or test was run, and every remaining spike (nº1, nº2) in the section above is exactly
+that, not yet run. Whether `Extensions`'
 per-provider structs stay small (as this ADR's classification suggests) or grow the way
 `VmConfig` did is unmeasured by construction — this ADR can state the design pressure that
 caused `VmConfig`'s growth (each provider quirk became a trait method) and claim `Extensions`
