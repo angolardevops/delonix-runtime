@@ -17,8 +17,7 @@
 //! binary to the holder entry point (`netns holder`/`netns pin`, intercepted in
 //! the bin's `main()` before clap parses anything).
 
-use crate::{run, run_ok, SLIRP_IP};
-use delonix_model::{Error, Result};
+use crate::{run, run_ok, Error, Result, SLIRP_IP};
 use delonix_node::peer_cred::peer_uid;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -338,7 +337,7 @@ pub fn runtime_dir_env() -> (&'static str, PathBuf) {
 /// depth alongside the control socket's own `0600`+`SO_PEERCRED` guard.
 fn ensure_runtime_dir() -> Result<()> {
     let dir = runtime_dir();
-    std::fs::create_dir_all(&dir).map_err(|e| Error::Runtime {
+    std::fs::create_dir_all(&dir).map_err(|e| Error::Command {
         context: "runtime dir",
         message: e.to_string(),
     })?;
@@ -892,7 +891,7 @@ impl FileLock {
         use std::os::fd::AsRawFd;
         use std::os::unix::fs::OpenOptionsExt;
         let path = lock_path();
-        let lock_err = |what: String| Error::Runtime {
+        let lock_err = |what: String| Error::Command {
             context: "network lock",
             message: format!(
                 "{what} ({}) — refusing to change the network infra without the lock, \
@@ -1117,7 +1116,7 @@ fn ensure_up_locked() -> Result<()> {
         // drops the network of every workload on it. The operator's call.
         let legacy = legacy_control_sock_path();
         if legacy.exists() {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "control socket",
                 message: stale_holder_message(pin, &control_sock_path(), Some(legacy.as_path())),
             });
@@ -1129,7 +1128,7 @@ fn ensure_up_locked() -> Result<()> {
         // namespaces and not a single wire moves. Before the split this path did
         // not exist: a dead holder meant a brand-new netns and every workload on
         // the node permanently unplugged.
-        std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Runtime {
+        std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Command {
             context: "ingress dir",
             message: e.to_string(),
         })?;
@@ -1212,13 +1211,13 @@ fn ensure_up_locked() -> Result<()> {
             }
             return Ok(());
         }
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "control socket",
             message: foreign_holder_message(&control_sock_path(), &ingress_dir()),
         });
     }
     teardown_locked();
-    std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Runtime {
+    std::fs::create_dir_all(ingress_dir()).map_err(|e| Error::Command {
         context: "ingress dir",
         message: e.to_string(),
     })?;
@@ -1243,7 +1242,7 @@ fn ensure_up_locked() -> Result<()> {
 /// `/run/netns` lives — that is where every named netns of every pod and
 /// `--net <custom>` container is pinned.
 fn start_control(pin: i32) -> Result<i32> {
-    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+    let exe = std::env::current_exe().map_err(|e| Error::Command {
         context: "current_exe",
         message: e.to_string(),
     })?;
@@ -1285,7 +1284,7 @@ fn start_control(pin: i32) -> Result<i32> {
                 .unwrap_or_else(|_| Stdio::null()),
         )
         .spawn()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "spawn nsenter (control)",
             message: e.to_string(),
         })?;
@@ -1294,7 +1293,7 @@ fn start_control(pin: i32) -> Result<i32> {
     std::mem::forget(child);
     for _ in 0..100 {
         if !pid_alive(pid) {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "ingress control",
                 message: "the control plane died during startup".into(),
             });
@@ -1302,7 +1301,7 @@ fn start_control(pin: i32) -> Result<i32> {
         match std::fs::read_to_string(status_path()) {
             Ok(s) if s.trim() == "ready" => return Ok(pid),
             Ok(s) if s.trim_start().starts_with("err:") => {
-                return Err(Error::Runtime {
+                return Err(Error::Command {
                     context: "ingress control",
                     message: s.trim().trim_start_matches("err:").trim().to_string(),
                 });
@@ -1310,7 +1309,7 @@ fn start_control(pin: i32) -> Result<i32> {
             _ => std::thread::sleep(std::time::Duration::from_millis(50)),
         }
     }
-    Err(Error::Runtime {
+    Err(Error::Command {
         context: "ingress control",
         message: "timeout waiting for the control plane".into(),
     })
@@ -1382,7 +1381,7 @@ pub(crate) fn wait_readable(fd: i32, timeout_ms: i32) -> bool {
 }
 
 fn start_pin() -> Result<i32> {
-    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+    let exe = std::env::current_exe().map_err(|e| Error::Command {
         context: "current_exe",
         message: e.to_string(),
     })?;
@@ -1450,7 +1449,7 @@ fn start_pin() -> Result<i32> {
             Ok(())
         });
     }
-    let mut child = cmd.spawn().map_err(|e| Error::Runtime {
+    let mut child = cmd.spawn().map_err(|e| Error::Command {
         context: "spawn netns pin",
         message: e.to_string(),
     })?;
@@ -1464,7 +1463,7 @@ fn start_pin() -> Result<i32> {
             .ok()
             .and_then(|s| s.trim().strip_prefix("err:").map(|m| m.trim().to_string()));
         return Err(match reason {
-            Some(message) => Error::Runtime {
+            Some(message) => Error::Command {
                 context: "ingress holder",
                 message,
             },
@@ -1479,7 +1478,7 @@ fn start_pin() -> Result<i32> {
     for _ in 0..100 {
         if !pid_alive(pid) {
             teardown_locked();
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "ingress holder",
                 message: "the netns holder died during startup".into(),
             });
@@ -1488,7 +1487,7 @@ fn start_pin() -> Result<i32> {
             Ok(s) if s.trim() == "pinned" => return Ok(pid),
             Ok(s) if s.trim_start().starts_with("err:") => {
                 teardown_locked();
-                return Err(Error::Runtime {
+                return Err(Error::Command {
                     context: "ingress holder",
                     message: s.trim().trim_start_matches("err:").trim().to_string(),
                 });
@@ -1497,7 +1496,7 @@ fn start_pin() -> Result<i32> {
         }
     }
     teardown_locked();
-    Err(Error::Runtime {
+    Err(Error::Command {
         context: "ingress holder",
         message: "timeout waiting for the netns holder".into(),
     })
@@ -1553,7 +1552,7 @@ fn start_pin() -> Result<i32> {
 /// had. A `teardown_locked()` here — as `start_pin` does on the same timeout —
 /// would kill the live control plane this function exists to preserve.
 fn adopt_pin(control: i32) -> Result<i32> {
-    let exe = std::env::current_exe().map_err(|e| Error::Runtime {
+    let exe = std::env::current_exe().map_err(|e| Error::Command {
         context: "current_exe",
         message: e.to_string(),
     })?;
@@ -1591,7 +1590,7 @@ fn adopt_pin(control: i32) -> Result<i32> {
                 .unwrap_or_else(|_| Stdio::null()),
         )
         .spawn()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "spawn nsenter",
             message: e.to_string(),
         })?;
@@ -1646,7 +1645,7 @@ fn adopt_failed(pid: i32, why: &str) -> Error {
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
     let _ = std::fs::remove_file(holder_pid_path());
-    Error::Runtime {
+    Error::Command {
         context: "ingress holder",
         message: format!(
             "{why}: this root's control plane is alive and still holds the namespaces, but \
@@ -1665,7 +1664,7 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
     let mut fds = [0i32; 2];
     // SAFETY: pipe() fills 2 fds; -1 on failure is handled next.
     if unsafe { libc::pipe(fds.as_mut_ptr()) } != 0 {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "pipe",
             message: "slirp ready-fd".into(),
         });
@@ -1725,7 +1724,7 @@ fn start_slirp(holder_pid: i32) -> Result<()> {
         Err(e) => {
             // SAFETY: closes the read-end on error.
             unsafe { libc::close(rd) };
-            Err(Error::Runtime {
+            Err(Error::Command {
                 context: "slirp4netns",
                 message: e.to_string(),
             })
@@ -1788,7 +1787,7 @@ pub fn control_main() -> ! {
         let _ = std::fs::remove_file(control_sock_path());
         let listener =
             std::os::unix::net::UnixListener::bind(control_sock_path()).map_err(|e| {
-                Error::Runtime {
+                Error::Command {
                     context: "control socket",
                     message: e.to_string(),
                 }
@@ -2196,7 +2195,9 @@ fn handle_control(line: &str) -> String {
         // the caller reports that rather than pretending the peer is gone.
         ["vxlan-peer-del", dev, dst] => do_vxlan_peer_del(dev, dst),
         ["wg-peer-del", iface, key] => do_wg_peer_del(iface, key),
-        _ => Err(Error::Invalid(format!("invalid control command: {line:?}"))),
+        _ => Err(Error::InvalidControlCommand(format!(
+            "invalid control command: {line:?}"
+        ))),
     };
     match res {
         Ok(()) => "ok\n".to_string(),
@@ -2689,7 +2690,7 @@ fn prefix_of(ip: &str) -> String {
 /// IP (CIDR) assigned by the CNI's IPAM. `hex` = the conflist JSON in hex.
 fn do_cni_add(netns: &str, id: &str, ifname: &str, hex: &str) -> Result<String> {
     let netns = sanitize(netns);
-    let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid conflist hex".into()))?;
+    let bytes = hex_decode(hex).ok_or_else(|| Error::InvalidHex("invalid conflist hex".into()))?;
     let conf = crate::cni::parse_config(&String::from_utf8_lossy(&bytes))?;
     // Same body as a root CRI's host netns — see `cni::attach_named_netns`.
     crate::cni::attach_named_netns(&conf, &netns, id, ifname)
@@ -3129,7 +3130,7 @@ fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -
     let bridge = sanitize(bridge);
     let vni: u32 = vni
         .parse()
-        .map_err(|_| Error::Invalid(format!("invalid vni: {vni}")))?;
+        .map_err(|_| Error::InvalidVni(format!("invalid vni: {vni}")))?;
     // The overlay's bridge is a normal holder network bridge — the same function that
     // `attach`/`vmtap` use, so containers and VXLAN share the same L2.
     ensure_net_bridge(&bridge, gateway)?;
@@ -3200,7 +3201,7 @@ fn do_vxlan(dev: &str, vni: &str, bridge: &str, gateway: &str, dsts_csv: &str) -
 fn do_vxlan_peer_del(dev: &str, dst: &str) -> Result<()> {
     let dev = sanitize(dev);
     if !valid_fdb_dst(dst) {
-        return Err(Error::Invalid(format!("invalid FDB dst: '{dst}'")));
+        return Err(Error::InvalidFdbDst(format!("invalid FDB dst: '{dst}'")));
     }
     let have = crate::capture("bridge", &["fdb", "show", "dev", &dev]).unwrap_or_default();
     if !have.lines().any(|l| l.split_whitespace().any(|t| t == dst)) {
@@ -3222,7 +3223,7 @@ fn do_wg_peer_del(iface: &str, key: &str) -> Result<()> {
 fn do_netdel(bridge: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     if bridge == INFRA_BRIDGE {
-        return Err(Error::Invalid(
+        return Err(Error::IngressBridgeProtected(
             "the default ingress bridge cannot be removed".into(),
         ));
     }
@@ -3271,7 +3272,7 @@ fn do_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()
 /// que ninguém mandou tirar.
 fn do_lbclear(vip: &str) -> Result<()> {
     if !is_ingress_ip(vip) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::VipOutsideIngressSpace(format!(
             "VIP fora do espaço de ingress: {vip}"
         )));
     }
@@ -3334,7 +3335,7 @@ fn do_lbclear(vip: &str) -> Result<()> {
 /// serviço, que vem de um manifesto, e uma regra de firewall.
 fn do_lbset(vip: &str, algo: &str, backends: &str) -> Result<()> {
     if !is_ingress_ip(vip) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::VipOutsideIngressSpace(format!(
             "VIP fora do espaço de ingress: {vip}"
         )));
     }
@@ -3376,34 +3377,38 @@ fn lb_map_targets(backends: &str) -> Result<Vec<String>> {
             Some((e, p)) => (
                 e,
                 p.parse::<u32>()
-                    .map_err(|_| Error::Invalid(format!("peso inválido: {p}")))?
+                    .map_err(|_| Error::InvalidLbSpec(format!("peso inválido: {p}")))?
                     .clamp(1, 64),
             ),
             None => (b, 1),
         };
         let Some((ip, porta)) = endereco.rsplit_once(':') else {
-            return Err(Error::Invalid(format!("backend sem porta: {endereco}")));
+            return Err(Error::InvalidLbSpec(format!(
+                "backend sem porta: {endereco}"
+            )));
         };
         if !is_ingress_ip(ip) || !is_port(porta) {
-            return Err(Error::Invalid(format!("backend inválido: {endereco}")));
+            return Err(Error::InvalidLbSpec(format!(
+                "backend inválido: {endereco}"
+            )));
         }
         for _ in 0..peso {
             alvos.push(format!("{ip} . {porta}"));
         }
     }
     if alvos.is_empty() {
-        return Err(Error::Invalid("lbset sem backends".into()));
+        return Err(Error::InvalidLbSpec("lbset sem backends".into()));
     }
     Ok(alvos)
 }
 
 fn do_unpublish(host_port: &str, proto: Option<&str>) -> Result<()> {
     if !is_port(host_port) {
-        return Err(Error::Invalid(format!("invalid port: {host_port}")));
+        return Err(Error::InvalidPort(format!("invalid port: {host_port}")));
     }
     if let Some(p) = proto {
         if p != "tcp" && p != "udp" {
-            return Err(Error::Invalid(format!("invalid proto: {p}")));
+            return Err(Error::InvalidProto(format!("invalid proto: {p}")));
         }
     }
     // lists the chain with handles and deletes the rule(s) matching the dport.
@@ -3506,7 +3511,9 @@ fn do_egress(policy: &str) -> Result<()> {
             ],
         ),
         "allow" => Ok(()),
-        _ => Err(Error::Invalid(format!("invalid egress policy: {policy}"))),
+        _ => Err(Error::InvalidEgressPolicy(format!(
+            "invalid egress policy: {policy}"
+        ))),
     }
 }
 
@@ -3515,7 +3522,9 @@ fn do_egress(policy: &str) -> Result<()> {
 /// Supports `deny`/`allow`/`allowlist:<cidrs>` (NET-A).
 fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     if !(policy == "allow" || policy == "deny" || policy.starts_with("allowlist:")) {
-        return Err(Error::Invalid(format!("invalid egress policy: {policy}")));
+        return Err(Error::InvalidEgressPolicy(format!(
+            "invalid egress policy: {policy}"
+        )));
     }
     let norm = (policy != "allow").then(|| policy.to_string());
     let bridge = sanitize(bridge);
@@ -3564,7 +3573,9 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
     {
-        return Err(Error::Invalid(format!("invalid hostname: {suffix:?}")));
+        return Err(Error::InvalidEgressHostname(format!(
+            "invalid hostname: {suffix:?}"
+        )));
     }
     // Persists the hostname and re-applies the COMPLETE chain (composes with the CIDR
     // policy if any). `apply_egress_from_state` creates the set and registers in FQDN_ALLOW.
@@ -3748,13 +3759,13 @@ fn clear_l4guard() {
 /// against injection): `tcp`/`udp` protocol, numeric ports, IP in the infra subnet.
 fn validate_publish(proto: &str, host_port: &str, cip: &str, cport: &str) -> Result<()> {
     if proto != "tcp" && proto != "udp" {
-        return Err(Error::Invalid(format!("invalid protocol: {proto}")));
+        return Err(Error::InvalidProto(format!("invalid protocol: {proto}")));
     }
     if !is_port(host_port) || !is_port(cport) {
-        return Err(Error::Invalid("invalid port (1..65535)".into()));
+        return Err(Error::InvalidPort("invalid port (1..65535)".into()));
     }
     if !is_ingress_ip(cip) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::IpOutsideIngressSpace(format!(
             "IP {cip} outside the ingress space (10.200-254.x)"
         )));
     }
@@ -3867,7 +3878,7 @@ fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
         if !(name == INFRA_BRIDGE || name.starts_with("dlxn"))
             || !name.chars().all(|c| c.is_ascii_alphanumeric())
         {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "netroute",
                 message: format!("not a delonix bridge: {name}"),
             });
@@ -3877,7 +3888,7 @@ fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
         // The self-pair is what `isolation_elements` installs to keep intra-network
         // traffic open; a route onto itself would either be a no-op or, on removal,
         // silently cut a network off from itself.
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "netroute",
             message: "a route from a network to itself is not a route".to_string(),
         });
@@ -3886,7 +3897,7 @@ fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
         "add" => "add",
         "del" => "delete",
         other => {
-            return Err(Error::Runtime {
+            return Err(Error::Command {
                 context: "netroute",
                 message: format!("unknown netroute op: {other}"),
             })
@@ -3901,14 +3912,14 @@ fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
     let out = std::process::Command::new("nft")
         .args([verb, "element", "ip", INGRESS_TABLE, NETPAIR_MAP, &element])
         .output()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "netroute",
             message: format!("nft: {e}"),
         })?;
     if out.status.success() {
         Ok(())
     } else {
-        Err(Error::Runtime {
+        Err(Error::Command {
             context: "netroute",
             message: format!(
                 "nft {verb} element {a} -> {b}: {}",
@@ -4203,7 +4214,7 @@ pub fn network_routes_live() -> Result<Vec<(String, String)>> {
     let body = control_query("netroute-show")?;
     let listing = hex_decode(body.trim())
         .and_then(|b| String::from_utf8(b).ok())
-        .ok_or_else(|| Error::Runtime {
+        .ok_or_else(|| Error::Command {
             context: "netroute",
             message: "could not decode the holder's reply".to_string(),
         })?;
@@ -4228,7 +4239,7 @@ pub fn network_routes_live_counted() -> Result<Vec<(String, String, u64, u64)>> 
     let body = control_query("netroute-show")?;
     let listing = hex_decode(body.trim())
         .and_then(|b| String::from_utf8(b).ok())
-        .ok_or_else(|| Error::Runtime {
+        .ok_or_else(|| Error::Command {
             context: "netroute",
             message: "could not decode the holder's reply".to_string(),
         })?;
@@ -4268,18 +4279,18 @@ pub fn network_routes_live_counted() -> Result<Vec<(String, String, u64, u64)>> 
 fn do_firewall(ips: &str, hex: &str) -> Result<()> {
     let ips: Vec<&str> = ips.split(',').filter(|s| !s.is_empty()).collect();
     if ips.is_empty() {
-        return Err(Error::Invalid("firewall: no IP given".into()));
+        return Err(Error::FirewallNoIp("firewall: no IP given".into()));
     }
     for ip in &ips {
         if !is_ingress_ip(ip) {
-            return Err(Error::Invalid(format!(
+            return Err(Error::IpOutsideIngressSpace(format!(
                 "IP {ip} outside the ingress space (10.200-254.x)"
             )));
         }
     }
-    let bytes = hex_decode(hex).ok_or_else(|| Error::Invalid("invalid hex".into()))?;
+    let bytes = hex_decode(hex).ok_or_else(|| Error::InvalidHex("invalid hex".into()))?;
     let fw: delonix_model::records::ContainerFw = serde_json::from_slice(&bytes)
-        .map_err(|e| Error::Invalid(format!("firewall JSON: {e}")))?;
+        .map_err(|e| Error::FirewallJsonInvalid(format!("firewall JSON: {e}")))?;
     // The chain is named after the PRIMARY IP so it stays stable as extra networks
     // come and go (`do_unfirewall` finds it by the same name).
     let chain = fw_chain_name(ips[0]);
@@ -4639,7 +4650,7 @@ pub fn set_service_lb_algo(vip: &str, backends: &[String], algo: &str) -> Result
 /// relatório sai na mesma — só sem o exemplo. Uma ferramenta em falta não é
 /// razão para recusar a contagem.
 pub fn import_iptables(path: &std::path::Path) -> Result<String> {
-    let texto = std::fs::read_to_string(path).map_err(|e| Error::Runtime {
+    let texto = std::fs::read_to_string(path).map_err(|e| Error::Command {
         context: "iptables-save",
         message: format!("{}: {e}", path.display()),
     })?;
@@ -4968,8 +4979,8 @@ pub fn route_set_metadata(
     labels: &[(String, Option<String>)],
     annotations: &[(String, Option<String>)],
 ) -> Result<()> {
-    let mut def =
-        route_get(from, to).ok_or_else(|| Error::NotFound(format!("route: {from} -> {to}")))?;
+    let mut def = route_get(from, to)
+        .ok_or_else(|| Error::RouteNotFound(format!("route: {from} -> {to}")))?;
     for (k, v) in labels {
         match v {
             Some(v) => {
@@ -4995,14 +5006,14 @@ pub fn route_set_metadata(
 
 fn write_routedef(def: &RouteDef) -> Result<()> {
     let _ = std::fs::create_dir_all(routes_dir());
-    let json = serde_json::to_vec_pretty(def).map_err(|e| Error::Runtime {
+    let json = serde_json::to_vec_pretty(def).map_err(|e| Error::Command {
         context: "netroute",
         message: e.to_string(),
     })?;
     // `write_atomic`, not `fs::write` — the same lesson already paid for by the
     // network registry: a reader must never see a half-written record.
     delonix_state::write_atomic(&routedef_path(&def.from, &def.to), &json).map_err(|e| {
-        Error::Runtime {
+        Error::Command {
             context: "netroute",
             message: e.to_string(),
         }
@@ -5101,12 +5112,12 @@ pub fn service_get(namespace: &str, name: &str) -> Option<ServiceDef> {
 
 fn write_servicedef(def: &ServiceDef) -> Result<()> {
     let _ = std::fs::create_dir_all(services_dir());
-    let json = serde_json::to_vec_pretty(def).map_err(|e| Error::Runtime {
+    let json = serde_json::to_vec_pretty(def).map_err(|e| Error::Command {
         context: "service",
         message: e.to_string(),
     })?;
     delonix_state::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(|e| {
-        Error::Runtime {
+        Error::Command {
             context: "service",
             message: e.to_string(),
         }
@@ -5138,7 +5149,7 @@ pub fn service_set_metadata(
     annotations: &[(String, Option<String>)],
 ) -> Result<()> {
     let mut def = service_get(namespace, name)
-        .ok_or_else(|| Error::NotFound(format!("service: {namespace}/{name}")))?;
+        .ok_or_else(|| Error::ServiceNotFound(format!("service: {namespace}/{name}")))?;
     for (k, v) in labels {
         match v {
             Some(v) => {
@@ -5257,7 +5268,7 @@ pub fn resolve_net(name: &str) -> Result<NetPlan> {
         });
     }
     let def = network_get(name).ok_or_else(|| {
-        Error::NotFound(format!(
+        Error::IngressNetworkNotRealized(format!(
             "ingress network '{name}' does not exist — create it with `delonix network create {name}`, or use the default network"
         ))
     })?;
@@ -5340,7 +5351,9 @@ pub fn network_create(name: &str) -> Result<NetDef> {
     let prefix = (201..=254)
         .map(|o| format!("10.{o}"))
         .find(|p| !used.contains(p))
-        .ok_or_else(|| Error::Invalid("no free /16 prefixes for ingress networks".into()))?;
+        .ok_or_else(|| {
+            Error::NoFreeIngressPrefix("no free /16 prefixes for ingress networks".into())
+        })?;
     let def = NetDef::new(name, &prefix);
     write_netdef(name, &def)?;
     Ok(def)
@@ -5376,7 +5389,7 @@ pub fn network_create_with_gateway(
         // leases from the recorded prefix, and moving the bridge under them is
         // not something a `create` should decide on its own.
         if !prefix.is_empty() && def.prefix != prefix {
-            return Err(Error::Conflict(format!(
+            return Err(Error::NetworkPrefixConflict(format!(
                 "network '{name}' is already realized on {} and the registry asks for {prefix} — \
                  remove it (`delonix network rm {name}`) and create it again, or keep the \
                  recorded subnet",
@@ -5412,15 +5425,15 @@ pub fn network_create_with(name: &str, prefix: &str) -> Result<NetDef> {
 /// Persists a `NetDef`. One writer, because the two creation paths used to have
 /// one each and only one of them reported the serialization error.
 fn write_netdef(name: &str, def: &NetDef) -> Result<()> {
-    std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Runtime {
+    std::fs::create_dir_all(networks_dir()).map_err(|e| Error::Command {
         context: "networks dir",
         message: e.to_string(),
     })?;
-    let body = serde_json::to_string_pretty(def).map_err(|e| Error::Runtime {
+    let body = serde_json::to_string_pretty(def).map_err(|e| Error::Command {
         context: "netdef",
         message: e.to_string(),
     })?;
-    std::fs::write(netdef_path(name), body).map_err(|e| Error::Runtime {
+    std::fs::write(netdef_path(name), body).map_err(|e| Error::Command {
         context: "netdef",
         message: e.to_string(),
     })?;
@@ -5685,7 +5698,7 @@ pub fn attach_container_on_ip(
         ..
     } = resolve_net(net)?;
     if !delonix_net_rules::valid_ip_in_subnet(&prefix, ip) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::IpNotInSubnet(format!(
             "IP {ip} does not belong to network {net} ({prefix}.0.0/16)"
         )));
     }
@@ -5811,9 +5824,9 @@ pub fn apply_firewall_all(
     fw: &delonix_model::records::ContainerFw,
 ) -> Result<()> {
     if ips.is_empty() {
-        return Err(Error::Invalid("apply_firewall: no IP given".into()));
+        return Err(Error::FirewallNoIp("apply_firewall: no IP given".into()));
     }
-    let json = serde_json::to_vec(fw).map_err(|e| Error::Invalid(e.to_string()))?;
+    let json = serde_json::to_vec(fw).map_err(|e| Error::FirewallEncodeFailed(e.to_string()))?;
     control_send(&format!(
         "firewall {} {} {}",
         sanitize(id),
@@ -5883,7 +5896,7 @@ pub fn l4_guard_status() -> Result<Vec<(String, u64, u64)>> {
     let body = control_query("l4guard-show")?;
     let listing = hex_decode(body.trim())
         .and_then(|b| String::from_utf8(b).ok())
-        .ok_or_else(|| Error::Runtime {
+        .ok_or_else(|| Error::Command {
             context: "l4guard",
             message: "could not decode the holder's reply".to_string(),
         })?;
@@ -5927,7 +5940,7 @@ pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[Strin
     // holder-side): a dst with a space/newline would malform the line or attempt
     // smuggling a 2nd command. `do_vxlan` re-validates, but this is the boundary.
     if let Some(bad) = dsts.iter().find(|d| !valid_fdb_dst(d)) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidFdbDst(format!(
             "invalid overlay peer destination: {bad:?} (IPs only)"
         )));
     }
@@ -5950,7 +5963,7 @@ pub fn set_vxlan(dev: &str, vni: u32, bridge: &str, gateway: &str, dsts: &[Strin
 /// states above: this is where a value with a space would malform the line.
 pub fn del_vxlan_peer(dev: &str, dst: &str) -> Result<()> {
     if !valid_fdb_dst(dst) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidFdbDst(format!(
             "invalid overlay peer destination: {dst:?} (IPs only)"
         )));
     }
@@ -5964,7 +5977,7 @@ pub fn del_vxlan_peer(dev: &str, dst: &str) -> Result<()> {
 /// the tunnel, and only removing both actually retires a node.
 pub fn del_wg_peer(iface: &str, public_key: &str) -> Result<()> {
     if !crate::wg::valid_wg_key(public_key) {
-        return Err(Error::Invalid(format!(
+        return Err(Error::InvalidWgKey(format!(
             "not a WireGuard public key: {public_key:?}"
         )));
     }
@@ -6372,7 +6385,7 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     if !json.contains("list_hostfwd") {
         trace_unpublish("slirp_api", json);
     }
-    let mut s = UnixStream::connect(sock).map_err(|e| Error::Runtime {
+    let mut s = UnixStream::connect(sock).map_err(|e| Error::Command {
         context: "slirp api",
         message: e.to_string(),
     })?;
@@ -6390,7 +6403,7 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     } else {
         format!("{json}\n")
     };
-    s.write_all(line.as_bytes()).map_err(|e| Error::Runtime {
+    s.write_all(line.as_bytes()).map_err(|e| Error::Command {
         context: "slirp api write",
         message: e.to_string(),
     })?;
@@ -6401,7 +6414,7 @@ fn slirp_api(sock: &Path, json: &str) -> Result<String> {
     // success having removed NOTHING, leaving the host port held by an entry the
     // record no longer knows about.
     let mut resp = String::new();
-    s.read_to_string(&mut resp).map_err(|e| Error::Runtime {
+    s.read_to_string(&mut resp).map_err(|e| Error::Command {
         context: "slirp api read",
         message: format!("no reply from the slirp api-socket: {e}"),
     })?;
@@ -6440,7 +6453,7 @@ pub fn slirp_remove_hostfwd_proto(sock: &Path, host_port: &str, proto: Option<&s
     trace_unpublish("slirp_remove_hostfwd", host_port);
     let hp: u32 = host_port
         .parse()
-        .map_err(|_| Error::Invalid("invalid port".into()))?;
+        .map_err(|_| Error::InvalidPort("invalid port".into()))?;
     let listed = slirp_api(sock, r#"{"execute":"list_hostfwd"}"#)?;
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
     if let Some(entries) = hostfwd_entries(&v) {
@@ -6590,7 +6603,7 @@ fn control_query(cmd: &str) -> Result<String> {
     // TEARDOWN ones with the holder down exit here. The retry below still covers the
     // legitimate startup race (holder ALREADY alive, socket still coming up).
     let Some(holder_pid) = status().holder_pid else {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "control socket",
             message: "ingress holder is down".into(),
         });
@@ -6602,7 +6615,7 @@ fn control_query(cmd: &str) -> Result<String> {
             Ok(mut s) => {
                 let _ = s.set_read_timeout(Some(CONTROL_REPLY_TIMEOUT));
                 s.write_all(format!("{cmd}\n").as_bytes())
-                    .map_err(|e| Error::Runtime {
+                    .map_err(|e| Error::Command {
                         context: "control write",
                         message: e.to_string(),
                     })?;
@@ -6622,7 +6635,7 @@ fn control_query(cmd: &str) -> Result<String> {
                         e.kind(),
                         std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
                     );
-                    return Err(Error::Runtime {
+                    return Err(Error::Command {
                         context: "ingress control",
                         message: if timed_out {
                             format!(
@@ -6651,7 +6664,7 @@ concurrent `run`s queues up behind itself. Retry, or start them in smaller batch
                 // error with no subject, which is the one thing this codebase
                 // keeps having to remove.
                 let body = resp.trim_start_matches("err:").trim();
-                return Err(Error::Runtime {
+                return Err(Error::Command {
                     context: "ingress control",
                     message: if body.is_empty() {
                         "the control plane closed the connection without replying - it is \
@@ -6682,7 +6695,7 @@ concurrent `run`s queues up behind itself. Retry, or start them in smaller batch
             legacy.exists().then_some(legacy.as_path()),
         )
     };
-    Err(Error::Runtime {
+    Err(Error::Command {
         context: "control socket",
         message,
     })
@@ -6770,7 +6783,7 @@ fn setup_infra_netns() -> Result<()> {
     run("ip", &["link", "add", INFRA_BRIDGE, "type", "bridge"])?;
     run("ip", &["addr", "add", INFRA_CIDR, "dev", INFRA_BRIDGE])?;
     run("ip", &["link", "set", INFRA_BRIDGE, "up"])?;
-    std::fs::write("/proc/sys/net/ipv4/ip_forward", "1").map_err(|e| Error::Runtime {
+    std::fs::write("/proc/sys/net/ipv4/ip_forward", "1").map_err(|e| Error::Command {
         context: "ip_forward",
         message: e.to_string(),
     })?;
@@ -6812,7 +6825,7 @@ fn apply_nft_stdin(ruleset: &str) -> Result<()> {
         .stdin(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "spawn nft",
             message: e.to_string(),
         })?;
@@ -6821,16 +6834,16 @@ fn apply_nft_stdin(ruleset: &str) -> Result<()> {
         .take()
         .unwrap()
         .write_all(ruleset.as_bytes())
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "nft stdin",
             message: e.to_string(),
         })?;
-    let out = child.wait_with_output().map_err(|e| Error::Runtime {
+    let out = child.wait_with_output().map_err(|e| Error::Command {
         context: "nft wait",
         message: e.to_string(),
     })?;
     if !out.status.success() {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "nft -f",
             message: String::from_utf8_lossy(&out.stderr).trim().to_string(),
         });

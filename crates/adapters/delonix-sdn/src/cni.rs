@@ -11,7 +11,7 @@
 //! The *wiring* to the attach paths (root via `Net`, rootless via the holder) is done
 //! by whoever calls `add`/`del`.
 
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -139,10 +139,10 @@ pub fn list_conf_files(dir: &Path) -> Vec<PathBuf> {
 /// single-plugin `*.conf` (normalized to a list of a single plugin).
 pub fn parse_config(text: &str) -> Result<NetConfList> {
     let v: Value = serde_json::from_str(text)
-        .map_err(|e| Error::Invalid(format!("invalid CNI config: {e}")))?;
+        .map_err(|e| Error::CniConfigInvalid(format!("invalid CNI config: {e}")))?;
     if v.get("plugins").is_some() {
         return serde_json::from_value(v)
-            .map_err(|e| Error::Invalid(format!("invalid CNI conflist: {e}")));
+            .map_err(|e| Error::CniConfigInvalid(format!("invalid CNI conflist: {e}")));
     }
     // single-plugin `*.conf`: the object itself is the plugin.
     let cni_version = v
@@ -168,7 +168,7 @@ pub fn load_default(conf_dir: &Path) -> Result<Option<NetConfList>> {
         return Ok(None);
     };
     let text = std::fs::read_to_string(&first)
-        .map_err(|e| Error::Invalid(format!("read {}: {e}", first.display())))?;
+        .map_err(|e| Error::CniConfigInvalid(format!("read {}: {e}", first.display())))?;
     Ok(Some(parse_config(&text)?))
 }
 
@@ -208,7 +208,7 @@ fn plugin_input(
     let mut obj = plugin.clone();
     let map = obj
         .as_object_mut()
-        .ok_or_else(|| Error::Invalid("CNI plugin is not a JSON object".into()))?;
+        .ok_or_else(|| Error::CniConfigInvalid("CNI plugin is not a JSON object".into()))?;
     map.insert("cniVersion".into(), json!(cni_version));
     map.insert("name".into(), json!(name));
     if let Some(p) = prev {
@@ -217,7 +217,8 @@ fn plugin_input(
             serde_json::to_value(p).unwrap_or(Value::Null),
         );
     }
-    serde_json::to_string(&obj).map_err(|e| Error::Invalid(format!("serialize CNI config: {e}")))
+    serde_json::to_string(&obj)
+        .map_err(|e| Error::CniEncodeFailed(format!("serialize CNI config: {e}")))
 }
 
 /// Parses the result (stdout) of a successful plugin.
@@ -225,7 +226,8 @@ fn parse_result(stdout: &str) -> Result<CniResult> {
     if stdout.trim().is_empty() {
         return Ok(CniResult::default());
     }
-    serde_json::from_str(stdout).map_err(|e| Error::Invalid(format!("invalid CNI result: {e}")))
+    serde_json::from_str(stdout)
+        .map_err(|e| Error::CniResultInvalid(format!("invalid CNI result: {e}")))
 }
 
 /// Tries to extract the structured error a plugin writes to stdout on failure.
@@ -251,23 +253,23 @@ fn invoke(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "cni-spawn",
             message: format!("{}: {e}", plugin.display()),
         })?;
     child
         .stdin
         .take()
-        .ok_or_else(|| Error::Runtime {
+        .ok_or_else(|| Error::Command {
             context: "cni-stdin",
             message: "no stdin".into(),
         })?
         .write_all(stdin_json.as_bytes())
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "cni-stdin",
             message: e.to_string(),
         })?;
-    let out = child.wait_with_output().map_err(|e| Error::Runtime {
+    let out = child.wait_with_output().map_err(|e| Error::Command {
         context: "cni-wait",
         message: e.to_string(),
     })?;
@@ -290,9 +292,10 @@ fn run_one(
     let typ = plugin
         .get("type")
         .and_then(|t| t.as_str())
-        .ok_or_else(|| Error::Invalid("CNI plugin without a `type` field".into()))?;
-    let bin = resolve_plugin(cni_path, typ)
-        .ok_or_else(|| Error::Invalid(format!("CNI plugin `{typ}` not found in CNI_PATH")))?;
+        .ok_or_else(|| Error::CniConfigInvalid("CNI plugin without a `type` field".into()))?;
+    let bin = resolve_plugin(cni_path, typ).ok_or_else(|| {
+        Error::CniPluginNotFound(format!("CNI plugin `{typ}` not found in CNI_PATH"))
+    })?;
     let envs = build_env(cmd, target, cni_path);
     let stdin_json = plugin_input(plugin, &net.name, &net.cni_version, prev)?;
     let (ok, stdout, stderr) = invoke(&bin, &envs, &stdin_json)?;
@@ -300,7 +303,7 @@ fn run_one(
         let detail = parse_error(&stdout)
             .map(|e| format!("code {} — {}", e.code, e.msg))
             .unwrap_or_else(|| stderr.trim().to_string());
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "cni-plugin",
             message: format!("`{typ}` {}: {detail}", cmd.as_str()),
         });
@@ -327,7 +330,7 @@ pub fn add(
         let r = run_one(Command_::Add, plugin, net, cni_path, target, prev.as_ref())?;
         prev = Some(r);
     }
-    prev.ok_or_else(|| Error::Invalid("CNI conflist has no plugins".into()))
+    prev.ok_or_else(|| Error::CniConfigInvalid("CNI conflist has no plugins".into()))
 }
 
 /// `DEL`: runs the chain in **reverse order** (CNI spec). Best-effort: continues
@@ -515,12 +518,14 @@ pub fn set_netns_sysctls(netns_path: &str, sysctls: &[(String, String)]) -> Resu
             && k.chars()
                 .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
         if !ok {
-            return Err(Error::Invalid(format!("not a net.* sysctl: {k:?}")));
+            return Err(Error::CniSysctlKeyInvalid(format!(
+                "not a net.* sysctl: {k:?}"
+            )));
         }
     }
     let path = netns_path.to_string();
     let sysctls = sysctls.to_vec();
-    let err = |context: &'static str, message: String| Error::Runtime { context, message };
+    let err = |context: &'static str, message: String| Error::Command { context, message };
     std::thread::spawn(move || -> Result<()> {
         use std::os::fd::AsRawFd as _;
         let f =

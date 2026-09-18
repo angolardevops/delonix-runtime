@@ -141,13 +141,14 @@ pub(crate) fn stamp(
             Some(super::reconcile::encode_last_applied(fields)),
         )],
     )
+    .map_err(Into::into)
 }
 
 /// Closes the path. This is what `--prune` and `stack destroy` call, and its
 /// absence was the defect: a route removed from the manifest stayed open.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let (from, to) = split_route_name(name)?;
-    delonix_sdn::infra::network_route(from, to, false)
+    delonix_sdn::infra::network_route(from, to, false).map_err(Into::into)
 }
 
 /// What the dataplane is doing about a route that IS declared.

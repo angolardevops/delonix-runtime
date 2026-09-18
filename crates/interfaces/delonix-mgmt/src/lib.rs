@@ -1034,7 +1034,7 @@ async fn attach_extra(Json(b): Json<AttachExtraBody>) -> Response {
         Ok(Ok((ifname, ip))) => {
             Json(serde_json::json!({ "ifname": ifname, "ip": ip })).into_response()
         }
-        Ok(Err(e)) => err_response(e),
+        Ok(Err(e)) => err_response(e.into()),
         Err(e) => err_response(Error::Runtime {
             context: "join",
             message: e.to_string(),
@@ -1118,7 +1118,7 @@ async fn apply_firewall(Path(ip): Path<String>, Json(b): Json<FirewallBody>) -> 
             .await;
     match r {
         Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Ok(Err(e)) => err_response(e),
+        Ok(Err(e)) => err_response(e.into()),
         Err(e) => err_response(Error::Runtime {
             context: "join",
             message: e.to_string(),
@@ -1159,7 +1159,7 @@ struct EgressBody {
 async fn set_egress_global(Json(b): Json<EgressBody>) -> Response {
     match tokio::task::spawn_blocking(move || delonix_sdn::infra::set_egress_policy(b.deny)).await {
         Ok(Ok(())) => Json(serde_json::json!({ "ok": true, "deny": b.deny })).into_response(),
-        Ok(Err(e)) => err_response(e),
+        Ok(Err(e)) => err_response(e.into()),
         Err(e) => err_response(Error::Runtime {
             context: "join",
             message: e.to_string(),
@@ -1179,7 +1179,7 @@ async fn set_egress_net(Path(bridge): Path<String>, Json(b): Json<EgressBody>) -
     .await;
     match r {
         Ok(Ok(())) => Json(serde_json::json!({ "ok": true, "deny": deny })).into_response(),
-        Ok(Err(e)) => err_response(e),
+        Ok(Err(e)) => err_response(e.into()),
         Err(e) => err_response(Error::Runtime {
             context: "join",
             message: e.to_string(),
@@ -1211,7 +1211,7 @@ async fn set_net_rate(Path(id): Path<String>, Json(b): Json<RateBody>) -> Respon
     .await;
     match r {
         Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Ok(Err(e)) => err_response(e),
+        Ok(Err(e)) => err_response(e.into()),
         Err(e) => err_response(Error::Runtime {
             context: "join",
             message: e.to_string(),
@@ -1278,7 +1278,7 @@ async fn publish_port(State(s): State<AppState>, Json(b): Json<PublishBody>) -> 
             // The publication failed, so the record must not keep claiming it —
             // otherwise the next start would replay a port the operator never got.
             let _ = forget_published_port(s.base, Some(ip), spec).await;
-            err_response(e)
+            err_response(e.into())
         }
         Err(e) => err_response(Error::Runtime {
             context: "join",

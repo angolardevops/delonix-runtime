@@ -12,11 +12,13 @@ pub struct HostVmNetwork;
 
 impl VmNetwork for HostVmNetwork {
     fn ensure_network(&self, name: &str) -> Result<()> {
-        crate::infra::network_create(name).map(|_| ())
+        crate::infra::network_create(name)
+            .map(|_| ())
+            .map_err(Into::into)
     }
 
     fn attach_tap(&self, vm: &str, network: &str, mac: &str, namespace: &str) -> Result<String> {
-        crate::infra::vm_attach(vm, network, mac, namespace)
+        crate::infra::vm_attach(vm, network, mac, namespace).map_err(Into::into)
     }
 
     fn lease_ip(&self, network: &str, mac: &str) -> Option<String> {

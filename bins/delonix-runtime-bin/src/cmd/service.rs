@@ -141,12 +141,13 @@ pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) 
             Some(super::reconcile::encode_last_applied(fields)),
         )],
     )
+    .map_err(Into::into)
 }
 
 /// `--prune`/`stack destroy`'s teardown.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let namespace = doc_namespace_of(name)?;
-    delonix_sdn::infra::service_remove(&namespace, name)
+    delonix_sdn::infra::service_remove(&namespace, name).map_err(Into::into)
 }
 
 /// Finds which namespace an already-registered `Service` NAMED `name` lives

@@ -27,7 +27,7 @@
 //! `nsenter` into namespaces that already exist (the adoption path) must not
 //! create new ones, and it never gets the variable.
 
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 
 /// Carries `<read-fd>,<write-fd>` of the pin's ends of the two pipes.
@@ -73,7 +73,7 @@ fn pipe() -> Result<(OwnedFd, OwnedFd)> {
     let mut fds = [0 as RawFd; 2];
     // SAFETY: `fds` is a valid two-element array for the duration of the call.
     if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "pipe",
             message: std::io::Error::last_os_error().to_string(),
         });
@@ -263,14 +263,14 @@ fn run_helper(path: &str, pid: i32, args: &[String]) -> Result<()> {
         .arg(pid.to_string())
         .args(args)
         .output()
-        .map_err(|e| Error::Runtime {
+        .map_err(|e| Error::Command {
             context: "idmap",
             message: format!("{path}: {e}"),
         })?;
     if out.status.success() {
         return Ok(());
     }
-    Err(Error::Runtime {
+    Err(Error::Command {
         context: "idmap",
         message: format!(
             "{path} {} failed: {}",
@@ -303,7 +303,7 @@ pub(crate) fn write_maps(pid: i32) -> Result<()> {
     // refuses), no helpers, or no entry: map the one uid we hold. Writing a gid map
     // by hand requires `setgroups=deny` first.
     let write = |file: &str, body: String| {
-        std::fs::write(format!("/proc/{pid}/{file}"), body).map_err(|e| Error::Runtime {
+        std::fs::write(format!("/proc/{pid}/{file}"), body).map_err(|e| Error::Command {
             context: "idmap",
             message: format!("/proc/{pid}/{file}: {e}"),
         })
@@ -327,20 +327,20 @@ pub(crate) fn handshake(pipes: SyncPipes, pid: i32, wait_ms: i32) -> Result<()> 
     drop(child_read);
     drop(child_write);
     if !crate::infra::wait_readable(parent_read.as_raw_fd(), wait_ms) {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "netns pin",
             message: format!("the pin did not create its namespaces within {wait_ms} ms"),
         });
     }
     if read_byte(parent_read.as_raw_fd()) != Some(UNSHARED) {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "netns pin",
             message: "the pin exited before creating its namespaces".into(),
         });
     }
     write_maps(pid)?;
     if !write_byte(parent_write.as_raw_fd(), GO) {
-        return Err(Error::Runtime {
+        return Err(Error::Command {
             context: "netns pin",
             message: "the pin exited while its namespaces were being mapped".into(),
         });

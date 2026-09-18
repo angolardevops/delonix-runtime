@@ -12454,3 +12454,461 @@ msgstr "uma chamada de sistema do motor de containers falhou"
 msgid "A kernel operation this crate performs to build or manage a container (clone, mount, setns, a cgroup or /proc write) failed. The message carries the operation and the errno."
 msgstr "Uma operação do kernel que esta crate executa para construir ou gerir um container (clone, mount, setns, uma escrita de cgroup ou /proc) falhou. A mensagem leva a operação e o errno."
 
+
+# dicionário: entradas do delonix-sdn (ADR-0043)
+
+msgid "invalid WireGuard key"
+msgstr "chave WireGuard inválida"
+
+msgid "A string given as a WireGuard key is not 44 characters of base64 ending in '='."
+msgstr "Uma string dada como chave WireGuard não tem 44 caracteres de base64 a terminar em '='."
+
+msgid "Pass a key exactly as `wg genkey`/`wg pubkey` produced it."
+msgstr "Passa uma chave exactamente como o `wg genkey`/`wg pubkey` a produziu."
+
+msgid "invalid CNI configuration"
+msgstr "configuração CNI inválida"
+
+msgid "A CNI config/conflist file, or a plugin's input built from it, is not valid JSON or has the wrong shape."
+msgstr "Um ficheiro de config/conflist CNI, ou o input de um plugin construído a partir dele, não é JSON válido ou tem a forma errada."
+
+msgid "Check the `*.conflist`/`*.conf` file the message names; validate it with a JSON linter."
+msgstr "Verifica o ficheiro `*.conflist`/`*.conf` que a mensagem nomeia; valida-o com um linter de JSON."
+
+msgid "could not encode a CNI plugin's input"
+msgstr "não foi possível codificar o input de um plugin CNI"
+
+msgid "Building the JSON a CNI plugin reads on stdin failed."
+msgstr "Construir o JSON que um plugin CNI lê no stdin falhou."
+
+msgid "Check the plugin entry in the conflist for a value JSON cannot represent."
+msgstr "Verifica a entrada do plugin no conflist à procura de um valor que o JSON não consiga representar."
+
+msgid "invalid CNI plugin result"
+msgstr "resultado de plugin CNI inválido"
+
+msgid "A CNI plugin's own stdout did not parse as the result the CNI spec expects."
+msgstr "O próprio stdout de um plugin CNI não fez parse como o resultado que a especificação CNI espera."
+
+msgid "Check the plugin binary the message names is the version this host's conflist expects."
+msgstr "Verifica que o binário do plugin que a mensagem nomeia é a versão que o conflist deste host espera."
+
+msgid "CNI plugin not found"
+msgstr "plugin CNI não encontrado"
+
+msgid "A plugin named in the CNI chain (or its `ipam.type`) is not a binary in CNI_PATH."
+msgstr "Um plugin nomeado na cadeia CNI (ou o seu `ipam.type`) não é um binário em CNI_PATH."
+
+msgid "Install the plugin binary the message names into CNI_PATH (default /opt/cni/bin)."
+msgstr "Instala o binário do plugin que a mensagem nomeia em CNI_PATH (por omissão /opt/cni/bin)."
+
+msgid "invalid netns sysctl key"
+msgstr "chave de sysctl de netns inválida"
+
+msgid "A sysctl key given to be set inside a netns is not a plain `net.*` name."
+msgstr "Uma chave de sysctl dada para aplicar dentro de uma netns não é um nome simples `net.*`."
+
+msgid "Use a dotted `net.*` key, as `sysctl` itself would accept."
+msgstr "Usa uma chave `net.*` com pontos, como o próprio `sysctl` aceitaria."
+
+msgid "invalid publish spec"
+msgstr "especificação de publish inválida"
+
+msgid "A `-p`/`--publish` spec has a protocol other than tcp/udp, a non-numeric port, or a host address that is not an IPv4 literal."
+msgstr "Uma especificação `-p`/`--publish` tem um protocolo que não é tcp/udp, uma porta não numérica, ou um endereço de host que não é um literal IPv4."
+
+msgid "Write it as [hostIp:]hostPort:contPort[/tcp|udp], e.g. 8080:80 or 0.0.0.0:8080:80/tcp."
+msgstr "Escreve-a como [hostIp:]hostPort:contPort[/tcp|udp], por exemplo 8080:80 ou 0.0.0.0:8080:80/tcp."
+
+msgid "invalid publish port range"
+msgstr "intervalo de portas de publish inválido"
+
+msgid "A `-p` port RANGE has a non-numeric bound, an out-of-order/out-of-range port, or mismatched host/container widths."
+msgstr "Um INTERVALO de portas `-p` tem um limite não numérico, uma porta fora de ordem/fora de alcance, ou larguras de host/container que não coincidem."
+
+msgid "Use hostStart-hostEnd:contStart-contEnd with both sides the same width, within 1-65535."
+msgstr "Usa hostStart-hostEnd:contStart-contEnd com os dois lados da mesma largura, dentro de 1-65535."
+
+msgid "invalid network rate spec"
+msgstr "especificação de taxa de rede inválida"
+
+msgid "A `--net-bps`/`--net-burst` value does not parse, is zero, or is out of range."
+msgstr "Um valor `--net-bps`/`--net-burst` não faz parse, é zero, ou está fora de alcance."
+
+msgid "Use a number with an optional k/m/g/t suffix, e.g. 10mbit or 512k."
+msgstr "Usa um número com um sufixo opcional k/m/g/t, por exemplo 10mbit ou 512k."
+
+msgid "network record is corrupted"
+msgstr "o registo da rede está corrompido"
+
+msgid "A NetworkStore record on disk is missing a field its driver needs (parent, subnet, vni, or the base octet)."
+msgstr "Um registo do NetworkStore em disco falta um campo que o seu driver precisa (parent, subnet, vni, ou o octeto base)."
+
+msgid "Remove the network and recreate it (`delonix network rm`, then `delonix network create`)."
+msgstr "Remove a rede e recria-a (`delonix network rm`, depois `delonix network create`)."
+
+msgid "reserved network name"
+msgstr "nome de rede reservado"
+
+msgid "The name asked for is `bridge` (the implicit default network) or a reserved driver name (`host`/`none`)."
+msgstr "O nome pedido é `bridge` (a rede default implícita) ou um nome de driver reservado (`host`/`none`)."
+
+msgid "Pick a different name."
+msgstr "Escolhe um nome diferente."
+
+msgid "invalid network name"
+msgstr "nome de rede inválido"
+
+msgid "A network name may only use letters, digits, dash and underscore."
+msgstr "Um nome de rede só pode usar letras, dígitos, traço e underscore."
+
+msgid "Pick a name made of [A-Za-z0-9_-]."
+msgstr "Escolhe um nome feito de [A-Za-z0-9_-]."
+
+msgid "unsupported bridge subnet"
+msgstr "subnet de bridge não suportada"
+
+msgid "A --subnet for the bridge driver is not a 10.<workload-range>.0.0/16 this engine's IPAM can realize."
+msgstr "Um --subnet para o driver bridge não é um 10.<intervalo-de-workload>.0.0/16 que o IPAM deste motor consiga realizar."
+
+msgid "Pass a 10.<lo>-<hi>.0.0/16 in the workload range, or omit --subnet to let the engine pick a free one."
+msgstr "Passa um 10.<lo>-<hi>.0.0/16 dentro do intervalo de workload, ou omite --subnet para o motor escolher um livre."
+
+msgid "invalid subnet"
+msgstr "subnet inválida"
+
+msgid "An arbitrary --subnet CIDR is not a private prefix (RFC 1918) of a usable length."
+msgstr "Um CIDR --subnet arbitrário não é um prefixo privado (RFC 1918) de um comprimento utilizável."
+
+msgid "Use a private range (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) with a prefix between /8 and /28."
+msgstr "Usa um intervalo privado (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16) com um prefixo entre /8 e /28."
+
+msgid "invalid network gateway"
+msgstr "gateway de rede inválido"
+
+msgid "A declared gateway is outside the network's prefix, or is the network/broadcast address."
+msgstr "Um gateway declarado está fora do prefixo da rede, ou é o endereço de rede/broadcast."
+
+msgid "Pick an address inside the network's prefix that is not the network or broadcast address."
+msgstr "Escolhe um endereço dentro do prefixo da rede que não seja o endereço de rede ou de broadcast."
+
+msgid "invalid /16 base octet"
+msgstr "octeto base /16 inválido"
+
+msgid "A /16 base octet for a bridge network is outside the workload address space."
+msgstr "Um octeto base /16 para uma rede bridge está fora do espaço de endereços de workload."
+
+msgid "Pick a base octet inside the workload range this engine reports."
+msgstr "Escolhe um octeto base dentro do intervalo de workload que este motor reporta."
+
+msgid "no record to annotate"
+msgstr "sem registo para anotar"
+
+msgid "The implicit default `bridge` network has no record on disk, so there is nothing to label/annotate."
+msgstr "A rede default implícita `bridge` não tem registo em disco, por isso não há nada para etiquetar/anotar."
+
+msgid "Annotate a user network instead; the default network cannot carry labels."
+msgstr "Anota antes uma rede de utilizador; a rede default não pode levar labels."
+
+msgid "invalid network metadata key or value"
+msgstr "chave ou valor de metadados de rede inválido"
+
+msgid "A label/annotation key is empty or contains '=' or a newline, or its value contains a newline."
+msgstr "Uma chave de label/annotation está vazia ou contém '=' ou uma nova linha, ou o seu valor contém uma nova linha."
+
+msgid "Use a key/value with no '=' and no newline."
+msgstr "Usa uma chave/valor sem '=' e sem nova linha."
+
+msgid "invalid VNI"
+msgstr "VNI inválido"
+
+msgid "An overlay network's VNI does not parse, or is outside 1..16777215."
+msgstr "O VNI de uma rede overlay não faz parse, ou está fora de 1..16777215."
+
+msgid "Pass a VNI between 1 and 16777215."
+msgstr "Passa um VNI entre 1 e 16777215."
+
+msgid "not an overlay network"
+msgstr "não é uma rede overlay"
+
+msgid "An overlay-peer operation was asked of a network whose driver is not `overlay`."
+msgstr "Foi pedida uma operação de overlay-peer a uma rede cujo driver não é `overlay`."
+
+msgid "Target a network created with `--driver overlay`."
+msgstr "Aponta para uma rede criada com `--driver overlay`."
+
+msgid "invalid overlay peer"
+msgstr "peer de overlay inválido"
+
+msgid "An overlay peer spec has no node_ip."
+msgstr "Uma especificação de peer de overlay não tem node_ip."
+
+msgid "Write the peer as <node_ip> or <node_ip>=<pubkey>=<wg_ip>."
+msgstr "Escreve o peer como <node_ip> ou <node_ip>=<pubkey>=<wg_ip>."
+
+msgid "unknown network driver"
+msgstr "driver de rede desconhecido"
+
+msgid "A `create_lan` driver is neither `macvlan` nor `ipvlan`."
+msgstr "Um driver de `create_lan` não é nem `macvlan` nem `ipvlan`."
+
+msgid "Use --driver macvlan or --driver ipvlan."
+msgstr "Usa --driver macvlan ou --driver ipvlan."
+
+msgid "parent NIC not found"
+msgstr "NIC parent não encontrada"
+
+msgid "A macvlan/ipvlan network's parent NIC does not exist on this host."
+msgstr "A NIC parent de uma rede macvlan/ipvlan não existe neste host."
+
+msgid "Pass a NIC that `ip link` on this host actually shows."
+msgstr "Passa uma NIC que o `ip link` deste host realmente mostra."
+
+msgid "invalid macvlan/ipvlan subnet"
+msgstr "subnet de macvlan/ipvlan inválida"
+
+msgid "A macvlan/ipvlan subnet does not parse as a CIDR."
+msgstr "Uma subnet de macvlan/ipvlan não faz parse como um CIDR."
+
+msgid "Write it as e.g. 192.168.1.0/24."
+msgstr "Escreve-a como por exemplo 192.168.1.0/24."
+
+msgid "invalid holder control command"
+msgstr "comando de controlo do holder inválido"
+
+msgid "A line sent on the holder's control socket is not one this build recognises."
+msgstr "Uma linha enviada no socket de controlo do holder não é uma que este build reconheça."
+
+msgid "Check the CLI and the holder are from the same build; an old holder may need a respawn."
+msgstr "Verifica que a CLI e o holder são do mesmo build; um holder antigo pode precisar de um respawn."
+
+msgid "invalid hex payload"
+msgstr "payload hex inválido"
+
+msgid "A hex-encoded payload on the holder control socket (a CNI conflist, a firewall spec) does not decode."
+msgstr "Um payload codificado em hex no socket de controlo do holder (um conflist CNI, uma especificação de firewall) não decodifica."
+
+msgid "This is an internal protocol error between the CLI and the holder; check they are the same build."
+msgstr "Isto é um erro de protocolo interno entre a CLI e o holder; verifica que são o mesmo build."
+
+msgid "invalid FDB/overlay peer destination"
+msgstr "destino de FDB/overlay peer inválido"
+
+msgid "An FDB or overlay-peer destination is not a bare IP address."
+msgstr "Um destino de FDB ou de overlay-peer não é um endereço IP nu."
+
+msgid "Pass a plain IPv4 address, with no other characters."
+msgstr "Passa um endereço IPv4 simples, sem outros caracteres."
+
+msgid "the default ingress bridge cannot be removed"
+msgstr "a bridge de ingress default não pode ser removida"
+
+msgid "An attempt was made to remove the default ingress bridge, which every other network path depends on."
+msgstr "Foi feita uma tentativa de remover a bridge de ingress default, de que todos os outros caminhos de rede dependem."
+
+msgid "Remove a user network instead; the default bridge is not removable."
+msgstr "Remove antes uma rede de utilizador; a bridge default não é removível."
+
+msgid "VIP outside the ingress address space"
+msgstr "VIP fora do espaço de endereços de ingress"
+
+msgid "A load-balancer VIP is outside the ingress address space (10.200-254.x)."
+msgstr "Um VIP de load-balancer está fora do espaço de endereços de ingress (10.200-254.x)."
+
+msgid "Use an address inside the ingress range this engine reports."
+msgstr "Usa um endereço dentro do intervalo de ingress que este motor reporta."
+
+msgid "invalid load-balancer spec"
+msgstr "especificação de load-balancer inválida"
+
+msgid "An `lbset` backend list has a bad weight, a backend with no port, an invalid backend, or is empty."
+msgstr "Uma lista de backends de `lbset` tem um peso inválido, um backend sem porta, um backend inválido, ou está vazia."
+
+msgid "Write backends as ip:port[#weight], comma-separated, with at least one entry."
+msgstr "Escreve os backends como ip:port[#weight], separados por vírgula, com pelo menos uma entrada."
+
+msgid "invalid port"
+msgstr "porta inválida"
+
+msgid "A port string given to the ingress dataplane (publish/unpublish/lbset) is not 1..65535."
+msgstr "Uma string de porta dada ao dataplane de ingress (publish/unpublish/lbset) não está entre 1..65535."
+
+msgid "Pass a numeric port between 1 and 65535."
+msgstr "Passa uma porta numérica entre 1 e 65535."
+
+msgid "invalid protocol"
+msgstr "protocolo inválido"
+
+msgid "A protocol other than tcp/udp was given to a publish/unpublish call."
+msgstr "Foi dado um protocolo que não tcp/udp a uma chamada de publish/unpublish."
+
+msgid "Use tcp or udp."
+msgstr "Usa tcp ou udp."
+
+msgid "invalid egress policy"
+msgstr "política de egress inválida"
+
+msgid "An egress policy is not allow, deny, or allowlist:<cidrs>."
+msgstr "Uma política de egress não é allow, deny, ou allowlist:<cidrs>."
+
+msgid "Use allow, deny, or allowlist:<comma-separated CIDRs>."
+msgstr "Usa allow, deny, ou allowlist:<CIDRs separados por vírgula>."
+
+msgid "invalid egress hostname"
+msgstr "hostname de egress inválido"
+
+msgid "An `egress host` suffix is not a plain DNS name."
+msgstr "Um sufixo de `egress host` não é um nome DNS simples."
+
+msgid "Use a plain hostname/domain suffix, e.g. example.com."
+msgstr "Usa um sufixo de hostname/domínio simples, por exemplo example.com."
+
+msgid "IP outside the ingress address space"
+msgstr "IP fora do espaço de endereços de ingress"
+
+msgid "A container/publish IP is outside the ingress address space (10.200-254.x)."
+msgstr "Um IP de container/publish está fora do espaço de endereços de ingress (10.200-254.x)."
+
+msgid "Attach the container to a network inside the ingress range this engine reports."
+msgstr "Liga o container a uma rede dentro do intervalo de ingress que este motor reporta."
+
+msgid "firewall applied with no IP"
+msgstr "firewall aplicada sem IP"
+
+msgid "apply_firewall/apply_firewall_all was called with an empty IP list."
+msgstr "apply_firewall/apply_firewall_all foi chamado com uma lista de IPs vazia."
+
+msgid "This is an internal call error; report it if you see it from the CLI."
+msgstr "Isto é um erro de chamada interna; reporta-o se o vires vindo da CLI."
+
+msgid "invalid firewall spec"
+msgstr "especificação de firewall inválida"
+
+msgid "A firewall spec (hex-decoded JSON sent to the holder) does not parse as the expected structure."
+msgstr "Uma especificação de firewall (JSON descodificado de hex enviado ao holder) não faz parse na estrutura esperada."
+
+msgid "Check the CLI and the holder are from the same build."
+msgstr "Verifica que a CLI e o holder são do mesmo build."
+
+msgid "could not encode a firewall spec"
+msgstr "não foi possível codificar uma especificação de firewall"
+
+msgid "Encoding a container's firewall to send over the control socket failed."
+msgstr "Codificar a firewall de um container para enviar pelo socket de controlo falhou."
+
+msgid "no free ingress prefix"
+msgstr "sem prefixo de ingress livre"
+
+msgid "No /16 prefix is left in the ingress address space for a new network."
+msgstr "Não sobra nenhum prefixo /16 no espaço de endereços de ingress para uma rede nova."
+
+msgid "Remove an unused network (`delonix network rm`) to free a prefix."
+msgstr "Remove uma rede não usada (`delonix network rm`) para libertar um prefixo."
+
+msgid "IP does not belong to network"
+msgstr "o IP não pertence à rede"
+
+msgid "A fixed IP given to attach a container is not inside the target network's subnet."
+msgstr "Um IP fixo dado para ligar um container não está dentro da subnet da rede alvo."
+
+msgid "Pass an address inside the network's own subnet (`delonix network inspect <name>`)."
+msgstr "Passa um endereço dentro da própria subnet da rede (`delonix network inspect <name>`)."
+
+msgid "no such NetworkRoute"
+msgstr "não existe esse NetworkRoute"
+
+msgid "There is no NetworkRoute between the given pair of networks."
+msgstr "Não existe nenhum NetworkRoute entre o par de redes dado."
+
+msgid "List routes with `delonix network route ls`, or create one with `delonix network route <from> <to>`."
+msgstr "Lista as rotas com `delonix network route ls`, ou cria uma com `delonix network route <from> <to>`."
+
+msgid "no such Service"
+msgstr "não existe esse Service"
+
+msgid "There is no Service of that name in that namespace."
+msgstr "Não existe nenhum Service com esse nome nesse namespace."
+
+msgid "List services with `delonix get services`."
+msgstr "Lista os services com `delonix get services`."
+
+msgid "ingress network does not exist"
+msgstr "a rede de ingress não existe"
+
+msgid "The named network has no NetDef on this holder — it was never realized here, or was removed."
+msgstr "A rede nomeada não tem NetDef neste holder — nunca foi realizada aqui, ou foi removida."
+
+msgid "Create it with `delonix network create <name>`, or use the default network."
+msgstr "Cria-a com `delonix network create <name>`, ou usa a rede default."
+
+msgid "network already exists"
+msgstr "a rede já existe"
+
+msgid "A NetworkStore network with that name already exists."
+msgstr "Já existe uma rede do NetworkStore com esse nome."
+
+msgid "Pick another name, or remove the existing one first (`delonix network rm <name>`)."
+msgstr "Escolhe outro nome, ou remove primeiro a existente (`delonix network rm <name>`)."
+
+msgid "no free subnet left"
+msgstr "não sobra subnet livre"
+
+msgid "The workload address space has no /16 left to hand a new network."
+msgstr "O espaço de endereços de workload não tem nenhum /16 livre para dar a uma rede nova."
+
+msgid "Remove an unused network (`delonix network rm <name>`) to free a /16."
+msgstr "Remove uma rede não usada (`delonix network rm <name>`) para libertar um /16."
+
+msgid "subnet overlaps an existing network"
+msgstr "a subnet sobrepõe-se a uma rede existente"
+
+msgid "The requested CIDR overlaps an existing network's subnet."
+msgstr "O CIDR pedido sobrepõe-se à subnet de uma rede existente."
+
+msgid "Pick a CIDR that does not overlap any network `delonix network ls` already shows."
+msgstr "Escolhe um CIDR que não se sobreponha a nenhuma rede que o `delonix network ls` já mostra."
+
+msgid "network subnet cannot be changed in place"
+msgstr "a subnet da rede não pode ser mudada no lugar"
+
+msgid "A network by this name already exists with a different subnet than the one asked for; workloads may already be addressed on it."
+msgstr "Já existe uma rede com este nome com uma subnet diferente da pedida; podem já existir workloads endereçados nela."
+
+msgid "Remove the network (`delonix network rm <name>`) and create it again with the new subnet."
+msgstr "Remove a rede (`delonix network rm <name>`) e cria-a de novo com a nova subnet."
+
+msgid "base octet already used by another network"
+msgstr "octeto base já usado por outra rede"
+
+msgid "The /16 a create_with_base call was given is already used by a different network."
+msgstr "O /16 dado a uma chamada de create_with_base já está a ser usado por outra rede."
+
+msgid "Pick a different base octet, or remove the network that already has it."
+msgstr "Escolhe um octeto base diferente, ou remove a rede que já o tem."
+
+msgid "ingress network already realized on a different prefix"
+msgstr "a rede de ingress já está realizada noutro prefixo"
+
+msgid "An ingress NetDef is already realized on a prefix different from the one the registry now asks for."
+msgstr "Um NetDef de ingress já está realizado num prefixo diferente do que o registo agora pede."
+
+msgid "Remove the network (`delonix network rm <name>`) and create it again, or keep the recorded subnet."
+msgstr "Remove a rede (`delonix network rm <name>`) e cria-a de novo, ou mantém a subnet registada."
+
+msgid "'wg' is not available on this host"
+msgstr "o 'wg' não está disponível neste host"
+
+msgid "WireGuard node keys and encrypted overlay networks need the `wg` binary, which is not on PATH."
+msgstr "As chaves de nó WireGuard e as redes overlay cifradas precisam do binário `wg`, que não está no PATH."
+
+msgid "Install wireguard-tools (Debian/Ubuntu: apt install wireguard-tools; Fedora/RHEL: dnf install wireguard-tools; Arch: pacman -S wireguard-tools)."
+msgstr "Instala o wireguard-tools (Debian/Ubuntu: apt install wireguard-tools; Fedora/RHEL: dnf install wireguard-tools; Arch: pacman -S wireguard-tools)."
+
+msgid "a network system call failed"
+msgstr "uma chamada de sistema de rede falhou"
+
+msgid "A host tool this engine shells out to for networking (ip, nft, wg, bridge, a CNI plugin, newuidmap/newgidmap, or a raw syscall) could not be run or exited badly. The message names the operation and carries the tool's own error."
+msgstr "Uma ferramenta do host a que este motor recorre para redes (ip, nft, wg, bridge, um plugin CNI, newuidmap/newgidmap, ou uma syscall crua) não pôde correr ou terminou mal. A mensagem nomeia a operação e leva o erro próprio da ferramenta."
+
+msgid "Read the operation and error in the message; check the tool is installed and the host's network state is sane."
+msgstr "Lê a operação e o erro na mensagem; verifica que a ferramenta está instalada e que o estado de rede do host está são."

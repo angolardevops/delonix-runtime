@@ -21,7 +21,7 @@
 //! holder), so the registry lives in the host's `base_root`, like the `NetDef`s.
 
 use crate::infra::{base_root, REF_MARKER_GRACE};
-use delonix_model::{Error, Result};
+use crate::{Error, Result};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -91,7 +91,7 @@ impl IpamLock {
     /// consequence matters: "could not lock" alone reads like a transient
     /// annoyance, when what it prevents is a duplicate address.
     fn unavailable() -> Error {
-        Error::Runtime {
+        Error::Command {
             context: "ipam",
             message: format!(
                 "could not lock the IPAM registry at {} — refusing to allocate, \
@@ -136,15 +136,15 @@ fn load(prefix: &str) -> Option<BTreeMap<String, String>> {
 /// crash is not a degraded metric — it is two containers on one IP, with the
 /// firewall and DNAT rules indexed on the wrong one.
 fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
-    std::fs::create_dir_all(ipam_dir()).map_err(|e| Error::Runtime {
+    std::fs::create_dir_all(ipam_dir()).map_err(|e| Error::Command {
         context: "ipam dir",
         message: e.to_string(),
     })?;
-    let json = serde_json::to_vec_pretty(map).map_err(|e| Error::Runtime {
+    let json = serde_json::to_vec_pretty(map).map_err(|e| Error::Command {
         context: "ipam serialize",
         message: e.to_string(),
     })?;
-    delonix_state::write_atomic(&prefix_file(prefix), &json).map_err(|e| Error::Runtime {
+    delonix_state::write_atomic(&prefix_file(prefix), &json).map_err(|e| Error::Command {
         context: "ipam write",
         message: e.to_string(),
     })
@@ -166,7 +166,7 @@ pub fn allocate(prefix: &str, id: &str) -> Result<String> {
     {
         preferred
     } else {
-        probe_free(prefix, &preferred, &used).ok_or_else(|| Error::Runtime {
+        probe_free(prefix, &preferred, &used).ok_or_else(|| Error::Command {
             context: "ipam",
             message: format!("no free IP in the {prefix} /16 (registry full)"),
         })?
