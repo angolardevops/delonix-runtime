@@ -12281,3 +12281,176 @@ msgstr "A resposta do nó não era o JSON que este cliente esperava."
 msgid "Check the node's Proxmox VE version matches what this build expects; the message carries the start of the body."
 msgstr "Verifica que a versão do Proxmox VE do nó bate com o que esta build espera; a mensagem leva o início do corpo."
 
+# dicionário: entradas do delonix-linux (ADR-0043)
+
+msgid "invalid memory limit"
+msgstr "limite de memória inválido"
+
+msgid "The --memory value, or a Kubernetes resources.limits.memory, is not a byte count this engine understands."
+msgstr "O valor de --memory, ou um resources.limits.memory do Kubernetes, não é uma contagem de bytes que este motor entenda."
+
+msgid "Use bytes (67108864) or a suffix (64M, 64Mi, 1G, 1Gi)."
+msgstr "Usa bytes (67108864) ou um sufixo (64M, 64Mi, 1G, 1Gi)."
+
+msgid "invalid CPU limit"
+msgstr "limite de CPU inválido"
+
+msgid "The --cpus value, or a Kubernetes resources.limits.cpu, is not a number of cores this engine understands."
+msgstr "O valor de --cpus, ou um resources.limits.cpu do Kubernetes, não é um número de núcleos que este motor entenda."
+
+msgid "Use a decimal number of cores (0.5, 2); millicores (500m) are a Kubernetes spelling this flag does not take."
+msgstr "Usa um número decimal de núcleos (0.5, 2); millicores (500m) são uma grafia do Kubernetes que esta flag não aceita."
+
+msgid "invalid cgroup weight"
+msgstr "peso de cgroup inválido"
+
+msgid "A weight value (--cpu-weight, --io-weight) is outside the cgroup v2 range."
+msgstr "Um valor de peso (--cpu-weight, --io-weight) está fora do intervalo do cgroup v2."
+
+msgid "Pass a weight between 1 and 10000."
+msgstr "Passa um peso entre 1 e 10000."
+
+msgid "invalid CPU set"
+msgstr "conjunto de CPU inválido"
+
+msgid "The --cpuset value does not parse as a CPU list (e.g. 0-3,6)."
+msgstr "O valor de --cpuset não se interpreta como uma lista de CPUs (ex.: 0-3,6)."
+
+msgid "Pass a comma-separated list of CPU numbers or ranges."
+msgstr "Passa uma lista de números ou intervalos de CPU separados por vírgulas."
+
+msgid "invalid command argument"
+msgstr "argumento de comando inválido"
+
+msgid "A command or entrypoint argument contains a NUL byte, which cannot be passed to execve."
+msgstr "Um argumento do comando ou do entrypoint contém um byte NUL, que não pode ser passado ao execve."
+
+msgid "Remove the embedded NUL byte from the argument the message names."
+msgstr "Remove o byte NUL embutido no argumento que a mensagem nomeia."
+
+msgid "The container has no command to run: neither the image's ENTRYPOINT/CMD nor an explicit command was given."
+msgstr "O container não tem comando para correr: nem o ENTRYPOINT/CMD da imagem nem um comando explícito foram dados."
+
+msgid "Pass a command, or use an image with an ENTRYPOINT or CMD."
+msgstr "Passa um comando, ou usa uma imagem com ENTRYPOINT ou CMD."
+
+msgid "An operation needing at least one live process (renice) found none."
+msgstr "Uma operação que precisa de pelo menos um processo vivo (renice) não encontrou nenhum."
+
+msgid "Check the container is actually running (`delonix container ps`)."
+msgstr "Verifica que o container está mesmo a correr (`delonix container ps`)."
+
+msgid "unsafe live-mount path"
+msgstr "caminho de montagem ao vivo inseguro"
+
+msgid "A container update --volume-add/--volume-rm target is refused by the same path-safety check bind mounts use."
+msgstr "Um destino de container update --volume-add/--volume-rm é recusado pela mesma verificação de segurança de caminho que os bind mounts usam."
+
+msgid "Use a target path that stays inside the container's own root filesystem."
+msgstr "Usa um caminho de destino que fique dentro do próprio rootfs do container."
+
+msgid "live-mount source does not exist"
+msgstr "origem da montagem ao vivo não existe"
+
+msgid "The host path given to a live bind-mount (container update --volume-add) does not exist."
+msgstr "O caminho do host dado a um bind-mount ao vivo (container update --volume-add) não existe."
+
+msgid "Check the source path on the host exists before mounting it live."
+msgstr "Verifica que o caminho de origem existe no host antes de o montar ao vivo."
+
+msgid "container shares the host mount namespace"
+msgstr "o container partilha a namespace de montagem do host"
+
+msgid "A live mount/unmount was asked of a container with no private mount namespace to change."
+msgstr "Foi pedida uma montagem/desmontagem ao vivo a um container sem namespace de montagem própria para mudar."
+
+msgid "This container cannot take a live volume change; stop and recreate it if one is needed."
+msgstr "Este container não aceita uma mudança de volume ao vivo; pára-o e recria-o se for preciso uma."
+
+msgid "live mount failed"
+msgstr "montagem ao vivo falhou"
+
+msgid "The forked helper that performs a live bind-mount inside the running container's namespaces exited with a failure, or was interrupted."
+msgstr "O auxiliar bifurcado que faz a montagem ao vivo dentro das namespaces do container a correr saiu com falha, ou foi interrompido."
+
+msgid "Read the message for the exit code; retry the volume-add, or restart the container."
+msgstr "Lê o código de saída na mensagem; repete o volume-add, ou reinicia o container."
+
+msgid "live unmount failed"
+msgstr "desmontagem ao vivo falhou"
+
+msgid "The forked helper that performs a live unmount inside the running container's namespaces did not succeed."
+msgstr "O auxiliar bifurcado que faz a desmontagem ao vivo dentro das namespaces do container a correr não teve sucesso."
+
+msgid "Retry the volume-rm, or restart the container."
+msgstr "Repete o volume-rm, ou reinicia o container."
+
+msgid "invalid CDI device name"
+msgstr "nome de dispositivo CDI inválido"
+
+msgid "A --device value naming a CDI-qualified device is not vendor.com/class=name."
+msgstr "Um valor de --device que nomeia um dispositivo qualificado CDI não é vendor.com/class=name."
+
+msgid "Use the vendor.com/class=name form (e.g. nvidia.com/gpu=0)."
+msgstr "Usa a forma vendor.com/class=name (ex.: nvidia.com/gpu=0)."
+
+msgid "kubelet cgroup placement needs the root runtime"
+msgstr "colocação no cgroup do kubelet exige o motor como root"
+
+msgid "Placing a container in the cgroup hierarchy a CRI RunPodSandbox names needs privileges rootless, or an already-namespaced process, does not have."
+msgstr "Colocar um container na hierarquia de cgroup que um RunPodSandbox do CRI nomeia exige privilégios que o rootless, ou um processo já dentro de uma namespace, não tem."
+
+msgid "Run the CRI server as root, or do not request a kube cgroup parent in rootless."
+msgstr "Corre o servidor CRI como root, ou não peças um cgroup parent do kube em rootless."
+
+msgid "container is not running"
+msgstr "o container não está a correr"
+
+msgid "The container exists, but the operation needs it running."
+msgstr "O container existe, mas a operação precisa dele a correr."
+
+msgid "Start it first (`delonix container start <name>`)."
+msgstr "Arranca-o primeiro (`delonix container start <nome>`)."
+
+msgid "CDI device not found"
+msgstr "dispositivo CDI não encontrado"
+
+msgid "The device name is not declared by any discovered CDI spec."
+msgstr "O nome do dispositivo não é declarado por nenhum spec CDI descoberto."
+
+msgid "Check the device name against the spec (`nvidia-ctk cdi list`), or regenerate it."
+msgstr "Confere o nome do dispositivo contra o spec (`nvidia-ctk cdi list`), ou regenera-o."
+
+msgid "container already running"
+msgstr "container já a correr"
+
+msgid "The container is running, and the operation would remove or replace it without --force."
+msgstr "O container está a correr, e a operação removê-lo-ia ou substituí-lo-ia sem --force."
+
+msgid "Stop it first, or pass --force."
+msgstr "Pára-o primeiro, ou passa --force."
+
+msgid "AppArmor profile unavailable"
+msgstr "perfil AppArmor indisponível"
+
+msgid "The requested AppArmor profile could not be loaded: AppArmor is not enabled on this host, apparmor_parser is not on PATH, or it refused the profile."
+msgstr "O perfil AppArmor pedido não pôde ser carregado: o AppArmor não está activado neste host, o apparmor_parser não está no PATH, ou recusou o perfil."
+
+msgid "Enable AppArmor on this host, install apparmor_parser, or pass --security-opt apparmor=unconfined."
+msgstr "Activa o AppArmor neste host, instala o apparmor_parser, ou passa --security-opt apparmor=unconfined."
+
+msgid "no CDI spec found"
+msgstr "nenhum spec CDI encontrado"
+
+msgid "A --gpus/--device request named a CDI-qualified device, but this host has no generated CDI spec at all."
+msgstr "Um pedido --gpus/--device nomeou um dispositivo qualificado CDI, mas este host não tem spec CDI gerado nenhum."
+
+msgid "Generate one with `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (installing nvidia-container-toolkit first if needed)."
+msgstr "Gera um com `nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` (instalando primeiro o nvidia-container-toolkit se for preciso)."
+
+msgid "a container-runtime system call failed"
+msgstr "uma chamada de sistema do motor de containers falhou"
+
+msgid "A kernel operation this crate performs to build or manage a container (clone, mount, setns, a cgroup or /proc write) failed. The message carries the operation and the errno."
+msgstr "Uma operação do kernel que esta crate executa para construir ou gerir um container (clone, mount, setns, uma escrita de cgroup ou /proc) falhou. A mensagem leva a operação e o errno."
+
