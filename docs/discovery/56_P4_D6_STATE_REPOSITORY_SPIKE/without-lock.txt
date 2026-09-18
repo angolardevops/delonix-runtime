@@ -1,0 +1,17 @@
+$ CARGO_TARGET_DIR=.../target PROTOC=/home/walter/.local/bin/protoc \
+  cargo test -p delonix-state repository:: -- --nocapture
+
+# Store::update's real `FileLock::acquire` call was commented out (verification-by-
+# reversion, per the spike's own module doc-comment) before this run.
+
+running 2 tests
+
+thread 'repository::tests::state_repository_update_atraves_da_porta_nao_perde_escritas' (3582110) panicked at crates/adapters/delonix-state/src/repository.rs:289:9:
+assertion `left == right` failed: a porta perdeu escritas mesmo com a implementação REAL (com flock) por trás: 5 de 24
+  left: 5
+ right: 24
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+test repository::tests::sem_lock_por_baixo_a_mesma_porta_perde_escritas ... ok
+test repository::tests::state_repository_update_atraves_da_porta_nao_perde_escritas ... FAILED
+
+test result: FAILED. 1 passed; 1 failed; 0 ignored; 0 measured; 32 filtered out; finished in 0.06s
