@@ -1,0 +1,16 @@
+3650271 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+3650271 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+3650271 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+3650271 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+3650271 openat(AT_FDCWD, "/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/6606e583-b479-485a-9c25-2b82e9b82c12/scratchpad/d5spike-run/strace-file/3650271-1789761241366265219-1262300775", O_WRONLY|O_CREAT|O_EXCL|O_CLOEXEC, 0600) = 3
+3650271 openat(AT_FDCWD, "/dev/null", O_RDONLY|O_CLOEXEC) = 3
+3650272 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+3650272 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+3650272 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+3650272 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+3650272 openat(AT_FDCWD, "/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/6606e583-b479-485a-9c25-2b82e9b82c12/scratchpad/d5spike-run/strace-file/3650271-1789761241366265219-1262300775", O_RDONLY|O_CLOEXEC) = 3
+3650272 unlink("/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/6606e583-b479-485a-9c25-2b82e9b82c12/scratchpad/d5spike-run/strace-file/3650271-1789761241366265219-1262300775") = 0
+3650272 +++ exited with 0 +++
+3650271 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=3650272, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+3650271 unlink("/tmp/claude-1000/-home-walter-workspace-ngolacloud-delonix-runtime/6606e583-b479-485a-9c25-2b82e9b82c12/scratchpad/d5spike-run/strace-file/3650271-1789761241366265219-1262300775") = -1 ENOENT (No such file or directory)
+3650271 +++ exited with 0 +++

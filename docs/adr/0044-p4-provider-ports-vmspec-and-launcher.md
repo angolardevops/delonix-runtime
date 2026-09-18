@@ -420,6 +420,32 @@ question this ADR does not resolve** — see the spike list below. The code sket
 ADR-0040's stated intent; the spike decides whether it survives contact with a working
 implementation.
 
+**Addendum, 2026-09-18 — spike run, and it answers in the fd's favour, contrary to this
+section's own stated uncertainty** (`docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`,
+full detail). A standalone harness (no delonix crates — `std` + `libc`, already a
+workspace dependency via `delonix-linux`, zero new supply-chain surface) replicated
+`write_run_spec`'s exact file precedent (`0700` dir, `0600` `create_new`, unique name,
+unlink both sides) against a `memfd_create` (no `MFD_CLOEXEC`) fd inherited across a
+**real `execve`** into a different binary — the thing P1b never measured for this
+mechanism. Both transports: 50/50 correct under 50 concurrent writer/reader pairs, no
+cross-talk. Where they diverge is the crash window this section calls "an open
+question": when the writer process dies right after writing, before spawning the reader
+and before its own defensive `unlink` runs (an OOM-kill, an external `SIGKILL`, a crash —
+not a hypothetical), **the file transport leaves the secret on disk, readable by the
+owning uid, with nothing in this engine today that sweeps it** (no reaper for
+`cri/run/*.json`, unlike the IPAM-lease/ref-marker reapers `AGENTS.md`'s "O IPAM vaza"
+describes); the fd transport leaves zero trace, confirmed both by a directory scan and by
+`strace -e trace=openat,open,unlink,unlinkat` showing no syscall on any real path at all
+(only `/proc/self/maps`/`/dev/null`, the Rust runtime's own bookkeeping). This is not a
+flaw in `write_run_spec`'s implementation — `0600`+`create_new` already closes the
+cross-user-readability risk this ADR originally named — it is a property no amount of
+"write the file correctly" can close, because the guarantee depends on a *third* step
+(`unlink`) that a dead process simply never reaches. A `memfd` has no such step: nothing
+is ever `open()`ed, so there is nothing to forget to `unlink`. **D5's code sketch is kept
+as written, now measured rather than merely stated**; SCM_RIGHTS was deliberately not
+tested (`delonix-launcher` is always `fork`+`exec`ed directly by its caller, never handed
+a fd by an unrelated process over an existing socket — plain fork inheritance suffices).
+
 ### D6. `StateRepository<T>`: the port five adapters already owe
 
 The fitness script's five identical `P4` exceptions (`delonix-linux`, `delonix-vm`,
@@ -566,12 +592,12 @@ into `VmSpec` a second time, the same mistake `VmConfig` already made once.
   their `Command::new` calls through a launcher process would add a process hop with no
   privilege boundary to justify it. Revisit only if a future backend genuinely needs one
   (a namespaced microVM path, say) — not as a symmetry argument.
-- **Inherited-fd transport for `ProcessLauncher`, adopted without a spike.** Considered;
-  kept as the design intent (matching ADR-0040's own words) but not accepted as proven —
-  see D5 and the spike list below. The existing `0600`+`create_new`+unlink precedent
-  (`__apirun`) already closes the obvious risk (a spec readable by another user); an fd
-  needs to earn its added complexity against that baseline, not merely restate ADR-0040's
-  phrasing.
+- **The file-based transport, generalized instead of building the fd.** Considered as the
+  fallback if D5's spike came back negative; it did not (see the D5 addendum and
+  `docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`) — the file precedent
+  (`0600`+`create_new`+unlink, `__apirun`) closes cross-user readability but not the
+  crash-before-`unlink` window, which the fd closes structurally. Rejected once measured,
+  not assumed away.
 - **One big P4 PR.** Rejected in D9, on ADR-0040's own precedent and because the fitness
   script's seven exceptions are independently gate-able — forcing them into one PR would
   recreate the "several concurrent sessions in the same crates" risk ADR-0040's plan table
@@ -589,10 +615,10 @@ scanner stops depending on the OCI adapter's internals to read a layer.
 
 **Harder / cost, in order of risk:**
 
-1. **The `ProcessLauncher` transport is unproven.** D5's inherited-fd design is ADR-0040's
-   stated intent, not a measured mechanism; if the spike below finds it does not earn its
-   complexity, D2.4 needs a further amendment (the file-based precedent, generalized,
-   likely suffices) — recorded here so P4d does not silently regress to guessing.
+1. ~~**The `ProcessLauncher` transport is unproven.**~~ **CLOSED, 2026-09-18** — measured
+   in the fd's favour (`docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`, D5
+   addendum): the fd closes a crash-before-`unlink` window the file precedent cannot
+   close by construction. D2.4's wording stands; no amendment needed.
 2. **The two-binary launcher/holder split has never been measured**, only the same-path
    variant. P1b's own "not validated" list already says so; P4d's gate exists because of
    it, not despite it.
@@ -655,14 +681,18 @@ alone.
    `delonix-netns-holder` as three genuinely separate installed binaries — the gap the
    original spike's own "not validated" section names — and add `--net <custom>` and a pod
    to the matrix, neither of which P1b touched.
-3. **The IPC-transport spike (D5's open question).** Build `LaunchSpec` delivery both ways
-   — an inherited fd (`memfd_create` + `SCM_RIGHTS`, or a plain anonymous pipe passed
-   across `fork`) and the existing file-based precedent generalized (`0600`, `create_new`,
-   unlink on either side finishing) — and measure whether the fd approach closes a
-   real window the file approach does not, under concurrent spawns. If it does not, D5's
-   code sketch is amended to the file-based form and ADR-0040 D2.4's wording is corrected
-   in the same commit that lands `delonix-launcher`, the way this ADR corrects
-   `VmBootSpec`'s implicit field classification in D1.
+3. **The IPC-transport spike (D5's open question).** DONE — 2026-09-18,
+   `docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`. A standalone harness (no
+   delonix crates) measured `memfd_create` (no `SCM_RIGHTS` — unneeded, see the D5
+   addendum) inherited across a real `execve`, against the file precedent generalized
+   exactly as it exists in `write_run_spec` today, under 50 concurrent writer/reader
+   pairs (both: 50/50 correct, no cross-talk) and a crash-window simulation (writer dies
+   right after writing, before either side's cleanup runs). **The fd approach closes a
+   real window the file approach cannot close by construction**: the file transport
+   leaves the secret on disk, unswept, when the writer dies before its `unlink`; the fd
+   transport leaves zero trace (confirmed by `strace`, zero `openat`/`unlink` on any real
+   path). D5's code sketch is kept as written — this spike confirms it rather than
+   rolling it back to the file-based form.
 4. **`StateRepository<T>` against a live `flock`.** DONE for `Store<Container>`
    (`delonix-linux`'s shape) — 2026-09-18, `docs/discovery/56_P4_D6_STATE_REPOSITORY_SPIKE.md`.
    24-thread concurrency test through the port, both with the underlying `flock` (24/24,
@@ -694,7 +724,10 @@ recorded verdict and its own "not validated" list; **added 2026-09-18** —
 proven both with and without the underlying `flock` (spike nº4, `docs/discovery/
 56_P4_D6_STATE_REPOSITORY_SPIKE.md`); that `delonix-sdn`/`delonix-oci`/`delonix-volume`
 do not reach `delonix-state` through `Store`/`JsonStore` today, by reading each one, not
-by the fitness script's shared exception text.
+by the fitness script's shared exception text; that the inherited-fd `LaunchSpec`
+transport (D5) closes a crash-before-`unlink` window the file-based precedent cannot,
+against a real `execve` and 50 concurrent pairs, confirmed by `strace` (spike nº3,
+`docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`).
 
 **Not validated:** everything else under Decision — no other code was written for this ADR, no build
 or test was run, and every spike in the section above is exactly that, not yet run. The
