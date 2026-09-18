@@ -7171,7 +7171,9 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
         .filter(|p| safe_to_signal(*p, container.pid_starttime))
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
     let src_is_dir = std::fs::metadata(&m.source)
-        .map_err(|_| Error::MountSourceMissing(format!("mount source does not exist: {}", m.source)))?
+        .map_err(|_| {
+            Error::MountSourceMissing(format!("mount source does not exist: {}", m.source))
+        })?
         .is_dir();
 
     // namespace fds (opened in the PARENT, in the host context; inherited by the fork).
@@ -7186,7 +7188,9 @@ pub fn mount_live(container: &Container, m: &Mount) -> Result<()> {
     // (see the `ns_list` comment in `exec`).
     let user_fd = open_container_ns(pid, "user")?;
     let mnt_fd = open_container_ns(pid, "mnt")?.ok_or_else(|| {
-        Error::SharesHostMountNamespace("container shares the host mnt ns — nothing to mount".into())
+        Error::SharesHostMountNamespace(
+            "container shares the host mnt ns — nothing to mount".into(),
+        )
     })?;
 
     let mut attr = MOUNT_ATTR_NOSUID | MOUNT_ATTR_NODEV;
@@ -7283,8 +7287,9 @@ pub fn unmount_live(container: &Container, target: &str) -> Result<()> {
     // note in `mount_live`: `container.userns` is not the same as "is in a
     // userns different from mine".
     let user_fd = open_container_ns(pid, "user")?;
-    let mnt_fd = open_container_ns(pid, "mnt")?
-        .ok_or_else(|| Error::SharesHostMountNamespace("container shares the host mnt ns".into()))?;
+    let mnt_fd = open_container_ns(pid, "mnt")?.ok_or_else(|| {
+        Error::SharesHostMountNamespace("container shares the host mnt ns".into())
+    })?;
     let target = target.to_string();
 
     // SAFETY: the child only does simple syscalls and `_exit`.
@@ -7639,7 +7644,9 @@ fn kube_limits(c: &Container) -> Result<KubeLimits> {
             .parse()
             .ok()
             .filter(|v: &f64| v.is_finite() && *v > 0.0)
-            .ok_or_else(|| Error::InvalidCpuLimit(format!("--cpus {cpus}: not a number of cores")))?;
+            .ok_or_else(|| {
+                Error::InvalidCpuLimit(format!("--cpus {cpus}: not a number of cores"))
+            })?;
         Some(((cores * 1_000_000.0).round() as u64).max(10_000))
     };
     let weight = |v: &Option<String>, what: &str| -> Result<Option<u64>> {

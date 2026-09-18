@@ -285,9 +285,7 @@ mod tests {
             Error::SharesHostMountNamespace(
                 "container shares the host mnt ns — nothing to mount".into(),
             ),
-            Error::LiveMountFailed(
-                "failed to mount /a → /b in the live container (code 1)".into(),
-            ),
+            Error::LiveMountFailed("failed to mount /a → /b in the live container (code 1)".into()),
             Error::LiveUnmountFailed("failed to unmount /b in the live container".into()),
             Error::InvalidCdiDeviceName(
                 "invalid CDI device name: 'x' (expected vendor.com/class=name)".into(),
@@ -298,14 +296,18 @@ mod tests {
                     .into(),
             ),
             Error::NotRunning("web".into()),
-            Error::CdiDeviceNotFound("'nvidia.com/gpu=7': not found in any discovered CDI spec".into()),
+            Error::CdiDeviceNotFound(
+                "'nvidia.com/gpu=7': not found in any discovered CDI spec".into(),
+            ),
             Error::AlreadyRunning("container web is running (use --force)".into()),
             Error::ApparmorUnavailable(
                 "--apparmor delonix-default: AppArmor is not enabled on this host, so nothing \
                  would confine this container"
                     .into(),
             ),
-            Error::NoCdiSpec("'nvidia.com/gpu=all': no CDI spec found (checked /etc/cdi, /var/run/cdi)".into()),
+            Error::NoCdiSpec(
+                "'nvidia.com/gpu=all': no CDI spec found (checked /etc/cdi, /var/run/cdi)".into(),
+            ),
             Error::Syscall {
                 context: "clone",
                 message: "EPERM".into(),
@@ -337,7 +339,10 @@ mod tests {
                 Error::InvalidCpuLimit("--cpus abc: not a number of cores".into()),
                 "invalid argument: --cpus abc: not a number of cores",
             ),
-            (Error::NotRunning("web".into()), "container is not running: web"),
+            (
+                Error::NotRunning("web".into()),
+                "container is not running: web",
+            ),
             (
                 Error::AlreadyRunning("container web is running (use --force)".into()),
                 "conflict: container web is running (use --force)",
