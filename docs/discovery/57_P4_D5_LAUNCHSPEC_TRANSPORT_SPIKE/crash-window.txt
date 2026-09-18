@@ -1,0 +1,10 @@
+$ d5spike write-file <dir> "SEGREDO-QUE-NAO-DEVIA-SOBREVIVER" --die-after-write
+WROTE /.../crash-file/3639131-1789761144902995505-1903861299
+$ d5spike scan <dir>
+LEFTOVER /.../crash-file/3639131-1789761144902995505-1903861299 (32 bytes) content="SEGREDO-QUE-NAO-DEVIA-SOBREVIVER"
+SCAN found=1
+
+$ d5spike write-fd "SEGREDO-QUE-NAO-DEVIA-SOBREVIVER-FD" --die-after-write
+WROTE fd=3 (memfd, no path)
+$ grep -rl "NAO-DEVIA-SOBREVIVER-FD" /tmp
+(vazio — nada encontrado em disco)

@@ -1,0 +1,12 @@
+3649847 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 3
+3649847 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 3
+3649847 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 3
+3649847 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 3
+3649847 openat(AT_FDCWD, "/dev/null", O_RDONLY|O_CLOEXEC) = 4
+3649851 openat(AT_FDCWD, "/etc/ld.so.cache", O_RDONLY|O_CLOEXEC) = 4
+3649851 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libgcc_s.so.1", O_RDONLY|O_CLOEXEC) = 4
+3649851 openat(AT_FDCWD, "/lib/x86_64-linux-gnu/libc.so.6", O_RDONLY|O_CLOEXEC) = 4
+3649851 openat(AT_FDCWD, "/proc/self/maps", O_RDONLY|O_CLOEXEC) = 4
+3649851 +++ exited with 0 +++
+3649847 --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=3649851, si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---
+3649847 +++ exited with 0 +++

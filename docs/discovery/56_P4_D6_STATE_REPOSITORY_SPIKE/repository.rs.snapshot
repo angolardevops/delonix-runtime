@@ -1,0 +1,326 @@
+//! SPIKE (ADR-0044 D6) — `StateRepository<T>`, the port five adapters
+//! (`delonix-linux`, `delonix-vm`, `delonix-sdn`, `delonix-oci`,
+//! `delonix-volume`) currently owe `delonix-state` per `scripts/
+//! arch_fitness.py`'s `P4` exceptions.
+//!
+//! This is a spike branch (`spike/p4-state-repository`) exploring whether the
+//! port can be introduced WITHOUT changing [`JsonStore::update`]'s existing
+//! read-modify-write-under-`flock` guarantee. It is not meant to merge as-is —
+//! see the spike report for what diverges from ADR-0044 D6's sketch and why.
+//!
+//! ## Divergences from the ADR-0044 D6 sketch, and why
+//!
+//! The ADR sketches:
+//!
+//! ```ignore
+//! pub trait StateRepository<T> {
+//!     fn get(&self, id: &str) -> Result<T>;
+//!     fn list(&self) -> Result<Vec<T>>;
+//!     fn update(&self, id: &str, f: impl FnOnce(&mut T) -> Result<()>) -> Result<()>;
+//!     fn remove(&self, id: &str) -> Result<()>;
+//! }
+//! ```
+//!
+//! Trying to migrate a REAL caller (`delonix-linux`'s `wait_and_record`/
+//! `persist_stop`, `crates/adapters/delonix-linux/src/lib.rs:6259,7514`) against
+//! that exact shape breaks on contact with the actual contract those call
+//! sites depend on:
+//!
+//! 1. **The closure's return type is `bool`, not `Result<()>`, and the
+//!    distinction is load-bearing.** Both call sites use `false` to mean "this
+//!    record no longer describes the incarnation I'm reporting on — abort the
+//!    write, and it is NOT an error" (see `describes_incarnation`). Modeling
+//!    that as `Result<()>` would force an `Err` to express a perfectly healthy
+//!    no-op, which is exactly the "reported failure that isn't one" this
+//!    engine's own doctrine (`CLAUDE.md` §"Reporta as duas metades") argues
+//!    against elsewhere.
+//! 2. **`update` has to return the FINAL value (`Result<T>`), not `Result<()>`.**
+//!    `Store::update`'s own doc-comment says the point of doing read-modify-write
+//!    "all as one critical section" is partly so the caller does not need a
+//!    second read afterward. Sketching the return as `Result<()>` throws that
+//!    away — every caller that needs the post-update state (there are such
+//!    callers elsewhere in this codebase, e.g. `container update`'s five
+//!    mutation paths) would need a SECOND `get`, outside the lock, which
+//!    reopens exactly the lost-update window the port exists to close.
+//! 3. **The sketch has no `set`/`save` method at all**, and `update` cannot
+//!    substitute for one: `Store::update`/`JsonStore::update` both re-read via
+//!    `load`/`get` under the lock, which fails `NotFound` on a record that does
+//!    not exist yet. `delonix-linux::create_with` (lib.rs:6195,6210) calls
+//!    `store.save(container)` to create the FIRST record for a brand-new
+//!    container — there is no existing value to read-modify-write. Without
+//!    `set`, the port cannot support container creation, i.e. the single
+//!    biggest thing `delonix-linux` does with the store. This spike adds it
+//!    back as an unconditional, unlocked write — exactly what `Store::save`/
+//!    `JsonStore::save` already are today.
+//! 4. **`impl Trait` in a trait method's argument position is not
+//!    object-safe.** `fn update(&self, id: &str, f: impl FnOnce(&mut T) ->
+//!    Result<()>)` cannot be called through `dyn StateRepository<T>` — only
+//!    through a generic bound (`impl StateRepository<T>` at the CALL site, or
+//!    `<S: StateRepository<T>>`). That is fine for this spike's migration
+//!    (`delonix-linux` becomes generic over `S: StateRepository<Container>`,
+//!    monomorphized at the composition root) but is worth naming explicitly:
+//!    a composition root that wants to hold different repositories behind one
+//!    `dyn` field (e.g. to swap a real one for a test fake at runtime without
+//!    recompiling) cannot do it with this trait shape. This spike keeps the
+//!    generic-method form (matching the ADR's own sketch) rather than
+//!    reaching for `Box<dyn FnOnce>` to buy object-safety nobody asked for.
+
+use crate::{JsonStore, Store};
+use delonix_compute::Container;
+use serde::de::DeserializeOwned;
+use serde::Serialize;
+
+use crate::Result;
+
+/// The read-modify-write-under-lock port five adapters currently reach past
+/// (calling `JsonStore`/`Store` directly) instead of receiving from their
+/// composition root.
+///
+/// **Divergence from ADR-0044 D6's sketch**, see the module doc-comment: `set`
+/// is added (creation has no record to read-modify-write), and `update`'s
+/// closure returns `bool` (commit/abort) with the method itself returning the
+/// final `T`, matching what `Store::update`/`JsonStore::update` already do and
+/// what real callers already depend on — not `Result<()>` on either side.
+pub trait StateRepository<T> {
+    /// Loads an item by its id/key. `Store`'s notion of "id" additionally
+    /// accepts a name or id-prefix; `JsonStore`'s is an exact key. This port
+    /// does not paper over that difference — see the spike report.
+    fn get(&self, id: &str) -> Result<T>;
+
+    /// Lists every item currently persisted.
+    fn list(&self) -> Result<Vec<T>>;
+
+    /// Unconditional, atomic write — creates the record if it does not exist,
+    /// overwrites it if it does. NOT under `flock`: same guarantee as
+    /// `Store::save`/`JsonStore::save` today (atomic w.r.t. a concurrent
+    /// reader; not a safe read-modify-write on its own).
+    fn set(&self, id: &str, value: &T) -> Result<()>;
+
+    /// Safe read-modify-write: locks, re-reads the state ALREADY under the
+    /// lock, applies `f`, writes if `f` returns `true` — same contract as
+    /// `Store::update`/`JsonStore::update`. Returns the final value (the one
+    /// on disk after a commit, or the one read, if `f` aborted).
+    fn update<F>(&self, id: &str, f: F) -> Result<T>
+    where
+        F: FnOnce(&mut T) -> bool;
+
+    /// Removes the item, if it exists.
+    fn remove(&self, id: &str) -> Result<()>;
+}
+
+/// Reference implementation for the generic per-key store. No behaviour
+/// changes: every method forwards verbatim to `JsonStore<T>`'s own.
+impl<T: Serialize + DeserializeOwned> StateRepository<T> for JsonStore<T> {
+    fn get(&self, id: &str) -> Result<T> {
+        self.load(id)
+    }
+    fn list(&self) -> Result<Vec<T>> {
+        JsonStore::list(self)
+    }
+    fn set(&self, id: &str, value: &T) -> Result<()> {
+        self.save(id, value)
+    }
+    fn update<F>(&self, id: &str, f: F) -> Result<T>
+    where
+        F: FnOnce(&mut T) -> bool,
+    {
+        JsonStore::update(self, id, f)
+    }
+    fn remove(&self, id: &str) -> Result<()> {
+        JsonStore::remove(self, id)
+    }
+}
+
+/// Reference implementation for the container store. `Store` is concrete
+/// (not generic) because its `get` additionally resolves a name/id-prefix —
+/// the port does not narrow that away.
+impl StateRepository<Container> for Store {
+    fn get(&self, id: &str) -> Result<Container> {
+        self.load(id)
+    }
+    fn list(&self) -> Result<Vec<Container>> {
+        Store::list(self)
+    }
+    fn set(&self, _id: &str, value: &Container) -> Result<()> {
+        // `Store::save` keys by `value.id`, not by the `id` argument — a
+        // container's id lives INSIDE the record (unlike `JsonStore<T>`,
+        // where the key is external to the value). Trusting `value.id` here
+        // instead of the parameter is deliberate, not an oversight: it is
+        // exactly what `Store::save` already does, and building a `Container`
+        // whose `.id` disagrees with the path you intend to write it to is a
+        // caller bug this port has no way to catch either way.
+        self.save(value)
+    }
+    fn update<F>(&self, id: &str, f: F) -> Result<Container>
+    where
+        F: FnOnce(&mut Container) -> bool,
+    {
+        Store::update(self, id, f)
+    }
+    fn remove(&self, id: &str) -> Result<()> {
+        Store::remove(self, id)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn tmp_dir(tag: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "delonix-staterepo-spike-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    /// SPIKE control implementation: `update` does get+mutate+set with **no**
+    /// lock at all — the exact shape `FileLock::acquire`'s own doc-comment
+    /// (`store.rs`) says this codebase already tried once ("graceful
+    /// degradation") and removed, because it silently reintroduces the lost
+    /// update. Exists ONLY to prove, by reversion, that the guarantee comes
+    /// from `Store`'s real `update` (the `flock`) and not from the
+    /// `StateRepository<T>` trait boundary itself — the trait is a shape, not
+    /// a promise; the promise still has to come from whoever implements it.
+    struct UnlockedContainerRepository(Store);
+
+    impl UnlockedContainerRepository {
+        fn open(root: &Path) -> Self {
+            Self(Store::open(root).unwrap())
+        }
+    }
+
+    impl StateRepository<Container> for UnlockedContainerRepository {
+        fn get(&self, id: &str) -> Result<Container> {
+            self.0.load(id)
+        }
+        fn list(&self) -> Result<Vec<Container>> {
+            Store::list(&self.0)
+        }
+        fn set(&self, _id: &str, value: &Container) -> Result<()> {
+            self.0.save(value)
+        }
+        fn update<F>(&self, id: &str, f: F) -> Result<Container>
+        where
+            F: FnOnce(&mut Container) -> bool,
+        {
+            // NO FileLock::acquire here — this is the control path.
+            let mut c = self.0.load(id)?;
+            if f(&mut c) {
+                self.0.save(&c)?;
+            }
+            Ok(c)
+        }
+        fn remove(&self, id: &str) -> Result<()> {
+            Store::remove(&self.0, id)
+        }
+    }
+
+    /// Runs `n` concurrent `repo.update(...)` increments of a `"n"` label on
+    /// the same container, each opening its own repository handle against the
+    /// same `root` (mirrors how the CLI and the CRI are two different
+    /// processes touching the same directory) and injecting a 2ms sleep
+    /// BETWEEN the read and the write — the same explicit race window
+    /// `update_concorrente_nao_perde_escritas`/
+    /// `jsonstore_update_concorrente_nao_perde_escritas` already use in
+    /// `store.rs`. Returns the final count read back afterward.
+    fn run_concurrent_increments<S, F>(root: &Path, id: &str, n: usize, make: F) -> u64
+    where
+        S: StateRepository<Container>,
+        F: Fn(&Path) -> S + Sync,
+    {
+        std::thread::scope(|sc| {
+            for _ in 0..n {
+                let make = &make;
+                sc.spawn(move || {
+                    let repo = make(root);
+                    repo.update(id, |c| {
+                        let cur: u64 = c.labels.get("n").unwrap().parse().unwrap();
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                        c.labels.insert("n".into(), (cur + 1).to_string());
+                        true
+                    })
+                    .unwrap();
+                });
+            }
+        });
+        let repo = make(root);
+        repo.get(id)
+            .unwrap()
+            .labels
+            .get("n")
+            .unwrap()
+            .parse()
+            .unwrap()
+    }
+
+    fn seed(root: &Path, id: &str) {
+        let store = Store::open(root).unwrap();
+        let mut c = Container::new(
+            id.to_string(),
+            id.to_string(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
+        c.labels.insert("n".into(), "0".into());
+        store.save(&c).unwrap();
+    }
+
+    /// THE PROOF (spike deliverable, ADR-0044 D6 spike item 4): calling
+    /// `StateRepository::update` — the PORT, not `Store::update` directly —
+    /// through the real `Store`-backed implementation must not lose a single
+    /// concurrent write. This is the exact shape of
+    /// `update_concorrente_nao_perde_escritas` (`store.rs`), migrated to go
+    /// through the trait, to prove the port doesn't weaken what it wraps.
+    #[test]
+    fn state_repository_update_atraves_da_porta_nao_perde_escritas() {
+        let root = tmp_dir("locked");
+        let id = "race-via-port";
+        seed(&root, id);
+
+        const N: usize = 24;
+        let got = run_concurrent_increments::<Store, _>(&root, id, N, |r| Store::open(r).unwrap());
+
+        assert_eq!(
+            got, N as u64,
+            "a porta perdeu escritas mesmo com a implementação REAL (com flock) por trás: {got} de {N}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// THE CONTROL: the exact same test, against the exact same generic
+    /// `run_concurrent_increments` helper, but through an implementation of
+    /// the SAME port that does not take the lock. If this did NOT lose
+    /// writes, the earlier test would prove nothing (a repo that can't lose
+    /// writes even without a lock is not exercising the race at all) — this
+    /// is the "revert the fix and watch the test fail" the repo's own
+    /// doctrine requires, expressed as a second implementation instead of
+    /// editing the real one.
+    #[test]
+    fn sem_lock_por_baixo_a_mesma_porta_perde_escritas() {
+        let root = tmp_dir("unlocked");
+        let id = "race-via-port-unlocked";
+        seed(&root, id);
+
+        const N: usize = 24;
+        let got = run_concurrent_increments::<UnlockedContainerRepository, _>(
+            &root,
+            id,
+            N,
+            UnlockedContainerRepository::open,
+        );
+
+        assert!(
+            got < N as u64,
+            "esperava-se PERDA de escritas sem lock (prova de que o teste \
+             acima exercita mesmo a corrida) — deu {got} de {N}, ou seja não \
+             perdeu nada, o que tornaria a prova positiva vazia"
+        );
+        let _ = std::fs::remove_dir_all(&root);
+    }
+}

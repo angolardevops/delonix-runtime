@@ -1,0 +1,39 @@
+$ CARGO_TARGET_DIR=.../target PROTOC=/home/walter/.local/bin/protoc \
+  cargo test -p delonix-state
+
+# `Store::update`'s real `FileLock::acquire` restored to its origin/main form
+# before this run — this is the full `delonix-state` suite, not just the two
+# spike tests, to confirm nothing else regressed.
+
+test secret::tests::parse_dotenv ... ok
+test store::tests::safe_key_neutraliza_path_traversal ... ok
+test store::tests::jsonstore_update_de_chave_inexistente_da_not_found ... ok
+test cred_vault::tests::get_exists_remove_recusam_nomes_com_traversal ... ok
+test secret::tests::load_e_remove_recusam_nomes_com_traversal ... ok
+test store::tests::jsonstore_path_traversal_tambem_neutralizado ... ok
+test store::tests::jsonstore_update_aborta_sem_escrever_quando_f_devolve_false ... ok
+test cred_vault::tests::ciphertext_on_disk_is_not_plaintext ... ok
+test store::tests::store_path_traversal_nunca_escreve_fora_da_raiz ... ok
+test cred_vault::tests::put_get_roundtrip ... ok
+test store::tests::write_private_temp_nao_escreve_num_caminho_sequestrado ... ok
+test store::tests::store_round_trip_and_lookup ... ok
+test secret::tests::materialize_writes_files_0600 ... ok
+test secret::tests::store_roundtrip_and_resolve ... ok
+test store::tests::update_refuses_when_the_lock_cannot_be_taken ... ok
+test cred_vault::tests::list_names_only_and_remove ... ok
+test store::tests::um_nome_unico_continua_a_resolver_como_sempre ... ok
+test store::tests::load_resolve_id_exacto_prefixo_e_nome_com_desempate_pelo_mais_recente ... ok
+test store::tests::write_atomic_mode_cria_o_ficheiro_ja_restrito ... ok
+test store::tests::um_nome_em_duas_namespaces_e_recusado_nao_adivinhado ... ok
+test secret::tests::value_encrypted_at_rest_and_legacy_plaintext_readable ... ok
+test secret::tests::update_faz_read_modify_write_sem_perder_chaves ... ok
+test cred_vault::tests::rotation_keeps_values_and_changes_key ... ok
+test store::tests::save_concorrente_nunca_publica_json_corrompido ... ok
+test secret::tests::rotate_key_preserves_values_and_changes_key ... ok
+test repository::tests::sem_lock_por_baixo_a_mesma_porta_perde_escritas ... ok
+test store::tests::jsonstore_update_concorrente_nao_perde_escritas ... ok
+test repository::tests::state_repository_update_atraves_da_porta_nao_perde_escritas ... ok
+test store::tests::update_concorrente_nao_perde_escritas ... ok
+test store::tests::write_atomic_nunca_deixa_um_leitor_ver_ficheiro_parcial ... ok
+
+test result: ok. 34 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.89s

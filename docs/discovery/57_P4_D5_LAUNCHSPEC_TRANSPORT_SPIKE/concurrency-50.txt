@@ -1,0 +1,7 @@
+FILE transport, N=50 escritores/leitores concorrentes:
+  ok: 50   mismatch: 0   wrote: 50   leftovers em disco depois: 0
+
+FD transport, N=50 escritores/leitores concorrentes:
+  ok: 50   mismatch: 0   wrote: 50
+  fd usado em cada processo: sempre 3 (fd table por-processo, sem colisão — cada
+  memfd_create é chamado num processo distinto, não é um número global partilhado)
