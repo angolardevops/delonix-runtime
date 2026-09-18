@@ -3607,7 +3607,7 @@ pub(crate) fn generate_seed_iso(
         );
     }
     let resolved: Result<Vec<String>> = ssh_keys.iter().map(|s| resolve_ssh_key(s)).collect();
-    delonix_vm::cloudinit::generate_seed_iso(
+    Ok(delonix_vm::cloudinit::generate_seed_iso(
         &state_root(),
         vm_name,
         hostname,
@@ -3615,7 +3615,7 @@ pub(crate) fn generate_seed_iso(
         &resolved?,
         user_data_override,
         volumes,
-    )
+    )?)
 }
 
 /// Handles the `init` of this group (see `cmd::scaffold`).

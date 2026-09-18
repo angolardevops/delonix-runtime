@@ -19,8 +19,10 @@
 //! this exact sequence in its own copy, which is several sources of truth for a
 //! format the guest has to agree with.
 
+mod error;
+
 use crate::{mac_for, valid_vm_name, VmVolume};
-use delonix_model::{Error, Result};
+pub use error::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -159,7 +161,7 @@ pub fn generate_seed_iso(
     // function is a path-writing boundary of its own, not just an API consumer
     // of `create()`.
     if !valid_vm_name(vm_name) {
-        return Err(Error::Invalid(format!("invalid VM name: {vm_name:?}")));
+        return Err(Error::InvalidName(format!("invalid VM name: {vm_name:?}")));
     }
     let hostname = hostname.unwrap_or(vm_name).to_string();
     let ci_user = ci_user.unwrap_or(DEFAULT_CI_USER);
@@ -170,7 +172,10 @@ pub fn generate_seed_iso(
     match user_data_override {
         Some(p) => {
             std::fs::copy(p, &user_data_path).map_err(|e| {
-                Error::Invalid(format!("could not copy user-data '{}': {e}", p.display()))
+                Error::UserDataCopyFailed(format!(
+                    "could not copy user-data '{}': {e}",
+                    p.display()
+                ))
             })?;
         }
         None => {
@@ -198,17 +203,17 @@ pub fn generate_seed_iso(
             // a missing file»). Saying so beats sending the reader looking for a
             // path that was never named.
             if e.kind() == std::io::ErrorKind::NotFound {
-                Error::Invalid(
+                Error::ToolMissing(
                     "cloud-localds not found — install it (Debian/Ubuntu: `cloud-image-utils`, \
                      Fedora/Rocky: `cloud-utils`), or pass a ready-made seed"
                         .into(),
                 )
             } else {
-                Error::Invalid(format!("running cloud-localds: {e}"))
+                Error::ToolSpawnFailed(format!("running cloud-localds: {e}"))
             }
         })?;
     if !status.success() {
-        return Err(Error::Invalid(format!(
+        return Err(Error::ToolExitFailed(format!(
             "cloud-localds failed (exit {:?})",
             status.code()
         )));
