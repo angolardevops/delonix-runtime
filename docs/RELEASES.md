@@ -4,6 +4,187 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v4.0.0 — o motor ganha camadas e ports (ADR-0040), os erros ganham número (ADR-0043), e três crates mudam de nome
+
+Cento e quinze commits desde a `v3.1.0`, a maior série desde a extracção do repo: a
+reestruturação em camadas do ADR-0040 (fases P0–P3x), o dicionário de códigos numerados
+`DX-CDNN` do ADR-0043, três renomeações de crate, a eliminação do `delonix-runtime-core`,
+e uma dezena de correcções reais de produção (CRI/cgroups, VM, rede, containers). É a
+razão do salto de major: quem consome este repo por `git`+path/tag sente as renomeações
+de crate como quebra de compilação, e a CLI ganhou várias mudanças incompatíveis.
+
+### BREAKING — três crates mudaram de nome, e um deixou de existir
+
+Fase P3 do ADR-0040 (#393–#396, #406): o directório de cada crate já dizia a camada
+(`crates/adapters/`, `crates/contexts/`, ...) desde o P0; esta fase alinhou o NOME ao
+papel real de cada um.
+
+| antes | agora |
+|---|---|
+| `delonix-scan` | `delonix-scanner` |
+| `delonix-image` | `delonix-oci` |
+| `delonix-net` | `delonix-sdn` |
+| `delonix-runtime` | `delonix-linux` |
+| `delonix-runtime-core` | **eliminado** — os tipos partilhados (`Error`, `records`, `secret`, `typestate`, `exitcode`, os códigos `DX-CDNN`) foram para `delonix-model`; o estado persistido (`JsonStore` e o que ele guarda) foi para o novo `delonix-state` |
+
+Quem depende deste repo via `path`/`git`+tag num `Cargo.toml` externo (o caso do
+`delonix-paas`) tem de actualizar os nomes de crate no próximo bump do pin — o binário
+`delonix` e o seu comportamento não mudam por causa disto, só os nomes internos dos
+crates Rust que o compõem.
+
+### ADR-0040 — o motor por camadas: contextos, ports, e um binário por interface
+
+Cinco fases (P0–P3x, #319 e a série de commits `arch(Pxx)` que se segue) fecham a
+reestruturação que a `AGENTS.md` já impunha desde o P0 (a tabela `LAYERS`/`ALLOWED` do
+`scripts/arch_fitness.py`), agora completa até ao código:
+
+- **Novos crates de contexto** (`crates/contexts/`): `delonix-compute` (as portas de
+  execução — `RunHost`, `ImageStore`, `StorageProvider`, `DeviceResolver`, `VmNetwork`,
+  `NetworkProvider`, `WorkloadRuntime` — e o `RunSpec` único que `container run` e
+  `container start` agora partilham em vez de reconstruírem cada um o seu), `delonix-node`
+  (o contrato de nó, `proto/delonix/node/v1`), `delonix-stack` (o reconciliador de 3 vias e
+  a tabela de Kinds).
+- **Cada porta ganhou o SEU adaptador**, um caso de uso de cada vez (P2c–P3m):
+  `DeviceResolver` no adaptador do kernel (CDI), `NetworkProvider`/`VmNetwork` no adaptador
+  de rede, `StorageProvider`/`ImageStore` nos adaptadores de armazenamento e imagem,
+  `RunHost`/`WorkloadRuntime` no adaptador do motor. O `container run`, o `container start`
+  e o arranque de uma VM passam a resolver a mesma sequência de fases (rede → segredos →
+  `--security-opt` → caminho de log → arranque) através dessas portas, em vez de três
+  cópias divergentes.
+- **Um binário compõe UMA interface** (P3k–P3m): `delonix serve cri` passa a EXECUTAR o
+  binário `delonix-cri` em vez de o embutir; `delonix serve api` executa o `delonix-mgmt`;
+  `delonix mcp` executa o `delonix-mcp`. O `delonix` deixa de ligar três servidores dentro
+  de si — cada um ganhou o seu próprio `[[bin]]`.
+- **A telemetria saiu da fundação** para `delonix-telemetry` (P3j) — a fundação
+  (`delonix-model`) fica só com o que qualquer camada nomeia sem depender de mecanismo.
+- **O `build` arranca o container de trabalho pelo `HostWorkload`** (#391), fechando a
+  última chamada directa ao motor que o `build` ainda fazia por fora das portas.
+
+Ver `docs/adr/0040-*.md` para o detalhe de cada fase e a evidência medida.
+
+### ADR-0043 — o dicionário de códigos `DX-CDNN`
+
+Cada falha ganha um número de quatro dígitos — classe (o que fazer a seguir) + domínio
+(onde aconteceu) + sequência — que nunca muda de significado e nunca é reaproveitado.
+`delonix explain <código>` lê o mesmo dicionário que a linha de erro, o JSON e a página
+gerada em `docs/codigos.html`. Cinco passos fecham a fundação (#399–#403):
+
+1. O dicionário em si + `delonix explain codes`/`delonix explain <código>`.
+2. O número aparece na linha de erro, no `-o json` e na página gerada.
+3. O exit code pergunta-se pela CLASSE do erro, não por um `match` de variante.
+4. O número específico viaja DENTRO do erro (o `delonix-scanner` foi o primeiro crate a
+   ganhar o seu próprio `Error` tipado com números).
+5. `delonix-volume` ganhou o seu.
+
+Mais tarde, já sem número de passo formal: `delonix-scanner` (#398) e `delonix-oci`
+(#407) também ganharam o seu `Error` tipado. **`delonix-truenas`, `delonix-proxmox` e o
+`delonix-vm` (incluindo o gerador de seed cloud-init) têm PRs próprios em curso** — não
+entram nesta release, entram na próxima assim que fundidos.
+
+### CRI/cgroups — três correcções de produção medidas contra um kubelet real
+
+- **Um nó root novo não arrancava nenhum pod** (#310): a sonda de delegação de cgroup
+  media um caminho que só existe em modo delegado de utilizador; em root, tudo o que
+  pedisse `-m`/`--cpus`/`--cpu-weight` era recusado — incluindo os pods estáticos do
+  próprio control-plane. Corrigido a criar o slice à mão quando ainda não existe.
+- **O control-plane de nó único entrava em crash-loop** (#315): o kubelet cria os cgroups
+  de pod como slices `systemd`, e o `systemd` retira o controlador `cpuset` de um slice
+  sem unidades por baixo — exactamente o padrão deste motor, cujos containers vivem FORA
+  da hierarquia do kubelet. O CRI passa a dizer `cgroupDriver: cgroupfs`, que é a verdade.
+- **Em root, o nó ficava `NotReady` por `BridgeMissing`** (#322): o `RunPodSandbox` em
+  root nunca teve rede de pod nenhuma — chamava um comando que o `clap` recusava. Cinco
+  defeitos em cadeia fechados: rede CNI real no host para sandboxes root, `USER`
+  não-root com `--cap-drop ALL` a arrancar, `/proc/sys` gravável sob `--privileged`,
+  variáveis de ambiente do `ContainerConfig` finalmente entregues ao container, e
+  `NET_ADMIN`+portas não-privilegiadas por netns de pod.
+- Os containers do CRI entram na hierarquia de cgroup do kubelet (ADR-0038 fase 1, #325):
+  «sem limite» só é mesmo sem limite debaixo do kubelet — o tecto da casa continua a
+  proteger fora dele. O eviction manager voltou a ter estatísticas e o `kubeadm reset`
+  deixou de largar órfãos (#316).
+
+### `runtime`/`container` — supervisor, restart, e um `run -d` mais honesto
+
+Uma dezena de correcções encadeadas em torno do supervisor de `--restart` e do registo
+de containers (#357, #362, #365, #367, #368, #372, #374, #377–#380): um perfil seccomp
+allow-all deixou de abortar o container; os reinícios da política de restart passam a
+contar em `RESTARTS`; um `run -d` cujo comando não arranca é recusado com a razão real do
+`exec`; um `stop` que interrompe a espera entre reinícios é respeitado; um supervisor
+atrasado, um stop que retoma, e um restart concorrente deixaram de se pisar mutuamente no
+PID gravado — cada um destes era uma corrida real, reproduzida antes da correcção.
+`container run --net-bps` num `-d` passa a ser aplicado (P2e); um `run` recusado já não
+deixa o directório do container para trás (#359); um container privilegiado volta a ter
+`/proc/sys` gravável (#318, o mesmo defeito de raiz do achado de CRI acima).
+
+### `vm` — cloud-hypervisor, libvirt, pausa e recriação
+
+- **O `boot` do cloud-hypervisor só devolve quando o VMM confirma a VM a correr** (#350) —
+  antes devolvia ao lançar o processo, sem confirmar que arrancou.
+- **`vm stop` tenta desligar graciosamente e detecta disco corrompido de imediato** (#304).
+- **Uma VM libvirt pausada deixava de aparecer no `vm ls` sem `-A`** (#312, #363).
+- **Uma VM recriada com o mesmo nome deixava de anunciar o IP da anterior** (#320).
+- O motor de VM liga-se à SDN pela porta `VmNetwork` e deixa de depender directamente do
+  `delonix-net`/`delonix-sdn` (P3i, #383).
+
+### `network`/`proxmox`/`pod` — ceifador de IPAM, portas de pod, e o lock do nó Proxmox
+
+- **`network ipam ls`/`prune`** — o ceifador do registo de leases, respeitando a
+  vivacidade de pods (#308), fechando a fuga documentada na `AGENTS.md`.
+- **As portas de um membro de pod são libertadas e republicadas correctamente**, e
+  publicar a quente num membro de pod passa a atravessar o ingress (#375, #376).
+- **`delonix-proxmox`**: o `create` deixou de mandar `ipconfig0` duas vezes, e operações
+  seguidas deixaram de morrer no lock do nó (#314).
+
+### `delonix init` — CI/CD, adopção de projecto existente, e o template Odoo
+
+- `stack init --template --up` passa a honrar o manifesto declarativo (`stack apply`) em
+  vez de um `container run` cru escrito à parte (#291).
+- `delonix init` sobre um directório já existente **adopta** em vez de despejar código de
+  exemplo por cima (#292).
+- Os 7 templates com código real ganharam CI/CD (GitHub Actions + GitLab CI),
+  `sonar-project.properties`, `CONTRIBUTING.md` (git-flow + Conventional Commits + SemVer)
+  e `commitlint` nos três templates JS (#293).
+- `-v/--template-version` chegou aos 11 templates (#297); o template `odoo` segue as
+  recomendações da OCA, com live reload (#296).
+- **Validado ao vivo, os 11 Delonixfiles**: build e serviço real confirmados para cada um
+  (#300).
+
+### `docker-api`/`compatibility`/outras correcções
+
+- `POST /wait` devolve o código de saída real; `HostConfig.RestartPolicy` passa a ser
+  servido (#370, #371).
+- `delonix compatibility docker` — a matriz de compatibilidade Docker de topo, com
+  `-o json` (#306).
+- Uma imagem que o registo não autoriza ler responde "não existe" em vez de vazar a
+  existência (#381); um layer em cache substitui correctamente o obsoleto em vez de o
+  duplicar (#299).
+
+### Documentação
+
+- `AGENTS.md` ganhou a secção que faltava sobre `Gateway`/`VirtualMachine`/
+  `KubernetesCluster` (#290) e a narrativa completa do manual do contribuidor em
+  `docs/dev/` (#392, gerado a partir de factos verificados, não escrito à mão).
+- ADRs novos: 0038 (CRI/kubelet dono da política de recursos), 0039 (spike de um
+  `VmBackend` OpenStack, aceite só depois de validar contra uma cloud real), 0040 (esta
+  reestruturação), 0041 (o contrato local de nó), 0042 (uma só API do motor, maturidade
+  de Richardson), 0043 (o dicionário de códigos).
+- O site (`docs/gen.py`) reorganizou-se pelas 9 categorias do `--help` (#281, #294).
+
+### Conhecido, não corrigido nesta série
+
+- `delonix-truenas`, `delonix-proxmox` e o `delonix-vm` continuam com o `Error` genérico e
+  partilhado — as três conversões para o dicionário `DX-CDNN` estão em PR aberto, não
+  fundidas a tempo desta release.
+- `image vm ls-remote` sem argumento pode passar de 90s numa ligação lenta e não tem
+  `--timeout` (herdado da `v3.1.0`, não tocado nesta série).
+
+### Não validado nesta release
+
+O ciclo completo `kubeadm apply`/`kubeadm` multi-VM com SSH real entre nós, e o caminho
+CNI em root além do que o `crictl` já exercitou directamente — precisam de um segundo nó
+físico ou de um kubelet real, nenhum dos dois disponível neste sandbox.
+
+---
+
 ## v3.1.0 — a auditoria grupo a grupo: 33 achados, zero folha nova, e o README já não ensina uma CLI de há duas versões
 
 Vinte e nove commits desde a `v3.0.0`, quase todos de uma varredura sistemática da
