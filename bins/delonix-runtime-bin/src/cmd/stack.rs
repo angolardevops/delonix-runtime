@@ -592,17 +592,44 @@ fn print_compared_fields() {
 fn print_kind_catalogue() {
     println!("{}", super::po::t("All Kinds, by area of action:"));
     println!();
-    let mut t = super::output::Table::new(&["KIND", "DOMAIN", "FORM", "NAMESPACED", "PRESENCE"]);
+    let mut t = super::output::Table::new(&[
+        "KIND",
+        "DOMAIN",
+        "FORM",
+        "STACK GROUP",
+        "NAMESPACED",
+        "PRESENCE",
+    ]);
     for f in super::kinds::all() {
         t.row(vec![
             f.kind.to_string(),
             f.domain.label().to_string(),
             form_label(f.form),
+            // `-` is never bare: the reason follows the table, for the same
+            // reason the converge/teardown obstacles are spelt out — a Kind
+            // that is silently absent reads as «nobody got round to it».
+            if f.stack_group.is_empty() {
+                "-".to_string()
+            } else {
+                f.stack_group.to_string()
+            },
             super::po::t(namespaced_label(f.namespaced)).to_string(),
             super::po::t(presence_label(f.presence)).to_string(),
         ]);
     }
     t.print();
+    for f in super::kinds::all() {
+        if let Some(why) = super::kinds::stack_group_absent_reason(f.kind) {
+            println!();
+            println!(
+                "{}",
+                super::po::tf(
+                    "{kind} cannot be a group of a Stack: {why}",
+                    &[("kind", f.kind), ("why", super::po::t(why))]
+                )
+            );
+        }
+    }
 }
 
 /// `Deprecated`/`Sugar`/`Compat` all name their target, and the arrow is the
@@ -2653,6 +2680,21 @@ fn validate_graph_with(
                     }
                 }
             }
+            k::POD => {
+                // A Pod names the network its shared netns attaches to, and
+                // `create_pod` used to drop it on the floor (see `PodSpec.network`) —
+                // now it is honoured, so a name that resolves to nothing is an
+                // apply that fails halfway instead of a validate that says so.
+                // `host`/`none` are the default and mean «the pod's own netns».
+                if let Some(net) = doc.spec.get("network").and_then(|v| v.as_str()) {
+                    if !is_builtin_net(net, false) && !networks.contains(net) {
+                        issues.push(super::po::tf(
+                            "Pod '{name}' → network '{net}' is not declared nor does it exist",
+                            &[("name", name), ("net", net)],
+                        ));
+                    }
+                }
+            }
             k::VOLUME => {
                 // A network share's `passwordSecret` references a Secret (the mount
                 // reads that Secret's `password` key — `storage::resolve_password`).
@@ -3036,6 +3078,107 @@ mod tests {
     fn check(yaml: &str) -> Vec<String> {
         // Nothing "existing" on the machine — the test sees only what the manifest declares.
         validate_graph_with(&docs(yaml), &[], &[], &[], &[])
+    }
+
+    /// The Stack groups added from the Kind table are checked against each other
+    /// the way top-level documents are: validation runs on the EXPANDED list, so
+    /// a reference from one group to another is resolved wherever it is written.
+    /// These pin that for the groups that could not be written inside a Stack
+    /// before, and for the Pod, which had no reference check at all.
+    #[test]
+    fn a_stack_with_every_reference_resolved_validates() {
+        let issues = check(
+            "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  networks:
+    - { name: front, spec: { driver: bridge } }
+    - { name: back, spec: { driver: bridge } }
+  networkRoutes:
+    - { name: r, spec: { from: front, to: back } }
+  containers:
+    - { name: web, spec: { image: nginx, network: front } }
+  pods:
+    - { name: worker, spec: { network: back, containers: [{ name: a, image: nginx }] } }
+  services:
+    - { name: svc, spec: { selector: { matchLabels: { app: web } }, port: 80 } }
+  networkAccessRules:
+    - { name: allow-web, spec: { target: web, direction: ingress, port: '80' } }
+",
+        );
+        assert!(issues.is_empty(), "{issues:?}");
+    }
+
+    #[test]
+    fn a_route_between_networks_the_stack_does_not_declare_is_refused() {
+        let issues = check(
+            "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  networks:
+    - { name: front, spec: { driver: bridge } }
+  networkRoutes:
+    - { name: r, spec: { from: front, to: missing } }
+",
+        );
+        assert!(issues.iter().any(|i| i.contains("'missing'")), "{issues:?}");
+    }
+
+    #[test]
+    fn a_rule_aimed_at_a_container_the_stack_does_not_declare_is_refused() {
+        let issues = check(
+            "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  containers:
+    - { name: web, spec: { image: nginx } }
+  networkAccessRules:
+    - { name: r, spec: { target: ghost, direction: ingress, port: '80' } }
+",
+        );
+        assert!(issues.iter().any(|i| i.contains("'ghost'")), "{issues:?}");
+    }
+
+    #[test]
+    fn a_pod_on_an_undeclared_network_is_refused() {
+        let issues = check(
+            "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  pods:
+    - { name: p, spec: { network: nowhere, containers: [{ name: a, image: nginx }] } }
+",
+        );
+        assert!(issues.iter().any(|i| i.contains("nowhere")), "{issues:?}");
+    }
+
+    /// A `Service` whose selector matches nothing is NOT a validation error, on
+    /// purpose. It selects by label against workloads that are alive when the
+    /// DNS answers (ADR-0032), so the same manifest is legitimate when the
+    /// backends arrive from another stack or a later apply — blocking it here
+    /// would refuse a valid ordering. `apply` already warns about an EMPTY
+    /// selector, the case that is certainly a mistake.
+    #[test]
+    fn a_service_selecting_nothing_yet_still_validates() {
+        let issues = check(
+            "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  services:
+    - { name: svc, spec: { selector: { matchLabels: { app: later } }, port: 80 } }
+",
+        );
+        assert!(issues.is_empty(), "{issues:?}");
     }
 
     #[test]

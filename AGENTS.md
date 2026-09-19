@@ -1334,6 +1334,22 @@ grafias antigas resolvem, com as duas casings extremas) e as 39 `cmd::cluster::t
 `nas-vm-cloud-config.yaml` (falha pré-existente e sem relação — é um fragmento de cloud-init sem
 `apiVersion`, não um manifesto; não é regressão desta investigação).
 
+**Os grupos de um `kind: Stack` saem da tabela de Kinds (ADR-0045).** Antes eram um `StackSpec` escrito
+à mão ao lado da tabela, e divergiram: `NetworkRoute`, `NetworkAccessRule`, `Service` e `App`
+eram aplicados pelo `stack apply` e não cabiam dentro de um Stack, o grupo do `Gateway` ainda se
+chamava `tunnels:`, e o `Workload` não tinha grupo. Agora a coluna `KindFacts.stack_group` governa a
+expansão, o aviso de campo desconhecido, o schema e o exemplo — não há segunda lista. `workloads:` e
+`dependencies:` são grupos mas baixam no `load` (um filho `Workload` é baixado explicitamente, porque
+os filhos de um Stack não passam pelo ciclo de topo); `Stack` e `KubernetesCluster` não são grupos e
+dizem porquê (`stack_group_absent_reason`, impresso por `stack plan --fields`). `tunnels:` continua a
+carregar em silêncio como grafia antiga de `gateways:`. Um Stack **não tem estado próprio, de
+propósito** (mesma decisão do «sem ficheiro de estado»): dissolve-se nos filhos e `--prune`/`destroy`
+vêem-nos pela label `delonix.io/stack`. O schema tipa o interior de cada grupo contra o spec do
+próprio Kind (o mesmo schema, comparado por igualdade num teste), e um item ganhou `labels:`/
+`annotations:`, sem os quais um `Service` dentro de um Stack não tinha como seleccionar os seus
+containers. Um `Service` cujo selector não casa com nada **não** é erro de validação — a selecção é
+dinâmica, e recusá-lo recusaria uma ordem legítima; um `Pod` numa rede não declarada é.
+
 **Seguimento real, não hipotético: `delonix get clusters` chegou partido à v1.0.0** (#166, `1cb7692c`,
 2026-08-29). `KindFacts.plural` de `KubernetesCluster` é `kubernetesclusters` — a pluralização
 literal que todos os outros Kinds seguem — mas o manual embutido e as notas de migração da v0.69.0
