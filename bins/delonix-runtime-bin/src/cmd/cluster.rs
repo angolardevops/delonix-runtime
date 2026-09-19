@@ -595,6 +595,10 @@ pub enum ClusterCmd {
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
+        /// `delonix-cri` binary to install on the nodes. Omit = the one next to
+        /// `delonix`, else the release asset of this version.
+        #[arg(value_hint = clap::ValueHint::FilePath, long = "cri-bin")]
+        cri_bin: Option<PathBuf>,
     },
     /// Provision VMs (golden VM image) + `kubeadm` bootstrap.
     ///
@@ -650,6 +654,10 @@ pub enum ClusterCmd {
         /// today's default behavior.
         #[arg(long = "etcd-cluster")]
         etcd_cluster: Option<u32>,
+        /// `delonix-cri` binary to install on the nodes. Omit = the one next to
+        /// `delonix`, else the release asset of this version.
+        #[arg(value_hint = clap::ValueHint::FilePath, long = "cri-bin")]
+        cri_bin: Option<PathBuf>,
     },
     /// Print a cluster's kubeconfig from the local cache (no live SSH).
     ///
@@ -847,10 +855,10 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         ClusterCmd::Ls { all } => cmd_ls(all),
         ClusterCmd::Kubectl(args) => cmd_kubectl(&args),
         ClusterCmd::Kube { action } => super::kube::run(action),
-        ClusterCmd::Apply { file } => {
+        ClusterCmd::Apply { file, cri_bin } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
-            apply(&docs)
+            apply(&docs, cri_bin.as_deref())
         }
         ClusterCmd::Kubeadm {
             name,
@@ -867,6 +875,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             boot_timeout,
             copy_kubeconfig,
             etcd_cluster,
+            cri_bin,
         } => {
             let name = match name {
                 Some(n) => n,
@@ -887,6 +896,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 boot_timeout,
                 copy_kubeconfig,
                 etcd_cluster,
+                cri_bin,
             })
         }
         ClusterCmd::Kubeconfig { name } => cmd_kubeconfig(name),
@@ -1425,7 +1435,7 @@ fn cmd_upgrade(file: Option<PathBuf>, to: &str, node: Option<&str>, no_drain: bo
     }
 }
 
-pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+pub fn apply(docs: &[ManifestDoc], cri_bin: Option<&std::path::Path>) -> Result<()> {
     for doc in manifest::of_kind(docs, k::CLUSTER) {
         let name = &doc.metadata.name;
         let spec: ClusterSpec = manifest::spec_of(doc)?;
@@ -1433,21 +1443,26 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // `cluster apply` (manifest-driven) keeps the historical timing: no
         // wait for node Ready. `cluster kubeadm --copy-kubeconfig` is the
         // opt-in path for that (see `provision_and_apply`).
-        apply_one(name, &spec, false)?;
+        apply_one(name, &spec, false, cri_bin)?;
     }
     Ok(())
 }
 
-fn apply_one(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
+fn apply_one(
+    name: &str,
+    spec: &ClusterSpec,
+    wait_ready: bool,
+    cri_bin: Option<&std::path::Path>,
+) -> Result<()> {
     validate(spec)?;
     // `spec.mode` chooses the path — the common fields (k8sVersion/podSubnet/
     // cni) hold in all three; only the mode-specific block changes.
     match spec.mode.as_str() {
         "kind" => return apply_kind(name, spec),
-        "vm" => return apply_vm(name, spec, wait_ready),
+        "vm" => return apply_vm(name, spec, wait_ready, cri_bin),
         _ => {} // `ssh` follows below (the original path)
     }
-    apply_ssh(name, spec, wait_ready)
+    apply_ssh(name, spec, wait_ready, cri_bin)
 }
 
 /// `mode: kind` — nodes in containers on this machine (see `cmd::kindmode`).
@@ -1482,7 +1497,12 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
 
 /// `mode: vm` — provisions VMs from the golden image and bootstraps them over SSH.
 /// Reuses `cluster kubeadm`'s `provision_and_apply` (zero duplication).
-fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
+fn apply_vm(
+    name: &str,
+    spec: &ClusterSpec,
+    wait_ready: bool,
+    cri_bin: Option<&std::path::Path>,
+) -> Result<()> {
     let network = spec.vm.network.clone().ok_or_else(|| {
         Error::Invalid(
             super::po::t(
@@ -1516,6 +1536,7 @@ fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         // does (see AGENTS.md). `validate()` rejects `spec.etcd.mode: external`
         // combined with `mode: vm` outright, so this is never silently dropped.
         etcd_cluster: None,
+        cri_bin: cri_bin.map(|p| p.to_path_buf()),
     })
 }
 
@@ -1531,8 +1552,13 @@ fn combine_host_prep_errors(errors: Vec<String>) -> Result<()> {
 }
 
 /// `mode: ssh` — remote hosts ALREADY live (the original path, unchanged).
-fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
-    let cri_bin = vmimage::resolve_cri_bin(None)?;
+fn apply_ssh(
+    name: &str,
+    spec: &ClusterSpec,
+    wait_ready: bool,
+    cri_bin: Option<&std::path::Path>,
+) -> Result<()> {
+    let cri_bin = vmimage::resolve_cri_bin(cri_bin.map(|p| p.to_path_buf()))?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
 
     let all_hosts: Vec<&HostSpec> = spec
@@ -1789,6 +1815,8 @@ struct ProvisionArgs {
     /// auto-provision `n` more VMs as a dedicated etcd cluster (odd `n` for a
     /// well-defined quorum, or exactly 1 for dev/test — see `validate()`).
     etcd_cluster: Option<u32>,
+    /// `--cri-bin`: the `delonix-cri` to install (else resolved, see `resolve_cri_bin`).
+    cri_bin: Option<PathBuf>,
 }
 
 /// Deterministic VM names of a role (`<cluster>-cp1`, `<cluster>-w1`, ...).
@@ -2282,7 +2310,12 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         vm: VmModeSpec::default(),
     };
     validate(&spec)?;
-    apply_one(&args.name, &spec, args.copy_kubeconfig)
+    apply_one(
+        &args.name,
+        &spec,
+        args.copy_kubeconfig,
+        args.cri_bin.as_deref(),
+    )
 }
 
 fn create_and_wait(
@@ -2347,23 +2380,81 @@ fn prepare_host(
             .map_err(|e| Error::Invalid(format!("[{label}] {}: {e}", r.name)))?;
     }
 
-    if !remote::ssh_check(target, "systemctl is-active --quiet delonix-cri") {
-        remote::scp_to(target, cri_bin, "/tmp/delonix-cri")
-            .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
-        remote::ssh_run(
-            target,
-            "mv /tmp/delonix-cri /usr/local/bin/delonix-cri && chmod +x /usr/local/bin/delonix-cri",
-        )
-        .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
-        remote::scp_to(target, cri_service, "/tmp/delonix-cri.service")
-            .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
-        remote::ssh_run(
-            target,
-            "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
-             systemctl daemon-reload && systemctl enable --now delonix-cri",
-        )
-        .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
+    install_cri(target, label, cri_bin, cri_service)?;
+    Ok(())
+}
+
+/// Remote path the `delonix-cri` binary lives at.
+const REMOTE_CRI_BIN: &str = "/usr/local/bin/delonix-cri";
+
+/// What `install_cri` has to do on a host, decided from two facts.
+#[derive(Debug, PartialEq, Eq)]
+enum CriAction {
+    /// The right binary is there and the service is up.
+    Nothing,
+    /// The right binary is there but the service is down: (re)install the unit
+    /// and start it.
+    Start,
+    /// A different binary (or none) is there: replace it and restart.
+    Replace,
+}
+
+/// Pure: the binary decides first. Asking only «is the service active?» is what
+/// let the golden image's CRI win over any newer one — active, therefore skipped.
+fn cri_action(binary_matches: bool, active: bool) -> CriAction {
+    match (binary_matches, active) {
+        (true, true) => CriAction::Nothing,
+        (true, false) => CriAction::Start,
+        (false, _) => CriAction::Replace,
     }
+}
+
+/// Makes the node run exactly the `delonix-cri` that was resolved — same
+/// `sha256` — and SAYS which of the two it kept when they differed.
+fn install_cri(
+    target: &SshTarget,
+    label: &str,
+    cri_bin: &std::path::Path,
+    cri_service: &std::path::Path,
+) -> Result<()> {
+    let err = |e: Error| Error::Invalid(format!("[{label}] delonix-cri: {e}"));
+    let local = vmimage::hex_sha256_file(cri_bin)?;
+    // `local` is a hex digest we just computed, so it is safe to interpolate.
+    let matches = remote::ssh_check(
+        target,
+        &format!("[ \"$(sha256sum {REMOTE_CRI_BIN} 2>/dev/null | cut -d' ' -f1)\" = \"{local}\" ]"),
+    );
+    let active = remote::ssh_check(target, "systemctl is-active --quiet delonix-cri");
+    match cri_action(matches, active) {
+        CriAction::Nothing => return Ok(()),
+        CriAction::Start => {}
+        CriAction::Replace => {
+            // A CRI already running is being replaced by a different one: the
+            // operator has to hear it, not discover it from a byte count.
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "[{label}] delonix-cri differs from the resolved one (sha256 {sha}) — replacing it and restarting the service",
+                    &[("label", label), ("sha", &local[..12])],
+                )
+            );
+            remote::scp_to(target, cri_bin, "/tmp/delonix-cri").map_err(err)?;
+            remote::ssh_run(
+                target,
+                &format!("mv /tmp/delonix-cri {REMOTE_CRI_BIN} && chmod +x {REMOTE_CRI_BIN}"),
+            )
+            .map_err(err)?;
+        }
+    }
+    remote::scp_to(target, cri_service, "/tmp/delonix-cri.service").map_err(err)?;
+    // `restart`, not `enable --now`: on an active unit the latter does nothing,
+    // and the old binary would keep running.
+    remote::ssh_run(
+        target,
+        "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
+         systemctl daemon-reload && systemctl enable delonix-cri && systemctl restart delonix-cri",
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -2825,6 +2916,15 @@ fn cmd_init(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_binary_decides_before_the_service() {
+        assert_eq!(cri_action(true, true), CriAction::Nothing);
+        assert_eq!(cri_action(true, false), CriAction::Start);
+        // The case of #242: the golden's CRI is active, yet it is not ours.
+        assert_eq!(cri_action(false, true), CriAction::Replace);
+        assert_eq!(cri_action(false, false), CriAction::Replace);
+    }
+
     use super::*;
 
     /// A state root and a `$HOME` under `temp_dir`, each with its own files —
