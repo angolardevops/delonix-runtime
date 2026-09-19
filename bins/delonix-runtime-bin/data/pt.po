@@ -1471,8 +1471,8 @@ msgstr "Nome local (default: derivado da referência)."
 msgid "Push a local golden VM image to an OCI registry (`vm push <name> <target>`)."
 msgstr "Publica uma imagem VM dourada local num registo OCI (`vm push <nome> <destino>`)."
 
-msgid "Attach to the VM's serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-] ."
-msgstr "Liga à consola serial da VM (terminal interactivo) — funciona sem IP (logs de boot, login). Sair: Ctrl-] ."
+msgid "Attach to the VM's serial console (interactive terminal) — works with no IP (boot logs, login). Escape: Ctrl-D ."
+msgstr "Liga à consola serial da VM (terminal interactivo) — funciona sem IP (logs de boot, login). Sair: Ctrl-D ."
 
 msgid "VM '{name}' is not running — start it first"
 msgstr "a VM '{name}' não está a correr — arranca-a primeiro"
@@ -1495,8 +1495,8 @@ msgstr "sem display VNC para '{name}' — foi criada com `--vnc`?"
 msgid "connect with a VNC client, e.g. `vncviewer {addr}`"
 msgstr "liga com um cliente VNC, ex.: `vncviewer {addr}`"
 
-msgid "After starting, attach to the serial console to watch the boot live (Ctrl-] to detach)."
-msgstr "Depois de arrancar, liga à consola serial para ver o boot ao vivo (Ctrl-] para sair)."
+msgid "After starting, attach to the serial console to watch the boot live (Ctrl-D to detach)."
+msgstr "Depois de arrancar, liga à consola serial para ver o boot ao vivo (Ctrl-D para sair)."
 
 msgid "After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout."
 msgstr "Depois de arrancar, espera (com spinner) até a VM ter IP, até ao --boot-timeout."
@@ -2207,8 +2207,8 @@ msgstr "✓ VM '{name}' arrancada."
 msgid "Next steps:"
 msgstr "Próximos passos:"
 
-msgid "open the serial console (back to host: Ctrl+])"
-msgstr "abre a consola série (voltar ao host: Ctrl+])"
+msgid "open the serial console (back to host: Ctrl+D)"
+msgstr "abre a consola série (voltar ao host: Ctrl+D)"
 
 msgid "state, backend and IP"
 msgstr "estado, backend e IP"
@@ -5427,8 +5427,8 @@ msgstr "Nome da VM (`vm ls`) ou um IP/hostname para onde ir directamente."
 msgid "Login user. Default: `delonix` on cloud-init images, `root` on appliances (which have no `delonix` account)."
 msgstr "Utilizador de login. Por omissão: `delonix` nas imagens cloud-init, `root` nas appliances (que não têm conta `delonix`)."
 
-msgid "Key that detaches the console, as `^X` (default `^]`). Also settable via `$DELONIX_CONSOLE_ESCAPE`."
-msgstr "Tecla que larga a consola, na forma `^X` (por omissão `^]`). Também definível por `$DELONIX_CONSOLE_ESCAPE`."
+msgid "Key that detaches the console, as `^X` (default `^D`). Also settable via `$DELONIX_CONSOLE_ESCAPE`."
+msgstr "Tecla que larga a consola, na forma `^X` (por omissão `^D`). Também definível por `$DELONIX_CONSOLE_ESCAPE`."
 
 msgid "Private key to authenticate with (`ssh -i`)."
 msgstr "Chave privada com que autenticar (`ssh -i`)."
@@ -7151,8 +7151,8 @@ msgstr "tudo o que o registo guarda sobre uma VM, mais o estado ao vivo, ao esti
 msgid "several at once, to compare how they were created"
 msgstr "várias de uma vez, para comparar como foram criadas"
 
-msgid "watch the boot and log in before there is any IP or SSH — Ctrl-] brings you back to the host"
-msgstr "vê o arranque e entra antes de haver IP ou SSH — Ctrl-] traz-te de volta ao host"
+msgid "watch the boot and log in before there is any IP or SSH — Ctrl-D brings you back to the host"
+msgstr "vê o arranque e entra antes de haver IP ou SSH — Ctrl-D traz-te de volta ao host"
 
 msgid "the address to point a VNC client at, for a VM created with `--vnc` on libvirt"
 msgstr "o endereço para onde apontar um cliente VNC, para uma VM criada com `--vnc` em libvirt"
@@ -7993,19 +7993,19 @@ msgstr ""
 msgid "Attach to the VM's serial console (interactive terminal)."
 msgstr "Liga-te à consola série da VM (terminal interactivo)."
 
-msgid "Works with no IP (boot logs, login). Escape: Ctrl-] ."
-msgstr "Funciona sem IP nenhum (logs de arranque, login). Escape: Ctrl-] ."
+msgid "Works with no IP (boot logs, login). Escape: Ctrl-D ."
+msgstr "Funciona sem IP nenhum (logs de arranque, login). Escape: Ctrl-D ."
 
 msgid ""
 "Attach to the VM's serial console (interactive terminal)."
 "\n"
 "\n"
-"Works with no IP (boot logs, login). Escape: Ctrl-] ."
+"Works with no IP (boot logs, login). Escape: Ctrl-D ."
 msgstr ""
 "Liga-te à consola série da VM (terminal interactivo)."
 "\n"
 "\n"
-"Funciona sem IP nenhum (logs de arranque, login). Escape: Ctrl-] ."
+"Funciona sem IP nenhum (logs de arranque, login). Escape: Ctrl-D ."
 
 # ---------------------------------------------------------------------------
 # `about` encurtado (a lista `Commands:` do comando pai deixa de ser um
@@ -12942,3 +12942,48 @@ msgstr "várias de uma vez, largando o estado local mesmo que o provider recuse 
 
 msgid "also delete extra disks that live outside the state directory"
 msgstr "apaga também os discos extra que vivem fora do directório de estado"
+
+msgid "Destroying VM '{name}'…"
+msgstr "A destruir a VM '{name}'…"
+
+msgid "powering off and removing from {backend}"
+msgstr "a desligar e a remover de {backend}"
+
+msgid "deleting the overlay disk"
+msgstr "a apagar o disco overlay"
+
+msgid "deleting {n} extra disk(s)"
+msgstr "a apagar {n} disco(s) extra"
+
+msgid "deleting the cloud-init seed and snapshots"
+msgstr "a apagar o seed cloud-init e os snapshots"
+
+msgid "deleting sockets, logs and domain XML"
+msgstr "a apagar sockets, logs e XML do domínio"
+
+msgid "removing the VM record"
+msgstr "a remover o registo da VM"
+
+msgid "Throwaway VM: destroy it, with all its artifacts, as soon as it is stopped (`vm stop`, or a poweroff from inside the guest) — the VM twin of `container run --rm`."
+msgstr "VM descartável: destrói-a, com todos os artefactos, assim que for parada (`vm stop`, ou um poweroff dentro do convidado) — o par de VM do `container run --rm`."
+
+msgid "Like `--rm`, but keep the stopped VM for this long first (`30s`, `10m`, `2h`, `1d`) so a proof of concept can be inspected or restarted before it goes."
+msgstr "Como `--rm`, mas mantém a VM parada durante este tempo (`30s`, `10m`, `2h`, `1d`) para que uma prova de conceito possa ser inspeccionada ou reiniciada antes de desaparecer."
+
+msgid "Skip a VM that is running again (used by the `--rm-after` timer, so a VM restarted during its grace period is not destroyed under you)."
+msgstr "Ignora uma VM que voltou a correr (usado pelo temporizador de `--rm-after`, para que uma VM reiniciada no período de graça não seja destruída debaixo de ti)."
+
+msgid "invalid --rm-after '{spec}' — use a positive duration such as 30s, 10m, 2h or 1d"
+msgstr "--rm-after '{spec}' inválido — usa uma duração positiva como 30s, 10m, 2h ou 1d"
+
+msgid "throwaway VM: it is destroyed as soon as it is stopped"
+msgstr "VM descartável: é destruída assim que for parada"
+
+msgid "throwaway VM: it is destroyed {after} after it is stopped"
+msgstr "VM descartável: é destruída {after} depois de parada"
+
+msgid "throwaway VM '{name}' will be destroyed in {after}"
+msgstr "a VM descartável '{name}' será destruída daqui a {after}"
+
+msgid "could not schedule the removal of '{name}' (already scheduled, or no user systemd) — `delonix vm destroy {name}` removes it now"
+msgstr "não foi possível agendar a remoção de '{name}' (já agendada, ou sem systemd de utilizador) — `delonix vm destroy {name}` remove-a já"

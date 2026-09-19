@@ -2332,7 +2332,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "vm console",
         group: "Interact",
         examples: &[
-            ("watch the boot and log in before there is any IP or SSH — Ctrl-] brings you back to the host", "delonix vm console dev"),
+            ("watch the boot and log in before there is any IP or SSH — Ctrl-D brings you back to the host", "delonix vm console dev"),
         ],
         see_also: &["vm vnc", "get", "vm create", "vm restart"],
     },

@@ -645,6 +645,25 @@ pub enum CreateStage {
     Start,
 }
 
+/// A stage of [`destroy_with`], reported as it STARTS — the teardown twin of
+/// [`CreateStage`], so a destroy can show what it is taking away instead of a
+/// blinking cursor. Only stages that have something to do are reported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DestroyStage<'a> {
+    /// Powering off and removing the VM from its provider (the backend id).
+    Provider(&'a str),
+    /// Deleting the per-VM overlay disk.
+    Overlay,
+    /// Deleting extra disks that belong to the VM (how many).
+    ExtraDisks(usize),
+    /// Deleting the cloud-init seed and the preserved snapshots.
+    SeedAndSnapshots,
+    /// Deleting sockets, serial log, pid file and the domain XML.
+    RuntimeState,
+    /// Removing the record itself.
+    Record,
+}
+
 /// Builds a `Command` whose output this crate PARSES, pinned to the `C` locale.
 ///
 /// BUG FIXED HERE (latent, and it bites precisely in this product's home
@@ -4263,13 +4282,13 @@ pub fn restart_policy_unsupervised(backend_id: &str, policy: Option<&str>) -> bo
 /// the reverse: no local record but with an orphaned domain in libvirt (an
 /// old interrupted `rm`), `remove` cleans up the domain anyway.
 pub fn remove(base: &Path, name: &str) -> Result<()> {
-    remove_inner(base, name, false, false).map(|_| ())
+    remove_inner(base, name, false, false, &|_| {}).map(|_| ())
 }
 
 /// Like [`remove`], but deletes the local state EVEN if the backend cleanup
 /// fails (the `vm rm --force`) — the user takes on resolving the rest in libvirt.
 pub fn remove_force(base: &Path, name: &str) -> Result<()> {
-    remove_inner(base, name, true, false).map(|_| ())
+    remove_inner(base, name, true, false, &|_| {}).map(|_| ())
 }
 
 /// What a [`destroy`] took away, and what it deliberately left.
@@ -4296,7 +4315,18 @@ pub struct Destroyed {
 /// directory; without it they are listed in [`Destroyed::kept`]. `force`
 /// deletes the local state even when the provider refuses.
 pub fn destroy(base: &Path, name: &str, force: bool, purge_disks: bool) -> Result<Destroyed> {
-    remove_inner(base, name, force, purge_disks)
+    remove_inner(base, name, force, purge_disks, &|_| {})
+}
+
+/// [`destroy`] that reports each [`DestroyStage`] as it starts.
+pub fn destroy_with(
+    base: &Path,
+    name: &str,
+    force: bool,
+    purge_disks: bool,
+    on: &dyn Fn(DestroyStage),
+) -> Result<Destroyed> {
+    remove_inner(base, name, force, purge_disks, on)
 }
 
 fn path_size(p: &Path) -> u64 {
@@ -4312,7 +4342,13 @@ fn path_size(p: &Path) -> u64 {
     }
 }
 
-fn remove_inner(base: &Path, name: &str, force: bool, purge_disks: bool) -> Result<Destroyed> {
+fn remove_inner(
+    base: &Path,
+    name: &str,
+    force: bool,
+    purge_disks: bool,
+    on: &dyn Fn(DestroyStage),
+) -> Result<Destroyed> {
     // A name that `create` would refuse cannot exist — and above all, it cannot
     // flow into the paths deleted below (the seed dir's `remove_dir_all`).
     if !valid_vm_name(name) {
@@ -4327,6 +4363,7 @@ fn remove_inner(base: &Path, name: &str, force: bool, purge_disks: bool) -> Resu
             // backend still owns has to go with it. They are the same call for
             // the local backends (the default), and deliberately not for a
             // remote one, whose disk lives on the node.
+            on(DestroyStage::Provider(&vm.backend));
             if let Err(e) =
                 backend_for(&vm).and_then(|b| b.destroy(&vmdir, &vm).map_err(Error::from))
             {
@@ -4341,6 +4378,9 @@ fn remove_inner(base: &Path, name: &str, force: bool, purge_disks: bool) -> Resu
             // No record: there may be an orphaned libvirt domain with this name —
             // clean it up, and the ingress tap for safety.
             let orphan = libvirt_domain_uri(name).is_some();
+            if orphan {
+                on(DestroyStage::Provider("libvirt"));
+            }
             if let Err(e) = libvirt_cleanup(name) {
                 if !force {
                     return Err(e);
@@ -4373,19 +4413,28 @@ fn remove_inner(base: &Path, name: &str, force: bool, purge_disks: bool) -> Resu
         return Err(Error::VmNotFound(name.to_string()));
     }
     let mut out = Destroyed::default();
-    for ext in ["qcow2", "sock", "sock.lock", "serial", "log", "pid", "xml"] {
-        let p = vmdir.join(format!("{name}.{ext}"));
-        let sz = path_size(&p);
-        if std::fs::remove_file(&p).is_ok() {
+    let rm_file = |out: &mut Destroyed, p: &Path, label: String| {
+        let sz = path_size(p);
+        if std::fs::remove_file(p).is_ok() {
             out.freed_bytes += sz;
-            out.removed.push(format!("{name}.{ext}"));
+            out.removed.push(label);
         }
+    };
+    // The overlay first: it is the bulk of what is freed.
+    if vmdir.join(format!("{name}.qcow2")).exists() {
+        on(DestroyStage::Overlay);
+        rm_file(
+            &mut out,
+            &vmdir.join(format!("{name}.qcow2")),
+            format!("{name}.qcow2"),
+        );
     }
     // Extra disks and shares named by the record. Only what lives inside the
     // state directory is provably ours; the rest is reported, and removed only
     // when the operator said so.
     if let Some(vm) = &record {
         let root = std::fs::canonicalize(&vmdir).unwrap_or_else(|_| vmdir.clone());
+        let mut doomed: Vec<&str> = Vec::new();
         for d in &vm.boot.extra_disks {
             let p = Path::new(&d.source);
             if d.device == "cdrom" || !p.exists() {
@@ -4395,16 +4444,18 @@ fn remove_inner(base: &Path, name: &str, force: bool, purge_disks: bool) -> Resu
                 .map(|c| c.starts_with(&root))
                 .unwrap_or(false);
             if inside || purge_disks {
-                let sz = path_size(p);
-                if std::fs::remove_file(p).is_ok() {
-                    out.freed_bytes += sz;
-                    out.removed.push(d.source.clone());
-                }
+                doomed.push(&d.source);
             } else {
                 out.kept.push(format!(
                     "{} (extra disk outside the state directory; --purge-disks removes it)",
                     d.source
                 ));
+            }
+        }
+        if !doomed.is_empty() {
+            on(DestroyStage::ExtraDisks(doomed.len()));
+            for src in doomed {
+                rm_file(&mut out, Path::new(src), src.to_string());
             }
         }
         for v in &vm.boot.volumes {
@@ -4417,11 +4468,29 @@ fn remove_inner(base: &Path, name: &str, force: bool, purge_disks: bool) -> Resu
     // The cloud-init seed directory (`vms/<name>/`, from `generate_seed_iso`)
     // and the preserved snapshots inside it also belong to the VM.
     let dir = vmdir.join(name);
-    let sz = path_size(&dir);
-    if std::fs::remove_dir_all(&dir).is_ok() && sz > 0 {
-        out.freed_bytes += sz;
-        out.removed.push(format!("{name}/"));
+    if dir.exists() {
+        on(DestroyStage::SeedAndSnapshots);
+        let sz = path_size(&dir);
+        if std::fs::remove_dir_all(&dir).is_ok() && sz > 0 {
+            out.freed_bytes += sz;
+            out.removed.push(format!("{name}/"));
+        }
     }
+    let leftovers = ["sock", "sock.lock", "serial", "log", "pid", "xml"];
+    if leftovers
+        .iter()
+        .any(|e| vmdir.join(format!("{name}.{e}")).exists())
+    {
+        on(DestroyStage::RuntimeState);
+        for ext in leftovers {
+            rm_file(
+                &mut out,
+                &vmdir.join(format!("{name}.{ext}")),
+                format!("{name}.{ext}"),
+            );
+        }
+    }
+    on(DestroyStage::Record);
     st.remove(name)?;
     // The store's per-record lock file (`.<name>.lock`) is the last trace: it
     // outlived every destroy, so «removes everything» was not quite true.
