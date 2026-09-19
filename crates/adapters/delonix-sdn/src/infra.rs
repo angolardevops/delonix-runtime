@@ -8560,7 +8560,6 @@ Inter-|   Receive                                                |  Transmit
         assert!(body.contains(&format!("@{}", dlxns_set(token))));
     }
 
-    #[test]
     /// Two records whose names share their first 12 chars used to share a file.
     #[test]
     fn pair_record_paths_are_injective_past_12_chars() {
