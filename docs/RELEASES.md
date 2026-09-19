@@ -4,6 +4,129 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v4.1.0 — o ADR-0043 fecha nos últimos cinco crates, e um nó root novo volta a aceitar `-m`/`--cpus`
+
+Onze commits desde a `v4.0.0`. O gatilho foi uma correcção de produção (#415, PR
+externo, revisto e fundido nesta sessão): um nó root FRESCO recusava `-m`/`--cpus`/
+`--cpu-weight` mesmo quando o kernel delegava os três controladores — e, no caso em
+que a delegação era mesmo real mas parcial, o operador via "Permission denied" onde
+a resposta certa era "o `cpu` não está delegado, corre isto". Ao lado, os cinco
+crates que a `v4.0.0` tinha deixado por fazer ("Conhecido, não corrigido nesta
+série") ganharam o dicionário de códigos `DX-CDNN` do ADR-0043 — que passa a
+**Accepted**. Nenhuma mudança de superfície de CLI (comandos, flags, Kinds):
+esta série é sobre a QUALIDADE do que o motor já fazia.
+
+### `-m`/`--cpus`/`--cpu-weight` num nó root: a recusa perguntava a coisa errada (#415)
+
+`cgroup_limits_apply()`, em modo root, só perguntava "consigo criar um cgroup sob
+`delonix.slice`?" — necessário, mas não suficiente: a resposta certa é "os
+controladores foram mesmo ENTREGUES aos filhos da slice?". `ensure_delonix_slice`
+descartava cada escrita de `cgroup.subtree_control` com `let _ =`, por isso uma
+slice que não recebesse `cpu` do `/sys/fs/cgroup` ficava sem `cpu.max` — e a
+mensagem de erro dizia **"Permission denied"**, porque `std::fs::write` abre com
+`O_CREAT` e o cgroupfs recusa criar um ficheiro regular com `EACCES`: a mesma
+directoria, o mesmo uid, `memory.max` aceite uma linha antes.
+
+Duas correcções, as duas medidas e não só lidas:
+
+- `cgroup_limits_apply()` em root pergunta as DUAS coisas agora, como a perna
+  rootless já fazia — criar o cgroup, **e** confirmar que `memory`/`cpu`/`pids`
+  estão em `cgroup.subtree_control`.
+- Um `cpu.max` (ou `memory.max`/`pids.max`) AUSENTE deixa de reportar o errno do
+  kernel e passa a nomear o controlador em falta e o comando que o repara. Um
+  ficheiro que EXISTE mas recusa a escrita mantém o errno — aí é a resposta certa.
+  A reparação em si é bounded: só activa um controlador que o nível acima já
+  oferece, nunca move um processo nem aperta um limite alheio.
+
+Quatro testes cobrem o par (a leitura da delegação, a mensagem, e as duas
+distinções — ficheiro ausente vs. ficheiro que recusa). Não validado ao vivo nesta
+sessão contra um nó root real (o achado original foi reproduzido numa VM aarch64
+pelo autor do PR, 2026-09-18); validado nesta sessão com o build/clippy/testes
+completos do crate e com o merge contra a `main` actual (que entretanto já tinha
+renomeado `Error::Runtime` para `Error::Syscall`, ADR-0043 — o merge de 3 vias
+resolveu sozinho, sem conflito).
+
+### ADR-0043 fecha — os últimos cinco crates ganham códigos numerados
+
+A `v4.0.0` tinha deixado escrito: "`delonix-truenas`, `delonix-proxmox` e o
+`delonix-vm` continuam com o `Error` genérico e partilhado (...) não entram nesta
+release, entram na próxima assim que fundidos." Entraram, e o `delonix-linux` e o
+`delonix-sdn` (que nem estavam nessa lista, por serem os dois maiores) foram atrás:
+
+- **`delonix-vm::cloudinit`** — o gerador de seed NoCloud, 5 falhas (nome de VM
+  inválido, cópia de `--user-data`, `cloud-localds` em falta ou que falha).
+- **`delonix-truenas`** — as 20 recusas do provider de armazenamento (ADR-0009): 15
+  variantes, incluindo job assíncrono falhado/desaparecido/esgotado e quota abaixo
+  do mínimo.
+- **`delonix-proxmox`** — as 19 recusas do provider de VM (ADR-0008), o primeiro a
+  povoar o domínio `Vm` do dicionário.
+- **`delonix-linux`** — ~65 sítios (`cdi.rs`, `run_host.rs`, `supervise.rs`,
+  `workload.rs`, `lib.rs`: `spawn`/`exec`/`mount_live`/cgroups). Os ~30 que
+  construíam `Error::Runtime{context,message}` (clone, mount, setns, escritas de
+  `/proc`/cgroup, `waitpid`, `busctl`) colapsam num único `Error::Syscall` — zero
+  mudança de texto ou de classe, só o número por trás. `Domain::Host` (vazio até
+  aqui) ganha as falhas que são mesmo sobre o HOST: o próprio system call, o
+  AppArmor, a ausência de um spec CDI.
+- **`delonix-sdn`** — ~180 construções (a SDN rootless, o firewall de ingress, o
+  CNI, o IPAM, o overlay WireGuard), o maior dos cinco: 50 variantes próprias + um
+  bucket `Command{context,message}` para "uma ferramenta do host falhou", o
+  primeiro crate a povoar o domínio de rede do dicionário.
+
+O dicionário publicado em `docs/codigos.html` passa de **61 para 198** códigos
+`DX-CDNN` catalogados. `delonix explain <código>` continua a ler a mesma fonte que
+a linha de erro e o `-o json` — nenhum destes cinco crates inventa um dicionário
+à parte. O ADR-0043 já estava `Accepted` desde 2026-09-17; esta série fecha o
+rollout "landed crate by crate" que o próprio ADR previa — os últimos cinco dos
+crates listados no plano ganham o dicionário nesta release.
+
+### ADR-0044 (P4) — os cinco spikes exigidos estão feitos; a arquitectura continua `Proposed`
+
+Sem mudança de comportamento observável nesta série. Três achados de investigação
+que valem registar, e um pedaço de código que FICA (mas ainda não tem consumidor):
+
+- **`StateRepository<T>`** — um port novo em `delonix-model` (a fundação; o trait
+  não nomeia nada de `delonix-compute`), implementado para `Store`/`JsonStore<T>`
+  em `delonix-state`. `delonix-linux`'s `wait_and_record`/`stop`/`persist_stop`/
+  `remove` passam a receber `&impl StateRepository<Container>` em vez do `Store`
+  concreto — validado ao vivo que o registo em disco fica byte-a-byte igual (um
+  ciclo `run`/`stop`/`rm` isolado, antes e depois). `spawn`/`create_with` continuam
+  a abrir o `SecretStore` directamente — ficam por fazer, para uma porta própria.
+- **Proxmox: `--namespace` já era recusado** (o guarda vive uma camada acima do
+  provider, desde antes do próprio ADR-0044 ter sido escrito — o achado estático
+  original tinha procurado no crate errado); **`--network` é aceite e IGNORADO**,
+  confirmado pelo formulário HTTP real enviado ao nó Proxmox (nunca a rede pedida).
+  Fica registado como decisão pequena (recusar, não construir uma ponte remota),
+  não como trabalho novo.
+- **`VmSpec`/`Extensions`/`VmProvider`** (`delonix-vm::provider_spike`) — um spike
+  que convirgiu Cloud Hypervisor e libvirt sob o MESMO contrato, provado ao vivo
+  nos dois backends. Fica no repositório (zero risco à superfície pública — não é
+  chamado por nenhum caminho da CLI), como base para a fase seguinte do ADR; não é
+  uma capacidade nova que um utilizador possa invocar hoje.
+- O par de binários `delonix-launcher`/`delonix-netns-holder` foi validado num
+  spike isolado (hardlinks, perfil AppArmor por caminho) — nenhum dos dois existe
+  como binário publicado nesta release.
+
+A decisão de aceitar o ADR-0044 continua do dono do repositório; esta série só
+fecha os cinco spikes que o próprio ADR exigia antes disso.
+
+### Conhecido, não corrigido nesta série
+
+- O achado do #415 foi medido numa VM aarch64 por quem abriu o PR; esta sessão
+  validou a lógica (build/clippy/testes/gates) e o merge contra a `main` actual,
+  mas não repetiu a medição num nó root x86_64 real.
+- `image vm ls-remote` sem argumento continua sem `--timeout` numa ligação lenta
+  (herdado, não tocado nesta série).
+
+### Não validado nesta release
+
+O caminho `--network`/`--namespace` do backend Proxmox contra uma bridge SDN real
+(a topologia do host de teste já respondia à pergunta sem precisar de um convidado
+a sério — ver `docs/discovery/58_P4_D1_D8_PROXMOX_NETWORK_NAMESPACE_LIVE.md`); e o
+par `delonix-launcher`/`delonix-netns-holder` contra uma carga de produção (só o
+spike isolado foi corrido).
+
+---
+
 ## v4.0.0 — o motor ganha camadas e ports (ADR-0040), os erros ganham número (ADR-0043), e três crates mudam de nome
 
 Cento e quinze commits desde a `v3.1.0`, a maior série desde a extracção do repo: a
