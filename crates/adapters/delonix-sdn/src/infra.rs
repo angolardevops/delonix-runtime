@@ -3924,17 +3924,23 @@ fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
             context: "netroute",
             message: format!("nft: {e}"),
         })?;
-    if out.status.success() {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if out.status.success() || netroute_delete_already_absent(verb, &stderr) {
         Ok(())
     } else {
         Err(Error::Command {
             context: "netroute",
-            message: format!(
-                "nft {verb} element {a} -> {b}: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
+            message: format!("nft {verb} element {a} -> {b}: {}", stderr.trim()),
         })
     }
+}
+
+/// Closing a path that is already closed is success, not an error. The map lives
+/// in the holder's EPHEMERAL netns: when the last container goes the netns dies
+/// and the element with it, so a `stack destroy` that removes containers first
+/// finds nothing left to delete. nft answers that with ENOENT.
+fn netroute_delete_already_absent(verb: &str, stderr: &str) -> bool {
+    verb == "delete" && stderr.contains("No such file or directory")
 }
 
 pub(crate) fn isolation_elements(bridge: &str) -> Vec<(&'static str, String)> {
@@ -7985,6 +7991,17 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deleting_an_absent_route_element_is_success_but_add_is_not() {
+        let enoent = "Error: Could not process rule: No such file or directory";
+        assert!(netroute_delete_already_absent("delete", enoent));
+        assert!(!netroute_delete_already_absent("add", enoent));
+        assert!(!netroute_delete_already_absent(
+            "delete",
+            "Error: Operation not permitted"
+        ));
+    }
+
     /// The network lock fails CLOSED. Forced deterministically — as any uid, root
     /// included — by putting a FILE where the `ingress/` directory must be: the lock
     /// cannot be created, and then nothing may change the infra. Before, `acquire`
