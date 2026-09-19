@@ -1283,15 +1283,37 @@ fn after_stopped(base: &std::path::Path, name: &str) {
         return;
     }
     let unit = format!("delonix-vm-rm-{name}");
-    let ok = Command::new("systemd-run")
-        .args([
-            "--user",
-            "--collect",
-            "--quiet",
-            &format!("--unit={unit}"),
-            &format!("--on-active={grace}s"),
-            "--",
-        ])
+    // Already armed: leave it alone. Scheduling again (every `vm ls` reaps)
+    // failed with «unit already loaded» and, once the unit had failed, re-armed
+    // the deadline so the destroy never arrived.
+    let armed = Command::new("systemctl")
+        .args(["--user", "--quiet", "is-active", &format!("{unit}.timer")])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if armed {
+        return;
+    }
+    // The transient unit starts with a CLEAN environment, so the state root
+    // this VM lives in has to be handed over explicitly — otherwise the timer
+    // fires against the default root and answers «no such VM».
+    let mut sched = Command::new("systemd-run");
+    sched.args([
+        "--user",
+        "--collect",
+        "--quiet",
+        &format!("--unit={unit}"),
+        &format!("--on-active={grace}s"),
+        &format!("--setenv=DELONIX_ROOT={}", base.display()),
+    ]);
+    if let Some(dir) = std::env::var_os("DELONIX_NET_RUNTIME_DIR") {
+        sched.arg(format!(
+            "--setenv=DELONIX_NET_RUNTIME_DIR={}",
+            dir.to_string_lossy()
+        ));
+    }
+    let ok = sched
+        .arg("--")
         .arg(delonix_node::dispatch::cli_bin())
         .args(["vm", "destroy", "--force", "--if-stopped", "--", name])
         .status()
