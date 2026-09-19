@@ -1411,6 +1411,7 @@ fn cmd_upgrade(file: Option<PathBuf>, to: &str, node: Option<&str>, no_drain: bo
     let docs = manifest::load(&path)?;
     let (doc, spec) = single_cluster_doc(&docs)?;
     let name = &doc.metadata.name;
+    check_cluster_name(name)?;
     validate(&spec)?;
     if spec.mode != "ssh" {
         return Err(Error::Invalid(super::po::tf(
@@ -1422,6 +1423,33 @@ fn cmd_upgrade(file: Option<PathBuf>, to: &str, node: Option<&str>, no_drain: bo
     match node {
         None => upgrade_control_plane_leader(name, &spec, to, no_drain),
         Some(n) => upgrade_one_node(name, &spec, n, to, no_drain),
+    }
+}
+
+/// A cluster name is joined into local paths (`<root>/clusters/<name>/...`,
+/// `<name>-kubeconfig.yaml`, the etcd PKI dir) and into remote hostnames, and
+/// it comes straight from `metadata.name` of a manifest that may be untrusted.
+/// Same whitelist idea as `delonix_vm::valid_vm_name`: `metadata.name:
+/// "../../../etc/kubernetes/pki"` used to make `cluster apply` write CA
+/// material outside the state root.
+pub(crate) fn valid_cluster_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 63
+        && !name.starts_with(['-', '.'])
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+pub(crate) fn check_cluster_name(name: &str) -> Result<()> {
+    if valid_cluster_name(name) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(super::po::tf(
+            "invalid cluster name '{name}' — letters, digits, '-', '_' and '.' only, no '..', at most 63 characters",
+            &[("name", name)],
+        )))
     }
 }
 
@@ -1439,6 +1467,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
 }
 
 fn apply_one(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
+    check_cluster_name(name)?;
     validate(spec)?;
     // `spec.mode` chooses the path — the common fields (k8sVersion/podSubnet/
     // cni) hold in all three; only the mode-specific block changes.
@@ -3533,6 +3562,29 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
             info.certificate_key.as_deref(),
             Some("2222222222222222222222222222222222222222222222222222222222222222")
         );
+    }
+
+    #[test]
+    fn cluster_name_rejects_path_traversal_and_shell() {
+        for bad in [
+            "../../../etc/kubernetes/pki",
+            "a/b",
+            "..",
+            "a..b",
+            ".hidden",
+            "-rf",
+            "",
+            "a b",
+            "a;b",
+            "a\nb",
+        ] {
+            assert!(!valid_cluster_name(bad), "{bad:?}");
+        }
+        assert!(!valid_cluster_name(&"a".repeat(64)));
+        for ok in ["prod", "njinga-benguela-07", "lab_1", "eu.west-1"] {
+            assert!(valid_cluster_name(ok), "{ok:?}");
+        }
+        assert!(check_cluster_name("../x").is_err());
     }
 
     fn etcd_host(ip: &str) -> HostSpec {
