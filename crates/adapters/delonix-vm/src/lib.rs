@@ -2792,19 +2792,13 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // it on; both accept plain byte/op counts.
     s.push_str(&vm_iotune_xml());
     s.push_str("    </disk>\n");
-    // cloud-init seed (NoCloud) as cdrom.
-    if let Some(seed) = &cfg.seed {
-        s.push_str("    <disk type='file' device='cdrom'>\n");
-        s.push_str("      <driver name='qemu' type='raw'/>\n");
-        s.push_str(&format!("      <source file='{}'/>\n", xml_escape(seed)));
-        s.push_str("      <target dev='sda' bus='sata'/>\n");
-        s.push_str("      <readonly/>\n    </disk>\n");
-    }
-    // Extra disks (typed): additional images beyond the main overlay + seed.
-    // Target devs are auto-assigned per bus (vdb, vdc… for virtio; sdb… for
-    // sata/scsi) unless the user pinned one — `vda`/`sda` stay reserved above.
+    // Extra disks (typed): additional images beyond the main overlay. Target
+    // devs are auto-assigned per bus (vdb, vdc… for virtio; sdb… for sata/scsi)
+    // unless the user pinned one — `vda` stays reserved above, and the cloud-init
+    // seed takes the virtio letter AFTER the extras, so adding a seed never
+    // renames a disk the guest already knows.
     let mut vd = b'b'; // next virtio letter (vda taken by the main disk)
-    let mut sd = b'b'; // next sata/scsi letter (sda taken by the seed cdrom)
+    let mut sd = b'b'; // next sata/scsi letter (kept from when the seed sat on sda)
     for d in &cfg.extra_disks {
         let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
         let device = if d.device.is_empty() {
@@ -2851,6 +2845,26 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             s.push_str("      <readonly/>\n");
         }
         s.push_str("    </disk>\n");
+    }
+    // cloud-init seed (NoCloud), as a read-only VIRTIO disk.
+    //
+    // It used to be a SATA cdrom, and that made cloud-init invisible on every
+    // image whose kernel has no SATA: the Debian `-cloud` kernel (the
+    // `genericcloud` image) enumerates the q35 AHCI controller on PCI and binds
+    // no driver — no libata, no `sr` — so the seed never appears as a block
+    // device, no datasource is found, and the guest boots with hostname
+    // `localhost`, no network config and no user-data (measured on
+    // `delonix-vm-base:debian-bookworm`, kernel 6.1.0-52-cloud-amd64). Every
+    // guest that runs on a hypervisor has virtio-blk, and NoCloud finds the
+    // seed by its `cidata` label on any block device. `snapshot='no'` keeps it
+    // out of libvirt's disk snapshots and blockcommit, as the cdrom was.
+    if let Some(seed) = &cfg.seed {
+        let target = format!("vd{}", vd as char);
+        s.push_str("    <disk type='file' device='disk' snapshot='no'>\n");
+        s.push_str("      <driver name='qemu' type='raw'/>\n");
+        s.push_str(&format!("      <source file='{}'/>\n", xml_escape(seed)));
+        s.push_str(&format!("      <target dev='{target}' bus='virtio'/>\n"));
+        s.push_str("      <readonly/>\n    </disk>\n");
     }
     // volumes/Storage shared via virtio-9p — the user does NOT write this
     // XML: it comes from `spec.volumes` already resolved. The guest mounts by `<target dir=tag>`
@@ -6425,6 +6439,33 @@ Format specific information:
         assert_eq!(xml.matches("<filterref").count(), 0, "{xml}");
     }
 
+    /// The seed takes the virtio letter AFTER the extra disks: adding cloud-init
+    /// to a VM must never rename a disk the guest already has.
+    #[test]
+    fn the_seed_takes_the_virtio_letter_after_the_extra_disks() {
+        let mut c = hpc_cfg();
+        c.seed = Some("/seed.iso".into());
+        let xml = libvirt_domain_xml(&c, "/v.qcow2", "52:54:00:ab:cd:ef");
+        assert!(xml.contains("dev='vdb' bus='virtio'"), "no extras: {xml}");
+
+        c.extra_disks = vec![ExtraDisk {
+            source: "/data.qcow2".into(),
+            ..Default::default()
+        }];
+        let xml = libvirt_domain_xml(&c, "/v.qcow2", "52:54:00:ab:cd:ef");
+        let extra = xml.find("/data.qcow2").expect("extra disk");
+        let seed = xml.find("/seed.iso").expect("seed");
+        assert!(
+            xml[extra..seed].contains("dev='vdb'") || xml[..seed].contains("dev='vdb'"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("dev='vdc' bus='virtio'"),
+            "seed after extra: {xml}"
+        );
+        assert_eq!(xml.matches("dev='vdb'").count(), 1, "{xml}");
+    }
+
     #[test]
     fn libvirt_xml_has_core_devices() {
         let mut c = hpc_cfg();
@@ -6437,7 +6478,15 @@ Format specific information:
         assert!(xml.contains("<memory unit='KiB'>2097152</memory>")); // 2G
         assert!(xml.contains("type='qcow2'"));
         assert!(xml.contains("dev='vda' bus='virtio'"));
-        assert!(xml.contains("device='cdrom'")); // seed
+        // The seed is a read-only virtio disk, NOT a SATA cdrom: the Debian
+        // `-cloud` kernel has no SATA driver and would never see it.
+        assert!(!xml.contains("device='cdrom'"), "{xml}");
+        assert!(!xml.contains("bus='sata'"), "{xml}");
+        assert!(
+            xml.contains("<disk type='file' device='disk' snapshot='no'>"),
+            "{xml}"
+        );
+        assert!(xml.contains("/seed.iso"), "{xml}");
         assert!(xml.contains("<interface type='user'>"));
         assert!(xml.contains("52:54:00:ab:cd:ef"));
         assert!(xml.contains("host-passthrough"));
