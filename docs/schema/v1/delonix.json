@@ -2022,7 +2022,7 @@
         },
         "spec": {
           "default": null,
-          "description": "Left as «anything» in the schema on purpose: this is a different Kind's\nspec depending on which group the item sits in, and narrowing it to one\nof them would reject the other fourteen."
+          "description": "Left as «anything» in the schema on purpose: this is a different Kind's\nspec depending on which group the item sits in, and narrowing it to one\nof them would reject the other eleven."
         }
       },
       "required": [
@@ -2032,7 +2032,7 @@
     },
     "StackSpec": {
       "additionalProperties": false,
-      "description": "A grouped `kind: Stack` — bundles resources of several Kinds in ONE document\n(k8s-Service-like: everything for an app in one place). Expanded at load time\ninto the individual docs, which then flow through the normal per-Kind apply,\nin dependency order. Each child inherits the Stack's namespace unless it sets\nits own. The Stack doc itself does not survive the load (it becomes its parts).\nThe schema this type generates is deliberately SHALLOW, and the limit is\nworth stating because it is invisible from the outside.\n\nEach group is a list of [`StackItem`], whose `spec` is a raw `Value` that the\nchild Kind re-deserializes later. One item type serves all fifteen groups, so\nthere is no per-group type to point `#[schemars(with = ...)]` at the way\n`WorkloadSpec` can — typing the insides would mean fifteen new item types.\n\nWhat this DOES buy is the mistake people actually make: a typo in a GROUP\nname. `contaienrs:` is silently dropped today — `expand_stack` reads the\ngroups it knows and never looks at the rest — so the stack applies, reports\nsuccess, and is missing every container in it. `additionalProperties: false`\nover `STACK_SPEC_FIELDS` catches that in the editor.\n\nWhat it does NOT buy: the children's own specs are unchecked here. The\nper-Kind branches key on a document's `kind`, and a Stack's children have no\n`kind` of their own until `load` gives them one.",
+      "description": "A grouped `kind: Stack` — bundles resources of several Kinds in ONE document\n(k8s-Service-like: everything for an app in one place). Expanded at load time\ninto the individual docs, which then flow through the normal per-Kind apply,\nin dependency order. Each child inherits the Stack's namespace unless it sets\nits own. The Stack doc itself does not survive the load (it becomes its parts).\nThe schema this type generates is deliberately SHALLOW, and the limit is\nworth stating because it is invisible from the outside.\n\nEach group is a list of [`StackItem`], whose `spec` is a raw `Value` that the\nchild Kind re-deserializes later. One item type serves all twelve groups, so\nthere is no per-group type to point `#[schemars(with = ...)]` at the way\n`WorkloadSpec` can — typing the insides would mean twelve new item types.\n\nWhat this DOES buy is the mistake people actually make: a typo in a GROUP\nname. `contaienrs:` is silently dropped today — `expand_stack` reads the\ngroups it knows and never looks at the rest — so the stack applies, reports\nsuccess, and is missing every container in it. `additionalProperties: false`\nover `STACK_SPEC_FIELDS` catches that in the editor.\n\nWhat it does NOT buy: the children's own specs are unchecked here. The\nper-Kind branches key on a document's `kind`, and a Stack's children have no\n`kind` of their own until `load` gives them one.",
       "properties": {
         "containers": {
           "items": {
@@ -2041,12 +2041,6 @@
           "type": "array"
         },
         "dependencies": {
-          "items": {
-            "$ref": "#/$defs/StackItem"
-          },
-          "type": "array"
-        },
-        "egress": {
           "items": {
             "$ref": "#/$defs/StackItem"
           },
@@ -2089,18 +2083,6 @@
           "type": "array"
         },
         "secrets": {
-          "items": {
-            "$ref": "#/$defs/StackItem"
-          },
-          "type": "array"
-        },
-        "shareVolumes": {
-          "items": {
-            "$ref": "#/$defs/StackItem"
-          },
-          "type": "array"
-        },
-        "storage": {
           "items": {
             "$ref": "#/$defs/StackItem"
           },
