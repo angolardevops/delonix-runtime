@@ -5410,6 +5410,31 @@ pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// A 206 whose `Content-Range` starts elsewhere must not be appended: the
+    /// server here answers the resume request with the WHOLE body labelled as
+    /// starting at 0, and the file must end up as that body, not prefix+body.
+    #[test]
+    fn a_misaligned_206_restarts_the_download_instead_of_splicing() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut c, _)) = listener.accept() {
+                let mut req = [0u8; 2048];
+                let _ = c.read(&mut req);
+                let _ = c.write_all(
+                    b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
+                );
+            }
+        });
+        let dest = std::env::temp_dir().join(format!("dlx-206-{}", std::process::id()));
+        std::fs::write(&dest, b"AAAAA").unwrap();
+        stream_download(&format!("http://127.0.0.1:{port}/x"), &dest).unwrap();
+        let got = std::fs::read(&dest).unwrap();
+        let _ = std::fs::remove_file(&dest);
+        assert_eq!(got, b"0123456789");
+    }
+
     #[test]
     fn content_range_start_reads_the_offset() {
         assert_eq!(content_range_start("bytes 100-199/200"), Some(100));
