@@ -181,7 +181,14 @@ done
 # ---------------------------------------------------------------- pré-condições
 [ "$(uname -s)" = Linux ] || die "Delonix Runtime is Linux-only."
 ARCH=$(uname -m)
-[ "$ARCH" = x86_64 ] || die "no prebuilt binary for $ARCH yet (only x86_64). Build from source: cargo build --release -p delonix-runtime-bin"
+# The release asset's suffix IS `uname -m`, so the installer and the workflow
+# cannot drift apart. `arm64` is accepted as an input alias because some
+# userlands report it that way; the published asset is always `aarch64`.
+case "$ARCH" in
+  x86_64)        ASSET_ARCH=x86_64 ;;
+  aarch64|arm64) ASSET_ARCH=aarch64 ;;
+  *) die "no prebuilt binary for $ARCH yet (x86_64 and aarch64 only). Build from source: cargo build --release -p delonix-runtime-bin" ;;
+esac
 
 # O utilizador REAL (o script pode correr sob sudo já): é para ele que se
 # configuram subuid/grupos, não para o root.
@@ -252,10 +259,16 @@ elif [ -d /sys/class/drm ] && ls /sys/class/drm/card[0-9] >/dev/null 2>&1; then
 fi
 CPU_VARIANT=""
 # x86-64-v3 = AVX2+BMI2+FMA. O teu binário genérico continua a ser o fallback.
-if grep -qm1 avx2 /proc/cpuinfo && grep -qm1 bmi2 /proc/cpuinfo && grep -qm1 fma /proc/cpuinfo; then
+# The probe stays inside the architecture that HAS a variant to find: aarch64
+# publishes one binary, because it has no comparable named level, and on that
+# architecture `/proc/cpuinfo` has no `avx2` line to match anyway.
+if [ "$ASSET_ARCH" = x86_64 ] \
+  && grep -qm1 avx2 /proc/cpuinfo && grep -qm1 bmi2 /proc/cpuinfo && grep -qm1 fma /proc/cpuinfo; then
   CPU_VARIANT="-v3"
 fi
-if [ -n "$CPU_VARIANT" ]; then VARIANT_LABEL="x86-64-v3 (AVX2)"; else VARIANT_LABEL="x86-64 baseline"; fi
+if [ "$ASSET_ARCH" != x86_64 ]; then VARIANT_LABEL="$ASSET_ARCH"
+elif [ -n "$CPU_VARIANT" ]; then VARIANT_LABEL="x86-64-v3 (AVX2)"
+else VARIANT_LABEL="x86-64 baseline"; fi
 step host cpu "${CPU_MODEL:-unknown} (${NCPU} cpus, $VARIANT_LABEL)"
 step host resources "${RAM_GB}GB RAM · ${DISK_FREE_GB:-?}GB free at $REAL_HOME"
 [ -n "$GPU_INFO" ] && step host gpu "$GPU_INFO"
@@ -355,20 +368,20 @@ if [ "$WITH_BINARY" = 1 ]; then
   # `|| return 1` explícito em cada `curl` que tem de ser fatal — controlo de
   # fluxo explícito não depende do estado (in)consistente do `errexit`.
   fetch_asset() { # $1 nome-base (delonix|delonix-cri|delonix-mcp|delonix-mgmt) → devolve o nome descarregado, ou falha
-    local base="$1" asset="$1-x86_64${CPU_VARIANT}-linux"
+    local base="$1" asset="$1-${ASSET_ARCH}${CPU_VARIANT}-linux"
     if [ -n "$CPU_VARIANT" ]; then
       if curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
         echo "$asset"
         return 0
       fi
       warn "$asset is not in this release — falling back to the generic binary"
-      asset="$base-x86_64-linux"
+      asset="$base-${ASSET_ARCH}-linux"
     fi
     curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" || return 1
     echo "$asset"
   }
   # Um asset cujo nome é o nome, sem sufixo de arquitectura. O `fetch_asset`
-  # acima existe para BINÁRIOS e compõe sempre `-x86_64[-v3]-linux`; um `.vsix`
+  # acima existe para BINÁRIOS e compõe sempre `-<arch>[-v3]-linux`; um `.vsix`
   # é independente de arquitectura e chama-se `delonix-vscode` e mais nada.
   # Reutilizar aquele aqui pedia dois nomes que não existem, levava 404 nos dois,
   # e reportava «this release ships no editor extension» sobre uma release que a
@@ -722,9 +735,15 @@ if [ "$WITH_VM" = 1 ]; then
     skip vm hypervisor-fw
   fi
   optional_dep vm virsh "libvirt-clients|libvirt-client|libvirt"                    "libvirt VM backend (fallback)"
-  if ! command -v qemu-system-x86_64 >/dev/null 2>&1 && [ ! -e /usr/libexec/qemu-kvm ]; then
+  # QEMU's binary and its package are both named after the architecture, and
+  # here the guest is the host. Probing for `qemu-system-x86_64` on an arm64
+  # machine reported QEMU missing on every arm64 install, and then tried to
+  # install the x86 emulator to fix it.
+  QEMU_PKG=qemu-system-x86
+  [ "$ASSET_ARCH" = aarch64 ] && QEMU_PKG=qemu-system-arm
+  if ! command -v "qemu-system-${ASSET_ARCH}" >/dev/null 2>&1 && [ ! -e /usr/libexec/qemu-kvm ]; then
     step vm qemu-kvm "installing..."
-    pkg_install "qemu-system-x86|qemu-kvm|qemu-base|qemu" >/dev/null 2>&1 \
+    pkg_install "$QEMU_PKG|qemu-kvm|qemu-base|qemu" >/dev/null 2>&1 \
       && stepok vm qemu-kvm || warn "could not install QEMU — libvirt VMs will not start"
   else
     skip vm qemu-kvm

@@ -152,6 +152,41 @@ jobs:
       - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked --no-fail-fast
 
+  # ---- The same build and the same suite, natively on arm64 ----
+  #
+  # The engine's Linux boundary is architecture-specific in exactly one place —
+  # the seccomp allowlist, whose syscall numbers differ between x86_64 and
+  # aarch64 — and no job here ever looked at it. Three faults reached a user
+  # through that gap: `sendfile` denied on arm64 (a static HTTP response came
+  # back with its headers and an empty body), `fadvise64` denied the same way,
+  # and a custom OCI profile losing both rules without a message.
+  #
+  # NATIVE, and not cross-compiled. A cross build type-checks the aarch64 `cfg`
+  # branches and runs none of them, and all three faults compile perfectly:
+  # a missing syscall number is not a compile error, it is a denied syscall.
+  # `ubuntu-24.04-arm` is a GitHub-hosted arm64 runner, free for public
+  # repositories.
+  #
+  # `clippy -D warnings` is deliberately NOT here yet. On arm64 it fails today
+  # on a true warning — `allowed_syscalls` declares `let mut v` and never
+  # extends it, because the only `extend_from_slice` is behind
+  # `cfg(target_arch = "x86_64")`. That warning goes away with the syscall work,
+  # not with a CI change, so the lint gate turns on in the PR that fixes it
+  # rather than being silenced here.
+  test-arm64:
+    name: test (arm64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      # `delonix-cri` builds the CRI .proto through prost/tonic — needs protoc.
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --locked
+      - run: cargo test --workspace --locked --no-fail-fast
+
   # ---- Supply-chain: advisories RUSTSEC + licenças + fontes (ver deny.toml) ----
   deny:
     name: cargo-deny

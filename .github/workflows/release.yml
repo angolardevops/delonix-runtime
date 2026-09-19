@@ -7,8 +7,13 @@
 # `latest` (24.04, glibc 2.39) excluiria as enterprise ainda em uso.
 #
 # Assets publicados (nomes estáveis — o scripts/install.sh depende deles):
-#   delonix-x86_64-linux, delonix-cri-x86_64-linux, SHA256SUMS,
-#   SHA256SUMS.minisig, install.sh
+#   delonix-x86_64-linux, delonix-cri-x86_64-linux, delonix-aarch64-linux,
+#   delonix-cri-aarch64-linux, SHA256SUMS, SHA256SUMS.minisig, install.sh
+#
+# The aarch64 half is built by the `build-arm64` job, on an arm64 runner, and
+# is folded into the SAME SHA256SUMS and the same signature — one release, one
+# supply chain. The architecture suffix is what `uname -m` prints, which is
+# what `install.sh` matches on.
 #
 # ASSINATURA (porquê): o SHA256SUMS sozinho prova INTEGRIDADE DE TRANSFERÊNCIA,
 # não AUTENTICIDADE DE ORIGEM — vem da mesma URL que o binário, por isso quem
@@ -39,8 +44,69 @@ permissions:
   attestations: write
 
 jobs:
+  # ---- arm64, built natively on an arm64 runner ----
+  #
+  # ADR-0018 fixed the order of this work: «arm64 release artefacts first, then
+  # arm64 VM images». This job is that first half. Until it existed, the only
+  # way to run this engine on a Graviton, on an Ampere, or in a Linux aarch64
+  # guest on an Apple M-series host was to build it from source.
+  #
+  # NATIVE, and not cross-compiled. A cross build cannot run the sanity check
+  # below, and shipping a binary nobody executed is exactly the failure ADR-0018
+  # refused for the VM images: an image that builds, publishes, boots, and fails
+  # at the first command.
+  #
+  # `ubuntu-22.04-arm` for the same reason the x86_64 job pins 22.04 — glibc
+  # 2.35, so the binary runs on any distribution that old or newer (RHEL 9,
+  # Debian 12, Ubuntu 22.04+).
+  #
+  # There is no `-v3` equivalent here on purpose. `x86-64-v3` is a named
+  # microarchitecture level with wide support and a real gain; aarch64 has no
+  # single level that earns a second binary, so this architecture ships one.
+  build-arm64:
+    name: build (arm64)
+    runs-on: ubuntu-22.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (release, generic aarch64)
+        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin
+      - name: Collect and strip the binaries
+        # Stripped HERE, on the architecture that owns them. The publishing job's
+        # `strip` is binutils built for x86_64 and answers «file format not
+        # recognized» for an aarch64 ELF.
+        run: |
+          mkdir -p dist-arm64
+          cp target/release/delonix      dist-arm64/delonix-aarch64-linux
+          cp target/release/delonix-cri  dist-arm64/delonix-cri-aarch64-linux
+          cp target/release/delonix-mcp  dist-arm64/delonix-mcp-aarch64-linux
+          cp target/release/delonix-mgmt dist-arm64/delonix-mgmt-aarch64-linux
+          strip dist-arm64/delonix-*-linux
+      - name: Sanity — the binary starts and reports the tag's version
+        # Here and not in the publishing job: only an arm64 machine can execute
+        # an arm64 binary.
+        run: |
+          V=$(dist-arm64/delonix-aarch64-linux --version)
+          echo "$V"
+          echo "$V" | grep -q "${GITHUB_REF_NAME#v}" || { echo "::error::binary version ($V) != tag ($GITHUB_REF_NAME) — was the Cargo.toml bump forgotten?"; exit 1; }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist-arm64
+          path: dist-arm64/
+          retention-days: 1
+          # An empty upload would publish a release missing half its binaries
+          # and say nothing. Fail here instead.
+          if-no-files-found: error
+
   release:
     name: build & publish
+    # The aarch64 binaries have to exist before the SHA256SUMS is written: an
+    # asset outside the signed sums is an asset nobody can verify.
+    needs: build-arm64
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -85,15 +151,23 @@ jobs:
         env:
           RUSTFLAGS: "-C target-cpu=x86-64-v3"
         run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin
+      # The arm64 binaries, built and already stripped on their own runner.
+      - name: Fetch the aarch64 binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-arm64
+          path: dist-release
       - name: Prepara assets
         run: |
           cp target/release/delonix     dist-release/delonix-x86_64-v3-linux
           cp target/release/delonix-cri dist-release/delonix-cri-x86_64-v3-linux
           cp target/release/delonix-mcp dist-release/delonix-mcp-x86_64-v3-linux
           cp target/release/delonix-mgmt dist-release/delonix-mgmt-x86_64-v3-linux
-          strip dist-release/delonix-*-linux
+          # x86_64 ONLY: this runner's `strip` does not read an aarch64 ELF, and
+          # the aarch64 binaries arrived stripped from their own runner.
+          strip dist-release/delonix-*x86_64*-linux
           cp scripts/install.sh dist-release/install.sh
-          cd dist-release && sha256sum delonix-x86_64-linux delonix-x86_64-v3-linux delonix-cri-x86_64-linux delonix-cri-x86_64-v3-linux delonix-mcp-x86_64-linux delonix-mcp-x86_64-v3-linux delonix-mgmt-x86_64-linux delonix-mgmt-x86_64-v3-linux install.sh > SHA256SUMS
+          cd dist-release && sha256sum delonix-x86_64-linux delonix-x86_64-v3-linux delonix-cri-x86_64-linux delonix-cri-x86_64-v3-linux delonix-mcp-x86_64-linux delonix-mcp-x86_64-v3-linux delonix-mgmt-x86_64-linux delonix-mgmt-x86_64-v3-linux delonix-aarch64-linux delonix-cri-aarch64-linux delonix-mcp-aarch64-linux delonix-mgmt-aarch64-linux install.sh > SHA256SUMS
       - name: SBOM (SPDX 2.3, do Cargo.lock)
         run: |
           python3 scripts/sbom.py --version "${GITHUB_REF_NAME#v}" > dist-release/delonix-sbom.spdx.json
@@ -200,6 +274,10 @@ jobs:
             dist-release/delonix-mcp-x86_64-v3-linux
             dist-release/delonix-mgmt-x86_64-linux
             dist-release/delonix-mgmt-x86_64-v3-linux
+            dist-release/delonix-aarch64-linux
+            dist-release/delonix-cri-aarch64-linux
+            dist-release/delonix-mcp-aarch64-linux
+            dist-release/delonix-mgmt-aarch64-linux
             dist-release/delonix-sbom.spdx.json
       - name: Publica a release
         env:

@@ -277,6 +277,7 @@ holder de rede ou no arranque de VMs funciona — isso precisa de uma corrida ao
 | `cli-surface` | cli surface |
 | `clippy` | clippy -D warnings |
 | `test` | test |
+| `test-arm64` | test (arm64) |
 | `deny` | cargo-deny |
 | `docs` | generated docs and valid examples |
 <!-- dev-docs:end ci-gates -->
