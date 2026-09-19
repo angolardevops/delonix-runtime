@@ -1340,6 +1340,25 @@ fn after_stopped(base: &std::path::Path, name: &str) {
     }
 }
 
+/// Disarms the `--rm-after` timer of a VM that is being destroyed by other
+/// means (`vm destroy`, or the timer itself). Left armed it fires later,
+/// answers «no such VM» and leaves a failed unit behind — and would hit a NEW
+/// VM re-created under the same name. Best effort: no user systemd, or no
+/// timer, is the ordinary case and not worth a message.
+fn cancel_scheduled_removal(name: &str) {
+    let unit = format!("delonix-vm-rm-{name}");
+    for verb in [
+        ["stop", &format!("{unit}.timer")],
+        ["reset-failed", &format!("{unit}.service")],
+    ] {
+        let _ = Command::new("systemctl")
+            .args(["--user", "--quiet"])
+            .args(verb)
+            .stderr(std::process::Stdio::null())
+            .status();
+    }
+}
+
 /// Destroys/schedules throwaway VMs found stopped — the guest-poweroff case,
 /// which never passed through `vm stop`.
 fn reap_ephemeral(base: &std::path::Path) {
@@ -1411,6 +1430,7 @@ fn cmd_destroy(
         drop(prog);
         match res {
             Ok(d) => {
+                cancel_scheduled_removal(name);
                 println!(
                     "{}",
                     super::po::tf(
