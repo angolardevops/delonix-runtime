@@ -4119,21 +4119,58 @@ pub(crate) fn check_cri_bin(explicit: Option<&Path>) -> Result<()> {
 }
 
 pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    let (path, origin) = locate_cri_bin(explicit)?;
+    // Provenance, always: this binary is what runs on every node of the
+    // cluster, so the operator gets to see WHICH one it is (path, origin and
+    // hash) instead of having to infer it from the byte size afterwards.
+    let sha = hex_sha256_file(&path)?;
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "delonix-cri: {origin} — {path} (sha256 {sha})",
+            &[
+                ("origin", origin),
+                ("path", &path.display().to_string()),
+                ("sha", &sha),
+            ],
+        )
+    );
+    Ok(path)
+}
+
+/// Opt-in for building `delonix-cri` from the source tree around the cwd.
+/// Only an explicit `1`/`true` counts — anything else (unset, empty, `0`) is
+/// off, so the runtime of a cluster never depends on where the command ran.
+pub(crate) const CRI_FROM_SOURCE_ENV: &str = "DELONIX_CRI_FROM_SOURCE";
+
+fn cri_from_source_requested(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some("1") | Some("true"))
+}
+
+/// Where the `delonix-cri` to install came from, in the order it is tried:
+/// `--cri-bin`, next to the running `delonix`, the source tree of the cwd
+/// (ONLY when `DELONIX_CRI_FROM_SOURCE=1`), and finally the verified release
+/// asset of the running version. Returns the origin so the caller can say it.
+fn locate_cri_bin(explicit: Option<PathBuf>) -> Result<(PathBuf, &'static str)> {
     check_cri_bin(explicit.as_deref())?;
     if let Some(p) = explicit {
-        return Ok(p);
+        return Ok((p, "--cri-bin"));
     }
     // Next to the current `delonix` (normal install, release).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join("delonix-cri");
             if candidate.exists() {
-                return Ok(candidate);
+                return Ok((candidate, "next to delonix"));
             }
         }
     }
-    // Dev convenience: source-code workspace from the cwd.
-    if let Some(workspace_root) = find_workspace_root() {
+    // Dev convenience — opt-in only. It used to be the silent second choice,
+    // which made the cwd of whoever ran the command the source of the runtime
+    // installed on a cluster's nodes: a binary matching no published commit,
+    // and not reproducible when the tree is dirty.
+    let from_source = cri_from_source_requested(std::env::var(CRI_FROM_SOURCE_ENV).ok().as_deref());
+    if let Some(workspace_root) = find_workspace_root().filter(|_| from_source) {
         eprintln!(
             "{}",
             super::po::tf(
@@ -4160,7 +4197,7 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
         }
         let built = workspace_root.join("target/release/delonix-cri");
         if built.exists() {
-            return Ok(built);
+            return Ok((built, "built from source ($DELONIX_CRI_FROM_SOURCE)"));
         }
     }
     // BUG FIXED HERE, found live: a user who installed via `install.sh`
@@ -4171,11 +4208,13 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
     // alongside `delonix` (same tag, always released together) — download it
     // (verified against the release's own SHA256SUMS, same as `install.sh`
     // would with `--with-cri`) instead of giving up.
-    download_cri_bin().map_err(|e| {
-        Error::Invalid(format!(
-            "{e} — or use --cri-bin <path> / run from a source checkout"
-        ))
-    })
+    download_cri_bin()
+        .map(|p| (p, "release asset"))
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "{e} — or use --cri-bin <path> (or {CRI_FROM_SOURCE_ENV}=1 to build from a source checkout)"
+            ))
+        })
 }
 
 /// `true` when the CPU has AVX2+BMI2+FMA — the same 3-feature check
@@ -5463,6 +5502,16 @@ mod tests {
         assert!(!cache_intact(&f), "seal disagrees");
         assert!(!f.exists(), "the bad file is removed so it is refetched");
         assert!(!cache_seal_path(&f).exists());
+    }
+
+    #[test]
+    fn building_cri_from_the_cwd_needs_an_explicit_opt_in() {
+        assert!(!cri_from_source_requested(None));
+        assert!(!cri_from_source_requested(Some("")));
+        assert!(!cri_from_source_requested(Some("0")));
+        assert!(!cri_from_source_requested(Some("yes please")));
+        assert!(cri_from_source_requested(Some("1")));
+        assert!(cri_from_source_requested(Some(" true ")));
     }
 
     #[test]

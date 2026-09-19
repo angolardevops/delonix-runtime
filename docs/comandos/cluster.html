@@ -429,6 +429,9 @@ Options:
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
+      --cri-bin &lt;CRI_BIN&gt;
+          `delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version
+
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
 
@@ -505,6 +508,9 @@ Options:
 
       --etcd-cluster &lt;ETCD_CLUSTER&gt;
           Auto-provision N more VMs as a DEDICATED etcd cluster (delonix generates its own CA + certs and bootstraps it) instead of the default `stacked` etcd (co-located with the control-planes). Use an ODD number for a well-defined quorum (3, 5, ...) — 1 is allowed for dev/test but has no HA (a single point of failure). Omit for today&#x27;s default behavior
+
+      --cri-bin &lt;CRI_BIN&gt;
+          `delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

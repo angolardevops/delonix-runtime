@@ -397,6 +397,13 @@ and how to tear the isolated infra down, is in
 <td><code>--cap-ceiling-mode</code> wins. In both modes the engine's implicit default set is reduced to the ceiling without an error.</td>
 </tr>
 <tr>
+<td><code>DELONIX_CRI_FROM_SOURCE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs:locate_cri_bin</code></a> (<code>CRI_FROM_SOURCE_ENV</code>, parsed by <code>cri_from_source_requested</code>)</td>
+<td>Opt-in to compile <code>delonix-cri</code> from the source checkout around the cwd when <code>cluster apply</code> / <code>cluster kubeadm</code> need a binary to install on the nodes.</td>
+<td>Only <code>1</code> or <code>true</code> (after trimming) turns it on; unset, empty, <code>0</code> or anything else is off.</td>
+<td>Off by default so the runtime installed on a cluster never depends on the directory the command ran from. Without it the order is <code>--cri-bin</code>, the <code>delonix-cri</code> next to <code>delonix</code>, then the release asset of the running version, verified against its <code>SHA256SUMS</code>. The origin, path and sha256 are always printed.</td>
+</tr>
+<tr>
 <td><code>DELONIX_API_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>; forwarded by <code>cmd/serve.rs:run</code></td>
 <td>Socket of the local management API (<code>delonix serve api</code>).</td>
