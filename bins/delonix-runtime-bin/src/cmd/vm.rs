@@ -764,6 +764,26 @@ pub enum VmCmd {
         #[arg(long)]
         apply: bool,
     },
+    /// Destroy VMs and everything they own — provider-side VM, disks, snapshots.
+    ///
+    /// Unlike `stop` this is not reversible. It goes through the VM's own
+    /// backend (libvirt, Proxmox, Cloud Hypervisor) and removes the overlay,
+    /// seed, snapshots, sockets, logs, extra disks and the DHCP reservation.
+    /// If the provider refuses, the record is kept and the error says why —
+    /// `--force` drops the local state anyway. Shared volumes are never
+    /// deleted; extra disks outside the state directory only with
+    /// `--purge-disks`.
+    #[command(alias = "rm")]
+    Destroy {
+        #[arg(required = true, num_args = 1.., add = ArgValueCandidates::new(super::complete::vms))]
+        names: Vec<String>,
+        /// Delete the local state even if the provider refuses the removal.
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Also delete extra disks that live outside the state directory.
+        #[arg(long)]
+        purge_disks: bool,
+    },
     /// Stop the VM (preserves disk, record and snapshots).
     #[command(alias = "down")]
     Stop {
@@ -1176,6 +1196,58 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 /// So the default sweeps leftovers only, and the preview names them before the
 /// prompt. `--stopped` opts into the destructive half, and gets its own line in
 /// the warning rather than being folded into the same sentence.
+fn cmd_destroy(
+    base: &std::path::Path,
+    names: &[String],
+    force: bool,
+    purge_disks: bool,
+) -> Result<()> {
+    let mut failed = 0usize;
+    for name in names {
+        match delonix_vm::destroy(base, name, force, purge_disks) {
+            Ok(d) => {
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "destroyed {name} — {n} artifact(s), {size} freed",
+                        &[
+                            ("name", name),
+                            ("n", &d.removed.len().to_string()),
+                            ("size", &super::output::fmt_size(d.freed_bytes)),
+                        ]
+                    )
+                );
+                for r in &d.removed {
+                    println!("  - {r}");
+                }
+                for k in &d.kept {
+                    eprintln!("  {} {k}", super::po::t("kept:"));
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!("{name}: {e}");
+                if !force && e.number() != 4501 {
+                    eprintln!(
+                        "{}",
+                        super::po::t(
+                            "  the record was kept intact; retry with --force to drop the local state"
+                        )
+                    );
+                }
+            }
+        }
+    }
+    if failed > 0 {
+        return Err(delonix_vm::Error::Command {
+            context: "vm destroy",
+            message: format!("{failed} of {} VM(s) could not be destroyed", names.len()),
+        }
+        .into());
+    }
+    Ok(())
+}
+
 fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
     let mut lines = Vec::new();
     let entries = super::prune::doomed_vm_entries(base)?;
@@ -1236,6 +1308,17 @@ fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
         )
     );
     super::prune::note_partial(v.freed);
+    if !v.failed.is_empty() {
+        return Err(delonix_vm::Error::Command {
+            context: "vm prune",
+            message: format!(
+                "{} VM(s) could not be destroyed: {} — see the errors above, or use `vm destroy --force`",
+                v.failed.len(),
+                v.failed.join(", ")
+            ),
+        }
+        .into());
+    }
     Ok(())
 }
 
@@ -2162,6 +2245,11 @@ pub fn run(action: VmCmd) -> Result<()> {
             apply,
         } => super::vmbridge::bridge(&network, vm_subnet, apply),
         VmCmd::Unbridge { network, apply } => super::vmbridge::unbridge(&network, apply),
+        VmCmd::Destroy {
+            names,
+            force,
+            purge_disks,
+        } => cmd_destroy(&base, &names, force, purge_disks),
         VmCmd::Stop { name } => {
             delonix_vm::stop(&base, &name)?;
             println!("{name}");

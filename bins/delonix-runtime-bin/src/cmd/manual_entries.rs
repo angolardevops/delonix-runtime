@@ -2300,6 +2300,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm stop", "vm restart", "vm create", "get"],
     },
     Entry {
+        path: "vm destroy",
+        group: "Lifecycle",
+        examples: &[
+            ("remove a VM and everything it owns — provider-side VM, overlay, seed, snapshots, sockets, logs, DHCP reservation — and see what was freed", "delonix vm destroy dev"),
+            ("several at once, dropping the local state even if the provider refuses the removal", "delonix vm destroy dev1 dev2 --force"),
+            ("also delete extra disks that live outside the state directory", "delonix vm destroy dev --purge-disks"),
+        ],
+        see_also: &["vm stop", "vm prune", "vm ls", "delete"],
+    },
+    Entry {
         path: "vm stop",
         group: "Lifecycle",
         examples: &[

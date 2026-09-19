@@ -12912,3 +12912,33 @@ msgstr "Uma ferramenta do host a que este motor recorre para redes (ip, nft, wg,
 
 msgid "Read the operation and error in the message; check the tool is installed and the host's network state is sane."
 msgstr "Lê a operação e o erro na mensagem; verifica que a ferramenta está instalada e que o estado de rede do host está são."
+
+msgid "Destroy VMs and everything they own — provider-side VM, disks, snapshots."
+msgstr "Destrói VMs e tudo o que possuem — a VM no provider, discos, snapshots."
+
+msgid "Destroy VMs and everything they own — provider-side VM, disks, snapshots.\n\nUnlike `stop` this is not reversible. It goes through the VM's own backend (libvirt, Proxmox, Cloud Hypervisor) and removes the overlay, seed, snapshots, sockets, logs, extra disks and the DHCP reservation. If the provider refuses, the record is kept and the error says why — `--force` drops the local state anyway. Shared volumes are never deleted; extra disks outside the state directory only with `--purge-disks`."
+msgstr "Destrói VMs e tudo o que possuem — a VM no provider, discos, snapshots.\n\nAo contrário de `stop`, não é reversível. Passa pelo backend da própria VM (libvirt, Proxmox, Cloud Hypervisor) e remove o overlay, o seed, os snapshots, sockets, logs, discos extra e a reserva DHCP. Se o provider recusar, o registo fica e o erro diz porquê — `--force` larga o estado local na mesma. Os volumes partilhados nunca são apagados; os discos extra fora do directório de estado só com `--purge-disks`."
+
+msgid "Delete the local state even if the provider refuses the removal."
+msgstr "Apaga o estado local mesmo que o provider recuse a remoção."
+
+msgid "Also delete extra disks that live outside the state directory."
+msgstr "Apaga também os discos extra que vivem fora do directório de estado."
+
+msgid "destroyed {name} — {n} artifact(s), {size} freed"
+msgstr "destruída {name} — {n} artefacto(s), {size} libertados"
+
+msgid "kept:"
+msgstr "mantido:"
+
+msgid "  the record was kept intact; retry with --force to drop the local state"
+msgstr "  o registo ficou intacto; repete com --force para largar o estado local"
+
+msgid "remove a VM and everything it owns — provider-side VM, overlay, seed, snapshots, sockets, logs, DHCP reservation — and see what was freed"
+msgstr "remove uma VM e tudo o que possui — VM no provider, overlay, seed, snapshots, sockets, logs, reserva DHCP — e mostra o que foi libertado"
+
+msgid "several at once, dropping the local state even if the provider refuses the removal"
+msgstr "várias de uma vez, largando o estado local mesmo que o provider recuse a remoção"
+
+msgid "also delete extra disks that live outside the state directory"
+msgstr "apaga também os discos extra que vivem fora do directório de estado"
