@@ -1,0 +1,82 @@
+# Complete reference for `kind: Service` (ADR-0032) — a SET of workloads picked by
+# label and published as MULTIPLE DNS `A` records under
+# <name>.<namespace>.delonix.internal, in rotating order (DNS round-robin).
+# No VIP, no L4 dataplane, no daemon. Membership is recomputed within a DNS-index TTL
+# (~2s): a workload added, removed or relabelled shows up without re-applying.
+#
+# spec fields: selector.matchLabels (all listed labels must match — logical AND) and
+# port (the CONTAINER-side port; never a host or VIP port). A selector that is empty or
+# matches nothing is not an error: the name resolves to an empty set and apply warns.
+# The workloads below carry labels through `kind: Workload` (type: container), which
+# lowers to a labelled container.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: web-1
+  labels: { app: web, tier: frontend, track: stable }
+spec:
+  type: container
+  container: { image: "nginx:alpine", network: appnet }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: web-2
+  labels: { app: web, tier: frontend, track: canary }
+spec:
+  type: container
+  container: { image: "nginx:alpine", network: appnet }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: api-1
+  namespace: team-a            # a namespace other than `default`
+  labels: { app: api }
+spec:
+  type: container
+  container: { image: "caddy:alpine", network: appnet }
+---
+# 1. Single-label selector, namespace `default`.
+#    Clients resolve web.default.delonix.internal and get web-1 and web-2 in rotation.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: web
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: web                 # every listed label must match
+  port: 80                     # container-side port the members listen on
+---
+# 2. Multi-label selector: narrows the set to the stable track only (here: web-1).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: web-stable
+spec:                          # namespace omitted = `default`
+  selector:
+    matchLabels:
+      app: web
+      track: stable
+  port: 80
+---
+# 3. Service living in another namespace: resolves as api.team-a.delonix.internal.
+#    Namespace isolation applies to DNS: other namespaces get NXDOMAIN (except services in `default`).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: api
+  namespace: team-a
+spec:
+  selector:
+    matchLabels:
+      app: api
+  port: 8080

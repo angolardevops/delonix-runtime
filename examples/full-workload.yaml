@@ -1,0 +1,235 @@
+# kind: Workload — ONE declarative object for every compute type (ADR-0001/0006).
+#
+#   delonix stack apply -f examples/full-workload.yaml --dry-run    # shows what each Workload lowers to
+#   delonix stack validate -f examples/full-workload.yaml
+#
+# A Workload is sugar: it does not survive the load. `spec.type` picks the target Kind and the block
+# named after the type carries EXACTLY that Kind's spec (no field is redefined here):
+#
+#     type: container  ->  spec.container  ==  kind: Container spec   (full-container.yaml)
+#     type: vm         ->  spec.vm          ==  kind: VirtualMachine spec (full-virtualmachine.yaml)
+#     type: pod        ->  spec.pod         ==  kind: Pod spec         (full-pod.yaml)
+#     type: microvm    ->  spec.microvm     ==  kind: VirtualMachine spec, backend FORCED to cloud-hypervisor
+#
+# Exactly ONE block, the one matching `type` (any other block is an error). `metadata` (name, namespace,
+# labels, annotations) is inherited by the lowered resource. Because each type is an alternative, every
+# type gets its own document below; each block is shown with all its fields.
+# ---------------------------------------------------------------------------
+# Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: wl-net
+spec:
+  driver: bridge
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: wl-secret
+spec:
+  stringData:
+    API_TOKEN: example-token-not-real
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: wl-data
+spec:
+  driver: local
+---
+# ---------------------------------------------------------------------------
+# type: container — the FLAT container spec, every field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-container
+  namespace: default                    # inherited by the lowered Container
+  labels: { tier: backend }
+  annotations: { example.delonix.io/note: lowers-to-container }
+spec:
+  type: container
+  container:
+    image: nginx:alpine                 # REQUIRED
+    detach: true
+    command: ["nginx", "-g", "daemon off;"]
+    entrypoint: /docker-entrypoint.sh
+    user: "101:101"
+    hostname: wl-container-host
+    restartPolicy: always
+    addHost: ["legacy-api:10.0.0.9"]
+    labels: ["team=platform"]
+    logDriver: json
+    network: wl-net
+    ports: ["18090:80"]
+    expose: 80
+    networkAlias: [wl-web]
+    netBps: 10mbit
+    netBurst: 20mbit
+    memory: 256M
+    cpus: "0.5"
+    cpuWeight: "200"
+    cpuset: "0"
+    ioWeight: "100"
+    cgroupParent: { name: wl-tier, memoryMax: "1073741824", cpus: "2", pidsMax: "512" }
+    readOnly: true
+    capDrop: ["ALL"]
+    capAdd: ["NET_BIND_SERVICE"]
+    securityOpt: ["no-new-privileges"]
+    userns: true
+    volumes: ["wl-data:/var/lib/app"]
+    tmpfs: ["/tmp"]
+    env: ["TZ=Africa/Luanda"]
+    secret: [wl-secret]
+    secretFiles: true
+    ulimit: ["nofile=1024:2048"]
+    sysctl: ["net.core.somaxconn=1024"]
+---
+# ---------------------------------------------------------------------------
+# type: container — the GROUPED container spec (resources/network/security/storage/env/limits)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-container-grouped
+spec:
+  type: container
+  container:
+    image: busybox:latest
+    command: ["sleep", "infinity"]
+    restartPolicy: unless-stopped       # no | on-failure[:max] | always | unless-stopped
+    resources: { memory: 128M, cpus: "0.25", cpuWeight: "100", ioWeight: "50" }
+    network: { name: wl-net, alias: [wl-grouped], rateBps: 5mbit, rateBurst: 10mbit }
+    security: { readOnly: true, capDrop: [ALL], userns: true }
+    storage: { volumes: ["wl-data:/data"], tmpfs: ["/tmp"] }
+    env: { vars: ["MODE=grouped"], secrets: [wl-secret], secretFiles: false }
+    limits: { ulimit: ["nofile=512:1024"], sysctl: ["net.core.somaxconn=512"] }
+---
+# ---------------------------------------------------------------------------
+# type: pod — a multi-container pod (k8s-shaped), every pod-level field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-pod
+spec:
+  type: pod
+  pod:
+    network: wl-net                     # SDN network of the pod's shared netns
+    restartPolicy: OnFailure            # Always | OnFailure | Never
+    hostname: wl-pod-host
+    shareProcessNamespace: true         # members see each other's processes
+    hostAliases:
+      - ip: 10.0.0.9
+        hostnames: [legacy-api]
+    volumes:
+      - name: scratch
+        emptyDir: { medium: Memory }
+      - name: data
+        persistentVolumeClaim: { claimName: wl-data }
+      - name: host-files
+        hostPath: { path: /srv/www }
+    containers:
+      - name: web
+        image: nginx:latest
+        command: ["/bin/sh", "-c"]
+        args: ["nginx -g 'daemon off;'"]
+        workingDir: /usr/share/nginx/html
+        ports:
+          - { containerPort: 80, hostPort: 18091, protocol: TCP, hostIP: 127.0.0.1 }
+        env:
+          - { name: TZ, value: Africa/Luanda }
+        volumeMounts:
+          - { name: scratch, mountPath: /tmp/cache }
+          - { name: data, mountPath: /var/lib/web }
+          - { name: host-files, mountPath: /usr/share/nginx/html, readOnly: true }
+        resources:
+          limits: { cpu: "500m", memory: 256Mi }
+        securityContext:
+          privileged: false
+          runAsUser: 101
+          readOnlyRootFilesystem: true
+          capabilities: { drop: ["ALL"], add: ["NET_BIND_SERVICE"] }
+      - name: sidecar
+        image: busybox:latest
+        command: ["sleep", "infinity"]
+---
+# ---------------------------------------------------------------------------
+# type: vm — a full VirtualMachine spec (libvirt backend), flat shape
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-vm
+spec:
+  type: vm
+  vm:
+    disk: delonix-vm-base:ubuntu-24.04
+    backend: libvirt                    # `vm` accepts any backend (unlike `microvm`)
+    restartPolicy: always
+    vcpus: 2
+    memory: 4G
+    hugepages: false
+    cpuAffinity: "0-1"
+    network: wl-net
+    netMode: nat
+    ip: 192.168.122.60
+    vnc: true
+    hostname: wl-vm
+    sshKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example"]
+    userData: "@/etc/delonix/examples/user-data.yaml"
+    volumes:
+      - { name: wl-data, mountPath: /mnt/data, readOnly: false }
+    machine: q35
+    cpuModel: host-model
+    cpuTopology: { sockets: 1, cores: 2, threads: 1 }
+    tpm: true
+    video: virtio
+    bootOrder: [hd]
+    extraDisks:
+      - { source: /var/lib/libvirt/images/wl-extra.qcow2, bus: virtio, format: qcow2, readOnly: false, target: vdb }
+    extraNics:
+      - { type: network, source: default, model: virtio }
+    libvirtXmlOverlay:
+      - "<memballoon model='virtio'/>"
+---
+# ---------------------------------------------------------------------------
+# type: vm — the GROUPED VirtualMachine spec (resources/network/cloudInit/libvirt)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-vm-grouped
+spec:
+  type: vm
+  vm:
+    disk: delonix-vm-base:ubuntu-24.04
+    resources: { vcpus: 2, memory: 2G }
+    network: { name: wl-net, mode: nat, staticIp: 192.168.122.61 }
+    cloudInit: { hostname: wl-vm-grouped }
+    libvirt: { backend: libvirt, machine: q35 }
+---
+# ---------------------------------------------------------------------------
+# type: microvm — a VirtualMachine on the microVM hypervisor; the backend is FORCED to cloud-hypervisor
+# (writing `backend: libvirt` here is a contradiction and is rejected — use `type: vm` for that)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-microvm
+spec:
+  type: microvm
+  microvm:
+    disk: delonix-vm-base:ubuntu-24.04  # needs an image that boots on Cloud Hypervisor (not the libvirt-only k8s golden)
+    backend: cloud-hypervisor           # optional: only the value cloud-hypervisor is accepted here
+    vcpus: 2
+    memory: 2G
+    network: wl-net
+    firmware: /usr/local/share/delonix/CLOUDHV.fd
+    hostname: wl-microvm
+    restartPolicy: on-failure
+    hugepages: false
+    cpuAffinity: "2-3"
+    sshKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example"]

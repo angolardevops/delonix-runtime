@@ -1,0 +1,250 @@
+# kind: Container — EVERY field of the flat container spec, in every accepted shape.
+#
+#   delonix stack apply -f examples/full-container.yaml --dry-run
+#   delonix stack validate -f examples/full-container.yaml
+#
+# Layout of this file (one document per variant, separated by `---`):
+#   1. supporting resources (Network, Secret, Volume) that the containers reference
+#   2. `full-flat`     — the FLAT shape: every field at the top level of `spec`
+#   3. `full-grouped`  — the GROUPED shape: resources/network/security/storage/env/limits
+#   4. `env-map`       — `env` written as a plain `KEY: value` mapping
+#   5. `foreground`    — `detach: false` (synchronous, like `container run` without -d)
+#   6. `minimal`       — the only mandatory field (`image`)
+#
+# The flat and the grouped shape describe the SAME container; they are separate
+# documents because they are alternative spellings (a flat key wins over a grouped one
+# of the same target if both are present). The k8s-style `spec.containers[]` shape is a
+# `kind: Pod` (see full-pod.yaml) — on a `kind: Container` it is a sunset form.
+# ---------------------------------------------------------------------------
+# 1. Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: app-net
+spec:
+  driver: bridge
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: app-secret
+spec:
+  stringData:
+    DB_PASSWORD: change-me-example      # injected as env (or /run/secrets/DB_PASSWORD, see secretFiles)
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: app-data
+spec:
+  driver: local
+---
+# A peer container so `knows:` has something to resolve.
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: peer
+spec:
+  image: busybox:latest
+  command: ["sleep", "infinity"]
+  network: app-net
+---
+# ---------------------------------------------------------------------------
+# 2. FLAT shape — every field at the top level
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: full-flat
+  namespace: default                    # isolation namespace (containers of other namespaces cannot reach it)
+  labels:                               # metadata labels (the engine adds its own delonix.io/* ones)
+    tier: frontend
+  annotations:
+    example.delonix.io/purpose: full-spec-demo
+spec:
+  image: nginx:alpine                   # REQUIRED — image reference (pulled if missing)
+  detach: true                          # run in the background (default true for a manifest)
+  command: ["nginx", "-g", "daemon off;"]   # overrides the image CMD
+  entrypoint: /docker-entrypoint.sh     # overrides the image ENTRYPOINT ("" clears it)
+  user: "101:101"                       # uid[:gid] or user name to run as
+  hostname: full-flat-host              # container hostname (default: the container name)
+  restartPolicy: on-failure:3           # no | on-failure[:max] | always | unless-stopped (legacy key `restart` also accepted)
+  addHost:                              # extra /etc/hosts entries, `name:ip`
+    - legacy-api:10.0.0.9
+  labels:                               # container labels, `key=value` (spec-level, distinct from metadata.labels)
+    - tier=frontend
+    - team=platform
+
+  # --- network ---
+  network: app-net                      # host | none | <custom network> (custom => own netns on the SDN)
+  ports:                                # publish host:container[/proto]; [hostIp:]host:container and ranges work too
+    - "127.0.0.1:18080:80"
+    - "18443:443/tcp"
+    - "19000-19002:9000-9002"
+  expose: 80                            # auto-register this HTTP port in the L7 proxy (needs a custom network)
+  networkAlias:                         # extra DNS names on the custom network
+    - web
+    - frontend
+  knows:                                # restrict what this container can reach to these peers (directed Dependency)
+    - peer
+  netBps: 10mbit                        # egress rate limit (needs a custom network)
+  netBurst: 20mbit                      # burst for netBps
+
+  # --- resources (cgroup v2) ---
+  memory: 256M                          # 64M | 2G | max
+  cpus: "0.5"                           # CPU cores
+  cpuWeight: "200"                      # relative CPU weight under contention (1-10000)
+  cpuset: "0"                           # pin to CPUs, e.g. "0-3" (needs the cpuset controller delegated)
+  ioWeight: "100"                       # relative block-I/O weight
+  cgroupParent:                         # shared intermediate cgroup bounding a GROUP of containers together
+    name: app-tier                      # single safe path segment
+    memoryMax: "1073741824"             # aggregate memory ceiling (bytes)
+    cpus: "2"                           # aggregate CPU cores
+    pidsMax: "512"                      # aggregate process ceiling
+
+  # --- security ---
+  readOnly: true                        # read-only rootfs (writes go to tmpfs/volumes)
+  capDrop: ["ALL"]                      # capabilities to drop
+  capAdd: ["NET_BIND_SERVICE"]          # capabilities to add back
+  securityOpt:                          # docker-style security options
+    - no-new-privileges
+  # apparmor: <profile>                 # AppArmor profile — see the note at the end of this file
+  # selinux: <context>                  # SELinux context   — see the note at the end of this file
+  userns: true                          # force the subuid user namespace (already default in rootless)
+
+  # --- storage ---
+  volumes:                              # named volume or bind mount; optional :ro
+    - app-data:/var/lib/app
+    - /etc/hostname:/etc/host-name:ro
+  tmpfs:                                # in-memory mounts
+    - /tmp
+    - /run/cache
+
+  # --- environment ---
+  env:                                  # KEY=value list
+    - TZ=Africa/Luanda
+    - LOG_LEVEL=info
+  secret:                               # vault secret names, injected as env (or files, below)
+    - app-secret
+  secretFiles: false                    # true => secrets appear as /run/secrets/<key> instead of env
+
+  # --- misc limits ---
+  ulimit:
+    - nofile=1024:2048
+  sysctl:
+    - net.core.somaxconn=1024
+  logDriver: json                       # json | cri
+---
+# ---------------------------------------------------------------------------
+# 3. GROUPED shape — the same fields, organised by concern
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: full-grouped
+spec:
+  image: nginx:alpine
+  detach: true
+  command: ["nginx", "-g", "daemon off;"]
+  entrypoint: /docker-entrypoint.sh
+  user: "101:101"
+  hostname: full-grouped-host
+  restartPolicy: always
+  addHost: ["legacy-api:10.0.0.9"]
+  labels: ["tier=frontend"]
+  logDriver: json
+
+  resources:                            # cgroup v2 limits
+    memory: 256M
+    cpus: "0.5"
+    cpuWeight: "200"
+    cpuset: "0"
+    ioWeight: "100"
+    cgroupParent:
+      name: app-tier-grouped
+      memoryMax: "1073741824"
+      cpus: "2"
+      pidsMax: "512"
+
+  network:                              # a mapping here (a plain string is the flat form)
+    name: app-net                       # host | none | <custom network>
+    ports: ["18081:80"]
+    expose: 80                          # auto-register in the L7 proxy
+    alias: [web-grouped]                # => networkAlias
+    knows: [peer]
+    rateBps: 10mbit                     # => netBps
+    rateBurst: 20mbit                   # => netBurst
+
+  security:
+    privileged: false                   # true => all caps, seccomp off (trusted workloads only)
+    readOnly: true
+    capAdd: ["NET_BIND_SERVICE"]
+    capDrop: ["ALL"]
+    securityOpt: ["no-new-privileges"]
+    userns: true
+    hostPid: false                      # share the HOST pid namespace
+    hostIpc: false                      # share the HOST ipc namespace
+    detect: false                       # seccomp in log mode: discover the syscalls a workload uses
+
+  storage:
+    volumes: ["app-data:/var/lib/app"]
+    tmpfs: ["/tmp"]
+
+  env:                                  # grouped env (vars/files/secrets/secretFiles)
+    vars: ["TZ=Africa/Luanda"]
+    files: []                           # ["./.env"] — env files read at apply time
+    secrets: [app-secret]
+    secretFiles: true                   # secrets as /run/secrets/<key>
+
+  limits:
+    ulimit: ["nofile=1024:2048"]
+    sysctl: ["net.core.somaxconn=1024"]
+    devices: ["/dev/null:/dev/fuse-demo"]   # extra device nodes
+    # gpus: nvidia                      # all | nvidia | dri — see the note at the end of this file
+---
+# ---------------------------------------------------------------------------
+# 4. `env` as a plain KEY: value mapping (what compose/k8s users write)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: env-map
+spec:
+  image: busybox:latest
+  command: ["sleep", "infinity"]
+  env:
+    POSTGRES_USER: app
+    POSTGRES_PASSWORD: example-only
+    PORT: 8080                          # non-strings are stringified
+---
+# ---------------------------------------------------------------------------
+# 5. Foreground: detach false blocks apply until the process exits (like `container run`)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: foreground
+spec:
+  image: busybox:latest
+  command: ["echo", "hello"]
+  detach: false
+  restartPolicy: "no"
+---
+# ---------------------------------------------------------------------------
+# 6. Minimal: `image` is the only mandatory field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: minimal
+spec:
+  image: alpine:3.20
+# Fields of `delonix explain Container` deliberately NOT set above:
+#   apparmor / selinux  host-LSM specific: an unknown AppArmor profile or SELinux context makes the
+#                       runtime refuse to start the container on hosts without it; kept as comments.
+#   gpus                needs a CDI spec generated by `nvidia-ctk` on the host; refused otherwise.
+#   privileged: true   would defeat the hardening shown in full-flat; shown as `false` in the grouped form.
+#   hostPid/hostIpc: true  share HOST namespaces — off on purpose.
+#   resources.restart   `restart` is only the legacy alias of `restartPolicy`.
+# (The `explain` rows `limits`, `resources`, `security`, `storage`, `restart` are the group names / the alias.)

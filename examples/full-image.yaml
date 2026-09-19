@@ -1,0 +1,50 @@
+# Complete reference for `kind: Image` — ensure an image is present, either by PULLING it
+# or by BUILDING it (`pull` and `build` are mutually exclusive: one document each).
+#
+#   delonix stack apply -f examples/full-image.yaml --dry-run
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: registry-cred
+spec:
+  # Registry credentials (`username` + `password`) for a private registry.
+  stringData:
+    username: demo
+    password: change-me
+---
+# 1. Pull a public image (idempotent).
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: alpine
+spec:
+  pull: alpine:3.19
+---
+# 2. Pull from a PRIVATE registry, credentials named by the manifest so it also works on a
+#    host where nobody ran `delonix image login`. Only meaningful together with `pull`.
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: private-app
+spec:
+  pull: ghcr.io/example/private-app:1.0
+  pullSecret: registry-cred
+---
+# 3. Build from a Delonixfile/Dockerfile with every build option.
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: app-built
+spec:
+  build:
+    tag: app:dev                     # required: the tag to produce
+    context: .                       # build context directory (default ".")
+    file: Delonixfile                # Delonixfile/Dockerfile path (default: ./Delonixfile, then ./Dockerfile)
+    target: runtime                  # multi-stage: build up to this stage (name or index)
+    platform: linux/amd64            # target architecture, like the CLI's --platform
+    noCache: true                    # bypass the layer cache, like --no-cache
+    buildArgs:                       # ARG overrides KEY=VALUE (only for ARGs the file declares)
+      - VERSION=1.2.3
+      - CHANNEL=stable
+    secrets:                         # build-time secrets, `id=<name>,src=<path>`; used with
+      - id=npmrc,src=./npmrc.txt     #   RUN --mount=type=secret,id=npmrc — never lands in a layer

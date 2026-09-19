@@ -1,0 +1,84 @@
+# Complete reference for `kind: Dependency` (alias `KnowDepends`) — DIRECTED reachability
+# between workloads. `from` may open connections to `to`; `to` does not initiate towards
+# `from`, and `to` stops being exposed to everyone else on the network.
+#
+# It is sugar: at load each Dependency is rewritten into a `kind: NetworkPolicy` with
+# `direction: ingress` on the `to` workload (default-deny + one allow per `from`, naming the
+# peer by WORKLOAD so it survives restarts). Several Dependencies for the same `to` accumulate
+# and merge into one policy. Run `delonix stack apply --dry-run` to see the real policy.
+#
+# spec fields: from (required, string), to (string or list), ports (list), proto.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: db }
+spec:
+  network: appnet
+  containers:
+    - name: db
+      image: "postgres:16-alpine"
+      env:
+        - { name: POSTGRES_PASSWORD, value: example }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: cache }
+spec:
+  network: appnet
+  containers:
+    - name: cache
+      image: "redis:7-alpine"
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: app }
+spec:
+  network: appnet
+  containers:
+    - name: app
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: worker }
+spec:
+  network: appnet
+  containers:
+    - name: worker
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+---
+# 1. Every field, `to` as a single name: app may reach db on TCP/5432 only.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: app-knows-db }
+spec:
+  from: app                    # who INITIATES (the one that "knows")
+  to: db                       # the protected target
+  ports: ["5432"]              # ports of `to` opened to `from`; empty/omitted = any port
+  proto: tcp                   # tcp | udp | any (default any)
+---
+# 2. `to` as a LIST: one declaration protecting two targets at once.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: app-knows-cache }
+spec:
+  from: app
+  to: [cache, worker]
+  ports: ["6379", "9000"]      # several ports
+  proto: tcp
+---
+# 3. Accumulation: a second `from` for the same `to` (db) — merged with document 1,
+#    so db accepts both app (5432/tcp) and worker (any port, any protocol).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: worker-knows-db }
+spec:
+  from: worker
+  to: db
