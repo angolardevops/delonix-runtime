@@ -49,7 +49,7 @@ spec:
   # ---- pod-level ----
   network: pod-net                      # delonix extension: SDN network of the pod's shared netns
                                         #   (host | none | <unset> = the default bridge; a custom name selects that network)
-  restartPolicy: OnFailure              # Always | OnFailure | Never (delonix values always/on-failure/no also accepted)
+  restartPolicy: OnFailure              # Always | OnFailure | Never (the engine spellings always/on-failure/no are also accepted)
   hostname: full-pod-host               # hostname shared by every member (default: the pod name)
   shareProcessNamespace: false          # true => members see each other's processes (see `shared-pid` below)
   hostAliases:                          # extra /etc/hosts entries in every member, k8s shape

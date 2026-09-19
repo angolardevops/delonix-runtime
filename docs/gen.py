@@ -4290,8 +4290,8 @@ KINDS_DOC = [
      "para o mesmo container acumulam, e cada uma sai sozinha quando o documento sai do manifesto."),
 ]
 
-# Para cada exemplo base acima, o ficheiro `full-<kind>.yaml` que mostra TODAS as
-# possibilidades do Kind (o base é o mínimo funcional; este é a referência).
+# For each base example above, the `full-<kind>.yaml` file showing EVERY option of
+# the Kind (the base is the working minimum; this is the reference).
 KINDS_FULL = {
     "secret.yaml": "full-secret.yaml",
     "pod.yaml": "full-pod.yaml",
