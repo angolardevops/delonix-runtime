@@ -1,7 +1,7 @@
 # kind: Pod — a real multi-container pod: N containers share ONE network namespace
 # (same IP, `localhost` between them), plus IPC/UTS (and optionally PID) sharing.
 # The schema is the k8s Pod one (`spec.containers[]`, structured ports/env/resources/
-# securityContext, pod-level `volumes[]`) plus a few delonix extensions (`network`).
+# securityContext, pod-level `volumes[]`) plus an engine-specific `network` field.
 #
 #   delonix stack apply -f examples/full-pod.yaml --dry-run
 #   delonix stack validate -f examples/full-pod.yaml
