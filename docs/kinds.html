@@ -177,6 +177,77 @@ metadata:
   name: app-env
 spec:
   fromEnvFile: ./app.env      # ex.: DATABASE_URL=..., API_TOKEN=...</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-secret.yaml</span><span class='lang-en'>Every option — examples/full-secret.yaml</span></summary><pre><code># Complete reference for `kind: Secret` — every field of `spec` and every source form.
+# A Secret is a bag of KEY=value pairs, encrypted at rest. It is consumed by
+# `Container.secret` (env or /run/secrets files), `Volume.&lt;block&gt;.passwordSecret`,
+# `Image.pullSecret` and `provision.truenas.*Secret`.
+#
+# The three sources (stringData, fromEnvFile, fromEnv) can be combined in ONE document;
+# they are shown separately below for clarity. Precedence when combined:
+# fromEnvFile first, then stringData overrides it (inline wins over the file).
+#
+#   delonix stack apply -f examples/full-secret.yaml --dry-run
+#
+# NOTE: there is no `data:` (base64) field — the engine only reads the three below.
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: inline-secret
+  labels:                      # free-form labels stored with the resource
+    app: demo
+  annotations:                 # free-form annotations
+    delonix.io/purpose: &quot;example only&quot;
+spec:
+  # stringData: inline KEY: value pairs. Values are CLEARTEXT in the manifest, so the
+  # apply prints a warning — fine for dev, never commit real values.
+  stringData:
+    password: change-me        # the key `passwordSecret` fields look for
+    apiKey: dummy-api-key      # `apiKeySecret` fields look for `apiKey` (or `token`)
+    username: demo             # `pullSecret` wants `username` + `password`
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: file-secret
+spec:
+  # fromEnvFile: load `KEY=value` lines from a .env-style file, keeping the values OUT of
+  # the manifest. A relative path is resolved against the manifest&#x27;s own folder.
+  fromEnvFile: ./secret-source.env
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: env-map-secret
+spec:
+  # fromEnv, mapping form: `&lt;key in the secret&gt;: &lt;environment variable to read&gt;`.
+  # The key is what the consumer looks up; the variable is whatever the CI job exports.
+  # An unset variable is an ERROR at apply time, never an empty secret.
+  fromEnv:
+    password: EXAMPLE_DB_PASSWORD
+    token: EXAMPLE_API_TOKEN
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: env-list-secret
+spec:
+  # fromEnv, list form: shorthand when the key name and the variable name are the same.
+  fromEnv:
+    - DATABASE_URL
+    - SENTRY_DSN
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: combined-secret
+spec:
+  # All three sources at once: the file gives the base, stringData overrides `LOG_LEVEL`,
+  # fromEnv adds a value read from the process environment.
+  fromEnvFile: ./secret-source.env
+  stringData:
+    LOG_LEVEL: debug
+  fromEnv:
+    - EXAMPLE_EXTRA</code></pre></details>
 <h2 id='pod'>Pod</h2>
 <p class='lang-pt'>O schema de Pod do Kubernetes (<code>spec.containers[]</code>) — portas/env/resources/securityContext/volumeMounts estruturados. O MESMO schema continua aceite num <code>kind: Container</code>, com aviso, e <strong>não é reescrito de propósito</strong>: um <code>kind: Container</code> chamado <code>web</code> cria um container <code>web</code>, este cria a netns <code>pod-web</code> cujo membro é <code>web-c0</code> — renomear um workload nas costas de quem o escreveu partiria o DNS e os backends de HTTPRoute.</p><p class='lang-en'>The Kubernetes Pod schema (<code>spec.containers[]</code>) — structured ports/env/resources/securityContext/volumeMounts. The SAME schema is still accepted on a <code>kind: Container</code>, with a warning, and is <strong>deliberately not rewritten for you</strong>: a <code>kind: Container</code> named <code>web</code> creates a container <code>web</code>, this creates the pod netns <code>pod-web</code> whose member is <code>web-c0</code> — renaming a workload behind your back would break DNS and HTTPRoute backends.</p>
 <pre><code># kind: Pod — the familiar k8s schema: spec.containers[] with structured
@@ -247,6 +318,163 @@ spec:
         path: /srv/www                    # bind mount
     - name: scratch
       emptyDir: {}                        # ephemeral → tmpfs</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-pod.yaml</span><span class='lang-en'>Every option — examples/full-pod.yaml</span></summary><pre><code># kind: Pod — a real multi-container pod: N containers share ONE network namespace
+# (same IP, `localhost` between them), plus IPC/UTS (and optionally PID) sharing.
+# The schema is the k8s Pod one (`spec.containers[]`, structured ports/env/resources/
+# securityContext, pod-level `volumes[]`) plus an engine-specific `network` field.
+#
+#   delonix stack apply -f examples/full-pod.yaml --dry-run
+#   delonix stack validate -f examples/full-pod.yaml
+#
+# Documents in this file:
+#   1. supporting resources (Network, Volumes) referenced by the pods
+#   2. `full-pod`      — every pod-level field and every container field
+#   3. `shared-pid`    — shareProcessNamespace: true
+#   4. `minimal-pod`   — the smallest valid pod
+# ---------------------------------------------------------------------------
+# 1. Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: pod-net
+spec:
+  driver: bridge
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: pod-data                        # referenced through `persistentVolumeClaim.claimName`
+spec:
+  driver: local
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: pod-cache                       # referenced through `source`
+spec:
+  driver: local
+---
+# ---------------------------------------------------------------------------
+# 2. Every field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: full-pod
+  namespace: default                    # isolation namespace (a pod is isolated like a container)
+  labels:
+    app: full-pod
+spec:
+  # ---- pod-level ----
+  network: pod-net                      # delonix extension: SDN network of the pod&#x27;s shared netns
+                                        #   (host | none | &lt;unset&gt; = the default bridge; a custom name selects that network)
+  restartPolicy: OnFailure              # Always | OnFailure | Never (delonix values always/on-failure/no also accepted)
+  hostname: full-pod-host               # hostname shared by every member (default: the pod name)
+  shareProcessNamespace: false          # true =&gt; members see each other&#x27;s processes (see `shared-pid` below)
+  hostAliases:                          # extra /etc/hosts entries in every member, k8s shape
+    - ip: 10.0.0.9
+      hostnames: [legacy-api, legacy-api.internal]
+    - ip: 10.0.0.10
+      hostnames: [billing]
+
+  # ---- pod-level volumes, referenced by containers[].volumeMounts[].name ----
+  volumes:
+    - name: site
+      hostPath:                         # bind mount of a host directory
+        path: /srv/www
+    - name: scratch
+      emptyDir:                         # ephemeral, backed by tmpfs (host RAM) in this engine
+        medium: Memory                  # &quot;&quot; would warn: k8s means node disk there, this engine always uses tmpfs
+    - name: data
+      persistentVolumeClaim:            # a NAMED volume (a `kind: Volume`), by name
+        claimName: pod-data
+    - name: cache
+      source: pod-cache                 # delonix extension: a named Volume by plain source string
+
+  # ---- members ----
+  containers:
+    - name: web                         # member name; the container is called &lt;pod&gt;-&lt;name&gt; (default c&lt;index&gt;)
+      image: nginx:latest               # REQUIRED
+      command: [&quot;/bin/sh&quot;, &quot;-c&quot;]        # k8s `command` =&gt; overrides the image ENTRYPOINT
+      args: [&quot;nginx -g &#x27;daemon off;&#x27;&quot;]  # k8s `args`    =&gt; overrides the image CMD
+      workingDir: /usr/share/nginx/html # directory the process starts in
+      ports:
+        - containerPort: 80
+          hostPort: 8080                # published on the host ONLY when hostPort is set
+          protocol: TCP                 # TCP | UDP (default TCP)
+          hostIP: 127.0.0.1             # bind address of the published port
+        - containerPort: 443            # no hostPort =&gt; informational only, not published
+      env:
+        - name: TZ
+          value: Africa/Luanda
+        - name: LOG_LEVEL
+          value: info
+      volumeMounts:
+        - name: site
+          mountPath: /usr/share/nginx/html
+          readOnly: true
+        - name: scratch
+          mountPath: /tmp/cache
+        - name: data
+          mountPath: /var/lib/web
+        - name: cache
+          mountPath: /var/cache/web
+      resources:
+        limits:                         # enforced as cgroup limits (`requests` are advisory here and not set)
+          cpu: &quot;500m&quot;                   # 500m =&gt; 0.5 cores
+          memory: 256Mi
+      securityContext:
+        privileged: false
+        runAsUser: 101
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [&quot;ALL&quot;]
+          add: [&quot;NET_BIND_SERVICE&quot;]
+
+    - name: sidecar                     # a second member: reaches `web` on localhost (shared netns)
+      image: busybox:latest
+      command: [&quot;sh&quot;, &quot;-c&quot;]
+      args: [&quot;while true; do wget -qO- http://localhost:80/ &gt;/dev/null 2&gt;&amp;1; sleep 10; done&quot;]
+      resources:
+        limits:
+          cpu: &quot;100m&quot;
+          memory: 64Mi
+---
+# ---------------------------------------------------------------------------
+# 3. Shared PID namespace: the members see each other&#x27;s processes
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: shared-pid
+spec:
+  shareProcessNamespace: true
+  containers:
+    - name: app
+      image: busybox:latest
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+    - name: debug
+      image: busybox:latest
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+# ---------------------------------------------------------------------------
+# 4. Minimal: only `containers[].image` is mandatory
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: minimal-pod
+spec:
+  containers:
+    - image: alpine:3.20                # unnamed member =&gt; container &quot;minimal-pod-c0&quot;
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+# Not set above, and why:
+#   spec.detach, spec.expose   are accepted by the schema but a `kind: Pod` ignores them (members are always
+#                              started detached and are not auto-registered in the L7 proxy) — use a
+#                              HTTPRoute/Ingress towards the pod for L7 exposure.
+#   containers[].tty           accepted and ignored (the engine decides tty by attach/detach).
+#   resources.requests         advisory only; the engine enforces `limits`.</code></pre></details>
 <h2 id='workload'>Workload</h2>
 <p class='lang-pt'>UM objecto declarativo para os dois tipos de computação: <code>spec.type: container | vm | pod | microvm</code> + o bloco com o mesmo nome. Baixa para o Kind correspondente no load — não redefine um único campo, por isso não pode divergir dele.</p><p class='lang-en'>ONE declarative object for both kinds of compute: <code>spec.type: container | vm | pod | microvm</code> plus the block with that same name. Lowers to the matching Kind on load — it doesn't redefine a single field, so it can never drift from it.</p>
 <pre><code># Workload — one declarative object for BOTH compute types (ADR-0001).
@@ -305,6 +533,241 @@ spec:
     vcpus: 2
     memory: 2G
     # backend: libvirt       # &lt;- a contradiction: type: microvm rejects it (use type: vm)</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-workload.yaml</span><span class='lang-en'>Every option — examples/full-workload.yaml</span></summary><pre><code># kind: Workload — ONE declarative object for every compute type (ADR-0001/0006).
+#
+#   delonix stack apply -f examples/full-workload.yaml --dry-run    # shows what each Workload lowers to
+#   delonix stack validate -f examples/full-workload.yaml
+#
+# A Workload is sugar: it does not survive the load. `spec.type` picks the target Kind and the block
+# named after the type carries EXACTLY that Kind&#x27;s spec (no field is redefined here):
+#
+#     type: container  -&gt;  spec.container  ==  kind: Container spec   (full-container.yaml)
+#     type: vm         -&gt;  spec.vm          ==  kind: VirtualMachine spec (full-virtualmachine.yaml)
+#     type: pod        -&gt;  spec.pod         ==  kind: Pod spec         (full-pod.yaml)
+#     type: microvm    -&gt;  spec.microvm     ==  kind: VirtualMachine spec, backend FORCED to cloud-hypervisor
+#
+# Exactly ONE block, the one matching `type` (any other block is an error). `metadata` (name, namespace,
+# labels, annotations) is inherited by the lowered resource. Because each type is an alternative, every
+# type gets its own document below; each block is shown with all its fields.
+# ---------------------------------------------------------------------------
+# Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: wl-net
+spec:
+  driver: bridge
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: wl-secret
+spec:
+  stringData:
+    API_TOKEN: example-token-not-real
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: wl-data
+spec:
+  driver: local
+---
+# ---------------------------------------------------------------------------
+# type: container — the FLAT container spec, every field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-container
+  namespace: default                    # inherited by the lowered Container
+  labels: { tier: backend }
+  annotations: { example.delonix.io/note: lowers-to-container }
+spec:
+  type: container
+  container:
+    image: nginx:alpine                 # REQUIRED
+    detach: true
+    command: [&quot;nginx&quot;, &quot;-g&quot;, &quot;daemon off;&quot;]
+    entrypoint: /docker-entrypoint.sh
+    user: &quot;101:101&quot;
+    hostname: wl-container-host
+    restartPolicy: always
+    addHost: [&quot;legacy-api:10.0.0.9&quot;]
+    labels: [&quot;team=platform&quot;]
+    logDriver: json
+    network: wl-net
+    ports: [&quot;18090:80&quot;]
+    expose: 80
+    networkAlias: [wl-web]
+    netBps: 10mbit
+    netBurst: 20mbit
+    memory: 256M
+    cpus: &quot;0.5&quot;
+    cpuWeight: &quot;200&quot;
+    cpuset: &quot;0&quot;
+    ioWeight: &quot;100&quot;
+    cgroupParent: { name: wl-tier, memoryMax: &quot;1073741824&quot;, cpus: &quot;2&quot;, pidsMax: &quot;512&quot; }
+    readOnly: true
+    capDrop: [&quot;ALL&quot;]
+    capAdd: [&quot;NET_BIND_SERVICE&quot;]
+    securityOpt: [&quot;no-new-privileges&quot;]
+    userns: true
+    volumes: [&quot;wl-data:/var/lib/app&quot;]
+    tmpfs: [&quot;/tmp&quot;]
+    env: [&quot;TZ=Africa/Luanda&quot;]
+    secret: [wl-secret]
+    secretFiles: true
+    ulimit: [&quot;nofile=1024:2048&quot;]
+    sysctl: [&quot;net.core.somaxconn=1024&quot;]
+---
+# ---------------------------------------------------------------------------
+# type: container — the GROUPED container spec (resources/network/security/storage/env/limits)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-container-grouped
+spec:
+  type: container
+  container:
+    image: busybox:latest
+    command: [&quot;sleep&quot;, &quot;infinity&quot;]
+    restartPolicy: unless-stopped       # no | on-failure[:max] | always | unless-stopped
+    resources: { memory: 128M, cpus: &quot;0.25&quot;, cpuWeight: &quot;100&quot;, ioWeight: &quot;50&quot; }
+    network: { name: wl-net, alias: [wl-grouped], rateBps: 5mbit, rateBurst: 10mbit }
+    security: { readOnly: true, capDrop: [ALL], userns: true }
+    storage: { volumes: [&quot;wl-data:/data&quot;], tmpfs: [&quot;/tmp&quot;] }
+    env: { vars: [&quot;MODE=grouped&quot;], secrets: [wl-secret], secretFiles: false }
+    limits: { ulimit: [&quot;nofile=512:1024&quot;], sysctl: [&quot;net.core.somaxconn=512&quot;] }
+---
+# ---------------------------------------------------------------------------
+# type: pod — a multi-container pod (k8s-shaped), every pod-level field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-pod
+spec:
+  type: pod
+  pod:
+    network: wl-net                     # SDN network of the pod&#x27;s shared netns
+    restartPolicy: OnFailure            # Always | OnFailure | Never
+    hostname: wl-pod-host
+    shareProcessNamespace: true         # members see each other&#x27;s processes
+    hostAliases:
+      - ip: 10.0.0.9
+        hostnames: [legacy-api]
+    volumes:
+      - name: scratch
+        emptyDir: { medium: Memory }
+      - name: data
+        persistentVolumeClaim: { claimName: wl-data }
+      - name: host-files
+        hostPath: { path: /srv/www }
+    containers:
+      - name: web
+        image: nginx:latest
+        command: [&quot;/bin/sh&quot;, &quot;-c&quot;]
+        args: [&quot;nginx -g &#x27;daemon off;&#x27;&quot;]
+        workingDir: /usr/share/nginx/html
+        ports:
+          - { containerPort: 80, hostPort: 18091, protocol: TCP, hostIP: 127.0.0.1 }
+        env:
+          - { name: TZ, value: Africa/Luanda }
+        volumeMounts:
+          - { name: scratch, mountPath: /tmp/cache }
+          - { name: data, mountPath: /var/lib/web }
+          - { name: host-files, mountPath: /usr/share/nginx/html, readOnly: true }
+        resources:
+          limits: { cpu: &quot;500m&quot;, memory: 256Mi }
+        securityContext:
+          privileged: false
+          runAsUser: 101
+          readOnlyRootFilesystem: true
+          capabilities: { drop: [&quot;ALL&quot;], add: [&quot;NET_BIND_SERVICE&quot;] }
+      - name: sidecar
+        image: busybox:latest
+        command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+# ---------------------------------------------------------------------------
+# type: vm — a full VirtualMachine spec (libvirt backend), flat shape
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-vm
+spec:
+  type: vm
+  vm:
+    disk: delonix-vm-base:ubuntu-24.04
+    backend: libvirt                    # `vm` accepts any backend (unlike `microvm`)
+    restartPolicy: always
+    vcpus: 2
+    memory: 4G
+    hugepages: false
+    cpuAffinity: &quot;0-1&quot;
+    network: wl-net
+    netMode: nat
+    ip: 192.168.122.60
+    vnc: true
+    hostname: wl-vm
+    sshKeys: [&quot;ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example&quot;]
+    userData: &quot;@/etc/delonix/examples/user-data.yaml&quot;
+    volumes:
+      - { name: wl-data, mountPath: /mnt/data, readOnly: false }
+    machine: q35
+    cpuModel: host-model
+    cpuTopology: { sockets: 1, cores: 2, threads: 1 }
+    tpm: true
+    video: virtio
+    bootOrder: [hd]
+    extraDisks:
+      - { source: /var/lib/libvirt/images/wl-extra.qcow2, bus: virtio, format: qcow2, readOnly: false, target: vdb }
+    extraNics:
+      - { type: network, source: default, model: virtio }
+    libvirtXmlOverlay:
+      - &quot;&lt;memballoon model=&#x27;virtio&#x27;/&gt;&quot;
+---
+# ---------------------------------------------------------------------------
+# type: vm — the GROUPED VirtualMachine spec (resources/network/cloudInit/libvirt)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-vm-grouped
+spec:
+  type: vm
+  vm:
+    disk: delonix-vm-base:ubuntu-24.04
+    resources: { vcpus: 2, memory: 2G }
+    network: { name: wl-net, mode: nat, staticIp: 192.168.122.61 }
+    cloudInit: { hostname: wl-vm-grouped }
+    libvirt: { backend: libvirt, machine: q35 }
+---
+# ---------------------------------------------------------------------------
+# type: microvm — a VirtualMachine on the microVM hypervisor; the backend is FORCED to cloud-hypervisor
+# (writing `backend: libvirt` here is a contradiction and is rejected — use `type: vm` for that)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: wl-microvm
+spec:
+  type: microvm
+  microvm:
+    disk: delonix-vm-base:ubuntu-24.04  # needs an image that boots on Cloud Hypervisor (not the libvirt-only k8s golden)
+    backend: cloud-hypervisor           # optional: only the value cloud-hypervisor is accepted here
+    vcpus: 2
+    memory: 2G
+    network: wl-net
+    firmware: /usr/local/share/delonix/CLOUDHV.fd
+    hostname: wl-microvm
+    restartPolicy: on-failure
+    hugepages: false
+    cpuAffinity: &quot;2-3&quot;
+    sshKeys: [&quot;ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example&quot;]</code></pre></details>
 <h2 id='dependency'>Dependency</h2>
 <p class='lang-pt'>Alcançabilidade DIRIGIDA entre containers (ao contrário da rede, que é bidireccional): <code>from</code> alcança <code>to</code>, e <code>to</code> não fica exposto aos outros. É açúcar reduzido no load para <code>kind: NetworkPolicy</code> — sem dataplane novo. Várias dependências para o mesmo alvo ACUMULAM os allows (por isso são fundidas por alvo, e não uma política por dependência).</p><p class='lang-en'>DIRECTED reachability between containers (unlike a network, which is bidirectional): <code>from</code> reaches <code>to</code>, and <code>to</code> stays unexposed to the others. Sugar lowered on load into <code>kind: NetworkPolicy</code> — no new dataplane. Several dependencies on the same target ACCUMULATE their allows, which is why they are merged by target rather than one policy per dependency.</p>
 <pre><code># kind: Dependency (alias: KnowDepends) — alcançabilidade DIRIGIDA entre containers.
@@ -360,6 +823,90 @@ spec:
   to: db             # alvo protegido (aceita um nome ou uma lista: [db, cache])
   ports: [&quot;5432&quot;]    # opcional — vazio = qualquer porta
   proto: tcp         # opcional — default any</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-dependency.yaml</span><span class='lang-en'>Every option — examples/full-dependency.yaml</span></summary><pre><code># Complete reference for `kind: Dependency` (alias `KnowDepends`) — DIRECTED reachability
+# between workloads. `from` may open connections to `to`; `to` does not initiate towards
+# `from`, and `to` stops being exposed to everyone else on the network.
+#
+# It is sugar: at load each Dependency is rewritten into a `kind: NetworkPolicy` with
+# `direction: ingress` on the `to` workload (default-deny + one allow per `from`, naming the
+# peer by WORKLOAD so it survives restarts). Several Dependencies for the same `to` accumulate
+# and merge into one policy. Run `delonix stack apply --dry-run` to see the real policy.
+#
+# spec fields: from (required, string), to (string or list), ports (list), proto.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: db }
+spec:
+  network: appnet
+  containers:
+    - name: db
+      image: &quot;postgres:16-alpine&quot;
+      env:
+        - { name: POSTGRES_PASSWORD, value: example }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: cache }
+spec:
+  network: appnet
+  containers:
+    - name: cache
+      image: &quot;redis:7-alpine&quot;
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: app }
+spec:
+  network: appnet
+  containers:
+    - name: app
+      image: &quot;alpine:3.19&quot;
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: worker }
+spec:
+  network: appnet
+  containers:
+    - name: worker
+      image: &quot;alpine:3.19&quot;
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+# 1. Every field, `to` as a single name: app may reach db on TCP/5432 only.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: app-knows-db }
+spec:
+  from: app                    # who INITIATES (the one that &quot;knows&quot;)
+  to: db                       # the protected target
+  ports: [&quot;5432&quot;]              # ports of `to` opened to `from`; empty/omitted = any port
+  proto: tcp                   # tcp | udp | any (default any)
+---
+# 2. `to` as a LIST: one declaration protecting two targets at once.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: app-knows-cache }
+spec:
+  from: app
+  to: [cache, worker]
+  ports: [&quot;6379&quot;, &quot;9000&quot;]      # several ports
+  proto: tcp
+---
+# 3. Accumulation: a second `from` for the same `to` (db) — merged with document 1,
+#    so db accepts both app (5432/tcp) and worker (any port, any protocol).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: worker-knows-db }
+spec:
+  from: worker
+  to: db</code></pre></details>
 <h2 id='networkroute'>NetworkRoute</h2>
 <p class='lang-pt'>O grau ACIMA do <code>Dependency</code>: aquele liga dois WORKLOADS, este liga duas REDES — isoladas por omissão. Uma rota diz que o pacote PODE atravessar; <strong>nunca</strong> diz que é PERMITIDO — quem decide isso continua a ser o <code>FirewallPolicy</code>/<code>Dependency</code> em cada extremidade. São duas perguntas em série (há caminho? → é aceite?), por isso são dois Kinds e não um campo <code>routes:</code> dentro de <code>Network</code>. Dirigida (<code>from</code> inicia, o retorno flui; <code>to</code> nunca inicia de volta); custo constante, não cresce com o número de redes.</p><p class='lang-en'>The grade ABOVE <code>Dependency</code>: that one links two WORKLOADS, this one links two NETWORKS — isolated by default. A route says the packet CAN cross; it <strong>never</strong> says it's ALLOWED — that decision still belongs to <code>FirewallPolicy</code>/<code>Dependency</code> at each end. Two questions in series (is there a path? → is it accepted?), which is why they're two Kinds and not one <code>routes:</code> field inside <code>Network</code>. Directed (<code>from</code> initiates, the return flows; <code>to</code> never initiates back); constant cost, doesn't grow with the number of networks.</p>
 <pre><code># kind: NetworkRoute — caminho DIRIGIDO entre duas REDES (ADR-0013 tier B).
@@ -456,6 +1003,98 @@ spec:
   to: api
   ports: [&quot;8080&quot;]
   proto: tcp</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-networkroute.yaml</span><span class='lang-en'>Every option — examples/full-networkroute.yaml</span></summary><pre><code># Complete reference for `kind: NetworkRoute` — a DIRECTED path between two NETWORKS.
+# The spec has exactly two fields: `from` and `to`. There is no `via`.
+#
+# A route only says the packet MAY cross between the two bridges; it never says
+# it is ALLOWED. Per-workload policy (NetworkPolicy / Dependency / NetworkAccessRule)
+# still decides, so the last two documents show the second question answered.
+# The identity of a route is the PAIR (from-&gt;to), not metadata.name; two documents
+# declaring the same pair are refused. `stack apply --prune` closes routes removed
+# from the manifest.
+---
+# Networks the routes connect (referenced by name; they must be declared here).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: frontend }
+spec: { driver: bridge }
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: backend }
+spec: { driver: bridge }
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: mgmt }
+spec: { driver: bridge }
+---
+# 1. One-way path: hosts on `frontend` may initiate towards `backend`.
+#    Return traffic of those conversations flows; `backend` cannot initiate back.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata:
+  name: frontend-to-backend
+  labels:
+    purpose: app-traffic     # metadata is free-form; only spec.from/spec.to matter
+spec:
+  from: frontend             # network that may INITIATE
+  to: backend                # network reached
+---
+# 2. A second, independent pair: the management network may reach both others.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata: { name: mgmt-to-backend }
+spec:
+  from: mgmt
+  to: backend
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata: { name: mgmt-to-frontend }
+spec:
+  from: mgmt
+  to: frontend
+---
+# 3. A bidirectional path is two explicit routes (the reverse pair, declared on purpose).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata: { name: backend-to-mgmt }
+spec:
+  from: backend
+  to: mgmt
+---
+# Workloads, so that the &quot;is it allowed?&quot; question below has something to protect.
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: frontend
+  containers:
+    - name: web
+      image: &quot;alpine:3.19&quot;
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: api }
+spec:
+  network: backend
+  containers:
+    - name: api
+      image: &quot;alpine:3.19&quot;
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+# 4. The 2nd question, in series with the route: is the crossing ACCEPTED by `api`?
+#    Without this the path exists but `api` still decides who it accepts.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: web-knows-api }
+spec:
+  from: web
+  to: api
+  ports: [&quot;8080&quot;]
+  proto: tcp</code></pre></details>
 <h2 id='networkpolicy'>NetworkPolicy</h2>
 <p class='lang-pt'>Firewall L4 por container, estilo NetworkPolicy do k8s, com a direcção em <code>spec.direction</code>. Aplicar substitui as regras dessa direcção e deixa a outra intacta.</p><p class='lang-en'>Per-container L4 firewall, k8s NetworkPolicy-style, with the direction in <code>spec.direction</code>. Applying replaces that direction's rules and leaves the other intact.</p>
 <pre><code># kind: NetworkPolicy — a forma UNIFICADA do firewall declarativo. A direcção
@@ -518,6 +1157,161 @@ spec:
       port: &quot;443&quot;
       to: 0.0.0.0/0
       note: https</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-networkpolicy.yaml</span><span class='lang-en'>Every option — examples/full-networkpolicy.yaml</span></summary><pre><code># Complete reference for `kind: NetworkPolicy` — declarative L4 firewall.
+# One document = the DESIRED STATE of ONE direction (`ingress` or `egress`) of ONE
+# target. Applying it REPLACES that direction&#x27;s rules; the other direction is untouched,
+# so an ingress and an egress document compose on the same workload. Two documents for
+# the same (target, direction) are refused. It only acts on workloads on a custom SDN network.
+#
+# spec fields: direction, scope, target, defaultPolicy, rules[], allowCidrs,
+# fqdnAllowlist, rateLimit. Per-rule fields: proto, port, action, from, fromWorkload,
+# to, toWorkload, note. `allowCidrs`/`fqdnAllowlist`/`rateLimit` are only for
+# `scope: network` (documents 5 and 6); `rules` is only for `scope: container`.
+---
+# Resources the policies refer to (must exist in the same manifest).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-demo }
+spec: { driver: bridge }
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-locked }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: db }
+spec:
+  network: sdn-demo
+  containers:
+    - name: db
+      image: &quot;postgres:16-alpine&quot;
+      env:
+        - { name: POSTGRES_PASSWORD, value: example }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: app }
+spec:
+  network: sdn-demo
+  containers:
+    - name: app
+      image: &quot;alpine:3.19&quot;
+      command: [&quot;sleep&quot;, &quot;infinity&quot;]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: cache }
+spec:
+  network: sdn-demo
+  containers:
+    - name: cache
+      image: &quot;redis:7-alpine&quot;
+---
+# 1. INGRESS allowlist (defaultPolicy deny) using every ingress-side rule form.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: db-inbound }
+spec:
+  direction: ingress           # ingress (inbound) | egress (outbound)
+  scope: container             # container (default): `target` is a workload name
+  target: db                   # workload the policy protects
+  defaultPolicy: deny          # allow | deny when no rule matches (default for scope container: deny)
+  rules:
+    - proto: tcp               # tcp | udp | any (default any)
+      port: &quot;5432&quot;             # a single port
+      from: 10.219.0.0/16      # source CIDR
+      action: allow            # allow (default) | deny
+      note: postgres-from-sdn  # free-text label, shown in listings
+    - proto: tcp
+      port: &quot;5432&quot;
+      fromWorkload: app        # source BY WORKLOAD NAME (resolved to its SDN address at apply;
+                               # survives restarts, unlike a CIDR). Exclusive with from/to.
+      note: postgres-from-app
+    - proto: udp
+      port: &quot;8000-8100&quot;        # a port range n-m
+      from: 10.219.5.0/24
+      note: udp-range
+    - proto: any               # any protocol
+      port: &quot;*&quot;                # any port
+      from: 10.219.9.9/32
+      action: deny             # an explicit deny, evaluated by rule order
+      note: block-this-host
+---
+# 2. INGRESS with defaultPolicy allow: only the listed denies apply.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: cache-inbound-open }
+spec:
+  direction: ingress
+  target: cache
+  defaultPolicy: allow         # everything not listed is accepted
+  rules:
+    - port: &quot;6379&quot;             # proto omitted = any
+      from: 203.0.113.0/24
+      action: deny
+      note: no-external-redis
+---
+# 3. EGRESS allowlist for a workload, with a CIDR, a workload name and a wildcard.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: app-outbound }
+spec:
+  direction: egress
+  target: app
+  defaultPolicy: deny
+  rules:
+    - proto: udp
+      port: &quot;53&quot;
+      note: dns
+    - proto: tcp
+      port: &quot;443&quot;
+      to: 0.0.0.0/0            # destination CIDR (egress-side counterpart of `from`)
+      note: https-anywhere
+    - proto: tcp
+      port: &quot;5432&quot;
+      toWorkload: db           # destination BY WORKLOAD NAME (egress counterpart of fromWorkload)
+      note: postgres-to-db
+---
+# 4. Minimal egress: no rules, default deny =&gt; the workload cannot open outbound connections.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: cache-outbound-locked }
+spec:
+  direction: egress
+  target: cache
+  defaultPolicy: deny
+---
+# 5. PER-NETWORK egress (scope: network, egress only): `target` is a NETWORK name.
+#    CIDR allowlist + FQDN allowlist (learnt live from DNS) + global L4 rate limit.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: sdn-locked-egress }
+spec:
+  direction: egress
+  scope: network               # container (default) | network
+  target: sdn-locked           # network name
+  defaultPolicy: deny          # allowCidrs/fqdnAllowlist only make sense with deny
+  allowCidrs:                  # destinations allowed besides DNS
+    - 10.0.0.0/8
+    - 198.51.100.0/24
+  fqdnAllowlist:               # hostnames allowed (and *.host), learnt via DNS snooping
+    - registry.example.com
+    - updates.example.org
+  rateLimit:                   # GLOBAL L4 guard of the rootless ingress (not per network)
+    connRate: 100              # new connections per second allowed
+    connMax: 2000              # maximum concurrent connections
+---
+# 6. PER-NETWORK egress fully open (defaultPolicy allow, nothing else).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: sdn-demo-egress-open }
+spec:
+  direction: egress
+  scope: network
+  target: sdn-demo
+  defaultPolicy: allow</code></pre></details>
 <h2 id='ingress'>Ingress</h2>
 <p class='lang-pt'>Ingress L7 no formato <code>networking.k8s.io/v1</code> (host/path → backend), compilado para o proxy embutido. Limitações herdadas: um só certificado (sem SNI) e <code>pathType: Exact</code> tratado como prefixo.</p><p class='lang-en'>L7 Ingress in the <code>networking.k8s.io/v1</code> shape (host/path → backend), compiled to the built-in proxy. Inherited limitations: one certificate only (no SNI) and <code>pathType: Exact</code> treated as a prefix.</p>
 <pre><code># kind: Ingress — Kubernetes-shaped L7/HTTP Ingress (host/path → backend service).
@@ -595,6 +1389,117 @@ spec:
                   number: 8080
   # defaultBackend:                # optional catch-all when no rule matches
   #   service: { name: web, port: { number: 80 } }</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-ingress.yaml</span><span class='lang-en'>Every option — examples/full-ingress.yaml</span></summary><pre><code># Complete reference for `kind: Ingress` — the Kubernetes networking.k8s.io/v1 Ingress shape
+# (host/path -&gt; backend service). It compiles to the SAME embedded L7 proxy as `kind: HTTPRoute`
+# and is composed with every other Ingress/HTTPRoute of the manifest into ONE proxy with a SINGLE
+# certificate (no SNI). Backends must be workloads with an IP on a custom SDN network.
+# (The L4 firewall that used to live under this Kind is `kind: NetworkPolicy`.)
+#
+# spec fields used here: entrypoints[] (port, tls), tls[] (secretName), rules[] (host,
+# http.paths[] (path, pathType, backend.service (name, port.number))), defaultBackend.service.
+# Not shown because they have no effect: `ingressClassName` (the embedded proxy is the only
+# class), `tls[].hosts` (reported as not applied), `pathType: Exact` (served as a prefix and
+# warned), a `tls` list longer than one (only the first is used) and named ports (`port.name`
+# is refused: use `port.number`).
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-demo }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: sdn-demo
+  containers:
+    - name: web
+      image: &quot;nginx:alpine&quot;
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: api }
+spec:
+  network: sdn-demo
+  containers:
+    - name: api
+      image: &quot;caddy:alpine&quot;
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: docs }
+spec:
+  network: sdn-demo
+  containers:
+    - name: docs
+      image: &quot;httpd:2.4-alpine&quot;
+---
+# Certificate presented by the TLS listener (placeholders — use a real pair).
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: { name: shop-tls }
+stringData:
+  tls_crt: &quot;-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----&quot;
+  tls_key: &quot;-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----&quot;
+---
+# 1. Full Ingress: explicit listeners, a TLS certificate, two hosts, several paths and a default backend.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Ingress
+metadata: { name: shop }
+spec:
+  entrypoints:                     # delonix extension: listener ports. Omitted = 80 (+443 when tls is set)
+    - { port: 80 }
+    - { port: 443, tls: true }     # terminate TLS on this port
+  tls:                             # a LIST in k8s; this engine serves a single certificate
+    - secretName: shop-tls         # kind: Secret with tls_crt/tls_key (or tls.crt/tls.key); omit = self-signed
+  rules:
+    - host: shop.example.ao        # Host header to match; omit = any host
+      http:
+        paths:
+          - path: /
+            pathType: Prefix       # matched by prefix
+            backend:
+              service:
+                name: web          # workload name, resolved to its SDN IP at apply
+                port:
+                  number: 80       # container port (named ports are not supported)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+    - host: docs.example.ao        # a second host in the same Ingress
+      http:
+        paths:
+          - path: /                # `path` defaults to /
+            backend:
+              service:
+                name: docs
+                port:
+                  number: 80
+  defaultBackend:                  # catch-all when no rule matches
+    service:
+      name: web
+      port:
+        number: 80
+---
+# 2. A minimal second Ingress joining the same proxy: no TLS, no entrypoints (defaults to port 80).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Ingress
+metadata: { name: status }
+spec:
+  rules:
+    - host: status.example.ao
+      http:
+        paths:
+          - path: /healthz
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080</code></pre></details>
 <h2 id='stack'>Stack</h2>
 <p class='lang-pt'>Agrupa vários recursos num só documento. Expandido no load para os Kinds individuais, em ordem de dependência — o Stack não sobrevive ao load, tudo o resto vê os filhos.</p><p class='lang-en'>Groups several resources into one document. Expanded on load into the individual Kinds, in dependency order — the Stack doesn't survive the load, everything else sees the children.</p>
 <pre><code># kind: Stack — groups a whole app (networks, containers, volumes, …) in ONE
@@ -806,6 +1711,112 @@ spec:
   # (TLS entre membros, discovery) é um subprojecto à parte.
   etcd:
     mode: stacked</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-kubernetescluster.yaml</span><span class='lang-en'>Every option — examples/full-kubernetescluster.yaml</span></summary><pre><code># Complete reference for `kind: KubernetesCluster` — the three modes, one document each.
+# `mode` is the discriminator: `kind` (nodes as containers here), `vm` (golden-image VMs),
+# `ssh` (remote hosts that already exist). Each mode reads only its own block
+# (`kind:`, `vm:`, `ssh:`) plus the common fields.
+#
+# This Kind is NOT part of `stack apply` (a cluster is a remote procedure, not a node-local
+# resource). Apply it with:  delonix cluster apply -f examples/full-kubernetescluster.yaml
+# Validate offline with:      delonix manifest validate -f examples/full-kubernetescluster.yaml
+---
+# 1. mode: kind — a local cluster in containers, no Docker and no `kind` binary needed.
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: lab-kind
+spec:
+  mode: kind
+  k8sVersion: &quot;1.34&quot;                 # Kubernetes minor version
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: default                       # default = the node image&#x27;s CNI (kindnet); none = install none
+  controlPlane:
+    replicas: 1                      # &gt;1 requires controlPlaneEndpoint
+  workers:
+    replicas: 1
+  kind:                              # only read in mode: kind
+    image: kindest/node:v1.34.0      # node image (pin by digest for reproducibility)
+    apiServerPort: 6443              # host port for the apiserver
+---
+# 2. mode: vm — every node is a real microVM from the golden image.
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: lab-vm
+spec:
+  mode: vm
+  k8sVersion: &quot;1.34&quot;
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: default
+  controlPlane:
+    replicas: 1
+  workers:
+    replicas: 2
+  vm:                                # only read in mode: vm
+    image: k8s-golden                # tag from `delonix image vm ls` (omit = the only local one)
+    network: lab-net                 # network created beforehand
+    vcpus: 2                         # per node
+    memory: 2G                       # per node
+    sshKey: ~/.ssh/id_ed25519        # private key to reach the VMs (omit = a key is generated)
+    bootTimeout: 300s                # wait for SSH after boot
+---
+# 3. mode: ssh — hosts that already exist (bare metal / someone else&#x27;s VMs), HA control plane.
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: prod-ssh
+spec:
+  mode: ssh
+  k8sVersion: &quot;1.34&quot;
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: none                          # bring your own CNI (Cilium, Calico...)
+  controlPlaneEndpoint: &quot;k8s-api.example.com:6443&quot;   # REQUIRED with &gt;1 control-plane (LB/VIP)
+  controlPlane:
+    hosts:                           # `hosts` (not `replicas`): the machines already exist
+      - address: 10.0.0.11
+      - address: 10.0.0.12
+      - address: 10.0.0.13
+  workers:
+    hosts:
+      - address: 10.0.0.21
+      - address: 10.0.0.22
+  ssh:                               # only read in mode: ssh
+    user: delonix                    # needs passwordless sudo on the hosts
+    keyPath: ~/.ssh/id_ed25519       # canonical name (`key` is the legacy spelling)
+    port: 22
+  etcd:
+    mode: stacked                    # etcd on the control-planes (kubeadm default)
+---
+# 4. mode: ssh with a dedicated external etcd cluster (own CA, odd number of members).
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: prod-ssh-etcd
+spec:
+  mode: ssh
+  k8sVersion: &quot;1.34&quot;
+  cni: none
+  controlPlaneEndpoint: &quot;k8s-api.example.com:6443&quot;
+  controlPlane:
+    hosts:
+      - address: 10.0.1.11
+      - address: 10.0.1.12
+      - address: 10.0.1.13
+  workers:
+    hosts:
+      - address: 10.0.1.21
+  ssh:
+    user: delonix
+    keyPath: ~/.ssh/id_ed25519
+  etcd:
+    mode: external                   # external etcd is only accepted with mode: ssh
+    hosts:                           # dedicated etcd hosts (odd count; exactly 1 = dev only)
+      - address: 10.0.2.11
+      - address: 10.0.2.12
+      - address: 10.0.2.13</code></pre></details>
 <h2 id='network'>Network</h2>
 <p class='lang-pt'>Uma rede de utilizador. Os containers juntam-se com <code>--net &lt;nome&gt;</code>; as VMs com <code>network:</code>. Driver <code>bridge</code> é o único a que containers se atacham hoje.</p><p class='lang-en'>A user network. Containers join it with <code>--net &lt;name&gt;</code>; VMs with <code>network:</code>. <code>bridge</code> is the only driver containers can attach to today.</p>
 <pre><code># Network — a user-defined network. Containers join it with `--net &lt;name&gt;`.
@@ -822,6 +1833,75 @@ spec:
   vni: null                 # VXLAN id, for overlay
   peers: []                 # overlay peers: &quot;&lt;ip&gt;&quot; or &quot;&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;&quot;
   wgIp: null                # this node&#x27;s WireGuard tunnel IP (encrypted overlay)  (alias: wg_ip)</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-network.yaml</span><span class='lang-en'>Every option — examples/full-network.yaml</span></summary><pre><code># Complete reference for `kind: Network` — every spec field and every driver form.
+# Each document is independent; apply with `delonix stack apply -f full-network.yaml`.
+# Fields: driver, subnet, gateway, parent, vni, peers, wgIp (alias wg_ip).
+---
+# 1. Bridge with every bridge-relevant field spelled out.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-bridge-full
+  labels:
+    tier: backend            # free-form labels (ownership stamps are added by stack apply)
+  annotations:
+    example.io/purpose: &quot;all bridge fields&quot;
+spec:
+  driver: bridge             # bridge (default) | macvlan | ipvlan | overlay
+  subnet: 10.201.0.0/16      # CIDR of the network; omit to auto-pick a free /16
+  gateway: 10.201.0.1        # gateway address; omit to default to .0.1 of the subnet
+---
+# 2. Bridge with every field omitted — driver defaults to bridge, subnet is auto-picked.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-bridge-default
+spec: {}
+---
+# 3. Overlay (VXLAN) between nodes: vni + peers, clear-text.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-overlay-plain
+spec:
+  driver: overlay
+  vni: 42                    # VXLAN network identifier
+  peers:                     # other nodes of the overlay, by underlay IP
+    - 192.168.1.11
+    - 192.168.1.12
+---
+# 4. Encrypted overlay (WireGuard transport): peers carry &quot;&lt;ip&gt;=&lt;wg_pubkey&gt;=&lt;wg_ip&gt;&quot;.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-overlay-encrypted
+spec:
+  driver: overlay
+  vni: 77
+  wgIp: 10.250.0.1           # this node&#x27;s WireGuard tunnel IP (alias: wg_ip)
+  peers:
+    - &quot;192.168.1.11=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==10.250.0.2&quot;
+---
+# 5. macvlan: containers get an address directly on the parent NIC&#x27;s L2 segment.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-macvlan
+spec:
+  driver: macvlan
+  parent: eth0               # host NIC the macvlan sits on
+  subnet: 192.168.50.0/24
+  gateway: 192.168.50.1
+---
+# 6. ipvlan: like macvlan but all containers share the parent&#x27;s MAC.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-ipvlan
+spec:
+  driver: ipvlan
+  parent: eth0
+  subnet: 192.168.60.0/24</code></pre></details>
 <h2 id='volume'>Volume</h2>
 <p class='lang-pt'>Um volume local nomeado — os dados sobrevivem a <code>container rm</code>. Para armazenamento de REDE (NFS/SMB/WebDAV) o MESMO Kind leva um bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> — ver <code>storage.yaml</code>.</p><p class='lang-en'>A named local volume — the data survives <code>container rm</code>. For NETWORK storage (NFS/SMB/WebDAV) the SAME Kind takes an <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block — see <code>storage.yaml</code>.</p>
 <pre><code># Volume — a named local volume (data survives `container rm`). For NETWORK
@@ -837,6 +1917,153 @@ spec:
   quota: null               # size cap, e.g. &quot;2g&quot; (hard cap as root, monitored in rootless)
   device: null              # nfs export &quot;server:/export&quot; (only with driver: nfs)
   mountOptions: null        # mount options, e.g. &quot;vers=4,ro&quot; (only with driver: nfs)  (alias: options)</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-volume.yaml</span><span class='lang-en'>Every option — examples/full-volume.yaml</span></summary><pre><code># Complete reference for `kind: Volume` — every variant of `spec`.
+# One Kind, several MUTUALLY EXCLUSIVE shapes (hence one document each):
+#   1. local volume            (driver: local, or nothing)
+#   2. raw network driver      (driver: nfs + device + mountOptions)
+#   3. nfs: / cifs: / webdav:  network share blocks (the block NAME is the type)
+#   4. share:                  a quota&#x27;d slice of another volume
+#   5. provision.truenas:      create the dataset/quota/export on a NAS, then mount it
+# `quota` and `alertPct` apply to every shape.
+#
+#   delonix stack apply -f examples/full-volume.yaml --dry-run
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: nas-creds
+spec:
+  # Credentials for the network shares below (cleartext only because this is an example).
+  stringData:
+    password: change-me
+    apiKey: dummy-truenas-api-key
+---
+# 1. Local named volume: data survives `container rm`.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: local-data
+  labels:                       # stored on the volume; also carries the stack ownership stamp
+    app: demo
+  annotations:
+    delonix.io/note: &quot;plain local volume&quot;
+spec:
+  driver: local                 # local (default) | nfs — omit for local
+  quota: 2G                     # size cap (monitored when rootless, hard cap as root)
+  alertPct: 80                  # usage % above which `ls`/`describe` show WARN (default 90)
+---
+# 2. Raw driver form: mount an NFS export without the friendly block.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: raw-nfs
+spec:
+  driver: nfs
+  device: &quot;10.0.0.5:/mnt/pool/raw&quot;   # &quot;server:/export&quot;; only with driver: nfs
+  mountOptions: &quot;vers=4.1,soft&quot;      # `mount -o` options (alias: options)
+---
+# 3a. NFS block.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: nfs-media
+spec:
+  nfs:
+    server: 10.0.0.5                 # NAS host or IP (required)
+    share: /mnt/pool/media           # export path (required)
+    readOnly: false                  # true = mounted read-only
+    mountOptions: &quot;vers=4.1,soft&quot;    # extra `mount -o` options
+  quota: 500G
+  alertPct: 85
+---
+# 3b. SMB/CIFS block, credentials from a Secret.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: cifs-backups
+spec:
+  cifs:
+    server: nas.local                # required
+    share: backups                   # SMB share name, no leading slash (required)
+    username: delonix                # SMB user
+    passwordSecret: nas-creds        # reads key `password` from this Secret (preferred)
+    readOnly: false
+    mountOptions: &quot;vers=3.0&quot;
+---
+# 3c. SMB/CIFS block with an inline password (discouraged; use passwordSecret instead).
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: cifs-inline
+spec:
+  cifs:
+    server: nas.local
+    share: scratch
+    username: delonix
+    password: change-me              # inline alternative to passwordSecret
+    readOnly: true
+---
+# 3d. WebDAV block (Nextcloud/ownCloud).
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: webdav-cloud
+spec:
+  webdav:
+    server: cloud.example.com        # host, or a full URL to override the scheme
+    share: /remote.php/dav/files/delonix   # path inside the WebDAV endpoint
+    username: delonix
+    passwordSecret: nas-creds
+    readOnly: false
+---
+# 4. Share: an isolated, individually quota&#x27;d slice of another volume (`nfs-media` above).
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: team-share
+  namespace: teamA                   # scopes the name and data dir; omit = unscoped root
+spec:
+  share:
+    from: nfs-media                  # required: the parent volume to carve out of
+  quota: 5G                          # soft quota for this slice
+  alertPct: 90
+---
+# 5. Provision on a TrueNAS appliance: creates dataset + quota + owner + NFS export,
+#    then mounts what the appliance reported. Authenticate with an API key OR an account.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: truenas-dados
+spec:
+  provision:
+    truenas:
+      url: https://192.168.122.83    # required
+      apiKeySecret: nas-creds        # Secret with key `apiKey` (or `token`); preferred over an account
+      insecureTLS: true              # a stock TrueNAS serves a self-signed certificate
+      dataset: tank/dados            # required: &lt;pool&gt;/&lt;name&gt;
+      quota: 2G                      # quota ON THE NAS (min 1 GiB)
+      owner:
+        uid: 1000                    # required inside owner
+        gid: 1000                    # required inside owner
+        mode: &quot;0770&quot;                 # octal, quoted
+      share:                         # drop this block to provision without exporting
+        networks: [&quot;192.168.122.0/24&quot;]   # CIDRs allowed to mount (must be non-empty)
+        readOnly: false
+        maprootUser: root
+        maprootGroup: root
+---
+# 5b. TrueNAS with account credentials instead of an API key.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: truenas-account
+spec:
+  provision:
+    truenas:
+      url: https://192.168.122.83
+      username: truenas_admin        # account name
+      passwordSecret: nas-creds      # Secret with key `password` (or use inline `password:`)
+      insecureTLS: true
+      dataset: tank/account</code></pre></details>
 <h2 id='volume-com-bloco-de-rede'>Volume com bloco de rede</h2>
 <p class='lang-pt'>Um volume de REDE montado de um NAS (TrueNAS/Synology/Samba/Nextcloud), estilo PersistentVolume do k8s — o bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> de um <code>kind: Volume</code>. A password vem do cofre (<code>passwordSecret</code>); montar precisa de CAP_SYS_ADMIN. <strong>O <code>kind: Storage</code> ainda carrega</strong>, reescrito nisto com aviso de depreciação — descreviam a mesma montagem de duas maneiras e aterravam no mesmo store.</p><p class='lang-en'>A NETWORK volume mounted from a NAS (TrueNAS/Synology/Samba/Nextcloud), k8s PersistentVolume-style — the <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code> block of a <code>kind: Volume</code>. The password comes from the vault (<code>passwordSecret</code>); mounting needs CAP_SYS_ADMIN. <strong><code>kind: Storage</code> still loads</strong>, rewritten into this with a deprecation warning — the two described the same mount two ways and landed in the same store.</p>
 <pre><code># Network shares mounted as volumes, like Kubernetes PersistentVolumes.
@@ -936,6 +2163,56 @@ spec:
     tag: app:dev            # required — the tag to produce
     context: .              # build context (default &quot;.&quot;)
     file: null              # Delonixfile/Dockerfile path (default: ./Delonixfile then ./Dockerfile)</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-image.yaml</span><span class='lang-en'>Every option — examples/full-image.yaml</span></summary><pre><code># Complete reference for `kind: Image` — ensure an image is present, either by PULLING it
+# or by BUILDING it (`pull` and `build` are mutually exclusive: one document each).
+#
+#   delonix stack apply -f examples/full-image.yaml --dry-run
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: registry-cred
+spec:
+  # Registry credentials (`username` + `password`) for a private registry.
+  stringData:
+    username: demo
+    password: change-me
+---
+# 1. Pull a public image (idempotent).
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: alpine
+spec:
+  pull: alpine:3.19
+---
+# 2. Pull from a PRIVATE registry, credentials named by the manifest so it also works on a
+#    host where nobody ran `delonix image login`. Only meaningful together with `pull`.
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: private-app
+spec:
+  pull: ghcr.io/example/private-app:1.0
+  pullSecret: registry-cred
+---
+# 3. Build from a Delonixfile/Dockerfile with every build option.
+apiVersion: artifact.delonix.io/v1alpha1
+kind: Image
+metadata:
+  name: app-built
+spec:
+  build:
+    tag: app:dev                     # required: the tag to produce
+    context: .                       # build context directory (default &quot;.&quot;)
+    file: Delonixfile                # Delonixfile/Dockerfile path (default: ./Delonixfile, then ./Dockerfile)
+    target: runtime                  # multi-stage: build up to this stage (name or index)
+    platform: linux/amd64            # target architecture, like the CLI&#x27;s --platform
+    noCache: true                    # bypass the layer cache, like --no-cache
+    buildArgs:                       # ARG overrides KEY=VALUE (only for ARGs the file declares)
+      - VERSION=1.2.3
+      - CHANNEL=stable
+    secrets:                         # build-time secrets, `id=&lt;name&gt;,src=&lt;path&gt;`; used with
+      - id=npmrc,src=./npmrc.txt     #   RUN --mount=type=secret,id=npmrc — never lands in a layer</code></pre></details>
 <h2 id='virtualmachine'>VirtualMachine</h2>
 <p class='lang-pt'>Uma microVM declarativa (Cloud Hypervisor ou libvirt), com cloud-init por instância. É a camada que o <code>delonix cluster kubeadm</code> usa para provisionar nós.</p><p class='lang-en'>A declarative microVM (Cloud Hypervisor or libvirt), with per-instance cloud-init. It's the layer <code>delonix cluster kubeadm</code> uses to provision nodes.</p>
 <pre><code># Vm — a declarative microVM (Cloud Hypervisor or libvirt). Apply with:
@@ -998,6 +2275,240 @@ spec:
   devices: []                   # VFIO PCI passthrough (sysfs paths) — backend-agnostic (CH + libvirt)
   volumes: []                   # 9p mounts from a Volume/Storage: [{ name: data, target: /data, readOnly: false }]
   vnc: false                    # graphical console (libvirt backend only)</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-virtualmachine.yaml</span><span class='lang-en'>Every option — examples/full-virtualmachine.yaml</span></summary><pre><code># kind: VirtualMachine — a declarative VM (libvirt / Cloud Hypervisor / Proxmox backends).
+# Every field of `delonix explain VirtualMachine`, in every accepted shape.
+#
+#   delonix stack apply -f examples/full-virtualmachine.yaml --dry-run
+#   delonix stack validate -f examples/full-virtualmachine.yaml
+#
+# The base disk is a VM image from the local store (`delonix image vm ls`, e.g. built by
+# `delonix image vm build` or pulled with `delonix image vm pull`) or a path to a qcow2/raw.
+#
+# Documents in this file (variants are alternatives, hence separate documents):
+#   1. supporting resources: a Volume (9p share) and a Network
+#   2. `full-flat`      — FLAT shape, every field the libvirt backend understands
+#   3. `full-grouped`   — GROUPED shape (resources/network/boot/cloudInit/libvirt)
+#   4. `bridge-vm`      — netMode: bridge on a host bridge (alternative to nat + static ip)
+#   5. `direct-kernel`  — direct-kernel boot (kernel/initrd/cmdline) instead of firmware, Cloud Hypervisor
+#   6. `firmware-boot`  — explicit UEFI firmware, Cloud Hypervisor
+#   7. `prebuilt-seed`  — a ready-made cloud-init seed ISO instead of the generated one
+#   8. `raw-domain`     — the full libvirt &lt;domain&gt; XML used verbatim (escape hatch)
+#   9. `built-disk`     — the disk is BUILT from a VMfile (spec.build) instead of named (spec.disk)
+# ---------------------------------------------------------------------------
+# 1. Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: vm-data                         # shared into the guest over virtio-9p (libvirt backend)
+spec:
+  driver: local
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: vm-net                          # the SDN network the VM&#x27;s tap joins (Cloud Hypervisor backend)
+spec:
+  driver: bridge
+---
+# ---------------------------------------------------------------------------
+# 2. FLAT shape — every field at the top level (libvirt backend)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: full-flat
+  namespace: default                    # isolation namespace (enforced on the Cloud Hypervisor backend only)
+spec:
+  disk: delonix-vm-base:ubuntu-24.04    # base image: a name in the VM image store, or a path (an overlay is made per VM)
+  backend: libvirt                      # cloud-hypervisor | libvirt | proxmox (omit = auto-detect / default-backend)
+  restartPolicy: always                 # no | on-failure | always
+  vcpus: 4                              # omitted =&gt; the image&#x27;s own default, else 1
+  memory: 4G                            # &quot;512M&quot; | &quot;2G&quot; | &quot;2Gi&quot; (k8s-style suffix accepted)
+  hugepages: false                      # back guest RAM with hugepages
+  cpuAffinity: &quot;0-3&quot;                    # pin vCPUs to host CPUs
+  network: vm-net                       # SDN network name (declared above; `ingress` is the built-in default when omitted)
+  netMode: nat                          # libvirt only: user | nat | bridge   (`nat` gives an observable IP)
+  ip: 192.168.122.50                    # static IP: DHCP reservation on the libvirt network (nat mode only)
+  vnc: true                             # graphical console (libvirt backend only)
+  devices:                              # VFIO PCI passthrough, sysfs path (backend-agnostic)
+    - /sys/bus/pci/devices/0000:01:00.0
+
+  # cloud-init: a NoCloud seed ISO is generated from these unless `seed` is given
+  hostname: full-flat                   # hostname applied on first boot
+  sshKeys:                              # authorized public keys: &quot;ssh-ed25519 AAAA…&quot; or &quot;@/path/to/key.pub&quot;
+    - &quot;ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example&quot;
+  userData: &quot;@/etc/delonix/examples/user-data.yaml&quot;   # your own cloud-init user-data (path or @path); replaces the generated one
+
+  # volumes shared into the guest over virtio-9p (`kind: Volume`, by name)
+  volumes:
+    - name: vm-data
+      mountPath: /mnt/data              # where the guest mounts it
+      readOnly: false
+
+  # advanced libvirt knobs
+  machine: q35                          # machine type (default q35)
+  cpuModel: host-passthrough            # host-passthrough (default) | host-model | a named model
+  cpuTopology: { sockets: 1, cores: 2, threads: 2 }
+  tpm: true                             # emulated TPM 2.0
+  video: virtio                         # virtio | qxl | vga | none
+  bootOrder: [hd, cdrom]                # OS boot device order
+  extraDisks:                           # extra disks beyond the main overlay + seed
+    - source: /var/lib/libvirt/images/extra.qcow2
+      device: disk                      # disk (default) | cdrom
+      bus: virtio                       # virtio (default) | sata | scsi | ide
+      format: qcow2                     # qcow2 (default) | raw
+      readOnly: false
+      target: vdb                       # explicit target dev (auto-assigned when omitted)
+  extraNics:                            # extra network interfaces beyond the primary one
+    - type: network                     # network (a libvirt network) | bridge (host bridge) | user
+      source: default
+      model: virtio                     # virtio (default) | e1000 | …
+      mac: &quot;52:54:00:12:34:56&quot;          # fixed MAC (random when omitted)
+  libvirtXmlOverlay:                    # raw &lt;device&gt; fragments injected before &lt;/devices&gt; (TRUSTED manifests only)
+    - &quot;&lt;rng model=&#x27;virtio&#x27;&gt;&lt;backend model=&#x27;random&#x27;&gt;/dev/urandom&lt;/backend&gt;&lt;/rng&gt;&quot;
+---
+# ---------------------------------------------------------------------------
+# 3. GROUPED shape — the same knobs, organised by concern
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: full-grouped
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  restartPolicy: on-failure
+  devices: []                           # VFIO PCI passthrough (stays top-level)
+  volumes:                              # 9p mounts (stays top-level)
+    - { name: vm-data, mountPath: /mnt/data, readOnly: true }
+  vnc: true                             # stays top-level
+
+  resources:
+    vcpus: 2
+    memory: 2G
+    hugepages: false
+    cpuAffinity: &quot;0-1&quot;
+
+  network:                              # a mapping here (a plain string is the flat form)
+    name: vm-net
+    mode: nat                           # =&gt; netMode
+    staticIp: 192.168.122.51            # =&gt; ip (nat mode)
+    # bridge: br0                       # =&gt; bridge (host bridge, bridge mode) — see `bridge-vm`
+
+  cloudInit:
+    hostname: full-grouped
+    sshKeys: [&quot;ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example&quot;]
+    userData: &quot;@/etc/delonix/examples/user-data.yaml&quot;
+    # seed: /path/seed.iso              # prebuilt seed — see `prebuilt-seed`
+
+  libvirt:                              # advanced libvirt knobs
+    backend: libvirt
+    machine: q35
+    cpuModel: host-model
+    cpuTopology: { sockets: 1, cores: 2, threads: 1 }
+    tpm: false
+    video: qxl
+    bootOrder: [hd]
+    extraDisks:
+      - { source: /var/lib/libvirt/images/scratch.raw, format: raw, bus: sata }
+    extraNics:
+      - { type: bridge, source: br0, model: e1000 }
+    xmlOverlay:                         # =&gt; libvirtXmlOverlay
+      - &quot;&lt;memballoon model=&#x27;virtio&#x27;/&gt;&quot;
+    # xml: &quot;&lt;domain …&gt;&quot;                 # =&gt; libvirtXml — see `raw-domain`
+---
+# ---------------------------------------------------------------------------
+# 4. Bridge mode: the VM attaches to a host bridge (mutually exclusive with a static `ip`, which is nat-only)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: bridge-vm
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  backend: libvirt
+  netMode: bridge
+  bridge: br0                           # host bridge / libvirt network to attach to
+  vcpus: 2
+  memory: 2G
+---
+# ---------------------------------------------------------------------------
+# 5. Direct-kernel boot (alternative to firmware): kernel [+ initrd] [+ cmdline] — Cloud Hypervisor
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: direct-kernel
+spec:
+  disk: delonix-vm-base:fedora-42
+  backend: cloud-hypervisor
+  network: vm-net
+  kernel: /var/lib/delonix/kernels/vmlinuz-6.14.0     # direct kernel boot
+  initrd: /var/lib/delonix/kernels/initramfs-6.14.0.img
+  cmdline: &quot;console=ttyS0 root=/dev/vda1 rw&quot;          # kernel command line
+  vcpus: 2
+  memory: 2G
+---
+# ---------------------------------------------------------------------------
+# 6. Explicit UEFI firmware (the usual way to boot a cloud image) — Cloud Hypervisor
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: firmware-boot
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  backend: cloud-hypervisor
+  network: vm-net
+  firmware: /usr/local/share/delonix/CLOUDHV.fd       # UEFI firmware path
+  vcpus: 2
+  memory: 2G
+---
+# ---------------------------------------------------------------------------
+# 7. A prebuilt cloud-init seed ISO: replaces the generated one (so hostname/sshKeys/userData are not set)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: prebuilt-seed
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  seed: /var/lib/delonix/seeds/prebuilt-seed.iso      # NoCloud ISO handed to the guest as-is
+---
+# ---------------------------------------------------------------------------
+# 8. Escape hatch: the whole libvirt &lt;domain&gt; XML, used verbatim (TRUSTED manifests only)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: raw-domain
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  backend: libvirt
+  libvirtXml: |
+    &lt;domain type=&#x27;kvm&#x27;&gt;
+      &lt;name&gt;raw-domain&lt;/name&gt;
+      &lt;memory unit=&#x27;MiB&#x27;&gt;1024&lt;/memory&gt;
+      &lt;vcpu&gt;1&lt;/vcpu&gt;
+      &lt;os&gt;&lt;type arch=&#x27;x86_64&#x27; machine=&#x27;q35&#x27;&gt;hvm&lt;/type&gt;&lt;/os&gt;
+    &lt;/domain&gt;
+---
+# ---------------------------------------------------------------------------
+# 9. The disk is BUILT from a VMfile (spec.build) — mutually exclusive with `disk`
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: built-disk
+spec:
+  build:
+    context: .                          # build context, relative to THIS manifest&#x27;s folder (default &quot;.&quot;)
+    file: VMfile                        # the VMfile (default &lt;context&gt;/VMfile)
+    tag: built-disk:latest              # tag of the produced image, then used as the VM&#x27;s disk (default &lt;name&gt;:latest)
+    compress: true                      # zstd-compress the result (default true)
+    network: false                      # give the build network access (default false: reproducible)
+  vcpus: 2
+  memory: 2G</code></pre></details>
 <h2 id='container'>Container</h2>
 <p class='lang-pt'>A carga do dia a dia. Só <code>image</code> é obrigatório; todos os outros campos têm default. Cobre rede, storage, recursos (cgroup v2), segredos, segurança, devices e limites.</p><p class='lang-en'>The everyday workload. Only <code>image</code> is required; every other field has a default. Covers networking, storage, resources (cgroup v2), secrets, security, devices and limits.</p>
 <pre><code># Container — the everyday workload. Apply with:  delonix container apply -f examples/container.yaml
@@ -1070,6 +2581,256 @@ spec:
 
   labels: []                     # [&quot;tier=frontend&quot;]
   logDriver: null                # json | cri</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-container.yaml</span><span class='lang-en'>Every option — examples/full-container.yaml</span></summary><pre><code># kind: Container — EVERY field of the flat container spec, in every accepted shape.
+#
+#   delonix stack apply -f examples/full-container.yaml --dry-run
+#   delonix stack validate -f examples/full-container.yaml
+#
+# Layout of this file (one document per variant, separated by `---`):
+#   1. supporting resources (Network, Secret, Volume) that the containers reference
+#   2. `full-flat`     — the FLAT shape: every field at the top level of `spec`
+#   3. `full-grouped`  — the GROUPED shape: resources/network/security/storage/env/limits
+#   4. `env-map`       — `env` written as a plain `KEY: value` mapping
+#   5. `foreground`    — `detach: false` (synchronous, like `container run` without -d)
+#   6. `minimal`       — the only mandatory field (`image`)
+#
+# The flat and the grouped shape describe the SAME container; they are separate
+# documents because they are alternative spellings (a flat key wins over a grouped one
+# of the same target if both are present). The k8s-style `spec.containers[]` shape is a
+# `kind: Pod` (see full-pod.yaml) — on a `kind: Container` it is a sunset form.
+# ---------------------------------------------------------------------------
+# 1. Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: app-net
+spec:
+  driver: bridge
+---
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: app-secret
+spec:
+  stringData:
+    DB_PASSWORD: change-me-example      # injected as env (or /run/secrets/DB_PASSWORD, see secretFiles)
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: app-data
+spec:
+  driver: local
+---
+# A peer container so `knows:` has something to resolve.
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: peer
+spec:
+  image: busybox:latest
+  command: [&quot;sleep&quot;, &quot;infinity&quot;]
+  network: app-net
+---
+# ---------------------------------------------------------------------------
+# 2. FLAT shape — every field at the top level
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: full-flat
+  namespace: default                    # isolation namespace (containers of other namespaces cannot reach it)
+  labels:                               # metadata labels (the engine adds its own delonix.io/* ones)
+    tier: frontend
+  annotations:
+    example.delonix.io/purpose: full-spec-demo
+spec:
+  image: nginx:alpine                   # REQUIRED — image reference (pulled if missing)
+  detach: true                          # run in the background (default true for a manifest)
+  command: [&quot;nginx&quot;, &quot;-g&quot;, &quot;daemon off;&quot;]   # overrides the image CMD
+  entrypoint: /docker-entrypoint.sh     # overrides the image ENTRYPOINT (&quot;&quot; clears it)
+  user: &quot;101:101&quot;                       # uid[:gid] or user name to run as
+  hostname: full-flat-host              # container hostname (default: the container name)
+  restartPolicy: on-failure:3           # no | on-failure[:max] | always | unless-stopped (legacy key `restart` also accepted)
+  addHost:                              # extra /etc/hosts entries, `name:ip`
+    - legacy-api:10.0.0.9
+  labels:                               # container labels, `key=value` (spec-level, distinct from metadata.labels)
+    - tier=frontend
+    - team=platform
+
+  # --- network ---
+  network: app-net                      # host | none | &lt;custom network&gt; (custom =&gt; own netns on the SDN)
+  ports:                                # publish host:container[/proto]; [hostIp:]host:container and ranges work too
+    - &quot;127.0.0.1:18080:80&quot;
+    - &quot;18443:443/tcp&quot;
+    - &quot;19000-19002:9000-9002&quot;
+  expose: 80                            # auto-register this HTTP port in the L7 proxy (needs a custom network)
+  networkAlias:                         # extra DNS names on the custom network
+    - web
+    - frontend
+  knows:                                # restrict what this container can reach to these peers (directed Dependency)
+    - peer
+  netBps: 10mbit                        # egress rate limit (needs a custom network)
+  netBurst: 20mbit                      # burst for netBps
+
+  # --- resources (cgroup v2) ---
+  memory: 256M                          # 64M | 2G | max
+  cpus: &quot;0.5&quot;                           # CPU cores
+  cpuWeight: &quot;200&quot;                      # relative CPU weight under contention (1-10000)
+  cpuset: &quot;0&quot;                           # pin to CPUs, e.g. &quot;0-3&quot; (needs the cpuset controller delegated)
+  ioWeight: &quot;100&quot;                       # relative block-I/O weight
+  cgroupParent:                         # shared intermediate cgroup bounding a GROUP of containers together
+    name: app-tier                      # single safe path segment
+    memoryMax: &quot;1073741824&quot;             # aggregate memory ceiling (bytes)
+    cpus: &quot;2&quot;                           # aggregate CPU cores
+    pidsMax: &quot;512&quot;                      # aggregate process ceiling
+
+  # --- security ---
+  readOnly: true                        # read-only rootfs (writes go to tmpfs/volumes)
+  capDrop: [&quot;ALL&quot;]                      # capabilities to drop
+  capAdd: [&quot;NET_BIND_SERVICE&quot;]          # capabilities to add back
+  securityOpt:                          # docker-style security options
+    - no-new-privileges
+  # apparmor: &lt;profile&gt;                 # AppArmor profile — see the note at the end of this file
+  # selinux: &lt;context&gt;                  # SELinux context   — see the note at the end of this file
+  userns: true                          # force the subuid user namespace (already default in rootless)
+
+  # --- storage ---
+  volumes:                              # named volume or bind mount; optional :ro
+    - app-data:/var/lib/app
+    - /etc/hostname:/etc/host-name:ro
+  tmpfs:                                # in-memory mounts
+    - /tmp
+    - /run/cache
+
+  # --- environment ---
+  env:                                  # KEY=value list
+    - TZ=Africa/Luanda
+    - LOG_LEVEL=info
+  secret:                               # vault secret names, injected as env (or files, below)
+    - app-secret
+  secretFiles: false                    # true =&gt; secrets appear as /run/secrets/&lt;key&gt; instead of env
+
+  # --- misc limits ---
+  ulimit:
+    - nofile=1024:2048
+  sysctl:
+    - net.core.somaxconn=1024
+  logDriver: json                       # json | cri
+---
+# ---------------------------------------------------------------------------
+# 3. GROUPED shape — the same fields, organised by concern
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: full-grouped
+spec:
+  image: nginx:alpine
+  detach: true
+  command: [&quot;nginx&quot;, &quot;-g&quot;, &quot;daemon off;&quot;]
+  entrypoint: /docker-entrypoint.sh
+  user: &quot;101:101&quot;
+  hostname: full-grouped-host
+  restartPolicy: always
+  addHost: [&quot;legacy-api:10.0.0.9&quot;]
+  labels: [&quot;tier=frontend&quot;]
+  logDriver: json
+
+  resources:                            # cgroup v2 limits
+    memory: 256M
+    cpus: &quot;0.5&quot;
+    cpuWeight: &quot;200&quot;
+    cpuset: &quot;0&quot;
+    ioWeight: &quot;100&quot;
+    cgroupParent:
+      name: app-tier-grouped
+      memoryMax: &quot;1073741824&quot;
+      cpus: &quot;2&quot;
+      pidsMax: &quot;512&quot;
+
+  network:                              # a mapping here (a plain string is the flat form)
+    name: app-net                       # host | none | &lt;custom network&gt;
+    ports: [&quot;18081:80&quot;]
+    expose: 80                          # auto-register in the L7 proxy
+    alias: [web-grouped]                # =&gt; networkAlias
+    knows: [peer]
+    rateBps: 10mbit                     # =&gt; netBps
+    rateBurst: 20mbit                   # =&gt; netBurst
+
+  security:
+    privileged: false                   # true =&gt; all caps, seccomp off (trusted workloads only)
+    readOnly: true
+    capAdd: [&quot;NET_BIND_SERVICE&quot;]
+    capDrop: [&quot;ALL&quot;]
+    securityOpt: [&quot;no-new-privileges&quot;]
+    userns: true
+    hostPid: false                      # share the HOST pid namespace
+    hostIpc: false                      # share the HOST ipc namespace
+    detect: false                       # seccomp in log mode: discover the syscalls a workload uses
+
+  storage:
+    volumes: [&quot;app-data:/var/lib/app&quot;]
+    tmpfs: [&quot;/tmp&quot;]
+
+  env:                                  # grouped env (vars/files/secrets/secretFiles)
+    vars: [&quot;TZ=Africa/Luanda&quot;]
+    files: []                           # [&quot;./.env&quot;] — env files read at apply time
+    secrets: [app-secret]
+    secretFiles: true                   # secrets as /run/secrets/&lt;key&gt;
+
+  limits:
+    ulimit: [&quot;nofile=1024:2048&quot;]
+    sysctl: [&quot;net.core.somaxconn=1024&quot;]
+    devices: [&quot;/dev/null:/dev/fuse-demo&quot;]   # extra device nodes
+    # gpus: nvidia                      # all | nvidia | dri — see the note at the end of this file
+---
+# ---------------------------------------------------------------------------
+# 4. `env` as a plain KEY: value mapping (what compose/k8s users write)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: env-map
+spec:
+  image: busybox:latest
+  command: [&quot;sleep&quot;, &quot;infinity&quot;]
+  env:
+    POSTGRES_USER: app
+    POSTGRES_PASSWORD: example-only
+    PORT: 8080                          # non-strings are stringified
+---
+# ---------------------------------------------------------------------------
+# 5. Foreground: detach false blocks apply until the process exits (like `container run`)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: foreground
+spec:
+  image: busybox:latest
+  command: [&quot;echo&quot;, &quot;hello&quot;]
+  detach: false
+  restartPolicy: &quot;no&quot;
+---
+# ---------------------------------------------------------------------------
+# 6. Minimal: `image` is the only mandatory field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: minimal
+spec:
+  image: alpine:3.20
+# Fields of `delonix explain Container` deliberately NOT set above:
+#   apparmor / selinux  host-LSM specific: an unknown AppArmor profile or SELinux context makes the
+#                       runtime refuse to start the container on hosts without it; kept as comments.
+#   gpus                needs a CDI spec generated by `nvidia-ctk` on the host; refused otherwise.
+#   privileged: true   would defeat the hardening shown in full-flat; shown as `false` in the grouped form.
+#   hostPid/hostIpc: true  share HOST namespaces — off on purpose.
+#   resources.restart   `restart` is only the legacy alias of `restartPolicy`.
+# (The `explain` rows `limits`, `resources`, `security`, `storage`, `restart` are the group names / the alias.)</code></pre></details>
 <h2 id='pod'>Pod</h2>
 <p class='lang-pt'>Um pod REAL multi-container: N containers a partilhar as namespaces do pod (mesmo schema <code>spec.containers[]</code> do <code>kind: Container</code>, mas com N containers). Partilham <strong>netns</strong> (mesmo IP, <code>localhost</code> entre si), <strong>IPC</strong> e <strong>UTS</strong> (hostname). A namespace de PID (<code>shareProcessNamespace</code>) é follow-up. Gere-se com <code>delonix pod create/ls/describe/rm/logs</code>.</p><p class='lang-en'>A REAL multi-container pod: N containers sharing the pod's namespaces (the same <code>spec.containers[]</code> schema as <code>kind: Container</code>, but with N containers allowed). They share <strong>netns</strong> (same IP, reachable via <code>localhost</code>), <strong>IPC</strong> and <strong>UTS</strong> (hostname). The PID namespace (<code>shareProcessNamespace</code>) is a follow-up. Managed with <code>delonix pod create/ls/describe/rm/logs</code>.</p>
 <pre><code># kind: Pod — a REAL multi-container pod: N containers sharing the pod&#x27;s network
@@ -1224,6 +2985,105 @@ spec:
           backend: { service: web, port: 80 }
         - path: /api          # prefixos mais específicos ganham
           backend: { service: api, port: 3000 }</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-httproute.yaml</span><span class='lang-en'>Every option — examples/full-httproute.yaml</span></summary><pre><code># Complete reference for `kind: HTTPRoute` — embedded L7/HTTP reverse proxy (Gateway API style).
+# Routes by Host header and/or path prefix to backend workloads. The proxy runs inside the
+# holder netns (it reaches backends by their SDN IP) and publishes the entry ports on the host.
+# TLS terminates at the proxy.
+#
+# ALL HTTPRoute (and Ingress) documents of a manifest are composed into ONE proxy: listeners
+# are merged by port (TLS wins on collision), routes are concatenated, and the proxy has a
+# SINGLE certificate (no SNI). If any document says `mode: secretRef` that certificate is used
+# for every TLS listener; otherwise a self-signed one covering all the hosts is generated.
+# Listeners and TLS are fixed at proxy start-up: changing them restarts the proxy (connections
+# are cut); changing only rules is a hot reload with the same PID.
+#
+# spec fields: entrypoints[] (port, tls), tls (mode, secretRef), rules[] (host, paths[] (path, backend (service, port))).
+# Backends must be workloads WITH an IP on a custom SDN network (not host/none networking).
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: appnet
+  containers:
+    - name: web
+      image: &quot;nginx:1.27-alpine&quot;
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: api }
+spec:
+  network: appnet
+  containers:
+    - name: api
+      image: &quot;hashicorp/http-echo:latest&quot;
+      command: [&quot;-listen=:3000&quot;, &quot;-text=hello from api&quot;]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: admin }
+spec:
+  network: appnet
+  containers:
+    - name: admin
+      image: &quot;hashicorp/http-echo:latest&quot;
+      command: [&quot;-listen=:9000&quot;, &quot;-text=admin&quot;]
+---
+# Certificate for the secretRef mode below (PEM under tls.crt / tls.key; tls_crt / tls_key also work).
+# Replace the placeholders with a real pair before serving real traffic.
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: { name: loja-cert }
+stringData:
+  tls.crt: &quot;-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----&quot;
+  tls.key: &quot;-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----&quot;
+---
+# 1. The main route: two listeners, a certificate from a Secret, host + several path prefixes.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: loja }
+spec:
+  entrypoints:
+    - { port: 80 }                 # plain HTTP listener (tls defaults to false)
+    - { port: 443, tls: true }     # TLS terminates here (requires spec.tls)
+  tls:
+    mode: secretRef                # selfSigned (default, cert generated for the hosts) | secretRef
+    secretRef: loja-cert           # kind: Secret holding tls.crt / tls.key
+  rules:
+    - host: loja.exemplo.ao        # matched against the Host header
+      paths:
+        - path: /                  # path prefix; the longest prefix wins
+          backend: { service: web, port: 80 }
+        - path: /api
+          backend: { service: api, port: 3000 }
+---
+# 2. A second document joins the same proxy: a different host and an extra listener.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: painel }
+spec:
+  entrypoints:
+    - { port: 8080 }               # extra HTTP listener, merged with the ones above
+  rules:
+    - host: admin.exemplo.ao
+      paths:
+        - path: /
+          backend: { service: admin, port: 9000 }
+---
+# 3. A rule without `host` matches ANY Host (a catch-all by path); `path` omitted defaults to `/`.
+#    No entrypoints given: defaults to port 80 (plus 443 with TLS if `tls` were set).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: catch-all }
+spec:
+  rules:
+    - paths:
+        - backend: { service: web, port: 80 }</code></pre></details>
 <h2 id='gateway'>Gateway</h2>
 <p class='lang-pt'>Expõe UMA porta local à internet pública via pinggy/ngrok/cloudflare — sem conta, sem IP público. Junta-se ao <code>HTTPRoute</code> apontando <code>localPort</code> para onde o proxy L7 escuta: uma URL pública, routing por Host do lado de lá para vários backends.</p><p class='lang-en'>Exposes ONE local port to the public internet via pinggy/ngrok/cloudflare — no account, no public IP. Pairs with <code>HTTPRoute</code> by pointing <code>localPort</code> at where the L7 proxy listens: one public URL, Host-based routing on the other end to several backends.</p>
 <pre><code># kind: Gateway — exposes ONE local TCP port to the public internet via a
@@ -1246,6 +3106,70 @@ spec:
   token: null                  # pinggy pro token / ngrok authtoken / a cloudflare NAMED tunnel&#x27;s token (literal — prefer tokenSecretRef)
   tokenSecretRef: null         # pull the token from a `kind: Secret`&#x27;s `token` key instead
   insecureSkipTlsVerify: false # skip TLS verification of the LOCAL backend&#x27;s self-signed cert — never affects the public URL, no-op for pinggy</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-gateway.yaml</span><span class='lang-en'>Every option — examples/full-gateway.yaml</span></summary><pre><code># Complete reference for `kind: Gateway` — exposes ONE local TCP port to the public internet
+# through a third-party tunnel provider. It only does the outbound transport; point `localPort`
+# at the HTTPRoute proxy&#x27;s listening port to publish many backends behind one public URL.
+#
+# spec fields: provider* (pinggy | ngrok | cloudflare), localPort*, hostname, token,
+# tokenSecretRef, insecureSkipTlsVerify.   (* = required)
+# `token` and `tokenSecretRef` are two ways to give the same credential: use ONE per document.
+# Only one ngrok tunnel can be alive at a time (its local agent API has a fixed port).
+---
+# Secret that carries a provider token under the key `token` (placeholder value).
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: { name: tunnel-token }
+stringData:
+  token: &quot;REPLACE-WITH-PROVIDER-TOKEN&quot;
+---
+# 1. Minimal: pinggy free tier needs no account and no extra binary.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-min }
+spec:
+  provider: pinggy
+  localPort: 80              # local port to expose (e.g. the HTTPRoute proxy, or a published port)
+---
+# 2. pinggy with a pro token given literally (works, but prefer tokenSecretRef).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-pinggy-pro }
+spec:
+  provider: pinggy
+  localPort: 8080
+  token: &quot;REPLACE-WITH-PINGGY-PRO-TOKEN&quot;
+---
+# 3. ngrok with a reserved hostname (passed as ngrok&#x27;s --url) and the token read from a Secret.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-ngrok }
+spec:
+  provider: ngrok
+  localPort: 8080
+  hostname: demo.ngrok.app   # custom/reserved hostname (provider-dependent)
+  tokenSecretRef: tunnel-token   # kind: Secret whose `token` key holds the authtoken
+---
+# 4. cloudflare NAMED tunnel: runs `cloudflared tunnel run --token ...` for a tunnel you already
+#    created. `hostname` is informational only — the route itself lives in the Cloudflare dashboard.
+#    `insecureSkipTlsVerify` skips verification of the LOCAL backend&#x27;s self-signed certificate
+#    (the origin becomes https://localhost:&lt;localPort&gt;); the public URL is always a real certificate.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-cloudflare }
+spec:
+  provider: cloudflare
+  localPort: 8443
+  hostname: app.example.com
+  tokenSecretRef: tunnel-token
+  insecureSkipTlsVerify: true
+---
+# 5. cloudflare quick tunnel: no token at all (an ephemeral trycloudflare.com URL).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-cloudflare-quick }
+spec:
+  provider: cloudflare
+  localPort: 80</code></pre></details>
 <h2 id='volume-com-bloco-share'>Volume com bloco share</h2>
 <p class='lang-pt'>Uma fatia ISOLADA e com quota própria de outro volume (tipicamente um com bloco de rede) — vários container/vm/pod partilham UM export NFS/CIFS/WebDAV sem se verem. Cada fatia é um subdirectório real do mount pai, registado como o seu próprio volume; consome-se com <code>-v &lt;nome&gt;:/destino</code>, sem nada de novo do lado do consumidor. <strong>O <code>kind: ShareVolume</code> deixou de existir</strong>: é o MESMO <code>kind: Volume</code> com um bloco <code>share:</code>.</p><p class='lang-en'>An ISOLATED, individually-quota'd slice of another volume (typically one with a network block) — several container/vm/pod share ONE NFS/CIFS/WebDAV export without seeing each other. Each slice is a real subdirectory of the parent mount, registered as its own volume; consumed with <code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side. <strong><code>kind: ShareVolume</code> no longer exists</strong>: it's the SAME <code>kind: Volume</code> with a <code>share:</code> block.</p>
 <pre><code># A SHARE — an isolated, individually-quota&#x27;d slice of an existing volume, so
@@ -1307,6 +3231,371 @@ spec:
   share:
     from: nas                 # the SAME parent — app-a and app-b never see each other&#x27;s files
   quota: 2G</code></pre>
+<h2 id='app'>App</h2>
+<p class='lang-pt'>Build por Cloud Native Buildpacks (Paketo/Heroku), sem Dockerfile: aponta para o código e o motor detecta a linguagem, constrói e deixa a imagem no store local.</p><p class='lang-en'>Build with Cloud Native Buildpacks (Paketo/Heroku), no Dockerfile: point it at the source and the engine detects the language, builds, and leaves the image in the local store.</p>
+<pre><code># kind: App — build por Cloud Native Buildpacks (Paketo/Heroku), sem Dockerfile.
+#
+# `source` (por omissão &quot;.&quot;, relativo ao directório onde correste o comando —
+# a mesma convenção do `build.context` de `kind: Image`, não a pasta deste
+# manifesto) é detectado automaticamente (`go.mod`, `package.json`,
+# `requirements.txt`, ...) para escolher o builder Paketo certo. `builder:
+# heroku` troca de família; um builder próprio exige `runImage` explícito —
+# este motor não lê o `builder.toml` de um builder alheio para o adivinhar.
+#
+# Por baixo: um registo OCI descartável (não o loopback, que um container
+# builder não alcança) vive numa rede própria desta build, alcançado pelo
+# `creator` do lifecycle CNB pelo DNS interno do motor — a mesma rede/DNS que
+# qualquer outro container usa para se encontrar, sem dataplane novo. A imagem
+# resultante volta para o `ImageStore` local sob o nome de `spec.image`.
+#
+# Sem cache de build (cada apply reconstrói), a mesma promessa que `kind:
+# Image`&#x27;s `build:` já faz. Aplicar com `delonix stack apply -f app.yaml`.
+---
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata: { name: shop }
+spec:
+  source: .
+  builder: auto
+  image: shop:latest</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-app.yaml</span><span class='lang-en'>Every option — examples/full-app.yaml</span></summary><pre><code># kind: App — build an application image from source with Cloud Native Buildpacks (no Dockerfile).
+#
+#   delonix stack apply -f examples/full-app.yaml --dry-run
+#   delonix stack validate -f examples/full-app.yaml
+#
+# Spec fields: `image` (required), `source`, `builder`, `runImage`. The built image lands in the LOCAL
+# image store under the tag in `spec.image`; there is no build cache (every apply rebuilds).
+# `builder` selects how the stack is built, and each choice is a separate document below:
+#   1. builder: auto     — detect the stack (go.mod, package.json, requirements.txt, …), Paketo builder
+#   2. builder: heroku   — the Heroku builder family
+#   3. custom builder    — any builder image; `runImage` becomes REQUIRED (and is only read here)
+#   4. defaults          — only `image`: source &quot;.&quot;, builder &quot;auto&quot;
+# ---------------------------------------------------------------------------
+# 1. Auto-detected stack (Paketo)
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-auto
+  labels:
+    app: shop
+spec:
+  source: .                             # directory to build; relative to where you RUN the command (not to this file)
+  builder: auto                         # auto | heroku | &lt;builder image ref&gt;   (default auto)
+  image: shop-auto:latest               # REQUIRED — tag of the built image in the local image store
+---
+# ---------------------------------------------------------------------------
+# 2. Heroku builder family
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-heroku
+spec:
+  source: .
+  builder: heroku
+  image: shop-heroku:latest
+---
+# ---------------------------------------------------------------------------
+# 3. A custom builder image — the engine does not read a custom builder&#x27;s metadata to discover its run image,
+#    so `runImage` is mandatory here (omitting it is an error), and meaningless with auto/heroku.
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-custom
+spec:
+  source: ./services/shop               # any directory holding the application source
+  builder: registry.example.com/buildpacks/builder-jammy-base:latest
+  runImage: registry.example.com/buildpacks/run-jammy-base:latest
+  image: shop-custom:1.0.0
+---
+# ---------------------------------------------------------------------------
+# 4. Defaults: only the image tag is mandatory
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-defaults
+spec:
+  image: shop-defaults:latest</code></pre></details>
+<h2 id='service'>Service</h2>
+<p class='lang-pt'>Um CONJUNTO de containers escolhido por label e publicado como vários registos DNS <code>A</code> sob <code>&lt;nome&gt;.&lt;namespace&gt;.delonix.internal</code>, em round-robin. Sem VIP e sem daemon.</p><p class='lang-en'>A SET of containers picked by label and published as several DNS <code>A</code> records under <code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>, round-robin. No VIP, no daemon.</p>
+<pre><code># kind: Service (ADR-0032) — um CONJUNTO de containers seleccionado por label,
+# publicado como MÚLTIPLOS registos DNS `A` sob
+# &lt;nome&gt;.&lt;namespace&gt;.delonix.internal, com ordem rotativa a cada consulta
+# (round-robin). Sem VIP, sem dataplane L4 novo, sem daemon.
+#
+# A membership é recomputada a cada consulta que ultrapassa o TTL do índice DNS
+# já existente (`build_dns_index`, ~2s) — um container acrescentado, removido ou
+# relabelado aparece dentro de uma janela de TTL, sem precisar de `stack apply`
+# outra vez. Um selector vazio (ou que não corresponda a nada) resolve para uma
+# lista vazia — nunca é erro, mas o `apply` avisa em voz alta.
+#
+# `spec.port` é a porta do CONTAINER (o lado que os workloads escutam), nunca
+# uma porta de host ou de VIP — o cliente resolve o nome, recebe um IP, e liga
+# directamente a essa porta na máquina que calhou.
+#
+# Aplicar com `delonix stack apply -f service.yaml`.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec:
+  driver: bridge
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: web-1
+  labels: { app: web }
+spec:
+  image: &quot;nginx:alpine&quot;
+  network: appnet
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: web-2
+  labels: { app: web }
+spec:
+  image: &quot;nginx:alpine&quot;
+  network: appnet
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: web
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: web
+  port: 80
+# Um cliente na mesma rede resolve `web.default.delonix.internal` e recebe os
+# dois IPs de web-1/web-2, em ordem alternada a cada consulta.</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-service.yaml</span><span class='lang-en'>Every option — examples/full-service.yaml</span></summary><pre><code># Complete reference for `kind: Service` (ADR-0032) — a SET of workloads picked by
+# label and published as MULTIPLE DNS `A` records under
+# &lt;name&gt;.&lt;namespace&gt;.delonix.internal, in rotating order (DNS round-robin).
+# No VIP, no L4 dataplane, no daemon. Membership is recomputed within a DNS-index TTL
+# (~2s): a workload added, removed or relabelled shows up without re-applying.
+#
+# spec fields: selector.matchLabels (all listed labels must match — logical AND) and
+# port (the CONTAINER-side port; never a host or VIP port). A selector that is empty or
+# matches nothing is not an error: the name resolves to an empty set and apply warns.
+# The workloads below carry labels through `kind: Workload` (type: container), which
+# lowers to a labelled container.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: web-1
+  labels: { app: web, tier: frontend, track: stable }
+spec:
+  type: container
+  container: { image: &quot;nginx:alpine&quot;, network: appnet }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: web-2
+  labels: { app: web, tier: frontend, track: canary }
+spec:
+  type: container
+  container: { image: &quot;nginx:alpine&quot;, network: appnet }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Workload
+metadata:
+  name: api-1
+  namespace: team-a            # a namespace other than `default`
+  labels: { app: api }
+spec:
+  type: container
+  container: { image: &quot;caddy:alpine&quot;, network: appnet }
+---
+# 1. Single-label selector, namespace `default`.
+#    Clients resolve web.default.delonix.internal and get web-1 and web-2 in rotation.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: web
+  namespace: default
+spec:
+  selector:
+    matchLabels:
+      app: web                 # every listed label must match
+  port: 80                     # container-side port the members listen on
+---
+# 2. Multi-label selector: narrows the set to the stable track only (here: web-1).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: web-stable
+spec:                          # namespace omitted = `default`
+  selector:
+    matchLabels:
+      app: web
+      track: stable
+  port: 80
+---
+# 3. Service living in another namespace: resolves as api.team-a.delonix.internal.
+#    Namespace isolation applies to DNS: other namespaces get NXDOMAIN (except services in `default`).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Service
+metadata:
+  name: api
+  namespace: team-a
+spec:
+  selector:
+    matchLabels:
+      app: api
+  port: 8080</code></pre></details>
+<h2 id='networkaccessrule'>NetworkAccessRule</h2>
+<p class='lang-pt'>UMA regra de firewall INCREMENTAL por documento: várias regras para o mesmo container acumulam, e cada uma sai sozinha quando o documento sai do manifesto.</p><p class='lang-en'>ONE INCREMENTAL firewall rule per document: several rules for the same container accumulate, and each one goes away on its own when its document leaves the manifest.</p>
+<pre><code># kind: NetworkAccessRule — UMA regra de firewall INCREMENTAL por documento.
+#
+# Ao contrário de `kind: FirewallPolicy`/`NetworkPolicy`, que SUBSTITUI o
+# estado inteiro de uma direcção a cada apply (e por isso recusa dois
+# documentos para o mesmo alvo+direcção), várias NetworkAccessRule para o
+# MESMO container acumulam — é o que este exemplo mostra: duas regras
+# independentes no mesmo alvo, cada uma retirável sozinha (remove-a do
+# manifesto e reaplica; a outra fica intacta).
+#
+# É o primitivo que faltava para o B4 do plano de reestruturação da CLI
+# (ver `docs/adr/0028-network-access-rule-incremental.md`) — `net ingress
+# allow`/`net egress allow` já eram incrementais, mas nada declarativo
+# conseguia exprimir isso até agora. NÃO substitui `net ingress`/`net
+# egress` (essa decisão é trabalho futuro, separado); aplica-se por
+# `delonix stack apply -f network-access-rule.yaml`, como qualquer outro
+# Kind — não tem verbo de CLI próprio.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec:
+  driver: bridge
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata: { name: web }
+spec:
+  image: &quot;nginx:alpine&quot;
+  network: appnet
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: allow-web-from-lan }
+spec:
+  target: web
+  direction: ingress   # ou egress
+  action: allow        # ou deny (default: allow)
+  proto: tcp           # tcp | udp | any (default: any)
+  port: &quot;8080&quot;
+  from: &quot;10.0.0.0/24&quot;  # CIDR; vazio/omitido = qualquer origem
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: allow-web-metrics-from-monitoring }
+spec:
+  target: web          # o MESMO alvo — acumula com a regra acima, não a substitui
+  direction: ingress
+  proto: tcp
+  port: &quot;9090&quot;
+  from: &quot;10.1.0.0/24&quot;</code></pre>
+<details><summary><span class='lang-pt'>Todas as possibilidades — examples/full-networkaccessrule.yaml</span><span class='lang-en'>Every option — examples/full-networkaccessrule.yaml</span></summary><pre><code># Complete reference for `kind: NetworkAccessRule` — ONE firewall rule per document,
+# INCREMENTAL: several rules for the same target accumulate (unlike NetworkPolicy, which
+# replaces a whole direction). Removing a document from the manifest and re-applying
+# with --prune retires only that rule. Applying the same document again replaces only
+# the rule it owns (&quot;the last command wins&quot; for the same match).
+#
+# spec fields: target*, direction*, port*, action, proto, from   (* = required).
+# The identity of the rule is metadata.name. It only acts on workloads on a custom SDN network.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: appnet
+  containers:
+    - name: web
+      image: &quot;nginx:alpine&quot;
+---
+# 1. Every field explicitly set: allow TCP/8080 into `web` from one CIDR.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-8080-from-lan }
+spec:
+  target: web                # workload the rule applies to
+  direction: ingress         # ingress (traffic TO the workload) | egress (traffic FROM it)
+  action: allow              # allow (accept, default) | deny (drop)
+  proto: tcp                 # tcp | udp | any (default any)
+  port: &quot;8080&quot;               # a port, a range &quot;n-m&quot;, or &quot;*&quot; (any)
+  from: 10.0.0.0/24          # CIDR of the other end (source on ingress); omit = anywhere
+---
+# 2. Accumulates with rule 1 on the same target: a second, independent ingress rule.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-metrics-from-monitoring }
+spec:
+  target: web
+  direction: ingress
+  proto: tcp
+  port: &quot;9090&quot;
+  from: 10.1.0.0/24
+---
+# 3. Port range, UDP, defaults for action (allow) and from (anywhere).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-udp-range }
+spec:
+  target: web
+  direction: ingress
+  proto: udp
+  port: &quot;5000-5100&quot;
+---
+# 4. Explicit deny of one abusive source, any protocol, any port.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-block-bad-host }
+spec:
+  target: web
+  direction: ingress
+  action: deny
+  proto: any
+  port: &quot;*&quot;
+  from: 203.0.113.7/32
+---
+# 5. EGRESS: `from` names the DESTINATION CIDR the workload may reach.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-egress-https }
+spec:
+  target: web
+  direction: egress
+  action: allow
+  proto: tcp
+  port: &quot;443&quot;
+  from: 0.0.0.0/0
+---
+# 6. Minimal form: only the required fields (direction + port + target).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-minimal }
+spec:
+  target: web
+  direction: egress
+  port: &quot;53&quot;</code></pre></details>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

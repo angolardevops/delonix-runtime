@@ -4281,7 +4281,37 @@ KINDS_DOC = [
      "com <code>-v &lt;nome&gt;:/destino</code>, sem nada de novo do lado do consumidor. <strong>O "
      "<code>kind: ShareVolume</code> deixou de existir</strong>: é o MESMO <code>kind: Volume</code> com um "
      "bloco <code>share:</code>."),
+    ("App", "app.yaml", "Build por Cloud Native Buildpacks (Paketo/Heroku), sem Dockerfile: aponta para o código "
+     "e o motor detecta a linguagem, constrói e deixa a imagem no store local."),
+    ("Service", "service.yaml", "Um CONJUNTO de containers escolhido por label e publicado como vários registos DNS "
+     "<code>A</code> sob <code>&lt;nome&gt;.&lt;namespace&gt;.delonix.internal</code>, em round-robin. Sem VIP e sem "
+     "daemon."),
+    ("NetworkAccessRule", "network-access-rule.yaml", "UMA regra de firewall INCREMENTAL por documento: várias regras "
+     "para o mesmo container acumulam, e cada uma sai sozinha quando o documento sai do manifesto."),
 ]
+
+# Para cada exemplo base acima, o ficheiro `full-<kind>.yaml` que mostra TODAS as
+# possibilidades do Kind (o base é o mínimo funcional; este é a referência).
+KINDS_FULL = {
+    "secret.yaml": "full-secret.yaml",
+    "pod.yaml": "full-pod.yaml",
+    "workload.yaml": "full-workload.yaml",
+    "dependency.yaml": "full-dependency.yaml",
+    "netroute.yaml": "full-networkroute.yaml",
+    "firewallpolicy.yaml": "full-networkpolicy.yaml",
+    "ingress.yaml": "full-ingress.yaml",
+    "cluster-ssh.yaml": "full-kubernetescluster.yaml",
+    "network.yaml": "full-network.yaml",
+    "volume.yaml": "full-volume.yaml",
+    "image.yaml": "full-image.yaml",
+    "vm.yaml": "full-virtualmachine.yaml",
+    "container.yaml": "full-container.yaml",
+    "httproute.yaml": "full-httproute.yaml",
+    "tunnel.yaml": "full-gateway.yaml",
+    "app.yaml": "full-app.yaml",
+    "service.yaml": "full-service.yaml",
+    "network-access-rule.yaml": "full-networkaccessrule.yaml",
+}
 
 # Tradução EN das intros do `KINDS_DOC` (mesma ordem/tamanho — o YAML em si
 # vem sempre de `examples/*.yaml`, ficheiros reais, e não se traduz).
@@ -4358,6 +4388,12 @@ KINDS_DOC_EN = [
     "<code>-v &lt;name&gt;:/dest</code>, nothing new on the consumer side. <strong>"
     "<code>kind: ShareVolume</code> no longer exists</strong>: it's the SAME <code>kind: Volume</code> with a "
     "<code>share:</code> block.",
+    "Build with Cloud Native Buildpacks (Paketo/Heroku), no Dockerfile: point it at the source and the engine "
+    "detects the language, builds, and leaves the image in the local store.",
+    "A SET of containers picked by label and published as several DNS <code>A</code> records under "
+    "<code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>, round-robin. No VIP, no daemon.",
+    "ONE INCREMENTAL firewall rule per document: several rules for the same container accumulate, and each one "
+    "goes away on its own when its document leaves the manifest.",
 ]
 
 
@@ -5361,6 +5397,16 @@ def kinds_page():
         except OSError:
             yaml = f"# (exemplo em falta: examples/{fname})"
         body.append(f"<pre><code>{html.escape(yaml)}</code></pre>")
+        full = KINDS_FULL.get(fname)
+        if full:
+            try:
+                full_yaml = open(os.path.join(ROOT, "..", "examples", full)).read().strip()
+            except OSError:
+                full_yaml = f"# (exemplo em falta: examples/{full})"
+            summary = bi("span", f"Todas as possibilidades — examples/{full}",
+                         f"Every option — examples/{full}")
+            body.append(f"<details><summary>{summary}</summary>"
+                        f"<pre><code>{html.escape(full_yaml)}</code></pre></details>")
     page("kinds.html", "Kinds do manifesto", "\n".join(body))
 
 
