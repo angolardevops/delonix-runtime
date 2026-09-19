@@ -50,8 +50,21 @@ echo "==> downloading $(basename "$DEST")"
 # to some vendors) a dropped connection would otherwise start a 1.7 GB download
 # from zero, which is how a fetch never finishes. Writing to `$DEST.part` keeps
 # a half-file from ever being mistaken for a complete one.
-curl -fL --retry 5 --retry-delay 2 --retry-connrefused -C - \
-     --progress-bar -o "$DEST.part" "$URL"
+#
+# The download is bounded: the checksum is only checked AFTER the whole file is
+# on disk, so a redirected or compromised mirror could otherwise fill the build
+# host first. `--max-filesize` refuses early when the server announces a size,
+# and `ulimit -f` is the real ceiling on the bytes written, announced or not
+# (bash counts it in 1 KiB blocks). Override with MAX_MEDIA_BYTES.
+MAX_MEDIA_BYTES="${MAX_MEDIA_BYTES:-8589934592}"   # 8 GiB; the largest appliance ISO is ~2 GiB
+( ulimit -f $(( MAX_MEDIA_BYTES / 1024 )) &&
+  curl -fL --retry 5 --retry-delay 2 --retry-connrefused -C - \
+       --max-filesize "$MAX_MEDIA_BYTES" \
+       --progress-bar -o "$DEST.part" "$URL" ) || {
+  echo "!! download of $URL failed or exceeded $MAX_MEDIA_BYTES bytes" >&2
+  rm -f "$DEST.part"
+  exit 1
+}
 
 echo "==> verifying"
 if ! echo "$WANT  $DEST.part" | sha256sum -c --status -; then
