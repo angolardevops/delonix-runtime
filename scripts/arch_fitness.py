@@ -109,12 +109,18 @@ HEAVY = {
 # Each exception names the ADR-0040 phase that removes it. No phase = failure.
 EXCEPTIONS = {
     ("dep", "delonix-linux", "delonix-state"): (
-        "P4",
-        "the adapter opens its record store directly; P4 hands it a StateRepository port from the composition root",
+        "P4a",
+        "the StateRepository<Container> port landed and covers wait_and_record/stop/"
+        "persist_stop/remove (ADR-0044 D6); spawn/create_with still open SecretStore "
+        "directly (2 sites) and write_private_temp once for the AppArmor profile — a "
+        "SecretVault port closes those, not yet built",
     ),
     ("dep", "delonix-vm", "delonix-state"): (
         "P4",
-        "the adapter opens its record store directly; P4 hands it a StateRepository port from the composition root",
+        "the adapter opens its record store directly; P4 hands it a StateRepository port from the composition root — "
+        "AND writes 4 files (set_default_backend's marker, 3 libvirt XML sites including one reached from stop, "
+        "not just create) with the state layer's atomic write; a ConfigWriter port closes those, scope mapped but "
+        "not yet built (ADR-0044 D6 addendum, 2026-09-19)",
     ),
     ("dep", "delonix-sdn", "delonix-state"): (
         "P4",

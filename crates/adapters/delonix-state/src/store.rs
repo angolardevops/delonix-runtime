@@ -470,6 +470,40 @@ impl Store {
     }
 }
 
+/// `Store` already IS a `Container`-only record store — this just gives the rest of
+/// the workspace the port's name for it (ADR-0044 D6) instead of the concrete type,
+/// so an adapter can depend on `delonix-model` for it instead of `delonix-state`.
+/// Thin wrappers over the methods above; no new behavior, no format change.
+///
+/// `id` is ignored in `set`: `Store::save` derives the path from `value.id` itself,
+/// and the two are always the same value at every real call site (the caller reads
+/// `value.id` to get `id` in the first place). A mismatched pair would be a caller
+/// bug this wrapper cannot detect any better than `Store::save` already could.
+impl delonix_model::ports::StateRepository<Container> for Store {
+    fn get(&self, id: &str) -> delonix_model::Result<Container> {
+        self.load(id).map_err(Into::into)
+    }
+
+    fn list(&self) -> delonix_model::Result<Vec<Container>> {
+        Store::list(self).map_err(Into::into)
+    }
+
+    fn set(&self, _id: &str, value: &Container) -> delonix_model::Result<()> {
+        self.save(value).map_err(Into::into)
+    }
+
+    fn update<F>(&self, id: &str, f: F) -> delonix_model::Result<Container>
+    where
+        F: FnOnce(&mut Container) -> bool,
+    {
+        Store::update(self, id, f).map_err(Into::into)
+    }
+
+    fn remove(&self, id: &str) -> delonix_model::Result<()> {
+        Store::remove(self, id).map_err(Into::into)
+    }
+}
+
 /// Generic typed store — one JSON file per item, indexed by a key
 /// (name). Reuses the same atomic pattern (temp + `rename`) as [`Store`],
 /// for types that are not `Container`: VMs ([`crate::Vm`]) and the applied
@@ -570,6 +604,40 @@ impl<T: Serialize + DeserializeOwned> JsonStore<T> {
             fs::remove_file(p)?;
         }
         Ok(())
+    }
+}
+
+/// Same wrapping as `impl StateRepository<Container> for Store` above, generalized to
+/// any `JsonStore<T>` (e.g. `JsonStore<Vm>`). `id` is ignored in `set` for the same
+/// reason: `JsonStore::save` takes the key explicitly, and every real caller already
+/// derives it from `value` before calling — a mismatch here is a caller bug this
+/// wrapper cannot catch any better than `save` itself could.
+///
+/// `remove`'s idempotence (absence is not an error) is `JsonStore`'s own behavior,
+/// unlike `Store::remove` above — deliberately not unified, since `delonix-vm` already
+/// depends on it.
+impl<T: Serialize + DeserializeOwned> delonix_model::ports::StateRepository<T> for JsonStore<T> {
+    fn get(&self, id: &str) -> delonix_model::Result<T> {
+        self.load(id).map_err(Into::into)
+    }
+
+    fn list(&self) -> delonix_model::Result<Vec<T>> {
+        JsonStore::list(self).map_err(Into::into)
+    }
+
+    fn set(&self, id: &str, value: &T) -> delonix_model::Result<()> {
+        self.save(id, value).map_err(Into::into)
+    }
+
+    fn update<F>(&self, id: &str, f: F) -> delonix_model::Result<T>
+    where
+        F: FnOnce(&mut T) -> bool,
+    {
+        JsonStore::update(self, id, f).map_err(Into::into)
+    }
+
+    fn remove(&self, id: &str) -> delonix_model::Result<()> {
+        JsonStore::remove(self, id).map_err(Into::into)
     }
 }
 
@@ -1144,6 +1212,139 @@ mod tests {
             .parse()
             .unwrap();
         assert_eq!(got, N, "perderam-se escritas: {got} de {N}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// A store with no lock at all, used only to prove (by reversion) that
+    /// `state_repository_update_through_the_port_does_not_lose_writes`'s guarantee
+    /// comes from `Store::update`'s `flock`, not from the `StateRepository` trait
+    /// shape — the same proof-by-removal the concurrency test above already applies to
+    /// the concrete method; this proves the same guarantee survives being reached
+    /// through the port.
+    struct UnlockedContainerRepository(Store);
+
+    impl delonix_model::ports::StateRepository<Container> for UnlockedContainerRepository {
+        fn get(&self, id: &str) -> delonix_model::Result<Container> {
+            self.0.load(id).map_err(Into::into)
+        }
+        fn list(&self) -> delonix_model::Result<Vec<Container>> {
+            Store::list(&self.0).map_err(Into::into)
+        }
+        fn set(&self, _id: &str, value: &Container) -> delonix_model::Result<()> {
+            self.0.save(value).map_err(Into::into)
+        }
+        fn update<F>(&self, id: &str, f: F) -> delonix_model::Result<Container>
+        where
+            F: FnOnce(&mut Container) -> bool,
+        {
+            // No `FileLock` here, unlike `Store::update` — read, mutate, write,
+            // with the exact same race window the real port closes.
+            let mut c = self.0.load(id)?;
+            if !f(&mut c) {
+                return Ok(c);
+            }
+            self.0.save(&c)?;
+            Ok(c)
+        }
+        fn remove(&self, id: &str) -> delonix_model::Result<()> {
+            Store::remove(&self.0, id).map_err(Into::into)
+        }
+    }
+
+    /// Drives `N` threads each incrementing a counter by one through `repo`'s
+    /// `StateRepository::update`, generic over the port — never the concrete
+    /// `Store`/`JsonStore` method — with an explicit race window (the same 2ms
+    /// sleep between read and write as the existing concurrency test above).
+    fn stress_update_through_the_port<R>(open: impl Fn() -> R, id: &str, n: usize)
+    where
+        R: delonix_model::ports::StateRepository<Container> + Send,
+    {
+        std::thread::scope(|sc| {
+            for _ in 0..n {
+                let repo = open();
+                let id = id.to_string();
+                sc.spawn(move || {
+                    delonix_model::ports::StateRepository::update(&repo, &id, |c| {
+                        let count: u64 = c.labels.get("n").unwrap().parse().unwrap();
+                        std::thread::sleep(std::time::Duration::from_millis(2));
+                        c.labels.insert("n".into(), (count + 1).to_string());
+                        true
+                    })
+                    .unwrap();
+                });
+            }
+        });
+    }
+
+    /// The port itself preserves the flock guarantee (ADR-0044 D6) — dispatched
+    /// generically through `StateRepository<Container>`, not by calling
+    /// `Store::update` directly the way the test above does.
+    #[test]
+    fn state_repository_update_through_the_port_does_not_lose_writes() {
+        let root = tmp_dir("store-port-race");
+        let store = Store::open(&root).unwrap();
+        let mut c = Container::new(
+            "race-port".into(),
+            "race-port".into(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
+        c.labels.insert("n".into(), "0".into());
+        store.save(&c).unwrap();
+
+        const N: usize = 24;
+        stress_update_through_the_port(|| Store::open(&root).unwrap(), "race-port", N);
+
+        let got: usize = store
+            .load("race-port")
+            .unwrap()
+            .labels
+            .get("n")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(got, N, "lost writes through the port: {got} of {N}");
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// REVERSION PROOF: the same stress, through a `StateRepository` impl with no
+    /// lock, loses writes — confirming the guarantee above comes from `Store`'s
+    /// `flock`, not from anything the trait shape itself provides.
+    #[test]
+    fn state_repository_without_the_underlying_lock_loses_writes() {
+        let root = tmp_dir("store-port-race-unlocked");
+        let store = Store::open(&root).unwrap();
+        let mut c = Container::new(
+            "race-unlocked".into(),
+            "race-unlocked".into(),
+            "img".into(),
+            vec!["x".into()],
+            "max".into(),
+        );
+        c.labels.insert("n".into(), "0".into());
+        store.save(&c).unwrap();
+
+        const N: usize = 24;
+        stress_update_through_the_port(
+            || UnlockedContainerRepository(Store::open(&root).unwrap()),
+            "race-unlocked",
+            N,
+        );
+
+        let got: usize = store
+            .load("race-unlocked")
+            .unwrap()
+            .labels
+            .get("n")
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert!(
+            got < N,
+            "expected lost writes without a lock, got all {got} of {N} \
+             — the reversion proof no longer proves anything"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 

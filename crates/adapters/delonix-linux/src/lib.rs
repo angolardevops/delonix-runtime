@@ -28,6 +28,7 @@ pub use error::{Error, Result};
 
 use capabilities::{all_caps_mask, resolve_cap_keep};
 use delonix_compute::{Container, KubeCgroupDriver, KubeCgroupParent, Mount};
+use delonix_model::ports::StateRepository;
 use delonix_model::records::Status;
 use delonix_state::Store;
 
@@ -6241,7 +6242,10 @@ fn describes_incarnation(c: &Container, pid: i32, starttime: Option<u64>) -> boo
 /// `create_with` and then this becomes the container's parent and captures the
 /// true code (`Failed(n)`), which is what an `on-failure` restart policy
 /// needs to know to decide.
-pub fn wait_and_record(store: &Store, container: &mut Container) -> Result<Status> {
+pub fn wait_and_record(
+    store: &impl StateRepository<Container>,
+    container: &mut Container,
+) -> Result<Status> {
     let pid = container
         .pid
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
@@ -7437,7 +7441,11 @@ fn process_gone(pid: i32, starttime: Option<u64>) -> bool {
         .unwrap_or(true)
 }
 
-pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Result<()> {
+pub fn stop(
+    store: &impl StateRepository<Container>,
+    container: &mut Container,
+    timeout_secs: u64,
+) -> Result<()> {
     let pid = container
         .pid
         .ok_or_else(|| Error::NotRunning(container.short_id().to_string()))?;
@@ -7505,7 +7513,7 @@ pub fn stop(store: &Store, container: &mut Container, timeout_secs: u64) -> Resu
 /// `Crashed`, so `ps -a` said `Dead` and `dash` counted a PROBLEM for a
 /// container the operator had asked to stop.
 fn persist_stop(
-    store: &Store,
+    store: &impl StateRepository<Container>,
     container: &Container,
     stopped_pid: i32,
     stopped_starttime: Option<u64>,
@@ -8311,7 +8319,11 @@ pub fn update_limits(
 }
 
 /// Removes a container. If it is running, requires `force` (and kills it).
-pub fn remove(store: &Store, container: &Container, force: bool) -> Result<()> {
+pub fn remove(
+    store: &impl StateRepository<Container>,
+    container: &Container,
+    force: bool,
+) -> Result<()> {
     if let Some(pid) = container.pid {
         if safe_to_signal(pid, container.pid_starttime) {
             if !force {

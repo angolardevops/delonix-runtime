@@ -510,6 +510,45 @@ direction the fitness script currently tolerates only by exception. `SecretVault
 list because its contract (encrypted at rest, a `reveal` boundary) is different from a
 plain record.
 
+**Addendum, 2026-09-19 — the port landed for real on `delonix-linux`'s clean half, and D9's
+own gate for P4a needs correcting.** The trait above was never merged (the spike branch
+that proved it was intentionally left unmerged, per its own doc); this addendum records
+what shipped once it was. Two things this pass found, neither visible from reading the
+sketch above alone:
+
+1. **D9's row for P4a ("`StateRepository<T>` + `SecretVault` ports; the five
+   `delonix-state` exceptions close") is superseded by point 2 of this section's own
+   2026-09-18 addendum**, which already narrowed P4a to two of the five before any code
+   existed. D9 was never updated to match. It should be read as: P4a closes at most
+   `delonix-linux` and `delonix-vm`; `delonix-sdn`/`delonix-oci`/`delonix-volume` need their
+   own decision (a P4a-successor slice, unnumbered as of this addendum) before they can be
+   attempted, and are untouched by everything below.
+2. **Even `delonix-linux` does not close in one PR.** `spawn`/`create_with`
+   (`crates/adapters/delonix-linux/src/lib.rs:5491`/`5184`) call
+   `delonix_state::SecretStore::open(store.base())` twice (`:5552`, `:5746`) to resolve
+   `--secret`/`--secret-files` — `base()` is not part of `StateRepository<T>`'s surface, so
+   these two functions (and `HostWorkload`/`run_supervised`, which call `create_with`
+   internally) stay on the concrete `Store` for now; wiring them needs a `SecretVault` port
+   this ADR names but does not design (D6's own text above, "listed separately"). What
+   landed instead: the port, proven by a real conformance test (not the spike's — a new one,
+   in `delonix-state::store::tests`, following the exact same 24-thread/reversion pattern),
+   and used by the four `delonix-linux` functions that never touched `SecretStore` at all —
+   `wait_and_record`, `stop`, `persist_stop`, `remove`. The
+   `("dep", "delonix-linux", "delonix-state")` exception stays (the dependency is still
+   real), reworded to name exactly what remains instead of the generic reason above.
+3. **`delonix-vm`'s share of D6's point 2 undersold its own scope.** Measured live (not
+   assumed from the sketch): the four `write_atomic` calls (`lib.rs:1334, 3355, 3680,
+   3785`) are not confined to `create`/`create_with` — `stop` (`:4310`) also writes
+   snapshot XML via `preserve_snapshots` (`:3628`, called at `:4331`, before the domain is
+   undefined). Three of the four write live libvirt/host state (`getuid`/`getgid` +
+   rootless seclabel, a live `virsh snapshot-dumpxml` per enumerated snapshot, a live
+   `virsh domuuid` query) that only `delonix-vm` has at the moment of writing — not
+   precomputable by a composition root ahead of time, so the realistic shape is a small
+   injected `ConfigWriter` port (`write_atomic(path, contents)`) that `delonix-vm` still
+   computes the content for, not a moved write. `delonix-vm` itself is untouched by this
+   pass; this is recorded so the next attempt starts from the measured scope instead of
+   D6's original "swap the store" framing.
+
 ### D7. `ImageStore` for the scanner: the remaining exception, briefly
 
 `delonix-scanner` reads layers by depending on `delonix-oci` directly (`use
