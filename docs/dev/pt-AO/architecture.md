@@ -438,7 +438,7 @@ A camada a que cada crate pertence, e a direcção em que pode depender:
 
 Excepções declaradas (cada uma nomeia a fase do ADR-0040 que a remove):
 
-- `delonix-linux` → `delonix-state` — removida na **P4**
+- `delonix-linux` → `delonix-state` — removida na **P4a**
 - `delonix-mcp` → `delonix-mgmt` — removida na **P5**
 - `delonix-oci` → `delonix-state` — removida na **P4**
 - `delonix-proxmox` → `delonix-vm` — removida na **P4**
