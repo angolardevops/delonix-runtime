@@ -12987,3 +12987,12 @@ msgstr "a VM descartável '{name}' será destruída daqui a {after}"
 
 msgid "could not schedule the removal of '{name}' (already scheduled, or no user systemd) — `delonix vm destroy {name}` removes it now"
 msgstr "não foi possível agendar a remoção de '{name}' (já agendada, ou sem systemd de utilizador) — `delonix vm destroy {name}` remove-a já"
+
+msgid "delonix-cri: {origin} — {path} (sha256 {sha})"
+msgstr "delonix-cri: {origin} — {path} (sha256 {sha})"
+
+msgid "[{label}] delonix-cri differs from the resolved one (sha256 {sha}) — replacing it and restarting the service"
+msgstr "[{label}] o delonix-cri do nó é diferente do resolvido (sha256 {sha}) — a substituí-lo e a reiniciar o serviço"
+
+msgid "`delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version."
+msgstr "Binário `delonix-cri` a instalar nos nós. Omitido = o que está ao lado do `delonix`, senão o asset da release desta versão."
