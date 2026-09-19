@@ -43,6 +43,9 @@ have.
 # OpenStack — NOT an appliance; see the section at the end
 ./build-openstack.sh                 # 2026.1 "Gazpacho" on Ubuntu 24.04
 
+# Monitoring (Zabbix + Grafana, pre-wired) — also NOT an appliance
+./build-monitoring.sh                # Zabbix 7.0.30-1 + Grafana 13.2.2
+
 # Another version, or media you already have
 ./build-proxmox.sh pve 9.1-1
 ./build-proxmox.sh pve /path/to/proxmox-ve_9.1-1.iso
@@ -68,6 +71,7 @@ builds — the checksum is what makes that safe.
 | `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
 | `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
+| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2 | `monitoring-zabbix7.0-grafana13.2.2.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant
@@ -92,6 +96,7 @@ assumed:
 | OPNsense | the `MIRROR` in `build-opnsense.sh` (dotsrc by default) |
 | TrueNAS SCALE | `download.sys.truenas.net/TrueNAS-SCALE-<train>/<version>/` |
 | OpenStack | `cloud-images.ubuntu.com` for the host OS; `opendev.org` for kolla-ansible; quay.io for the service images |
+| Monitoring | `cloud-images.ubuntu.com` for the host OS; `repo.zabbix.com` for Zabbix; `apt.grafana.com` for Grafana; `grafana.com/api/plugins` for the Zabbix app |
 
 `download.proxmox.com` is **not** where these ISOs live — it serves the apt
 repositories, and none of the four pages links to it. An earlier note in the CI
@@ -126,6 +131,16 @@ reads them back, so a pulled appliance stays an appliance. Without that, the
 image would land on the other side looking like a cloud image and get a seed
 it cannot read.
 
+The monitoring image registers WITHOUT `--appliance` — see "Monitoring" below
+for why it still wants the NoCloud seed:
+
+```bash
+delonix image vm import monitoring-zabbix7.0-grafana13.2.2.qcow2 -t monitoring:7.0 \
+    --distro ubuntu --release 24.04 --default-vcpus 2 --default-memory 2G
+
+delonix image vm push monitoring:7.0 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0
+```
+
 ## Credentials
 
 Every image ships with a **known, public** password — they are in this
@@ -140,6 +155,14 @@ untrusted network as-is.
 | Proxmox Mail Gateway | `root` | `delonix-admin` | `https://<ip>:8006/` |
 | Proxmox Datacenter Manager | `root` | `delonix-admin` | `https://<ip>:8443/` |
 | TrueNAS SCALE | `truenas_admin` | `delonix-admin` | `http://<ip>/` — API at `https://<ip>/api/v2.0` |
+| Monitoring — Zabbix | `Admin` | `delonix-admin` | `http://<ip>/` |
+| Monitoring — Grafana | `admin` | `delonix-admin` | `http://<ip>:3000/` |
+
+The monitoring image does not ship the vendor's own default (Zabbix's is
+`Admin`/`zabbix`, Grafana's is `admin`/`admin`) — both are reset at build time
+to the same `delonix-admin` this directory already uses everywhere else, so a
+password grepped out of this repository does not also unlock every
+unpatched Zabbix/Grafana on the internet still on its factory default.
 
 Every account above also works on the console. The ports are not a guess: they
 are the `CASES` table of `verify-boot.sh`, which is the port each image was
@@ -240,3 +263,52 @@ Budget: the pull is ~20 GiB, and this workspace measures 3.3 MB/s to the
 mirrors. Over an hour, on a link that never gets faster by being asked twice —
 which is the entire argument for paying it once, here, instead of once per
 deployment.
+
+## Monitoring — Zabbix + Grafana, pre-wired, also not an appliance
+
+`build-monitoring.sh` follows the OpenStack script's shape for the same
+reason: there is no vendor installer here either, just Ubuntu 24.04 with two
+pinned packages installed and wired to each other. It registers WITHOUT
+`--appliance`, for the same reason OpenStack does — it wants the NoCloud seed
+`vm create` builds, because that seed is how the target's hostname and SSH
+key get in.
+
+**"Pre-wired" is a small, precise claim, and it stops exactly where a golden
+image's authority should stop:**
+
+- The Zabbix frontend never shows its setup wizard — `zabbix.conf.php` is
+  written at build time, so a clone answers ready-to-use on `:80`.
+- Grafana already has Zabbix configured as a data source
+  (`/etc/grafana/provisioning/datasources/zabbix.yaml`) the moment it boots,
+  reachable on `:3000`.
+- **What it does NOT decide is which remote network to monitor.** That is a
+  per-deployment choice — SNMP/agent hosts added inside Zabbix, reachability
+  through whatever the VM is attached to (a delonix `--net`, a
+  `kind: NetworkRoute` between two networks, a VPN reached through
+  `kind: Gateway`/a WireGuard overlay). None of that is new mechanism: it is
+  the SDN and IaC primitives this repo already has, aimed at a VM that
+  happens to run Zabbix. A "tenant picks a network and it just works"
+  self-service flow is a real, separate thing to build — on top of this VM,
+  in a platform that has a concept of tenant to hang it off. This engine does
+  not (see `AGENTS.md`, "Identidade e fronteira do motor"), so it is not a
+  `kind:` this repository can own; baking one guess of "the network" into
+  every clone would also be wrong for every clone but one.
+
+**The database password is generated once per build, not shipped as a
+literal, and never printed** — `openssl rand` inside the guest, immediately
+before `CREATE USER`. Unlike the OpenStack image's Keystone/database
+passwords (a real externally-relevant secret the deploy role must generate
+per-target, so the build image never bakes one in), Postgres here listens
+only on `localhost` for a Zabbix server that is the only other thing on the
+machine: one password per build, shared by every clone of that build, has no
+external surface to leak from. What every clone gets instead is the
+`Admin`/`delonix-admin` and `admin`/`delonix-admin` logins in the credentials
+table above — the actual, human-facing secrets — reset from each vendor's
+factory default for the reason already given there.
+
+**Both Zabbix and Grafana packages are `apt-mark hold` at the end of the
+build.** An unattended `apt upgrade` moving the server past the schema
+already imported into Postgres — or Grafana past the plugin API the pinned
+`alexanderzobnin-zabbix-app` build was compiled against — is exactly the
+kind of drift a golden image exists to prevent; the same reasoning the golden
+Kubernetes image already applies to `kubeadm`/`kubelet`/`kubectl`.

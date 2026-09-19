@@ -1,0 +1,324 @@
+#cloud-config
+# ===========================================================================
+#  The build seed for the monitoring host image (Zabbix + Grafana). Consumed
+#  ONLY by build-monitoring.sh, inside QEMU, and never by a deployed VM.
+# ===========================================================================
+# `@ZABBIX_SERIES@`/`@ZABBIX_VERSION@`/`@GRAFANA_VERSION@`/`@ZABBIX_GRAFANA_APP_VERSION@`
+# are substituted by the script. They are not cloud-init syntax -- keep them
+# out of anything cloud-init parses as a value.
+#
+# One script, not a list of `runcmd` entries, for the same reason
+# openstack-build.yaml gives: cloud-init keeps going after a failed `runcmd`
+# element, and a monitoring stack that is half-installed still looks like a
+# server that boots.
+write_files:
+  - path: /root/build.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/delonix-monitoring-build.log) 2>&1
+      echo "=== delonix monitoring build: Zabbix @ZABBIX_VERSION@ + Grafana @GRAFANA_VERSION@ ==="
+
+      export DEBIAN_FRONTEND=noninteractive
+
+      # Same wrapper and the same reason as the OpenStack build: a stalled
+      # connection is not a failure, and nothing that only handles failure
+      # protects against one.
+      retry() {
+        local n=0 max=${2:-5}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*10))s: $1"
+          sleep $((n*10))
+        done
+      }
+
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "timeout 300 apt-get update"
+      retry "timeout 300 apt-get install -y curl gnupg ca-certificates"
+
+      # ------------------------------------------------------------------
+      #  PostgreSQL -- installed FIRST, from the Ubuntu archive. Not pinned:
+      #  it is the OS's own package, the same convention every other build
+      #  here follows for its base distro's dependencies (only the vendor's
+      #  OWN artifact gets a version pin).
+      # ------------------------------------------------------------------
+      retry "timeout 300 apt-get install -y postgresql"
+
+      # ------------------------------------------------------------------
+      #  Zabbix, from the vendor's own repository -- pinned to the release
+      #  bootstrap .deb AND to every zabbix-* package version, so that a
+      #  rebuild next month installs the exact same bytes and not whatever
+      #  7.0.x happens to be current that day.
+      # ------------------------------------------------------------------
+      retry "curl -fsSL -o /tmp/zabbix-release.deb https://repo.zabbix.com/zabbix/@ZABBIX_SERIES@/ubuntu/pool/main/z/zabbix-release/zabbix-release_@ZABBIX_SERIES@-5+ubuntu24.04_all.deb"
+      dpkg -i /tmp/zabbix-release.deb
+      rm -f /tmp/zabbix-release.deb
+      retry "timeout 120 apt-get update"
+
+      ZBX_PKG="@ZABBIX_VERSION@+ubuntu24.04"
+      retry "timeout 600 apt-get install -y \
+        zabbix-server-pgsql=1:\$ZBX_PKG \
+        zabbix-frontend-php=1:\$ZBX_PKG \
+        php8.3-pgsql \
+        zabbix-nginx-conf=1:\$ZBX_PKG \
+        zabbix-sql-scripts=1:\$ZBX_PKG \
+        zabbix-agent2=1:\$ZBX_PKG"
+
+      # Hold them: an unattended `apt upgrade` on a running appliance must
+      # not silently move the server and the DB schema it already imported
+      # to a different minor -- the same reasoning the golden k8s image
+      # applies to kubeadm/kubelet/kubectl.
+      apt-mark hold zabbix-server-pgsql zabbix-frontend-php zabbix-nginx-conf \
+        zabbix-sql-scripts zabbix-agent2
+
+      # ------------------------------------------------------------------
+      #  Database -- a password generated HERE, once per build, never
+      #  printed and never leaving this host: Postgres listens only on
+      #  localhost, so this is an internal secret between two processes on
+      #  the same machine, not a credential an operator is meant to know or
+      #  rotate. Same reasoning as why the OpenStack image never bakes
+      #  kolla's passwords.yml: what differs is that THIS secret has no
+      #  external surface at all, so baking one per build (not per clone)
+      #  is the right amount of caution -- generating it per-VM would need
+      #  cloud-init, and this is an appliance that deliberately has none.
+      # ------------------------------------------------------------------
+      ZBX_DB_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+      sudo -u postgres createuser zabbix
+      sudo -u postgres psql -c "ALTER USER zabbix WITH PASSWORD '$ZBX_DB_PASS';"
+      sudo -u postgres createdb -O zabbix -E Unicode -T template0 zabbix
+      # Asked of dpkg and not assumed: the 7.0 packages keep the schema under
+      # /usr/share/zabbix-sql-scripts/, while 7.2+ moved it to
+      # /usr/share/zabbix/sql-scripts/ -- the first build here died on exactly
+      # that guess, after the role and database already existed.
+      SCHEMA=$(dpkg -L zabbix-sql-scripts | grep 'postgresql/server\.sql\.gz$' | head -1)
+      [ -n "$SCHEMA" ] || { echo "!! zabbix-sql-scripts ships no postgresql/server.sql.gz"; exit 1; }
+      zcat "$SCHEMA" | sudo -u zabbix psql -v ON_ERROR_STOP=1 zabbix >/dev/null
+
+      sed -i "s/^# DBPassword=.*/DBPassword=$ZBX_DB_PASS/" /etc/zabbix/zabbix_server.conf
+      grep -q "^DBPassword=$ZBX_DB_PASS$" /etc/zabbix/zabbix_server.conf || \
+        echo "DBPassword=$ZBX_DB_PASS" >> /etc/zabbix/zabbix_server.conf
+
+      # ------------------------------------------------------------------
+      #  Frontend -- pre-seeded so the appliance answers ready-to-use and
+      #  never shows the setup wizard. This IS the point of a golden image:
+      #  a wizard an operator must click through by hand is a manual step
+      #  in the path this VM exists to remove.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/zabbix/web
+      cat > /etc/zabbix/web/zabbix.conf.php <<PHP
+      <?php
+      \$DB['TYPE']     = 'POSTGRESQL';
+      \$DB['SERVER']   = 'localhost';
+      \$DB['PORT']     = '0';
+      \$DB['DATABASE'] = 'zabbix';
+      \$DB['USER']     = 'zabbix';
+      \$DB['PASSWORD'] = '$ZBX_DB_PASS';
+      \$DB['SCHEMA']   = '';
+
+      \$DB['ENCRYPTION']  = false;
+      \$DB['KEY_FILE']    = '';
+      \$DB['CERT_FILE']   = '';
+      \$DB['CA_FILE']     = '';
+      \$DB['VERIFY_HOST'] = false;
+      \$DB['CIPHER_LIST'] = '';
+
+      \$DB['VAULT_URL']           = '';
+      \$DB['VAULT_DB_PATH']       = '';
+      \$DB['VAULT_TOKEN']         = '';
+      \$DB['VAULT_TLS_CERT_FILE'] = '';
+      \$DB['VAULT_TLS_KEY_FILE']  = '';
+
+      \$ZBX_SERVER      = 'localhost';
+      \$ZBX_SERVER_PORT = '10051';
+      \$ZBX_SERVER_NAME = 'delonix-vm-monitoring';
+
+      \$IMAGE_FORMAT_DEFAULT = IMAGE_FORMAT_PNG;
+      PHP
+      chown www-data:www-data /etc/zabbix/web/zabbix.conf.php
+      chmod 0640 /etc/zabbix/web/zabbix.conf.php
+
+      # nginx package ships the vhost DISABLED (listen commented out) on
+      # purpose, so an install never grabs a port the operator did not ask
+      # for. Listen on 80 -- this VM does nothing else.
+      sed -i 's/^\s*#\s*listen\s*8080;/    listen 80;/' /etc/zabbix/nginx.conf
+      sed -i 's/^\s*#\s*server_name\s*example.com;/    server_name _;/' /etc/zabbix/nginx.conf
+      # The shipped pool has NO date.timezone line at all (checked in the built
+      # disk), so editing an existing one would silently do nothing: append.
+      grep -q 'date.timezone' /etc/zabbix/php-fpm.conf || \
+        echo 'php_value[date.timezone] = UTC' >> /etc/zabbix/php-fpm.conf
+
+      # Ubuntu's nginx ships a `default` site that is the default_server on :80,
+      # so with it enabled every request without a matching Host -- including
+      # this VM's own probes by IP -- gets the welcome page and a 404 for the
+      # Zabbix API. The first build of this image died there, with the vhost
+      # above correctly edited and nothing wrong with it.
+      rm -f /etc/nginx/sites-enabled/default
+
+      # `enable --now` does NOT restart a unit that is already running, and the
+      # Ubuntu packages start nginx and php-fpm at install time -- before
+      # zabbix-nginx-conf has dropped its vhost and its php-fpm pool. Left at
+      # that, the guest keeps serving the OLD config until a reboot: every
+      # probe here got nginx's own 404, while a cold boot of the very same disk
+      # answered 200 on `/` and on the API. Measured, not inferred -- this cost
+      # two builds, one of which blamed the default site (removing it is still
+      # right, but was not the cause).
+      systemctl enable postgresql zabbix-server zabbix-agent2 php8.3-fpm nginx
+      systemctl restart postgresql php8.3-fpm nginx
+      systemctl restart zabbix-server zabbix-agent2
+
+      # Point the bundled agent at the server it shares a machine with, so
+      # the appliance monitors itself out of the box.
+      sed -i 's/^Server=.*/Server=127.0.0.1/' /etc/zabbix/zabbix_agent2.conf
+      sed -i 's/^ServerActive=.*/ServerActive=127.0.0.1/' /etc/zabbix/zabbix_agent2.conf
+      sed -i 's/^Hostname=.*/Hostname=delonix-vm-monitoring/' /etc/zabbix/zabbix_agent2.conf
+      systemctl restart zabbix-agent2
+
+      # Wait for the API to actually answer before touching the DB it backs --
+      # nginx/php-fpm/postgres/zabbix-server all just started, and a race here
+      # would silently skip the Admin password below on a slow boot.
+      for i in $(seq 1 30); do
+        curl -fs http://127.0.0.1/api_jsonrpc.php \
+          -H 'Content-Type: application/json-rpc' \
+          -d '{"jsonrpc":"2.0","method":"apiinfo.version","id":1}' >/dev/null 2>&1 && break
+        sleep 2
+        [ "$i" -eq 30 ] && { echo "!! Zabbix API never answered"; exit 1; }
+      done
+
+      # Same known, documented, "change me" credential every other appliance
+      # in this directory ships (README has the table) -- not the vendor
+      # default 'zabbix', so grepping this repo for the password does not
+      # also unlock every unpatched Zabbix on the internet.
+      ADMIN_HASH=$(php -r 'echo password_hash("delonix-admin", PASSWORD_BCRYPT);')
+      sudo -u postgres psql zabbix -c "UPDATE users SET passwd='$ADMIN_HASH' WHERE username='Admin';"
+
+      # ------------------------------------------------------------------
+      #  Grafana, from the vendor's own repository -- pinned exactly like
+      #  Zabbix, for the same reason.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/apt/keyrings
+      retry "curl -fsSL -o /etc/apt/keyrings/grafana.asc https://apt.grafana.com/gpg-full.key"
+      chmod 644 /etc/apt/keyrings/grafana.asc
+      echo "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main" \
+        > /etc/apt/sources.list.d/grafana.list
+      retry "timeout 120 apt-get update"
+      # The Grafana package is ~200 MB, and 300 s was too short on the slow
+      # link this repo builds on: `timeout` killed apt mid-unpack and left dpkg
+      # interrupted, so every retry then failed on "dpkg was interrupted" and
+      # the build gave up with a healthy package and a healthy mirror. Fetch it
+      # with a generous limit first, install from the local cache, and let the
+      # retry repair a half-finished dpkg before it tries again.
+      retry "timeout 1500 apt-get install -y --download-only grafana=@GRAFANA_VERSION@"
+      retry "dpkg --configure -a; timeout 600 apt-get install -y grafana=@GRAFANA_VERSION@"
+      apt-mark hold grafana
+
+      sed -i 's/^;\?admin_password =.*/admin_password = delonix-admin/' /etc/grafana/grafana.ini
+      sed -i 's/^;\?http_port =.*/http_port = 3000/' /etc/grafana/grafana.ini
+
+      systemctl enable --now grafana-server
+      for i in $(seq 1 30); do
+        curl -fs http://127.0.0.1:3000/api/health >/dev/null 2>&1 && break
+        sleep 2
+        [ "$i" -eq 30 ] && { echo "!! Grafana never answered"; exit 1; }
+      done
+
+      # The Zabbix app for Grafana, pinned, Grafana-signed (no
+      # allow_loading_unsigned_plugins needed -- checked against the
+      # catalog API before writing this, not assumed).
+      # `grafana cli`, not `grafana-cli`: 13.x prints a deprecation notice for
+      # the old name. And --homepath is mandatory outside the systemd unit --
+      # without it the CLI dies with "Could not find config defaults", which is
+      # what the previous build reported five times in a row against a healthy
+      # network. Run as root, so hand the plugin tree to the service user.
+      retry "grafana cli --homepath /usr/share/grafana --pluginsDir /var/lib/grafana/plugins plugins install alexanderzobnin-zabbix-app @ZABBIX_GRAFANA_APP_VERSION@"
+      chown -R grafana:grafana /var/lib/grafana/plugins
+
+      # The datasource, provisioned -- this is the "no configuration effort"
+      # promise for the piece that is actually generic: whatever network this
+      # VM is attached to (a delonix `--net`, a `kind: NetworkRoute` to
+      # another network, a VPN/gateway tunnel already reaching the API on
+      # 127.0.0.1 of THIS host), Grafana already has Zabbix as a data source
+      # the moment it boots. What it does NOT do, on purpose, is decide
+      # which remote network to monitor -- that is a per-deployment choice
+      # (SNMP/agent targets configured IN Zabbix, or the tenant-facing
+      # self-service flow a platform builds on top), and baking one guess
+      # into every clone of this image would be wrong for all but one of them.
+      mkdir -p /etc/grafana/provisioning/datasources
+      cat > /etc/grafana/provisioning/datasources/zabbix.yaml <<YAML
+      apiVersion: 1
+      datasources:
+        - name: Zabbix
+          type: alexanderzobnin-zabbix-datasource
+          access: proxy
+          url: http://127.0.0.1/api_jsonrpc.php
+          jsonData:
+            authType: userLogin
+            username: Admin
+            trends: true
+            trendsFrom: 7d
+            trendsRange: 4d
+            cacheTTL: 1h
+            dbConnectionEnable: false
+          secureJsonData:
+            password: delonix-admin
+          version: 1
+          editable: true
+      YAML
+      # Installed is not enabled: a cold boot of the previous build reported the
+      # app at 6.7.0 with enabled=False, so its bundled dashboards were absent
+      # even though the data source itself answered. Provision it on.
+      mkdir -p /etc/grafana/provisioning/plugins
+      cat > /etc/grafana/provisioning/plugins/zabbix.yaml <<YAML
+      apiVersion: 1
+      apps:
+        - type: alexanderzobnin-zabbix-app
+          disabled: false
+      YAML
+      systemctl restart grafana-server
+
+      # ------------------------------------------------------------------
+      #  What a clone actually has -- readable from inside any VM cloned
+      #  from this image, same two-carrier idea as the golden k8s template
+      #  and the OpenStack image: the filename says what was asked for,
+      #  this file says what is there.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/delonix
+      {
+        echo "{"
+        echo "  \"zabbix_version\": \"@ZABBIX_VERSION@\","
+        echo "  \"grafana_version\": \"@GRAFANA_VERSION@\","
+        echo "  \"grafana_zabbix_app_version\": \"@ZABBIX_GRAFANA_APP_VERSION@\","
+        echo "  \"zabbix_db\": \"postgresql-local\","
+        echo "  \"zabbix_frontend_port\": 80,"
+        echo "  \"grafana_port\": 3000"
+        echo "}"
+      } > /etc/delonix/monitoring-image.json
+      cat /etc/delonix/monitoring-image.json
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+      # This image must not carry this boot's identity -- the same lesson
+      # every golden image in this repo already learned: without it every
+      # clone comes up with the same machine-id and SSH host keys.
+      cloud-init clean --logs --seed
+      truncate -s 0 /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+runcmd:
+  # The marker, and only the marker, is what the build script believes --
+  # the same two lessons openstack-build.yaml already paid for: QEMU exits 0
+  # whether the guest finished or panicked, and cloud-init reports success
+  # for a `runcmd` whose script failed.
+  - |
+    if /root/build.sh; then
+      echo "DELONIX-MONITORING-BUILD-OK" > /dev/console
+    else
+      echo "DELONIX-MONITORING-BUILD-FAIL rc=$?" > /dev/console
+      tail -60 /var/log/delonix-monitoring-build.log > /dev/console
+    fi
+    sync
+    poweroff
