@@ -219,91 +219,52 @@ pub fn canonical_kind(kind: &str) -> &str {
         .unwrap_or(kind)
 }
 
-/// A grouped `kind: Stack` — bundles resources of several Kinds in ONE document
+/// One entry inside a `kind: Stack` group: a name + the resource's own `spec`.
+///
+/// A grouped `kind: Stack` bundles resources of several Kinds in ONE document
 /// (k8s-Service-like: everything for an app in one place). Expanded at load time
 /// into the individual docs, which then flow through the normal per-Kind apply,
 /// in dependency order. Each child inherits the Stack's namespace unless it sets
 /// its own. The Stack doc itself does not survive the load (it becomes its parts).
-/// The schema this type generates is deliberately SHALLOW, and the limit is
-/// worth stating because it is invisible from the outside.
 ///
-/// Each group is a list of [`StackItem`], whose `spec` is a raw `Value` that the
-/// child Kind re-deserializes later. One item type serves all twelve groups, so
-/// there is no per-group type to point `#[schemars(with = ...)]` at the way
-/// `WorkloadSpec` can — typing the insides would mean twelve new item types.
+/// **The groups are not written here.** Which keys a Stack accepts, and which
+/// Kind each one holds, is the `stack_group` column of the Kind table
+/// (`delonix_stack::kinds`); the expansion, the unknown-field warning and the
+/// published schema all read it. There used to be a `StackSpec` struct with one
+/// field per group, and it had drifted: four Kinds the stack applies could not
+/// be put inside one.
 ///
-/// What this DOES buy is the mistake people actually make: a typo in a GROUP
-/// name. `contaienrs:` is silently dropped today — `expand_stack` reads the
-/// groups it knows and never looks at the rest — so the stack applies, reports
-/// success, and is missing every container in it. `additionalProperties: false`
-/// over `STACK_SPEC_FIELDS` catches that in the editor.
-///
-/// What it does NOT buy: the children's own specs are unchecked here. The
-/// per-Kind branches key on a document's `kind`, and a Stack's children have no
-/// `kind` of their own until `load` gives them one.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-pub(crate) struct StackSpec {
-    #[serde(default)]
-    secrets: Vec<StackItem>,
-    #[serde(default)]
-    networks: Vec<StackItem>,
-    #[serde(default)]
-    volumes: Vec<StackItem>,
-    #[serde(default)]
-    images: Vec<StackItem>,
-    #[serde(default)]
-    vms: Vec<StackItem>,
-    #[serde(default)]
-    containers: Vec<StackItem>,
-    #[serde(default)]
-    pods: Vec<StackItem>,
-    #[serde(default)]
-    ingress: Vec<StackItem>,
-    #[serde(default, rename = "firewallPolicies")]
-    firewall_policies: Vec<StackItem>,
-    #[serde(default, rename = "httpRoutes")]
-    http_routes: Vec<StackItem>,
-    #[serde(default)]
-    dependencies: Vec<StackItem>,
-    #[serde(default)]
-    tunnels: Vec<StackItem>,
-}
-
-/// One entry inside a `kind: Stack` group: a name + the resource's own `spec`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
+/// The published schema types every group's items against the Kind's own spec
+/// (see `schema::stack_spec_schema`), which is what makes a typo INSIDE a child
+/// visible in the editor and not only at apply.
+#[derive(Debug, Deserialize)]
 pub(crate) struct StackItem {
     name: String,
     #[serde(default)]
     namespace: Option<String>,
-    /// Left as «anything» in the schema on purpose: this is a different Kind's
-    /// spec depending on which group the item sits in, and narrowing it to one
-    /// of them would reject the other eleven.
+    /// The child's `metadata.labels`. A group item used to carry only name,
+    /// namespace and spec, which left a Stack unable to hold a `Service`'s
+    /// backends: a Service selects by the LABELS on the workloads, and a
+    /// container inside a Stack had no way to be given any at the metadata level.
     #[serde(default)]
-    #[schemars(with = "serde_json::Value")]
+    labels: BTreeMap<String, String>,
+    #[serde(default)]
+    annotations: BTreeMap<String, String>,
+    #[serde(default)]
     spec: serde_yaml::Value,
 }
 
-/// Top-level field names accepted in a `kind: Stack` `spec` (unknown-field warning).
-pub const STACK_SPEC_FIELDS: &[&str] = &[
-    "secrets",
-    "networks",
-    "volumes",
-    "images",
-    "vms",
-    "containers",
-    "pods",
-    "ingress",
-    "firewallPolicies",
-    "httpRoutes",
-    "dependencies",
-    "tunnels",
-];
+/// Top-level field names accepted in a `kind: Stack` `spec`: the groups, and the
+/// old spellings of them (unknown-field warning, schema).
+pub fn stack_spec_fields() -> &'static [&'static str] {
+    static FIELDS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    FIELDS.get_or_init(super::kinds::stack_spec_fields)
+}
 
-/// Expands a `kind: Stack` doc into its constituent resource docs, in dependency
-/// order (Secret → Network → Volume → Image → Vm → Container → firewall
-/// → route → Dependency). Each child inherits the Stack's namespace by default.
+/// Expands a `kind: Stack` doc into its constituent resource docs, in the order
+/// of the Kind table (which is the apply order). Each child inherits the Stack's
+/// namespace by default.
 fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
-    let spec: StackSpec = spec_of(doc)?;
     let ns = &doc.metadata.namespace;
     // ADR-0011 §4: deliberately NOT derived from the stack name. Doing that
     // would make the reconciler find nothing of its own in the new namespace
@@ -316,20 +277,38 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
             "this stack declares no namespace, so its resources land in the shared 'default' — everything else in 'default' can reach them. Set metadata.namespace to isolate it",
         ));
     }
-    let groups: Vec<(&str, Vec<StackItem>)> = vec![
-        (k::SECRET, spec.secrets),
-        (k::NETWORK, spec.networks),
-        (k::VOLUME, spec.volumes),
-        (k::IMAGE, spec.images),
-        (k::VM, spec.vms),
-        (k::CONTAINER, spec.containers),
-        (k::POD, spec.pods),
-        (k::INGRESS, spec.ingress),
-        (k::FIREWALL_POLICY, spec.firewall_policies),
-        (k::HTTP_ROUTE, spec.http_routes),
-        (k::DEPENDENCY, spec.dependencies),
-        (k::GATEWAY, spec.tunnels),
-    ];
+    let mut groups: Vec<(&str, Vec<StackItem>)> = Vec::new();
+    for (group, kind) in super::kinds::stack_groups() {
+        // The group itself plus any old spelling of it (`tunnels:` for
+        // `gateways:`), concatenated: a manifest mid-migration may carry both.
+        let mut items: Vec<StackItem> = Vec::new();
+        let keys = std::iter::once(group).chain(
+            super::kinds::STACK_GROUP_ALIASES
+                .iter()
+                .filter(|(_, canonical)| *canonical == group)
+                .map(|(old, _)| *old),
+        );
+        for key in keys {
+            let Some(v) = doc.spec.get(key).filter(|v| !v.is_null()) else {
+                continue;
+            };
+            let more: Vec<StackItem> = serde_yaml::from_value(v.clone()).map_err(|e| {
+                Error::Invalid(format!(
+                    "{}: {e}",
+                    super::po::tf(
+                        "{kind} '{name}': invalid spec — group '{group}'",
+                        &[
+                            ("kind", &doc.kind),
+                            ("name", &doc.metadata.name),
+                            ("group", key)
+                        ],
+                    )
+                ))
+            })?;
+            items.extend(more);
+        }
+        groups.push((kind, items));
+    }
     let mut out = Vec::new();
     for (kind, items) in groups {
         for it in items {
@@ -348,8 +327,8 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
                 metadata: Metadata {
                     name: it.name,
                     namespace: it.namespace.or_else(|| ns.clone()),
-                    labels: Default::default(),
-                    annotations: Default::default(),
+                    labels: it.labels,
+                    annotations: it.annotations,
                 },
                 spec: it.spec,
             });
@@ -423,7 +402,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
         k::SHARE_VOLUME => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         k::WORKLOAD => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
-        k::STACK => Some(STACK_SPEC_FIELDS),
+        k::STACK => Some(stack_spec_fields()),
         k::CLUSTER => Some(crate::cmd::cluster::CLUSTER_SPEC_FIELDS),
         _ => None,
     }
@@ -594,8 +573,16 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
             for mut child in expand_stack(&doc)? {
                 lower_legacy_kind(&mut child)?;
                 // The child's spec is the user's own text, moved from inside the
-                // Stack — a typo there is as invisible as anywhere else.
+                // Stack — a typo there is as invisible as anywhere else. Checked
+                // BEFORE a `Workload` child is lowered, for the same reason the
+                // top-level guard runs on the document as written.
                 check_unknown_fields(&child);
+                if child.kind == k::WORKLOAD {
+                    // Same reduction the top-level loop applies below: a Stack's
+                    // children never pass through it, so a `workloads:` group
+                    // would otherwise leave a document no handler claims.
+                    child = crate::cmd::workload::lower_workload(&child)?;
+                }
                 docs.push(child);
             }
         } else if doc.kind == k::WORKLOAD {
@@ -1438,59 +1425,189 @@ spec: { image: nginx }
         assert!(out.contains("restartPolicy: no"), "veio:\n{out}"); // renamed default
     }
 
-    /// Every group `StackSpec` still accepts must expand into a child that
-    /// survives `load` — a group whose children hit `removed_kind_hint` would
-    /// fail the whole manifest. The three removed groups are only warned about.
+    /// The minimal `spec` of one child per group, and the Kind it ends up as
+    /// after the load has lowered it.
+    ///
+    /// **Derived from the table, exhaustively.** The test below walks
+    /// `stack_groups()` and fails on a group with no sample here, so the next
+    /// Kind that gets a `stack_group` cannot be added without proving that its
+    /// children survive `load` — the check that would have caught `NetworkRoute`,
+    /// `NetworkAccessRule`, `Service` and `App` being applied by the stack and
+    /// unreachable from inside one.
+    fn stack_group_sample(group: &str) -> Option<(&'static str, &'static str)> {
+        Some(match group {
+            "secrets" => ("{ stringData: { K: v } }", "Secret"),
+            "networks" => ("{ driver: bridge }", "Network"),
+            "networkRoutes" => ("{ from: a, to: b }", "NetworkRoute"),
+            "volumes" => ("{}", "Volume"),
+            "images" => ("{ pull: alpine }", "Image"),
+            "apps" => ("{ source: ., image: shop }", "App"),
+            "vms" => ("{ disk: base }", "VirtualMachine"),
+            "containers" => ("{ image: nginx }", "Container"),
+            "pods" => ("{ containers: [{ name: a, image: nginx }] }", "Pod"),
+            "services" => (
+                "{ selector: { matchLabels: { app: web } }, port: 80 }",
+                "Service",
+            ),
+            "ingress" => ("{ rules: [] }", "Ingress"),
+            "firewallPolicies" => ("{ target: c, direction: egress }", "NetworkPolicy"),
+            "networkAccessRules" => (
+                "{ target: c, direction: ingress, port: '80' }",
+                "NetworkAccessRule",
+            ),
+            "httpRoutes" => ("{ rules: [] }", "HTTPRoute"),
+            "gateways" => ("{ provider: pinggy, localPort: 80 }", "Gateway"),
+            // Lowered on the way out: a Workload into the Kind its `type` names,
+            // a Dependency into the NetworkPolicy that carries its allow.
+            "workloads" => (
+                "{ type: container, container: { image: nginx } }",
+                "Container",
+            ),
+            "dependencies" => ("{ from: c, to: c }", "NetworkPolicy"),
+            _ => return None,
+        })
+    }
+
+    /// Every group the table declares must expand into a child that survives
+    /// `load` and ends up as the Kind it is meant to. One document with ALL of
+    /// them at once, so a group that only works alone is caught too.
     #[test]
     fn every_stack_group_loads() {
-        let yaml = "\
-apiVersion: delonix.io/v1
-kind: Stack
-metadata:
-  name: all
-  namespace: prod
-spec:
-  secrets: [{ name: s, spec: { stringData: { K: v } } }]
-  networks: [{ name: n, spec: { driver: bridge } }]
-  volumes: [{ name: v, spec: {} }]
-  images: [{ name: i, spec: { pull: alpine } }]
-  vms: [{ name: vm, spec: { disk: base } }]
-  containers: [{ name: c, spec: { image: nginx } }]
-  pods: [{ name: p, spec: { containers: [{ name: a, image: nginx }] } }]
-  ingress: [{ name: ing, spec: { rules: [] } }]
-  firewallPolicies: [{ name: fw, spec: { target: c, direction: egress } }]
-  httpRoutes: [{ name: r, spec: { rules: [] } }]
-  dependencies: [{ name: d, spec: { from: c, to: c } }]
-  tunnels: [{ name: t, spec: { provider: pinggy, localPort: 80 } }]
-";
+        let mut body = String::new();
+        let mut expected: Vec<(&str, &str)> = Vec::new();
+        for (group, kind) in super::super::kinds::stack_groups() {
+            let (spec, lands_as) = stack_group_sample(group).unwrap_or_else(|| {
+                panic!("group '{group}' ({kind}) has no sample in stack_group_sample")
+            });
+            body.push_str(&format!(
+                "  {group}: [{{ name: x-{group}, spec: {spec} }}]\n"
+            ));
+            expected.push((group, lands_as));
+        }
+        let yaml = format!(
+            "apiVersion: core.delonix.io/v1alpha1\nkind: Stack\n\
+             metadata:\n  name: all\n  namespace: prod\nspec:\n{body}"
+        );
         let p = std::env::temp_dir().join(format!("delonix-stack-all-{}.yaml", std::process::id()));
         std::fs::write(&p, yaml).unwrap();
         let docs = load(&p);
         let _ = std::fs::remove_file(&p);
         let docs = docs.unwrap();
-        for kind in [
-            "Secret",
-            "Network",
-            "Volume",
-            "Image",
-            "VirtualMachine",
-            "Container",
-            "Pod",
-            "Ingress",
-            "NetworkPolicy",
-            "HTTPRoute",
-            "Gateway",
-        ] {
+        for (group, lands_as) in expected {
+            // By NAME as well as by Kind: `workloads` lands as a Container and so
+            // does `containers`, and a check on the Kind alone passed with the
+            // Workload lowering removed. (A Dependency is folded by target into a
+            // policy of its own name, so it can only be checked by Kind.)
+            let name = format!("x-{group}");
             assert!(
-                docs.iter().any(|d| d.kind == kind),
-                "sem {kind}: {:?}",
+                docs.iter()
+                    .any(|d| d.kind == lands_as
+                        && (group == "dependencies" || d.metadata.name == name)),
+                "group '{group}' produced no {lands_as}: {:?}",
                 docs.iter().map(|d| d.kind.as_str()).collect::<Vec<_>>()
             );
         }
-        // The removed groups are no longer in the accepted list.
+        // The Stack itself dissolved, and the removed groups stay removed.
+        assert!(!docs.iter().any(|d| d.kind == "Stack"));
         for g in ["storage", "shareVolumes", "egress"] {
-            assert!(!STACK_SPEC_FIELDS.contains(&g), "{g} ainda aceite");
+            assert!(!stack_spec_fields().contains(&g), "{g} ainda aceite");
         }
+    }
+
+    /// `tunnels:` is the old spelling of `gateways:` and keeps loading — in
+    /// silence, because a rename does not change what the document means — and a
+    /// manifest mid-migration may carry both, so they add up instead of the
+    /// second one winning.
+    #[test]
+    fn the_old_tunnels_key_still_loads_and_adds_to_gateways() {
+        let yaml = "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  tunnels: [{ name: old, spec: { provider: pinggy, localPort: 80 } }]
+  gateways: [{ name: new, spec: { provider: pinggy, localPort: 81 } }]
+";
+        let docs = load_str(yaml, "t").unwrap();
+        let names: Vec<_> = docs
+            .iter()
+            .filter(|d| d.kind == "Gateway")
+            .map(|d| d.metadata.name.as_str())
+            .collect();
+        assert_eq!(names, ["new", "old"]);
+    }
+
+    /// A `workloads:` child is lowered like a top-level Workload — a Stack's
+    /// children never pass through the loop that does it, so without the
+    /// explicit step this would leave a `kind: Workload` no handler claims.
+    #[test]
+    fn a_workload_inside_a_stack_is_lowered() {
+        let yaml = "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  workloads:
+    - name: w
+      spec: { type: container, container: { image: nginx } }
+";
+        let docs = load_str(yaml, "t").unwrap();
+        assert_eq!(docs.len(), 1);
+        assert_eq!(docs[0].kind, "Container");
+        assert_eq!(docs[0].metadata.namespace.as_deref(), Some("prod"));
+    }
+
+    /// A Service selects by the labels on the workloads, so a container inside a
+    /// Stack has to be able to carry them: an item's `labels:`/`annotations:`
+    /// land in the child's metadata, where `container::apply` reads them.
+    #[test]
+    fn a_stack_item_carries_its_metadata_labels() {
+        let yaml = "\
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: s, namespace: prod }
+spec:
+  containers:
+    - name: web
+      labels: { app: web }
+      annotations: { note: front }
+      spec: { image: nginx }
+";
+        let docs = load_str(yaml, "t").unwrap();
+        assert_eq!(
+            docs[0].metadata.labels.get("app").map(String::as_str),
+            Some("web")
+        );
+        assert_eq!(
+            docs[0].metadata.annotations.get("note").map(String::as_str),
+            Some("front")
+        );
+    }
+
+    /// The published example says which groups exist, and it is the first place a
+    /// person looks. It listed four fewer than the engine accepted — and named
+    /// the Kinds `Storage`/`ShareVolume`/`Tunnel` that no longer exist — because
+    /// nothing tied the sentence to the table. Now a group missing from the
+    /// example fails here.
+    #[test]
+    fn the_stack_example_names_every_group() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/stack.yaml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        for (group, _) in super::super::kinds::stack_groups() {
+            assert!(
+                text.contains(group),
+                "examples/stack.yaml never mentions '{group}'"
+            );
+        }
+        for (old, _) in super::super::kinds::STACK_GROUP_ALIASES {
+            assert!(
+                text.contains(old),
+                "examples/stack.yaml never mentions the old '{old}'"
+            );
+        }
+        // And the example must itself load: it is the file everyone copies.
+        load_str(&text, "examples/stack.yaml").unwrap();
     }
 
     #[test]

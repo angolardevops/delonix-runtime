@@ -2007,102 +2007,607 @@
       },
       "type": "object"
     },
-    "StackItem": {
-      "description": "One entry inside a `kind: Stack` group: a name + the resource's own `spec`.",
-      "properties": {
-        "name": {
-          "type": "string"
-        },
-        "namespace": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "spec": {
-          "default": null,
-          "description": "Left as «anything» in the schema on purpose: this is a different Kind's\nspec depending on which group the item sits in, and narrowing it to one\nof them would reject the other eleven."
-        }
-      },
-      "required": [
-        "name"
-      ],
-      "type": "object"
-    },
     "StackSpec": {
       "additionalProperties": false,
-      "description": "A grouped `kind: Stack` — bundles resources of several Kinds in ONE document\n(k8s-Service-like: everything for an app in one place). Expanded at load time\ninto the individual docs, which then flow through the normal per-Kind apply,\nin dependency order. Each child inherits the Stack's namespace unless it sets\nits own. The Stack doc itself does not survive the load (it becomes its parts).\nThe schema this type generates is deliberately SHALLOW, and the limit is\nworth stating because it is invisible from the outside.\n\nEach group is a list of [`StackItem`], whose `spec` is a raw `Value` that the\nchild Kind re-deserializes later. One item type serves all twelve groups, so\nthere is no per-group type to point `#[schemars(with = ...)]` at the way\n`WorkloadSpec` can — typing the insides would mean twelve new item types.\n\nWhat this DOES buy is the mistake people actually make: a typo in a GROUP\nname. `contaienrs:` is silently dropped today — `expand_stack` reads the\ngroups it knows and never looks at the rest — so the stack applies, reports\nsuccess, and is missing every container in it. `additionalProperties: false`\nover `STACK_SPEC_FIELDS` catches that in the editor.\n\nWhat it does NOT buy: the children's own specs are unchecked here. The\nper-Kind branches key on a document's `kind`, and a Stack's children have no\n`kind` of their own until `load` gives them one.",
       "properties": {
+        "apps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/AppSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "containers": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ContainerSpec"
+                  },
+                  {
+                    "$ref": "#/$defs/PodSpec"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "dependencies": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/DependencySpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "firewallPolicies": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/FwDocSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gateways": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/TunnelSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "httpRoutes": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/HttpRouteSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "images": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/ImageSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "ingress": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/IngressSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "networkAccessRules": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkAccessRuleSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "networkRoutes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkRouteSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "networks": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "pods": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/PodSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "secrets": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/SecretSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/ServiceSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "tunnels": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/TunnelSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "vms": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/VmSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         },
         "volumes": {
           "items": {
-            "$ref": "#/$defs/StackItem"
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/VolumeSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "workloads": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/WorkloadSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
           },
           "type": "array"
         }

@@ -959,6 +959,25 @@ fn first_time(seen: &std::sync::Mutex<Vec<String>>, line: &str) -> bool {
     true
 }
 
+/// `metadata.labels` of the document, as the `k=v` list `RunOpts.labels` takes,
+/// with the spec's own `labels:` after them so the spec wins on a repeated key.
+///
+/// Until this existed `metadata.labels` never reached a container: the doc was
+/// parsed, carried and printed by `describe`, and nothing put it on the record.
+/// A `Service` selects by the labels on `Container.labels`, so the published
+/// `examples/service.yaml` — which writes them under `metadata` — matched no
+/// workload. Found by applying a Stack for real, not by a test: the unit tests
+/// only ever asserted that the label survived into the document.
+fn with_metadata_labels(
+    spec_labels: Vec<String>,
+    meta: &std::collections::BTreeMap<String, String>,
+) -> Vec<String> {
+    meta.iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .chain(spec_labels)
+        .collect()
+}
+
 fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Result<RunOpts> {
     let mut notices = Vec::new();
     let out = delonix_compute::pod::pod_to_run_opts(name, namespace, pod, &mut notices);
@@ -1899,7 +1918,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         }
         if pod_shaped {
             let pod: PodSpec = manifest::spec_of(doc)?;
-            let opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
+            let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
+            opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
             cmd_run(&images, &store, opts)?;
             println!("container/{name}: created");
             continue;
@@ -1924,7 +1944,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 restart: spec.restart.clone(),
                 devices: spec.devices,
                 env: spec.env,
-                labels: spec.labels,
+                labels: with_metadata_labels(spec.labels, &doc.metadata.labels),
                 image: spec.image,
                 command: spec.command,
                 quiet: false,
@@ -7122,6 +7142,18 @@ restartPolicy: OnFailure
         assert!(super::first_time(&seen, "warning: volume 'a'"));
         assert!(!super::first_time(&seen, "warning: volume 'a'"));
         assert!(super::first_time(&seen, "warning: volume 'b'"));
+    }
+
+    /// `metadata.labels` has to land on the container, and a key the spec also
+    /// sets must keep the SPEC's value (it comes last).
+    #[test]
+    fn metadata_labels_reach_the_run_options_and_the_spec_wins() {
+        let mut meta = std::collections::BTreeMap::new();
+        meta.insert("app".to_string(), "web".to_string());
+        meta.insert("tier".to_string(), "front".to_string());
+        let got = super::with_metadata_labels(vec!["tier=back".to_string()], &meta);
+        assert_eq!(got, ["app=web", "tier=front", "tier=back"]);
+        assert!(super::with_metadata_labels(vec![], &Default::default()).is_empty());
     }
 
     #[test]

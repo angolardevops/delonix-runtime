@@ -9257,6 +9257,27 @@ msgstr ""
 msgid "All Kinds, by area of action:"
 msgstr "Todos os Kinds, por campo de actuação:"
 
+msgid "{kind} cannot be a group of a Stack: {why}"
+msgstr "{kind} não pode ser um grupo de um Stack: {why}"
+
+msgid ""
+"a Stack does not nest: the children would need a namespace and an owner of "
+"their own, and the reconciler identifies a resource by (kind, name) — two "
+"stacks reaching the same child through a third is a second writer"
+msgstr ""
+"um Stack não se aninha: os filhos precisariam de namespace e dono próprios, "
+"e o reconciliador identifica um recurso por (kind, nome) — dois stacks a "
+"chegarem ao mesmo filho por um terceiro são um segundo escritor"
+
+msgid ""
+"a KubernetesCluster is a remote procedure over SSH against hosts that already "
+"exist, not a resource of this node, so `stack apply` never runs it — grouping "
+"it would promise an apply that does not happen"
+msgstr ""
+"um KubernetesCluster é um procedimento remoto por SSH sobre hosts que já "
+"existem, não um recurso deste nó, por isso o `stack apply` nunca o corre — "
+"agrupá-lo prometeria um apply que não acontece"
+
 msgid "primary"
 msgstr "próprio"
 

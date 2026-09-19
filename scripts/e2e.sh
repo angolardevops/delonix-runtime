@@ -1518,6 +1518,40 @@ check "manifesto: um grupo mal escrito NÃO se chama «ficheiro vazio»" ok bash
   printf '%s' \"\$out\" | grep -qi 'expanded to nothing' || exit 1"
 rm -f "$OUT/typo-stack.yaml"
 
+# Os grupos de um Stack saem da tabela de Kinds (ADR-0045). Quatro Kinds que o
+# `stack apply` aplica (NetworkRoute, NetworkAccessRule, Service, App) não cabiam
+# dentro de um Stack, e o grupo do Gateway ainda se chamava `tunnels:`. `validate`
+# não escreve estado nenhum; o gate é o carregamento e a resolução de referências
+# entre grupos, com a grafia antiga a misturar-se com a nova.
+cat > "$OUT/groups-stack.yaml" <<'YAML'
+apiVersion: core.delonix.io/v1alpha1
+kind: Stack
+metadata: { name: grp, namespace: e2e-grp }
+spec:
+  networks:
+    - { name: grp-front, spec: { driver: bridge } }
+    - { name: grp-back, spec: { driver: bridge } }
+  networkRoutes:
+    - { name: grp-r, spec: { from: grp-front, to: grp-back } }
+  containers:
+    - name: grp-web
+      labels: { app: grp-web }
+      spec: { image: "alpine:3.19", network: grp-front }
+  services:
+    - { name: grp-svc, spec: { selector: { matchLabels: { app: grp-web } }, port: 80 } }
+  networkAccessRules:
+    - { name: grp-allow, spec: { target: grp-web, direction: ingress, port: "80" } }
+  gateways:
+    - { name: grp-gw, spec: { provider: pinggy, localPort: 80 } }
+  tunnels:
+    - { name: grp-old, spec: { provider: pinggy, localPort: 81 } }
+YAML
+check "manifesto: um Stack aceita rotas, serviços, regras e gateways (e o antigo tunnels:)" ok "$BIN" stack validate -f "$OUT/groups-stack.yaml"
+check "manifesto: uma rota para uma rede que o Stack não declara é recusada" fail bash -c "
+  sed 's/to: grp-back/to: grp-nowhere/' '$OUT/groups-stack.yaml' > '$OUT/groups-stack-bad.yaml'
+  '$BIN' stack validate -f '$OUT/groups-stack-bad.yaml'"
+rm -f "$OUT/groups-stack.yaml" "$OUT/groups-stack-bad.yaml"
+
 # A mesma classe, noutros dois sítios: o `Display` do `NotFound` é `no such {0}`
 # e recebia frases inteiras. Medido a 2026-09-10: um `kind: Workload` com o bloco
 # errado respondia «no such workload 'w1': type: vm must not carry a
