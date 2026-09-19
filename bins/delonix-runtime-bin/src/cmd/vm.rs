@@ -591,7 +591,7 @@ pub enum VmCmd {
         /// VNC graphical console (libvirt backend only — Cloud Hypervisor has no display).
         #[arg(long)]
         vnc: bool,
-        /// After starting, attach to the serial console to watch the boot live (Ctrl-] to detach).
+        /// After starting, attach to the serial console to watch the boot live (Ctrl-D to detach).
         #[arg(long)]
         console: bool,
         /// After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout.
@@ -600,6 +600,14 @@ pub enum VmCmd {
         /// Seconds to wait with --wait (default 120).
         #[arg(long = "boot-timeout", default_value_t = 120)]
         boot_timeout: u64,
+        /// Throwaway VM: destroy it, with all its artifacts, as soon as it is stopped
+        /// (`vm stop`, or a poweroff from inside the guest) — the VM twin of `container run --rm`.
+        #[arg(long = "rm")]
+        rm: bool,
+        /// Like `--rm`, but keep the stopped VM for this long first (`30s`, `10m`, `2h`, `1d`)
+        /// so a proof of concept can be inspected or restarted before it goes.
+        #[arg(long = "rm-after", value_name = "DURATION")]
+        rm_after: Option<String>,
     },
     /// Pull a golden VM image from an OCI registry.
     ///
@@ -702,11 +710,11 @@ pub enum VmCmd {
     },
     /// Attach to the VM's serial console (interactive terminal).
     ///
-    /// Works with no IP (boot logs, login). Escape: Ctrl-] .
+    /// Works with no IP (boot logs, login). Escape: Ctrl-D .
     Console {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
-        /// Key that detaches the console, as `^X` (default `^]`). Also settable via `$DELONIX_CONSOLE_ESCAPE`.
+        /// Key that detaches the console, as `^X` (default `^D`). Also settable via `$DELONIX_CONSOLE_ESCAPE`.
         #[arg(short = 'e', long = "escape")]
         escape: Option<String>,
     },
@@ -763,6 +771,30 @@ pub enum VmCmd {
         network: String,
         #[arg(long)]
         apply: bool,
+    },
+    /// Destroy VMs and everything they own — provider-side VM, disks, snapshots.
+    ///
+    /// Unlike `stop` this is not reversible. It goes through the VM's own
+    /// backend (libvirt, Proxmox, Cloud Hypervisor) and removes the overlay,
+    /// seed, snapshots, sockets, logs, extra disks and the DHCP reservation.
+    /// If the provider refuses, the record is kept and the error says why —
+    /// `--force` drops the local state anyway. Shared volumes are never
+    /// deleted; extra disks outside the state directory only with
+    /// `--purge-disks`.
+    #[command(alias = "rm")]
+    Destroy {
+        #[arg(required = true, num_args = 1.., add = ArgValueCandidates::new(super::complete::vms))]
+        names: Vec<String>,
+        /// Delete the local state even if the provider refuses the removal.
+        #[arg(short = 'f', long)]
+        force: bool,
+        /// Also delete extra disks that live outside the state directory.
+        #[arg(long)]
+        purge_disks: bool,
+        /// Skip a VM that is running again (used by the `--rm-after` timer, so a
+        /// VM restarted during its grace period is not destroyed under you).
+        #[arg(long, hide = true)]
+        if_stopped: bool,
     },
     /// Stop the VM (preserves disk, record and snapshots).
     #[command(alias = "down")]
@@ -1176,6 +1208,230 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 /// So the default sweeps leftovers only, and the preview names them before the
 /// prompt. `--stopped` opts into the destructive half, and gets its own line in
 /// the warning rather than being folded into the same sentence.
+/// Annotation that marks a throwaway VM; its value is the grace period in
+/// seconds between the stop and the destroy (`0` = immediately).
+const EPHEMERAL_ANNOTATION: &str = "delonix.io/ephemeral-rm-after";
+
+/// `30s`, `10m`, `2h`, `1d` — or a bare number of seconds. `None` for anything
+/// else, and for zero (a zero grace is spelled `--rm`).
+fn parse_grace(spec: &str) -> Option<u64> {
+    let s = spec.trim();
+    let (num, mult) = match s.chars().last()? {
+        's' => (&s[..s.len() - 1], 1),
+        'm' => (&s[..s.len() - 1], 60),
+        'h' => (&s[..s.len() - 1], 3600),
+        'd' => (&s[..s.len() - 1], 86400),
+        c if c.is_ascii_digit() => (s, 1),
+        _ => return None,
+    };
+    let n: u64 = num.parse().ok()?;
+    n.checked_mul(mult).filter(|v| *v > 0)
+}
+
+fn fmt_grace(secs: u64) -> String {
+    match secs {
+        s if s % 86400 == 0 => format!("{}d", s / 86400),
+        s if s % 3600 == 0 => format!("{}h", s / 3600),
+        s if s % 60 == 0 => format!("{}m", s / 60),
+        s => format!("{s}s"),
+    }
+}
+
+/// `--rm` / `--rm-after` -> the grace in seconds, or `None` for a normal VM.
+fn ephemeral_policy(rm: bool, rm_after: Option<&str>) -> Result<Option<u64>> {
+    match rm_after {
+        Some(spec) => parse_grace(spec).map(Some).ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "invalid --rm-after '{spec}' — use a positive duration such as 30s, 10m, 2h or 1d",
+                &[("spec", spec)],
+            ))
+        }),
+        None => Ok(rm.then_some(0)),
+    }
+}
+
+fn mark_ephemeral(name: &str, grace: u64) -> Result<()> {
+    let st: delonix_state::JsonStore<delonix_compute::Vm> =
+        delonix_state::JsonStore::open(state_root().join("vms"))?;
+    st.update(name, |vm| {
+        vm.annotations
+            .insert(EPHEMERAL_ANNOTATION.into(), grace.to_string());
+        true
+    })?;
+    Ok(())
+}
+
+/// The throwaway grace of a VM, if it is one.
+fn ephemeral_grace(vm: &delonix_compute::Vm) -> Option<u64> {
+    vm.annotations.get(EPHEMERAL_ANNOTATION)?.parse().ok()
+}
+
+/// What happens to a throwaway VM once it is stopped: destroyed right away, or
+/// — with a grace period — handed to a systemd transient timer that destroys it
+/// later. No daemon of ours: systemd owns the wait, and the destroy it runs is
+/// guarded by `--if-stopped`, so a VM restarted meanwhile is left alone.
+/// Best effort — a stopped VM must never turn `vm stop` into an error.
+fn after_stopped(base: &std::path::Path, name: &str) {
+    let Ok(vm) = delonix_vm::status(base, name) else {
+        return;
+    };
+    let Some(grace) = ephemeral_grace(&vm) else {
+        return;
+    };
+    if grace == 0 {
+        let _ = cmd_destroy(base, &[name.to_string()], true, false);
+        return;
+    }
+    let unit = format!("delonix-vm-rm-{name}");
+    let ok = Command::new("systemd-run")
+        .args([
+            "--user",
+            "--collect",
+            "--quiet",
+            &format!("--unit={unit}"),
+            &format!("--on-active={grace}s"),
+            "--",
+        ])
+        .arg(delonix_node::dispatch::cli_bin())
+        .args(["vm", "destroy", "--force", "--if-stopped", "--", name])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "throwaway VM '{name}' will be destroyed in {after}",
+                &[("name", name), ("after", &fmt_grace(grace))],
+            )
+        );
+    } else {
+        // Already scheduled by an earlier stop is the usual reason; a missing
+        // systemd is the other. Say so instead of promising a cleanup.
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "could not schedule the removal of '{name}' (already scheduled, or no user systemd) — `delonix vm destroy {name}` removes it now",
+                &[("name", name)],
+            )
+        );
+    }
+}
+
+/// Destroys/schedules throwaway VMs found stopped — the guest-poweroff case,
+/// which never passed through `vm stop`.
+fn reap_ephemeral(base: &std::path::Path) {
+    let Ok(vms) = delonix_vm::list(base) else {
+        return;
+    };
+    for vm in vms {
+        if ephemeral_grace(&vm).is_some()
+            && !matches!(vm.status, delonix_model::records::Status::Running)
+        {
+            after_stopped(base, &vm.name);
+        }
+    }
+}
+
+fn cmd_destroy(
+    base: &std::path::Path,
+    names: &[String],
+    force: bool,
+    purge_disks: bool,
+) -> Result<()> {
+    // Exits here with the exit-code CLASS of the failures (4 = no such VM,
+    // 5 = conflict, …), the same as `for_each_id` does for containers: a
+    // generic 1 would make «it does not exist» indistinguishable from
+    // «the provider refused», which is the distinction a script needs.
+    let mut codes: Vec<i32> = Vec::new();
+    for name in names {
+        // Same live display as `vm create`: a spinner per stage, a tick and
+        // the time it took when it ends. STDERR is human; STDOUT keeps the
+        // summary line. Without a TTY it degrades to one line per stage.
+        eprintln!(
+            "{}",
+            super::po::tf("Destroying VM '{name}'…", &[("name", name)])
+        );
+        let prog = std::cell::RefCell::new(super::output::Progress::new());
+        let render = |s: delonix_vm::DestroyStage| {
+            use delonix_vm::DestroyStage::*;
+            let (step, icon) = match s {
+                Provider(b) => (
+                    super::po::tf(
+                        "powering off and removing from {backend}",
+                        &[("backend", b)],
+                    ),
+                    "🛑",
+                ),
+                Overlay => (super::po::t("deleting the overlay disk").to_string(), "💽"),
+                ExtraDisks(n) => (
+                    super::po::tf("deleting {n} extra disk(s)", &[("n", &n.to_string())]),
+                    "🗄",
+                ),
+                SeedAndSnapshots => (
+                    super::po::t("deleting the cloud-init seed and snapshots").to_string(),
+                    "📸",
+                ),
+                RuntimeState => (
+                    super::po::t("deleting sockets, logs and domain XML").to_string(),
+                    "🧹",
+                ),
+                Record => (super::po::t("removing the VM record").to_string(), "🗑"),
+            };
+            let mut p = prog.borrow_mut();
+            p.ok();
+            p.step(&step, icon);
+        };
+        let res = delonix_vm::destroy_with(base, name, force, purge_disks, &render);
+        if res.is_ok() {
+            prog.borrow_mut().ok();
+        }
+        drop(prog);
+        match res {
+            Ok(d) => {
+                println!(
+                    "{}",
+                    super::po::tf(
+                        "destroyed {name} — {n} artifact(s), {size} freed",
+                        &[
+                            ("name", name),
+                            ("n", &d.removed.len().to_string()),
+                            ("size", &super::output::fmt_size(d.freed_bytes)),
+                        ]
+                    )
+                );
+                for r in &d.removed {
+                    println!("  - {r}");
+                }
+                for k in &d.kept {
+                    eprintln!("  {} {k}", super::po::t("kept:"));
+                }
+            }
+            Err(e) => {
+                let e: delonix_model::Error = e.into();
+                eprintln!(
+                    "{name}: [{}] {}",
+                    delonix_model::codes::label(e.number()),
+                    super::po::t_dyn(&e.to_string())
+                );
+                if !force && e.number() != 4501 {
+                    eprintln!(
+                        "{}",
+                        super::po::t(
+                            "  the record was kept intact; retry with --force to drop the local state"
+                        )
+                    );
+                }
+                codes.push(super::exitcode::for_error(&e));
+            }
+        }
+    }
+    if !codes.is_empty() {
+        std::process::exit(super::exitcode::merge(&codes));
+    }
+    Ok(())
+}
+
 fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
     let mut lines = Vec::new();
     let entries = super::prune::doomed_vm_entries(base)?;
@@ -1236,6 +1492,17 @@ fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
         )
     );
     super::prune::note_partial(v.freed);
+    if !v.failed.is_empty() {
+        return Err(delonix_vm::Error::Command {
+            context: "vm prune",
+            message: format!(
+                "{} VM(s) could not be destroyed: {} — see the errors above, or use `vm destroy --force`",
+                v.failed.len(),
+                v.failed.join(", ")
+            ),
+        }
+        .into());
+    }
     Ok(())
 }
 
@@ -1694,6 +1961,8 @@ pub fn run(action: VmCmd) -> Result<()> {
             console,
             wait,
             boot_timeout,
+            rm,
+            rm_after,
         } => {
             // The node's runtime policy, BEFORE the image is resolved, fetched
             // or written — the same placement, and the same reason, as
@@ -1893,6 +2162,9 @@ pub fn run(action: VmCmd) -> Result<()> {
             // only that a stage STARTED, so each report closes the previous one
             // — correct here because a stage that failed never reaches the next
             // (and the one left open closes with ✗ on the way out, from `Drop`).
+            // Parsed BEFORE anything is created: a typo in `--rm-after` must not
+            // leave behind a VM that was meant to be throwaway.
+            let ephemeral = ephemeral_policy(rm, rm_after.as_deref())?;
             let prog = std::cell::RefCell::new(super::output::Progress::new());
             let render = |s: delonix_vm::CreateStage| {
                 use delonix_vm::CreateStage::*;
@@ -1930,6 +2202,23 @@ pub fn run(action: VmCmd) -> Result<()> {
             // point is that the VMM process exists. Whether the guest booted is
             // what `--wait` goes and finds out, and it is the only thing
             // entitled to say "is up".
+            if let Some(grace) = ephemeral {
+                mark_ephemeral(&vm.name, grace)?;
+                eprintln!(
+                    "{}",
+                    if grace == 0 {
+                        super::po::tf(
+                            "throwaway VM: it is destroyed as soon as it is stopped",
+                            &[],
+                        )
+                    } else {
+                        super::po::tf(
+                            "throwaway VM: it is destroyed {after} after it is stopped",
+                            &[("after", &fmt_grace(grace))],
+                        )
+                    }
+                );
+            }
             eprintln!(
                 "{}",
                 super::po::tf("✓ VM '{name}' started.", &[("name", &vm.name)])
@@ -2030,6 +2319,9 @@ pub fn run(action: VmCmd) -> Result<()> {
             all,
             namespace,
         } => {
+            // A throwaway VM whose guest powered itself off never went through
+            // `vm stop`; this is where such a VM is noticed.
+            reap_ephemeral(&base);
             let output = super::config::resolve_output(&base, output);
             // One filter, applied once, before either renderer sees a row —
             // table and JSON cannot disagree about what `--namespace` means.
@@ -2162,9 +2454,34 @@ pub fn run(action: VmCmd) -> Result<()> {
             apply,
         } => super::vmbridge::bridge(&network, vm_subnet, apply),
         VmCmd::Unbridge { network, apply } => super::vmbridge::unbridge(&network, apply),
+        VmCmd::Destroy {
+            names,
+            force,
+            purge_disks,
+            if_stopped,
+        } => {
+            let names: Vec<String> = if if_stopped {
+                names
+                    .into_iter()
+                    .filter(|n| {
+                        !matches!(
+                            delonix_vm::status(&base, n).map(|v| v.status),
+                            Ok(delonix_model::records::Status::Running)
+                        )
+                    })
+                    .collect()
+            } else {
+                names
+            };
+            if names.is_empty() {
+                return Ok(());
+            }
+            cmd_destroy(&base, &names, force, purge_disks)
+        }
         VmCmd::Stop { name } => {
             delonix_vm::stop(&base, &name)?;
             println!("{name}");
+            after_stopped(&base, &name);
             Ok(())
         }
         VmCmd::Start { name } => {
@@ -2485,6 +2802,7 @@ pub(crate) fn workload_stop(name: &str) -> Result<()> {
     // Echo the name on success, mirroring the native `vm stop` (whose CLI arm
     // prints it — `delonix_vm::stop` itself is silent).
     println!("{name}");
+    after_stopped(&state_root(), name);
     Ok(())
 }
 
@@ -3118,7 +3436,7 @@ fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool, ssh_user: Op
     let mut rows = vec![
         (
             format!("delonix vm console {name}"),
-            super::po::t("open the serial console (back to host: Ctrl+])"),
+            super::po::t("open the serial console (back to host: Ctrl+D)"),
         ),
         (
             "delonix vm ls".to_string(),
@@ -3200,7 +3518,7 @@ fn cmd_console(base: &std::path::Path, name: &str, escape: Option<&str>) -> Resu
     let backend = vm.backend.as_str();
     if backend.contains("libvirt") || backend.contains("qemu") || backend.contains("kvm") {
         // Spawn `virsh console` as a CHILD (not exec/replace) so that when the
-        // user presses Ctrl+] we regain control and can confirm the return —
+        // user presses Ctrl+D we regain control and can confirm the return —
         // virsh handles the raw tty and the escape key itself.
         //
         // BUG FIXED HERE, found live on a real host: without `--force`, a console
@@ -3276,20 +3594,21 @@ pub(crate) struct Escape {
 }
 
 /// Which key detaches the console: `--escape`, then `$DELONIX_CONSOLE_ESCAPE`,
-/// then `^]`.
+/// then `^D`.
 ///
-/// The default is `^]` because that is what telnet, virsh and every serial
-/// console before them used — but it is NOT typeable on every keyboard, and
-/// that is the reason this is configurable at all. On a Portuguese layout `]`
-/// is `AltGr+9`, and `Ctrl+AltGr+9` does not produce 0x1d: the console opens,
-/// works, and cannot be left except by killing the terminal. Reported exactly
-/// that way. `delonix vm console x -e ^X` (or the env var, once, in a profile)
-/// gives back a key the keyboard can actually press.
+/// The default is `^D`: the key everybody already presses to leave a shell.
+/// It used to be `^]` (telnet, virsh), but that is NOT typeable on every
+/// keyboard — on a Portuguese layout `]` is `AltGr+9` and `Ctrl+AltGr+9` does
+/// not produce 0x1d — and, worse, `Ctrl+D` did nothing useful: the golden
+/// image auto-logs-in on ttyS0, so the guest's own EOF just restarted the
+/// session. Now `Ctrl+D` detaches, the VM keeps running, and the trade-off is
+/// that the guest never receives a `^D` from this console. `-e`/the env var
+/// pick another key (`^]` included) for anyone who needs it.
 fn resolve_escape(flag: Option<&str>) -> Result<Escape> {
     let raw = flag
         .map(str::to_string)
         .or_else(|| std::env::var("DELONIX_CONSOLE_ESCAPE").ok())
-        .unwrap_or_else(|| "^]".to_string());
+        .unwrap_or_else(|| "^D".to_string());
     let byte = escape_byte(&raw).ok_or_else(|| {
         Error::Invalid(super::po::tf(
             "invalid console escape '{raw}' — give ONE control key, as `^X` (or `X`)",
@@ -3386,7 +3705,7 @@ impl Drop for RawTty {
     }
 }
 
-/// Connects stdin/stdout to the console socket, byte by byte, until `Ctrl-]`
+/// Connects stdin/stdout to the console socket, byte by byte, until `Ctrl-D`
 /// (0x1d) on stdin — the same escape key as `telnet`.
 fn console_bridge(sock: &std::path::Path, escape: u8) -> Result<()> {
     use std::io::{Read, Write};
@@ -3402,8 +3721,8 @@ fn console_bridge(sock: &std::path::Path, escape: u8) -> Result<()> {
     // Bidirectional bridge with `poll()` on a single thread: reacts to stdin AND
     // to the socket, and — the point of the fix — RETURNS to the host when the
     // socket closes (the VM powered off/shut down), without getting stuck in a
-    // stdin `read`. Ctrl-] (0x1d) detaches; `exit`/Ctrl-D inside the VM go to the
-    // getty (autologin), not here — the only manual exit is Ctrl-], so it's announced.
+    // stdin `read`. The escape key (Ctrl-D by default) detaches; `exit` inside the VM goes to the
+    // getty (autologin), not here — so the escape key is announced.
     let mut wr = stream.try_clone().map_err(|e| Error::Runtime {
         context: "vm console",
         message: e.to_string(),
@@ -3433,7 +3752,7 @@ fn console_bridge(sock: &std::path::Path, escape: u8) -> Result<()> {
         if unsafe { libc::poll(fds.as_mut_ptr(), 2, -1) } < 0 {
             break;
         }
-        // stdin -> socket (Ctrl-] detaches; host EOF exits).
+        // stdin -> socket (Ctrl-D detaches; host EOF exits).
         if fds[0].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
             match std::io::stdin().read(&mut buf) {
                 Ok(0) | Err(_) => break,
@@ -4276,5 +4595,40 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert_eq!(a.len(), 8, "4 random bytes hex-encoded is 8 chars: {a:?}");
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()), "{a:?}");
         assert_ne!(a, b, "two calls must not collide in a quick smoke test");
+    }
+}
+
+#[cfg(test)]
+mod ephemeral_tests {
+    use super::*;
+
+    #[test]
+    fn grace_parses_units_and_refuses_the_rest() {
+        assert_eq!(parse_grace("30s"), Some(30));
+        assert_eq!(parse_grace("10m"), Some(600));
+        assert_eq!(parse_grace("2h"), Some(7200));
+        assert_eq!(parse_grace("1d"), Some(86400));
+        assert_eq!(parse_grace("45"), Some(45));
+        assert_eq!(parse_grace("0"), None, "a zero grace is spelled --rm");
+        assert_eq!(parse_grace("m"), None);
+        assert_eq!(parse_grace("10x"), None);
+        assert_eq!(parse_grace(""), None);
+        assert_eq!(parse_grace("-5m"), None);
+    }
+
+    #[test]
+    fn rm_after_wins_and_a_typo_is_refused_before_anything_is_created() {
+        assert_eq!(ephemeral_policy(false, None).unwrap(), None);
+        assert_eq!(ephemeral_policy(true, None).unwrap(), Some(0));
+        assert_eq!(ephemeral_policy(false, Some("5m")).unwrap(), Some(300));
+        assert_eq!(ephemeral_policy(true, Some("5m")).unwrap(), Some(300));
+        assert!(ephemeral_policy(false, Some("soon")).is_err());
+    }
+
+    #[test]
+    fn grace_round_trips_to_a_readable_string() {
+        assert_eq!(fmt_grace(600), "10m");
+        assert_eq!(fmt_grace(7200), "2h");
+        assert_eq!(fmt_grace(90), "90s");
     }
 }

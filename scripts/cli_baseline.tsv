@@ -209,6 +209,7 @@
 ~	vm convert
 ~	vm create
 ~	vm default-backend
+=	vm destroy
 ~	vm init
 ~	vm ls
 ~	vm ls-remote
