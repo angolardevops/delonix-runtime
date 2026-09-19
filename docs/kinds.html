@@ -597,13 +597,13 @@ spec:
   #   service: { name: web, port: { number: 80 } }</code></pre>
 <h2 id='stack'>Stack</h2>
 <p class='lang-pt'>Agrupa vários recursos num só documento. Expandido no load para os Kinds individuais, em ordem de dependência — o Stack não sobrevive ao load, tudo o resto vê os filhos.</p><p class='lang-en'>Groups several resources into one document. Expanded on load into the individual Kinds, in dependency order — the Stack doesn't survive the load, everything else sees the children.</p>
-<pre><code># kind: Stack — groups a whole app (networks, containers, storage, …) in ONE
+<pre><code># kind: Stack — groups a whole app (networks, containers, volumes, …) in ONE
 # document (k8s-Service-like). Apply with:
 #   delonix stack apply -f examples/stack.yaml
 # At load time the Stack expands into its constituent resources, which then flow
 # through the normal per-Kind apply IN DEPENDENCY ORDER (Secret → Network → Volume
-# → Storage → ShareVolume → Image → Vm → Container → Pod → Ingress/Egress →
-# Dependency → HTTPRoute → Tunnel). Each child inherits the Stack&#x27;s namespace
+# → Image → VirtualMachine → Container → Pod → Ingress/NetworkPolicy →
+# Dependency → HTTPRoute → Gateway). Each child inherits the Stack&#x27;s namespace
 # unless it sets its own. You can still write the resources as separate documents
 # — the Stack is just a convenient single place to bundle them.
 apiVersion: core.delonix.io/v1alpha1
@@ -628,9 +628,11 @@ spec:
         image: postgres:16
         network: blog-net
         env: [&quot;POSTGRES_PASSWORD=change-me&quot;]
-  # Every groupable Kind is available: secrets, volumes, storage, shareVolumes,
-  # images, vms, containers, pods, ingress, egress, firewallPolicies,
-  # httpRoutes, tunnels, dependencies.
+  # Groups available: secrets, networks, volumes, images, vms, containers,
+  # pods, ingress, firewallPolicies, httpRoutes, tunnels, dependencies.
+  # NFS/CIFS/WebDAV storage and shares are a `volumes:` item with an
+  # `nfs:`/`cifs:`/`webdav:` or `share:` block; an egress policy is a
+  # `firewallPolicies:` item with `direction: egress`.
   dependencies:
     - name: web-knows-db
       spec:
