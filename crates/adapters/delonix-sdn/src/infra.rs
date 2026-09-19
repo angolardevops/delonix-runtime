@@ -4083,7 +4083,12 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> Stri
     // The EXPLICIT rules above take precedence (first-match terminal in the chain).
     let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
     if !has_explicit_in {
-        let nsset = dlxns_set(&fw.namespace);
+        // `namespace_isolation_key`, not the raw `fw.namespace`: this is the
+        // side of the attach/chain pair that must agree with the wire token
+        // `attach_container`/`attach_extra_container`/`vmtap_line` compute —
+        // see that function's doc comment for the cross-tenant bypass this
+        // closes.
+        let nsset = dlxns_set(&namespace_isolation_key(&fw.namespace));
         body.push_str(&format!(
             "\t\tip daddr {ip} ip saddr @{nsset} counter accept\n"
         ));
@@ -4398,6 +4403,41 @@ pub fn sanitize(s: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
         .collect();
     cleaned.chars().take(12).collect()
+}
+
+/// Canonicalizes a `metadata.namespace` value for the isolation-set hash fed
+/// to [`dlxns_set`] — filters the same charset as [`sanitize`] but WITHOUT its
+/// 12-char truncation, and is the ONLY function allowed to touch a namespace
+/// on the way into that hash.
+///
+/// **Security fix (2026-09, offensive audit)**: the attach-time wire token
+/// used `sanitize(namespace)` — truncated to 12 chars, because that limit
+/// exists for a netns/interface name (IFNAMSIZ), which a logical namespace
+/// is not. [`fw_chain_body`], on the other side of the isolation check, hashes
+/// the RAW, untruncated `fw.namespace` (`ContainerFw` never truncates it).
+/// For any namespace longer than 12 chars the two sides fed `dlxns_set` two
+/// DIFFERENT strings — e.g. `attach_container` would compute
+/// `sanitize("tenant-alpha-prod") == "tenant-alpha"` while `fw_chain_body`
+/// kept the full `"tenant-alpha-prod"`. A container whose namespace happened
+/// to share the first 12 (cleaned) characters with a victim's namespace
+/// joined the VICTIM's `@dlxns_<hash>` set on attach, while the victim's own
+/// chain still accepted that exact set — full cross-tenant reachability
+/// through the isolation the AGENTS.md documents as the product's central
+/// guarantee. `dlxns_set` itself never needed the truncation: it only ever
+/// hashes its input into a fixed 13-byte set name (`dlxns` + 8 hex digits),
+/// so nothing downstream cares how long the input string was — only that
+/// BOTH sides of the check compute it identically. Every caller that used to
+/// truncate an isolation namespace with `sanitize` (`attach_container`,
+/// `attach_extra_container`, `vmtap_line`) and the chain generator
+/// (`fw_chain_body`) now go through this single function instead, closing
+/// the mismatch for namespaces of any length AND any charset (a namespace
+/// with, say, a `.` in it — unvalidated by the manifest schema — used to
+/// diverge the same way even under 12 chars, since `sanitize` strips it on
+/// one side and `fw_chain_body` never did on the other).
+pub fn namespace_isolation_key(ns: &str) -> String {
+    ns.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect()
 }
 
 // ---- ingress private networks (F6): bridge per network, gateway = ingress ----
@@ -5628,8 +5668,12 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
         return Err(e);
     }
     let netns = sanitize(id);
-    // `namespace` sanitized (goes to a control-line token): no spaces/garbage.
-    let ns = sanitize(if namespace.is_empty() {
+    // `namespace_isolation_key`, NOT `sanitize` — the latter's 12-char cap is
+    // for netns/interface names (IFNAMSIZ), and truncating a logical
+    // namespace here made two differently-named tenants collide into the
+    // same isolation set on the holder side while `fw_chain_body` kept
+    // hashing the full name — see `namespace_isolation_key`'s doc comment.
+    let ns = namespace_isolation_key(if namespace.is_empty() {
         "default"
     } else {
         namespace
@@ -5709,7 +5753,10 @@ pub fn attach_container_on_ip(
         return Err(e);
     }
     let netns = sanitize(id);
-    let ns = sanitize(if namespace.is_empty() {
+    // See the sibling `attach_container` for why this must be
+    // `namespace_isolation_key` and not `sanitize` (the isolation-set hash,
+    // not a netns/interface name subject to IFNAMSIZ).
+    let ns = namespace_isolation_key(if namespace.is_empty() {
         "default"
     } else {
         namespace
@@ -5752,10 +5799,26 @@ pub fn attach_extra_container(
     let netns = sanitize(id);
     // `default` keeps the 6-token form an older holder understands (same compat rule
     // `attach_container` follows); only a namespaced attach needs the newer holder.
-    let line = if namespace.is_empty() || namespace == "default" {
+    //
+    // `namespace_isolation_key`, not the raw `namespace`: this used to embed
+    // `namespace` verbatim — no charset filtering and no length cap at all —
+    // while `attach_container`'s primary-network attach truncated the SAME
+    // logical namespace with `sanitize()` before sending it. A container
+    // connected to BOTH a primary and an extra network (`--net-connect`)
+    // could therefore have its two IPs land in two DIFFERENT `@dlxns_<hash>`
+    // sets for the identical `metadata.namespace`, and an unfiltered value
+    // could also break the control-line's whitespace tokenization on the
+    // holder side. Canonicalizing here closes both, and keeps this attach
+    // path consistent with `attach_container`/`vmtap_line`/`fw_chain_body`.
+    let ns = namespace_isolation_key(if namespace.is_empty() {
+        "default"
+    } else {
+        namespace
+    });
+    let line = if ns == "default" {
         format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway}")
     } else {
-        format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway} {namespace}")
+        format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway} {ns}")
     };
     if let Err(e) = control_send(&line) {
         restore_lease(&prefix, id, previous_lease);
@@ -6014,7 +6077,10 @@ pub fn name_hash(s: &str) -> u32 {
 fn vmtap_line(tap: &str, bridge: &str, gateway: &str, ip: Option<&str>, namespace: &str) -> String {
     match (namespace, ip) {
         ("default", _) | (_, None) => format!("vmtap {tap} {bridge} {gateway}"),
-        (ns, Some(ip)) => format!("vmtap {tap} {bridge} {gateway} {ip} {}", sanitize(ns)),
+        (ns, Some(ip)) => format!(
+            "vmtap {tap} {bridge} {gateway} {ip} {}",
+            namespace_isolation_key(ns)
+        ),
     }
 }
 
@@ -8342,6 +8408,45 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(sanitize("abc; rm -rf /"), "abcrm-rf"); // no spaces/`;`/`/`
         assert_eq!(sanitize("0123456789abcdef").len(), 12); // <= 12
         assert_eq!(sanitize("web_1-x"), "web_1-x"); // alnum/_/- preserved
+    }
+
+    /// Cross-tenant bypass: two namespaces sharing their first 12 chars used to
+    /// hash to the SAME isolation set on the attach side (truncated by
+    /// `sanitize`) while the chain side hashed the full name.
+    #[test]
+    fn namespaces_longer_than_12_chars_never_share_an_isolation_set() {
+        let a = "tenant-alpha";
+        let b = "tenant-alpha-prod";
+        assert_ne!(
+            dlxns_set(&namespace_isolation_key(a)),
+            dlxns_set(&namespace_isolation_key(b))
+        );
+        // The old attach-side computation collapsed them — this is the bug.
+        assert_eq!(sanitize(a), sanitize(b));
+    }
+
+    #[test]
+    fn isolation_key_is_charset_filtered_but_never_truncated() {
+        assert_eq!(namespace_isolation_key("a b;c.d"), "abcd");
+        let long = "x".repeat(200);
+        assert_eq!(namespace_isolation_key(&long), long);
+        assert_eq!(namespace_isolation_key("team_1-x"), "team_1-x");
+    }
+
+    /// Attach wire tokens and the chain generator must feed `dlxns_set` the
+    /// same string for every attach path.
+    #[test]
+    fn wire_token_and_chain_agree_on_the_namespace_set() {
+        let ns = "customer-production-eu";
+        let line = vmtap_line("tap0", "br0", "10.1.0.1", Some("10.1.0.5"), ns);
+        let token = line.split_whitespace().last().unwrap();
+        let fw = delonix_model::records::ContainerFw {
+            enabled: true,
+            namespace: ns.to_string(),
+            ..Default::default()
+        };
+        let body = fw_chain_body("10.1.0.5", &fw);
+        assert!(body.contains(&format!("@{}", dlxns_set(token))));
     }
 
     #[test]
