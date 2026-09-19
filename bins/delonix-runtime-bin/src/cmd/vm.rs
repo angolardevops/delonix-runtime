@@ -1202,7 +1202,11 @@ fn cmd_destroy(
     force: bool,
     purge_disks: bool,
 ) -> Result<()> {
-    let mut failed = 0usize;
+    // Exits here with the exit-code CLASS of the failures (4 = no such VM,
+    // 5 = conflict, …), the same as `for_each_id` does for containers: a
+    // generic 1 would make «it does not exist» indistinguishable from
+    // «the provider refused», which is the distinction a script needs.
+    let mut codes: Vec<i32> = Vec::new();
     for name in names {
         match delonix_vm::destroy(base, name, force, purge_disks) {
             Ok(d) => {
@@ -1225,8 +1229,12 @@ fn cmd_destroy(
                 }
             }
             Err(e) => {
-                failed += 1;
-                eprintln!("{name}: {e}");
+                let e: delonix_model::Error = e.into();
+                eprintln!(
+                    "{name}: [{}] {}",
+                    delonix_model::codes::label(e.number()),
+                    super::po::t_dyn(&e.to_string())
+                );
                 if !force && e.number() != 4501 {
                     eprintln!(
                         "{}",
@@ -1235,15 +1243,12 @@ fn cmd_destroy(
                         )
                     );
                 }
+                codes.push(super::exitcode::for_error(&e));
             }
         }
     }
-    if failed > 0 {
-        return Err(delonix_vm::Error::Command {
-            context: "vm destroy",
-            message: format!("{failed} of {} VM(s) could not be destroyed", names.len()),
-        }
-        .into());
+    if !codes.is_empty() {
+        std::process::exit(super::exitcode::merge(&codes));
     }
     Ok(())
 }

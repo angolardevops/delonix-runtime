@@ -4423,6 +4423,10 @@ fn remove_inner(base: &Path, name: &str, force: bool, purge_disks: bool) -> Resu
         out.removed.push(format!("{name}/"));
     }
     st.remove(name)?;
+    // The store's per-record lock file (`.<name>.lock`) is the last trace: it
+    // outlived every destroy, so «removes everything» was not quite true.
+    // Nothing holds it once the record is gone.
+    let _ = std::fs::remove_file(vmdir.join(format!(".{name}.lock")));
     Ok(out)
 }
 
@@ -7180,6 +7184,7 @@ Format specific information:
         assert!(d.freed_bytes >= 4096 + 1024 + 2048);
         assert_eq!(d.kept.len(), 2, "{:?}", d.kept);
         assert!(st.load("d").is_err(), "the record is gone");
+        assert!(!vmdir.join(".d.lock").exists(), "the lock file is gone too");
 
         // Second incarnation: `purge_disks` takes the outside disk too.
         st.save("d", &vm).unwrap();
