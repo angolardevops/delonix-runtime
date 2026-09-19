@@ -1,6 +1,6 @@
 {
   "self_exec_sites": 30,
-  "library_prints": 93,
+  "library_prints": 94,
   "env_writes": 23,
   "shared_error_imports": 3,
   "raw_error_variant_matches": 0

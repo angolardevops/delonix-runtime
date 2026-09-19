@@ -1,0 +1,18 @@
+$ DLX_P4SPIKE=1 delonix version
+# (ran through a hidden verb, temporary — reverted before commit, see the
+# report's "O que ficou" section — this transcript is the evidence it left)
+
+Formatting '/tmp/dlx-p4spike-ch-real-66274/base.qcow2', fmt=qcow2 cluster_size=65536 extended_l2=off compression_type=zlib size=67108864 lazy_refcounts=off refcount_bits=16
+P4SPIKE: created
+P4SPIKE: after-create running=true ip=Some("10.200.254.164") confidence=Predicted
+No errors were found on the image.
+Image end offset: 262144
+P4SPIKE: after-stop running=false
+P4SPIKE: after-start running=true
+P4SPIKE: destroyed
+
+# Cleanup verified afterward against the real host:
+$ delonix network ipam ls | grep -i "p4spike\|254.164"   # (empty)
+$ delonix vm ls | grep -i p4spike                          # (empty)
+$ sudo nft list ruleset | grep -i "254.164\|p4spike"        # (empty)
+$ delonix container ls | head                                # production containers untouched

@@ -1,6 +1,8 @@
 # ADR-0044: P4 — the `VmSpec`/`Extensions` port, provider crates, and `delonix-launcher`
 
-- **Status:** Proposed
+- **Status:** Proposed — all five required spikes done as of 2026-09-19 (`docs/discovery/
+  56_..md` through `60_..md`); ready for the owner's Accept/reject decision, not
+  self-promoted here
 - **Date:** 2026-09-18
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0040 (the restructuring this closes phase P4 of — D2.2, D2.3, D2.4,
@@ -191,8 +193,8 @@ resolved either way):
 | `bridge` | lives in `VmBootSpec` (which reads as "local-only") but is **actually read** by `delonix-proxmox::net0_arg` | universal — this ADR corrects the classification `VmBootSpec`'s current shape implies |
 | `hostname`, `ci_user`, `ssh_keys`, `cloud_init` (the cloud-init INTENT fields) | universal by design already — `VmConfig`'s own doc-comment says local backends realize them as a NoCloud ISO and Proxmox maps them to its own cloud-init keys, "the whole point of the intent fields" | stays universal, unchanged |
 | `restart_policy` | read by `delonix-vm::create_with` (orchestration, above `VmBackend::boot`) to decide `on_crash` vs. an unsupervised policy, currently by matching `backend.id()` as a string | stays universal as *intent*; the "can this provider honour it natively" question moves from a name match to `capabilities().has(Capability::CrashRestart)` (D3) |
-| `kernel`, `initrd`, `firmware`, `cmdline`, `seed`, `hugepages`, `cpu_affinity`, `vnc`, `serial_capture`, `static_ip`, `machine`, `cpu_model`, `cpu_topology`, `tpm`, `video`, `boot_order`, `extra_disks`, `extra_nics`, `libvirt_xml_overlay`, `libvirt_xml`, `net_mode` | explicitly refused by `delonix-proxmox` today | `Extensions`, keyed `cloud-hypervisor`/`libvirt` (D2) |
-| `devices` (VFIO passthrough) | refused by Proxmox; **not universal even between the two local backends** — libvirt-only in practice today | `Extensions::libvirt` |
+| `kernel`, `initrd`, `firmware`, `cmdline`, `seed`, `hugepages`, `cpu_affinity`, `vnc`, ~~`serial_capture`~~, `static_ip`, `machine`, `cpu_model`, `cpu_topology`, `tpm`, `video`, `boot_order`, `extra_disks`, `extra_nics`, `libvirt_xml_overlay`, `libvirt_xml`, `net_mode` | explicitly refused by `delonix-proxmox` today | `Extensions`, keyed `cloud-hypervisor`/`libvirt` (D2) — **except `serial_capture`, corrected 2026-09-18** (substitution spike, `docs/discovery/59_P4_D1_D3_SUBSTITUTION_SPIKE.md`): `boot_ch` and `libvirt_domain_xml` read it identically ("capture the console to a file"), so lumping it into this Proxmox-refused list mis-filed it as libvirt-specific when it is shared by both local backends — moved to `VmSpec` |
+| `devices` (VFIO passthrough) | refused by Proxmox; ~~not universal even between the two local backends — libvirt-only in practice today~~ **corrected 2026-09-18**: `boot_ch` (`--device path=…`) and `libvirt_domain_xml` (`<hostdev>`) read the SAME `Vec<String>` of sysfs paths identically — shared by the two local backends, just not by Proxmox | `Extensions::cloud_hypervisor` **and** `Extensions::libvirt` (duplicated, not promoted to `VmSpec` — Proxmox still refuses it, so it is not universal to every provider either; a `LocalExt` tier shared by CH+libvirt only is the honest fix, named but not built by this spike) |
 | `volumes` (9p mounts) | refused by Proxmox; `VmVolume`'s own doc-comment says libvirt-only ("Cloud Hypervisor does not do 9p") | `Extensions::libvirt` — **not** `Extensions::cloud_hypervisor`, because it never was CH's to refuse either |
 
 ```rust
@@ -213,6 +215,7 @@ pub struct VmSpec {
     pub ssh_keys: Vec<String>,
     pub cloud_init: Option<bool>,
     pub restart_policy: Option<String>,
+    pub serial_capture: bool, // moved here 2026-09-18 — see the corrected D1 table row above
 }
 ```
 
@@ -540,12 +543,20 @@ session) already implements. What has to change in that crate, concretely:
   `send_authed` re-authentication — none of this changes. It is the HTTP client and the
   Proxmox-specific mechanics ADR-0008's spike proved; D1–D3 only change the shape of what
   arrives at the crate's boundary, not what the crate does with it.
-- `network`/`namespace` (D1's finding) go from silently unread to **required decisions**:
-  either `delonix-provider-proxmox` gains real support for at least `bridge`-shaped network
-  attachment honouring `namespace` (it already reads `bridge`, so this may be closer than it
-  looks), or it refuses both explicitly, by name, the same way it refuses `tpm` today. Either
-  is acceptable; silently continuing to ignore them is not, and this ADR treats closing that
-  gap as part of the migration, not a follow-up.
+- `network`/`namespace` (D1's finding) go from silently unread to **required decisions —
+  and, measured live 2026-09-18** (spike nº5, `docs/discovery/
+  58_P4_D1_D8_PROXMOX_NETWORK_NAMESPACE_LIVE.md`), **`namespace`'s half is already done**:
+  `delonix-vm::vm_namespace_supported` already refuses it for Proxmox (and libvirt) today,
+  from a month before this ADR — D8's job for `namespace` is to carry that same refusal
+  into `Extensions`/`refuse_unsupported`'s new home, not invent it. `network`'s half is
+  still open and is a genuine decision, not a formality: the live form sent to a real
+  `pve92` node shows `net0=virtio,bridge=vmbr0` regardless of what `--network` named, and
+  the topology (`pve92`'s only bridge rides this host's own `virbr0` NAT, structurally
+  disjoint from the rootless SDN inside the netns holder) means "real support" is not a
+  small addition — it needs the same class of privileged bridging `vm bridge`
+  (EXPERIMENTAL, libvirt-only today) already does, extended to reach a remote node, which
+  is its own ADR. **Refusing `network` explicitly, the same way `tpm` is refused today, is
+  the D8-sized answer**; building the bridge is not.
 
 `delonix-provider-cloud-hypervisor` and `delonix-provider-libvirt` change the least: they
 are the two backends `VmConfig` was originally shaped around, so most of D1's "universal"
@@ -622,10 +633,11 @@ scanner stops depending on the OCI adapter's internals to read a layer.
 2. **The two-binary launcher/holder split has never been measured**, only the same-path
    variant. P1b's own "not validated" list already says so; P4d's gate exists because of
    it, not despite it.
-3. **`network`/`namespace` on Proxmox is a real gap this ADR is choosing to close during
-   the migration rather than carry forward silently** (D8) — that is more work in P4c than
-   "just rename the trait", and is the honest cost of D1's finding rather than something
-   this ADR can defer without repeating the mistake it just found.
+3. **Smaller than this section first estimated.** `namespace` was already closed a month
+   before this ADR (spike nº5, D8 addendum) — P4c's job there is relocation, not new
+   behaviour. `network` is still real cost: an explicit refusal (the honest, D8-sized
+   answer) is a small addition; anything more ("real support") is the scope of a
+   follow-on ADR for a privileged remote bridge, not this migration.
 4. **Distribution**, again: P4d adds an eighth-ish executable to what ADR-0040's own
    Consequences section already counted going from two to eight; `install.sh` and
    `delonix-deploy` change with each provider crate rename.
@@ -670,17 +682,54 @@ Per this repository's own standing rule (ADR-0008's Proxmox spike, ADR-0039's ga
 the P1b spike this ADR builds on): nothing above is accepted on the strength of the design
 alone.
 
-1. **The substitution spike (P4b's gate).** Hand the *same* `VmSpec` to
-   `delonix-provider-cloud-hypervisor` and `delonix-provider-libvirt` and converge both —
-   `delonix vm create`, `stop`, `start` on each, from one manifest, with **zero**
-   `#[cfg]`/name-branching outside the composition root. Measure by `grep -rn
-   'backend.contains\|backend\.id() ==' --include=*.rs crates/` returning zero outside
-   `bins/`, not by inspection.
-2. **The two-binary launcher/holder spike (P4d's gate).** Repeat P1b's exact matrix
-   (`53_P1B_LAUNCHER_SPIKE/matrix.sh`) with `delonix`, `delonix-launcher` and
-   `delonix-netns-holder` as three genuinely separate installed binaries — the gap the
-   original spike's own "not validated" section names — and add `--net <custom>` and a pod
-   to the matrix, neither of which P1b touched.
+1. **The substitution spike (P4b's gate).** DONE — 2026-09-18, `docs/discovery/
+   59_P4_D1_D3_SUBSTITUTION_SPIKE.md`. `crates/adapters/delonix-vm/src/provider_spike.rs`
+   (kept, unlike the D5/D6 throwaway spikes — a thin, tested wrapper over `create_with`/
+   `stop`/`start`/`status`/`remove`, zero duplicated logic, zero new public-surface risk)
+   implements D1-D4 for real and converges both backends live: libvirt through the
+   `cargo test` binary itself (create→stop→start→destroy, fully green); Cloud Hypervisor
+   through the real `delonix` binary (a `cargo test` binary cannot complete CH's boot —
+   see the D5-style finding below), both from the exact same `VmSpec`. The measurement
+   itself passes as stated: `grep -rn 'backend.contains\|backend\.id() =='
+   --include=*.rs crates/` is 1 hit, inside a comment, unchanged by this spike's new
+   code — the only string match anywhere in it is `registry(id)`'s own dispatch.
+   **Two corrections to D1's field table, measured against `boot_ch`/`libvirt_domain_xml`
+   directly, not read from the table**: `devices` (VFIO) is read identically by BOTH
+   local backends, not "libvirt-only in practice" as originally classified; `serial_capture`
+   is universal but was lumped into the same row as the Proxmox-refused fields, as if it
+   were libvirt-specific. **One operational finding that
+   would have cost real debugging time**: the CLI's actual default `network` is
+   `"ingress"`, not `"default"` — the ADR's own field-classification prose never states
+   this, and a first attempt using `"default"` fails with a clear but easy-to-not-expect
+   error. **One finding that carries into spike nº2**: the netns-pin re-exec
+   (`delonix-sdn::infra::start_control` and two siblings) resolves
+   `std::env::current_exe()` with no override, unlike `delonix_node::dispatch::cli_bin`'s
+   `DELONIX_BIN` mechanism for a different self-exec path — P4d's two-binary split needs
+   the same kind of override for this one, or the holder cannot be re-exec'd correctly
+   once it is its own binary either.
+2. **The two-binary launcher/holder spike (P4d's gate).** DONE — 2026-09-19,
+   `docs/discovery/60_P4_D5_TWO_BINARY_LAUNCHER_HOLDER_SPIKE.md`, on a fresh VM (P1b's own
+   was already gone). The same binary hardlinked at three genuinely distinct paths
+   (`/opt/p4d/delonix`, `-launcher`, `-netns-holder` — a hardlink, not a copy, because the
+   2.4 GiB golden disk has no room for three 282 MB copies; AppArmor confines by path, not
+   inode, so this preserves exactly the variable under test), two profiles matching
+   `install.sh`'s own template, none on the plain path. **GO, confirmed with real
+   separation this time** (P1b's own gap): `ps` shows the pin/control processes running
+   as `/opt/p4d/delonix-netns-holder`, not a same-path stand-in. Both gaps P1b's "not
+   validated" named are closed: `pod create` needs the launcher's profile (fails
+   `EPERM` without it, the same self-explaining error the pin now gives — an
+   improvement over P1b's own opaque timeout); `container run --net <custom>` does
+   **not** — see the finding below, which this ADR's D2.4/D3 capability model should
+   account for once it is designed in earnest.
+   **Finding: not every "creates a namespace" path needs the launcher's `userns`
+   permission.** `--net <custom>`'s re-exec joins the ALREADY-CREATED holder namespace via
+   `nsenter -U` (`RunSpec.inherit_userns`, already documented in this repo's own
+   `AGENTS.md`) rather than calling `unshare(CLONE_NEWUSER)` itself — AppArmor's `userns`
+   rule mediates namespace *creation*, not joining one that already exists, so this path
+   succeeded with **zero** AppArmor profile at all, confirmed live. The boundary D2.4/D3
+   eventually needs is "who creates a namespace from scratch" (`--net none`/default
+   network, `pod create`), not "who touches namespaces" — a container joining a network
+   the holder already serves inherits that holder's one-time privilege for free.
 3. **The IPC-transport spike (D5's open question).** DONE — 2026-09-18,
    `docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`. A standalone harness (no
    delonix crates) measured `memfd_create` (no `SCM_RIGHTS` — unneeded, see the D5
@@ -704,11 +753,22 @@ alone.
    through the port itself), and `delonix-sdn`/`delonix-oci`/`delonix-volume`, which the
    spike found do not reach the port through the same mechanism at all (D6 addendum) and
    need their own spike once someone decides how each one adopts it.
-5. **The `network`/`namespace` gap on Proxmox, confirmed live, not by grep.** D1's finding
-   is a static read; before P4c ships either a real fix or a refusal, run `delonix vm
-   create --backend proxmox --network <sdn-net> --namespace teamA` against the
-   `proxmox-ve:9.2` appliance and observe what actually happens to the resulting VM's
-   network reachability from a container in a different namespace on this node.
+5. **The `network`/`namespace` gap on Proxmox, confirmed live, not by grep.** DONE —
+   2026-09-18, `docs/discovery/58_P4_D1_D8_PROXMOX_NETWORK_NAMESPACE_LIVE.md`, against the
+   `pve92` appliance already on this host (Proxmox VE 9.2.2). **`namespace` was already
+   half of D1's own finding, wrong**: `--namespace teamA` is REFUSED before any API call
+   reaches the node — `delonix-vm::vm_namespace_supported` (landed `c1ed34ec8`,
+   2026-08-05, a month before this ADR's Context section) returns `true` only for
+   `"cloud-hypervisor"`, so libvirt and Proxmox both refuse today. D1's grep was scoped to
+   `crates/providers/delonix-proxmox/src/lib.rs` and never reached this guard, which lives
+   a layer up in `delonix-vm::create_with` — right file to grep, wrong crate. `network`
+   is confirmed exactly as D1 read it: accepted, silently ignored — the real HTTP form
+   sent to the node carries `net0=virtio,bridge=vmbr0` (the node's own default), never the
+   SDN network name, and the local `Vm` record misleadingly shows `Network: p4spike-net`
+   for a VM that is not on it. No guest reachability test was needed to settle this: `pve92`'s
+   only bridge (`vmbr0`) is wired to its own `eth0`, itself on this host's `virbr0`
+   (192.168.122.0/24) — structurally disjoint from the rootless SDN inside the netns
+   holder, with or without a `namespace`. See the D8 addendum below.
 
 ## Proven vs not validated
 
@@ -727,12 +787,32 @@ do not reach `delonix-state` through `Store`/`JsonStore` today, by reading each 
 by the fitness script's shared exception text; that the inherited-fd `LaunchSpec`
 transport (D5) closes a crash-before-`unlink` window the file-based precedent cannot,
 against a real `execve` and 50 concurrent pairs, confirmed by `strace` (spike nº3,
-`docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`).
+`docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`); that `namespace` on Proxmox is
+already refused (`delonix-vm::vm_namespace_supported`, landed a month before this ADR)
+and that `network` is silently ignored exactly as Context first read, confirmed against a
+real `pve92` node's HTTP form and its network topology, not by grep (spike nº5,
+`docs/discovery/58_P4_D1_D8_PROXMOX_NETWORK_NAMESPACE_LIVE.md`); that `VmSpec`/
+`Extensions`/`VmProvider` (D1-D4) converge Cloud Hypervisor and libvirt from the SAME
+spec, live, with the `grep`-measured zero-branching bar the ADR itself sets, and the two
+field-table corrections (`devices`, `serial_capture`) that came from reading
+`boot_ch`/`libvirt_domain_xml` instead of trusting the table (spike nº1, `docs/discovery/
+59_P4_D1_D3_SUBSTITUTION_SPIKE.md`) — `crates/adapters/delonix-vm/src/provider_spike.rs`
+and its live test are real code now, not a discarded spike; that three genuinely distinct
+binary paths (`delonix`/`delonix-launcher`/`delonix-netns-holder`) converge on a fresh VM,
+closing both gaps P1b's own "not validated" section named (`--net <custom>`, a pod), and
+that `--net <custom>` needs no AppArmor profile at all because it joins an
+already-created namespace rather than making one (spike nº2, `docs/discovery/
+60_P4_D5_TWO_BINARY_LAUNCHER_HOLDER_SPIKE.md`). **All five spikes this ADR required are
+now done.**
 
-**Not validated:** everything else under Decision — no other code was written for this ADR, no build
-or test was run, and every spike in the section above is exactly that, not yet run. The
-`network`/`namespace` finding in Context is a static read, flagged as needing live
-confirmation before D8 treats it as more than a strong signal. Whether `Extensions`'
+**Not validated:** the actual crate/binary split — `delonix-launcher`/`delonix-netns-holder`
+as their own `[[bin]]` targets with their own dispatch code, rather than three hardlinked
+copies of today's single binary (spikes nº2 and P1b both used copies, deliberately, to
+isolate the AppArmor variable without needing the real split to exist first) — that is
+P4d's actual implementation, not a spike; upgrade in-place with three real, different
+binaries installed (P1b read it from the code, this ADR still has not run it); Debian/
+Rocky, root mode, and a fourth VM provider building against `Extensions` for real. Whether
+`Extensions`'
 per-provider structs stay small (as this ADR's classification suggests) or grow the way
 `VmConfig` did is unmeasured by construction — this ADR can state the design pressure that
 caused `VmConfig`'s growth (each provider quirk became a trait method) and claim `Extensions`
