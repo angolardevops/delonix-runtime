@@ -161,6 +161,7 @@ nodes.</p>
 
 Commands:
   create           Create (or auto-recover) a VM
+  destroy          Destroy VMs and everything they own — provider-side VM, disks, snapshots
   migrate          Move a VM to another `delonix` host — real downtime, no shared storage
   pause            Suspend a running VM&#x27;s vCPUs — guest memory stays intact, unlike `stop`
   restart          Stop (if running) then start — always a real reboot, unlike `start`. Same recovered-fields limits as `start`
@@ -193,7 +194,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle    create · stop · start · restart · migrate · pause · unpause
+  Lifecycle    create · destroy · stop · start · restart · migrate · pause · unpause
   Inspect      ls
   Interact     console · ssh · vnc
   Configure    default-backend
@@ -560,7 +561,7 @@ SEE ALSO:
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Abrir o ecrã gráfico da VM</div><div class='cap lang-en'>Open the VM&#x27;s graphical screen</div><pre><code>delonix vm vnc dev</code></pre></div>
 <h2 id='console'><code>vm console</code></h2>
 <p class='intro'>Attach to the VM&#x27;s serial console (interactive terminal).</p>
-<p class='intro'>Works with no IP (boot logs, login). Escape: Ctrl-] .</p>
+<p class='intro'>Works with no IP (boot logs, login). Escape: Ctrl-D .</p>
 <div class='help'><pre><code>Usage: delonix vm console [OPTIONS] &lt;NAME&gt;
 
 Arguments:
@@ -569,7 +570,7 @@ Arguments:
 
 Options:
   -e, --escape &lt;ESCAPE&gt;
-          Key that detaches the console, as `^X` (default `^]`). Also settable via `$DELONIX_CONSOLE_ESCAPE`
+          Key that detaches the console, as `^X` (default `^D`). Also settable via `$DELONIX_CONSOLE_ESCAPE`
 
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
@@ -578,7 +579,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 EXAMPLES:
-  # watch the boot and log in before there is any IP or SSH — Ctrl-] brings
+  # watch the boot and log in before there is any IP or SSH — Ctrl-D brings
   # you back to the host
   delonix vm console dev
 
@@ -843,7 +844,7 @@ Options:
           VNC graphical console (libvirt backend only — Cloud Hypervisor has no display)
 
       --console
-          After starting, attach to the serial console to watch the boot live (Ctrl-] to detach)
+          After starting, attach to the serial console to watch the boot live (Ctrl-D to detach)
 
       --wait
           After starting, wait (with a spinner) until the VM has an IP, up to --boot-timeout
@@ -852,6 +853,12 @@ Options:
           Seconds to wait with --wait (default 120)
           
           [default: 120]
+
+      --rm
+          Throwaway VM: destroy it, with all its artifacts, as soon as it is stopped (`vm stop`, or a poweroff from inside the guest) — the VM twin of `container run --rm`
+
+      --rm-after &lt;DURATION&gt;
+          Like `--rm`, but keep the stopped VM for this long first (`30s`, `10m`, `2h`, `1d`) so a proof of concept can be inspected or restarted before it goes
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)

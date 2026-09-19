@@ -545,7 +545,14 @@ impl Client {
     }
 
     pub fn destroy(&self, vmid: u32) -> Result<()> {
-        let url = self.url(&format!("/nodes/{}/qemu/{vmid}", self.node));
+        // `purge` drops the VM from backup jobs, replication and HA, and
+        // `destroy-unreferenced-disks` removes disks the config no longer
+        // names — without them a destroy freed the VM and left storage behind,
+        // which is exactly what `vm destroy` exists to give back.
+        let url = self.url(&format!(
+            "/nodes/{}/qemu/{vmid}?purge=1&destroy-unreferenced-disks=1",
+            self.node
+        ));
         self.task("destroy", || self.send_authed(|| self.http.delete(&url)))
     }
 
