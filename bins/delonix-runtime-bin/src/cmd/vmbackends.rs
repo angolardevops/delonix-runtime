@@ -119,13 +119,13 @@ fn proxmox_auth(lookup: &dyn Fn(&str) -> Option<String>) -> Result<delonix_proxm
     }
     if let (Some(id), Some(secret)) = (
         lookup("DELONIX_PROXMOX_TOKEN_ID"),
-        lookup("DELONIX_PROXMOX_TOKEN"),
+        credential_value(lookup, "DELONIX_PROXMOX_TOKEN")?,
     ) {
         return Ok(delonix_proxmox::Auth::ApiToken { id, secret });
     }
     if let (Some(username), Some(password)) = (
         lookup("DELONIX_PROXMOX_USER"),
-        lookup("DELONIX_PROXMOX_PASSWORD"),
+        credential_value(lookup, "DELONIX_PROXMOX_PASSWORD")?,
     ) {
         return Ok(delonix_proxmox::Auth::Password { username, password });
     }
@@ -137,6 +137,39 @@ fn proxmox_auth(lookup: &dyn Fn(&str) -> Option<String>) -> Result<delonix_proxm
         )
         .into(),
     ))
+}
+
+/// A credential from `<key>_FILE` (preferred) or, failing that, `<key>` itself.
+///
+/// A secret in an environment variable is inherited by every child this engine
+/// spawns and readable in `/proc/<pid>/environ` for the life of the process, so
+/// the plain form still works (it is how a CI job hands one over) but says so.
+/// The file form is refused unless only its owner can read it — the same rule
+/// `ssh` applies to a private key.
+fn credential_value(lookup: &dyn Fn(&str) -> Option<String>, key: &str) -> Result<Option<String>> {
+    if let Some(path) = lookup(&format!("{key}_FILE")) {
+        use std::os::unix::fs::PermissionsExt;
+        let meta = std::fs::metadata(&path)?;
+        if meta.permissions().mode() & 0o077 != 0 {
+            return Err(Error::Invalid(po::tf(
+                "{path} is readable by other users — chmod 600 it before using it as {key}_FILE",
+                &[("path", &path), ("key", key)],
+            )));
+        }
+        return Ok(nonempty(Some(std::fs::read_to_string(&path)?)));
+    }
+    let v = lookup(key);
+    if v.is_some() {
+        eprintln!(
+            "{} {}",
+            po::t("warning:"),
+            po::tf(
+                "{key} is set in the environment, where every child process inherits it — prefer {key}_FILE or DELONIX_PROXMOX_SECRET",
+                &[("key", key)],
+            )
+        );
+    }
+    Ok(v)
 }
 
 /// A VLAN tag, or an error naming the range.
@@ -175,6 +208,31 @@ mod tests {
 
     /// The whole point of the early return: a host with no Proxmox must not pay
     /// for this, and must not see a warning about something it never asked for.
+    #[test]
+    fn a_credential_file_must_be_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!(
+            "dlx-low-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("tok");
+        std::fs::write(&f, "s3cret\n").unwrap();
+        let path = f.display().to_string();
+        let lookup = |k: &str| (k == "X_FILE").then(|| path.clone());
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(credential_value(&lookup, "X").is_err(), "world-readable");
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600)).unwrap();
+        assert_eq!(
+            credential_value(&lookup, "X").unwrap().as_deref(),
+            Some("s3cret")
+        );
+    }
+
     #[test]
     fn sem_configuracao_nao_regista_nada_e_nao_se_queixa() {
         // No env var of ours is set in a plain `cargo test` run.
