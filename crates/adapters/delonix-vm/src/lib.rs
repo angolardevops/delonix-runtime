@@ -4299,6 +4299,11 @@ pub struct Destroyed {
     pub freed_bytes: u64,
     /// Every local artifact removed: overlay, seed, snapshots, sockets, extra disks.
     pub removed: Vec<String>,
+    /// The backend id when its storage lives on the provider (a remote node),
+    /// so the disks it released are NOT in `removed`/`freed_bytes` — those count
+    /// local files only, and reporting «0 B freed» for a VM whose disks and
+    /// snapshots went away on the node reads as «nothing was freed».
+    pub provider_released: Option<String>,
     /// Things the record points to that are NOT the VM's to delete (a 9p share
     /// is somebody's data; an extra disk outside the state directory may be an
     /// image the operator supplied). Named, never silently left.
@@ -4357,6 +4362,7 @@ fn remove_inner(
     let vmdir = vms_dir(base);
     let st = store(base)?;
     let mut record: Option<Vm> = None;
+    let mut provider_released: Option<String> = None;
     let existed = match st.load(name) {
         Ok(vm) => {
             // `destroy`, not `stop`: the record is going away, so whatever the
@@ -4364,9 +4370,13 @@ fn remove_inner(
             // the local backends (the default), and deliberately not for a
             // remote one, whose disk lives on the node.
             on(DestroyStage::Provider(&vm.backend));
-            if let Err(e) =
-                backend_for(&vm).and_then(|b| b.destroy(&vmdir, &vm).map_err(Error::from))
-            {
+            let backend = backend_for(&vm);
+            provider_released = backend
+                .as_ref()
+                .ok()
+                .filter(|b| b.manages_own_storage())
+                .map(|b| b.id().to_string());
+            if let Err(e) = backend.and_then(|b| b.destroy(&vmdir, &vm).map_err(Error::from)) {
                 if !force {
                     return Err(e); // record intact — the rm can be retried
                 }
@@ -4412,7 +4422,10 @@ fn remove_inner(
         // does not exist should say so, like docker.
         return Err(Error::VmNotFound(name.to_string()));
     }
-    let mut out = Destroyed::default();
+    let mut out = Destroyed {
+        provider_released,
+        ..Destroyed::default()
+    };
     let rm_file = |out: &mut Destroyed, p: &Path, label: String| {
         let sz = path_size(p);
         if std::fs::remove_file(p).is_ok() {
