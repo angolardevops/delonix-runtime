@@ -1,6 +1,8 @@
 # ADR-0044: P4 — the `VmSpec`/`Extensions` port, provider crates, and `delonix-launcher`
 
-- **Status:** Proposed
+- **Status:** Proposed — all five required spikes done as of 2026-09-19 (`docs/discovery/
+  56_..md` through `60_..md`); ready for the owner's Accept/reject decision, not
+  self-promoted here
 - **Date:** 2026-09-18
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0040 (the restructuring this closes phase P4 of — D2.2, D2.3, D2.4,
@@ -705,11 +707,29 @@ alone.
    `DELONIX_BIN` mechanism for a different self-exec path — P4d's two-binary split needs
    the same kind of override for this one, or the holder cannot be re-exec'd correctly
    once it is its own binary either.
-2. **The two-binary launcher/holder spike (P4d's gate).** Repeat P1b's exact matrix
-   (`53_P1B_LAUNCHER_SPIKE/matrix.sh`) with `delonix`, `delonix-launcher` and
-   `delonix-netns-holder` as three genuinely separate installed binaries — the gap the
-   original spike's own "not validated" section names — and add `--net <custom>` and a pod
-   to the matrix, neither of which P1b touched.
+2. **The two-binary launcher/holder spike (P4d's gate).** DONE — 2026-09-19,
+   `docs/discovery/60_P4_D5_TWO_BINARY_LAUNCHER_HOLDER_SPIKE.md`, on a fresh VM (P1b's own
+   was already gone). The same binary hardlinked at three genuinely distinct paths
+   (`/opt/p4d/delonix`, `-launcher`, `-netns-holder` — a hardlink, not a copy, because the
+   2.4 GiB golden disk has no room for three 282 MB copies; AppArmor confines by path, not
+   inode, so this preserves exactly the variable under test), two profiles matching
+   `install.sh`'s own template, none on the plain path. **GO, confirmed with real
+   separation this time** (P1b's own gap): `ps` shows the pin/control processes running
+   as `/opt/p4d/delonix-netns-holder`, not a same-path stand-in. Both gaps P1b's "not
+   validated" named are closed: `pod create` needs the launcher's profile (fails
+   `EPERM` without it, the same self-explaining error the pin now gives — an
+   improvement over P1b's own opaque timeout); `container run --net <custom>` does
+   **not** — see the finding below, which this ADR's D2.4/D3 capability model should
+   account for once it is designed in earnest.
+   **Finding: not every "creates a namespace" path needs the launcher's `userns`
+   permission.** `--net <custom>`'s re-exec joins the ALREADY-CREATED holder namespace via
+   `nsenter -U` (`RunSpec.inherit_userns`, already documented in this repo's own
+   `AGENTS.md`) rather than calling `unshare(CLONE_NEWUSER)` itself — AppArmor's `userns`
+   rule mediates namespace *creation*, not joining one that already exists, so this path
+   succeeded with **zero** AppArmor profile at all, confirmed live. The boundary D2.4/D3
+   eventually needs is "who creates a namespace from scratch" (`--net none`/default
+   network, `pod create`), not "who touches namespaces" — a container joining a network
+   the holder already serves inherits that holder's one-time privilege for free.
 3. **The IPC-transport spike (D5's open question).** DONE — 2026-09-18,
    `docs/discovery/57_P4_D5_LAUNCHSPEC_TRANSPORT_SPIKE.md`. A standalone harness (no
    delonix crates) measured `memfd_create` (no `SCM_RIGHTS` — unneeded, see the D5
@@ -777,12 +797,22 @@ spec, live, with the `grep`-measured zero-branching bar the ADR itself sets, and
 field-table corrections (`devices`, `serial_capture`) that came from reading
 `boot_ch`/`libvirt_domain_xml` instead of trusting the table (spike nº1, `docs/discovery/
 59_P4_D1_D3_SUBSTITUTION_SPIKE.md`) — `crates/adapters/delonix-vm/src/provider_spike.rs`
-and its live test are real code now, not a discarded spike.
+and its live test are real code now, not a discarded spike; that three genuinely distinct
+binary paths (`delonix`/`delonix-launcher`/`delonix-netns-holder`) converge on a fresh VM,
+closing both gaps P1b's own "not validated" section named (`--net <custom>`, a pod), and
+that `--net <custom>` needs no AppArmor profile at all because it joins an
+already-created namespace rather than making one (spike nº2, `docs/discovery/
+60_P4_D5_TWO_BINARY_LAUNCHER_HOLDER_SPIKE.md`). **All five spikes this ADR required are
+now done.**
 
-**Not validated:** everything else under Decision — no other code was written for this ADR, no build
-or test was run, and the one remaining spike (nº2, the two-binary launcher/holder split)
-is exactly that, not yet run — and now has a concrete lead from spike nº1: the
-`current_exe()`-based re-exec with no `DELONIX_BIN`-style override. Whether `Extensions`'
+**Not validated:** the actual crate/binary split — `delonix-launcher`/`delonix-netns-holder`
+as their own `[[bin]]` targets with their own dispatch code, rather than three hardlinked
+copies of today's single binary (spikes nº2 and P1b both used copies, deliberately, to
+isolate the AppArmor variable without needing the real split to exist first) — that is
+P4d's actual implementation, not a spike; upgrade in-place with three real, different
+binaries installed (P1b read it from the code, this ADR still has not run it); Debian/
+Rocky, root mode, and a fourth VM provider building against `Extensions` for real. Whether
+`Extensions`'
 per-provider structs stay small (as this ADR's classification suggests) or grow the way
 `VmConfig` did is unmeasured by construction — this ADR can state the design pressure that
 caused `VmConfig`'s growth (each provider quirk became a trait method) and claim `Extensions`
