@@ -1839,6 +1839,9 @@ pub fn control_main() -> ! {
 /// `control_query`.
 const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Largest command line the holder accepts on the control socket.
+const CONTROL_LINE_MAX: u64 = 64 * 1024;
+
 /// Reads ONE command line from a control connection, bounded by
 /// [`CONTROL_IO_TIMEOUT`]. `None` when the peer sent nothing in time, hung up,
 /// or the deadline could not be armed — in every case the caller drops the
@@ -1855,12 +1858,17 @@ const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 const CONTROL_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn read_control_line(stream: &std::os::unix::net::UnixStream) -> Option<String> {
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read};
     // Fail CLOSED: if the deadline cannot be armed we refuse the connection
     // rather than fall back to the unbounded read this exists to prevent.
     stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT)).ok()?;
     let mut line = String::new();
-    match BufReader::new(stream).read_line(&mut line) {
+    // The deadline bounds the TIME, not the SIZE: within 5 s a peer can still
+    // stream a newline-less gigabyte and `read_line` keeps growing the String
+    // in the one thread that serves the node's whole control plane. A real
+    // command is a few hundred bytes; a line that fills the cap is refused.
+    match BufReader::new(stream.take(CONTROL_LINE_MAX)).read_line(&mut line) {
+        Ok(n) if n as u64 >= CONTROL_LINE_MAX && !line.ends_with('\n') => None,
         Ok(0) => None, // peer hung up without sending anything
         Ok(_) => Some(line),
         Err(_) => None, // includes WouldBlock/TimedOut once the deadline fires
@@ -8045,6 +8053,24 @@ mod tests {
 
         drop(silent);
         let _ = std::fs::remove_file(&sock);
+    }
+
+    /// A newline-less flood is refused at the cap instead of growing without end.
+    #[test]
+    fn read_control_line_refuses_a_line_over_the_cap() {
+        use std::io::Write;
+        let (server, mut client) = std::os::unix::net::UnixStream::pair().unwrap();
+        let w = std::thread::spawn(move || {
+            let chunk = [b'a'; 8192];
+            for _ in 0..32 {
+                if client.write_all(&chunk).is_err() {
+                    break;
+                }
+            }
+        });
+        assert_eq!(super::read_control_line(&server), None);
+        drop(server);
+        let _ = w.join();
     }
 
     /// REGRESSION: the traffic total must cover EVERY interface, not just
