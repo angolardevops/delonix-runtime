@@ -12912,3 +12912,12 @@ msgstr "Uma ferramenta do host a que este motor recorre para redes (ip, nft, wg,
 
 msgid "Read the operation and error in the message; check the tool is installed and the host's network state is sane."
 msgstr "Lê a operação e o erro na mensagem; verifica que a ferramenta está instalada e que o estado de rede do host está são."
+
+msgid "delonix-cri: {origin} — {path} (sha256 {sha})"
+msgstr "delonix-cri: {origin} — {path} (sha256 {sha})"
+
+msgid "[{label}] delonix-cri differs from the resolved one (sha256 {sha}) — replacing it and restarting the service"
+msgstr "[{label}] o delonix-cri do nó é diferente do resolvido (sha256 {sha}) — a substituí-lo e a reiniciar o serviço"
+
+msgid "`delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version."
+msgstr "Binário `delonix-cri` a instalar nos nós. Omitido = o que está ao lado do `delonix`, senão o asset da release desta versão."
