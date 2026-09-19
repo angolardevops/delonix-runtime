@@ -12996,3 +12996,12 @@ msgstr "[{label}] o delonix-cri do nó é diferente do resolvido (sha256 {sha}) 
 
 msgid "`delonix-cri` binary to install on the nodes. Omit = the one next to `delonix`, else the release asset of this version."
 msgstr "Binário `delonix-cri` a instalar nos nós. Omitido = o que está ao lado do `delonix`, senão o asset da release desta versão."
+
+msgid "destroyed {name} — {n} local artifact(s), {size} freed here; disks and snapshots released on {backend}"
+msgstr "destruída {name} — {n} artefacto(s) locais, {size} libertados aqui; discos e snapshots libertados em {backend}"
+
+msgid "stop it — destroys it and its disk (--rm)"
+msgstr "pára-a — destrói-a com o disco (--rm)"
+
+msgid "stop it — destroyed {after} later, with its disk (--rm-after)"
+msgstr "pára-a — destruída {after} depois, com o disco (--rm-after)"

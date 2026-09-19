@@ -1304,6 +1304,9 @@ fn after_stopped(base: &std::path::Path, name: &str) {
         "--quiet",
         &format!("--unit={unit}"),
         &format!("--on-active={grace}s"),
+        // The transient timer inherits systemd's 1 min AccuracySec, which made
+        // `--rm-after 1m` fire anywhere between 1 and 2 minutes.
+        "--timer-property=AccuracySec=1s",
         &format!("--setenv=DELONIX_ROOT={}", base.display()),
     ]);
     if let Some(dir) = std::env::var_os("DELONIX_NET_RUNTIME_DIR") {
@@ -1431,16 +1434,22 @@ fn cmd_destroy(
         match res {
             Ok(d) => {
                 cancel_scheduled_removal(name);
+                let n = d.removed.len().to_string();
+                let size = super::output::fmt_size(d.freed_bytes);
                 println!(
                     "{}",
-                    super::po::tf(
-                        "destroyed {name} — {n} artifact(s), {size} freed",
-                        &[
-                            ("name", name),
-                            ("n", &d.removed.len().to_string()),
-                            ("size", &super::output::fmt_size(d.freed_bytes)),
-                        ]
-                    )
+                    match &d.provider_released {
+                        // Remote storage: what the node released is not in the
+                        // local numbers, and «0 B freed» would read as «nothing».
+                        Some(b) => super::po::tf(
+                            "destroyed {name} — {n} local artifact(s), {size} freed here; disks and snapshots released on {backend}",
+                            &[("name", name), ("n", &n), ("size", &size), ("backend", b)],
+                        ),
+                        None => super::po::tf(
+                            "destroyed {name} — {n} artifact(s), {size} freed",
+                            &[("name", name), ("n", &n), ("size", &size)],
+                        ),
+                    }
                 );
                 for r in &d.removed {
                     println!("  - {r}");
@@ -2288,7 +2297,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             let fresh = delonix_vm::status(&base, &vm.name).ok();
             let ip = fresh.as_ref().and_then(|v| v.ip.clone());
             let ssh_user = fresh.as_ref().map(|v| default_ssh_user(v));
-            print_vm_next_steps(&vm.name, ip.as_deref(), injected_key, ssh_user);
+            print_vm_next_steps(&vm.name, ip.as_deref(), injected_key, ssh_user, ephemeral);
             Ok(())
         }
         VmCmd::Pull {
@@ -3537,23 +3546,38 @@ fn default_ssh_user(vm: &delonix_compute::Vm) -> &'static str {
     }
 }
 
-fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool, ssh_user: Option<&str>) {
-    let mut rows = vec![
+fn print_vm_next_steps(
+    name: &str,
+    ip: Option<&str>,
+    has_key: bool,
+    ssh_user: Option<&str>,
+    ephemeral: Option<u64>,
+) {
+    let mut rows: Vec<(String, String)> = vec![
         (
             format!("delonix vm console {name}"),
-            super::po::t("open the serial console (back to host: Ctrl+D)"),
+            super::po::t("open the serial console (back to host: Ctrl+D)").to_string(),
         ),
         (
             "delonix vm ls".to_string(),
-            super::po::t("state, backend and IP"),
+            super::po::t("state, backend and IP").to_string(),
         ),
         (
             format!("delonix describe vm {name}"),
-            super::po::t("full details"),
+            super::po::t("full details").to_string(),
         ),
         (
             format!("delonix vm stop {name}"),
-            super::po::t("stop it (keeps the disk)"),
+            // A throwaway VM does NOT keep its disk: saying so would invite the
+            // operator to stop it «to come back later» and lose it.
+            match ephemeral {
+                None => super::po::t("stop it (keeps the disk)").to_string(),
+                Some(0) => super::po::t("stop it — destroys it and its disk (--rm)").to_string(),
+                Some(g) => super::po::tf(
+                    "stop it — destroyed {after} later, with its disk (--rm-after)",
+                    &[("after", &fmt_grace(g))],
+                ),
+            },
         ),
     ];
     // Second row, not last: it is what most people want first, and it is the
@@ -3567,7 +3591,7 @@ fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool, ssh_user: Op
                     ssh_user.unwrap_or(GUEST_SSH_USER),
                     ip.unwrap_or("<ip>")
                 ),
-                super::po::t("log in with the key you injected"),
+                super::po::t("log in with the key you injected").to_string(),
             ),
         );
     } else if ssh_user == Some("root") {
@@ -3579,7 +3603,8 @@ fn print_vm_next_steps(name: &str, ip: Option<&str>, has_key: bool, ssh_user: Op
             1,
             (
                 format!("delonix vm ssh {name} -l root"),
-                super::po::t("log in (appliance: root + the password from the image build)"),
+                super::po::t("log in (appliance: root + the password from the image build)")
+                    .to_string(),
             ),
         );
     }
