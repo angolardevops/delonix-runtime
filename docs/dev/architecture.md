@@ -433,7 +433,7 @@ The layer each crate belongs to, and the direction it may depend in:
 
 Declared exceptions (each one names the ADR-0040 phase that removes it):
 
-- `delonix-linux` → `delonix-state` — removed in **P4**
+- `delonix-linux` → `delonix-state` — removed in **P4a**
 - `delonix-mcp` → `delonix-mgmt` — removed in **P5**
 - `delonix-oci` → `delonix-state` — removed in **P4**
 - `delonix-proxmox` → `delonix-vm` — removed in **P4**

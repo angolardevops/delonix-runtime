@@ -442,7 +442,7 @@ La couche à laquelle appartient chaque crate, et la direction dans laquelle il 
 
 Exceptions déclarées (chacune nomme la phase de l'ADR-0040 qui la supprime) :
 
-- `delonix-linux` → `delonix-state` — supprimée en **P4**
+- `delonix-linux` → `delonix-state` — supprimée en **P4a**
 - `delonix-mcp` → `delonix-mgmt` — supprimée en **P5**
 - `delonix-oci` → `delonix-state` — supprimée en **P4**
 - `delonix-proxmox` → `delonix-vm` — supprimée en **P4**
