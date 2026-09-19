@@ -1,0 +1,69 @@
+# Complete reference for `kind: Network` — every spec field and every driver form.
+# Each document is independent; apply with `delonix stack apply -f full-network.yaml`.
+# Fields: driver, subnet, gateway, parent, vni, peers, wgIp (alias wg_ip).
+---
+# 1. Bridge with every bridge-relevant field spelled out.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-bridge-full
+  labels:
+    tier: backend            # free-form labels (ownership stamps are added by stack apply)
+  annotations:
+    example.io/purpose: "all bridge fields"
+spec:
+  driver: bridge             # bridge (default) | macvlan | ipvlan | overlay
+  subnet: 10.201.0.0/16      # CIDR of the network; omit to auto-pick a free /16
+  gateway: 10.201.0.1        # gateway address; omit to default to .0.1 of the subnet
+---
+# 2. Bridge with every field omitted — driver defaults to bridge, subnet is auto-picked.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-bridge-default
+spec: {}
+---
+# 3. Overlay (VXLAN) between nodes: vni + peers, clear-text.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-overlay-plain
+spec:
+  driver: overlay
+  vni: 42                    # VXLAN network identifier
+  peers:                     # other nodes of the overlay, by underlay IP
+    - 192.168.1.11
+    - 192.168.1.12
+---
+# 4. Encrypted overlay (WireGuard transport): peers carry "<ip>=<wg_pubkey>=<wg_ip>".
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-overlay-encrypted
+spec:
+  driver: overlay
+  vni: 77
+  wgIp: 10.250.0.1           # this node's WireGuard tunnel IP (alias: wg_ip)
+  peers:
+    - "192.168.1.11=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==10.250.0.2"
+---
+# 5. macvlan: containers get an address directly on the parent NIC's L2 segment.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-macvlan
+spec:
+  driver: macvlan
+  parent: eth0               # host NIC the macvlan sits on
+  subnet: 192.168.50.0/24
+  gateway: 192.168.50.1
+---
+# 6. ipvlan: like macvlan but all containers share the parent's MAC.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: net-ipvlan
+spec:
+  driver: ipvlan
+  parent: eth0
+  subnet: 192.168.60.0/24

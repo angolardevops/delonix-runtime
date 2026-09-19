@@ -606,38 +606,153 @@ spec:
 # Dependency → HTTPRoute → Gateway). Each child inherits the Stack&#x27;s namespace
 # unless it sets its own. You can still write the resources as separate documents
 # — the Stack is just a convenient single place to bundle them.
+#
+# This example uses EVERY group the Stack accepts, so it doubles as the reference
+# for what each one looks like. For a single Kind with all of its options, see
+# examples/full-&lt;kind&gt;.yaml.
+#
+# A group item is `{ name, namespace?, spec }`: `spec` is exactly the `spec` of
+# the Kind the group stands for, and `namespace` overrides the Stack&#x27;s for that
+# one item.
+#
+#   group             Kind             full reference
+#   secrets           Secret           full-secret.yaml
+#   networks          Network          full-network.yaml
+#   volumes           Volume           full-volume.yaml
+#   images            Image            full-image.yaml
+#   vms               VirtualMachine   full-virtualmachine.yaml
+#   containers        Container        full-container.yaml
+#   pods              Pod              full-pod.yaml
+#   ingress           Ingress          full-ingress.yaml
+#   firewallPolicies  NetworkPolicy    full-networkpolicy.yaml
+#   httpRoutes        HTTPRoute        full-httproute.yaml
+#   dependencies      Dependency       full-dependency.yaml
+#   tunnels           Gateway          full-gateway.yaml
+#
+# The groups that used to exist for the removed Kinds are gone: NFS/CIFS/WebDAV
+# storage and shares are a `volumes:` item with an `nfs:`/`cifs:`/`webdav:` or
+# `share:` block; an egress policy is a `firewallPolicies:` item with
+# `direction: egress`.
 apiVersion: core.delonix.io/v1alpha1
 kind: Stack
 metadata:
   name: blog
   namespace: default
 spec:
+  # Secrets first: everything below may reference them.
+  secrets:
+    - name: db-credentials
+      spec:
+        stringData:
+          POSTGRES_PASSWORD: change-me
+
   networks:
     - name: blog-net
       spec:
         driver: bridge
+
+  volumes:
+    - name: db-data
+      spec:
+        quota: 5G          # hard cap on the volume&#x27;s data
+        alertPct: 80       # warn when it is 80% full
+
+  images:
+    - name: alpine-base
+      spec:
+        pull: alpine:3.20  # `pull` and `build` are alternatives; see full-image.yaml
+
+  # A microVM/VM on the same SDN. Needs a VM image or disk on the host to apply.
+  vms:
+    - name: worker
+      spec:
+        disk: delonix-vm-base:ubuntu-24.04
+        vcpus: 1
+        memory: 1G
+        network: blog-net
+
   containers:
     - name: web
       spec:
         image: nginx:latest
         network: blog-net
         ports: [&quot;8080:80&quot;]
-        expose: 80
+        expose: 80         # auto-register in the L7 proxy as web.&lt;namespace&gt;.delonix.internal
     - name: db
       spec:
         image: postgres:16
         network: blog-net
-        env: [&quot;POSTGRES_PASSWORD=change-me&quot;]
-  # Groups available: secrets, networks, volumes, images, vms, containers,
-  # pods, ingress, firewallPolicies, httpRoutes, tunnels, dependencies.
-  # NFS/CIFS/WebDAV storage and shares are a `volumes:` item with an
-  # `nfs:`/`cifs:`/`webdav:` or `share:` block; an egress policy is a
-  # `firewallPolicies:` item with `direction: egress`.
+        secret: [db-credentials]
+        volumes: [&quot;db-data:/var/lib/postgresql/data&quot;]
+
+  # A pod: several containers sharing ONE network namespace (localhost between them).
+  pods:
+    - name: worker-pod
+      spec:
+        containers:
+          - name: app
+            image: nginx:alpine
+          - name: sidecar
+            image: alpine:3.20
+            command: [&quot;sleep&quot;, &quot;infinity&quot;]
+
+  # Kubernetes-shaped L7 Ingress: host/path → backend service.
+  ingress:
+    - name: blog-ingress
+      spec:
+        rules:
+          - host: blog.example.ao
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service: { name: web, port: { number: 80 } }
+
+  # Per-container L4 firewall. Each item is the WHOLE desired state of one direction.
+  firewallPolicies:
+    # (`db` ingress is owned by the Dependency below, and two policies for the same
+    # target+direction are refused — so this one protects `web`.)
+    - name: web-ingress
+      spec:
+        target: web
+        direction: ingress
+        defaultPolicy: deny
+        rules:
+          - { action: allow, proto: tcp, port: &quot;80&quot;, from: 10.0.0.0/8 }
+    - name: web-egress
+      spec:
+        target: web
+        direction: egress
+        defaultPolicy: allow
+
+  # Native L7 reverse proxy, same engine as `ingress:` (both merge into one proxy).
+  httpRoutes:
+    - name: blog-api
+      spec:
+        entrypoints:
+          - { port: 8081 }
+        rules:
+          - host: api.blog.example.ao
+            paths:
+              - path: /
+                backend: { service: web, port: 80 }
+
+  # Directed reachability: `web` may reach `db`, `db` is not exposed to the others.
   dependencies:
     - name: web-knows-db
       spec:
         from: web
-        to: db</code></pre>
+        to: db
+        ports: [&quot;5432&quot;]
+        proto: tcp
+
+  # Public tunnel to a local port (kind: Gateway). pinggy needs no account.
+  tunnels:
+    - name: blog-public
+      spec:
+        provider: pinggy
+        localPort: 8080</code></pre>
 <h2 id='kubernetescluster'>KubernetesCluster</h2>
 <p class='lang-pt'>Bootstrap kubeadm idempotente sobre hosts JÁ vivos, por SSH. Sem ficheiro de estado: cada passo tem um <code>check</code>, por isso nunca dessincroniza. Ver também <code>cluster-vm.yaml</code> (provisiona as VMs) e <code>cluster-kind.yaml</code> (modo kind).</p><p class='lang-en'>Idempotent kubeadm bootstrap on hosts that are ALREADY alive, over SSH. No state file: every step has a <code>check</code>, so it can never drift. See also <code>cluster-vm.yaml</code> (provisions the VMs) and <code>cluster-kind.yaml</code> (kind mode).</p>
 <pre><code># Cluster Kubernetes em **hosts remotos JÁ EXISTENTES** (bare-metal ou VMs de

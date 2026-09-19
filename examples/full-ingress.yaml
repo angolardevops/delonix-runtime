@@ -1,0 +1,111 @@
+# Complete reference for `kind: Ingress` — the Kubernetes networking.k8s.io/v1 Ingress shape
+# (host/path -> backend service). It compiles to the SAME embedded L7 proxy as `kind: HTTPRoute`
+# and is composed with every other Ingress/HTTPRoute of the manifest into ONE proxy with a SINGLE
+# certificate (no SNI). Backends must be workloads with an IP on a custom SDN network.
+# (The L4 firewall that used to live under this Kind is `kind: NetworkPolicy`.)
+#
+# spec fields used here: entrypoints[] (port, tls), tls[] (secretName), rules[] (host,
+# http.paths[] (path, pathType, backend.service (name, port.number))), defaultBackend.service.
+# Not shown because they have no effect: `ingressClassName` (the embedded proxy is the only
+# class), `tls[].hosts` (reported as not applied), `pathType: Exact` (served as a prefix and
+# warned), a `tls` list longer than one (only the first is used) and named ports (`port.name`
+# is refused: use `port.number`).
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-demo }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: sdn-demo
+  containers:
+    - name: web
+      image: "nginx:alpine"
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: api }
+spec:
+  network: sdn-demo
+  containers:
+    - name: api
+      image: "caddy:alpine"
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: docs }
+spec:
+  network: sdn-demo
+  containers:
+    - name: docs
+      image: "httpd:2.4-alpine"
+---
+# Certificate presented by the TLS listener (placeholders — use a real pair).
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: { name: shop-tls }
+stringData:
+  tls_crt: "-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----"
+  tls_key: "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----"
+---
+# 1. Full Ingress: explicit listeners, a TLS certificate, two hosts, several paths and a default backend.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Ingress
+metadata: { name: shop }
+spec:
+  entrypoints:                     # delonix extension: listener ports. Omitted = 80 (+443 when tls is set)
+    - { port: 80 }
+    - { port: 443, tls: true }     # terminate TLS on this port
+  tls:                             # a LIST in k8s; this engine serves a single certificate
+    - secretName: shop-tls         # kind: Secret with tls_crt/tls_key (or tls.crt/tls.key); omit = self-signed
+  rules:
+    - host: shop.example.ao        # Host header to match; omit = any host
+      http:
+        paths:
+          - path: /
+            pathType: Prefix       # matched by prefix
+            backend:
+              service:
+                name: web          # workload name, resolved to its SDN IP at apply
+                port:
+                  number: 80       # container port (named ports are not supported)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080
+    - host: docs.example.ao        # a second host in the same Ingress
+      http:
+        paths:
+          - path: /                # `path` defaults to /
+            backend:
+              service:
+                name: docs
+                port:
+                  number: 80
+  defaultBackend:                  # catch-all when no rule matches
+    service:
+      name: web
+      port:
+        number: 80
+---
+# 2. A minimal second Ingress joining the same proxy: no TLS, no entrypoints (defaults to port 80).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Ingress
+metadata: { name: status }
+spec:
+  rules:
+    - host: status.example.ao
+      http:
+        paths:
+          - path: /healthz
+            backend:
+              service:
+                name: api
+                port:
+                  number: 8080

@@ -1,0 +1,61 @@
+# kind: App — build an application image from source with Cloud Native Buildpacks (no Dockerfile).
+#
+#   delonix stack apply -f examples/full-app.yaml --dry-run
+#   delonix stack validate -f examples/full-app.yaml
+#
+# Spec fields: `image` (required), `source`, `builder`, `runImage`. The built image lands in the LOCAL
+# image store under the tag in `spec.image`; there is no build cache (every apply rebuilds).
+# `builder` selects how the stack is built, and each choice is a separate document below:
+#   1. builder: auto     — detect the stack (go.mod, package.json, requirements.txt, …), Paketo builder
+#   2. builder: heroku   — the Heroku builder family
+#   3. custom builder    — any builder image; `runImage` becomes REQUIRED (and is only read here)
+#   4. defaults          — only `image`: source ".", builder "auto"
+# ---------------------------------------------------------------------------
+# 1. Auto-detected stack (Paketo)
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-auto
+  labels:
+    app: shop
+spec:
+  source: .                             # directory to build; relative to where you RUN the command (not to this file)
+  builder: auto                         # auto | heroku | <builder image ref>   (default auto)
+  image: shop-auto:latest               # REQUIRED — tag of the built image in the local image store
+---
+# ---------------------------------------------------------------------------
+# 2. Heroku builder family
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-heroku
+spec:
+  source: .
+  builder: heroku
+  image: shop-heroku:latest
+---
+# ---------------------------------------------------------------------------
+# 3. A custom builder image — the engine does not read a custom builder's metadata to discover its run image,
+#    so `runImage` is mandatory here (omitting it is an error), and meaningless with auto/heroku.
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-custom
+spec:
+  source: ./services/shop               # any directory holding the application source
+  builder: registry.example.com/buildpacks/builder-jammy-base:latest
+  runImage: registry.example.com/buildpacks/run-jammy-base:latest
+  image: shop-custom:1.0.0
+---
+# ---------------------------------------------------------------------------
+# 4. Defaults: only the image tag is mandatory
+# ---------------------------------------------------------------------------
+apiVersion: artifact.delonix.io/v1alpha1
+kind: App
+metadata:
+  name: shop-defaults
+spec:
+  image: shop-defaults:latest

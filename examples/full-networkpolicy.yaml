@@ -1,0 +1,155 @@
+# Complete reference for `kind: NetworkPolicy` — declarative L4 firewall.
+# One document = the DESIRED STATE of ONE direction (`ingress` or `egress`) of ONE
+# target. Applying it REPLACES that direction's rules; the other direction is untouched,
+# so an ingress and an egress document compose on the same workload. Two documents for
+# the same (target, direction) are refused. It only acts on workloads on a custom SDN network.
+#
+# spec fields: direction, scope, target, defaultPolicy, rules[], allowCidrs,
+# fqdnAllowlist, rateLimit. Per-rule fields: proto, port, action, from, fromWorkload,
+# to, toWorkload, note. `allowCidrs`/`fqdnAllowlist`/`rateLimit` are only for
+# `scope: network` (documents 5 and 6); `rules` is only for `scope: container`.
+---
+# Resources the policies refer to (must exist in the same manifest).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-demo }
+spec: { driver: bridge }
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: sdn-locked }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: db }
+spec:
+  network: sdn-demo
+  containers:
+    - name: db
+      image: "postgres:16-alpine"
+      env:
+        - { name: POSTGRES_PASSWORD, value: example }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: app }
+spec:
+  network: sdn-demo
+  containers:
+    - name: app
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: cache }
+spec:
+  network: sdn-demo
+  containers:
+    - name: cache
+      image: "redis:7-alpine"
+---
+# 1. INGRESS allowlist (defaultPolicy deny) using every ingress-side rule form.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: db-inbound }
+spec:
+  direction: ingress           # ingress (inbound) | egress (outbound)
+  scope: container             # container (default): `target` is a workload name
+  target: db                   # workload the policy protects
+  defaultPolicy: deny          # allow | deny when no rule matches (default for scope container: deny)
+  rules:
+    - proto: tcp               # tcp | udp | any (default any)
+      port: "5432"             # a single port
+      from: 10.219.0.0/16      # source CIDR
+      action: allow            # allow (default) | deny
+      note: postgres-from-sdn  # free-text label, shown in listings
+    - proto: tcp
+      port: "5432"
+      fromWorkload: app        # source BY WORKLOAD NAME (resolved to its SDN address at apply;
+                               # survives restarts, unlike a CIDR). Exclusive with from/to.
+      note: postgres-from-app
+    - proto: udp
+      port: "8000-8100"        # a port range n-m
+      from: 10.219.5.0/24
+      note: udp-range
+    - proto: any               # any protocol
+      port: "*"                # any port
+      from: 10.219.9.9/32
+      action: deny             # an explicit deny, evaluated by rule order
+      note: block-this-host
+---
+# 2. INGRESS with defaultPolicy allow: only the listed denies apply.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: cache-inbound-open }
+spec:
+  direction: ingress
+  target: cache
+  defaultPolicy: allow         # everything not listed is accepted
+  rules:
+    - port: "6379"             # proto omitted = any
+      from: 203.0.113.0/24
+      action: deny
+      note: no-external-redis
+---
+# 3. EGRESS allowlist for a workload, with a CIDR, a workload name and a wildcard.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: app-outbound }
+spec:
+  direction: egress
+  target: app
+  defaultPolicy: deny
+  rules:
+    - proto: udp
+      port: "53"
+      note: dns
+    - proto: tcp
+      port: "443"
+      to: 0.0.0.0/0            # destination CIDR (egress-side counterpart of `from`)
+      note: https-anywhere
+    - proto: tcp
+      port: "5432"
+      toWorkload: db           # destination BY WORKLOAD NAME (egress counterpart of fromWorkload)
+      note: postgres-to-db
+---
+# 4. Minimal egress: no rules, default deny => the workload cannot open outbound connections.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: cache-outbound-locked }
+spec:
+  direction: egress
+  target: cache
+  defaultPolicy: deny
+---
+# 5. PER-NETWORK egress (scope: network, egress only): `target` is a NETWORK name.
+#    CIDR allowlist + FQDN allowlist (learnt live from DNS) + global L4 rate limit.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: sdn-locked-egress }
+spec:
+  direction: egress
+  scope: network               # container (default) | network
+  target: sdn-locked           # network name
+  defaultPolicy: deny          # allowCidrs/fqdnAllowlist only make sense with deny
+  allowCidrs:                  # destinations allowed besides DNS
+    - 10.0.0.0/8
+    - 198.51.100.0/24
+  fqdnAllowlist:               # hostnames allowed (and *.host), learnt via DNS snooping
+    - registry.example.com
+    - updates.example.org
+  rateLimit:                   # GLOBAL L4 guard of the rootless ingress (not per network)
+    connRate: 100              # new connections per second allowed
+    connMax: 2000              # maximum concurrent connections
+---
+# 6. PER-NETWORK egress fully open (defaultPolicy allow, nothing else).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: sdn-demo-egress-open }
+spec:
+  direction: egress
+  scope: network
+  target: sdn-demo
+  defaultPolicy: allow

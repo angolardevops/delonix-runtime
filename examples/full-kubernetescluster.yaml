@@ -1,0 +1,106 @@
+# Complete reference for `kind: KubernetesCluster` — the three modes, one document each.
+# `mode` is the discriminator: `kind` (nodes as containers here), `vm` (golden-image VMs),
+# `ssh` (remote hosts that already exist). Each mode reads only its own block
+# (`kind:`, `vm:`, `ssh:`) plus the common fields.
+#
+# This Kind is NOT part of `stack apply` (a cluster is a remote procedure, not a node-local
+# resource). Apply it with:  delonix cluster apply -f examples/full-kubernetescluster.yaml
+# Validate offline with:      delonix manifest validate -f examples/full-kubernetescluster.yaml
+---
+# 1. mode: kind — a local cluster in containers, no Docker and no `kind` binary needed.
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: lab-kind
+spec:
+  mode: kind
+  k8sVersion: "1.34"                 # Kubernetes minor version
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: default                       # default = the node image's CNI (kindnet); none = install none
+  controlPlane:
+    replicas: 1                      # >1 requires controlPlaneEndpoint
+  workers:
+    replicas: 1
+  kind:                              # only read in mode: kind
+    image: kindest/node:v1.34.0      # node image (pin by digest for reproducibility)
+    apiServerPort: 6443              # host port for the apiserver
+---
+# 2. mode: vm — every node is a real microVM from the golden image.
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: lab-vm
+spec:
+  mode: vm
+  k8sVersion: "1.34"
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: default
+  controlPlane:
+    replicas: 1
+  workers:
+    replicas: 2
+  vm:                                # only read in mode: vm
+    image: k8s-golden                # tag from `delonix image vm ls` (omit = the only local one)
+    network: lab-net                 # network created beforehand
+    vcpus: 2                         # per node
+    memory: 2G                       # per node
+    sshKey: ~/.ssh/id_ed25519        # private key to reach the VMs (omit = a key is generated)
+    bootTimeout: 300s                # wait for SSH after boot
+---
+# 3. mode: ssh — hosts that already exist (bare metal / someone else's VMs), HA control plane.
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: prod-ssh
+spec:
+  mode: ssh
+  k8sVersion: "1.34"
+  podSubnet: 10.244.0.0/16
+  serviceSubnet: 10.96.0.0/12
+  cni: none                          # bring your own CNI (Cilium, Calico...)
+  controlPlaneEndpoint: "k8s-api.example.com:6443"   # REQUIRED with >1 control-plane (LB/VIP)
+  controlPlane:
+    hosts:                           # `hosts` (not `replicas`): the machines already exist
+      - address: 10.0.0.11
+      - address: 10.0.0.12
+      - address: 10.0.0.13
+  workers:
+    hosts:
+      - address: 10.0.0.21
+      - address: 10.0.0.22
+  ssh:                               # only read in mode: ssh
+    user: delonix                    # needs passwordless sudo on the hosts
+    keyPath: ~/.ssh/id_ed25519       # canonical name (`key` is the legacy spelling)
+    port: 22
+  etcd:
+    mode: stacked                    # etcd on the control-planes (kubeadm default)
+---
+# 4. mode: ssh with a dedicated external etcd cluster (own CA, odd number of members).
+apiVersion: infrastructure.delonix.io/v1alpha1
+kind: KubernetesCluster
+metadata:
+  name: prod-ssh-etcd
+spec:
+  mode: ssh
+  k8sVersion: "1.34"
+  cni: none
+  controlPlaneEndpoint: "k8s-api.example.com:6443"
+  controlPlane:
+    hosts:
+      - address: 10.0.1.11
+      - address: 10.0.1.12
+      - address: 10.0.1.13
+  workers:
+    hosts:
+      - address: 10.0.1.21
+  ssh:
+    user: delonix
+    keyPath: ~/.ssh/id_ed25519
+  etcd:
+    mode: external                   # external etcd is only accepted with mode: ssh
+    hosts:                           # dedicated etcd hosts (odd count; exactly 1 = dev only)
+      - address: 10.0.2.11
+      - address: 10.0.2.12
+      - address: 10.0.2.13

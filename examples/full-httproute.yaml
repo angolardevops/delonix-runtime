@@ -1,0 +1,99 @@
+# Complete reference for `kind: HTTPRoute` — embedded L7/HTTP reverse proxy (Gateway API style).
+# Routes by Host header and/or path prefix to backend workloads. The proxy runs inside the
+# holder netns (it reaches backends by their SDN IP) and publishes the entry ports on the host.
+# TLS terminates at the proxy.
+#
+# ALL HTTPRoute (and Ingress) documents of a manifest are composed into ONE proxy: listeners
+# are merged by port (TLS wins on collision), routes are concatenated, and the proxy has a
+# SINGLE certificate (no SNI). If any document says `mode: secretRef` that certificate is used
+# for every TLS listener; otherwise a self-signed one covering all the hosts is generated.
+# Listeners and TLS are fixed at proxy start-up: changing them restarts the proxy (connections
+# are cut); changing only rules is a hot reload with the same PID.
+#
+# spec fields: entrypoints[] (port, tls), tls (mode, secretRef), rules[] (host, paths[] (path, backend (service, port))).
+# Backends must be workloads WITH an IP on a custom SDN network (not host/none networking).
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: appnet
+  containers:
+    - name: web
+      image: "nginx:1.27-alpine"
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: api }
+spec:
+  network: appnet
+  containers:
+    - name: api
+      image: "hashicorp/http-echo:latest"
+      command: ["-listen=:3000", "-text=hello from api"]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: admin }
+spec:
+  network: appnet
+  containers:
+    - name: admin
+      image: "hashicorp/http-echo:latest"
+      command: ["-listen=:9000", "-text=admin"]
+---
+# Certificate for the secretRef mode below (PEM under tls.crt / tls.key; tls_crt / tls_key also work).
+# Replace the placeholders with a real pair before serving real traffic.
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: { name: loja-cert }
+stringData:
+  tls.crt: "-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----"
+  tls.key: "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----"
+---
+# 1. The main route: two listeners, a certificate from a Secret, host + several path prefixes.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: loja }
+spec:
+  entrypoints:
+    - { port: 80 }                 # plain HTTP listener (tls defaults to false)
+    - { port: 443, tls: true }     # TLS terminates here (requires spec.tls)
+  tls:
+    mode: secretRef                # selfSigned (default, cert generated for the hosts) | secretRef
+    secretRef: loja-cert           # kind: Secret holding tls.crt / tls.key
+  rules:
+    - host: loja.exemplo.ao        # matched against the Host header
+      paths:
+        - path: /                  # path prefix; the longest prefix wins
+          backend: { service: web, port: 80 }
+        - path: /api
+          backend: { service: api, port: 3000 }
+---
+# 2. A second document joins the same proxy: a different host and an extra listener.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: painel }
+spec:
+  entrypoints:
+    - { port: 8080 }               # extra HTTP listener, merged with the ones above
+  rules:
+    - host: admin.exemplo.ao
+      paths:
+        - path: /
+          backend: { service: admin, port: 9000 }
+---
+# 3. A rule without `host` matches ANY Host (a catch-all by path); `path` omitted defaults to `/`.
+#    No entrypoints given: defaults to port 80 (plus 443 with TLS if `tls` were set).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: HTTPRoute
+metadata: { name: catch-all }
+spec:
+  rules:
+    - paths:
+        - backend: { service: web, port: 80 }

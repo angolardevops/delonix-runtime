@@ -1,0 +1,234 @@
+# kind: VirtualMachine — a declarative VM (libvirt / Cloud Hypervisor / Proxmox backends).
+# Every field of `delonix explain VirtualMachine`, in every accepted shape.
+#
+#   delonix stack apply -f examples/full-virtualmachine.yaml --dry-run
+#   delonix stack validate -f examples/full-virtualmachine.yaml
+#
+# The base disk is a VM image from the local store (`delonix image vm ls`, e.g. built by
+# `delonix image vm build` or pulled with `delonix image vm pull`) or a path to a qcow2/raw.
+#
+# Documents in this file (variants are alternatives, hence separate documents):
+#   1. supporting resources: a Volume (9p share) and a Network
+#   2. `full-flat`      — FLAT shape, every field the libvirt backend understands
+#   3. `full-grouped`   — GROUPED shape (resources/network/boot/cloudInit/libvirt)
+#   4. `bridge-vm`      — netMode: bridge on a host bridge (alternative to nat + static ip)
+#   5. `direct-kernel`  — direct-kernel boot (kernel/initrd/cmdline) instead of firmware, Cloud Hypervisor
+#   6. `firmware-boot`  — explicit UEFI firmware, Cloud Hypervisor
+#   7. `prebuilt-seed`  — a ready-made cloud-init seed ISO instead of the generated one
+#   8. `raw-domain`     — the full libvirt <domain> XML used verbatim (escape hatch)
+#   9. `built-disk`     — the disk is BUILT from a VMfile (spec.build) instead of named (spec.disk)
+# ---------------------------------------------------------------------------
+# 1. Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: vm-data                         # shared into the guest over virtio-9p (libvirt backend)
+spec:
+  driver: local
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: vm-net                          # the SDN network the VM's tap joins (Cloud Hypervisor backend)
+spec:
+  driver: bridge
+---
+# ---------------------------------------------------------------------------
+# 2. FLAT shape — every field at the top level (libvirt backend)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: full-flat
+  namespace: default                    # isolation namespace (enforced on the Cloud Hypervisor backend only)
+spec:
+  disk: delonix-vm-base:ubuntu-24.04    # base image: a name in the VM image store, or a path (an overlay is made per VM)
+  backend: libvirt                      # cloud-hypervisor | libvirt | proxmox (omit = auto-detect / default-backend)
+  restartPolicy: always                 # no | on-failure | always
+  vcpus: 4                              # omitted => the image's own default, else 1
+  memory: 4G                            # "512M" | "2G" | "2Gi" (k8s-style suffix accepted)
+  hugepages: false                      # back guest RAM with hugepages
+  cpuAffinity: "0-3"                    # pin vCPUs to host CPUs
+  network: vm-net                       # SDN network name (declared above; `ingress` is the built-in default when omitted)
+  netMode: nat                          # libvirt only: user | nat | bridge   (`nat` gives an observable IP)
+  ip: 192.168.122.50                    # static IP: DHCP reservation on the libvirt network (nat mode only)
+  vnc: true                             # graphical console (libvirt backend only)
+  devices:                              # VFIO PCI passthrough, sysfs path (backend-agnostic)
+    - /sys/bus/pci/devices/0000:01:00.0
+
+  # cloud-init: a NoCloud seed ISO is generated from these unless `seed` is given
+  hostname: full-flat                   # hostname applied on first boot
+  sshKeys:                              # authorized public keys: "ssh-ed25519 AAAA…" or "@/path/to/key.pub"
+    - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example"
+  userData: "@/etc/delonix/examples/user-data.yaml"   # your own cloud-init user-data (path or @path); replaces the generated one
+
+  # volumes shared into the guest over virtio-9p (`kind: Volume`, by name)
+  volumes:
+    - name: vm-data
+      mountPath: /mnt/data              # where the guest mounts it
+      readOnly: false
+
+  # advanced libvirt knobs
+  machine: q35                          # machine type (default q35)
+  cpuModel: host-passthrough            # host-passthrough (default) | host-model | a named model
+  cpuTopology: { sockets: 1, cores: 2, threads: 2 }
+  tpm: true                             # emulated TPM 2.0
+  video: virtio                         # virtio | qxl | vga | none
+  bootOrder: [hd, cdrom]                # OS boot device order
+  extraDisks:                           # extra disks beyond the main overlay + seed
+    - source: /var/lib/libvirt/images/extra.qcow2
+      device: disk                      # disk (default) | cdrom
+      bus: virtio                       # virtio (default) | sata | scsi | ide
+      format: qcow2                     # qcow2 (default) | raw
+      readOnly: false
+      target: vdb                       # explicit target dev (auto-assigned when omitted)
+  extraNics:                            # extra network interfaces beyond the primary one
+    - type: network                     # network (a libvirt network) | bridge (host bridge) | user
+      source: default
+      model: virtio                     # virtio (default) | e1000 | …
+      mac: "52:54:00:12:34:56"          # fixed MAC (random when omitted)
+  libvirtXmlOverlay:                    # raw <device> fragments injected before </devices> (TRUSTED manifests only)
+    - "<rng model='virtio'><backend model='random'>/dev/urandom</backend></rng>"
+---
+# ---------------------------------------------------------------------------
+# 3. GROUPED shape — the same knobs, organised by concern
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: full-grouped
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  restartPolicy: on-failure
+  devices: []                           # VFIO PCI passthrough (stays top-level)
+  volumes:                              # 9p mounts (stays top-level)
+    - { name: vm-data, mountPath: /mnt/data, readOnly: true }
+  vnc: true                             # stays top-level
+
+  resources:
+    vcpus: 2
+    memory: 2G
+    hugepages: false
+    cpuAffinity: "0-1"
+
+  network:                              # a mapping here (a plain string is the flat form)
+    name: vm-net
+    mode: nat                           # => netMode
+    staticIp: 192.168.122.51            # => ip (nat mode)
+    # bridge: br0                       # => bridge (host bridge, bridge mode) — see `bridge-vm`
+
+  cloudInit:
+    hostname: full-grouped
+    sshKeys: ["ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIExampleExampleExampleExampleExampleExample admin@example"]
+    userData: "@/etc/delonix/examples/user-data.yaml"
+    # seed: /path/seed.iso              # prebuilt seed — see `prebuilt-seed`
+
+  libvirt:                              # advanced libvirt knobs
+    backend: libvirt
+    machine: q35
+    cpuModel: host-model
+    cpuTopology: { sockets: 1, cores: 2, threads: 1 }
+    tpm: false
+    video: qxl
+    bootOrder: [hd]
+    extraDisks:
+      - { source: /var/lib/libvirt/images/scratch.raw, format: raw, bus: sata }
+    extraNics:
+      - { type: bridge, source: br0, model: e1000 }
+    xmlOverlay:                         # => libvirtXmlOverlay
+      - "<memballoon model='virtio'/>"
+    # xml: "<domain …>"                 # => libvirtXml — see `raw-domain`
+---
+# ---------------------------------------------------------------------------
+# 4. Bridge mode: the VM attaches to a host bridge (mutually exclusive with a static `ip`, which is nat-only)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: bridge-vm
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  backend: libvirt
+  netMode: bridge
+  bridge: br0                           # host bridge / libvirt network to attach to
+  vcpus: 2
+  memory: 2G
+---
+# ---------------------------------------------------------------------------
+# 5. Direct-kernel boot (alternative to firmware): kernel [+ initrd] [+ cmdline] — Cloud Hypervisor
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: direct-kernel
+spec:
+  disk: delonix-vm-base:fedora-42
+  backend: cloud-hypervisor
+  network: vm-net
+  kernel: /var/lib/delonix/kernels/vmlinuz-6.14.0     # direct kernel boot
+  initrd: /var/lib/delonix/kernels/initramfs-6.14.0.img
+  cmdline: "console=ttyS0 root=/dev/vda1 rw"          # kernel command line
+  vcpus: 2
+  memory: 2G
+---
+# ---------------------------------------------------------------------------
+# 6. Explicit UEFI firmware (the usual way to boot a cloud image) — Cloud Hypervisor
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: firmware-boot
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  backend: cloud-hypervisor
+  network: vm-net
+  firmware: /usr/local/share/delonix/CLOUDHV.fd       # UEFI firmware path
+  vcpus: 2
+  memory: 2G
+---
+# ---------------------------------------------------------------------------
+# 7. A prebuilt cloud-init seed ISO: replaces the generated one (so hostname/sshKeys/userData are not set)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: prebuilt-seed
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  seed: /var/lib/delonix/seeds/prebuilt-seed.iso      # NoCloud ISO handed to the guest as-is
+---
+# ---------------------------------------------------------------------------
+# 8. Escape hatch: the whole libvirt <domain> XML, used verbatim (TRUSTED manifests only)
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: raw-domain
+spec:
+  disk: delonix-vm-base:ubuntu-24.04
+  backend: libvirt
+  libvirtXml: |
+    <domain type='kvm'>
+      <name>raw-domain</name>
+      <memory unit='MiB'>1024</memory>
+      <vcpu>1</vcpu>
+      <os><type arch='x86_64' machine='q35'>hvm</type></os>
+    </domain>
+---
+# ---------------------------------------------------------------------------
+# 9. The disk is BUILT from a VMfile (spec.build) — mutually exclusive with `disk`
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: built-disk
+spec:
+  build:
+    context: .                          # build context, relative to THIS manifest's folder (default ".")
+    file: VMfile                        # the VMfile (default <context>/VMfile)
+    tag: built-disk:latest              # tag of the produced image, then used as the VM's disk (default <name>:latest)
+    compress: true                      # zstd-compress the result (default true)
+    network: false                      # give the build network access (default false: reproducible)
+  vcpus: 2
+  memory: 2G
