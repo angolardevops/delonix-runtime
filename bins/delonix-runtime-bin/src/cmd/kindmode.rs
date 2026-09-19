@@ -573,6 +573,10 @@ fn reexec_under_delegated_scope(runner: &str) -> Option<i32> {
 
 /// Creates the cluster: boots the control-plane node and bootstraps it with `kubeadm`.
 pub(crate) fn create(images: &ImageStore, store: &Store, cfg: &KindCluster) -> Result<()> {
+    // The name is joined into `<root>/clusters/<name>` and `<name>-kubeconfig.yaml`
+    // (and `delete` runs `remove_dir_all` on the former): a `--name ../..` must
+    // never get that far.
+    super::cluster::check_cluster_name(&cfg.name)?;
     let node = format!("{}-control-plane", cfg.name); // kind naming convention
     if store.list()?.iter().any(|c| c.name == node) {
         return Err(Error::Invalid(super::po::tf(
@@ -1409,6 +1413,9 @@ pub(crate) fn prune(store: &Store) -> Result<usize> {
 }
 
 pub(crate) fn delete(images: &ImageStore, store: &Store, name: &str) -> Result<()> {
+    // `delete` ends in `remove_dir_all(cluster_dir(name))` — refuse a name that
+    // could point outside `<root>/clusters` before anything is touched.
+    super::cluster::check_cluster_name(name)?;
     let label = format!("io.x-k8s.kind.cluster={name}");
     let (k, v) = label.split_once('=').unwrap();
     let nodes: Vec<Container> = store
