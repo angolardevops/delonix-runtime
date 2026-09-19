@@ -1711,20 +1711,87 @@ pub fn exec_sync(
             .arg(timeout.to_string())
             .arg(delonix_bin());
     }
-    let out = command
-        .arg("container")
-        .arg("exec")
-        .arg(&name)
-        .args(&cmd)
-        .output()
-        .map_err(st)?;
+    let (status, stdout, stderr) = run_capped(
+        command.arg("container").arg("exec").arg(&name).args(&cmd),
+        EXEC_SYNC_MAX_OUTPUT,
+    )
+    .map_err(st)?;
     // `timeout` returns 124 when it expires → maps to a distinct exit code.
-    let exit_code = out.status.code().unwrap_or(-1);
+    let exit_code = status.code().unwrap_or(-1);
     Ok(Response::new(ExecSyncResponse {
-        stdout: out.stdout,
-        stderr: out.stderr,
+        stdout,
+        stderr,
         exit_code,
     }))
+}
+
+/// Per-stream ceiling for an `ExecSync` answer. `Command::output()` buffered
+/// everything: a probe (or a compromised pod's `exec`) writing without pause
+/// grew the CRI server's memory until the timeout killed it, and the whole
+/// buffer was then serialized into the gRPC reply. 16 MiB is already the gRPC
+/// default message size, so nothing a kubelet could receive is lost.
+const EXEC_SYNC_MAX_OUTPUT: usize = 16 * 1024 * 1024;
+
+/// Reads `r` keeping at most `max` bytes but DRAINING the rest, so the child
+/// never blocks on a full pipe (which, with no timeout, would hang it forever).
+fn read_keep_first<R: std::io::Read>(mut r: R, max: usize) -> Vec<u8> {
+    let mut kept = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        match r.read(&mut chunk) {
+            Ok(0) | Err(_) => break,
+            Ok(n) => {
+                if kept.len() < max {
+                    let take = n.min(max - kept.len());
+                    kept.extend_from_slice(&chunk[..take]);
+                }
+            }
+        }
+    }
+    kept
+}
+
+/// Like `Command::output()`, but with bounded memory per stream.
+fn run_capped(
+    cmd: &mut Command,
+    max: usize,
+) -> std::io::Result<(std::process::ExitStatus, Vec<u8>, Vec<u8>)> {
+    use std::process::Stdio;
+    let mut child = cmd
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let out = child.stdout.take().expect("piped");
+    let err = child.stderr.take().expect("piped");
+    let t = std::thread::spawn(move || read_keep_first(err, max));
+    let stdout = read_keep_first(out, max);
+    let stderr = t.join().unwrap_or_default();
+    let status = child.wait()?;
+    Ok((status, stdout, stderr))
+}
+
+#[cfg(test)]
+mod exec_sync_cap_tests {
+    use super::*;
+
+    #[test]
+    fn output_beyond_the_cap_is_dropped_but_the_child_still_finishes() {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg("head -c 3000000 /dev/zero; echo err >&2");
+        let (st, out, err) = run_capped(&mut c, 1000).unwrap();
+        assert!(st.success());
+        assert_eq!(out.len(), 1000);
+        assert_eq!(err, b"err\n");
+    }
+
+    #[test]
+    fn small_output_is_returned_whole() {
+        let mut c = Command::new("sh");
+        c.arg("-c").arg("printf hello");
+        let (_, out, _) = run_capped(&mut c, 1000).unwrap();
+        assert_eq!(out, b"hello");
+    }
 }
 
 // ---------------------------------------------------------------------------
