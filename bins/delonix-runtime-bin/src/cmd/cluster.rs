@@ -1442,7 +1442,7 @@ pub(crate) fn valid_cluster_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
-fn check_cluster_name(name: &str) -> Result<()> {
+pub(crate) fn check_cluster_name(name: &str) -> Result<()> {
     if valid_cluster_name(name) {
         Ok(())
     } else {
