@@ -228,9 +228,9 @@ pub fn canonical_kind(kind: &str) -> &str {
 /// worth stating because it is invisible from the outside.
 ///
 /// Each group is a list of [`StackItem`], whose `spec` is a raw `Value` that the
-/// child Kind re-deserializes later. One item type serves all fifteen groups, so
+/// child Kind re-deserializes later. One item type serves all twelve groups, so
 /// there is no per-group type to point `#[schemars(with = ...)]` at the way
-/// `WorkloadSpec` can — typing the insides would mean fifteen new item types.
+/// `WorkloadSpec` can — typing the insides would mean twelve new item types.
 ///
 /// What this DOES buy is the mistake people actually make: a typo in a GROUP
 /// name. `contaienrs:` is silently dropped today — `expand_stack` reads the
@@ -250,10 +250,6 @@ pub(crate) struct StackSpec {
     #[serde(default)]
     volumes: Vec<StackItem>,
     #[serde(default)]
-    storage: Vec<StackItem>,
-    #[serde(default, rename = "shareVolumes")]
-    share_volumes: Vec<StackItem>,
-    #[serde(default)]
     images: Vec<StackItem>,
     #[serde(default)]
     vms: Vec<StackItem>,
@@ -263,8 +259,6 @@ pub(crate) struct StackSpec {
     pods: Vec<StackItem>,
     #[serde(default)]
     ingress: Vec<StackItem>,
-    #[serde(default)]
-    egress: Vec<StackItem>,
     #[serde(default, rename = "firewallPolicies")]
     firewall_policies: Vec<StackItem>,
     #[serde(default, rename = "httpRoutes")]
@@ -283,7 +277,7 @@ pub(crate) struct StackItem {
     namespace: Option<String>,
     /// Left as «anything» in the schema on purpose: this is a different Kind's
     /// spec depending on which group the item sits in, and narrowing it to one
-    /// of them would reject the other fourteen.
+    /// of them would reject the other eleven.
     #[serde(default)]
     #[schemars(with = "serde_json::Value")]
     spec: serde_yaml::Value,
@@ -294,14 +288,11 @@ pub const STACK_SPEC_FIELDS: &[&str] = &[
     "secrets",
     "networks",
     "volumes",
-    "storage",
-    "shareVolumes",
     "images",
     "vms",
     "containers",
     "pods",
     "ingress",
-    "egress",
     "firewallPolicies",
     "httpRoutes",
     "dependencies",
@@ -309,7 +300,7 @@ pub const STACK_SPEC_FIELDS: &[&str] = &[
 ];
 
 /// Expands a `kind: Stack` doc into its constituent resource docs, in dependency
-/// order (Secret → Network → Volume → Storage → Image → Vm → Container → firewall
+/// order (Secret → Network → Volume → Image → Vm → Container → firewall
 /// → route → Dependency). Each child inherits the Stack's namespace by default.
 fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
     let spec: StackSpec = spec_of(doc)?;
@@ -329,14 +320,11 @@ fn expand_stack(doc: &ManifestDoc) -> Result<Vec<ManifestDoc>> {
         (k::SECRET, spec.secrets),
         (k::NETWORK, spec.networks),
         (k::VOLUME, spec.volumes),
-        (k::STORAGE, spec.storage),
-        (k::SHARE_VOLUME, spec.share_volumes),
         (k::IMAGE, spec.images),
         (k::VM, spec.vms),
         (k::CONTAINER, spec.containers),
         (k::POD, spec.pods),
         (k::INGRESS, spec.ingress),
-        (k::EGRESS, spec.egress),
         (k::FIREWALL_POLICY, spec.firewall_policies),
         (k::HTTP_ROUTE, spec.http_routes),
         (k::DEPENDENCY, spec.dependencies),
@@ -600,9 +588,9 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
         check_unknown_fields(&doc);
         if doc.kind == k::STACK {
             // A Stack's children are built HERE, so they never passed through the
-            // loop's own lowering — a `kind: Stack` with an `egress:` group would
-            // produce `kind: Egress` docs that no handler claims any more, and
-            // they would be dropped in silence. Lower each child on its way out.
+            // loop's own lowering. Lower each child on its way out. (The groups
+            // that fed the removed Kinds — `storage:`, `shareVolumes:`, `egress:` —
+            // are gone from `StackSpec`, so no child carries a removed Kind.)
             for mut child in expand_stack(&doc)? {
                 lower_legacy_kind(&mut child)?;
                 // The child's spec is the user's own text, moved from inside the
@@ -1448,6 +1436,61 @@ spec: { image: nginx }
         assert!(out.contains("detach: true"), "veio:\n{out}"); // default_true
         assert!(out.contains("network: host"), "veio:\n{out}"); // default_net
         assert!(out.contains("restartPolicy: no"), "veio:\n{out}"); // renamed default
+    }
+
+    /// Every group `StackSpec` still accepts must expand into a child that
+    /// survives `load` — a group whose children hit `removed_kind_hint` would
+    /// fail the whole manifest. The three removed groups are only warned about.
+    #[test]
+    fn every_stack_group_loads() {
+        let yaml = "\
+apiVersion: delonix.io/v1
+kind: Stack
+metadata:
+  name: all
+  namespace: prod
+spec:
+  secrets: [{ name: s, spec: { stringData: { K: v } } }]
+  networks: [{ name: n, spec: { driver: bridge } }]
+  volumes: [{ name: v, spec: {} }]
+  images: [{ name: i, spec: { pull: alpine } }]
+  vms: [{ name: vm, spec: { disk: base } }]
+  containers: [{ name: c, spec: { image: nginx } }]
+  pods: [{ name: p, spec: { containers: [{ name: a, image: nginx }] } }]
+  ingress: [{ name: ing, spec: { rules: [] } }]
+  firewallPolicies: [{ name: fw, spec: { target: c, direction: egress } }]
+  httpRoutes: [{ name: r, spec: { rules: [] } }]
+  dependencies: [{ name: d, spec: { from: c, to: c } }]
+  tunnels: [{ name: t, spec: { provider: pinggy, localPort: 80 } }]
+";
+        let p = std::env::temp_dir().join(format!("delonix-stack-all-{}.yaml", std::process::id()));
+        std::fs::write(&p, yaml).unwrap();
+        let docs = load(&p);
+        let _ = std::fs::remove_file(&p);
+        let docs = docs.unwrap();
+        for kind in [
+            "Secret",
+            "Network",
+            "Volume",
+            "Image",
+            "VirtualMachine",
+            "Container",
+            "Pod",
+            "Ingress",
+            "NetworkPolicy",
+            "HTTPRoute",
+            "Gateway",
+        ] {
+            assert!(
+                docs.iter().any(|d| d.kind == kind),
+                "sem {kind}: {:?}",
+                docs.iter().map(|d| d.kind.as_str()).collect::<Vec<_>>()
+            );
+        }
+        // The removed groups are no longer in the accepted list.
+        for g in ["storage", "shareVolumes", "egress"] {
+            assert!(!STACK_SPEC_FIELDS.contains(&g), "{g} ainda aceite");
+        }
     }
 
     #[test]
