@@ -314,6 +314,14 @@ pub(crate) fn bootstrap_etcd_cluster(
     members: &[(String, SshTarget)],
     _k8s_version: Option<&str>,
 ) -> Result<EtcdBootstrapResult> {
+    // Boundary check too: `pki_dir` joins this into a local path and the CA
+    // material is written there.
+    if !super::cluster::valid_cluster_name(cluster_name) {
+        return Err(Error::Invalid(super::po::tf(
+            "etcd: invalid cluster name '{name}'",
+            &[("name", cluster_name)],
+        )));
+    }
     for (label, target) in members {
         if !valid_endpoint(label) {
             return Err(Error::Invalid(super::po::tf(
