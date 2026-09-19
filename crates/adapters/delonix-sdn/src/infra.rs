@@ -1839,6 +1839,9 @@ pub fn control_main() -> ! {
 /// `control_query`.
 const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Largest command line the holder accepts on the control socket.
+const CONTROL_LINE_MAX: u64 = 64 * 1024;
+
 /// Reads ONE command line from a control connection, bounded by
 /// [`CONTROL_IO_TIMEOUT`]. `None` when the peer sent nothing in time, hung up,
 /// or the deadline could not be armed — in every case the caller drops the
@@ -1855,12 +1858,17 @@ const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 const CONTROL_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn read_control_line(stream: &std::os::unix::net::UnixStream) -> Option<String> {
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read};
     // Fail CLOSED: if the deadline cannot be armed we refuse the connection
     // rather than fall back to the unbounded read this exists to prevent.
     stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT)).ok()?;
     let mut line = String::new();
-    match BufReader::new(stream).read_line(&mut line) {
+    // The deadline bounds the TIME, not the SIZE: within 5 s a peer can still
+    // stream a newline-less gigabyte and `read_line` keeps growing the String
+    // in the one thread that serves the node's whole control plane. A real
+    // command is a few hundred bytes; a line that fills the cap is refused.
+    match BufReader::new(stream.take(CONTROL_LINE_MAX)).read_line(&mut line) {
+        Ok(n) if n as u64 >= CONTROL_LINE_MAX && !line.ends_with('\n') => None,
         Ok(0) => None, // peer hung up without sending anything
         Ok(_) => Some(line),
         Err(_) => None, // includes WouldBlock/TimedOut once the deadline fires
@@ -4946,8 +4954,47 @@ fn routes_dir() -> PathBuf {
 
 /// One file per ORDERED pair. The pair is the identity of a route — not a name
 /// someone chose for it — so it is what keys the file.
+///
+/// **Injective**: the file name carries an `fnv32` of the FULL pair. It used to
+/// be `sanitize(from)--sanitize(to).json`, and `sanitize` caps at 12 chars (an
+/// IFNAMSIZ limit for device names, not a file-name limit), so two pairs whose
+/// names shared their first 12 characters shared a record — one overwrote or
+/// removed the other's. Same fix `netdef_path` already got.
 fn routedef_path(from: &str, to: &str) -> PathBuf {
+    pair_record_path(&routes_dir(), from, to)
+}
+
+/// The pre-fix, truncated path. Still READ (a record on disk is a live route
+/// and dropping it would silently close a path) but only trusted after the
+/// record's own `from`/`to` are confirmed, and removed on the next write.
+fn routedef_path_legacy(from: &str, to: &str) -> PathBuf {
     routes_dir().join(format!("{}--{}.json", sanitize(from), sanitize(to)))
+}
+
+/// `<readable prefix>-<fnv32 of the full pair>.json`. The `\0` keeps
+/// `("ab","c")` and `("a","bc")` from hashing alike.
+fn pair_record_path(dir: &std::path::Path, a: &str, b: &str) -> PathBuf {
+    let readable = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .take(24)
+            .collect()
+    };
+    dir.join(format!(
+        "{}--{}-{:08x}.json",
+        readable(a),
+        readable(b),
+        crate::fnv32(&format!("{a}\0{b}"))
+    ))
+}
+
+/// Removes a legacy record only when its content proves it is THIS record.
+fn remove_legacy_if(path: &std::path::Path, is_same: impl Fn(&[u8]) -> bool) {
+    if let Ok(bytes) = std::fs::read(path) {
+        if is_same(&bytes) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// Every declared route on this node. The enumeration is what makes `--prune`
@@ -4968,7 +5015,15 @@ pub fn route_list() -> Vec<RouteDef> {
 }
 
 pub fn route_get(from: &str, to: &str) -> Option<RouteDef> {
-    serde_json::from_slice(&std::fs::read(routedef_path(from, to)).ok()?).ok()
+    if let Some(def) = std::fs::read(routedef_path(from, to))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<RouteDef>(&b).ok())
+    {
+        return Some(def);
+    }
+    let def: RouteDef =
+        serde_json::from_slice(&std::fs::read(routedef_path_legacy(from, to)).ok()?).ok()?;
+    (def.from == from && def.to == to).then_some(def)
 }
 
 /// Records ownership on a route. Mirrors `NetworkStore::set_metadata`, including
@@ -5017,7 +5072,15 @@ fn write_routedef(def: &RouteDef) -> Result<()> {
             context: "netroute",
             message: e.to_string(),
         }
-    })
+    })?;
+    forget_legacy_route(&def.from, &def.to);
+    Ok(())
+}
+
+fn forget_legacy_route(from: &str, to: &str) {
+    remove_legacy_if(&routedef_path_legacy(from, to), |b| {
+        serde_json::from_slice::<RouteDef>(b).is_ok_and(|d| d.from == from && d.to == to)
+    });
 }
 
 /// Drops every route naming this network.
@@ -5045,6 +5108,7 @@ fn routes_forget_network(name: &str) {
                 crate::bridge_name(&r.to)
             ));
             let _ = std::fs::remove_file(routedef_path(&r.from, &r.to));
+            forget_legacy_route(&r.from, &r.to);
         }
     }
 }
@@ -5086,8 +5150,24 @@ fn services_dir() -> PathBuf {
 /// One file per (namespace, name) — a `Service` is always namespaced (ADR-0032:
 /// the DNS name itself is `<service>.<namespace>.delonix.internal`), so unlike
 /// `RouteDef`'s pair-keyed path there is no bare-name ambiguity to resolve.
+///
+/// Injective for the same reason as [`routedef_path`]: the old
+/// `sanitize(namespace)--sanitize(name).json` truncated both halves to 12
+/// chars, so two tenants whose namespaces shared a 12-char prefix overwrote each
+/// other's `Service` and one could end up served the other's definition.
 fn servicedef_path(namespace: &str, name: &str) -> PathBuf {
+    pair_record_path(&services_dir(), namespace, name)
+}
+
+fn servicedef_path_legacy(namespace: &str, name: &str) -> PathBuf {
     services_dir().join(format!("{}--{}.json", sanitize(namespace), sanitize(name)))
+}
+
+fn forget_legacy_service(namespace: &str, name: &str) {
+    remove_legacy_if(&servicedef_path_legacy(namespace, name), |b| {
+        serde_json::from_slice::<ServiceDef>(b)
+            .is_ok_and(|d| d.namespace == namespace && d.name == name)
+    });
 }
 
 /// Every declared `Service` on this node — what `--prune`/`get services` need
@@ -5107,7 +5187,16 @@ pub fn service_list() -> Vec<ServiceDef> {
 }
 
 pub fn service_get(namespace: &str, name: &str) -> Option<ServiceDef> {
-    serde_json::from_slice(&std::fs::read(servicedef_path(namespace, name)).ok()?).ok()
+    if let Some(def) = std::fs::read(servicedef_path(namespace, name))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<ServiceDef>(&b).ok())
+    {
+        return Some(def);
+    }
+    let def: ServiceDef =
+        serde_json::from_slice(&std::fs::read(servicedef_path_legacy(namespace, name)).ok()?)
+            .ok()?;
+    (def.namespace == namespace && def.name == name).then_some(def)
 }
 
 fn write_servicedef(def: &ServiceDef) -> Result<()> {
@@ -5116,12 +5205,14 @@ fn write_servicedef(def: &ServiceDef) -> Result<()> {
         context: "service",
         message: e.to_string(),
     })?;
-    delonix_state::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(|e| {
-        Error::Command {
+    delonix_state::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(
+        |e| Error::Command {
             context: "service",
             message: e.to_string(),
-        }
-    })
+        },
+    )?;
+    forget_legacy_service(&def.namespace, &def.name);
+    Ok(())
 }
 
 /// Applies a document's selector/port, PRESERVING whatever labels/annotations
@@ -5176,6 +5267,7 @@ pub fn service_set_metadata(
 /// Retracts a `Service` document — what `--prune`/`destroy` call.
 pub fn service_remove(namespace: &str, name: &str) -> Result<()> {
     let _ = std::fs::remove_file(servicedef_path(namespace, name));
+    forget_legacy_service(namespace, name);
     Ok(())
 }
 
@@ -5595,6 +5687,7 @@ pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
         }
     } else {
         let _ = std::fs::remove_file(routedef_path(from, to));
+        forget_legacy_route(from, to);
     }
     Ok(())
 }
@@ -8047,6 +8140,24 @@ mod tests {
         let _ = std::fs::remove_file(&sock);
     }
 
+    /// A newline-less flood is refused at the cap instead of growing without end.
+    #[test]
+    fn read_control_line_refuses_a_line_over_the_cap() {
+        use std::io::Write;
+        let (server, mut client) = std::os::unix::net::UnixStream::pair().unwrap();
+        let w = std::thread::spawn(move || {
+            let chunk = [b'a'; 8192];
+            for _ in 0..32 {
+                if client.write_all(&chunk).is_err() {
+                    break;
+                }
+            }
+        });
+        assert_eq!(super::read_control_line(&server), None);
+        drop(server);
+        let _ = w.join();
+    }
+
     /// REGRESSION: the traffic total must cover EVERY interface, not just
     /// `eth0`.
     ///
@@ -8342,6 +8453,35 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(sanitize("abc; rm -rf /"), "abcrm-rf"); // no spaces/`;`/`/`
         assert_eq!(sanitize("0123456789abcdef").len(), 12); // <= 12
         assert_eq!(sanitize("web_1-x"), "web_1-x"); // alnum/_/- preserved
+    }
+
+    /// Two records whose names share their first 12 chars used to share a file.
+    #[test]
+    fn pair_record_paths_are_injective_past_12_chars() {
+        let d = std::path::Path::new("/x");
+        assert_eq!(sanitize("production-alpha"), sanitize("production-alpine"));
+        assert_ne!(
+            pair_record_path(d, "production-alpha", "web"),
+            pair_record_path(d, "production-alpine", "web")
+        );
+        assert_ne!(
+            pair_record_path(d, "ab", "c"),
+            pair_record_path(d, "a", "bc")
+        );
+        assert_eq!(pair_record_path(d, "t", "n"), pair_record_path(d, "t", "n"));
+    }
+
+    #[test]
+    fn a_legacy_record_is_only_removed_when_it_is_the_same_record() {
+        let dir = std::env::temp_dir().join(format!("dlx-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("x.json");
+        std::fs::write(&f, br#"{"who":"other"}"#).unwrap();
+        remove_legacy_if(&f, |b| b == br#"{"who":"me"}"#);
+        assert!(f.exists(), "another tenant's record must survive");
+        remove_legacy_if(&f, |b| b == br#"{"who":"other"}"#);
+        assert!(!f.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

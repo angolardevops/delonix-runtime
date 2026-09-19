@@ -795,7 +795,11 @@ fn resolve_copy_source<'a>(
             })?;
             let rel = src.trim_start_matches('/').to_string();
             let root = Path::new(src_stage.rootfs.as_str());
-            Ok((root.join(&rel), root, rel))
+            // Confined like the context branch: the path is hashed for the
+            // cache key BEFORE `copy_into_rootfs` gets to confine it, so a
+            // `..` here read (and hashed) files outside the stage's rootfs.
+            let resolved = safe_join(root, &rel)?;
+            Ok((resolved, root, rel))
         }
         None => {
             let resolved = safe_join(context, src)?;
@@ -1676,6 +1680,32 @@ mod tests {
             safe_join(base, "src/app.txt").unwrap(),
             base.join("src/app.txt")
         );
+    }
+
+    #[test]
+    fn copy_from_a_stage_cannot_hash_outside_its_rootfs() {
+        let mut stages = std::collections::HashMap::new();
+        stages.insert(
+            "s".to_string(),
+            super::StageResult {
+                id: "x".into(),
+                rootfs: "/stage/rootfs".into(),
+                cmd: vec![],
+                entrypoint: vec![],
+                env: vec![],
+                workdir: "/".into(),
+                user: String::new(),
+                chain_hash: String::new(),
+                image: None,
+            },
+        );
+        let from = Some("s".to_string());
+        let ctx = Path::new("/ctx");
+        assert!(super::resolve_copy_source(ctx, &stages, "../../etc/shadow", &from).is_err());
+        let (p, root, rel) = super::resolve_copy_source(ctx, &stages, "/app/bin", &from).unwrap();
+        assert_eq!(p, Path::new("/stage/rootfs/app/bin"));
+        assert_eq!(root, Path::new("/stage/rootfs"));
+        assert_eq!(rel, "app/bin");
     }
 
     #[test]
