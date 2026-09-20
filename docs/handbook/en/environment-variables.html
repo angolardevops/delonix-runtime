@@ -327,6 +327,34 @@ and how to tear the isolated infra down, is in
 </thead>
 <tbody>
 <tr>
+<td><code>DELONIX_PERF_CONF</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>Path of the config (<code>CPU=</code>/<code>THP=</code> flags) the helper reads.</td>
+<td>A file path. Unset: <code>/<wbr>etc/<wbr>delonix/<wbr>performance.<wbr>conf</code>.</td>
+<td>Only for testing the helper against a fake sysfs; <code>install.sh</code> writes the real one.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PERF_CPU</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>Root of the CPU sysfs tree the helper reads and writes (governor, EPP).</td>
+<td>A directory path. Unset: <code>/sys/devices/system/cpu</code>.</td>
+<td>Point it at a fake tree to test <code>apply</code>/<code>revert</code> without touching the host.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PERF_STATE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>Directory where the helper stores the boot-time values it restores on <code>revert</code>.</td>
+<td>A directory path. Unset: <code>/<wbr>var/<wbr>lib/<wbr>delonix-performance</code>.</td>
+<td>Test-only override, like the others.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PERF_THP</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>The transparent-hugepage <code>enabled</code> file the helper reads and writes.</td>
+<td>A file path. Unset: <code>/<wbr>sys/<wbr>kernel/<wbr>mm/<wbr>transparent_hugepage/<wbr>enabled</code>.</td>
+<td>Test-only override, like the others.</td>
+</tr>
+<tr>
 <td><code>DELONIX_ROOT</code></td>
 <td>every store and binary: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>util.<wbr>rs:state_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/image.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>image.<wbr>rs:ImageStore::<wbr>default_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs:Store::<wbr>default_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:base_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 <td>The engine's state root: container records, images, networks, IPAM, volumes, VMs, secrets.</td>
