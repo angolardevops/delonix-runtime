@@ -275,7 +275,7 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         // unreachable. Meanwhile `RECONCILED_HTTPROUTE_FIELDS` documented
         // «everything converges hot». The table is a promise — this is it being
         // kept.
-        k::HTTP_ROUTE | k::INGRESS => &["entrypoints", "tls", "rules"],
+        k::HTTP_ROUTE | k::INGRESS => &["entrypoints", "tls", "rules", "hosts"],
         // `service::apply_one` fully overwrites the registry entry on every
         // apply — same "converges without recreating anything" shape as
         // `Image`'s ref/digest just above.

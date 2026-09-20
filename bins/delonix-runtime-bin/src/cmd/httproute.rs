@@ -206,7 +206,18 @@ pub struct HttpRouteSpec {
     /// Routing rules (by Host and/or path prefix). Required and non-empty.
     #[serde(default)]
     pub rules: Vec<RouteRule>,
+    /// Where to publish this route's host names, so they RESOLVE without editing
+    /// any `hosts` file (ADR-0046). Only `containers` exists so far: the holder's
+    /// DNS answers each rule `host` for every container on the SDN, with the
+    /// address of that container's own network bridge (where the proxy listens).
+    /// The port is the route's entrypoint, not something DNS can carry: with a
+    /// non-default port the client still has to say it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
 }
+
+/// Values `spec.hosts` accepts.
+pub const HOSTS_TARGETS: &[&str] = &["containers"];
 
 /// An entry point (proxy listen port).
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -264,7 +275,7 @@ pub struct Backend {
 }
 
 /// Known fields of the `spec` (drift-guard — see `manifest::warn_unknown_fields`).
-pub const HTTP_ROUTE_SPEC_FIELDS: &[&str] = &["entrypoints", "tls", "rules"];
+pub const HTTP_ROUTE_SPEC_FIELDS: &[&str] = &["entrypoints", "tls", "rules", "hosts"];
 
 /// A valid DNS host name to match against the `Host:` header. Strict on purpose
 /// (the audit's `valid_*` discipline): letters/digits/`.`/`-`, no scheme, no
@@ -341,6 +352,14 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             return Err(err(super::po::tf(
                 "entrypoint :{port} requests tls but spec.tls is not defined",
                 &[("port", &ep.port.to_string())],
+            )));
+        }
+    }
+    for h in &spec.hosts {
+        if !HOSTS_TARGETS.contains(&h.as_str()) {
+            return Err(err(super::po::tf(
+                "hosts: '{target}' is not supported (only: {allowed}) — `host` and `guest` are planned, ADR-0046",
+                &[("target", h), ("allowed", &HOSTS_TARGETS.join(", "))],
             )));
         }
     }
@@ -649,6 +668,7 @@ fn ingress_to_httproute(name: &str, ing: IngressSpec) -> Result<HttpRouteSpec> {
         entrypoints: ing.entrypoints,
         tls,
         rules,
+        hosts: Vec::new(),
     })
 }
 
@@ -758,8 +778,19 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
     let mut all_hosts: Vec<String> = Vec::new();
     let mut tls_material: Option<TlsMaterial> = None;
     let mut secret_ref: Option<String> = None;
+    let mut dns_hosts: Vec<ingress_proxy::DnsHost> = Vec::new();
 
     for (name, spec) in specs {
+        if spec.hosts.iter().any(|h| h == "containers") {
+            for rule in &spec.rules {
+                if let Some(h) = &rule.host {
+                    dns_hosts.push(ingress_proxy::DnsHost {
+                        host: h.clone(),
+                        source: name.clone(),
+                    });
+                }
+            }
+        }
         for ep in effective_entrypoints(spec) {
             // Dedup by port; on collision, TLS wins (more restrictive/secure).
             match listeners.iter_mut().find(|l| l.port == ep.port) {
@@ -821,6 +852,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
         listeners,
         routes,
         tls: tls_material,
+        dns_hosts,
     }))
 }
 
@@ -834,7 +866,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
 /// changing them needs an `httproute rm` + apply) and the apply already warns
 /// about that; the plan showing them as an update is not a promise the executor
 /// breaks — the warning is what tells the truth about the listener.
-pub(crate) const RECONCILED_HTTPROUTE_FIELDS: &[&str] = &["entrypoints", "tls", "rules"];
+pub(crate) const RECONCILED_HTTPROUTE_FIELDS: &[&str] = &["entrypoints", "tls", "rules", "hosts"];
 
 /// One route rendered comparably: host, path and the backend as WRITTEN.
 ///
@@ -857,6 +889,22 @@ fn route_keys(spec: &HttpRouteSpec) -> String {
     }
     keys.sort();
     keys.join(",")
+}
+
+/// The host names a spec asks the holder's DNS to publish — empty unless it opted
+/// in. Same shape as what `actual` reads back from the manual config.
+fn desired_dns_hosts(spec: &HttpRouteSpec) -> String {
+    if !spec.hosts.iter().any(|h| h == "containers") {
+        return String::new();
+    }
+    let mut v: Vec<&str> = spec
+        .rules
+        .iter()
+        .filter_map(|r| r.host.as_deref())
+        .collect();
+    v.sort();
+    v.dedup();
+    v.join(",")
 }
 
 /// The `tls.mode` a document declares, defaulted the way the apply defaults it.
@@ -925,6 +973,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         },
     );
     f.insert("rules".into(), route_keys(&spec));
+    f.insert("hosts".into(), desired_dns_hosts(&spec));
     Ok(super::reconcile::Desired {
         // Keyed by the document's OWN kind, so an `Ingress` matches the
         // `Ingress` half of the actual side and the plan names the Kind the
@@ -996,7 +1045,14 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         // The stored backend is `ip:port`; the manifest names a service. Map it
         // back through the same container→IP table the apply resolved with, so
         // the two sides speak the same language.
-        let by_ip = container_ips();
+        let mut by_ip = container_ips();
+        // A route to a VM stores the VM's address too (`vm_ips`); without mapping it
+        // back the plan read `10.x:8080` against `web01:8080` as drift on every run.
+        for (vm, ip) in vm_ips() {
+            if let Ok(ip) = ip {
+                by_ip.entry(vm).or_insert(ip);
+            }
+        }
         let mut keys: Vec<String> = mine
             .iter()
             .map(|r| {
@@ -1012,6 +1068,15 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             .collect();
         keys.sort();
         f.insert("rules".into(), keys.join(","));
+        let mut published: Vec<&str> = cfg
+            .dns_hosts
+            .iter()
+            .filter(|d| &d.source == name)
+            .map(|d| d.host.as_str())
+            .collect();
+        published.sort();
+        published.dedup();
+        f.insert("hosts".into(), published.join(","));
         out.push(super::reconcile::Actual {
             kind: doc.kind.clone(),
             name: name.clone(),

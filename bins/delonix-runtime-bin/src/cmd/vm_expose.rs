@@ -34,6 +34,11 @@ pub(crate) struct VmExposeSpec {
     #[serde(default)]
     #[schemars(with = "Option<super::httproute::TlsSpec>")]
     pub tls: Option<Value>,
+    /// Where to publish `host` so it resolves: `[containers]` makes every container
+    /// on the SDN resolve it through the holder's DNS. The route publishes ONE list
+    /// for all its names, so every entry must say the same.
+    #[serde(default)]
+    pub hosts: Vec<String>,
 }
 
 fn default_path() -> String {
@@ -92,6 +97,7 @@ fn route_for(vm: &ManifestDoc, exposes: &[VmExposeSpec]) -> Result<ManifestDoc> 
         return Err(bad(format!("'{vm_name}' is not a valid backend name")));
     }
     let mut tls: Option<&Value> = None;
+    let hosts = &exposes[0].hosts;
     let mut rules: Vec<Value> = Vec::new();
     let mut seen: Vec<(&str, &str)> = Vec::new();
     for (i, e) in exposes.iter().enumerate() {
@@ -106,6 +112,11 @@ fn route_for(vm: &ManifestDoc, exposes: &[VmExposeSpec]) -> Result<ManifestDoc> 
                 "[{i}].path '{}' is not a valid path prefix",
                 e.path
             )));
+        }
+        if &e.hosts != hosts {
+            return Err(bad(
+                "`hosts` must be the same on every entry: the route publishes one list for all its names".into(),
+            ));
         }
         if e.port == 0 {
             return Err(bad(format!("[{i}].port: 0 is invalid")));
@@ -147,6 +158,12 @@ fn route_for(vm: &ManifestDoc, exposes: &[VmExposeSpec]) -> Result<ManifestDoc> 
     let mut spec = serde_yaml::Mapping::new();
     if let Some(t) = tls {
         spec.insert(Value::from("tls"), t.clone());
+    }
+    if !hosts.is_empty() {
+        spec.insert(
+            Value::from("hosts"),
+            Value::Sequence(hosts.iter().cloned().map(Value::from).collect()),
+        );
     }
     spec.insert(Value::from("rules"), Value::Sequence(rules));
     Ok(ManifestDoc {
@@ -219,6 +236,21 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(e.contains("ONE certificate"), "{e}");
+    }
+
+    #[test]
+    fn hosts_are_carried_to_the_route_and_must_agree_across_entries() {
+        let out = lower_vm_expose(vec![vm(
+            "expose:\n  - {host: a.pt, port: 80, hosts: [containers]}\n  - {host: b.pt, port: 81, hosts: [containers]}",
+        )])
+        .unwrap();
+        assert_eq!(out[1].spec["hosts"][0], "containers");
+        let e = lower_vm_expose(vec![vm(
+            "expose:\n  - {host: a.pt, port: 80, hosts: [containers]}\n  - {host: b.pt, port: 81}",
+        )])
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("same on every entry"), "{e}");
     }
 
     #[test]

@@ -38,6 +38,19 @@ pub struct ProxyConfig {
     /// from a `kind: Secret`). Present ⇒ the `tls: true` listeners terminate TLS with it.
     #[serde(default)]
     pub tls: Option<TlsMaterial>,
+    /// Host names to publish to the containers on the SDN through the holder's DNS
+    /// (`hosts: [containers]`, ADR-0046). The proxy itself never reads this — it
+    /// rides in the manual config so `rebuild` can sync DNS from one place, and so
+    /// the reconciler can tell which document asked for which name.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dns_hosts: Vec<DnsHost>,
+}
+
+/// One host name a route publishes to the SDN, with the document that asked for it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DnsHost {
+    pub host: String,
+    pub source: String,
 }
 
 /// Cert + key in PEM, ready to load into rustls (Phase 4 resolves them).
@@ -710,6 +723,17 @@ fn rebuild() -> Result<()> {
     let manual = read_manual();
     let auto = read_auto();
 
+    // The holder's DNS answers the route hosts a document opted into. Synced here
+    // — the single point every source of routes goes through — and BEFORE the
+    // "nothing left, stop" exit below, so removing the last route also removes
+    // its names. A failure to write the registry is loud: a host that silently
+    // stopped resolving is the manual step this feature exists to remove.
+    let dns: Vec<String> = manual
+        .as_ref()
+        .map(|m| m.dns_hosts.iter().map(|d| d.host.clone()).collect())
+        .unwrap_or_default();
+    delonix_sdn::infra::route_hosts_set(&dns)?;
+
     let mut listeners: Vec<Listener> = manual
         .as_ref()
         .map(|m| m.listeners.clone())
@@ -750,6 +774,7 @@ fn rebuild() -> Result<()> {
         listeners,
         routes,
         tls,
+        dns_hosts: Vec::new(),
     })
 }
 
@@ -1409,6 +1434,7 @@ mod tests {
                 key_pem: "K".into(),
                 mode: "secretRef".into(),
             }),
+            dns_hosts: Vec::new(),
         };
         let js = serde_json::to_string(&cfg).unwrap();
         let back: ProxyConfig = serde_json::from_str(&js).unwrap();
@@ -1430,6 +1456,7 @@ mod tests {
             ],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
             tls: None,
+            dns_hosts: Vec::new(),
         };
         let js = serde_json::to_string(&cfg).unwrap();
         let back: ProxyConfig = serde_json::from_str(&js).unwrap();
