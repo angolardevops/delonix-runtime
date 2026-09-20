@@ -13026,3 +13026,21 @@ msgstr "pára-a — destrói-a com o disco (--rm)"
 
 msgid "stop it — destroyed {after} later, with its disk (--rm-after)"
 msgstr "pára-a — destruída {after} depois, com o disco (--rm-after)"
+
+msgid "hosts: the delonix block of this state root in {path} has no END line (a hand edit?) — restore the line '{end}' or delete the block by hand, then apply again"
+msgstr "hosts: o bloco delonix deste state root em {path} não tem linha END (edição à mão?) — repõe a linha '{end}' ou apaga o bloco à mão e volta a aplicar"
+
+msgid "listener :{port}: '{addr}' is not an IP address"
+msgstr "listener :{port}: '{addr}' não é um endereço IP"
+
+msgid "cannot publish :{p}: {err}"
+msgstr "não consigo publicar :{p}: {err}"
+
+msgid "HTTPRoute: port :{port} is already listened on {other} by a route applied earlier, and this apply asks for {mine} — give one of them another entrypoint"
+msgstr "HTTPRoute: o porto :{port} já está a ser escutado em {other} por uma route aplicada antes, e este apply pede {mine} — dá a uma delas outro entrypoint"
+
+msgid "httproute: the listeners changed — restarting the proxy (open connections are cut)"
+msgstr "httproute: os listeners mudaram — a reiniciar o proxy (as ligações abertas são cortadas)"
+
+msgid "{kind} '{name}' → pool '{pool}' is not a declared or existing IPPool"
+msgstr "{kind} '{name}' → o pool '{pool}' não é um IPPool declarado nem existente"

@@ -268,3 +268,19 @@ Everything above is design. Not measured yet: that a host-netns proxy reaches a 
 `virbr0` from a rootless user (the `qemu:///session` mode has no `virbr0` at all — user-mode
 SLIRP — so this may only hold for `qemu:///system`); that the guest agent is present in the
 published images; and the L2 announcement on any real network.
+
+## Notas de implementação (revisão da fase 3)
+
+- **`apply` acrescenta, `--prune`/`destroy` removem.** O config do proxy é colectivo, mas um
+  `apply` já não o substitui pelo que o manifesto tem à mão: mantém as contribuições dos
+  documentos que não estão a ser aplicados (`merge_with_existing`). Retirar uma route é
+  trabalho do `--prune`/`destroy`, como em todos os Kinds. Limite conhecido: o certificado
+  `selfSigned` é gerado com os hosts do apply em curso; uma route TLS aplicada antes pode
+  ficar fora dos SAN se a seguinte também for TLS.
+- **Um apply que falha volta atrás**: o config anterior é reposto e os leases sem dono
+  libertados; os leases só se largam depois de o proxy servir.
+- **Porto ocupado por outro processo** falha o apply (antes lia-se «já publicado»).
+- **Route para VM parada** é recusada com o estado da VM.
+- **`/etc/hosts`**: escrita sob `flock`, ficheiro temporário `O_EXCL` com nome imprevisível,
+  `fsync`; um bloco sem linha END é recusado em vez de apagar o resto do ficheiro.
+- **Ledger do IPPool ilegível** é erro; nunca se sobrescreve.

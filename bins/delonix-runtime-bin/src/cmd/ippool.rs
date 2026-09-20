@@ -116,6 +116,25 @@ fn get_in(d: &std::path::Path, name: &str) -> Option<PoolFile> {
     serde_json::from_slice(&std::fs::read(path_in(d, name)).ok()?).ok()
 }
 
+/// Like [`get_in`], but a file that exists and does not parse is an ERROR, not «no such
+/// pool»: the ledger holds who owns which address, and reading a damaged file as an empty
+/// one lets the next write replace it — every lease forgotten, two claimants on one
+/// address. Absent is `Ok(None)`.
+fn read_in(d: &std::path::Path, name: &str) -> Result<Option<PoolFile>> {
+    let path = path_in(d, name);
+    let bytes = match std::fs::read(&path) {
+        Ok(b) => b,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(Error::Invalid(format!("ippool {name}: {e}"))),
+    };
+    serde_json::from_slice(&bytes).map(Some).map_err(|e| {
+        Error::Invalid(format!(
+            "ippool {name}: {} is damaged ({e}) — restore it or remove it by hand; the engine will not overwrite a ledger it cannot read",
+            path.display()
+        ))
+    })
+}
+
 fn list_in(d: &std::path::Path) -> Vec<PoolFile> {
     let mut v: Vec<PoolFile> = std::fs::read_dir(d)
         .into_iter()
@@ -265,7 +284,7 @@ enum Mode {
 
 fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, mode: Mode) -> Result<Ipv4Addr> {
     let _l = Lock::acquire(d)?;
-    let mut p = get_in(d, pool).ok_or_else(|| {
+    let mut p = read_in(d, pool)?.ok_or_else(|| {
         Error::NotFound(format!(
             "IPPool '{pool}' (declare a `kind: IPPool` named '{pool}')"
         ))
@@ -400,7 +419,7 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
 pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) -> Result<()> {
     let d = dir();
     let _l = Lock::acquire(&d)?;
-    let mut p = get_in(&d, name).ok_or_else(|| Error::NotFound(format!("ippool: {name}")))?;
+    let mut p = read_in(&d, name)?.ok_or_else(|| Error::NotFound(format!("ippool: {name}")))?;
     p.labels
         .insert(super::reconcile::STACK_LABEL.into(), stack.into());
     p.labels
@@ -418,7 +437,7 @@ pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) 
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let d = dir();
     let _l = Lock::acquire(&d)?;
-    let Some(p) = get_in(&d, name) else {
+    let Some(p) = read_in(&d, name)? else {
         return Ok(());
     };
     if !p.leases.is_empty() {
@@ -437,7 +456,7 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     validate(&spec)?;
     let d = dir();
     let _l = Lock::acquire(&d)?;
-    let mut p = get_in(&d, &doc.metadata.name).unwrap_or_default();
+    let mut p = read_in(&d, &doc.metadata.name)?.unwrap_or_default();
     let new: std::collections::HashSet<Ipv4Addr> = expand(&spec.addresses)?.into_iter().collect();
     // Shrinking a pool under a live lease would leave a listener bound to an address the
     // ledger no longer owns.
@@ -733,6 +752,18 @@ mod tests {
                 .to_string(),
             "203.0.113.1"
         );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_damaged_ledger_is_an_error_and_is_never_overwritten() {
+        let d = scratch("damaged");
+        std::fs::write(path_in(&d, "edge"), b"{ not json").unwrap();
+        let e = claim_in(&d, "edge", "HTTPRoute/x", Mode::Take)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("damaged"), "{e}");
+        assert_eq!(std::fs::read(path_in(&d, "edge")).unwrap(), b"{ not json");
         let _ = std::fs::remove_dir_all(&d);
     }
 

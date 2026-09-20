@@ -2838,6 +2838,17 @@ fn validate_graph_with(
                         if let Err(e) = super::httproute::validate_spec(name, &spec) {
                             issues.push(e.to_string());
                         }
+                        if let Some(pool) = &spec.pool {
+                            let declared = docs
+                                .iter()
+                                .any(|d| d.kind == k::IPPOOL && &d.metadata.name == pool);
+                            if !declared && super::ippool::pool_get(pool).is_none() {
+                                issues.push(super::po::tf(
+                                    "{kind} '{name}' → pool '{pool}' is not a declared or existing IPPool",
+                                    &[("kind", &doc.kind), ("name", name), ("pool", pool)],
+                                ));
+                            }
+                        }
                         for rule in &spec.rules {
                             for pr in &rule.paths {
                                 if !containers.contains(&pr.backend.service) {

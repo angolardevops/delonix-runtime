@@ -98,9 +98,18 @@ pub(crate) fn render(existing: &str, hosts: &[Entry], id: &str) -> Result<String
         }
         kept.push(line);
     }
-    // An unterminated block (a hand edit that removed the END line) is dropped up
-    // to the end of the file. Refusing would leave the file impossible to fix
-    // from here, and everything after BEGIN was ours to begin with.
+    // An unterminated block (a hand edit that removed the END line) is REFUSED: dropping
+    // "up to the end of the file" would also erase whatever follows it — the hand-written
+    // lines and the other state roots' blocks, none of which are ours.
+    if inside {
+        return Err(Error::Invalid(super::po::tf(
+            "hosts: the delonix block of this state root in {path} has no END line (a hand edit?) — restore the line '{end}' or delete the block by hand, then apply again",
+            &[
+                ("path", &hosts_path().display().to_string()),
+                ("end", &end(id)),
+            ],
+        )));
+    }
     let wanted: Vec<String> = hosts.iter().map(|(h, _)| h.to_lowercase()).collect();
     // One name, two addresses is two answers to one question: refuse it rather than
     // let whichever line the resolver reads first win.
@@ -163,12 +172,40 @@ fn sync_at(path: &std::path::Path, hosts: &[Entry], id: &str) -> Result<()> {
     // Through the symlink, if any, so the link itself is not replaced by a file.
     let target = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
     let dir = target.parent().map(|p| p.to_path_buf()).unwrap_or_default();
-    let tmp = dir.join(format!(".hosts.delonix.{}", std::process::id()));
+    // Two writers (two state roots, two applies) must not interleave a
+    // read-modify-write: the second would erase the first's block.
+    let _lock = lock_beside(&dir);
+    // Re-read under the lock: what was read above may be stale by now.
+    let old2 = std::fs::read_to_string(&target).unwrap_or_default();
+    let new = if old2 == old {
+        new
+    } else {
+        render(&old2, hosts, id)?
+    };
+    if new == old2 {
+        return Ok(());
+    }
+    // A name nobody can guess and `create_new` (O_EXCL): a hostile local user cannot
+    // pre-create it as a symlink to make this write land somewhere else.
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let tmp = dir.join(format!(".hosts.delonix.{}.{nanos}", std::process::id()));
     let write = || -> std::io::Result<()> {
-        std::fs::write(&tmp, &new)?;
+        use std::io::Write;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp)?;
+        f.write_all(new.as_bytes())?;
         if let Ok(meta) = std::fs::metadata(&target) {
-            let _ = std::fs::set_permissions(&tmp, meta.permissions());
+            let _ = f.set_permissions(meta.permissions());
         }
+        // The name→address map of the whole host: a crash between the rename and the
+        // data reaching the disk must not leave an empty file behind.
+        f.sync_all()?;
+        drop(f);
         std::fs::rename(&tmp, &target)
     };
     write().map_err(|e| {
@@ -185,6 +222,22 @@ fn sync_at(path: &std::path::Path, hosts: &[Entry], id: &str) -> Result<()> {
             Error::Invalid(format!("hosts: {}: {e}", target.display()))
         }
     })
+}
+
+/// Holds an exclusive `flock` on a lock file beside the hosts file for as long as the
+/// returned guard lives. `None` when the lock file cannot be created (an unprivileged
+/// run that will fail to write anyway, and says so with the block to add by hand).
+fn lock_beside(dir: &std::path::Path) -> Option<std::fs::File> {
+    use std::os::unix::io::AsRawFd;
+    let f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(dir.join(".hosts.delonix.lock"))
+        .ok()?;
+    // SAFETY: a valid fd we own; released when `f` drops.
+    unsafe { libc::flock(f.as_raw_fd(), libc::LOCK_EX) };
+    Some(f)
 }
 
 #[cfg(test)]
@@ -270,11 +323,15 @@ mod tests {
     }
 
     #[test]
-    fn an_unterminated_block_is_replaced_not_stacked() {
-        let broken = format!("127.0.0.1 localhost\n{}\n127.0.0.1\told.pt\n", begin(ID));
-        let out = render(&broken, &h(&["new.pt"]), ID).unwrap();
-        assert!(!out.contains("old.pt"));
-        assert_eq!(out.matches(&begin(ID)).count(), 1);
+    fn an_unterminated_block_is_refused_and_takes_nothing_with_it() {
+        let broken = format!(
+            "127.0.0.1 localhost\n{}\n127.0.0.1\told.pt\n10.0.0.9 hand.written\n",
+            begin(ID)
+        );
+        let e = render(&broken, &h(&["new.pt"]), ID)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("no END line"), "{e}");
     }
 
     #[test]

@@ -762,6 +762,15 @@ fn vm_ips(
     use ingress_proxy::Where;
     let mut m = std::collections::HashMap::new();
     for vm in delonix_vm::list(&super::util::state_root()).unwrap_or_default() {
+        // A stopped VM keeps the address it had, and a route to it would be accepted and
+        // «served» while every request fails — the address is a memory, not a fact.
+        if !matches!(vm.status, delonix_model::records::Status::Running) {
+            m.insert(
+                vm.name.clone(),
+                Err(format!("it is not running (status: {:?})", vm.status)),
+            );
+            continue;
+        }
         let entry = match (vm.backend.as_str(), vm.ip.clone()) {
             (_, None) => Err("it has no IP yet (is it running?)".to_string()),
             ("cloud-hypervisor", Some(ip)) => Ok((ip, Where::Holder)),
@@ -1484,34 +1493,153 @@ fn pending_listener_changes(docs: &[ManifestDoc]) -> Vec<ingress_proxy::Where> {
     out
 }
 
+/// The proxy config of ONE instance after applying `names`: what was there from
+/// documents that are NOT being applied now, plus `new` (this apply's contribution).
+///
+/// `apply` used to replace the whole collective config with what the manifest in hand
+/// declared, so applying a second manifest silently dropped the first one's routes.
+/// Removing a document is `--prune`/`destroy`'s job, like every other Kind.
+fn merge_with_existing(
+    existing: Option<ProxyConfig>,
+    names: &[String],
+    new: Option<ProxyConfig>,
+) -> Result<Option<ProxyConfig>> {
+    let Some(old) = existing else {
+        return Ok(new);
+    };
+    let foreign = |src: &str| !names.iter().any(|n| n == src);
+    let mut cfg = new.unwrap_or(ProxyConfig {
+        listeners: Vec::new(),
+        routes: Vec::new(),
+        tls: None,
+        published_hosts: Vec::new(),
+        claims: Vec::new(),
+        stamps: Vec::new(),
+        bind: None,
+    });
+    let kept_routes: Vec<Route> = old
+        .routes
+        .into_iter()
+        .filter(|r| foreign(&r.source))
+        .collect();
+    let kept_tls = old.tls.clone();
+    for mut l in old.listeners {
+        // Provenance known: keep the listener only for the documents that stay.
+        // Unknown (a config from before it was recorded): keep it as it was.
+        let legacy = l.sources.is_empty();
+        l.sources.retain(|s| foreign(s));
+        if !legacy && l.sources.is_empty() {
+            continue;
+        }
+        match cfg.listeners.iter_mut().find(|x| x.port == l.port) {
+            Some(x) if x.addr != l.addr => {
+                return Err(Error::Invalid(super::po::tf(
+                    "HTTPRoute: port :{port} is already listened on {other} by a route applied earlier, and this apply asks for {mine} — give one of them another entrypoint",
+                    &[
+                        ("port", &l.port.to_string()),
+                        ("other", l.addr.as_deref().unwrap_or("loopback")),
+                        ("mine", x.addr.as_deref().unwrap_or("loopback")),
+                    ],
+                )));
+            }
+            Some(x) => {
+                x.tls = x.tls || l.tls;
+                for s in l.sources {
+                    if !x.sources.contains(&s) {
+                        x.sources.push(s);
+                    }
+                }
+            }
+            None => cfg.listeners.push(l),
+        }
+    }
+    cfg.routes.extend(kept_routes);
+    cfg.published_hosts.extend(
+        old.published_hosts
+            .into_iter()
+            .filter(|d| foreign(&d.source)),
+    );
+    cfg.claims
+        .extend(old.claims.into_iter().filter(|c| foreign(&c.source)));
+    cfg.stamps
+        .extend(old.stamps.into_iter().filter(|s| foreign(&s.source)));
+    if cfg.tls.is_none() && cfg.listeners.iter().any(|l| l.tls) {
+        cfg.tls = kept_tls;
+    }
+    if cfg.bind.is_none() {
+        cfg.bind = old.bind;
+    }
+    Ok(if cfg.routes.is_empty() {
+        None
+    } else {
+        Some(cfg)
+    })
+}
+
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     use ingress_proxy::Where;
     let specs = parse_and_validate(docs)?;
-    let (holder, host) = resolve_configs(&specs, true)?;
-    if holder.is_none() && host.is_none() {
-        return Ok(()); // no HTTPRoute — nothing to do
+    if specs.is_empty() {
+        // Nothing to add — and `apply` never removes (that is `--prune`/`destroy`).
+        return Ok(());
     }
-    // A claim is kept only by a document that still declares it: what this apply just
-    // resolved IS the set of live claimants, so the rest are let go here — never by a
-    // sweep that guesses who is alive.
-    let keep: Vec<String> = [&holder, &host]
-        .iter()
-        .filter_map(|c| c.as_ref())
-        .flat_map(|c| c.claims.iter().map(|x| format!("HTTPRoute/{}", x.source)))
-        .collect();
-    super::ippool::release_unlisted("HTTPRoute/", &keep)?;
+    // Resolve everything WITHOUT touching the ledger first: a document further down that
+    // cannot be served must not leave the leases of the ones before it taken.
+    resolve_configs(&specs, false)?;
+    let (holder, host) = resolve_configs(&specs, true)?;
+    let names: Vec<String> = specs.iter().map(|(n, _)| n.clone()).collect();
+    let mut merged = Vec::new();
     for (w, cfg) in [(Where::Holder, holder), (Where::Host, host)] {
+        let cfg = merge_with_existing(ingress_proxy::read_manual_config(w), &names, cfg)?;
+        merged.push((w, cfg));
+    }
+    for (w, cfg) in &merged {
         let Some(cfg) = cfg else {
-            // This instance has nothing to serve any more (its routes moved, or
-            // were removed): stop what an earlier apply left behind.
-            if ingress_proxy::read_manual_config(w).is_some() {
-                ingress_proxy::clear_manual(w)?;
+            // This instance has nothing to serve any more (its routes moved to the other
+            // one): stop what an earlier apply left behind.
+            if ingress_proxy::read_manual_config(*w).is_some() {
+                ingress_proxy::clear_manual(*w)?;
             }
             continue;
         };
-        // Write the MANUAL part and recompose (composes with the auto-registered
-        // routes of `--expose` containers, without one erasing the other).
-        ingress_proxy::set_manual(&cfg, w)?;
+        let w = *w;
+        let before = ingress_proxy::read_manual_config(w);
+        let served = (|| -> Result<()> {
+            // Listeners are bound once, at startup: a changed port, TLS flag or address
+            // needs the proxy restarted, and SIGHUP would leave the old sockets serving.
+            if ingress_proxy::listeners_changed(w, &cfg.listeners) {
+                eprintln!(
+                "{}",
+                super::po::t(
+                    "httproute: the listeners changed — restarting the proxy (open connections are cut)"
+                )
+            );
+                ingress_proxy::stop_keeping_sources(w)?;
+            }
+            // Write the MANUAL part and recompose (composes with the auto-registered
+            // routes of `--expose` containers, without one erasing the other).
+            ingress_proxy::set_manual(cfg, w)
+        })();
+        if let Err(e) = served {
+            // Put back what was there: leaving this apply's half-served contribution in
+            // the config would have the NEXT apply carry it along as if it were live,
+            // and would keep leases for routes that never came up.
+            let _ = match before {
+                Some(b) => ingress_proxy::set_manual(&b, w),
+                None => ingress_proxy::clear_manual(w).map(|_| ()),
+            };
+            let keep: Vec<String> = [Where::Holder, Where::Host]
+                .into_iter()
+                .filter_map(ingress_proxy::read_manual_config)
+                .flat_map(|c| {
+                    c.claims
+                        .into_iter()
+                        .map(|x| format!("HTTPRoute/{}", x.source))
+                })
+                .collect();
+            let _ = super::ippool::release_unlisted("HTTPRoute/", &keep);
+            return Err(e);
+        }
         println!(
             "{}",
             super::po::tf(
@@ -1533,12 +1661,103 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
             )
         );
     }
+    // Only NOW — with the proxy serving — let go of the leases nobody declares any more.
+    // Releasing first freed an address the previous config was still listening on
+    // whenever the write or the start failed.
+    let keep: Vec<String> = merged
+        .iter()
+        .filter_map(|(_, c)| c.as_ref())
+        .flat_map(|c| c.claims.iter().map(|x| format!("HTTPRoute/{}", x.source)))
+        .collect();
+    super::ippool::release_unlisted("HTTPRoute/", &keep)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cfg_of(source: &str, port: u16, pool: Option<&str>) -> ProxyConfig {
+        ProxyConfig {
+            listeners: vec![Listener {
+                port,
+                tls: false,
+                addr: None,
+                sources: vec![source.into()],
+            }],
+            routes: vec![Route {
+                host: format!("{source}.pt"),
+                path: "/".into(),
+                backend: "10.0.0.1:80".into(),
+                source: source.into(),
+            }],
+            tls: None,
+            published_hosts: Vec::new(),
+            claims: pool
+                .map(|p| {
+                    vec![ingress_proxy::PoolClaim {
+                        source: source.into(),
+                        pool: p.into(),
+                        addr: "127.0.0.10".into(),
+                    }]
+                })
+                .unwrap_or_default(),
+            stamps: Vec::new(),
+            bind: None,
+        }
+    }
+
+    #[test]
+    fn applying_a_second_manifest_keeps_the_routes_of_the_first() {
+        let old = cfg_of("a", 80, Some("edge"));
+        let new = cfg_of("b", 81, None);
+        let m = merge_with_existing(Some(old), &["b".into()], Some(new))
+            .unwrap()
+            .unwrap();
+        let src: Vec<&str> = m.routes.iter().map(|r| r.source.as_str()).collect();
+        assert!(src.contains(&"a") && src.contains(&"b"), "{src:?}");
+        assert_eq!(m.listeners.len(), 2);
+        assert_eq!(m.claims.len(), 1, "a's lease is still declared");
+    }
+
+    #[test]
+    fn re_applying_a_document_replaces_its_own_contribution_only() {
+        let mut old = cfg_of("a", 80, None);
+        let extra = cfg_of("b", 80, None);
+        old.routes.extend(extra.routes);
+        old.listeners[0].sources.push("b".into());
+        let new = cfg_of("a", 90, None);
+        let m = merge_with_existing(Some(old), &["a".into()], Some(new))
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.routes.iter().filter(|r| r.source == "a").count(), 1);
+        assert!(m.listeners.iter().any(|l| l.port == 90));
+        let l80 = m.listeners.iter().find(|l| l.port == 80).unwrap();
+        assert_eq!(
+            l80.sources,
+            vec!["b".to_string()],
+            "a let go of :80, b keeps it"
+        );
+    }
+
+    #[test]
+    fn a_document_that_moved_away_leaves_nothing_behind() {
+        let old = cfg_of("a", 80, None);
+        assert!(merge_with_existing(Some(old), &["a".into()], None)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn the_same_port_on_two_addresses_across_applies_is_refused() {
+        let mut old = cfg_of("a", 80, None);
+        old.listeners[0].addr = Some("127.0.0.10".into());
+        let new = cfg_of("b", 80, None);
+        let e = merge_with_existing(Some(old), &["b".into()], Some(new))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(":80"), "{e}");
+    }
 
     fn spec_to(services: &[&str]) -> HttpRouteSpec {
         HttpRouteSpec {

@@ -573,12 +573,18 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
         // holder instance binds everything inside its own netns, where a host address
         // does not exist.
         let ip: std::net::IpAddr = match &cfg.bind {
-            Some(default) => l
-                .addr
-                .as_deref()
-                .unwrap_or(default)
-                .parse()
-                .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1])),
+            // An address that does not parse is a config error, not «loopback»: falling
+            // back silently would bind somewhere the operator never asked for and
+            // report the route as served.
+            Some(default) => {
+                let raw = l.addr.as_deref().unwrap_or(default);
+                raw.parse().map_err(|_| {
+                    Error::Invalid(super::po::tf(
+                        "listener :{port}: '{addr}' is not an IP address",
+                        &[("port", &l.port.to_string()), ("addr", raw)],
+                    ))
+                })?
+            }
             None => std::net::IpAddr::from([0, 0, 0, 0]),
         };
         let addr = SocketAddr::new(ip, l.port);
@@ -720,6 +726,24 @@ pub(crate) fn read_manual_config(w: Where) -> Option<ProxyConfig> {
 pub(crate) fn live_config(w: Where) -> Option<ProxyConfig> {
     running_pid(w)?;
     serde_json::from_slice(&std::fs::read(config_path(w)).ok()?).ok()
+}
+
+/// Do the listeners in `new` differ from the ones the running proxy was started with —
+/// by port, TLS or address? Listeners are bound once, at startup, so any of the three
+/// needs a restart; comparing only ports let a moved address go unnoticed.
+pub(crate) fn listeners_changed(w: Where, new: &[Listener]) -> bool {
+    if running_pid(w).is_none() {
+        return false;
+    }
+    let sig = |v: &[Listener]| -> Vec<(u16, bool, Option<String>)> {
+        let mut x: Vec<_> = v.iter().map(|l| (l.port, l.tls, l.addr.clone())).collect();
+        x.sort();
+        x
+    };
+    match read_manual(w) {
+        Some(old) => sig(&old.listeners) != sig(new),
+        None => false,
+    }
 }
 
 fn read_manual(w: Where) -> Option<ProxyConfig> {
@@ -888,7 +912,12 @@ fn rebuild(w: Where) -> Result<()> {
                 .map(|m| m.claims.clone())
                 .unwrap_or_default(),
             stamps: Vec::new(),
-            bind: manual.as_ref().and_then(|m| m.bind.clone()),
+            // The host instance is a real socket on the host: with no `bind` recorded it
+            // would listen on every address, so the default is loopback, never «all».
+            bind: manual
+                .as_ref()
+                .and_then(|m| m.bind.clone())
+                .or_else(|| (w == Where::Host).then(|| "127.0.0.1".to_string())),
         },
         w,
     )
@@ -1273,7 +1302,14 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
         // so it keeps the `DELONIX_PUBLISH_ADDR`/`127.0.0.1` fallback of `publish_bind_addr`.
         if let Err(e) = delonix_sdn::slirp_add_hostfwd(&sock, &p, &p, "tcp", l.addr.as_deref()) {
             let msg = e.to_string();
-            if msg.contains("already") || msg.to_lowercase().contains("exist") {
+            // «already in use on the host» is somebody ELSE's socket — the slirp's own
+            // «already exists» is our earlier publish. Reading both as «kept» reported a
+            // route as served while another process answered on its port.
+            let ours = !msg.contains("in use") && {
+                let m = msg.to_lowercase();
+                m.contains("already") || m.contains("exist")
+            };
+            if ours {
                 eprintln!(
                     "httproute: {}",
                     super::po::tf(
@@ -1282,13 +1318,16 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
                     )
                 );
             } else {
-                eprintln!(
-                    "httproute: {}",
-                    super::po::tf(
-                        "warning while publishing :{p}: {err}",
-                        &[("p", &p.to_string()), ("err", &e.to_string())]
-                    )
-                );
+                // Nothing is serving what was asked for: do not leave a proxy running
+                // for it, and do not call it applied.
+                let _ = stop_keeping_sources(Where::Holder);
+                return Err(Error::Runtime {
+                    context: "httproute publish",
+                    message: super::po::tf(
+                        "cannot publish :{p}: {err}",
+                        &[("p", &p.to_string()), ("err", &msg)],
+                    ),
+                });
             }
         }
     }
