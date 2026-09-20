@@ -5707,6 +5707,21 @@ vai por `modprobe.d` porque NÃO é um sysctl** — subir só o max alonga as ca
 escalar. `LimitNOFILE`/`TasksMax` vão para um drop-in do `user@.service`: em rootless os
 containers são filhos dele, e os limites de uma sessão PAM/SSH não lhes chegam.
 
+**`install.sh --performance` / as três perguntas (Enter = sim).** Medido num portátil Ryzen 9
+(32 threads): governor `powersave`, EPP `power` e perfil `power-saver` de fábrica — o CPU fica
+limitado a montante, e nenhum sysctl do `--production` o compensa. Sem `--performance` nem
+`--no-performance` o instalador PERGUNTA três coisas, cada uma com default sim: CPU em modo
+performance (governor + EPP + `powerprofilesctl`), THP em `madvise` + irqbalance, e o timer de GC
+(`system prune --auto --threshold 75`, utilizador, `systemctl --global enable`). **Sem terminal a
+resposta é NÃO** (`ask_yn` lê do `/dev/tty`, porque `curl | bash` ocupa o stdin): o instalador não
+muda o governor de uma máquina sem ninguém para dizer que sim. O que se escreve em sysfs não é um
+sysctl e não sobrevive a um reboot, por isso vive num serviço (`delonix-performance.service`,
+helper `/usr/local/sbin/delonix-performance`) que guarda o estado do ARRANQUE e o repõe no `stop`:
+`systemctl disable --now delonix-performance` reverte. O perfil de energia aplica-se ANTES do
+governor — o power-profiles-daemon reescreve os dois ao mudar de perfil. O `install.sh` avisa
+também de um `delonix-cri`/`-mcp`/`-mgmt` diferente noutro ponto do PATH, comparando conteúdo:
+**nunca com `--version`, que o `delonix-cri` ignora e arranca o servidor.**
+
 **Dois bugs reais apanhados a construir**, ambos com teste de regressão:
 
 1. **O `stream_download` não tinha retry nenhum.** A cloud image do Rocky (646 MiB) morreu aos
