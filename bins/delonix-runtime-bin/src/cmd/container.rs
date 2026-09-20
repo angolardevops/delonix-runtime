@@ -3136,6 +3136,9 @@ struct ContainerLsRow {
     /// container is not something a plain `ls` should pay for by default.
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<u64>,
+    /// What a browser can open for this container (ADR-0048); absent when nothing is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    services: Vec<super::svc::SvcRow>,
 }
 
 /// How many times a container has been restarted, counted from the event log.
@@ -3200,6 +3203,7 @@ fn cmd_ps(
         _ => None,
     };
     let restarts = restart_counts(&super::util::state_root());
+    let svc_index = super::svc::SvcIndex::load();
     if format == super::output::OutputFormat::Json {
         let rows: Vec<ContainerLsRow> = included
             .iter()
@@ -3217,6 +3221,7 @@ fn cmd_ps(
                     .flatten()
                     .map(|dir| super::volume::measured_usage(&dir))
                     .and_then(|u| u.is_complete().then_some(u.bytes)),
+                services: svc_index.rows(&c.name, &c.namespace, c.ip.as_deref()),
             })
             .collect();
         return output::print_json(&rows);
@@ -3244,6 +3249,7 @@ fn cmd_ps(
     // `output::namespace_cell`. Until it existed, the boundary the engine
     // enforces in nftables was invisible in the listing an operator reads
     // most.
+    headers.push("SVC");
     headers.push("NAMESPACE");
     let mut t = output::Table::new(&headers);
     for c in &included {
@@ -3267,6 +3273,11 @@ fn cmd_ps(
                 .unwrap_or_else(|| "-".to_string());
             row.push(cell);
         }
+        row.push(super::svc::cell(&svc_index.rows(
+            &c.name,
+            &c.namespace,
+            c.ip.as_deref(),
+        )));
         row.push(output::namespace_cell(&c.namespace, namespace.is_some()));
         t.row(row);
     }
@@ -4770,6 +4781,10 @@ fn describe_one(c: &Container) {
     // rota para os pares, e antes disto aparecia aqui como um `host` normal.
     d.sub("Mode", net_mode_display(c));
     d.sub("IP", c.ip.as_deref().unwrap_or("<none>"));
+    let svc = super::svc::SvcIndex::load().rows(&c.name, &c.namespace, c.ip.as_deref());
+    if !svc.is_empty() {
+        d.sub("Services", super::svc::cell(&svc));
+    }
     if !c.extra_networks.is_empty() {
         d.sub(
             "Extra",

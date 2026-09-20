@@ -66,6 +66,7 @@ pub mod service;
 pub mod sharevolume;
 pub mod stack;
 pub mod storage;
+pub mod svc;
 pub mod system;
 pub mod tunnel;
 pub mod util;

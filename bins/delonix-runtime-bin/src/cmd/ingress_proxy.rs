@@ -680,7 +680,7 @@ fn log_path(w: Where) -> std::path::PathBuf {
 }
 /// HTTP port of the auto-routes (`--expose`). **Non-privileged** — in rootless the
 /// slirp refuses to publish ports <1024. Reached with `Host: <fqdn>` on `:8080`.
-const AUTO_HTTP_PORT: u16 = 8080;
+pub(crate) const AUTO_HTTP_PORT: u16 = 8080;
 
 /// The MANUAL part of the config (routes/listeners/TLS from `kind: HTTPRoute`).
 fn manual_path(w: Where) -> std::path::PathBuf {
@@ -702,8 +702,15 @@ pub struct AutoRoute {
 }
 
 impl AutoRoute {
-    /// This container's internal FQDN (the `Host` that matches it in the proxy + the DNS name).
+    /// This container's standard service name (ADR-0048): the `Host` a browser uses and the
+    /// one the listings print.
     pub fn fqdn(&self) -> String {
+        delonix_sdn::infra::service_fqdn(&self.name, &self.namespace)
+    }
+
+    /// The earlier spelling, `<name>.<namespace>.delonix.internal`. Still registered as a
+    /// second `Host` so nothing that already uses it stops answering.
+    pub fn legacy_fqdn(&self) -> String {
         format!("{}.{}.delonix.internal", self.name, self.namespace)
     }
 }
@@ -749,6 +756,10 @@ pub(crate) fn listeners_changed(w: Where, new: &[Listener]) -> bool {
 fn read_manual(w: Where) -> Option<ProxyConfig> {
     serde_json::from_slice(&std::fs::read(manual_path(w)).ok()?).ok()
 }
+pub(crate) fn auto_routes() -> Vec<AutoRoute> {
+    read_auto()
+}
+
 fn read_auto() -> Vec<AutoRoute> {
     std::fs::read(auto_path())
         .ok()
@@ -894,16 +905,18 @@ fn rebuild(w: Where) -> Result<()> {
         });
     }
     for a in &auto {
-        routes.push(Route {
-            host: a.fqdn(),
-            path: "/".into(),
-            backend: format!("{}:{}", a.ip, a.port),
-            // An auto-registered route comes from a `container run --expose`,
-            // not from any document — left empty so the reconciler never
-            // mistakes it for a manifest's, which is what would let a `plan`
-            // propose removing a route nobody declared.
-            source: String::new(),
-        });
+        for host in [a.fqdn(), a.legacy_fqdn()] {
+            routes.push(Route {
+                host,
+                path: "/".into(),
+                backend: format!("{}:{}", a.ip, a.port),
+                // An auto-registered route comes from a `container run --expose`,
+                // not from any document — left empty so the reconciler never
+                // mistakes it for a manifest's, which is what would let a `plan`
+                // propose removing a route nobody declared.
+                source: String::new(),
+            });
+        }
     }
 
     if listeners.is_empty() || routes.is_empty() {
