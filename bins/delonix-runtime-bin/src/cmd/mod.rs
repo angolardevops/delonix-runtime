@@ -70,6 +70,7 @@ pub mod util;
 pub(crate) mod verbs;
 pub mod vlan;
 pub mod vm;
+pub mod vm_expose;
 pub mod vmbackends;
 pub mod vmbridge;
 pub mod vmfile;

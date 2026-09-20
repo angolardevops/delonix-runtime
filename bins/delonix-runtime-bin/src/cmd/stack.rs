@@ -2474,10 +2474,16 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
         .and_then(|s| s.list())
         .map(|vs| vs.into_iter().map(|v| v.name).collect())
         .unwrap_or_default();
-    let existing_containers: Vec<String> = super::util::open_stores()
+    let mut existing_containers: Vec<String> = super::util::open_stores()
         .and_then(|(_, cstore)| Ok(cstore.list()?))
         .map(|cs| cs.into_iter().map(|c| c.name).collect())
         .unwrap_or_default();
+    existing_containers.extend(
+        delonix_vm::list(&root)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| v.name),
+    );
     let existing_secrets: Vec<String> = delonix_state::SecretStore::open(&root)
         .map(|s| s.list().into_iter().map(|sec| sec.name).collect())
         .unwrap_or_default();
@@ -2522,7 +2528,10 @@ fn validate_graph_with(
     // A Pod's members are named `<pod>-cN` unless the member names itself, but
     // the reference is to the POD: that is the name the netns, the address and
     // the firewall chain all hang off.
-    let mut containers = declared(&[k::CONTAINER, k::POD]);
+    // A VM is a workload target too: a route published by `VirtualMachine.spec.expose`
+    // names it as its backend (ADR-0046), and `Dependency` documents already say
+    // «containers/VMs».
+    let mut containers = declared(&[k::CONTAINER, k::POD, k::VM]);
     let mut secrets = declared(&[k::SECRET]);
     networks.extend(existing_networks.iter().cloned());
     volumes.extend(existing_volumes.iter().cloned());

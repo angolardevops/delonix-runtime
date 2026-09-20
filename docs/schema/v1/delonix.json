@@ -2799,6 +2799,44 @@
       },
       "type": "object"
     },
+    "VmExposeSpec": {
+      "description": "One published service of a VM.",
+      "properties": {
+        "host": {
+          "description": "Host name to match (`app.example.pt`).",
+          "type": "string"
+        },
+        "path": {
+          "default": "/",
+          "description": "Path prefix. Default `/`.",
+          "type": "string"
+        },
+        "port": {
+          "description": "Port the service listens on INSIDE the guest.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS termination, the same block as `kind: HTTPRoute` (`mode: selfSigned`\nor `mode: secretRef` + `secretRef`). The proxy has ONE certificate per\nroute set, so every entry that sets it must set the same one."
+        }
+      },
+      "required": [
+        "host",
+        "port"
+      ],
+      "type": "object"
+    },
     "VmModeSpec": {
       "description": "`spec.vm` block — only read in `mode: vm`.",
       "properties": {
@@ -2931,6 +2969,13 @@
           "default": "",
           "description": "The base disk: a VM image name in the store, or a path.\n\nOptional ONLY because [`build`](Self::build) can produce it. Exactly one\nof the two — a `kind: VirtualMachine` with neither has no disk to boot, and one with\nboth is two answers to the same question (see [`VmSpec::resolve_disk`]).",
           "type": "string"
+        },
+        "expose": {
+          "description": "HTTP/S services listening inside the guest, published by name (ADR-0046).\nLowered at load into a synthetic `kind: HTTPRoute` named `<vm>-expose`; the\nkey never reaches the VM apply. See [`super::vm_expose`].",
+          "items": {
+            "$ref": "#/$defs/VmExposeSpec"
+          },
+          "type": "array"
         },
         "extraDisks": {
           "default": [],

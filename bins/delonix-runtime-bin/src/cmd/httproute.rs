@@ -693,6 +693,32 @@ fn container_ips() -> std::collections::HashMap<String, String> {
     m
 }
 
+/// IPs of the VMs a route may name as a backend (ADR-0046).
+///
+/// **Only VMs that are ON the SDN.** The proxy runs inside the holder netns, so a
+/// backend has to be reachable from there: a Cloud Hypervisor VM has a tap on the
+/// SDN bridge, a libvirt VM sits on `virbr0` in the host netns, which the holder
+/// does not see. A libvirt VM is therefore mapped to `Err(reason)` instead of being
+/// left out — so the caller can say WHY, and not "does not exist".
+fn vm_ips() -> std::collections::HashMap<String, std::result::Result<String, String>> {
+    let mut m = std::collections::HashMap::new();
+    for vm in delonix_vm::list(&super::util::state_root()).unwrap_or_default() {
+        let entry = if vm.backend != "cloud-hypervisor" {
+            Err(format!(
+                "its backend is '{}': only Cloud Hypervisor VMs are on the SDN the proxy reaches (libvirt is planned, ADR-0046 phase 2)",
+                vm.backend
+            ))
+        } else {
+            match vm.ip {
+                Some(ip) => Ok(ip),
+                None => Err("it has no IP yet (is it running?)".to_string()),
+            }
+        };
+        m.insert(vm.name, entry);
+    }
+    m
+}
+
 /// Reads the cert/key pair (PEM) from a `kind: Secret`. Accepts the k8s-style keys
 /// (`tls.crt`/`tls.key`) OR the variant with `_` (the vault does not allow `.` in
 /// env keys — see `valid_env_key`), whichever is found.
@@ -726,6 +752,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
         return Ok(None);
     }
     let ips = container_ips();
+    let vms = vm_ips();
     let mut listeners: Vec<Listener> = Vec::new();
     let mut routes: Vec<Route> = Vec::new();
     let mut all_hosts: Vec<String> = Vec::new();
@@ -755,12 +782,23 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
                 all_hosts.push(h.clone());
             }
             for pr in &rule.paths {
-                let ip = ips.get(&pr.backend.service).ok_or_else(|| {
-                    Error::Invalid(super::po::tf(
-                        "HTTPRoute '{name}': backend '{service}' has no IP on the SDN (does it exist and is it on a custom network?)",
-                        &[("name", name), ("service", &pr.backend.service)],
-                    ))
-                })?;
+                // A container wins a name clash: it is what a route always meant.
+                let ip = match (ips.get(&pr.backend.service), vms.get(&pr.backend.service)) {
+                    (Some(ip), _) => ip.clone(),
+                    (None, Some(Ok(ip))) => ip.clone(),
+                    (None, Some(Err(why))) => {
+                        return Err(Error::Invalid(super::po::tf(
+                            "HTTPRoute '{name}': backend VM '{service}' cannot be served — {why}",
+                            &[("name", name), ("service", &pr.backend.service), ("why", why)],
+                        )))
+                    }
+                    (None, None) => {
+                        return Err(Error::Invalid(super::po::tf(
+                            "HTTPRoute '{name}': backend '{service}' has no IP on the SDN (does it exist and is it on a custom network?)",
+                            &[("name", name), ("service", &pr.backend.service)],
+                        )))
+                    }
+                };
                 routes.push(Route {
                     host: rule.host.clone().unwrap_or_default(),
                     path: pr.path.clone(),
