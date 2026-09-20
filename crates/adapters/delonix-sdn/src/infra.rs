@@ -5189,79 +5189,6 @@ pub struct ServiceDef {
     pub annotations: std::collections::BTreeMap<String, String>,
 }
 
-// ---- Route hosts (ADR-0046, phase 1b) -----------------------------------------
-//
-// A host declared by an `HTTPRoute` (`app.example.pt`) resolves nowhere for a
-// container unless somebody edits its `/etc/hosts` — and a container's
-// `/etc/hosts` is written once, at creation. The holder's DNS already answers
-// live, so the route publishes its host names HERE and every client on the SDN
-// resolves them to the address of its own network's bridge, where the proxy
-// listens. One file, rewritten whole by the proxy composer: a host disappears
-// from DNS the moment no route asks for it, with nothing to reap.
-
-fn route_hosts_path() -> PathBuf {
-    ingress_dir().join("route-hosts.json")
-}
-
-/// Host names a route publishes to the containers on the SDN. Only names that are
-/// plain DNS hostnames are kept; an empty list removes the file.
-pub fn route_hosts_set(hosts: &[String]) -> Result<()> {
-    let mut clean: Vec<String> = hosts
-        .iter()
-        .map(|h| h.trim_end_matches('.').to_lowercase())
-        .filter(|h| {
-            !h.is_empty()
-                && h.split('.').all(|l| {
-                    !l.is_empty()
-                        && !l.starts_with('-')
-                        && !l.ends_with('-')
-                        && l.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-                })
-        })
-        .collect();
-    clean.sort();
-    clean.dedup();
-    if clean.is_empty() {
-        let _ = std::fs::remove_file(route_hosts_path());
-        return Ok(());
-    }
-    let _ = std::fs::create_dir_all(ingress_dir());
-    let json = serde_json::to_vec_pretty(&clean).map_err(|e| Error::Command {
-        context: "route hosts",
-        message: e.to_string(),
-    })?;
-    delonix_state::write_atomic(&route_hosts_path(), &json).map_err(|e| Error::Command {
-        context: "route hosts",
-        message: e.to_string(),
-    })
-}
-
-/// The host names currently published.
-pub fn route_hosts_list() -> Vec<String> {
-    std::fs::read(route_hosts_path())
-        .ok()
-        .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
-}
-
-/// The bridge address a route host resolves to for `client`: the address, on the
-/// network the client sits on, where the proxy listens. PURE over the index.
-///
-/// `None` when the name is not a route host, or the client is on no known
-/// network — in which case the query falls through to the normal path instead of
-/// being answered with an address the client cannot reach.
-fn route_host_answer(idx: &DnsIndex, name: &str, client: Option<[u8; 4]>) -> Option<[u8; 4]> {
-    let n = name.trim_end_matches('.').to_lowercase();
-    if !idx.route_hosts.contains(&n) {
-        return None;
-    }
-    let c = u32::from_be_bytes(client?);
-    idx.gateways
-        .iter()
-        .find(|(first, last, _)| (*first..=*last).contains(&c))
-        .map(|(_, _, gw)| *gw)
-}
-
 fn services_dir() -> PathBuf {
     ingress_dir().join("services")
 }
@@ -7270,18 +7197,8 @@ fn handle_dns(q: &[u8], client: Option<[u8; 4]>) -> Option<Vec<u8>> {
     // container/VM name, and building the multi-record answer here keeps
     // `dns_action_owned`/the single-IP `Answer` branch below completely
     // unchanged for every other caller (ADR-0032's explicit design goal).
-    if qtype == QTYPE_AAAA
-        && dns_index()
-            .route_hosts
-            .contains(&name.trim_end_matches('.').to_lowercase())
-    {
-        // A route host is ours and has no IPv6 address: an empty NOERROR, not a
-        // forward — upstream would answer NXDOMAIN for a name it never heard of.
-        return Some(negative_reply(q, qend, RCODE_NOERROR));
-    }
     if qtype == QTYPE_A {
-        let routed = || route_host_answer(&dns_index(), &name, client).map(|ip| vec![ip]);
-        if let Some(ips) = dns_resolve_multi_for(&name, client).or_else(routed) {
+        if let Some(ips) = dns_resolve_multi_for(&name, client) {
             let mut r = Vec::with_capacity(qend + 16 * ips.len());
             r.extend_from_slice(&q[0..2]); // original ID
             r.extend_from_slice(&[0x81, 0x80]); // flags: response + RA
@@ -7470,13 +7387,6 @@ struct DnsIndex {
     /// qualified (`<name>.<namespace>.delonix.internal`), so there is no bare
     /// form to also index.
     services: std::collections::HashMap<String, ServiceDnsEntry>,
-    /// Host names published by a route (`hosts: [containers]`, ADR-0046): a
-    /// client on the SDN resolves each of them to ITS OWN network's bridge
-    /// address, where the L7 proxy listens.
-    route_hosts: std::collections::HashSet<String>,
-    /// `(first, last, bridge address)` of every network, to answer a route host
-    /// with the address on the network the client is actually on.
-    gateways: Vec<(u32, u32, [u8; 4])>,
 }
 
 /// Parses `a.b.c.d/len` into `(network, mask)`. A bare address is `/32`.
@@ -7742,22 +7652,6 @@ fn build_dns_index() -> DnsIndex {
                 ns: def.namespace,
             },
         );
-    }
-    idx.route_hosts = route_hosts_list().into_iter().collect();
-    if !idx.route_hosts.is_empty() {
-        // The default network is not in `network_list()`; its bridge is the
-        // infra gateway.
-        let mut prefixes: Vec<String> = vec![INFRA_CIDR.to_string()];
-        prefixes.extend(network_list().into_iter().map(|d| d.prefix));
-        for p in prefixes {
-            let Some(c) = crate::Cidr::parse(&p) else {
-                continue;
-            };
-            let Some(gw) = c.gateway().as_deref().and_then(parse_v4) else {
-                continue;
-            };
-            idx.gateways.push((c.base, c.last(), gw));
-        }
     }
     idx
 }
@@ -10488,54 +10382,5 @@ mod tests_restore_lease {
                 Some("10.88.1.1")
             );
         });
-    }
-}
-
-#[cfg(test)]
-mod route_host_tests {
-    use super::*;
-
-    fn idx(hosts: &[&str], nets: &[&str]) -> DnsIndex {
-        let mut i = DnsIndex::default();
-        i.route_hosts = hosts.iter().map(|h| h.to_string()).collect();
-        for n in nets {
-            let c = crate::Cidr::parse(n).unwrap();
-            i.gateways
-                .push((c.base, c.last(), parse_v4(&c.gateway().unwrap()).unwrap()));
-        }
-        i
-    }
-
-    #[test]
-    fn a_client_gets_the_bridge_address_of_its_own_network() {
-        let i = idx(&["app.example.pt"], &["10.200.0.1/16", "10.210"]);
-        assert_eq!(
-            route_host_answer(&i, "app.example.pt", Some([10, 210, 3, 9])),
-            Some([10, 210, 0, 1])
-        );
-        assert_eq!(
-            route_host_answer(&i, "app.example.pt", Some([10, 200, 0, 7])),
-            Some([10, 200, 0, 1])
-        );
-    }
-
-    #[test]
-    fn the_name_is_case_and_trailing_dot_insensitive() {
-        let i = idx(&["app.example.pt"], &["10.210"]);
-        assert!(route_host_answer(&i, "APP.Example.pt.", Some([10, 210, 1, 1])).is_some());
-    }
-
-    #[test]
-    fn a_name_nobody_published_or_a_client_on_no_network_is_not_answered() {
-        let i = idx(&["app.example.pt"], &["10.210"]);
-        assert_eq!(
-            route_host_answer(&i, "other.pt", Some([10, 210, 1, 1])),
-            None
-        );
-        assert_eq!(
-            route_host_answer(&i, "app.example.pt", Some([192, 168, 1, 5])),
-            None
-        );
-        assert_eq!(route_host_answer(&i, "app.example.pt", None), None);
     }
 }

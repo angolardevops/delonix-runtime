@@ -132,8 +132,7 @@ Each phase closes with a run against the real thing, and reports what was not va
 
 1. Should `IPPool` addresses also be usable by `kind: Service` (DNS round-robin today, no VIP)?
    Leaning yes, as a later claimant, not in v1.
-2. `hosts: host` when several stacks share one operator host: one block per stack, or one shared
-   block with per-stack markers? Leaning per stack.
+2. ~~`hosts: host` with several stacks~~ — answered in phase 1b: one block per node.
 3. libvirt `expose` when the guest IP is not yet known at apply time: fail, or register the route
    and let the proxy retry? Leaning fail, with `--wait`.
 
@@ -149,12 +148,48 @@ host; the `expose:` sugar itself was validated by `validate` and `--dry-run`, no
 Found only by running it: `validate_graph` rejected every VM backend ("not a declared or existing
 Container"), which no unit test had reached.
 
-**Not built: `hosts: containers`.** The container `/etc/hosts` is written once at creation, and
-rewriting it in a running overlay container needs a write through `/proc/<pid>/root`. The holder DNS
-already resolves live, so the better fit is a route-host record in that DNS. It lives in the holder
-process, so it needs its own step and a measured respawn. It moves to phase 1b.
+**`hosts: containers` is not in phase 1.** A container's `/etc/hosts` is written once at creation,
+so the first attempt (phase 1b) answered the route host from the holder DNS with the bridge address
+of the client's network. The name resolved, and the container could not connect: `dlxinput` drops a
+container's connection to any holder-resident listener ON PURPOSE, because a container that reaches
+the proxy is relayed to any backend, across namespaces and past `ingress policy deny`. That control
+is not weakened here. The question is now ADR-0047. The DNS code is kept in commit `d7245765` for
+that ADR to reuse; it is not in the tree.
 
-## Not validated
+## Phase 1b — `hosts: host` (2026-09-20)
+
+`spec.hosts: [host]` on an `HTTPRoute` (and `expose[].hosts`, which must agree across entries)
+publishes each rule host as `127.0.0.1 <host>` in ONE delimited block of the operator host's
+`/etc/hosts` (`cmd/hosts_file.rs`). Loopback is where the slirp forward binds by default; the port is
+the route's entrypoint, which a hosts file cannot carry.
+
+- **One block per node, not per stack** (resolves open question 2): the proxy composer is collective
+  across documents, so the block is rewritten whole from the composed config and a name disappears
+  when no route asks for it.
+- **Nothing outside the block is touched.** A name that already has an entry outside it is refused,
+  with the offending line.
+- **Root is required.** Without it the apply stops and prints the exact block to add; `/etc/hosts` was
+  measured byte-identical after that refusal. Removing a route without root only warns, so `rm`
+  is never blocked by it. No write happens when nothing would change, so a manifest that does not
+  use `hosts:` never needs root.
+- `DELONIX_HOSTS_FILE` redirects the file, so an isolated run never touches the real one.
+- The reconciler compares `hosts` (desired from the spec, actual from the composed config). A route to
+  a VM also had permanent drift, because `actual()` mapped addresses back to names for containers
+  only; fixed.
+
+Measured against the real proxy in an isolated root: the block is written after the other lines and
+removed by `httproute rm`, leaving the file as it was; a second apply changes nothing; a conflicting
+line is refused.
+
+## Not validated (phase 1b)
+
+A client resolving a name from the written block and reaching the backend was NOT observed: writing
+the real `/etc/hosts` needs root, and the traffic step of that run failed on my test backend (a
+container whose command never came up, not investigated further). The block content, the refusals
+and the removal were measured; the name-to-traffic step was not. The `expose:` sugar with `hosts:` was
+covered by unit tests and `--dry-run`, not by traffic.
+
+## Not validated (design)
 
 Everything above is design. Not measured yet: that a host-netns proxy reaches a libvirt guest on
 `virbr0` from a rootless user (the `qemu:///session` mode has no `virbr0` at all — user-mode

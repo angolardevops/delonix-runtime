@@ -34,9 +34,9 @@ pub(crate) struct VmExposeSpec {
     #[serde(default)]
     #[schemars(with = "Option<super::httproute::TlsSpec>")]
     pub tls: Option<Value>,
-    /// Where to publish `host` so it resolves: `[containers]` makes every container
-    /// on the SDN resolve it through the holder's DNS. The route publishes ONE list
-    /// for all its names, so every entry must say the same.
+    /// Where to publish `host` so it resolves: `[host]` puts it in a delimited block
+    /// of the operator host's `/etc/hosts` (root). The route publishes ONE list for
+    /// all its names, so every entry must say the same.
     #[serde(default)]
     pub hosts: Vec<String>,
 }
@@ -241,12 +241,12 @@ mod tests {
     #[test]
     fn hosts_are_carried_to_the_route_and_must_agree_across_entries() {
         let out = lower_vm_expose(vec![vm(
-            "expose:\n  - {host: a.pt, port: 80, hosts: [containers]}\n  - {host: b.pt, port: 81, hosts: [containers]}",
+            "expose:\n  - {host: a.pt, port: 80, hosts: [host]}\n  - {host: b.pt, port: 81, hosts: [host]}",
         )])
         .unwrap();
-        assert_eq!(out[1].spec["hosts"][0], "containers");
+        assert_eq!(out[1].spec["hosts"][0], "host");
         let e = lower_vm_expose(vec![vm(
-            "expose:\n  - {host: a.pt, port: 80, hosts: [containers]}\n  - {host: b.pt, port: 81}",
+            "expose:\n  - {host: a.pt, port: 80, hosts: [host]}\n  - {host: b.pt, port: 81}",
         )])
         .unwrap_err()
         .to_string();

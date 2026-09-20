@@ -19,6 +19,7 @@ pub use delonix_model::exitcode;
 pub mod features;
 pub mod firewall;
 pub mod flow;
+pub mod hosts_file;
 pub mod httproute;
 pub mod image;
 pub mod ingress_proxy;

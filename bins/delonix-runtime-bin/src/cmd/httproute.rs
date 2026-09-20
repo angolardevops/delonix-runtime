@@ -207,17 +207,17 @@ pub struct HttpRouteSpec {
     #[serde(default)]
     pub rules: Vec<RouteRule>,
     /// Where to publish this route's host names, so they RESOLVE without editing
-    /// any `hosts` file (ADR-0046). Only `containers` exists so far: the holder's
-    /// DNS answers each rule `host` for every container on the SDN, with the
-    /// address of that container's own network bridge (where the proxy listens).
-    /// The port is the route's entrypoint, not something DNS can carry: with a
-    /// non-default port the client still has to say it.
+    /// any `hosts` file by hand (ADR-0046). Only `host` exists so far: each rule
+    /// `host` gets `127.0.0.1` in a delimited block of the operator host's
+    /// `/etc/hosts` (needs root, refused otherwise). `containers` and `guest` are
+    /// planned (ADR-0047 for the first). The PORT is the route's entrypoint, which
+    /// a hosts file cannot carry.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<String>,
 }
 
 /// Values `spec.hosts` accepts.
-pub const HOSTS_TARGETS: &[&str] = &["containers"];
+pub const HOSTS_TARGETS: &[&str] = &["host"];
 
 /// An entry point (proxy listen port).
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -358,7 +358,7 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
     for h in &spec.hosts {
         if !HOSTS_TARGETS.contains(&h.as_str()) {
             return Err(err(super::po::tf(
-                "hosts: '{target}' is not supported (only: {allowed}) — `host` and `guest` are planned, ADR-0046",
+                "hosts: '{target}' is not supported (only: {allowed}) — `containers` needs the proxy to authorise container sources first (ADR-0047), `guest` is planned",
                 &[("target", h), ("allowed", &HOSTS_TARGETS.join(", "))],
             )));
         }
@@ -778,13 +778,13 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
     let mut all_hosts: Vec<String> = Vec::new();
     let mut tls_material: Option<TlsMaterial> = None;
     let mut secret_ref: Option<String> = None;
-    let mut dns_hosts: Vec<ingress_proxy::DnsHost> = Vec::new();
+    let mut published: Vec<ingress_proxy::PublishedHost> = Vec::new();
 
     for (name, spec) in specs {
-        if spec.hosts.iter().any(|h| h == "containers") {
+        if spec.hosts.iter().any(|h| h == "host") {
             for rule in &spec.rules {
                 if let Some(h) = &rule.host {
-                    dns_hosts.push(ingress_proxy::DnsHost {
+                    published.push(ingress_proxy::PublishedHost {
                         host: h.clone(),
                         source: name.clone(),
                     });
@@ -852,7 +852,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
         listeners,
         routes,
         tls: tls_material,
-        dns_hosts,
+        published_hosts: published,
     }))
 }
 
@@ -891,10 +891,10 @@ fn route_keys(spec: &HttpRouteSpec) -> String {
     keys.join(",")
 }
 
-/// The host names a spec asks the holder's DNS to publish — empty unless it opted
+/// The host names a spec asks to publish in the host's `/etc/hosts` — empty unless it opted
 /// in. Same shape as what `actual` reads back from the manual config.
-fn desired_dns_hosts(spec: &HttpRouteSpec) -> String {
-    if !spec.hosts.iter().any(|h| h == "containers") {
+fn desired_published_hosts(spec: &HttpRouteSpec) -> String {
+    if !spec.hosts.iter().any(|h| h == "host") {
         return String::new();
     }
     let mut v: Vec<&str> = spec
@@ -973,7 +973,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         },
     );
     f.insert("rules".into(), route_keys(&spec));
-    f.insert("hosts".into(), desired_dns_hosts(&spec));
+    f.insert("hosts".into(), desired_published_hosts(&spec));
     Ok(super::reconcile::Desired {
         // Keyed by the document's OWN kind, so an `Ingress` matches the
         // `Ingress` half of the actual side and the plan names the Kind the
@@ -1069,7 +1069,7 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         keys.sort();
         f.insert("rules".into(), keys.join(","));
         let mut published: Vec<&str> = cfg
-            .dns_hosts
+            .published_hosts
             .iter()
             .filter(|d| &d.source == name)
             .map(|d| d.host.as_str())

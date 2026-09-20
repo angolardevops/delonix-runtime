@@ -1,0 +1,3915 @@
+{
+  "$defs": {
+    "AppSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "builder": {
+          "default": "auto",
+          "description": "`\"auto\"` (detect the stack, use the Paketo builder), `\"heroku\"`, or an\nexplicit builder image reference — the last one REQUIRES `runImage`\n(this engine does not introspect a custom builder's own `builder.toml`\nto discover its run image; refusing is the honest answer, not a guess).",
+          "type": "string"
+        },
+        "image": {
+          "description": "Tag the built image gets in the LOCAL `ImageStore` once the build\nsucceeds.",
+          "type": "string"
+        },
+        "runImage": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "default": ".",
+          "description": "Directory to build (Compose-style relative-to-CWD default, same\nconvention `kind: Image`'s `build.context` already uses — not the\nmanifest file's own directory).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "type": "object"
+    },
+    "Backend": {
+      "description": "The destination of a path: a container (by name) and the port it listens on.",
+      "properties": {
+        "port": {
+          "description": "Container port where the service listens.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "service": {
+          "description": "Name of the backend container (resolved to the record's IP at apply time).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "service",
+        "port"
+      ],
+      "type": "object"
+    },
+    "BuildSpec": {
+      "properties": {
+        "buildArgs": {
+          "default": [],
+          "description": "`ARG` overrides (`KEY=VALUE`) — same semantics as the CLI's `--build-arg`:\nonly takes effect for a name the Dockerfile actually declares.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "context": {
+          "default": ".",
+          "type": "string"
+        },
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "noCache": {
+          "default": false,
+          "description": "Bypasses the layer cache — same as the CLI's `--no-cache`.",
+          "type": "boolean"
+        },
+        "platform": {
+          "default": null,
+          "description": "`linux/<arch>` — same as the CLI's `--platform`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secrets": {
+          "default": [],
+          "description": "`id=<name>,src=<path>` entries — same as the CLI's repeatable `--secret`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tag": {
+          "type": "string"
+        },
+        "target": {
+          "default": null,
+          "description": "Name or index of a multi-stage `FROM ... AS <name>` stage to stop the\nbuild at — same as the CLI's `--target`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "tag"
+      ],
+      "type": "object"
+    },
+    "ClusterSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "cni": {
+          "default": "default",
+          "description": "`default` = the image's CNI (kindnet); `none` = install none.",
+          "type": "string"
+        },
+        "controlPlane": {
+          "$ref": "#/$defs/NodesSpec"
+        },
+        "controlPlaneEndpoint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "etcd": {
+          "$ref": "#/$defs/EtcdSpec"
+        },
+        "k8sVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/KindModeSpec"
+        },
+        "mode": {
+          "default": "kind",
+          "description": "**The discriminator**: `kind` (containers here), `vm` (golden VMs) or\n`ssh` (remote hosts already live). One Kind, three paths — the common\nfields (k8sVersion/podSubnet/cni) are shared, the specific ones live in\nthe mode's block.",
+          "type": "string"
+        },
+        "podSubnet": {
+          "default": "10.244.0.0/16",
+          "type": "string"
+        },
+        "serviceSubnet": {
+          "default": "10.96.0.0/12",
+          "type": "string"
+        },
+        "ssh": {
+          "$ref": "#/$defs/SshSpec"
+        },
+        "vm": {
+          "$ref": "#/$defs/VmModeSpec"
+        },
+        "workers": {
+          "$ref": "#/$defs/NodesSpec"
+        }
+      },
+      "type": "object"
+    },
+    "ContainerSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "addHost": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "apparmor": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "capAdd": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capDrop": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cgroupParent": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SpecCgroupParent"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Intermediate cgroup shared by a GROUP of containers, with its own aggregate\nceiling — the only way to bound what N containers hold TOGETHER (see\n`delonix_compute::CgroupParent`)."
+        },
+        "command": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cpuWeight": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuset": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "detach": {
+          "default": true,
+          "type": "boolean"
+        },
+        "detect": {
+          "default": false,
+          "type": "boolean"
+        },
+        "devices": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "entrypoint": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "env": {
+          "anyOf": [
+            {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "envFile": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expose": {
+          "default": null,
+          "description": "HTTP port to auto-register in the L7 proxy (internal FQDN). See `--expose`.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gpus": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hostIpc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hostPid": {
+          "default": false,
+          "type": "boolean"
+        },
+        "hostname": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "type": "string"
+        },
+        "ioWeight": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "knows": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "labels": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "limits": {},
+        "logDriver": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "netBps": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "netBurst": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "anyOf": [
+            {
+              "default": "host",
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "networkAlias": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ports": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "privileged": {
+          "default": false,
+          "type": "boolean"
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        },
+        "resources": {},
+        "restart": {},
+        "restartPolicy": {
+          "default": "no",
+          "description": "`no` (default) | `on-failure[:max]` | `always` | `unless-stopped` —\na detached supervisor becomes the container's parent and restarts it (see\n`run_supervised`). This is what makes a manifest resilient. Canonical\nfield name is `restartPolicy` (uniform with `kind: VirtualMachine`); the legacy\n`restart` stays accepted so existing manifests don't break.",
+          "type": "string"
+        },
+        "secret": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secretFiles": {
+          "default": false,
+          "type": "boolean"
+        },
+        "security": {},
+        "securityOpt": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "selinux": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "storage": {},
+        "sysctl": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "tmpfs": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ulimit": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "user": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userns": {
+          "default": false,
+          "type": "boolean"
+        },
+        "volumes": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "type": "object"
+    },
+    "CpuTopologySpec": {
+      "description": "`spec.cpuTopology` of a `kind: VirtualMachine`.",
+      "properties": {
+        "cores": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "sockets": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "threads": {
+          "default": 0,
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "DependencySpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Dependency`.",
+      "properties": {
+        "from": {
+          "description": "Container/VM that INITIATES the connection (the one that \"knows\"). Gains access to `to`.",
+          "type": "string"
+        },
+        "ports": {
+          "default": [],
+          "description": "Ports of `to` opened to `from` (e.g. `[\"5432\"]`). Empty = any port.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "proto": {
+          "default": null,
+          "description": "`tcp`/`udp`/`any` (default `any`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "anyOf": [
+            {
+              "default": [],
+              "description": "Target(s) that `from` gets to reach (and which become protected: only the\ndeclared `from`s reach them). Accepts a single name (`to: db`) or a list.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "string"
+            }
+          ]
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
+    "Entrypoint": {
+      "description": "An entry point (proxy listen port).",
+      "properties": {
+        "port": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls": {
+          "default": false,
+          "description": "`true` = terminate TLS on this port (requires `spec.tls`). Default `false`.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "type": "object"
+    },
+    "EtcdSpec": {
+      "properties": {
+        "hosts": {
+          "description": "Only meaningful with `mode: \"external\"` — the dedicated etcd hosts\ndelonix bootstraps its own CA + cluster on. Reuses `HostSpec` verbatim\n(same shape `controlPlane.hosts`/`workers.hosts` already use).",
+          "items": {
+            "$ref": "#/$defs/HostSpec"
+          },
+          "type": "array"
+        },
+        "mode": {
+          "default": "stacked",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "ExtraDiskSpec": {
+      "description": "One entry of `spec.extraDisks`.",
+      "properties": {
+        "bus": {
+          "description": "Bus: `virtio` (default), `sata`, `scsi`, `ide`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "device": {
+          "description": "`disk` (default) or `cdrom`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "format": {
+          "description": "Format: `qcow2` (default) or `raw`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readOnly": {
+          "default": false,
+          "description": "Mount read-only.",
+          "type": "boolean"
+        },
+        "source": {
+          "description": "Host path of the disk image.",
+          "type": "string"
+        },
+        "target": {
+          "description": "Explicit target dev (auto-assigned when omitted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "source"
+      ],
+      "type": "object"
+    },
+    "ExtraNicSpec": {
+      "description": "One entry of `spec.extraNics`.",
+      "properties": {
+        "mac": {
+          "description": "Fixed MAC (random when omitted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "description": "Model: `virtio` (default), `e1000`, …",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "description": "Network/bridge name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "type": {
+          "description": "`network` (libvirt network), `bridge` (host bridge) or `user`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type"
+      ],
+      "type": "object"
+    },
+    "FromEnv": {
+      "anyOf": [
+        {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      ],
+      "description": "`fromEnv:` accepts a list of names or a `key: ENV_VAR` mapping. Two shapes\nbecause the useful cases differ: a list is the shorthand when the key name\nand the variable name are the same, and the mapping is what you need when\nthe consumer expects a fixed key (`password`) but the environment calls it\nsomething else (`PGPASSWORD`)."
+    },
+    "FwDocRule": {
+      "properties": {
+        "action": {
+          "default": null,
+          "description": "`allow` (default) or `deny`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "from": {
+          "default": null,
+          "description": "Source CIDR (ingress) — the other end of inbound traffic.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fromWorkload": {
+          "default": null,
+          "description": "Source **by workload name** (ingress), resolved to that container's SDN\naddress at apply time.\n\nExists because **a container's IP is not stable**: it comes from the SDN\nand changes on a restart. A policy written as a CIDR is therefore a policy\nthat silently stops matching the workload it was written for — the same\nlesson `vm bridge` already paid for, where the follow-up recorded is\nexactly \"discovery by NAME, so as not to depend on dynamic IPs\".\n\nA NAME and not a permissive `from` that also accepts names: a value that\nfails to parse as a CIDR falling back to \"treat it as a name\" would be a\nsilent reinterpretation on a security field, which is the one place this\nengine refuses to guess.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "note": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "Port, range `n-m`, or `*`.",
+          "type": "string"
+        },
+        "proto": {
+          "default": null,
+          "description": "`tcp`/`udp`/`any` (default `any`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "to": {
+          "default": null,
+          "description": "Destination CIDR (egress) — the other end of outbound traffic.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toWorkload": {
+          "default": null,
+          "description": "Destination by workload name (egress). Same reasoning as\n[`FwDocRule::from_workload`].",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "port"
+      ],
+      "type": "object"
+    },
+    "FwDocSpec": {
+      "additionalProperties": false,
+      "description": "A `kind: Ingress`/`Egress` document. Each doc is the DESIRED STATE of one\ndirection (inbound for `Ingress`, outbound for `Egress`) for its `target`\ncontainer — applying it REPLACES that direction's rules and policy, leaving\nthe other direction untouched, so an `Ingress` and an `Egress` doc compose\non the same container. Allowlist by default (`defaultPolicy: deny`), like a\nk8s NetworkPolicy.",
+      "properties": {
+        "allowCidrs": {
+          "default": [],
+          "description": "CIDRs allowed when `defaultPolicy: deny` (egress allowlist, besides\nDNS). Translates to `set_egress_policy_net_allowlist`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "defaultPolicy": {
+          "default": null,
+          "description": "`allow` or `deny` when no rule matches. Default `deny` (allowlist).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "`ingress`|`egress` — only for `kind: NetworkPolicy` (the direction comes\nfrom the Kind for the legacy `Egress`). Captured so the dry-run round-trip\npreserves it; `apply` reads it directly from `doc.spec`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fqdnAllowlist": {
+          "default": [],
+          "description": "FQDNs allowed (and `*.fqdn`), learnt LIVE from DNS (DNS-snooping).\nTranslates to `set_egress_host` per host.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rateLimit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RateLimitSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "L4 protection (conn-rate/conn-max) — **GLOBAL** to the rootless ingress, not\nper-network (the engine API `set_l4_guard` is global). Translates to `set_l4_guard`."
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FwDocRule"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "default": null,
+          "description": "`container` (default) or `network`. In `network` (only `Egress`), the `target`\nis a NETWORK NAME and the per-network egress policy + CIDR/FQDN allowlist +\nL4 rate-limit apply — not per-container L4 rules.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "`container` (default): container name. `network`: network name.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target"
+      ],
+      "type": "object"
+    },
+    "HostAlias": {
+      "description": "k8s `hostAliases[]` entry: one IP, N hostnames.",
+      "properties": {
+        "hostnames": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ip": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ip"
+      ],
+      "type": "object"
+    },
+    "HostSpec": {
+      "anyOf": [
+        {
+          "required": [
+            "ip"
+          ]
+        },
+        {
+          "required": [
+            "address"
+          ]
+        }
+      ],
+      "properties": {
+        "address": {
+          "description": "`address` is the canonical name in the templates; `ip` stays for\ncompatibility with earlier manifests.",
+          "type": "string"
+        },
+        "hostname": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ip": {
+          "description": "`address` is the canonical name in the templates; `ip` stays for\ncompatibility with earlier manifests.",
+          "type": "string"
+        }
+      },
+      "required": [],
+      "type": "object"
+    },
+    "HttpRouteSpec": {
+      "additionalProperties": false,
+      "description": "`spec` for `kind: HTTPRoute`.",
+      "properties": {
+        "entrypoints": {
+          "default": [],
+          "description": "Entry points (ports where the proxy listens). Default: `[{port: 80}]`,\nplus an implicit `{port: 443, tls: true}` if `spec.tls` is defined.",
+          "items": {
+            "$ref": "#/$defs/Entrypoint"
+          },
+          "type": "array"
+        },
+        "hosts": {
+          "description": "Where to publish this route's host names, so they RESOLVE without editing\nany `hosts` file by hand (ADR-0046). Only `host` exists so far: each rule\n`host` gets `127.0.0.1` in a delimited block of the operator host's\n`/etc/hosts` (needs root, refused otherwise). `containers` and `guest` are\nplanned (ADR-0047 for the first). The PORT is the route's entrypoint, which\na hosts file cannot carry.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "rules": {
+          "default": [],
+          "description": "Routing rules (by Host and/or path prefix). Required and non-empty.",
+          "items": {
+            "$ref": "#/$defs/RouteRule"
+          },
+          "type": "array"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS configuration (optional). Without it, the proxy only serves HTTP."
+        }
+      },
+      "type": "object"
+    },
+    "ImageSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Image` — either `pull: <ref>` or `build: {...}` (mutually\nexclusive; clear error if both are missing).",
+      "properties": {
+        "build": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BuildSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pull": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pullSecret": {
+          "description": "`kind: Secret` holding `username`/`password` for the registry this image\nis pulled from.\n\nWithout it the pull uses the machine's credential vault\n(`delonix image login`) — per-MACHINE state that a manifest cannot\ncarry. A `kind: Image` naming a private registry therefore applied\ncleanly on the host where someone had logged in and failed on every\nother one, with an authentication error about a registry the manifest\nnever mentioned a credential for. Naming a Secret makes the document\nself-contained, which is the whole point of GitOps.\n\nOnly meaningful with `pull:` — a `build:` produces an image locally and\nauthenticates nowhere.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IngressBackend": {
+      "properties": {
+        "service": {
+          "$ref": "#/$defs/IngressServiceRef"
+        }
+      },
+      "required": [
+        "service"
+      ],
+      "type": "object"
+    },
+    "IngressHttp": {
+      "properties": {
+        "paths": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IngressPath"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "IngressPath": {
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/IngressBackend"
+        },
+        "path": {
+          "default": "/",
+          "type": "string"
+        },
+        "pathType": {
+          "default": null,
+          "description": "`Prefix` (default) | `Exact` | `ImplementationSpecific`.\n\nThis engine matches by PREFIX and has no other mode. `Exact` is accepted\nfor Kubernetes fidelity and then served as a prefix — so longer paths\nunder it match too, which is traffic the author did not ask for.\nApplying a manifest that sets `Exact` prints a warning naming the paths.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "backend"
+      ],
+      "type": "object"
+    },
+    "IngressRule": {
+      "properties": {
+        "host": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "http": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IngressHttp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "IngressServicePort": {
+      "properties": {
+        "name": {
+          "default": null,
+          "description": "Named ports are not supported — use `number`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "number": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IngressServiceRef": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "port": {
+          "$ref": "#/$defs/IngressServicePort"
+        }
+      },
+      "required": [
+        "name",
+        "port"
+      ],
+      "type": "object"
+    },
+    "IngressSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "defaultBackend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/IngressBackend"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Catch-all backend when no rule matches (→ a `host: any, path: /` route)."
+        },
+        "entrypoints": {
+          "default": [],
+          "description": "delonix extension: listener ports. Omit → 80 (+ 443 when `tls` is set).",
+          "items": {
+            "$ref": "#/$defs/Entrypoint"
+          },
+          "type": "array"
+        },
+        "ingressClassName": {
+          "default": null,
+          "description": "Accepted for k8s fidelity; the embedded proxy is the only ingress class.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/IngressRule"
+          },
+          "type": "array"
+        },
+        "tls": {
+          "default": [],
+          "description": "k8s TLS block (a LIST). v1 uses a SINGLE cert (no SNI) — the first entry wins.",
+          "items": {
+            "$ref": "#/$defs/IngressTls"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "IngressTls": {
+      "properties": {
+        "hosts": {
+          "default": [],
+          "description": "The SNI names this certificate should cover. **Accepted, never applied**:\nthis engine serves ONE certificate and does not select by SNI, so the\ncert from `secretName` (or the self-signed fallback) is presented to\nevery host that reaches the listener. Applying a manifest that sets this\nprints a warning naming the hosts.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "secretName": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "KindModeSpec": {
+      "description": "`spec.kind` block — only read in `mode: kind`.",
+      "properties": {
+        "apiServerPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "image": {
+          "default": "kindest/node:v1.34.0@sha256:7416a61b42b1662ca6ca89f02028ac133a309a2a30ba309614e8ec94d976dc5a",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "NetShareSpec": {
+      "description": "A network share, as declared inside a `kind: Volume` (`spec.nfs`,\n`spec.cifs`, `spec.webdav`).\n\nThis is `StorageSpec` minus the `type` field — the type is now the BLOCK's\nname, the same shape `kind: Workload` uses (`spec.container`/`spec.vm`), and\nfor the same reason: a type that names its own block cannot contradict it.\n\n`kind: Volume` and `kind: Storage` used to describe the SAME mount two ways\nand land in the SAME store, with nothing to say which to use — `volumes ls`\nshowed both (one store) while `storage ls` showed only some, so the same\nquestion got different answers depending on the command.",
+      "properties": {
+        "mountOptions": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "password": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordSecret": {
+          "default": null,
+          "description": "Vault secret (`password` key) — preferred over an inline `password`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        },
+        "server": {
+          "type": "string"
+        },
+        "share": {
+          "type": "string"
+        },
+        "username": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "server",
+        "share"
+      ],
+      "type": "object"
+    },
+    "NetworkAccessRuleSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: NetworkAccessRule`.",
+      "properties": {
+        "action": {
+          "default": null,
+          "description": "`allow` (accept) or `deny` (drop). Default `allow`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "direction": {
+          "description": "`ingress` (traffic TO the container) or `egress` (FROM it).",
+          "type": "string"
+        },
+        "from": {
+          "default": null,
+          "description": "CIDR of the other end (source on ingress, destination on egress).\nEmpty/omitted = anywhere.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "Port, a range `n-m`, or `*` (any).",
+          "type": "string"
+        },
+        "proto": {
+          "default": null,
+          "description": "`tcp`/`udp`/`any`. Default `any`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "target": {
+          "description": "Container this rule applies to. Must be on the SDN — a `--net\nhost`/`none` container has no firewall to govern.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "direction",
+        "port"
+      ],
+      "type": "object"
+    },
+    "NetworkRouteSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: NetworkRoute`.",
+      "properties": {
+        "from": {
+          "description": "Network that may INITIATE. Its workloads reach `to`.",
+          "type": "string"
+        },
+        "to": {
+          "description": "Network reached. Its workloads do NOT get to reach `from` back — the\nreturn traffic of a conversation `from` started flows (established), a\nnew one from this side does not. Same asymmetry `kind: Dependency` gives\nbetween containers.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    "NetworkSpec": {
+      "additionalProperties": false,
+      "description": "`spec` for `kind: Network` — mirrors the fields of `NetworkCmd::Create`.",
+      "properties": {
+        "driver": {
+          "default": "bridge",
+          "type": "string"
+        },
+        "gateway": {
+          "default": "",
+          "type": "string"
+        },
+        "parent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "peers": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subnet": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vni": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "wgIp": {
+          "description": "Canonical `wgIp` (camelCase, uniform with the rest of the schema); `wg_ip`\nis still accepted (backward compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wg_ip": {}
+      },
+      "type": "object"
+    },
+    "NodesSpec": {
+      "description": "The nodes of a role. **Unifies the three modes**: `kind`/`vm` say how many\n(`replicas`), `ssh` says which ones (`hosts`) — because there the machines already exist\nand we do not create them.",
+      "properties": {
+        "hosts": {
+          "items": {
+            "$ref": "#/$defs/HostSpec"
+          },
+          "type": "array"
+        },
+        "replicas": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "OwnerSpec": {
+      "properties": {
+        "gid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "mode": {
+          "description": "Octal, quoted (`\"0770\"`). A YAML `0770` unquoted is the decimal 770, and\nthat is not the mode anyone means — so it is parsed from a string and a\nbare number is refused by serde rather than misread.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "uid": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "uid",
+        "gid"
+      ],
+      "type": "object"
+    },
+    "PathRule": {
+      "description": "A path prefix and the backend it forwards to.",
+      "properties": {
+        "backend": {
+          "$ref": "#/$defs/Backend"
+        },
+        "path": {
+          "default": "/",
+          "description": "Path prefix (e.g.: `/`, `/api`). Default `/`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "backend"
+      ],
+      "type": "object"
+    },
+    "PodCapabilities": {
+      "properties": {
+        "add": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "drop": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "PodContainer": {
+      "description": "One entry of `spec.containers[]`.",
+      "properties": {
+        "args": {
+          "default": [],
+          "description": "k8s `args` — overrides the image CMD.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "command": {
+          "default": [],
+          "description": "k8s `command` — overrides the image ENTRYPOINT.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodEnvVar"
+          },
+          "type": "array"
+        },
+        "image": {
+          "type": "string"
+        },
+        "name": {
+          "default": null,
+          "description": "k8s member name. Absent → `c<i>` by position, the fallback\n`pod_member_run_opts` uses to build the container name `<pod>-<member>`;\nthe reconciler has to reproduce it or every pod would diff against\nitself.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ports": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodPort"
+          },
+          "type": "array"
+        },
+        "resources": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodResources"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "securityContext": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodSecurityContext"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tty": {
+          "default": false,
+          "type": "boolean"
+        },
+        "volumeMounts": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodVolumeMount"
+          },
+          "type": "array"
+        },
+        "workingDir": {
+          "default": null,
+          "description": "k8s `workingDir` — the directory the process starts in (same as\n`container run -w`). Omitted: the image's own working directory, or `/`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "image"
+      ],
+      "type": "object"
+    },
+    "PodEmptyDir": {
+      "properties": {
+        "medium": {
+          "default": null,
+          "description": "`\"\"` (default) or `\"Memory\"`. This engine always backs an `emptyDir` with\ntmpfs (host RAM); Kubernetes uses node disk unless `Memory` is set, so a\nmanifest that omits this gets a warning. Prefer a named volume for large\nscratch space.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PodEnvVar": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "value": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PodHostPath": {
+      "properties": {
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "PodPort": {
+      "properties": {
+        "containerPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "hostIP": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hostPort": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "protocol": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "containerPort"
+      ],
+      "type": "object"
+    },
+    "PodPvc": {
+      "properties": {
+        "claimName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "claimName"
+      ],
+      "type": "object"
+    },
+    "PodResourceList": {
+      "properties": {
+        "cpu": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PodResources": {
+      "properties": {
+        "limits": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodResourceList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "requests": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodResourceList"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    },
+    "PodSecurityContext": {
+      "properties": {
+        "capabilities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodCapabilities"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "privileged": {
+          "default": false,
+          "type": "boolean"
+        },
+        "readOnlyRootFilesystem": {
+          "default": false,
+          "type": "boolean"
+        },
+        "runAsUser": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "PodSpec": {
+      "additionalProperties": false,
+      "description": "k8s-like Pod spec: `spec.containers[]`. Used by `kind: Container` (Pod shape,\n1 container) AND by `kind: Pod` (N containers sharing the pod's namespaces —\nsee `cmd::pod`).",
+      "properties": {
+        "containers": {
+          "items": {
+            "$ref": "#/$defs/PodContainer"
+          },
+          "type": "array"
+        },
+        "detach": {
+          "default": true,
+          "type": "boolean"
+        },
+        "expose": {
+          "default": null,
+          "description": "delonix extension: auto-register an HTTP port in the L7 proxy.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "hostAliases": {
+          "default": [],
+          "description": "k8s `hostAliases`: extra `/etc/hosts` entries, in the k8s shape\n(`{ip, hostnames[]}`) rather than docker's `name:ip`. Same effect as\n`--add-host`; normalized below.\n\nWired on purpose: without it, the SAME `kind: Container` gained or lost\nthe feature depending on which shape of spec was used — flat had it,\nk8s silently did not.",
+          "items": {
+            "$ref": "#/$defs/HostAlias"
+          },
+          "type": "array"
+        },
+        "hostname": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "default": "host",
+          "description": "delonix extension: the SDN network the POD's shared netns attaches to.\n\nA `<custom>` name selects that network's bridge. `host`/`none` (the default) mean\n\"the pod's own netns on the default bridge\" — a pod IS a shared netns, so it never\ngets the host's. They are kept as the default because every existing manifest relies\non it; only a custom name changes anything.\n\nWas parsed and **entirely ignored** until v0.47.0: `create_pod` hardcoded `ingress`,\nso a pod declared on a custom network landed on the default bridge in silence.",
+          "type": "string"
+        },
+        "restartPolicy": {
+          "default": "no",
+          "description": "k8s `restartPolicy`: `Always`|`OnFailure`|`Never` (delonix values also accepted).",
+          "type": "string"
+        },
+        "shareProcessNamespace": {
+          "default": false,
+          "description": "k8s `shareProcessNamespace`: the pod's containers see each other's\nprocesses (shared PID namespace). Default `false`, like k8s. Honored by\n`kind: Pod` (see `cmd::pod`); ignored for a single `kind: Container`.",
+          "type": "boolean"
+        },
+        "volumes": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/PodVolume"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "containers"
+      ],
+      "type": "object"
+    },
+    "PodVolume": {
+      "description": "One entry of the Pod-level `spec.volumes[]` (referenced by `volumeMounts`).",
+      "properties": {
+        "emptyDir": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodEmptyDir"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "hostPath": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodHostPath"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "name": {
+          "type": "string"
+        },
+        "persistentVolumeClaim": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodPvc"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source": {
+          "default": null,
+          "description": "delonix extension: a named `Volume`/`Storage` directly by source string.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "PodVolumeMount": {
+      "properties": {
+        "mountPath": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "mountPath"
+      ],
+      "type": "object"
+    },
+    "ProvisionSpec": {
+      "properties": {
+        "truenas": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TrueNasSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RateLimitSpec": {
+      "description": "`spec.rateLimit` — the ingress L4 DDoS protection (global). `{connRate: 0,\nconnMax: 0}` explicitly TURNS OFF the guard (clear_l4_guard).",
+      "properties": {
+        "connMax": {
+          "default": 0,
+          "description": "Maximum concurrent connections.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "connRate": {
+          "default": 0,
+          "description": "New connections per second allowed.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "RouteRule": {
+      "description": "A routing rule: matches by `host` (optional — empty = any Host) and\ndispatches by path prefix to a backend.",
+      "properties": {
+        "host": {
+          "default": null,
+          "description": "Host name to match (e.g.: `loja.exemplo.ao`). Empty/omitted = any Host.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "paths": {
+          "default": [],
+          "description": "Sub-rules by path prefix. Required and non-empty.",
+          "items": {
+            "$ref": "#/$defs/PathRule"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "SecretSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Secret` — a bag of key/value pairs encrypted at-rest,\nconsumed by `Container.secret` (env/files) and `Storage.passwordSecret`\n(`password` key). Closes the \"no CLI\" gap: the secret is declared in YAML\ninstead of `delonix secret create`.",
+      "properties": {
+        "fromEnv": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FromEnv"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Keys read from the PROCESS's environment at apply time.\n\n`[\"DB_PASSWORD\"]` takes `$DB_PASSWORD` and stores it under that name;\n`{ password: DB_PASSWORD }` stores it under `password` instead — which is\nwhat the consumers of a secret usually want, since `Storage`/`Tunnel`/\n`provision` each look for a key by a fixed name.\n\nThis is the form a CI job has: the value arrives as an environment\nvariable from the runner's own secret store, and there is no file to\npoint at and nothing to write into the manifest. Neither of the other\ntwo shapes could express it."
+        },
+        "fromEnvFile": {
+          "default": null,
+          "description": "Path to a `KEY=value` file (e.g. `.env`) — keeps the values OUT of the\nmanifest. Applied BEFORE `stringData` (inline overrides the file).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "stringData": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Inline `KEY: value` pairs. **Plaintext in the manifest** — convenient for\ndev, but the value stays in cleartext in the file; for production prefer\n`fromEnvFile` (outside version control) or the CLI's `secret create`. Warned at apply.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ServiceSelector": {
+      "properties": {
+        "matchLabels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ServiceSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Service`.",
+      "properties": {
+        "port": {
+          "description": "The CONTAINER port every matched workload is expected to listen on —\nmirrors the \"always container-side, post-DNAT\" convention `net ingress\nallow`'s port already uses. There is no host-side or VIP-side port,\nbecause v1 has no VIP.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "selector": {
+          "$ref": "#/$defs/ServiceSelector"
+        }
+      },
+      "required": [
+        "selector",
+        "port"
+      ],
+      "type": "object"
+    },
+    "ShareBlock": {
+      "description": "`spec.share` — the volume this one is carved out of.\n\nOne field, because the rest was already on the volume: `quota`/`alertPct` are\nthe spec's own, so a share sets them exactly where every other volume does\ninstead of in a second place that would have to be kept in agreement.",
+      "properties": {
+        "from": {
+          "description": "Name of the volume to carve this one out of — typically a network volume\n(`nfs:`/`cifs:`/`webdav:`), which is the case the feature exists for, but\nany volume works: the mechanism is a real subdirectory of its mountpoint.\n\n`storageRef` is the spelling `kind: ShareVolume` used, kept as an alias so\na manifest that only renames its Kind does not also have to rename this.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from"
+      ],
+      "type": "object"
+    },
+    "ShareSpec": {
+      "properties": {
+        "maprootGroup": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maprootUser": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "networks": {
+          "default": [],
+          "description": "CIDRs allowed to mount. **Required, and refused when empty**: the\nappliance reads an empty list as \"every network\", and a manifest that\nsays nothing about who may mount a share must not end up exporting it to\neverything that can reach the NAS.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "readOnly": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "SpecCgroupParent": {
+      "description": "`spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,\nwhich comes from `metadata.name`). **`detach` defaults to `true`** (unlike the\nCLI, where the default is `false`): an `apply`/`stack apply` run in the\nforeground would block waiting for the process to exit — dangerous for a\ndeclarative command. Pass `detach: false` explicitly in the YAML if you want\nthe synchronous behavior of the interactive `run`.\nManifest mirror of [`delonix_compute::CgroupParent`].\n\nIt exists here, and not next to the `Container` record in `delonix-compute`, for two\nreasons: the record stays free of `schemars` (the manifest schema is a concern of this binary, not of\nthe domain types), and the manifest speaks camelCase (`memoryMax`) while the\npersisted `Container` keeps its own field names. One conversion at the boundary is\ncheaper than either a new dependency on the record or a rename that breaks stored records.",
+      "properties": {
+        "cpus": {
+          "description": "Aggregate CPU in cores.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memoryMax": {
+          "description": "Aggregate memory ceiling for the whole group (e.g. `1073741824`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "Group directory name — a single, safe path segment.",
+          "type": "string"
+        },
+        "pidsMax": {
+          "description": "Aggregate process ceiling.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "SshSpec": {
+      "properties": {
+        "key": {
+          "description": "`keyPath` is the canonical name (the one in the templates); `key` stays accepted\nso as not to break manifests written before this restructuring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyPath": {
+          "description": "`keyPath` is the canonical name (the one in the templates); `key` stays accepted\nso as not to break manifests written before this restructuring.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "default": null,
+          "description": "SSH port of every host in this cluster. `None` = the client's default (22).",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "user": {
+          "default": "delonix",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "StackSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "apps": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/AppSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "containers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/ContainerSpec"
+                  },
+                  {
+                    "$ref": "#/$defs/PodSpec"
+                  }
+                ]
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "dependencies": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/DependencySpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "firewallPolicies": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/FwDocSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "gateways": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/TunnelSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "httpRoutes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/HttpRouteSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "images": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/ImageSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "ingress": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/IngressSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "networkAccessRules": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkAccessRuleSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "networkRoutes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkRouteSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "networks": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "pods": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/PodSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "secrets": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/SecretSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "services": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/ServiceSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "tunnels": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/TunnelSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "vms": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/VmSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "volumes": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/VolumeSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "workloads": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/WorkloadSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "TlsSpec": {
+      "description": "Proxy TLS configuration.",
+      "properties": {
+        "mode": {
+          "default": null,
+          "description": "`selfSigned` (default) or `secretRef`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secretRef": {
+          "default": null,
+          "description": "Name of a `kind: Secret` with the `tls.crt`/`tls.key` keys (PEM). Used\nwhen `mode: secretRef`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "TrueNasSpec": {
+      "properties": {
+        "apiKeySecret": {
+          "description": "`kind: Secret` holding the API key under the key `apiKey` (or `token`).\nPreferred over an account: a key is revocable on the appliance without\ntouching anyone's login.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dataset": {
+          "description": "Full ZFS path, `<pool>/<name>`. The pool has to exist: laying out\nphysical disks is not something a volume manifest should trigger.",
+          "type": "string"
+        },
+        "insecureTLS": {
+          "default": false,
+          "description": "Accept a certificate this host cannot verify — which a stock TrueNAS\nneeds, since it serves a self-signed one. Explicit because turning it on\nmeans another machine can answer in the appliance's name, taking the API\nkey with it.",
+          "type": "boolean"
+        },
+        "owner": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OwnerSpec"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "password": {
+          "description": "Literal password. Accepted for a throwaway lab and nothing else — it\nends up in whatever git repository the manifest lives in.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "passwordSecret": {
+          "description": "`kind: Secret` holding the account password under the key `password`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quota": {
+          "description": "Quota ON THE NAS (`\"10G\"`). Distinct from the volume's own `spec.quota`,\nwhich is a local accounting limit — for a network share the NAS is the\nonly place a limit can actually be enforced.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "share": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "NFS export rules. Omit to provision the dataset WITHOUT exporting it —\nuseful when the export already exists and only the quota is managed here."
+        },
+        "url": {
+          "description": "`https://<nas>`. The scheme is the caller's: `http://` puts the API key\non the wire in the clear, which is a decision to make deliberately.",
+          "type": "string"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "url",
+        "dataset"
+      ],
+      "type": "object"
+    },
+    "TunnelSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "hostname": {
+          "default": null,
+          "description": "Custom/reserved hostname — provider-dependent support (see module doc).\nFor `cloudflare` this is informational only: it does not create the\nroute, it just labels the URL this tunnel is expected to answer on —\nthe route itself lives in the Cloudflare dashboard for that tunnel.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "insecureSkipTlsVerify": {
+          "default": false,
+          "description": "Skip TLS verification when the tunnel connects to the LOCAL backend\n(a self-signed cert on `localhost:<localPort>`) — never affects the\npublic tunnel URL, which every provider here always serves over a\nreal, provider-issued TLS cert. No-op for `pinggy` (it forwards raw\nTCP and never inspects what is behind it).",
+          "type": "boolean"
+        },
+        "localPort": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "provider": {
+          "description": "`pinggy` | `ngrok` | `cloudflare`.",
+          "type": "string"
+        },
+        "token": {
+          "default": null,
+          "description": "Literal provider token (pinggy pro token / ngrok authtoken / a\ncloudflare NAMED tunnel's token, from `cloudflared tunnel token\n<name>` or the Zero Trust dashboard). Prefer `tokenSecretRef` for\nanything checked into a manifest.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokenSecretRef": {
+          "default": null,
+          "description": "Pull the token from a `kind: Secret`'s `token` key — same convention\nas `storage`'s `--password-secret`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "provider",
+        "localPort"
+      ],
+      "type": "object"
+    },
+    "VmBuildSpec": {
+      "description": "`spec.build` of a `kind: VirtualMachine` — the declarative face of `delonix image vm build`.\n\nThe fields are the flags of that command, one for one, so the two paths\ncannot describe different builds. Nothing here is a second implementation:\n`apply` calls the SAME `vmfile::build`.",
+      "properties": {
+        "compress": {
+          "default": true,
+          "description": "Compress the result with zstd (default `true`) — the image is the\nread-only backing file of every VM created from it, so it is read far\nmore often than written.",
+          "type": "boolean"
+        },
+        "context": {
+          "default": ".",
+          "description": "Build context (default `.`), resolved relative to the MANIFEST's folder\nand not to the shell's working directory — the same rule\n`Secret.fromEnvFile` already follows, so a manifest means the same thing\nfrom wherever it is applied.",
+          "type": "string"
+        },
+        "file": {
+          "default": null,
+          "description": "The `VMfile` (default `<context>/VMfile`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "default": false,
+          "description": "Give the build network access. **Off by default**, like the CLI: a build\nthat reaches the internet produces a different image depending on the\nday.",
+          "type": "boolean"
+        },
+        "tag": {
+          "default": null,
+          "description": "Tag for the produced image (default `<metadata.name>:latest`), which is\nthen used as the VM's disk.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "VmExposeSpec": {
+      "description": "One published service of a VM.",
+      "properties": {
+        "host": {
+          "description": "Host name to match (`app.example.pt`).",
+          "type": "string"
+        },
+        "hosts": {
+          "default": [],
+          "description": "Where to publish `host` so it resolves: `[host]` puts it in a delimited block\nof the operator host's `/etc/hosts` (root). The route publishes ONE list for\nall its names, so every entry must say the same.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "default": "/",
+          "description": "Path prefix. Default `/`.",
+          "type": "string"
+        },
+        "port": {
+          "description": "Port the service listens on INSIDE the guest.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS termination, the same block as `kind: HTTPRoute` (`mode: selfSigned`\nor `mode: secretRef` + `secretRef`). The proxy has ONE certificate per\nroute set, so every entry that sets it must set the same one."
+        }
+      },
+      "required": [
+        "host",
+        "port"
+      ],
+      "type": "object"
+    },
+    "VmModeSpec": {
+      "description": "`spec.vm` block — only read in `mode: vm`.",
+      "properties": {
+        "bootTimeout": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "image": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "network": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sshKey": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vcpus": {
+          "default": null,
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "VmSpec": {
+      "additionalProperties": false,
+      "description": "`spec` for `kind: VirtualMachine` — mirrors `delonix_vm::VmConfig` (minus `name`, which\ncomes from `metadata.name`).",
+      "properties": {
+        "backend": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "boot": {},
+        "bootOrder": {
+          "default": [],
+          "description": "OS boot device order, e.g. `[cdrom, hd]`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "boot_order": {},
+        "bridge": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "build": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VmBuildSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Build the base disk from a `VMfile`, instead of naming one that already\nexists — the same shape `kind: Image` has (`pull:` or `build:`), applied\nto VMs.\n\nWithout it, a project whose VM image is built from a `VMfile` needed two\ncommands and a hand-copied tag between them: `delonix image vm build -t x` and\nthen a manifest saying `disk: x`. The tag was written in two places and\nnothing kept them in step."
+        },
+        "cloudInit": {},
+        "cmdline": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuAffinity": {
+          "description": "Canonical `cpuAffinity`; `cpu_affinity` stays accepted (back-compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuModel": {
+          "description": "CPU mode/model: `host-passthrough` (default), `host-model`, or a named model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cpuTopology": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CpuTopologySpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "CPU topology (sockets/cores/threads)."
+        },
+        "cpu_affinity": {},
+        "cpu_model": {},
+        "cpu_topology": {},
+        "devices": {
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "disk": {
+          "default": "",
+          "description": "The base disk: a VM image name in the store, or a path.\n\nOptional ONLY because [`build`](Self::build) can produce it. Exactly one\nof the two — a `kind: VirtualMachine` with neither has no disk to boot, and one with\nboth is two answers to the same question (see [`VmSpec::resolve_disk`]).",
+          "type": "string"
+        },
+        "expose": {
+          "description": "HTTP/S services listening inside the guest, published by name (ADR-0046).\nLowered at load into a synthetic `kind: HTTPRoute` named `<vm>-expose`; the\nkey never reaches the VM apply. See [`super::vm_expose`].",
+          "items": {
+            "$ref": "#/$defs/VmExposeSpec"
+          },
+          "type": "array"
+        },
+        "extraDisks": {
+          "default": [],
+          "description": "Extra disks beyond the main overlay + seed.",
+          "items": {
+            "$ref": "#/$defs/ExtraDiskSpec"
+          },
+          "type": "array"
+        },
+        "extraNics": {
+          "default": [],
+          "description": "Extra network interfaces beyond the primary one.",
+          "items": {
+            "$ref": "#/$defs/ExtraNicSpec"
+          },
+          "type": "array"
+        },
+        "extra_disks": {},
+        "extra_nics": {},
+        "firmware": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hostname": {
+          "description": "cloud-init: hostname applied on first boot (CLI `--hostname`). Without an\nexplicit `seed`, a NoCloud ISO is generated from these fields — full\nparity with `vm create` in the declarative path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hugepages": {
+          "default": false,
+          "type": "boolean"
+        },
+        "initrd": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ip": {
+          "default": null,
+          "description": "Static IP (libvirt `nat` mode): DHCP reservation on the libvirt network.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kernel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "libvirt": {},
+        "libvirtXml": {
+          "description": "Full `<domain>` XML used verbatim (ultimate escape hatch; trusted only).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "libvirtXmlOverlay": {
+          "default": [],
+          "description": "Raw libvirt XML fragments injected before `</devices>` (trusted manifests).",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "libvirt_xml": {},
+        "libvirt_xml_overlay": {},
+        "machine": {
+          "description": "Machine type (default `q35`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "memory": {
+          "default": null,
+          "description": "RAM (`512M`, `2G`, …). Optional for the same reason as\n[`vcpus`](Self::vcpus); the fallback when neither the manifest nor the\nimage says anything is `1G`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "netMode": {
+          "description": "Canonical `netMode`; `net_mode` stays accepted (back-compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "net_mode": {},
+        "network": {
+          "anyOf": [
+            {
+              "default": "ingress",
+              "type": "string"
+            },
+            {
+              "type": "object"
+            }
+          ]
+        },
+        "resources": {},
+        "restartPolicy": {
+          "description": "Canonical `restartPolicy` (uniform with `Container`); `restart_policy`\nstays accepted so earlier manifests don't break.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "restart_policy": {},
+        "seed": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sshKeys": {
+          "default": [],
+          "description": "cloud-init: authorized public SSH keys (CLI `--ssh-key`, repeatable).\nEach is `ssh-ed25519 AAAA…` or `@/path` to read from a file.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "ssh_keys": {},
+        "tpm": {
+          "default": false,
+          "description": "Emulated TPM 2.0.",
+          "type": "boolean"
+        },
+        "userData": {
+          "default": null,
+          "description": "cloud-init: your own `user-data` (replaces the generated one) — a path or\n`@/path` (CLI `--user-data`). Full control for whoever needs it.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_data": {},
+        "vcpus": {
+          "default": null,
+          "description": "vCPUs. **Optional so that \"omitted\" and \"1\" are different things**: an\nimage built from a `VMfile` records its own `VCPUS`/`MEMORY`, and those\nonly apply where the manifest said nothing. `default_value_t` had to go\nfrom the CLI flags for exactly this reason — the declarative path is the\nsame problem. Nothing is declared ⇒ [`resolve_vm_defaults`] falls back\nto 1.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "video": {
+          "description": "Video model (`virtio`|`qxl`|`vga`|`none`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vnc": {
+          "default": false,
+          "type": "boolean"
+        },
+        "volumes": {
+          "default": [],
+          "description": "Volumes/Storage to mount inside the VM (virtio-9p) — closes the gap of\ngiving storage to a VM without writing cloud-init/XML. See `VmVolumeSpec`.",
+          "items": {
+            "$ref": "#/$defs/VmVolumeSpec"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "VmVolumeSpec": {
+      "description": "One entry of a VM's `spec.volumes`: refers to a `Volume`/`Storage` by\nname and says where to mount it in the guest.",
+      "properties": {
+        "mountPath": {
+          "description": "Mount point in the guest (e.g. `/mnt/dados`).",
+          "type": "string"
+        },
+        "name": {
+          "description": "Name of a `kind: Volume` or `kind: Storage` (resolved at apply time).",
+          "type": "string"
+        },
+        "readOnly": {
+          "default": false,
+          "description": "Mount read-only.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "mountPath"
+      ],
+      "type": "object"
+    },
+    "VolumeSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: Volume` — mirrors the fields of `VolumeCmd::Create`.",
+      "properties": {
+        "alertPct": {
+          "default": null,
+          "description": "Usage percentage above which `ls`/`describe` flag a WARN (default 90).\n\nThe record has carried this since volumes had quotas; the manifest could\nnot set it, so a declarative volume was stuck with the default while the\nCLI could change it. It arrived with the `share:` block below, which\nneeds it, and applies to every volume for the same reason it always did.",
+          "format": "uint8",
+          "maximum": 255,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cifs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "SMB/CIFS share (Samba, Windows, TrueNAS SMB)."
+        },
+        "device": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "driver": {
+          "default": "local",
+          "type": "string"
+        },
+        "mountOptions": {
+          "description": "Canonical `mountOptions` (uniform with `kind: Storage`); `options`\nis still accepted (backward-compat).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nfs": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "NFS export. One of the three network-share blocks — the block's NAME is\nthe type, so a type cannot contradict its own declaration (the same shape\n`kind: Workload` uses for `spec.container`/`spec.vm`)."
+        },
+        "options": {},
+        "provision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProvisionSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "OPTIONAL: create what the share block consumes, instead of requiring it\nto exist already (ADR-0009). Absent, this Kind behaves exactly as before."
+        },
+        "quota": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "share": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ShareBlock"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A subdirectory carved out of ANOTHER volume, with its own name, quota and\nconsumers — what `kind: ShareVolume` used to be a Kind of its own for.\n\nIt is a block and not a Kind because a share IS a volume: it was already\nregistered as one (`VolumeStore::register_external`), and the separate\nKind only added a second record whose one unique field was the parent's\nname. The block sits beside `nfs:`/`cifs:`/`webdav:` and is exclusive\nwith them for the reason `net_share` gives: a volume is one mount, and a\nshare does not mount anything — it points inside a mount someone else made."
+        },
+        "webdav": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NetShareSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "WebDAV (Nextcloud, ownCloud)."
+        }
+      },
+      "type": "object"
+    },
+    "WorkloadSpec": {
+      "additionalProperties": false,
+      "description": "The `spec` of a `kind: Workload`: a `type` discriminator plus the single\ntype-named block that holds the underlying spec, kept raw until the target\nKind re-deserializes it.\nThe four blocks are `serde_yaml::Value` because the lowering hands them to\nthe target Kind to re-deserialize, and holding them raw is what keeps this\ntype from restating a spec it does not own.\n\nFor the SCHEMA that is not good enough: `Value` describes as «anything», so\nan editor would have nothing to say inside the block that carries the entire\nworkload. `#[schemars(with = ...)]` names the type the block actually IS —\nstill derived from the real spec, never a second copy of its fields. That is\nalso the truth of the lowering: `spec.container` is re-read as a\n`ContainerSpec`, so anything the schema would accept here and that type would\nreject is a manifest that fails at apply.\n\n`microvm` maps to `VmSpec` for the same reason it lowers to `kind: VirtualMachine` — it\nis a `VmSpec` with the backend forced to `cloud-hypervisor` (ADR-0006).",
+      "properties": {
+        "container": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ContainerSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "microvm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VmSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "pod": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PodSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "type": {
+          "default": "",
+          "type": "string"
+        },
+        "vm": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/VmSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Container"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "anyOf": [
+              {
+                "$ref": "#/$defs/ContainerSpec"
+              },
+              {
+                "$ref": "#/$defs/PodSpec"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Pod"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/PodSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Volume"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "storage.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/VolumeSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Network"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "VirtualMachine"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/VmSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Secret"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "core.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/SecretSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Image"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "artifact.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/ImageSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "App"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "artifact.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/AppSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Gateway"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "gateway.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/TunnelSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Dependency"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/DependencySpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "NetworkRoute"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkRouteSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "HTTPRoute"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "gateway.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/HttpRouteSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Ingress"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "gateway.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/IngressSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "NetworkPolicy"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/FwDocSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "NetworkAccessRule"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkAccessRuleSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Service"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/ServiceSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Workload"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "compute.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/WorkloadSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "KubernetesCluster"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "infrastructure.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/ClusterSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "Stack"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "core.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/StackSpec"
+          }
+        }
+      }
+    }
+  ],
+  "properties": {
+    "apiVersion": {
+      "enum": [
+        "artifact.delonix.io/v1alpha1",
+        "compute.delonix.io/v1alpha1",
+        "core.delonix.io/v1alpha1",
+        "delonix.io/v1",
+        "gateway.delonix.io/v1alpha1",
+        "infrastructure.delonix.io/v1alpha1",
+        "networking.delonix.io/v1alpha1",
+        "storage.delonix.io/v1alpha1"
+      ]
+    },
+    "kind": {
+      "enum": [
+        "App",
+        "Cluster",
+        "Container",
+        "Dependency",
+        "FirewallPolicy",
+        "Gateway",
+        "HTTPRoute",
+        "Image",
+        "Ingress",
+        "KnowDepends",
+        "KubernetesCluster",
+        "Network",
+        "NetworkAccessRule",
+        "NetworkPolicy",
+        "NetworkRoute",
+        "Pod",
+        "Secret",
+        "Service",
+        "Stack",
+        "Tunnel",
+        "VirtualMachine",
+        "Vm",
+        "Volume",
+        "Workload"
+      ]
+    },
+    "metadata": {
+      "properties": {
+        "annotations": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "labels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "namespace": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "spec": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata"
+  ],
+  "title": "Delonix manifest (delonix.io/v1)",
+  "type": "object"
+}
