@@ -69,7 +69,18 @@ fn run(args: &[String]) -> Result<(), String> {
     }
 }
 
+/// True when `args` asks for the version: `--version` or `-V`, alone.
+fn wants_version(args: &[String]) -> bool {
+    matches!(args, [a] if a == "--version" || a == "-V")
+}
+
 fn main() -> ExitCode {
+    // Answered before telemetry and the release check: asking which release this
+    // binary is must work even for one `check_version` would refuse.
+    if wants_version(&std::env::args().skip(1).collect::<Vec<_>>()) {
+        println!("delonix-mcp {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     delonix_telemetry::telemetry::init();
     let args: Vec<String> = std::env::args().skip(1).collect();
     match run(&args) {
@@ -78,5 +89,22 @@ fn main() -> ExitCode {
             eprintln!("delonix-mcp: {e}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::wants_version;
+
+    fn v(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn version_flag_is_recognised_only_alone() {
+        assert!(wants_version(&v(&["--version"])));
+        assert!(wants_version(&v(&["-V"])));
+        assert!(!wants_version(&v(&[])));
+        assert!(!wants_version(&v(&["serve", "--version"])));
     }
 }
