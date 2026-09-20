@@ -1,0 +1,157 @@
+# kind: Pod — a real multi-container pod: N containers share ONE network namespace
+# (same IP, `localhost` between them), plus IPC/UTS (and optionally PID) sharing.
+# The schema is the k8s Pod one (`spec.containers[]`, structured ports/env/resources/
+# securityContext, pod-level `volumes[]`) plus an engine-specific `network` field.
+#
+#   delonix stack apply -f examples/full-pod.yaml --dry-run
+#   delonix stack validate -f examples/full-pod.yaml
+#
+# Documents in this file:
+#   1. supporting resources (Network, Volumes) referenced by the pods
+#   2. `full-pod`      — every pod-level field and every container field
+#   3. `shared-pid`    — shareProcessNamespace: true
+#   4. `minimal-pod`   — the smallest valid pod
+# ---------------------------------------------------------------------------
+# 1. Supporting resources
+# ---------------------------------------------------------------------------
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata:
+  name: pod-net
+spec:
+  driver: bridge
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: pod-data                        # referenced through `persistentVolumeClaim.claimName`
+spec:
+  driver: local
+---
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: pod-cache                       # referenced through `source`
+spec:
+  driver: local
+---
+# ---------------------------------------------------------------------------
+# 2. Every field
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: full-pod
+  namespace: default                    # isolation namespace (a pod is isolated like a container)
+  labels:
+    app: full-pod
+spec:
+  # ---- pod-level ----
+  network: pod-net                      # delonix extension: SDN network of the pod's shared netns
+                                        #   (host | none | <unset> = the default bridge; a custom name selects that network)
+  restartPolicy: OnFailure              # Always | OnFailure | Never (the engine spellings always/on-failure/no are also accepted)
+  hostname: full-pod-host               # hostname shared by every member (default: the pod name)
+  shareProcessNamespace: false          # true => members see each other's processes (see `shared-pid` below)
+  hostAliases:                          # extra /etc/hosts entries in every member, k8s shape
+    - ip: 10.0.0.9
+      hostnames: [legacy-api, legacy-api.internal]
+    - ip: 10.0.0.10
+      hostnames: [billing]
+
+  # ---- pod-level volumes, referenced by containers[].volumeMounts[].name ----
+  volumes:
+    - name: site
+      hostPath:                         # bind mount of a host directory
+        path: /srv/www
+    - name: scratch
+      emptyDir:                         # ephemeral, backed by tmpfs (host RAM) in this engine
+        medium: Memory                  # "" would warn: k8s means node disk there, this engine always uses tmpfs
+    - name: data
+      persistentVolumeClaim:            # a NAMED volume (a `kind: Volume`), by name
+        claimName: pod-data
+    - name: cache
+      source: pod-cache                 # delonix extension: a named Volume by plain source string
+
+  # ---- members ----
+  containers:
+    - name: web                         # member name; the container is called <pod>-<name> (default c<index>)
+      image: nginx:latest               # REQUIRED
+      command: ["/bin/sh", "-c"]        # k8s `command` => overrides the image ENTRYPOINT
+      args: ["nginx -g 'daemon off;'"]  # k8s `args`    => overrides the image CMD
+      workingDir: /usr/share/nginx/html # directory the process starts in
+      ports:
+        - containerPort: 80
+          hostPort: 8080                # published on the host ONLY when hostPort is set
+          protocol: TCP                 # TCP | UDP (default TCP)
+          hostIP: 127.0.0.1             # bind address of the published port
+        - containerPort: 443            # no hostPort => informational only, not published
+      env:
+        - name: TZ
+          value: Africa/Luanda
+        - name: LOG_LEVEL
+          value: info
+      volumeMounts:
+        - name: site
+          mountPath: /usr/share/nginx/html
+          readOnly: true
+        - name: scratch
+          mountPath: /tmp/cache
+        - name: data
+          mountPath: /var/lib/web
+        - name: cache
+          mountPath: /var/cache/web
+      resources:
+        limits:                         # enforced as cgroup limits (`requests` are advisory here and not set)
+          cpu: "500m"                   # 500m => 0.5 cores
+          memory: 256Mi
+      securityContext:
+        privileged: false
+        runAsUser: 101
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: ["ALL"]
+          add: ["NET_BIND_SERVICE"]
+
+    - name: sidecar                     # a second member: reaches `web` on localhost (shared netns)
+      image: busybox:latest
+      command: ["sh", "-c"]
+      args: ["while true; do wget -qO- http://localhost:80/ >/dev/null 2>&1; sleep 10; done"]
+      resources:
+        limits:
+          cpu: "100m"
+          memory: 64Mi
+---
+# ---------------------------------------------------------------------------
+# 3. Shared PID namespace: the members see each other's processes
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: shared-pid
+spec:
+  shareProcessNamespace: true
+  containers:
+    - name: app
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+    - name: debug
+      image: busybox:latest
+      command: ["sleep", "infinity"]
+---
+# ---------------------------------------------------------------------------
+# 4. Minimal: only `containers[].image` is mandatory
+# ---------------------------------------------------------------------------
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata:
+  name: minimal-pod
+spec:
+  containers:
+    - image: alpine:3.20                # unnamed member => container "minimal-pod-c0"
+      command: ["sleep", "infinity"]
+# Not set above, and why:
+#   spec.detach, spec.expose   are accepted by the schema but a `kind: Pod` ignores them (members are always
+#                              started detached and are not auto-registered in the L7 proxy) — use a
+#                              HTTPRoute/Ingress towards the pod for L7 exposure.
+#   containers[].tty           accepted and ignored (the engine decides tty by attach/detach).
+#   resources.requests         advisory only; the engine enforces `limits`.

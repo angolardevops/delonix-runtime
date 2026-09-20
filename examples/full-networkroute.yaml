@@ -1,0 +1,92 @@
+# Complete reference for `kind: NetworkRoute` — a DIRECTED path between two NETWORKS.
+# The spec has exactly two fields: `from` and `to`. There is no `via`.
+#
+# A route only says the packet MAY cross between the two bridges; it never says
+# it is ALLOWED. Per-workload policy (NetworkPolicy / Dependency / NetworkAccessRule)
+# still decides, so the last two documents show the second question answered.
+# The identity of a route is the PAIR (from->to), not metadata.name; two documents
+# declaring the same pair are refused. `stack apply --prune` closes routes removed
+# from the manifest.
+---
+# Networks the routes connect (referenced by name; they must be declared here).
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: frontend }
+spec: { driver: bridge }
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: backend }
+spec: { driver: bridge }
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: mgmt }
+spec: { driver: bridge }
+---
+# 1. One-way path: hosts on `frontend` may initiate towards `backend`.
+#    Return traffic of those conversations flows; `backend` cannot initiate back.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata:
+  name: frontend-to-backend
+  labels:
+    purpose: app-traffic     # metadata is free-form; only spec.from/spec.to matter
+spec:
+  from: frontend             # network that may INITIATE
+  to: backend                # network reached
+---
+# 2. A second, independent pair: the management network may reach both others.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata: { name: mgmt-to-backend }
+spec:
+  from: mgmt
+  to: backend
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata: { name: mgmt-to-frontend }
+spec:
+  from: mgmt
+  to: frontend
+---
+# 3. A bidirectional path is two explicit routes (the reverse pair, declared on purpose).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkRoute
+metadata: { name: backend-to-mgmt }
+spec:
+  from: backend
+  to: mgmt
+---
+# Workloads, so that the "is it allowed?" question below has something to protect.
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: frontend
+  containers:
+    - name: web
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: api }
+spec:
+  network: backend
+  containers:
+    - name: api
+      image: "alpine:3.19"
+      command: ["sleep", "infinity"]
+---
+# 4. The 2nd question, in series with the route: is the crossing ACCEPTED by `api`?
+#    Without this the path exists but `api` still decides who it accepts.
+apiVersion: networking.delonix.io/v1alpha1
+kind: Dependency
+metadata: { name: web-knows-api }
+spec:
+  from: web
+  to: api
+  ports: ["8080"]
+  proto: tcp

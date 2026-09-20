@@ -152,6 +152,27 @@ jobs:
       - run: cargo build --workspace --locked
       - run: cargo test --workspace --locked --no-fail-fast
 
+  # ---- Native arm64 tests (issue #438) ----
+  # A cross build only type-checks the `#[cfg(target_arch)]` branches; none of
+  # them run. This runs the same suite as `test` on a real aarch64 runner. It is
+  # a real gate, with no `continue-on-error`. `clippy -D warnings` is not in it
+  # yet: it fails on a true warning in `allowed_syscalls` that goes away with
+  # the arm64 fixes.
+  test-arm64:
+    name: test (arm64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instala protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Instala toolchain fixada
+        run: rustup show
+      - name: Arquitectura do runner
+        run: test "$(uname -m)" = aarch64
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --locked
+      - run: cargo test --workspace --locked --no-fail-fast
+
   # ---- Supply-chain: advisories RUSTSEC + licenças + fontes (ver deny.toml) ----
   deny:
     name: cargo-deny

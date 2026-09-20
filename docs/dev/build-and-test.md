@@ -267,6 +267,7 @@ cgroups, the network holder or VM boot works — that needs a live run (see
 | `cli-surface` | cli surface |
 | `clippy` | clippy -D warnings |
 | `test` | test |
+| `test-arm64` | test (arm64) |
 | `deny` | cargo-deny |
 | `docs` | generated docs and valid examples |
 <!-- dev-docs:end ci-gates -->

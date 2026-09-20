@@ -1,0 +1,88 @@
+# Complete reference for `kind: NetworkAccessRule` — ONE firewall rule per document,
+# INCREMENTAL: several rules for the same target accumulate (unlike NetworkPolicy, which
+# replaces a whole direction). Removing a document from the manifest and re-applying
+# with --prune retires only that rule. Applying the same document again replaces only
+# the rule it owns ("the last command wins" for the same match).
+#
+# spec fields: target*, direction*, port*, action, proto, from   (* = required).
+# The identity of the rule is metadata.name. It only acts on workloads on a custom SDN network.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: Network
+metadata: { name: appnet }
+spec: { driver: bridge }
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Pod
+metadata: { name: web }
+spec:
+  network: appnet
+  containers:
+    - name: web
+      image: "nginx:alpine"
+---
+# 1. Every field explicitly set: allow TCP/8080 into `web` from one CIDR.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-8080-from-lan }
+spec:
+  target: web                # workload the rule applies to
+  direction: ingress         # ingress (traffic TO the workload) | egress (traffic FROM it)
+  action: allow              # allow (accept, default) | deny (drop)
+  proto: tcp                 # tcp | udp | any (default any)
+  port: "8080"               # a port, a range "n-m", or "*" (any)
+  from: 10.0.0.0/24          # CIDR of the other end (source on ingress); omit = anywhere
+---
+# 2. Accumulates with rule 1 on the same target: a second, independent ingress rule.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-metrics-from-monitoring }
+spec:
+  target: web
+  direction: ingress
+  proto: tcp
+  port: "9090"
+  from: 10.1.0.0/24
+---
+# 3. Port range, UDP, defaults for action (allow) and from (anywhere).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-udp-range }
+spec:
+  target: web
+  direction: ingress
+  proto: udp
+  port: "5000-5100"
+---
+# 4. Explicit deny of one abusive source, any protocol, any port.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-block-bad-host }
+spec:
+  target: web
+  direction: ingress
+  action: deny
+  proto: any
+  port: "*"
+  from: 203.0.113.7/32
+---
+# 5. EGRESS: `from` names the DESTINATION CIDR the workload may reach.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-egress-https }
+spec:
+  target: web
+  direction: egress
+  action: allow
+  proto: tcp
+  port: "443"
+  from: 0.0.0.0/0
+---
+# 6. Minimal form: only the required fields (direction + port + target).
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkAccessRule
+metadata: { name: web-minimal }
+spec:
+  target: web
+  direction: egress
+  port: "53"

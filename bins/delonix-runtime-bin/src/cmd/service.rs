@@ -315,7 +315,7 @@ pub(crate) fn cmd_ls(format: OutputFormat) -> Result<()> {
             namespace: def.namespace.clone(),
             port: def.port,
             backends: match_count(&def.namespace, &def.match_labels),
-            dns: format!("{}.{}.delonix.internal", def.name, def.namespace),
+            dns: delonix_sdn::infra::service_fqdn(&def.name, &def.namespace),
             stack: def.labels.get(super::reconcile::STACK_LABEL).cloned(),
         })
         .collect();
@@ -364,7 +364,7 @@ pub(crate) fn cmd_describe(names: &[String]) -> Result<()> {
         d.field("Port", def.port.to_string());
         d.field(
             "DNS",
-            format!("{}.{}.delonix.internal", def.name, def.namespace),
+            delonix_sdn::infra::service_fqdn(&def.name, &def.namespace),
         );
         d.field("Backends", backends.to_string());
         d.field_opt("Stack", def.labels.get(super::reconcile::STACK_LABEL));

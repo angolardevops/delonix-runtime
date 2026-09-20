@@ -1,0 +1,147 @@
+# Complete reference for `kind: Volume` — every variant of `spec`.
+# One Kind, several MUTUALLY EXCLUSIVE shapes (hence one document each):
+#   1. local volume            (driver: local, or nothing)
+#   2. raw network driver      (driver: nfs + device + mountOptions)
+#   3. nfs: / cifs: / webdav:  network share blocks (the block NAME is the type)
+#   4. share:                  a quota'd slice of another volume
+#   5. provision.truenas:      create the dataset/quota/export on a NAS, then mount it
+# `quota` and `alertPct` apply to every shape.
+#
+#   delonix stack apply -f examples/full-volume.yaml --dry-run
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata:
+  name: nas-creds
+spec:
+  # Credentials for the network shares below (cleartext only because this is an example).
+  stringData:
+    password: change-me
+    apiKey: dummy-truenas-api-key
+---
+# 1. Local named volume: data survives `container rm`.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: local-data
+  labels:                       # stored on the volume; also carries the stack ownership stamp
+    app: demo
+  annotations:
+    delonix.io/note: "plain local volume"
+spec:
+  driver: local                 # local (default) | nfs — omit for local
+  quota: 2G                     # size cap (monitored when rootless, hard cap as root)
+  alertPct: 80                  # usage % above which `ls`/`describe` show WARN (default 90)
+---
+# 2. Raw driver form: mount an NFS export without the friendly block.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: raw-nfs
+spec:
+  driver: nfs
+  device: "10.0.0.5:/mnt/pool/raw"   # "server:/export"; only with driver: nfs
+  mountOptions: "vers=4.1,soft"      # `mount -o` options (alias: options)
+---
+# 3a. NFS block.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: nfs-media
+spec:
+  nfs:
+    server: 10.0.0.5                 # NAS host or IP (required)
+    share: /mnt/pool/media           # export path (required)
+    readOnly: false                  # true = mounted read-only
+    mountOptions: "vers=4.1,soft"    # extra `mount -o` options
+  quota: 500G
+  alertPct: 85
+---
+# 3b. SMB/CIFS block, credentials from a Secret.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: cifs-backups
+spec:
+  cifs:
+    server: nas.local                # required
+    share: backups                   # SMB share name, no leading slash (required)
+    username: delonix                # SMB user
+    passwordSecret: nas-creds        # reads key `password` from this Secret (preferred)
+    readOnly: false
+    mountOptions: "vers=3.0"
+---
+# 3c. SMB/CIFS block with an inline password (discouraged; use passwordSecret instead).
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: cifs-inline
+spec:
+  cifs:
+    server: nas.local
+    share: scratch
+    username: delonix
+    password: change-me              # inline alternative to passwordSecret
+    readOnly: true
+---
+# 3d. WebDAV block (Nextcloud/ownCloud).
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: webdav-cloud
+spec:
+  webdav:
+    server: cloud.example.com        # host, or a full URL to override the scheme
+    share: /remote.php/dav/files/delonix   # path inside the WebDAV endpoint
+    username: delonix
+    passwordSecret: nas-creds
+    readOnly: false
+---
+# 4. Share: an isolated, individually quota'd slice of another volume (`nfs-media` above).
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: team-share
+  namespace: teamA                   # scopes the name and data dir; omit = unscoped root
+spec:
+  share:
+    from: nfs-media                  # required: the parent volume to carve out of
+  quota: 5G                          # soft quota for this slice
+  alertPct: 90
+---
+# 5. Provision on a TrueNAS appliance: creates dataset + quota + owner + NFS export,
+#    then mounts what the appliance reported. Authenticate with an API key OR an account.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: truenas-dados
+spec:
+  provision:
+    truenas:
+      url: https://192.168.122.83    # required
+      apiKeySecret: nas-creds        # Secret with key `apiKey` (or `token`); preferred over an account
+      insecureTLS: true              # a stock TrueNAS serves a self-signed certificate
+      dataset: tank/dados            # required: <pool>/<name>
+      quota: 2G                      # quota ON THE NAS (min 1 GiB)
+      owner:
+        uid: 1000                    # required inside owner
+        gid: 1000                    # required inside owner
+        mode: "0770"                 # octal, quoted
+      share:                         # drop this block to provision without exporting
+        networks: ["192.168.122.0/24"]   # CIDRs allowed to mount (must be non-empty)
+        readOnly: false
+        maprootUser: root
+        maprootGroup: root
+---
+# 5b. TrueNAS with account credentials instead of an API key.
+apiVersion: storage.delonix.io/v1alpha1
+kind: Volume
+metadata:
+  name: truenas-account
+spec:
+  provision:
+    truenas:
+      url: https://192.168.122.83
+      username: truenas_admin        # account name
+      passwordSecret: nas-creds      # Secret with key `password` (or use inline `password:`)
+      insecureTLS: true
+      dataset: tank/account

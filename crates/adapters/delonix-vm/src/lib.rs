@@ -645,6 +645,25 @@ pub enum CreateStage {
     Start,
 }
 
+/// A stage of [`destroy_with`], reported as it STARTS — the teardown twin of
+/// [`CreateStage`], so a destroy can show what it is taking away instead of a
+/// blinking cursor. Only stages that have something to do are reported.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DestroyStage<'a> {
+    /// Powering off and removing the VM from its provider (the backend id).
+    Provider(&'a str),
+    /// Deleting the per-VM overlay disk.
+    Overlay,
+    /// Deleting extra disks that belong to the VM (how many).
+    ExtraDisks(usize),
+    /// Deleting the cloud-init seed and the preserved snapshots.
+    SeedAndSnapshots,
+    /// Deleting sockets, serial log, pid file and the domain XML.
+    RuntimeState,
+    /// Removing the record itself.
+    Record,
+}
+
 /// Builds a `Command` whose output this crate PARSES, pinned to the `C` locale.
 ///
 /// BUG FIXED HERE (latent, and it bites precisely in this product's home
@@ -2371,6 +2390,28 @@ fn libvirt_reserve_ip(uri: &str, net: &str, mac: &str, ip: &str) -> Result<()> {
     )))
 }
 
+/// Drops the DHCP reservation [`libvirt_reserve_ip`] added. Best effort by
+/// design: the network may be gone or the entry already removed, and neither
+/// is a reason to keep a VM that is being destroyed.
+fn libvirt_release_ip(uri: &str, net: &str, mac: &str, ip: &str) {
+    let entry = format!("<host mac='{mac}' ip='{ip}'/>");
+    let _ = quiet(
+        "virsh",
+        &[
+            "-c",
+            uri,
+            "net-update",
+            "--live",
+            "--config",
+            "--",
+            net,
+            "delete",
+            "ip-dhcp-host",
+            &entry,
+        ],
+    );
+}
+
 /// The connection where the domain `name` is DEFINED, if any — unlike
 /// [`libvirt_uri_of`], **without** a fallback. `None` = libvirt does not know the VM.
 fn libvirt_domain_uri(name: &str) -> Option<&'static str> {
@@ -2470,6 +2511,33 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
             context: "vm",
             message: format!("could not remove VM '{name}' from libvirt ({uri}): {msg}"),
         })
+}
+
+/// The domain XML without the settings a session (unprivileged) libvirt cannot apply:
+/// the `<memtune>` hard limit and the `<cputune>` period/quota. CPU pinning stays — it
+/// is an affinity, not a cgroup limit. Pure.
+fn strip_cgroup_tuning(xml: &str) -> String {
+    let mut out = String::with_capacity(xml.len());
+    let mut in_memtune = false;
+    for line in xml.split_inclusive('\n') {
+        let t = line.trim();
+        if t == "<memtune>" {
+            in_memtune = true;
+            continue;
+        }
+        if in_memtune {
+            if t == "</memtune>" {
+                in_memtune = false;
+            }
+            continue;
+        }
+        if t.starts_with("<period>") || t.starts_with("<quota>") {
+            continue;
+        }
+        out.push_str(line);
+    }
+    // A `<cputune>` left with nothing inside is not valid to define.
+    out.replace("  <cputune>\n  </cputune>\n", "")
 }
 
 /// Generates the libvirt (KVM) domain XML. **Pure function** — tested without a daemon.
@@ -2751,19 +2819,13 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
     // it on; both accept plain byte/op counts.
     s.push_str(&vm_iotune_xml());
     s.push_str("    </disk>\n");
-    // cloud-init seed (NoCloud) as cdrom.
-    if let Some(seed) = &cfg.seed {
-        s.push_str("    <disk type='file' device='cdrom'>\n");
-        s.push_str("      <driver name='qemu' type='raw'/>\n");
-        s.push_str(&format!("      <source file='{}'/>\n", xml_escape(seed)));
-        s.push_str("      <target dev='sda' bus='sata'/>\n");
-        s.push_str("      <readonly/>\n    </disk>\n");
-    }
-    // Extra disks (typed): additional images beyond the main overlay + seed.
-    // Target devs are auto-assigned per bus (vdb, vdc… for virtio; sdb… for
-    // sata/scsi) unless the user pinned one — `vda`/`sda` stay reserved above.
+    // Extra disks (typed): additional images beyond the main overlay. Target
+    // devs are auto-assigned per bus (vdb, vdc… for virtio; sdb… for sata/scsi)
+    // unless the user pinned one — `vda` stays reserved above, and the cloud-init
+    // seed takes the virtio letter AFTER the extras, so adding a seed never
+    // renames a disk the guest already knows.
     let mut vd = b'b'; // next virtio letter (vda taken by the main disk)
-    let mut sd = b'b'; // next sata/scsi letter (sda taken by the seed cdrom)
+    let mut sd = b'b'; // next sata/scsi letter (kept from when the seed sat on sda)
     for d in &cfg.extra_disks {
         let bus = if d.bus.is_empty() { "virtio" } else { &d.bus };
         let device = if d.device.is_empty() {
@@ -2810,6 +2872,26 @@ pub fn libvirt_domain_xml(cfg: &VmConfig, overlay: &str, mac: &str) -> String {
             s.push_str("      <readonly/>\n");
         }
         s.push_str("    </disk>\n");
+    }
+    // cloud-init seed (NoCloud), as a read-only VIRTIO disk.
+    //
+    // It used to be a SATA cdrom, and that made cloud-init invisible on every
+    // image whose kernel has no SATA: the Debian `-cloud` kernel (the
+    // `genericcloud` image) enumerates the q35 AHCI controller on PCI and binds
+    // no driver — no libata, no `sr` — so the seed never appears as a block
+    // device, no datasource is found, and the guest boots with hostname
+    // `localhost`, no network config and no user-data (measured on
+    // `delonix-vm-base:debian-bookworm`, kernel 6.1.0-52-cloud-amd64). Every
+    // guest that runs on a hypervisor has virtio-blk, and NoCloud finds the
+    // seed by its `cidata` label on any block device. `snapshot='no'` keeps it
+    // out of libvirt's disk snapshots and blockcommit, as the cdrom was.
+    if let Some(seed) = &cfg.seed {
+        let target = format!("vd{}", vd as char);
+        s.push_str("    <disk type='file' device='disk' snapshot='no'>\n");
+        s.push_str("      <driver name='qemu' type='raw'/>\n");
+        s.push_str(&format!("      <source file='{}'/>\n", xml_escape(seed)));
+        s.push_str(&format!("      <target dev='{target}' bus='virtio'/>\n"));
+        s.push_str("      <readonly/>\n    </disk>\n");
     }
     // volumes/Storage shared via virtio-9p — the user does NOT write this
     // XML: it comes from `spec.volumes` already resolved. The guest mounts by `<target dir=tag>`
@@ -3337,6 +3419,20 @@ impl VmBackend for LibvirtBackend {
             ensure_antispoof_filter(uri)?;
         }
         let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
+        if uri == "qemu:///session" {
+            // A session daemon has no cgroup controller to hand out: it REFUSES a domain
+            // with a memory or CPU-quota ceiling («Memory tuning is not available in
+            // session mode»), so the guest never started. The ceilings are protections for
+            // a shared host; without them the guest still runs, and this says so.
+            let bare = strip_cgroup_tuning(&xml);
+            if bare != xml {
+                tracing::warn!(
+                    vm = %cfg.name,
+                    "libvirt session mode cannot enforce the memory/CPU ceilings — this VM runs without them (use `--net-mode nat` on qemu:///system to keep them)"
+                );
+                xml = bare;
+            }
+        }
         // On `qemu:///system` the QEMU process runs as the `libvirt-qemu` user,
         // which cannot read the overlay under a 0700 `$HOME`. A static DAC label
         // pins QEMU to the invoking uid/gid (the disk owner) and `relabel='no'`
@@ -3359,7 +3455,11 @@ impl VmBackend for LibvirtBackend {
         let defined = capture("virsh", &["-c", uri, "domstate", "--", &cfg.name]).is_some();
         if !defined {
             on(CreateStage::Define);
-            run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
+            if let Err(e) = run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])
+            {
+                let _ = std::fs::remove_file(&xml_path);
+                return Err(e.into());
+            }
             // A domain defined here is a domain libvirt has never seen before,
             // so any snapshot this VM had is metadata WE are holding — from the
             // `stop` that undefined it. Hand it back now, before the guest
@@ -3382,9 +3482,37 @@ impl VmBackend for LibvirtBackend {
             })?;
         // 'start' fails if it is already running — we tolerate that (auto-heal).
         if !out.status.success() && !self.is_running_uri(uri, &cfg.name) {
+            // What libvirt said is the only diagnosis there is: without it a failed
+            // start reads as «KVM, permissions or image?» and nothing else.
+            let why = String::from_utf8_lossy(&out.stderr);
+            let why = why.trim().trim_start_matches("error:").trim().to_string();
+            if !defined {
+                // We defined this domain a moment ago and it never ran: leave nothing
+                // of it behind — not the definition, not the rendered XML, and (for the
+                // session connection) not libvirt's per-domain log, whose tail is in
+                // the error below.
+                let _ = libvirt_cleanup(&cfg.name);
+                let _ = std::fs::remove_file(&xml_path);
+                if uri == "qemu:///session" {
+                    let cache = std::env::var_os("XDG_CACHE_HOME")
+                        .map(PathBuf::from)
+                        .or_else(|| {
+                            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache"))
+                        });
+                    if let Some(c) = cache {
+                        let _ = std::fs::remove_file(
+                            c.join("libvirt/qemu/log").join(format!("{}.log", cfg.name)),
+                        );
+                    }
+                }
+            }
             return Err(Error::Command {
                 context: "vm",
-                message: "failed to start the libvirt domain (KVM/permissions/image?)".into(),
+                message: if why.is_empty() {
+                    "failed to start the libvirt domain (KVM/permissions/image?)".into()
+                } else {
+                    format!("failed to start the libvirt domain: {why}")
+                },
             }
             .into());
         }
@@ -3429,6 +3557,20 @@ impl VmBackend for LibvirtBackend {
         // file — the one libvirt itself had, DAC seclabel and all — instead of
         // re-deriving a description that would only have to agree with `boot`
         // by hand. `remove` still deletes it, with everything else.
+        Ok(())
+    }
+
+    /// `stop` plus the libvirt-side state that outlives the domain: the DHCP
+    /// reservation a `--ip` created on the network. Without this the address
+    /// stayed bound to a MAC nothing uses, and a re-created VM with the same
+    /// name (same derived MAC) inherited it silently.
+    fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        self.stop(vmdir, vm)?;
+        if let Some(ip) = vm.boot.static_ip.as_deref() {
+            let uri = libvirt_uri_for(Some(vm.tap.as_str()));
+            let net = vm.boot.bridge.as_deref().unwrap_or("default");
+            libvirt_release_ip(uri, net, &vm.mac, ip);
+        }
         Ok(())
     }
 
@@ -4227,16 +4369,78 @@ pub fn restart_policy_unsupervised(backend_id: &str, policy: Option<&str>) -> bo
 /// the reverse: no local record but with an orphaned domain in libvirt (an
 /// old interrupted `rm`), `remove` cleans up the domain anyway.
 pub fn remove(base: &Path, name: &str) -> Result<()> {
-    remove_inner(base, name, false)
+    remove_inner(base, name, false, false, &|_| {}).map(|_| ())
 }
 
 /// Like [`remove`], but deletes the local state EVEN if the backend cleanup
 /// fails (the `vm rm --force`) — the user takes on resolving the rest in libvirt.
 pub fn remove_force(base: &Path, name: &str) -> Result<()> {
-    remove_inner(base, name, true)
+    remove_inner(base, name, true, false, &|_| {}).map(|_| ())
 }
 
-fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
+/// What a [`destroy`] took away, and what it deliberately left.
+#[derive(Debug, Default, Clone)]
+pub struct Destroyed {
+    /// Bytes of local files and directories removed (a remote disk is freed by
+    /// the node, which does not report a size).
+    pub freed_bytes: u64,
+    /// Every local artifact removed: overlay, seed, snapshots, sockets, extra disks.
+    pub removed: Vec<String>,
+    /// The backend id when its storage lives on the provider (a remote node),
+    /// so the disks it released are NOT in `removed`/`freed_bytes` — those count
+    /// local files only, and reporting «0 B freed» for a VM whose disks and
+    /// snapshots went away on the node reads as «nothing was freed».
+    pub provider_released: Option<String>,
+    /// Things the record points to that are NOT the VM's to delete (a 9p share
+    /// is somebody's data; an extra disk outside the state directory may be an
+    /// image the operator supplied). Named, never silently left.
+    pub kept: Vec<String>,
+}
+
+/// The full teardown of a VM: the provider's own destroy (libvirt domain with
+/// managed-save/snapshot metadata/NVRAM and the DHCP reservation, or a Proxmox
+/// VM purged from the node with its disks), then every local artifact —
+/// overlay, seed, sockets, serial log, pid, domain XML, the per-VM directory
+/// with its preserved snapshots, and extra disks in the state directory.
+///
+/// `purge_disks` widens the last step to extra disks OUTSIDE the state
+/// directory; without it they are listed in [`Destroyed::kept`]. `force`
+/// deletes the local state even when the provider refuses.
+pub fn destroy(base: &Path, name: &str, force: bool, purge_disks: bool) -> Result<Destroyed> {
+    remove_inner(base, name, force, purge_disks, &|_| {})
+}
+
+/// [`destroy`] that reports each [`DestroyStage`] as it starts.
+pub fn destroy_with(
+    base: &Path,
+    name: &str,
+    force: bool,
+    purge_disks: bool,
+    on: &dyn Fn(DestroyStage),
+) -> Result<Destroyed> {
+    remove_inner(base, name, force, purge_disks, on)
+}
+
+fn path_size(p: &Path) -> u64 {
+    let Ok(md) = std::fs::symlink_metadata(p) else {
+        return 0;
+    };
+    if md.is_dir() {
+        std::fs::read_dir(p)
+            .map(|rd| rd.flatten().map(|e| path_size(&e.path())).sum())
+            .unwrap_or(0)
+    } else {
+        md.len()
+    }
+}
+
+fn remove_inner(
+    base: &Path,
+    name: &str,
+    force: bool,
+    purge_disks: bool,
+    on: &dyn Fn(DestroyStage),
+) -> Result<Destroyed> {
     // A name that `create` would refuse cannot exist — and above all, it cannot
     // flow into the paths deleted below (the seed dir's `remove_dir_all`).
     if !valid_vm_name(name) {
@@ -4244,25 +4448,36 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
     }
     let vmdir = vms_dir(base);
     let st = store(base)?;
+    let mut record: Option<Vm> = None;
+    let mut provider_released: Option<String> = None;
     let existed = match st.load(name) {
         Ok(vm) => {
             // `destroy`, not `stop`: the record is going away, so whatever the
             // backend still owns has to go with it. They are the same call for
             // the local backends (the default), and deliberately not for a
             // remote one, whose disk lives on the node.
-            if let Err(e) =
-                backend_for(&vm).and_then(|b| b.destroy(&vmdir, &vm).map_err(Error::from))
-            {
+            on(DestroyStage::Provider(&vm.backend));
+            let backend = backend_for(&vm);
+            provider_released = backend
+                .as_ref()
+                .ok()
+                .filter(|b| b.manages_own_storage())
+                .map(|b| b.id().to_string());
+            if let Err(e) = backend.and_then(|b| b.destroy(&vmdir, &vm).map_err(Error::from)) {
                 if !force {
                     return Err(e); // record intact — the rm can be retried
                 }
             }
+            record = Some(vm);
             true
         }
         Err(_) => {
             // No record: there may be an orphaned libvirt domain with this name —
             // clean it up, and the ingress tap for safety.
             let orphan = libvirt_domain_uri(name).is_some();
+            if orphan {
+                on(DestroyStage::Provider("libvirt"));
+            }
             if let Err(e) = libvirt_cleanup(name) {
                 if !force {
                     return Err(e);
@@ -4294,13 +4509,94 @@ fn remove_inner(base: &Path, name: &str, force: bool) -> Result<()> {
         // does not exist should say so, like docker.
         return Err(Error::VmNotFound(name.to_string()));
     }
-    for ext in ["qcow2", "sock", "sock.lock", "serial", "log", "pid", "xml"] {
-        let _ = std::fs::remove_file(vmdir.join(format!("{name}.{ext}")));
+    let mut out = Destroyed {
+        provider_released,
+        ..Destroyed::default()
+    };
+    let rm_file = |out: &mut Destroyed, p: &Path, label: String| {
+        let sz = path_size(p);
+        if std::fs::remove_file(p).is_ok() {
+            out.freed_bytes += sz;
+            out.removed.push(label);
+        }
+    };
+    // The overlay first: it is the bulk of what is freed.
+    if vmdir.join(format!("{name}.qcow2")).exists() {
+        on(DestroyStage::Overlay);
+        rm_file(
+            &mut out,
+            &vmdir.join(format!("{name}.qcow2")),
+            format!("{name}.qcow2"),
+        );
+    }
+    // Extra disks and shares named by the record. Only what lives inside the
+    // state directory is provably ours; the rest is reported, and removed only
+    // when the operator said so.
+    if let Some(vm) = &record {
+        let root = std::fs::canonicalize(&vmdir).unwrap_or_else(|_| vmdir.clone());
+        let mut doomed: Vec<&str> = Vec::new();
+        for d in &vm.boot.extra_disks {
+            let p = Path::new(&d.source);
+            if d.device == "cdrom" || !p.exists() {
+                continue;
+            }
+            let inside = std::fs::canonicalize(p)
+                .map(|c| c.starts_with(&root))
+                .unwrap_or(false);
+            if inside || purge_disks {
+                doomed.push(&d.source);
+            } else {
+                out.kept.push(format!(
+                    "{} (extra disk outside the state directory; --purge-disks removes it)",
+                    d.source
+                ));
+            }
+        }
+        if !doomed.is_empty() {
+            on(DestroyStage::ExtraDisks(doomed.len()));
+            for src in doomed {
+                rm_file(&mut out, Path::new(src), src.to_string());
+            }
+        }
+        for v in &vm.boot.volumes {
+            out.kept.push(format!(
+                "{} (shared volume — remove it with `volume rm`)",
+                v.source
+            ));
+        }
     }
     // The cloud-init seed directory (`vms/<name>/`, from `generate_seed_iso`)
-    // also belongs to the VM — it was left behind and accumulated junk per name.
-    let _ = std::fs::remove_dir_all(vmdir.join(name));
-    Ok(st.remove(name)?)
+    // and the preserved snapshots inside it also belong to the VM.
+    let dir = vmdir.join(name);
+    if dir.exists() {
+        on(DestroyStage::SeedAndSnapshots);
+        let sz = path_size(&dir);
+        if std::fs::remove_dir_all(&dir).is_ok() && sz > 0 {
+            out.freed_bytes += sz;
+            out.removed.push(format!("{name}/"));
+        }
+    }
+    let leftovers = ["sock", "sock.lock", "serial", "log", "pid", "xml"];
+    if leftovers
+        .iter()
+        .any(|e| vmdir.join(format!("{name}.{e}")).exists())
+    {
+        on(DestroyStage::RuntimeState);
+        for ext in leftovers {
+            rm_file(
+                &mut out,
+                &vmdir.join(format!("{name}.{ext}")),
+                format!("{name}.{ext}"),
+            );
+        }
+    }
+    on(DestroyStage::Record);
+    st.remove(name)?;
+    // The store's per-record lock file (`.<name>.lock`) is the last trace: it
+    // outlived every destroy, so «removes everything» was not quite true.
+    // Nothing holds it once the record is gone.
+    let _ = std::fs::remove_file(vmdir.join(format!(".{name}.lock")));
+    Ok(out)
 }
 
 /// Stops the VM via ITS backend (CH/libvirt) but **preserves** the record and disk
@@ -5101,6 +5397,19 @@ mod tests {
         assert_eq!(mem_mib("2Gi"), 2048); // k8s suffix tolerated (before it gave 1024)
         assert_eq!(mem_mib("512Mi"), 512);
         assert_eq!(mem_mib("lixo"), 1024); // robust fallback
+    }
+
+    #[test]
+    fn a_session_domain_loses_the_ceilings_it_cannot_have_and_keeps_pinning() {
+        let xml = "  <memtune>\n    <hard_limit unit='KiB'>1</hard_limit>\n  </memtune>\n  <cputune>\n    <period>100000</period>\n    <quota>50000</quota>\n  </cputune>\n  <cputune>\n    <period>100000</period>\n    <vcpupin vcpu='0' cpuset='1'/>\n  </cputune>\n";
+        let out = strip_cgroup_tuning(xml);
+        assert!(!out.contains("memtune") && !out.contains("quota") && !out.contains("period"));
+        assert!(out.contains("vcpupin"));
+        assert_eq!(
+            out.matches("<cputune>").count(),
+            1,
+            "the empty one is gone: {out}"
+        );
     }
 
     #[test]
@@ -6216,6 +6525,33 @@ Format specific information:
         assert_eq!(xml.matches("<filterref").count(), 0, "{xml}");
     }
 
+    /// The seed takes the virtio letter AFTER the extra disks: adding cloud-init
+    /// to a VM must never rename a disk the guest already has.
+    #[test]
+    fn the_seed_takes_the_virtio_letter_after_the_extra_disks() {
+        let mut c = hpc_cfg();
+        c.seed = Some("/seed.iso".into());
+        let xml = libvirt_domain_xml(&c, "/v.qcow2", "52:54:00:ab:cd:ef");
+        assert!(xml.contains("dev='vdb' bus='virtio'"), "no extras: {xml}");
+
+        c.extra_disks = vec![ExtraDisk {
+            source: "/data.qcow2".into(),
+            ..Default::default()
+        }];
+        let xml = libvirt_domain_xml(&c, "/v.qcow2", "52:54:00:ab:cd:ef");
+        let extra = xml.find("/data.qcow2").expect("extra disk");
+        let seed = xml.find("/seed.iso").expect("seed");
+        assert!(
+            xml[extra..seed].contains("dev='vdb'") || xml[..seed].contains("dev='vdb'"),
+            "{xml}"
+        );
+        assert!(
+            xml.contains("dev='vdc' bus='virtio'"),
+            "seed after extra: {xml}"
+        );
+        assert_eq!(xml.matches("dev='vdb'").count(), 1, "{xml}");
+    }
+
     #[test]
     fn libvirt_xml_has_core_devices() {
         let mut c = hpc_cfg();
@@ -6228,7 +6564,15 @@ Format specific information:
         assert!(xml.contains("<memory unit='KiB'>2097152</memory>")); // 2G
         assert!(xml.contains("type='qcow2'"));
         assert!(xml.contains("dev='vda' bus='virtio'"));
-        assert!(xml.contains("device='cdrom'")); // seed
+        // The seed is a read-only virtio disk, NOT a SATA cdrom: the Debian
+        // `-cloud` kernel has no SATA driver and would never see it.
+        assert!(!xml.contains("device='cdrom'"), "{xml}");
+        assert!(!xml.contains("bus='sata'"), "{xml}");
+        assert!(
+            xml.contains("<disk type='file' device='disk' snapshot='no'>"),
+            "{xml}"
+        );
+        assert!(xml.contains("/seed.iso"), "{xml}");
         assert!(xml.contains("<interface type='user'>"));
         assert!(xml.contains("52:54:00:ab:cd:ef"));
         assert!(xml.contains("host-passthrough"));
@@ -6957,6 +7301,114 @@ Format specific information:
             .write()
             .unwrap()
             .retain(|b| b.id != "falharemoto");
+    }
+
+    /// `destroy` returns what it took, and takes exactly what is the VM's:
+    /// overlay, seed dir, sockets and an extra disk inside the state directory
+    /// go; an extra disk elsewhere is KEPT and named until `purge_disks`, and a
+    /// 9p share is never touched.
+    #[test]
+    fn destroy_reports_and_respects_what_is_not_the_vms() {
+        struct Nop;
+        impl VmBackend for Nop {
+            fn id(&self) -> &'static str {
+                "nop-destroy"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "nop-destroy",
+            aliases: &[],
+            auto_selectable: false,
+            new: Box::new(|| Ok(Box::new(Nop))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-destroy-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let vmdir = vms_dir(&base);
+        std::fs::create_dir_all(vmdir.join("d")).unwrap();
+        let outside = base.join("outside.qcow2");
+        std::fs::write(vmdir.join("d.qcow2"), vec![0u8; 4096]).unwrap();
+        std::fs::write(vmdir.join("d").join("seed.iso"), vec![0u8; 1024]).unwrap();
+        std::fs::write(vmdir.join("d-data.qcow2"), vec![0u8; 2048]).unwrap();
+        std::fs::write(&outside, b"operator image").unwrap();
+        let st = store(&base).unwrap();
+        let mut vm = Vm::new(
+            "d".into(),
+            "b".into(),
+            "b".into(),
+            1,
+            "1G".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            String::new(),
+        );
+        vm.backend = "nop-destroy".into();
+        vm.boot.extra_disks = vec![
+            ExtraDisk {
+                source: vmdir.join("d-data.qcow2").to_string_lossy().into(),
+                ..Default::default()
+            },
+            ExtraDisk {
+                source: outside.to_string_lossy().into(),
+                ..Default::default()
+            },
+        ];
+        vm.boot.volumes = vec![VmVolume {
+            tag: "t".into(),
+            source: "/srv/shared".into(),
+            mount_path: "/m".into(),
+            read_only: false,
+        }];
+        st.save("d", &vm).unwrap();
+
+        let d = destroy(&base, "d", false, false).expect("destroy");
+        assert!(!vmdir.join("d.qcow2").exists());
+        assert!(!vmdir.join("d").exists());
+        assert!(!vmdir.join("d-data.qcow2").exists(), "extra disk owned");
+        assert!(outside.exists(), "a disk outside the state dir is not ours");
+        assert!(d.freed_bytes >= 4096 + 1024 + 2048);
+        assert_eq!(d.kept.len(), 2, "{:?}", d.kept);
+        assert!(st.load("d").is_err(), "the record is gone");
+        assert!(!vmdir.join(".d.lock").exists(), "the lock file is gone too");
+
+        // Second incarnation: `purge_disks` takes the outside disk too.
+        st.save("d", &vm).unwrap();
+        std::fs::write(vmdir.join("d.qcow2"), b"x").unwrap();
+        destroy(&base, "d", false, true).expect("destroy purge");
+        assert!(!outside.exists());
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// `stop` and `destroy` are the SAME call locally and NOT remotely, and

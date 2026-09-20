@@ -67,6 +67,7 @@ pub const NETWORK_ACCESS_RULE: &str = "NetworkAccessRule";
 pub const HTTP_ROUTE: &str = "HTTPRoute";
 pub const GATEWAY: &str = "Gateway";
 pub const SERVICE: &str = "Service";
+pub const IPPOOL: &str = "IPPool";
 pub const WORKLOAD: &str = "Workload";
 pub const DEPENDENCY: &str = "Dependency";
 pub const SHARE_VOLUME: &str = "ShareVolume";
@@ -246,6 +247,21 @@ pub struct KindFacts {
     /// Applied by `stack apply`. **The order of the rows below is the order of
     /// the apply**, and `destroy` derives its own by reversing it.
     pub in_stack: bool,
+    /// The key of the `kind: Stack` `spec` that groups this Kind, or `""` when
+    /// the Kind cannot be grouped (and then [`stack_group_absent_reason`] says
+    /// why — a Kind that is silently absent reads as «nobody got round to it»).
+    ///
+    /// **This column governs the expansion.** `expand_stack`, the schema, the
+    /// unknown-field warning and the generated docs all read it, and there is no
+    /// second list of groups anywhere. There used to be one: it was written by
+    /// hand, and `NetworkRoute`, `NetworkAccessRule`, `Service` and `App` were
+    /// applied by `stack apply` and could not be put inside a Stack.
+    ///
+    /// It is NOT the same question as `in_stack`: a `Dependency` is lowered into
+    /// a `NetworkPolicy` and a `Workload` into a `Container`/`Pod`/`VirtualMachine`,
+    /// so neither is applied as itself — and both are things a person writes
+    /// inside a Stack.
+    pub stack_group: &'static str,
     /// A changed field is really applied, rather than «ensure present».
     pub converges: bool,
     /// `destroy_one` removes it, so `--prune` and `destroy` can promise it.
@@ -266,6 +282,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Artifact,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "secrets",
         // The state is the encrypted values, and a plan will not decrypt them to
         // compare. The only ensure-present Kind left, and `not_converged_reason`
         // says so in those words.
@@ -282,6 +299,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetConnectivity,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "networks",
         converges: true,
         teardown: true,
         namespaced: Namespaced::Never,
@@ -295,6 +313,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetConnectivity,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "networkRoutes",
         converges: true,
         teardown: true,
         namespaced: Namespaced::Never,
@@ -308,6 +327,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Storage,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "volumes",
         converges: true,
         teardown: true,
         // A plain volume is global and a `share:` one is scoped by namespace,
@@ -323,6 +343,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Artifact,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "images",
         converges: true,
         // Shared content-addressed cache: removing it because one stack stopped
         // declaring it would pull it from under the others.
@@ -338,6 +359,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Artifact,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "apps",
         converges: true,
         // An App's output is an image — shared content-addressed cache, owned
         // by no stack. Same reasoning, same wording, as Image's row above.
@@ -353,6 +375,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "vms",
         converges: true,
         teardown: true,
         namespaced: Namespaced::Always,
@@ -366,6 +389,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Compute,
         form: Form::Sunset(POD),
         in_stack: true,
+        stack_group: "containers",
         converges: true,
         teardown: true,
         namespaced: Namespaced::Always,
@@ -379,6 +403,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Compute,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "pods",
         converges: true,
         teardown: true,
         namespaced: Namespaced::Always,
@@ -397,6 +422,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetConnectivity,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "services",
         converges: true,
         teardown: true,
         namespaced: Namespaced::Always,
@@ -410,8 +436,9 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetExposure,
         form: Form::Compat(HTTP_ROUTE),
         in_stack: true,
+        stack_group: "ingress",
         converges: true,
-        teardown: false,
+        teardown: true,
         namespaced: Namespaced::Never,
         presence: Presence::Declarative,
     },
@@ -423,6 +450,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetPolicy,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "firewallPolicies",
         converges: true,
         teardown: false,
         namespaced: Namespaced::Never,
@@ -436,6 +464,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetPolicy,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "networkAccessRules",
         converges: true,
         // Unlike `FIREWALL_POLICY`: this Kind's rule carries its own `origin`,
         // a durable identity independent of anything else on the target
@@ -445,6 +474,23 @@ const FACTS: &[KindFacts] = &[
         presence: Presence::Declarative,
     },
     KindFacts {
+        // ADR-0046 D3: a reservation ledger routes claim addresses from. It sits
+        // BEFORE `HTTPRoute` because a route with `spec.pool` claims at apply time and
+        // the pool has to exist by then.
+        kind: IPPOOL,
+        plural: "ippools",
+        short: &["pool"],
+        api_version: "networking.delonix.io/v1alpha1",
+        domain: Domain::NetExposure,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "ipPools",
+        converges: true,
+        teardown: true,
+        namespaced: Namespaced::Never,
+        presence: Presence::Registry,
+    },
+    KindFacts {
         kind: HTTP_ROUTE,
         plural: "httproutes",
         short: &["hr"],
@@ -452,8 +498,9 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetExposure,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "httpRoutes",
         converges: true,
-        teardown: false,
+        teardown: true,
         namespaced: Namespaced::Never,
         presence: Presence::Declarative,
     },
@@ -465,6 +512,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetExposure,
         form: Form::Primary,
         in_stack: true,
+        stack_group: "gateways",
         converges: true,
         teardown: false,
         namespaced: Namespaced::Never,
@@ -480,6 +528,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Compute,
         form: Form::Sugar(WORKLOAD_LOWERS_TO),
         in_stack: false,
+        stack_group: "workloads",
         converges: false,
         teardown: false,
         // Carried onto the child it lowers to.
@@ -494,6 +543,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::NetPolicy,
         form: Form::Sugar(FIREWALL_POLICY),
         in_stack: false,
+        stack_group: "dependencies",
         converges: false,
         teardown: false,
         namespaced: Namespaced::Never,
@@ -510,6 +560,7 @@ const FACTS: &[KindFacts] = &[
         domain: Domain::Composition,
         form: Form::Aggregate,
         in_stack: false,
+        stack_group: "",
         converges: false,
         teardown: false,
         // Propagated to every child it expands into.
@@ -534,6 +585,7 @@ const FACTS: &[KindFacts] = &[
         // Deliberately outside the stack cycle: it is a remote procedure over
         // SSH against hosts that already exist, not a resource of this node.
         in_stack: false,
+        stack_group: "",
         converges: false,
         teardown: false,
         namespaced: Namespaced::Never,
@@ -556,6 +608,74 @@ pub fn all() -> impl Iterator<Item = &'static KindFacts> {
 /// constant.
 pub fn stack_kinds() -> impl DoubleEndedIterator<Item = &'static str> {
     FACTS.iter().filter(|f| f.in_stack).map(|f| f.kind)
+}
+
+/// Every group a `kind: Stack` accepts, as `(group, kind)`, **in table order**.
+///
+/// The Kinds that are applied as themselves come first, in apply order (the
+/// table is written that way), then the two that are lowered into another Kind.
+/// The expansion iterates this and never a list of its own.
+pub fn stack_groups() -> impl Iterator<Item = (&'static str, &'static str)> {
+    FACTS
+        .iter()
+        .filter(|f| !f.stack_group.is_empty())
+        .map(|f| (f.stack_group, f.kind))
+}
+
+/// Old spellings of a group key, as `(spelling, canonical group)`.
+///
+/// A rename does not change what the document MEANS, so the old key keeps
+/// loading in silence — the rule `KIND_ALIASES` already follows for the Kinds
+/// themselves, and for the same reason: warning would train people to ignore
+/// warnings. `tunnels:` is what the Gateway group was called while the Kind was
+/// still `Tunnel`.
+pub const STACK_GROUP_ALIASES: &[(&str, &str)] = &[("tunnels", "gateways")];
+
+/// The group a Stack key names, resolving an old spelling; `None` when the key
+/// is not a group at all (a typo).
+pub fn resolve_stack_group(key: &str) -> Option<&'static str> {
+    stack_groups()
+        .map(|(g, _)| g)
+        .find(|g| *g == key)
+        .or_else(|| {
+            STACK_GROUP_ALIASES
+                .iter()
+                .find(|(old, _)| *old == key)
+                .map(|(_, new)| *new)
+        })
+}
+
+/// Every key a Stack `spec` accepts: the groups plus their old spellings.
+pub fn stack_spec_fields() -> Vec<&'static str> {
+    stack_groups()
+        .map(|(g, _)| g)
+        .chain(STACK_GROUP_ALIASES.iter().map(|(old, _)| *old))
+        .collect()
+}
+
+/// Why a Kind cannot be grouped in a Stack — `None` when it can.
+///
+/// The same discipline as `not_converged_reason`-style columns: a Kind either
+/// has a group or writes down why not. Without it, the next Kind added to the
+/// table would silently join the ones a Stack cannot hold.
+pub fn stack_group_absent_reason(kind: &str) -> Option<&'static str> {
+    let f = facts(kind)?;
+    if !f.stack_group.is_empty() {
+        return None;
+    }
+    Some(match kind {
+        STACK => {
+            "a Stack does not nest: the children would need a namespace and an owner of \
+             their own, and the reconciler identifies a resource by (kind, name) — two \
+             stacks reaching the same child through a third is a second writer"
+        }
+        CLUSTER => {
+            "a KubernetesCluster is a remote procedure over SSH against hosts that already \
+             exist, not a resource of this node, so `stack apply` never runs it — grouping \
+             it would promise an apply that does not happen"
+        }
+        _ => return None,
+    })
 }
 
 /// Whether the Kind belongs to the stack cycle at all.
@@ -653,6 +773,88 @@ mod tests {
         );
     }
     use super::*;
+
+    /// **A Kind the stack applies must be a Kind a Stack can hold.** Four were
+    /// not — `NetworkRoute`, `NetworkAccessRule`, `Service`, `App` — because the
+    /// group list was written by hand next to the table instead of coming off it.
+    #[test]
+    fn every_kind_applied_by_the_stack_has_a_group() {
+        for f in all().filter(|f| f.in_stack) {
+            assert!(
+                !f.stack_group.is_empty(),
+                "{} is applied by `stack apply` and has no group in `kind: Stack`",
+                f.kind
+            );
+        }
+    }
+
+    /// The reverse: a Kind with no group owes the reason, and a Kind with a
+    /// group owes none.
+    #[test]
+    fn a_kind_without_a_group_says_why() {
+        for f in all() {
+            let reason = stack_group_absent_reason(f.kind);
+            assert_eq!(
+                f.stack_group.is_empty(),
+                reason.is_some(),
+                "{}: the group column and stack_group_absent_reason disagree",
+                f.kind
+            );
+        }
+    }
+
+    /// Two Kinds under one key would merge their children into one list and
+    /// hand the wrong spec to one of them.
+    #[test]
+    fn a_group_key_is_unique_and_no_alias_shadows_it() {
+        let mut seen = std::collections::BTreeSet::new();
+        for (g, _) in stack_groups() {
+            assert!(seen.insert(g), "group '{g}' is used by two Kinds");
+        }
+        for (old, new) in STACK_GROUP_ALIASES {
+            assert!(!seen.contains(old), "alias '{old}' shadows a real group");
+            assert!(
+                seen.contains(new),
+                "alias '{old}' points at '{new}', not a group"
+            );
+        }
+    }
+
+    /// A group is the Kind's plural in lowerCamelCase, so nobody has to look it
+    /// up: `networkRoutes` for `NetworkRoute`. Three are older than the rename of
+    /// their Kind and keep the key manifests already write — renaming a group
+    /// breaks every published Stack, and the Kind rename did not.
+    #[test]
+    fn a_group_is_the_plural_of_its_kind() {
+        const KEPT: &[(&str, &str)] = &[
+            (INGRESS, "ingress"),
+            (VM, "vms"),
+            (FIREWALL_POLICY, "firewallPolicies"),
+        ];
+        for f in all().filter(|f| !f.stack_group.is_empty()) {
+            if KEPT.contains(&(f.kind, f.stack_group)) {
+                continue;
+            }
+            assert_eq!(
+                f.stack_group.to_ascii_lowercase(),
+                f.plural,
+                "{}: the group is not the plural of the Kind",
+                f.kind
+            );
+        }
+    }
+
+    /// The two Kinds that are lowered still have a group, and a Stack is not one.
+    #[test]
+    fn lowered_kinds_are_groupable_and_the_aggregate_is_not() {
+        for kind in [WORKLOAD, DEPENDENCY] {
+            assert!(!facts(kind).unwrap().stack_group.is_empty(), "{kind}");
+        }
+        assert!(stack_group_absent_reason(STACK).is_some());
+        assert!(stack_group_absent_reason(CLUSTER).is_some());
+        assert_eq!(resolve_stack_group("tunnels"), Some("gateways"));
+        assert_eq!(resolve_stack_group("contaienrs"), None);
+    }
 
     /// Two rows for one Kind means half the code reads one and half the other.
     #[test]

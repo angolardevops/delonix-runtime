@@ -1253,7 +1253,7 @@ pub(crate) fn download_url_base(store: &VmImageStore, url: &str) -> Result<PathB
     // same file.
     let key = format!("url-{}", hex_sha256(url.as_bytes()));
     let cached = store.base_cache_path(Distro::Ubuntu, &key);
-    if cached.exists() {
+    if cache_intact(&cached) {
         return Ok(cached);
     }
     if let Some(parent) = cached.parent() {
@@ -1297,6 +1297,7 @@ pub(crate) fn download_url_base(store: &VmImageStore, url: &str) -> Result<PathB
         }
     }
     std::fs::rename(&tmp, &cached)?;
+    seal_cache(&cached)?;
     Ok(cached)
 }
 
@@ -2934,7 +2935,7 @@ pub(crate) fn node_exporter_steps(bin: &Path, listen: &str) -> Result<Vec<Custom
 
 pub(crate) fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     let cached = store.base_cache_path(Distro::Ubuntu, release);
-    if cached.exists() {
+    if cache_intact(&cached) {
         return Ok(cached);
     }
     let base_url = format!("https://cloud-images.ubuntu.com/releases/{release}/release");
@@ -2975,6 +2976,7 @@ pub(crate) fn download_ubuntu_base(store: &VmImageStore, release: &str) -> Resul
         )));
     }
     std::fs::rename(&tmp, &cached)?;
+    seal_cache(&cached)?;
     Ok(cached)
 }
 
@@ -3010,7 +3012,7 @@ fn debian_major_version(codename: &str) -> Result<&'static str> {
 /// algorithm, hence `hex_sha512_file` below.
 pub(crate) fn download_debian_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     let cached = store.base_cache_path(Distro::Debian, release);
-    if cached.exists() {
+    if cache_intact(&cached) {
         return Ok(cached);
     }
     let major = debian_major_version(release)?;
@@ -3052,6 +3054,7 @@ pub(crate) fn download_debian_base(store: &VmImageStore, release: &str) -> Resul
         )));
     }
     std::fs::rename(&tmp, &cached)?;
+    seal_cache(&cached)?;
     Ok(cached)
 }
 
@@ -3093,7 +3096,7 @@ fn valid_rocky_release(release: &str) -> Result<()> {
 pub(crate) fn download_fedora_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     valid_fedora_release(release)?;
     let cached = store.base_cache_path(Distro::Fedora, release);
-    if cached.exists() {
+    if cache_intact(&cached) {
         return Ok(cached);
     }
     let major = release.split('-').next().unwrap_or(release);
@@ -3132,6 +3135,7 @@ pub(crate) fn download_fedora_base(store: &VmImageStore, release: &str) -> Resul
         )));
     }
     std::fs::rename(&tmp, &cached)?;
+    seal_cache(&cached)?;
     Ok(cached)
 }
 
@@ -3173,7 +3177,7 @@ fn valid_fedora_release(release: &str) -> Result<()> {
 pub(crate) fn download_rocky_base(store: &VmImageStore, release: &str) -> Result<PathBuf> {
     valid_rocky_release(release)?;
     let cached = store.base_cache_path(Distro::Rocky, release);
-    if cached.exists() {
+    if cache_intact(&cached) {
         return Ok(cached);
     }
     let img_name = format!("Rocky-{release}-GenericCloud.latest.x86_64.qcow2");
@@ -3208,6 +3212,7 @@ pub(crate) fn download_rocky_base(store: &VmImageStore, release: &str) -> Result
         )));
     }
     std::fs::rename(&tmp, &cached)?;
+    seal_cache(&cached)?;
     Ok(cached)
 }
 
@@ -3221,6 +3226,68 @@ fn parse_bsd_checksum(text: &str, filename: &str) -> Option<String> {
     text.lines()
         .find_map(|l| l.strip_prefix(prefix.as_str()))
         .map(|s| s.trim().to_string())
+}
+
+/// Where the digest a cached base image had when it was verified is recorded.
+fn cache_seal_path(cached: &Path) -> PathBuf {
+    let mut s = cached.as_os_str().to_owned();
+    s.push(".sha256");
+    PathBuf::from(s)
+}
+
+/// Records the digest of a base image that has JUST passed its upstream
+/// checksum. The cache hit used to be `exists()` and nothing else, so after the
+/// one download-time verification nothing ever looked at the file again: a
+/// truncated copy, a disk error, or another process with write access to the
+/// cache directory was silently the base of every later VM.
+fn seal_cache(cached: &Path) -> Result<()> {
+    let digest = hex_sha256_file(cached)?;
+    std::fs::write(cache_seal_path(cached), format!("{digest}\n"))?;
+    Ok(())
+}
+
+/// Whether a cached base image can be trusted without downloading it again.
+///
+/// A file with no seal predates this check and is trusted as before: hashing
+/// it would only bless whatever is there. A file whose seal disagrees is
+/// discarded (with a message) so the caller fetches and re-verifies it.
+fn cache_intact(cached: &Path) -> bool {
+    if !cached.exists() {
+        return false;
+    }
+    let Ok(sealed) = std::fs::read_to_string(cache_seal_path(cached)) else {
+        return true;
+    };
+    match hex_sha256_file(cached) {
+        Ok(now) if now == sealed.trim() => true,
+        _ => {
+            eprintln!(
+                "{} {}",
+                super::po::t("warning:"),
+                super::po::tf(
+                    "cached base image {path} no longer matches the checksum it was verified with — discarding it",
+                    &[("path", &cached.display().to_string())],
+                )
+            );
+            let _ = std::fs::remove_file(cached);
+            let _ = std::fs::remove_file(cache_seal_path(cached));
+            false
+        }
+    }
+}
+
+/// The offset a `206`'s `Content-Range` (`bytes 100-199/200`) starts at.
+fn content_range_start(v: &str) -> Option<u64> {
+    v.trim()
+        .strip_prefix("bytes")?
+        .trim_start()
+        .split_once('/')?
+        .0
+        .split('-')
+        .next()?
+        .trim()
+        .parse()
+        .ok()
 }
 
 /// Downloads `url` to `dest`, RESUMING a partial file and retrying a dropped
@@ -3273,7 +3340,19 @@ pub(crate) fn stream_download(url: &str, dest: &Path) -> Result<()> {
         // 206 means the server honoured the range and we append; anything else
         // (a mirror without range support, or a redirect to a fresh object)
         // means it is sending the whole thing again, so start over.
-        let resuming = have > 0 && resp.status().as_u16() == 206;
+        //
+        // A 206 only counts when its `Content-Range` starts exactly where we
+        // stopped. One that starts elsewhere answers a different question, and
+        // appending it would splice a wrong span into the file (only the
+        // checksum, after the whole download, would notice).
+        let resuming = have > 0
+            && resp.status().as_u16() == 206
+            && resp
+                .headers()
+                .get(reqwest::header::CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(content_range_start)
+                == Some(have);
         let mut file = if resuming {
             std::fs::OpenOptions::new().append(true).open(dest)?
         } else {
@@ -4040,21 +4119,58 @@ pub(crate) fn check_cri_bin(explicit: Option<&Path>) -> Result<()> {
 }
 
 pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
+    let (path, origin) = locate_cri_bin(explicit)?;
+    // Provenance, always: this binary is what runs on every node of the
+    // cluster, so the operator gets to see WHICH one it is (path, origin and
+    // hash) instead of having to infer it from the byte size afterwards.
+    let sha = hex_sha256_file(&path)?;
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "delonix-cri: {origin} — {path} (sha256 {sha})",
+            &[
+                ("origin", origin),
+                ("path", &path.display().to_string()),
+                ("sha", &sha),
+            ],
+        )
+    );
+    Ok(path)
+}
+
+/// Opt-in for building `delonix-cri` from the source tree around the cwd.
+/// Only an explicit `1`/`true` counts — anything else (unset, empty, `0`) is
+/// off, so the runtime of a cluster never depends on where the command ran.
+pub(crate) const CRI_FROM_SOURCE_ENV: &str = "DELONIX_CRI_FROM_SOURCE";
+
+fn cri_from_source_requested(value: Option<&str>) -> bool {
+    matches!(value.map(str::trim), Some("1") | Some("true"))
+}
+
+/// Where the `delonix-cri` to install came from, in the order it is tried:
+/// `--cri-bin`, next to the running `delonix`, the source tree of the cwd
+/// (ONLY when `DELONIX_CRI_FROM_SOURCE=1`), and finally the verified release
+/// asset of the running version. Returns the origin so the caller can say it.
+fn locate_cri_bin(explicit: Option<PathBuf>) -> Result<(PathBuf, &'static str)> {
     check_cri_bin(explicit.as_deref())?;
     if let Some(p) = explicit {
-        return Ok(p);
+        return Ok((p, "--cri-bin"));
     }
     // Next to the current `delonix` (normal install, release).
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
             let candidate = dir.join("delonix-cri");
             if candidate.exists() {
-                return Ok(candidate);
+                return Ok((candidate, "next to delonix"));
             }
         }
     }
-    // Dev convenience: source-code workspace from the cwd.
-    if let Some(workspace_root) = find_workspace_root() {
+    // Dev convenience — opt-in only. It used to be the silent second choice,
+    // which made the cwd of whoever ran the command the source of the runtime
+    // installed on a cluster's nodes: a binary matching no published commit,
+    // and not reproducible when the tree is dirty.
+    let from_source = cri_from_source_requested(std::env::var(CRI_FROM_SOURCE_ENV).ok().as_deref());
+    if let Some(workspace_root) = find_workspace_root().filter(|_| from_source) {
         eprintln!(
             "{}",
             super::po::tf(
@@ -4081,7 +4197,7 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
         }
         let built = workspace_root.join("target/release/delonix-cri");
         if built.exists() {
-            return Ok(built);
+            return Ok((built, "built from source ($DELONIX_CRI_FROM_SOURCE)"));
         }
     }
     // BUG FIXED HERE, found live: a user who installed via `install.sh`
@@ -4092,11 +4208,13 @@ pub(crate) fn resolve_cri_bin(explicit: Option<PathBuf>) -> Result<PathBuf> {
     // alongside `delonix` (same tag, always released together) — download it
     // (verified against the release's own SHA256SUMS, same as `install.sh`
     // would with `--with-cri`) instead of giving up.
-    download_cri_bin().map_err(|e| {
-        Error::Invalid(format!(
-            "{e} — or use --cri-bin <path> / run from a source checkout"
-        ))
-    })
+    download_cri_bin()
+        .map(|p| (p, "release asset"))
+        .map_err(|e| {
+            Error::Invalid(format!(
+                "{e} — or use --cri-bin <path> (or {CRI_FROM_SOURCE_ENV}=1 to build from a source checkout)"
+            ))
+        })
 }
 
 /// `true` when the CPU has AVX2+BMI2+FMA — the same 3-feature check
@@ -5331,6 +5449,71 @@ pub(crate) fn run_tool(bin: &str, args: &[&str]) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    /// A 206 whose `Content-Range` starts elsewhere must not be appended: the
+    /// server here answers the resume request with the WHOLE body labelled as
+    /// starting at 0, and the file must end up as that body, not prefix+body.
+    #[test]
+    fn a_misaligned_206_restarts_the_download_instead_of_splicing() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            if let Ok((mut c, _)) = listener.accept() {
+                let mut req = [0u8; 2048];
+                let _ = c.read(&mut req);
+                let _ = c.write_all(
+                    b"HTTP/1.1 206 Partial Content\r\nContent-Range: bytes 0-9/10\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789",
+                );
+            }
+        });
+        let dest = std::env::temp_dir().join(format!("dlx-206-{}", std::process::id()));
+        std::fs::write(&dest, b"AAAAA").unwrap();
+        stream_download(&format!("http://127.0.0.1:{port}/x"), &dest).unwrap();
+        let got = std::fs::read(&dest).unwrap();
+        let _ = std::fs::remove_file(&dest);
+        assert_eq!(got, b"0123456789");
+    }
+
+    #[test]
+    fn content_range_start_reads_the_offset() {
+        assert_eq!(content_range_start("bytes 100-199/200"), Some(100));
+        assert_eq!(content_range_start("bytes 0-9/*"), Some(0));
+        assert_eq!(content_range_start("bytes */200"), None);
+        assert_eq!(content_range_start("items 1-2/3"), None);
+    }
+
+    #[test]
+    fn a_tampered_cached_base_is_discarded_and_an_unsealed_one_is_trusted() {
+        let dir = std::env::temp_dir().join(format!(
+            "dlx-low-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("base.img");
+        std::fs::write(&f, b"original").unwrap();
+        assert!(cache_intact(&f), "no seal: trusted as before");
+        seal_cache(&f).unwrap();
+        assert!(cache_intact(&f), "seal matches");
+        std::fs::write(&f, b"tampered").unwrap();
+        assert!(!cache_intact(&f), "seal disagrees");
+        assert!(!f.exists(), "the bad file is removed so it is refetched");
+        assert!(!cache_seal_path(&f).exists());
+    }
+
+    #[test]
+    fn building_cri_from_the_cwd_needs_an_explicit_opt_in() {
+        assert!(!cri_from_source_requested(None));
+        assert!(!cri_from_source_requested(Some("")));
+        assert!(!cri_from_source_requested(Some("0")));
+        assert!(!cri_from_source_requested(Some("yes please")));
+        assert!(cri_from_source_requested(Some("1")));
+        assert!(cri_from_source_requested(Some(" true ")));
+    }
+
     #[test]
     fn versao_de_pre_semeagem_vem_do_deb_com_a_patch() {
         // O `.deb` que o build descarrega traz a PATCH e o revision do Debian; o

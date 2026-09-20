@@ -1276,6 +1276,7 @@ pub(crate) fn doomed_vm_entries(base: &std::path::Path) -> Result<Vec<String>> {
 pub(crate) struct VmSweep {
     pub entries: usize,
     pub vms: usize,
+    pub failed: Vec<String>,
     pub freed: Reclaimed,
 }
 
@@ -1311,10 +1312,22 @@ pub(crate) fn sweep_vms(base: &std::path::Path, stopped: bool) -> Result<VmSweep
     if stopped {
         for vm in vms {
             if !matches!(vm.status, delonix_model::records::Status::Running) {
-                let sz = measure(&dir.join(format!("{}.qcow2", vm.name)));
-                if delonix_vm::remove(base, &vm.name).is_ok() {
-                    out.vms += 1;
-                    out.freed.add(sz);
+                // The same teardown as `vm destroy` — and a failure is REPORTED.
+                // It used to be `.is_ok()`: a provider that refused the removal
+                // (libvirt, Proxmox) made the VM survive while the summary said
+                // nothing, so the prune looked like it did nothing at all.
+                match delonix_vm::destroy(base, &vm.name, false, false) {
+                    Ok(d) => {
+                        out.vms += 1;
+                        out.freed.add(Reclaimed {
+                            bytes: d.freed_bytes,
+                            partial: false,
+                        });
+                    }
+                    Err(e) => {
+                        eprintln!("vm prune: could not destroy '{}': {e}", vm.name);
+                        out.failed.push(vm.name.clone());
+                    }
                 }
             }
         }

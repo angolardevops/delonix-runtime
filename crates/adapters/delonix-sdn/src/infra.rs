@@ -1839,6 +1839,9 @@ pub fn control_main() -> ! {
 /// `control_query`.
 const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
+/// Largest command line the holder accepts on the control socket.
+const CONTROL_LINE_MAX: u64 = 64 * 1024;
+
 /// Reads ONE command line from a control connection, bounded by
 /// [`CONTROL_IO_TIMEOUT`]. `None` when the peer sent nothing in time, hung up,
 /// or the deadline could not be armed — in every case the caller drops the
@@ -1855,12 +1858,17 @@ const CONTROL_IO_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5
 const CONTROL_REPLY_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 fn read_control_line(stream: &std::os::unix::net::UnixStream) -> Option<String> {
-    use std::io::{BufRead, BufReader};
+    use std::io::{BufRead, BufReader, Read};
     // Fail CLOSED: if the deadline cannot be armed we refuse the connection
     // rather than fall back to the unbounded read this exists to prevent.
     stream.set_read_timeout(Some(CONTROL_IO_TIMEOUT)).ok()?;
     let mut line = String::new();
-    match BufReader::new(stream).read_line(&mut line) {
+    // The deadline bounds the TIME, not the SIZE: within 5 s a peer can still
+    // stream a newline-less gigabyte and `read_line` keeps growing the String
+    // in the one thread that serves the node's whole control plane. A real
+    // command is a few hundred bytes; a line that fills the cap is refused.
+    match BufReader::new(stream.take(CONTROL_LINE_MAX)).read_line(&mut line) {
+        Ok(n) if n as u64 >= CONTROL_LINE_MAX && !line.ends_with('\n') => None,
         Ok(0) => None, // peer hung up without sending anything
         Ok(_) => Some(line),
         Err(_) => None, // includes WouldBlock/TimedOut once the deadline fires
@@ -3916,17 +3924,23 @@ fn do_netroute(op: &str, a: &str, b: &str) -> Result<()> {
             context: "netroute",
             message: format!("nft: {e}"),
         })?;
-    if out.status.success() {
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    if out.status.success() || netroute_delete_already_absent(verb, &stderr) {
         Ok(())
     } else {
         Err(Error::Command {
             context: "netroute",
-            message: format!(
-                "nft {verb} element {a} -> {b}: {}",
-                String::from_utf8_lossy(&out.stderr).trim()
-            ),
+            message: format!("nft {verb} element {a} -> {b}: {}", stderr.trim()),
         })
     }
+}
+
+/// Closing a path that is already closed is success, not an error. The map lives
+/// in the holder's EPHEMERAL netns: when the last container goes the netns dies
+/// and the element with it, so a `stack destroy` that removes containers first
+/// finds nothing left to delete. nft answers that with ENOENT.
+fn netroute_delete_already_absent(verb: &str, stderr: &str) -> bool {
+    verb == "delete" && stderr.contains("No such file or directory")
 }
 
 pub(crate) fn isolation_elements(bridge: &str) -> Vec<(&'static str, String)> {
@@ -4083,7 +4097,12 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> Stri
     // The EXPLICIT rules above take precedence (first-match terminal in the chain).
     let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
     if !has_explicit_in {
-        let nsset = dlxns_set(&fw.namespace);
+        // `namespace_isolation_key`, not the raw `fw.namespace`: this is the
+        // side of the attach/chain pair that must agree with the wire token
+        // `attach_container`/`attach_extra_container`/`vmtap_line` compute —
+        // see that function's doc comment for the cross-tenant bypass this
+        // closes.
+        let nsset = dlxns_set(&namespace_isolation_key(&fw.namespace));
         body.push_str(&format!(
             "\t\tip daddr {ip} ip saddr @{nsset} counter accept\n"
         ));
@@ -4398,6 +4417,41 @@ pub fn sanitize(s: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
         .collect();
     cleaned.chars().take(12).collect()
+}
+
+/// Canonicalizes a `metadata.namespace` value for the isolation-set hash fed
+/// to [`dlxns_set`] — filters the same charset as [`sanitize`] but WITHOUT its
+/// 12-char truncation, and is the ONLY function allowed to touch a namespace
+/// on the way into that hash.
+///
+/// **Security fix (2026-09, offensive audit)**: the attach-time wire token
+/// used `sanitize(namespace)` — truncated to 12 chars, because that limit
+/// exists for a netns/interface name (IFNAMSIZ), which a logical namespace
+/// is not. [`fw_chain_body`], on the other side of the isolation check, hashes
+/// the RAW, untruncated `fw.namespace` (`ContainerFw` never truncates it).
+/// For any namespace longer than 12 chars the two sides fed `dlxns_set` two
+/// DIFFERENT strings — e.g. `attach_container` would compute
+/// `sanitize("tenant-alpha-prod") == "tenant-alpha"` while `fw_chain_body`
+/// kept the full `"tenant-alpha-prod"`. A container whose namespace happened
+/// to share the first 12 (cleaned) characters with a victim's namespace
+/// joined the VICTIM's `@dlxns_<hash>` set on attach, while the victim's own
+/// chain still accepted that exact set — full cross-tenant reachability
+/// through the isolation the AGENTS.md documents as the product's central
+/// guarantee. `dlxns_set` itself never needed the truncation: it only ever
+/// hashes its input into a fixed 13-byte set name (`dlxns` + 8 hex digits),
+/// so nothing downstream cares how long the input string was — only that
+/// BOTH sides of the check compute it identically. Every caller that used to
+/// truncate an isolation namespace with `sanitize` (`attach_container`,
+/// `attach_extra_container`, `vmtap_line`) and the chain generator
+/// (`fw_chain_body`) now go through this single function instead, closing
+/// the mismatch for namespaces of any length AND any charset (a namespace
+/// with, say, a `.` in it — unvalidated by the manifest schema — used to
+/// diverge the same way even under 12 chars, since `sanitize` strips it on
+/// one side and `fw_chain_body` never did on the other).
+pub fn namespace_isolation_key(ns: &str) -> String {
+    ns.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+        .collect()
 }
 
 // ---- ingress private networks (F6): bridge per network, gateway = ingress ----
@@ -4946,8 +5000,47 @@ fn routes_dir() -> PathBuf {
 
 /// One file per ORDERED pair. The pair is the identity of a route — not a name
 /// someone chose for it — so it is what keys the file.
+///
+/// **Injective**: the file name carries an `fnv32` of the FULL pair. It used to
+/// be `sanitize(from)--sanitize(to).json`, and `sanitize` caps at 12 chars (an
+/// IFNAMSIZ limit for device names, not a file-name limit), so two pairs whose
+/// names shared their first 12 characters shared a record — one overwrote or
+/// removed the other's. Same fix `netdef_path` already got.
 fn routedef_path(from: &str, to: &str) -> PathBuf {
+    pair_record_path(&routes_dir(), from, to)
+}
+
+/// The pre-fix, truncated path. Still READ (a record on disk is a live route
+/// and dropping it would silently close a path) but only trusted after the
+/// record's own `from`/`to` are confirmed, and removed on the next write.
+fn routedef_path_legacy(from: &str, to: &str) -> PathBuf {
     routes_dir().join(format!("{}--{}.json", sanitize(from), sanitize(to)))
+}
+
+/// `<readable prefix>-<fnv32 of the full pair>.json`. The `\0` keeps
+/// `("ab","c")` and `("a","bc")` from hashing alike.
+fn pair_record_path(dir: &std::path::Path, a: &str, b: &str) -> PathBuf {
+    let readable = |s: &str| -> String {
+        s.chars()
+            .filter(|c| c.is_ascii_alphanumeric() || *c == '_' || *c == '-')
+            .take(24)
+            .collect()
+    };
+    dir.join(format!(
+        "{}--{}-{:08x}.json",
+        readable(a),
+        readable(b),
+        crate::fnv32(&format!("{a}\0{b}"))
+    ))
+}
+
+/// Removes a legacy record only when its content proves it is THIS record.
+fn remove_legacy_if(path: &std::path::Path, is_same: impl Fn(&[u8]) -> bool) {
+    if let Ok(bytes) = std::fs::read(path) {
+        if is_same(&bytes) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
 }
 
 /// Every declared route on this node. The enumeration is what makes `--prune`
@@ -4968,7 +5061,15 @@ pub fn route_list() -> Vec<RouteDef> {
 }
 
 pub fn route_get(from: &str, to: &str) -> Option<RouteDef> {
-    serde_json::from_slice(&std::fs::read(routedef_path(from, to)).ok()?).ok()
+    if let Some(def) = std::fs::read(routedef_path(from, to))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<RouteDef>(&b).ok())
+    {
+        return Some(def);
+    }
+    let def: RouteDef =
+        serde_json::from_slice(&std::fs::read(routedef_path_legacy(from, to)).ok()?).ok()?;
+    (def.from == from && def.to == to).then_some(def)
 }
 
 /// Records ownership on a route. Mirrors `NetworkStore::set_metadata`, including
@@ -5017,7 +5118,15 @@ fn write_routedef(def: &RouteDef) -> Result<()> {
             context: "netroute",
             message: e.to_string(),
         }
-    })
+    })?;
+    forget_legacy_route(&def.from, &def.to);
+    Ok(())
+}
+
+fn forget_legacy_route(from: &str, to: &str) {
+    remove_legacy_if(&routedef_path_legacy(from, to), |b| {
+        serde_json::from_slice::<RouteDef>(b).is_ok_and(|d| d.from == from && d.to == to)
+    });
 }
 
 /// Drops every route naming this network.
@@ -5045,6 +5154,7 @@ fn routes_forget_network(name: &str) {
                 crate::bridge_name(&r.to)
             ));
             let _ = std::fs::remove_file(routedef_path(&r.from, &r.to));
+            forget_legacy_route(&r.from, &r.to);
         }
     }
 }
@@ -5086,8 +5196,24 @@ fn services_dir() -> PathBuf {
 /// One file per (namespace, name) — a `Service` is always namespaced (ADR-0032:
 /// the DNS name itself is `<service>.<namespace>.delonix.internal`), so unlike
 /// `RouteDef`'s pair-keyed path there is no bare-name ambiguity to resolve.
+///
+/// Injective for the same reason as [`routedef_path`]: the old
+/// `sanitize(namespace)--sanitize(name).json` truncated both halves to 12
+/// chars, so two tenants whose namespaces shared a 12-char prefix overwrote each
+/// other's `Service` and one could end up served the other's definition.
 fn servicedef_path(namespace: &str, name: &str) -> PathBuf {
+    pair_record_path(&services_dir(), namespace, name)
+}
+
+fn servicedef_path_legacy(namespace: &str, name: &str) -> PathBuf {
     services_dir().join(format!("{}--{}.json", sanitize(namespace), sanitize(name)))
+}
+
+fn forget_legacy_service(namespace: &str, name: &str) {
+    remove_legacy_if(&servicedef_path_legacy(namespace, name), |b| {
+        serde_json::from_slice::<ServiceDef>(b)
+            .is_ok_and(|d| d.namespace == namespace && d.name == name)
+    });
 }
 
 /// Every declared `Service` on this node — what `--prune`/`get services` need
@@ -5107,7 +5233,16 @@ pub fn service_list() -> Vec<ServiceDef> {
 }
 
 pub fn service_get(namespace: &str, name: &str) -> Option<ServiceDef> {
-    serde_json::from_slice(&std::fs::read(servicedef_path(namespace, name)).ok()?).ok()
+    if let Some(def) = std::fs::read(servicedef_path(namespace, name))
+        .ok()
+        .and_then(|b| serde_json::from_slice::<ServiceDef>(&b).ok())
+    {
+        return Some(def);
+    }
+    let def: ServiceDef =
+        serde_json::from_slice(&std::fs::read(servicedef_path_legacy(namespace, name)).ok()?)
+            .ok()?;
+    (def.namespace == namespace && def.name == name).then_some(def)
 }
 
 fn write_servicedef(def: &ServiceDef) -> Result<()> {
@@ -5116,12 +5251,14 @@ fn write_servicedef(def: &ServiceDef) -> Result<()> {
         context: "service",
         message: e.to_string(),
     })?;
-    delonix_state::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(|e| {
-        Error::Command {
+    delonix_state::write_atomic(&servicedef_path(&def.namespace, &def.name), &json).map_err(
+        |e| Error::Command {
             context: "service",
             message: e.to_string(),
-        }
-    })
+        },
+    )?;
+    forget_legacy_service(&def.namespace, &def.name);
+    Ok(())
 }
 
 /// Applies a document's selector/port, PRESERVING whatever labels/annotations
@@ -5176,6 +5313,7 @@ pub fn service_set_metadata(
 /// Retracts a `Service` document — what `--prune`/`destroy` call.
 pub fn service_remove(namespace: &str, name: &str) -> Result<()> {
     let _ = std::fs::remove_file(servicedef_path(namespace, name));
+    forget_legacy_service(namespace, name);
     Ok(())
 }
 
@@ -5595,6 +5733,7 @@ pub fn network_route(from: &str, to: &str, add: bool) -> Result<()> {
         }
     } else {
         let _ = std::fs::remove_file(routedef_path(from, to));
+        forget_legacy_route(from, to);
     }
     Ok(())
 }
@@ -5628,8 +5767,12 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
         return Err(e);
     }
     let netns = sanitize(id);
-    // `namespace` sanitized (goes to a control-line token): no spaces/garbage.
-    let ns = sanitize(if namespace.is_empty() {
+    // `namespace_isolation_key`, NOT `sanitize` — the latter's 12-char cap is
+    // for netns/interface names (IFNAMSIZ), and truncating a logical
+    // namespace here made two differently-named tenants collide into the
+    // same isolation set on the holder side while `fw_chain_body` kept
+    // hashing the full name — see `namespace_isolation_key`'s doc comment.
+    let ns = namespace_isolation_key(if namespace.is_empty() {
         "default"
     } else {
         namespace
@@ -5709,7 +5852,10 @@ pub fn attach_container_on_ip(
         return Err(e);
     }
     let netns = sanitize(id);
-    let ns = sanitize(if namespace.is_empty() {
+    // See the sibling `attach_container` for why this must be
+    // `namespace_isolation_key` and not `sanitize` (the isolation-set hash,
+    // not a netns/interface name subject to IFNAMSIZ).
+    let ns = namespace_isolation_key(if namespace.is_empty() {
         "default"
     } else {
         namespace
@@ -5752,10 +5898,26 @@ pub fn attach_extra_container(
     let netns = sanitize(id);
     // `default` keeps the 6-token form an older holder understands (same compat rule
     // `attach_container` follows); only a namespaced attach needs the newer holder.
-    let line = if namespace.is_empty() || namespace == "default" {
+    //
+    // `namespace_isolation_key`, not the raw `namespace`: this used to embed
+    // `namespace` verbatim — no charset filtering and no length cap at all —
+    // while `attach_container`'s primary-network attach truncated the SAME
+    // logical namespace with `sanitize()` before sending it. A container
+    // connected to BOTH a primary and an extra network (`--net-connect`)
+    // could therefore have its two IPs land in two DIFFERENT `@dlxns_<hash>`
+    // sets for the identical `metadata.namespace`, and an unfiltered value
+    // could also break the control-line's whitespace tokenization on the
+    // holder side. Canonicalizing here closes both, and keeps this attach
+    // path consistent with `attach_container`/`vmtap_line`/`fw_chain_body`.
+    let ns = namespace_isolation_key(if namespace.is_empty() {
+        "default"
+    } else {
+        namespace
+    });
+    let line = if ns == "default" {
         format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway}")
     } else {
-        format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway} {namespace}")
+        format!("attach-extra {netns} {ifname} {ip} {bridge} {gateway} {ns}")
     };
     if let Err(e) = control_send(&line) {
         restore_lease(&prefix, id, previous_lease);
@@ -6014,7 +6176,10 @@ pub fn name_hash(s: &str) -> u32 {
 fn vmtap_line(tap: &str, bridge: &str, gateway: &str, ip: Option<&str>, namespace: &str) -> String {
     match (namespace, ip) {
         ("default", _) | (_, None) => format!("vmtap {tap} {bridge} {gateway}"),
-        (ns, Some(ip)) => format!("vmtap {tap} {bridge} {gateway} {ip} {}", sanitize(ns)),
+        (ns, Some(ip)) => format!(
+            "vmtap {tap} {bridge} {gateway} {ip} {}",
+            namespace_isolation_key(ns)
+        ),
     }
 }
 
@@ -7109,6 +7274,13 @@ fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// The standard service name of a workload: `<name>.<namespace>.svc.delonix.internal`
+/// (ADR-0048). One spelling for every kind, derived from two facts the record already
+/// holds — never stored, so it cannot drift from the workload.
+pub fn service_fqdn(name: &str, namespace: &str) -> String {
+    format!("{name}.{namespace}.svc.delonix.internal")
+}
+
 /// Resolves an ingress name (container OR VM) → IPv4. Accepts `name` and
 /// `name.delonix.io`. Reads the containers' records and the VMs' metas.
 /// Splits an internal DNS name into `(container, optional_namespace)`. Accepts the
@@ -7117,6 +7289,18 @@ fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
 /// (testable). Returns `None` if it ends up empty.
 pub fn parse_internal_name(name: &str) -> Option<(String, Option<String>)> {
     let n = name.trim_end_matches('.').to_lowercase();
+    // The standard service name, `<name>.<namespace>.svc.delonix.internal` (ADR-0048).
+    // Matched FIRST and only with exactly two labels before `.svc`: read the ordinary
+    // way, `web.data.svc` would split as name `web.data` in namespace `svc`. One label
+    // (`x.svc.delonix.internal`) is still the old form with a namespace called `svc`,
+    // so an existing namespace of that name keeps working.
+    if let Some(core) = n.strip_suffix(".svc.delonix.internal") {
+        if let Some((cname, ns)) = core.rsplit_once('.') {
+            if !cname.is_empty() && !cname.contains('.') && !ns.is_empty() {
+                return Some((cname.to_string(), Some(ns.to_string())));
+            }
+        }
+    }
     // ONLY `.delonix.internal` does namespace matching (`<name>.<namespace>`) — an
     // EXTERNAL domain `foo.com` CANNOT be hijacked by a container 'foo' in the
     // 'com' namespace. Container names have no `.`, so the last segment is the
@@ -7826,6 +8010,17 @@ pub fn dhcp_ip6_for_mac(_net: &str, mac: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deleting_an_absent_route_element_is_success_but_add_is_not() {
+        let enoent = "Error: Could not process rule: No such file or directory";
+        assert!(netroute_delete_already_absent("delete", enoent));
+        assert!(!netroute_delete_already_absent("add", enoent));
+        assert!(!netroute_delete_already_absent(
+            "delete",
+            "Error: Operation not permitted"
+        ));
+    }
+
     /// The network lock fails CLOSED. Forced deterministically — as any uid, root
     /// included — by putting a FILE where the `ingress/` directory must be: the lock
     /// cannot be created, and then nothing may change the infra. Before, `acquire`
@@ -8045,6 +8240,24 @@ mod tests {
 
         drop(silent);
         let _ = std::fs::remove_file(&sock);
+    }
+
+    /// A newline-less flood is refused at the cap instead of growing without end.
+    #[test]
+    fn read_control_line_refuses_a_line_over_the_cap() {
+        use std::io::Write;
+        let (server, mut client) = std::os::unix::net::UnixStream::pair().unwrap();
+        let w = std::thread::spawn(move || {
+            let chunk = [b'a'; 8192];
+            for _ in 0..32 {
+                if client.write_all(&chunk).is_err() {
+                    break;
+                }
+            }
+        });
+        assert_eq!(super::read_control_line(&server), None);
+        drop(server);
+        let _ = w.join();
     }
 
     /// REGRESSION: the traffic total must cover EVERY interface, not just
@@ -8342,6 +8555,74 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(sanitize("abc; rm -rf /"), "abcrm-rf"); // no spaces/`;`/`/`
         assert_eq!(sanitize("0123456789abcdef").len(), 12); // <= 12
         assert_eq!(sanitize("web_1-x"), "web_1-x"); // alnum/_/- preserved
+    }
+
+    /// Cross-tenant bypass: two namespaces sharing their first 12 chars used to
+    /// hash to the SAME isolation set on the attach side (truncated by
+    /// `sanitize`) while the chain side hashed the full name.
+    #[test]
+    fn namespaces_longer_than_12_chars_never_share_an_isolation_set() {
+        let a = "tenant-alpha";
+        let b = "tenant-alpha-prod";
+        assert_ne!(
+            dlxns_set(&namespace_isolation_key(a)),
+            dlxns_set(&namespace_isolation_key(b))
+        );
+        // The old attach-side computation collapsed them — this is the bug.
+        assert_eq!(sanitize(a), sanitize(b));
+    }
+
+    #[test]
+    fn isolation_key_is_charset_filtered_but_never_truncated() {
+        assert_eq!(namespace_isolation_key("a b;c.d"), "abcd");
+        let long = "x".repeat(200);
+        assert_eq!(namespace_isolation_key(&long), long);
+        assert_eq!(namespace_isolation_key("team_1-x"), "team_1-x");
+    }
+
+    /// Attach wire tokens and the chain generator must feed `dlxns_set` the
+    /// same string for every attach path.
+    #[test]
+    fn wire_token_and_chain_agree_on_the_namespace_set() {
+        let ns = "customer-production-eu";
+        let line = vmtap_line("tap0", "br0", "10.1.0.1", Some("10.1.0.5"), ns);
+        let token = line.split_whitespace().last().unwrap();
+        let fw = delonix_model::records::ContainerFw {
+            enabled: true,
+            namespace: ns.to_string(),
+            ..Default::default()
+        };
+        let body = fw_chain_body("10.1.0.5", &fw);
+        assert!(body.contains(&format!("@{}", dlxns_set(token))));
+    }
+
+    /// Two records whose names share their first 12 chars used to share a file.
+    #[test]
+    fn pair_record_paths_are_injective_past_12_chars() {
+        let d = std::path::Path::new("/x");
+        assert_eq!(sanitize("production-alpha"), sanitize("production-alpine"));
+        assert_ne!(
+            pair_record_path(d, "production-alpha", "web"),
+            pair_record_path(d, "production-alpine", "web")
+        );
+        assert_ne!(
+            pair_record_path(d, "ab", "c"),
+            pair_record_path(d, "a", "bc")
+        );
+        assert_eq!(pair_record_path(d, "t", "n"), pair_record_path(d, "t", "n"));
+    }
+
+    #[test]
+    fn a_legacy_record_is_only_removed_when_it_is_the_same_record() {
+        let dir = std::env::temp_dir().join(format!("dlx-legacy-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let f = dir.join("x.json");
+        std::fs::write(&f, br#"{"who":"other"}"#).unwrap();
+        remove_legacy_if(&f, |b| b == br#"{"who":"me"}"#);
+        assert!(f.exists(), "another tenant's record must survive");
+        remove_legacy_if(&f, |b| b == br#"{"who":"other"}"#);
+        assert!(!f.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -8831,6 +9112,35 @@ Inter-|   Receive                                                |  Transmit
         assert!(!valid_fdb_dst("$(curl evil)"));
         assert!(!valid_fdb_dst("10.0.0.1 dev eth0"));
         assert!(!valid_fdb_dst(&"a".repeat(46))); // above the textual IPv6 cap
+    }
+
+    #[test]
+    fn the_standard_service_name_resolves_to_name_and_namespace() {
+        assert_eq!(
+            parse_internal_name("web.data.svc.delonix.internal"),
+            Some(("web".into(), Some("data".into())))
+        );
+        assert_eq!(
+            parse_internal_name("WEB.Data.svc.delonix.internal."),
+            Some(("web".into(), Some("data".into())))
+        );
+        // One label before `.svc` is the OLD form with a namespace called `svc`.
+        assert_eq!(
+            parse_internal_name("web.svc.delonix.internal"),
+            Some(("web".into(), Some("svc".into())))
+        );
+        // The old spelling keeps meaning what it meant.
+        assert_eq!(
+            parse_internal_name("web.data.delonix.internal"),
+            Some(("web".into(), Some("data".into())))
+        );
+        assert_eq!(service_fqdn("web", "data"), "web.data.svc.delonix.internal");
+        // and the two spellings are each other's inverse
+        let f = service_fqdn("api", "prod");
+        assert_eq!(
+            parse_internal_name(&f),
+            Some(("api".into(), Some("prod".into())))
+        );
     }
 
     #[test]

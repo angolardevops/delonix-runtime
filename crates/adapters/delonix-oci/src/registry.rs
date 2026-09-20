@@ -31,6 +31,37 @@ const ACCEPT_MANIFEST: &str = "application/vnd.oci.image.index.v1+json, \
      application/vnd.oci.image.manifest.v1+json, \
      application/vnd.docker.distribution.manifest.v2+json";
 
+/// Ceiling for a manifest or index body. Real ones are a few KiB; 4 MiB is
+/// generous, and the point is that it is FINITE.
+const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+/// Ceiling for a non-registry feed fetched by [`http_get`] (the CVE feed).
+const MAX_FEED_BYTES: u64 = 256 * 1024 * 1024;
+
+/// Reads a response body up to `max` bytes and REFUSES anything longer.
+///
+/// `Response::bytes()` buffers whatever the server sends: a hostile or MITM'd
+/// registry answering a manifest request with a multi-GiB chunked body made
+/// the process allocate until OOM — before `verify_manifest_digest` ever ran.
+/// Blobs already had this cap (`blob_with_progress_capped`); manifests did not.
+fn read_capped(resp: reqwest::blocking::Response, max: u64, what: &str) -> Result<Vec<u8>> {
+    use std::io::Read;
+    if resp.content_length().is_some_and(|n| n > max) {
+        return Err(Error::Registry(format!(
+            "{what} larger than the {max}-byte limit (Content-Length) — refusing"
+        )));
+    }
+    let mut buf = Vec::new();
+    resp.take(max + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| Error::Registry(format!("reading {what}: {e}")))?;
+    if buf.len() as u64 > max {
+        return Err(Error::Registry(format!(
+            "{what} larger than the {max}-byte limit — refusing"
+        )));
+    }
+    Ok(buf)
+}
+
 fn reg_err(e: reqwest::Error) -> Error {
     Error::Registry(e.to_string())
 }
@@ -744,7 +775,9 @@ impl Client {
         })?;
         if !resp.status().is_success() {
             let status = resp.status();
-            let detail = resp.text().unwrap_or_default();
+            let detail = read_capped(resp, 64 * 1024, "error body")
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_default();
             let detail = detail.chars().take(200).collect::<String>();
             return Err(Error::Registry(format!(
                 "manifest PUT: HTTP {status} {detail}"
@@ -855,7 +888,7 @@ impl RegistryClient {
     pub fn get_manifest(&mut self, refr: &str) -> Result<Vec<u8>> {
         let url = self.inner.manifest_url(refr);
         let resp = self.inner.fetch(&url, ACCEPT_MANIFEST)?;
-        Ok(resp.bytes().map_err(reg_err)?.to_vec())
+        read_capped(resp, MAX_MANIFEST_BYTES, "manifest")
     }
     /// Raw bytes of a blob (by digest).
     pub fn get_blob(&mut self, digest: &str) -> Result<Vec<u8>> {
@@ -875,7 +908,7 @@ pub fn http_get(url: &str) -> Result<Vec<u8>> {
     if !resp.status().is_success() {
         return Err(Error::Registry(format!("HTTP {} at {url}", resp.status())));
     }
-    Ok(resp.bytes().map_err(reg_err)?.to_vec())
+    read_capped(resp, MAX_FEED_BYTES, "feed")
 }
 
 /// A local image, or the image pulled from its registry when there is none.
@@ -1005,7 +1038,7 @@ pub fn pull_from_registry_with_creds_full(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let body = resp.bytes().map_err(reg_err)?.to_vec();
+    let body = read_capped(resp, MAX_MANIFEST_BYTES, "manifest")?;
     // A digest pin (`@sha256:...`) covers whatever the registry returned for it —
     // the index (multi-arch) OR a single manifest. Verify it here, before we act
     // on any of it (before picking a platform, before fetching any blob).
@@ -1031,7 +1064,7 @@ pub fn pull_from_registry_with_creds_full(
         tracing::info!(arch = %arch, "platform selected: linux/{arch}");
         let purl = c.manifest_url(pick.digest().as_ref());
         let r = c.fetch(&purl, ACCEPT_MANIFEST)?;
-        let sub = r.bytes().map_err(reg_err)?.to_vec();
+        let sub = read_capped(r, MAX_MANIFEST_BYTES, "sub-manifest")?;
         // The picked sub-manifest is addressed by the index's own digest for that
         // platform — verify the bytes hash to it, or a registry that passed the
         // index check could still swap the per-arch manifest underneath us.
@@ -1504,11 +1537,11 @@ pub fn describe_remote_artifact(
         creds,
     };
     let url = c.manifest_url(tag);
-    let bytes = c
-        .fetch(&url, "application/vnd.oci.image.manifest.v1+json")?
-        .bytes()
-        .map_err(reg_err)?
-        .to_vec();
+    let bytes = read_capped(
+        c.fetch(&url, "application/vnd.oci.image.manifest.v1+json")?,
+        MAX_MANIFEST_BYTES,
+        "manifest",
+    )?;
     let manifest: ImageManifest = serde_json::from_slice(&bytes)
         .map_err(|e| Error::Registry(format!("invalid artifact manifest: {e}")))?;
     let layer = manifest
@@ -1566,7 +1599,7 @@ pub fn pull_oci_artifact_with_meta(
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
     let url = c.manifest_url(&refr);
-    let manifest_bytes = c.fetch(&url, accept)?.bytes().map_err(reg_err)?.to_vec();
+    let manifest_bytes = read_capped(c.fetch(&url, accept)?, MAX_MANIFEST_BYTES, "manifest")?;
     // A digest-pinned artifact pull (a golden VM image referenced by
     // `@sha256:...`) must verify the manifest against the pin too — otherwise a
     // compromised registry substitutes the whole manifest and the single-blob
@@ -1745,6 +1778,53 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+    /// Serves one response with `body_len` bytes, chunked (no Content-Length),
+    /// so only the streaming cap can stop it.
+    fn serve_chunked(body_len: usize) -> String {
+        use std::io::{Read, Write};
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = l.local_addr().unwrap();
+        std::thread::spawn(move || {
+            if let Ok((mut c, _)) = l.accept() {
+                let mut buf = [0u8; 1024];
+                let _ = c.read(&mut buf);
+                let _ = c.write_all(b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n");
+                let chunk = vec![b'a'; 4096];
+                let mut sent = 0;
+                while sent < body_len {
+                    let n = chunk.len().min(body_len - sent);
+                    if c.write_all(format!("{n:x}\r\n").as_bytes()).is_err()
+                        || c.write_all(&chunk[..n]).is_err()
+                        || c.write_all(b"\r\n").is_err()
+                    {
+                        return;
+                    }
+                    sent += n;
+                }
+                let _ = c.write_all(b"0\r\n\r\n");
+            }
+        });
+        format!("http://{addr}/")
+    }
+
+    #[test]
+    fn read_capped_refuses_a_body_over_the_limit() {
+        let url = serve_chunked(50_000);
+        let resp = reqwest::blocking::get(&url).unwrap();
+        let err = super::read_capped(resp, 10_000, "manifest").unwrap_err();
+        assert!(format!("{err}").contains("limit"), "{err}");
+    }
+
+    #[test]
+    fn read_capped_accepts_a_body_within_the_limit() {
+        let url = serve_chunked(5_000);
+        let resp = reqwest::blocking::get(&url).unwrap();
+        assert_eq!(
+            super::read_capped(resp, 10_000, "manifest").unwrap().len(),
+            5_000
+        );
+    }
+
     use super::{
         layer_media_type, matches_insecure, parse_content_range, parse_reference,
         pull_from_registry_with_creds, pull_oci_artifact, push_oci_artifact, scheme_for_with,

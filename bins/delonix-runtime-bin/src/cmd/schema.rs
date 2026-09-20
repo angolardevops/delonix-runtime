@@ -28,6 +28,7 @@
 use clap::Subcommand;
 use delonix_model::{Error, Result};
 use schemars::generate::SchemaSettings;
+use schemars::SchemaGenerator;
 
 use super::kinds as k;
 
@@ -61,6 +62,7 @@ const TYPED_KINDS: &[&str] = &[
     k::FIREWALL_POLICY,
     k::NETWORK_ACCESS_RULE,
     k::SERVICE,
+    k::IPPOOL,
     k::WORKLOAD,
     k::CLUSTER,
     k::STACK,
@@ -127,6 +129,209 @@ pub enum SchemaCmd {
     },
 }
 
+/// The typed spec of one Kind: its schema, the `$defs` key schemars generates
+/// for it, and the accept list the unknown-field guard uses. `None` for a Kind
+/// with no typed spec.
+///
+///         // The middle element is the `$defs` key schemars will generate, which is
+///         // the Rust TYPE name and not the Kind. It used to be guessed as
+///         // `format!("{kind}Spec")` further down, and the guess held only while
+///         // every typed Kind happened to be named after its struct. It stops
+///         // holding here — `FirewallPolicy` is `FwDocSpec`, `HTTPRoute` is
+///         // `HttpRouteSpec` — and the failure mode was silent: the strictness loop
+///         // did `continue` on a miss, so the Kind entered the schema WITHOUT
+///         // `additionalProperties: false` and nothing said so. That is the exact
+///         // shape this schema exists to abolish, so the name is now written down
+///         // next to the type it belongs to, and a miss is a hard error.
+fn typed_spec_parts(
+    generator: &mut SchemaGenerator,
+    kind: &str,
+) -> Option<(serde_json::Value, &'static str, &'static [&'static str])> {
+    let (spec, def_name, accepted) = match kind {
+        k::CONTAINER => (
+            generator.subschema_for::<super::container::ContainerSpec>(),
+            "ContainerSpec",
+            super::container::CONTAINER_SPEC_FIELDS,
+        ),
+        k::POD => (
+            generator.subschema_for::<super::container::PodSpec>(),
+            "PodSpec",
+            super::container::POD_SPEC_FIELDS,
+        ),
+        k::VOLUME => (
+            generator.subschema_for::<super::volume::VolumeSpec>(),
+            "VolumeSpec",
+            super::volume::VOLUME_SPEC_FIELDS,
+        ),
+        k::NETWORK => (
+            generator.subschema_for::<super::network::NetworkSpec>(),
+            "NetworkSpec",
+            super::network::NETWORK_SPEC_FIELDS,
+        ),
+        // `Vm` joins the typed Kinds: it is the largest spec in the manifest
+        // (34 fields) and was the one an editor could say nothing about.
+        // The accept list is `VM_SPEC_FIELDS`, which also carries the
+        // grouped-form keys (`resources:`/`boot:`/`cloudInit:`/`libvirt:`) —
+        // hoisted to flat fields before `VmSpec` is deserialized, so they
+        // exist in a valid manifest and not in the struct.
+        k::VM => (
+            generator.subschema_for::<super::vm::VmSpec>(),
+            "VmSpec",
+            super::vm::VM_SPEC_FIELDS,
+        ),
+        k::SECRET => (
+            generator.subschema_for::<super::secret::SecretSpec>(),
+            "SecretSpec",
+            super::secret::SECRET_SPEC_FIELDS,
+        ),
+        k::IMAGE => (
+            generator.subschema_for::<super::image::ImageSpec>(),
+            "ImageSpec",
+            super::image::IMAGE_SPEC_FIELDS,
+        ),
+        k::APP => (
+            generator.subschema_for::<super::app::AppSpec>(),
+            "AppSpec",
+            super::app::APP_SPEC_FIELDS,
+        ),
+        k::GATEWAY => (
+            generator.subschema_for::<super::tunnel::TunnelSpec>(),
+            "TunnelSpec",
+            super::tunnel::TUNNEL_SPEC_FIELDS,
+        ),
+        k::DEPENDENCY => (
+            generator.subschema_for::<super::dependency::DependencySpec>(),
+            "DependencySpec",
+            super::dependency::DEPENDENCY_SPEC_FIELDS,
+        ),
+        k::NETWORK_ROUTE => (
+            generator.subschema_for::<super::netroute::NetworkRouteSpec>(),
+            "NetworkRouteSpec",
+            super::netroute::NETWORK_ROUTE_SPEC_FIELDS,
+        ),
+        k::SERVICE => (
+            generator.subschema_for::<super::service::ServiceSpec>(),
+            "ServiceSpec",
+            super::service::SERVICE_SPEC_FIELDS,
+        ),
+        k::IPPOOL => (
+            generator.subschema_for::<super::ippool::IpPoolSpec>(),
+            "IpPoolSpec",
+            super::ippool::IPPOOL_SPEC_FIELDS,
+        ),
+        k::HTTP_ROUTE => (
+            generator.subschema_for::<super::httproute::HttpRouteSpec>(),
+            "HttpRouteSpec",
+            super::httproute::HTTP_ROUTE_SPEC_FIELDS,
+        ),
+        k::INGRESS => (
+            generator.subschema_for::<super::httproute::IngressSpec>(),
+            "IngressSpec",
+            super::httproute::INGRESS_SPEC_FIELDS,
+        ),
+        // `Egress` used to share this arm: one struct, two Kinds, both
+        // listed because the schema describes what is ACCEPTED. v0.65.0
+        // removed the Kind and the arm outlived it — see
+        // [`no_typed_kind_outlives_its_removal`].
+        k::FIREWALL_POLICY => (
+            generator.subschema_for::<super::firewall::FwDocSpec>(),
+            "FwDocSpec",
+            super::firewall::FW_SPEC_FIELDS,
+        ),
+        k::NETWORK_ACCESS_RULE => (
+            generator.subschema_for::<super::network_access_rule::NetworkAccessRuleSpec>(),
+            "NetworkAccessRuleSpec",
+            super::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS,
+        ),
+        k::WORKLOAD => (
+            generator.subschema_for::<super::workload::WorkloadSpec>(),
+            "WorkloadSpec",
+            super::workload::WORKLOAD_SPEC_FIELDS,
+        ),
+        k::CLUSTER => (
+            generator.subschema_for::<super::cluster::ClusterSpec>(),
+            "ClusterSpec",
+            super::cluster::CLUSTER_SPEC_FIELDS,
+        ),
+        _ => return None,
+    };
+    // `kind: Container` has TWO valid spec shapes: the flat one, and the
+    // k8s Pod shape (`spec.containers[]`, still limited to one container).
+    // `container::apply` picks between them by the presence of
+    // `spec.containers`, so the schema has to offer both — describing only
+    // the flat one would reject `examples/pod.yaml`, which is a documented,
+    // working manifest.
+    let spec = if kind == k::CONTAINER {
+        let pod = generator.subschema_for::<super::container::PodSpec>();
+        serde_json::json!({ "anyOf": [spec, pod] })
+    } else {
+        serde_json::to_value(spec).unwrap_or(serde_json::json!({}))
+    };
+    Some((spec, def_name, accepted))
+}
+
+/// The `StackSpec` definition: one array per group, each item typed against the
+/// spec of the Kind the group holds.
+///
+/// **The groups come off the Kind table** (`stack_groups`), like everything else
+/// about a Stack. Before this, `StackItem.spec` was «anything» — a typo INSIDE a
+/// child (`imgae:` in a container) passed the schema and the editor and only
+/// showed at apply, which is exactly the mistake this schema exists to catch.
+/// Item shape mirrors `manifest::StackItem`, and is closed for the same reason
+/// every spec is: `nmae:` would otherwise validate and be dropped.
+///
+/// The children's own definitions are registered through [`typed_spec_parts`],
+/// so they are the SAME `$defs` the top-level Kinds use, not copies. `register`
+/// is set when only the Stack is being printed (`explain Stack…`), where the
+/// strictness of those defs would otherwise never be applied.
+fn stack_spec_schema(
+    generator: &mut SchemaGenerator,
+    register: bool,
+    strict: &mut Vec<(String, &'static str, &'static [&'static str])>,
+) -> serde_json::Value {
+    let mut props = serde_json::Map::new();
+    for (group, kind) in super::kinds::stack_groups() {
+        let item_spec = match typed_spec_parts(generator, kind) {
+            Some((spec, def_name, accepted)) => {
+                if register && !strict.iter().any(|(k, _, _)| k == kind) {
+                    strict.push((kind.to_string(), def_name, accepted));
+                }
+                spec
+            }
+            None => serde_json::json!({}),
+        };
+        props.insert(
+            group.to_string(),
+            serde_json::json!({
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "required": ["name"],
+                    "additionalProperties": false,
+                    "properties": {
+                        "name": { "type": "string" },
+                        "namespace": { "type": "string" },
+                        "labels": { "type": "object", "additionalProperties": { "type": "string" } },
+                        "annotations": { "type": "object", "additionalProperties": { "type": "string" } },
+                        "spec": item_spec,
+                    },
+                },
+            }),
+        );
+    }
+    // The old spellings take the schema of the group they stand for.
+    for (old, canonical) in super::kinds::STACK_GROUP_ALIASES {
+        if let Some(v) = props.get(*canonical).cloned() {
+            props.insert((*old).to_string(), v);
+        }
+    }
+    serde_json::json!({
+        "type": "object",
+        "additionalProperties": false,
+        "properties": props,
+    })
+}
+
 /// Builds the schema document for the whole manifest.
 ///
 /// Shape: the four envelope fields every document has, plus an `allOf` of
@@ -137,143 +342,28 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
     let mut generator = SchemaSettings::draft2020_12().into_generator();
     let mut branches = Vec::new();
     let mut strict: Vec<(String, &str, &[&str])> = Vec::new();
+    let mut stack_def: Option<serde_json::Value> = None;
     for kind in TYPED_KINDS {
         if let Some(k) = only {
             if !k.eq_ignore_ascii_case(kind) {
                 continue;
             }
         }
-        // The middle element is the `$defs` key schemars will generate, which is
-        // the Rust TYPE name and not the Kind. It used to be guessed as
-        // `format!("{kind}Spec")` further down, and the guess held only while
-        // every typed Kind happened to be named after its struct. It stops
-        // holding here — `FirewallPolicy` is `FwDocSpec`, `HTTPRoute` is
-        // `HttpRouteSpec` — and the failure mode was silent: the strictness loop
-        // did `continue` on a miss, so the Kind entered the schema WITHOUT
-        // `additionalProperties: false` and nothing said so. That is the exact
-        // shape this schema exists to abolish, so the name is now written down
-        // next to the type it belongs to, and a miss is a hard error.
-        let (spec, def_name, accepted) = match *kind {
-            k::CONTAINER => (
-                generator.subschema_for::<super::container::ContainerSpec>(),
-                "ContainerSpec",
-                super::container::CONTAINER_SPEC_FIELDS,
-            ),
-            k::POD => (
-                generator.subschema_for::<super::container::PodSpec>(),
-                "PodSpec",
-                super::container::POD_SPEC_FIELDS,
-            ),
-            k::VOLUME => (
-                generator.subschema_for::<super::volume::VolumeSpec>(),
-                "VolumeSpec",
-                super::volume::VOLUME_SPEC_FIELDS,
-            ),
-            k::NETWORK => (
-                generator.subschema_for::<super::network::NetworkSpec>(),
-                "NetworkSpec",
-                super::network::NETWORK_SPEC_FIELDS,
-            ),
-            // `Vm` joins the typed Kinds: it is the largest spec in the manifest
-            // (34 fields) and was the one an editor could say nothing about.
-            // The accept list is `VM_SPEC_FIELDS`, which also carries the
-            // grouped-form keys (`resources:`/`boot:`/`cloudInit:`/`libvirt:`) —
-            // hoisted to flat fields before `VmSpec` is deserialized, so they
-            // exist in a valid manifest and not in the struct.
-            k::VM => (
-                generator.subschema_for::<super::vm::VmSpec>(),
-                "VmSpec",
-                super::vm::VM_SPEC_FIELDS,
-            ),
-            k::SECRET => (
-                generator.subschema_for::<super::secret::SecretSpec>(),
-                "SecretSpec",
-                super::secret::SECRET_SPEC_FIELDS,
-            ),
-            k::IMAGE => (
-                generator.subschema_for::<super::image::ImageSpec>(),
-                "ImageSpec",
-                super::image::IMAGE_SPEC_FIELDS,
-            ),
-            k::APP => (
-                generator.subschema_for::<super::app::AppSpec>(),
-                "AppSpec",
-                super::app::APP_SPEC_FIELDS,
-            ),
-            k::GATEWAY => (
-                generator.subschema_for::<super::tunnel::TunnelSpec>(),
-                "TunnelSpec",
-                super::tunnel::TUNNEL_SPEC_FIELDS,
-            ),
-            k::DEPENDENCY => (
-                generator.subschema_for::<super::dependency::DependencySpec>(),
-                "DependencySpec",
-                super::dependency::DEPENDENCY_SPEC_FIELDS,
-            ),
-            k::NETWORK_ROUTE => (
-                generator.subschema_for::<super::netroute::NetworkRouteSpec>(),
-                "NetworkRouteSpec",
-                super::netroute::NETWORK_ROUTE_SPEC_FIELDS,
-            ),
-            k::SERVICE => (
-                generator.subschema_for::<super::service::ServiceSpec>(),
-                "ServiceSpec",
-                super::service::SERVICE_SPEC_FIELDS,
-            ),
-            k::HTTP_ROUTE => (
-                generator.subschema_for::<super::httproute::HttpRouteSpec>(),
-                "HttpRouteSpec",
-                super::httproute::HTTP_ROUTE_SPEC_FIELDS,
-            ),
-            k::INGRESS => (
-                generator.subschema_for::<super::httproute::IngressSpec>(),
-                "IngressSpec",
-                super::httproute::INGRESS_SPEC_FIELDS,
-            ),
-            // `Egress` used to share this arm: one struct, two Kinds, both
-            // listed because the schema describes what is ACCEPTED. v0.65.0
-            // removed the Kind and the arm outlived it — see
-            // [`no_typed_kind_outlives_its_removal`].
-            k::FIREWALL_POLICY => (
-                generator.subschema_for::<super::firewall::FwDocSpec>(),
-                "FwDocSpec",
-                super::firewall::FW_SPEC_FIELDS,
-            ),
-            k::NETWORK_ACCESS_RULE => (
-                generator.subschema_for::<super::network_access_rule::NetworkAccessRuleSpec>(),
-                "NetworkAccessRuleSpec",
-                super::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS,
-            ),
-            k::WORKLOAD => (
-                generator.subschema_for::<super::workload::WorkloadSpec>(),
-                "WorkloadSpec",
-                super::workload::WORKLOAD_SPEC_FIELDS,
-            ),
-            k::CLUSTER => (
-                generator.subschema_for::<super::cluster::ClusterSpec>(),
-                "ClusterSpec",
-                super::cluster::CLUSTER_SPEC_FIELDS,
-            ),
-            k::STACK => (
-                generator.subschema_for::<super::manifest::StackSpec>(),
+        let (spec, def_name, accepted) = if *kind == k::STACK {
+            let def = stack_spec_schema(&mut generator, only.is_some(), &mut strict);
+            stack_def = Some(def);
+            (
+                serde_json::json!({ "$ref": "#/$defs/StackSpec" }),
                 "StackSpec",
-                super::manifest::STACK_SPEC_FIELDS,
-            ),
-            _ => continue,
+                super::manifest::stack_spec_fields(),
+            )
+        } else {
+            match typed_spec_parts(&mut generator, kind) {
+                Some(parts) => parts,
+                None => continue,
+            }
         };
         strict.push((kind.to_string(), def_name, accepted));
-        // `kind: Container` has TWO valid spec shapes: the flat one, and the
-        // k8s Pod shape (`spec.containers[]`, still limited to one container).
-        // `container::apply` picks between them by the presence of
-        // `spec.containers`, so the schema has to offer both — describing only
-        // the flat one would reject `examples/pod.yaml`, which is a documented,
-        // working manifest.
-        let spec = if *kind == k::CONTAINER {
-            let pod = generator.subschema_for::<super::container::PodSpec>();
-            serde_json::json!({ "anyOf": [spec, pod] })
-        } else {
-            serde_json::to_value(spec).unwrap_or(serde_json::json!({}))
-        };
         // The branch pins the Kind's OWN apiVersion as well as its spec. The
         // engine already does (`api_version_accepted`): a `kind: Pod` under
         // `networking.delonix.io/v1alpha1` is refused, naming the group it
@@ -296,6 +386,9 @@ fn manifest_schema(only: Option<&str>) -> Result<serde_json::Value> {
         return Err(no_typed_schema(only.unwrap_or("?")));
     }
     let mut defs = generator.take_definitions(false);
+    if let Some(def) = stack_def {
+        defs.insert("StackSpec".to_string(), def);
+    }
     // Teach the schema the second spelling of every aliased nested field (see
     // `NESTED_ALIASES`). The alias gets the SAME subschema as the canonical
     // field — they deserialize into one place, so describing them differently
@@ -981,6 +1074,71 @@ mod tests {
         let spec = &s["allOf"][0]["then"]["properties"]["spec"];
         let alts = spec["anyOf"].as_array().expect("two shapes expected");
         assert_eq!(alts.len(), 2, "{spec:#?}");
+    }
+
+    /// **A typo INSIDE a Stack child is as visible as one in a top-level document.**
+    /// The items used to be «anything», so `imgae:` in a container of a Stack
+    /// validated clean and showed only at apply. Every group's item spec is now
+    /// the SAME schema the Kind has at the top level — not a copy that can
+    /// drift — and the items themselves are closed (`nmae:` would otherwise pass).
+    #[test]
+    fn every_stack_group_is_typed_against_its_kinds_own_spec() {
+        let s = manifest_schema(None).unwrap();
+        let defs = &s["$defs"];
+        let props = &defs["StackSpec"]["properties"];
+        assert_eq!(
+            defs["StackSpec"]["additionalProperties"],
+            serde_json::Value::Bool(false)
+        );
+        for (group, kind) in super::super::kinds::stack_groups() {
+            let item = &props[group]["items"];
+            assert_eq!(
+                item["additionalProperties"],
+                serde_json::Value::Bool(false),
+                "{group}: an item with a misspelt `name:` would validate"
+            );
+            assert!(item["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|r| r == "name"));
+            let top = s["allOf"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|b| b["if"]["properties"]["kind"]["const"] == kind)
+                .unwrap_or_else(|| panic!("{kind} has no branch"));
+            assert_eq!(
+                item["properties"]["spec"], top["then"]["properties"]["spec"],
+                "{group}: the item spec is not the spec of {kind}"
+            );
+        }
+        // The old spelling takes the same schema.
+        assert_eq!(props["tunnels"], props["gateways"]);
+    }
+
+    /// `schema print --kind Stack` (and `explain Stack…`) never visits the
+    /// children's own branches, so it is the one path where their `$defs` would
+    /// come out WITHOUT the strictness — a typo would validate there and not in
+    /// the full schema.
+    #[test]
+    fn the_stack_alone_still_closes_its_children() {
+        let s = manifest_schema(Some("Stack")).unwrap();
+        let defs = &s["$defs"];
+        for (group, kind) in super::super::kinds::stack_groups() {
+            let spec = deref(
+                defs["StackSpec"]["properties"][group]["items"]["properties"]["spec"].clone(),
+                defs,
+            );
+            if kind == k::CONTAINER {
+                continue; // anyOf flat|pod, each closed on its own
+            }
+            assert_eq!(
+                spec["additionalProperties"],
+                serde_json::Value::Bool(false),
+                "{group} ({kind}) would accept a misspelt field inside a Stack"
+            );
+        }
     }
 
     /// The schema published in `docs/schema/v1/delonix.json` is what an editor

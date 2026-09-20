@@ -327,6 +327,34 @@ and how to tear the isolated infra down, is in
 </thead>
 <tbody>
 <tr>
+<td><code>DELONIX_PERF_CONF</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>Path of the config (<code>CPU=</code>/<code>THP=</code> flags) the helper reads.</td>
+<td>A file path. Unset: <code>/<wbr>etc/<wbr>delonix/<wbr>performance.<wbr>conf</code>.</td>
+<td>Only for testing the helper against a fake sysfs; <code>install.sh</code> writes the real one.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PERF_CPU</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>Root of the CPU sysfs tree the helper reads and writes (governor, EPP).</td>
+<td>A directory path. Unset: <code>/sys/devices/system/cpu</code>.</td>
+<td>Point it at a fake tree to test <code>apply</code>/<code>revert</code> without touching the host.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PERF_STATE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>Directory where the helper stores the boot-time values it restores on <code>revert</code>.</td>
+<td>A directory path. Unset: <code>/<wbr>var/<wbr>lib/<wbr>delonix-performance</code>.</td>
+<td>Test-only override, like the others.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PERF_THP</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> (the generated <code>/<wbr>usr/<wbr>local/<wbr>sbin/<wbr>delonix-performance</code>)</td>
+<td>The transparent-hugepage <code>enabled</code> file the helper reads and writes.</td>
+<td>A file path. Unset: <code>/<wbr>sys/<wbr>kernel/<wbr>mm/<wbr>transparent_hugepage/<wbr>enabled</code>.</td>
+<td>Test-only override, like the others.</td>
+</tr>
+<tr>
 <td><code>DELONIX_ROOT</code></td>
 <td>every store and binary: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>util.<wbr>rs:state_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/image.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>image.<wbr>rs:ImageStore::<wbr>default_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs:Store::<wbr>default_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs:base_root</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs:main</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 <td>The engine's state root: container records, images, networks, IPAM, volumes, VMs, secrets.</td>
@@ -369,6 +397,13 @@ and how to tear the isolated infra down, is in
 <td>Same effect as <code>--verbose</code> where a command has one.</td>
 </tr>
 <tr>
+<td><code>DELONIX_HOSTS_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>hosts_file.<wbr>rs:hosts_path</code></a></td>
+<td>The hosts file that <code>hosts: [host]</code> on an <code>HTTPRoute</code> writes its managed block into.</td>
+<td>A file path; default <code>/etc/hosts</code>.</td>
+<td>Point it at a scratch file in an isolated run so the real <code>/etc/hosts</code> is never touched (writing it needs root).</td>
+</tr>
+<tr>
 <td><code>DELONIX_CONSOLE_ESCAPE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs:resolve_escape</code></a></td>
 <td>The key that detaches <code>delonix vm console</code>.</td>
@@ -395,6 +430,13 @@ and how to tear the isolated infra down, is in
 <td>What happens when a pod explicitly asks for more than the ceiling.</td>
 <td><code>reject</code> (default; also <code>enforce</code> or empty) → <code>CreateContainer</code> fails naming the denied capabilities. <code>clamp</code> (or <code>trim</code>) → reduced to the ceiling with a warning. An unknown word <strong>refuses to start the server</strong>.</td>
 <td><code>--cap-ceiling-mode</code> wins. In both modes the engine's implicit default set is reduced to the ceiling without an error.</td>
+</tr>
+<tr>
+<td><code>DELONIX_CRI_FROM_SOURCE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs:locate_cri_bin</code></a> (<code>CRI_FROM_SOURCE_ENV</code>, parsed by <code>cri_from_source_requested</code>)</td>
+<td>Opt-in to compile <code>delonix-cri</code> from the source checkout around the cwd when <code>cluster apply</code> / <code>cluster kubeadm</code> need a binary to install on the nodes.</td>
+<td>Only <code>1</code> or <code>true</code> (after trimming) turns it on; unset, empty, <code>0</code> or anything else is off.</td>
+<td>Off by default so the runtime installed on a cluster never depends on the directory the command ran from. Without it the order is <code>--cri-bin</code>, the <code>delonix-cri</code> next to <code>delonix</code>, then the release asset of the running version, verified against its <code>SHA256SUMS</code>. The origin, path and sha256 are always printed.</td>
 </tr>
 <tr>
 <td><code>DELONIX_API_ADDR</code></td>

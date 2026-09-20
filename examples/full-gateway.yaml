@@ -1,0 +1,64 @@
+# Complete reference for `kind: Gateway` — exposes ONE local TCP port to the public internet
+# through a third-party tunnel provider. It only does the outbound transport; point `localPort`
+# at the HTTPRoute proxy's listening port to publish many backends behind one public URL.
+#
+# spec fields: provider* (pinggy | ngrok | cloudflare), localPort*, hostname, token,
+# tokenSecretRef, insecureSkipTlsVerify.   (* = required)
+# `token` and `tokenSecretRef` are two ways to give the same credential: use ONE per document.
+# Only one ngrok tunnel can be alive at a time (its local agent API has a fixed port).
+---
+# Secret that carries a provider token under the key `token` (placeholder value).
+apiVersion: core.delonix.io/v1alpha1
+kind: Secret
+metadata: { name: tunnel-token }
+stringData:
+  token: "REPLACE-WITH-PROVIDER-TOKEN"
+---
+# 1. Minimal: pinggy free tier needs no account and no extra binary.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-min }
+spec:
+  provider: pinggy
+  localPort: 80              # local port to expose (e.g. the HTTPRoute proxy, or a published port)
+---
+# 2. pinggy with a pro token given literally (works, but prefer tokenSecretRef).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-pinggy-pro }
+spec:
+  provider: pinggy
+  localPort: 8080
+  token: "REPLACE-WITH-PINGGY-PRO-TOKEN"
+---
+# 3. ngrok with a reserved hostname (passed as ngrok's --url) and the token read from a Secret.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-ngrok }
+spec:
+  provider: ngrok
+  localPort: 8080
+  hostname: demo.ngrok.app   # custom/reserved hostname (provider-dependent)
+  tokenSecretRef: tunnel-token   # kind: Secret whose `token` key holds the authtoken
+---
+# 4. cloudflare NAMED tunnel: runs `cloudflared tunnel run --token ...` for a tunnel you already
+#    created. `hostname` is informational only — the route itself lives in the Cloudflare dashboard.
+#    `insecureSkipTlsVerify` skips verification of the LOCAL backend's self-signed certificate
+#    (the origin becomes https://localhost:<localPort>); the public URL is always a real certificate.
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-cloudflare }
+spec:
+  provider: cloudflare
+  localPort: 8443
+  hostname: app.example.com
+  tokenSecretRef: tunnel-token
+  insecureSkipTlsVerify: true
+---
+# 5. cloudflare quick tunnel: no token at all (an ephemeral trycloudflare.com URL).
+apiVersion: gateway.delonix.io/v1alpha1
+kind: Gateway
+metadata: { name: public-cloudflare-quick }
+spec:
+  provider: cloudflare
+  localPort: 80

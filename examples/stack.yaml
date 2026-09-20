@@ -1,39 +1,221 @@
-# kind: Stack — groups a whole app (networks, containers, storage, …) in ONE
+# kind: Stack — groups a whole app (networks, containers, volumes, …) in ONE
 # document (k8s-Service-like). Apply with:
 #   delonix stack apply -f examples/stack.yaml
 # At load time the Stack expands into its constituent resources, which then flow
-# through the normal per-Kind apply IN DEPENDENCY ORDER (Secret → Network → Volume
-# → Storage → ShareVolume → Image → Vm → Container → Pod → Ingress/Egress →
-# Dependency → HTTPRoute → Tunnel). Each child inherits the Stack's namespace
-# unless it sets its own. You can still write the resources as separate documents
+# through the normal per-Kind apply IN DEPENDENCY ORDER — the order
+# `delonix stack plan --fields` prints, which is the order of the Kind table and
+# not a list kept here. Each child inherits the Stack's namespace unless it sets
+# its own, and can carry `labels:`/`annotations:` next to `name:`. You can still write the resources as separate documents
 # — the Stack is just a convenient single place to bundle them.
+#
+# This example uses EVERY group the Stack accepts (the test
+# `the_stack_example_names_every_group` fails if one is missing), so it doubles as the reference
+# for what each one looks like. For a single Kind with all of its options, see
+# examples/full-<kind>.yaml.
+#
+# A group item is `{ name, namespace?, labels?, annotations?, spec }`: `spec` is exactly the `spec` of
+# the Kind the group stands for, and `namespace` overrides the Stack's for that
+# one item.
+#
+#   group               Kind               full reference
+#   secrets             Secret             full-secret.yaml
+#   networks            Network            full-network.yaml
+#   networkRoutes       NetworkRoute       full-networkroute.yaml
+#   volumes             Volume             full-volume.yaml
+#   images              Image              full-image.yaml
+#   apps                App                full-app.yaml
+#   vms                 VirtualMachine     full-virtualmachine.yaml
+#   containers          Container          full-container.yaml
+#   pods                Pod                full-pod.yaml
+#   services            Service            full-service.yaml
+#   ipPools             IPPool             full-ippool.yaml
+#   ingress             Ingress            full-ingress.yaml
+#   firewallPolicies    NetworkPolicy      full-networkpolicy.yaml
+#   networkAccessRules  NetworkAccessRule  full-networkaccessrule.yaml
+#   httpRoutes          HTTPRoute          full-httproute.yaml
+#   gateways            Gateway            full-gateway.yaml
+#   workloads           Workload           full-workload.yaml   (lowered at load)
+#   dependencies        Dependency         full-dependency.yaml (lowered at load)
+#
+# `tunnels:` is the old spelling of `gateways:` and still loads. Not groupable:
+# `Stack` (a Stack does not nest) and `KubernetesCluster` (a remote procedure
+# over SSH, not a resource of this node — see full-kubernetescluster.yaml).
+#
+# The groups that used to exist for the removed Kinds are gone: NFS/CIFS/WebDAV
+# storage and shares are a `volumes:` item with an `nfs:`/`cifs:`/`webdav:` or
+# `share:` block; an egress policy is a `firewallPolicies:` item with
+# `direction: egress`.
 apiVersion: core.delonix.io/v1alpha1
 kind: Stack
 metadata:
   name: blog
   namespace: default
 spec:
+  # Secrets first: everything below may reference them.
+  secrets:
+    - name: db-credentials
+      spec:
+        stringData:
+          POSTGRES_PASSWORD: change-me
+
   networks:
     - name: blog-net
       spec:
         driver: bridge
+    - name: blog-back
+      spec:
+        driver: bridge
+
+  # A route says the two networks HAVE a path; the policies below still decide
+  # what is allowed across it.
+  networkRoutes:
+    - name: net-to-back
+      spec:
+        from: blog-net
+        to: blog-back
+
+  volumes:
+    - name: db-data
+      spec:
+        quota: 5G          # hard cap on the volume's data
+        alertPct: 80       # warn when it is 80% full
+
+  images:
+    - name: alpine-base
+      spec:
+        pull: alpine:3.20  # `pull` and `build` are alternatives; see full-image.yaml
+
+  # Cloud Native Buildpacks: source in, image out (see full-app.yaml).
+  apps:
+    - name: shop
+      spec:
+        source: .
+        image: shop:latest
+
+  # A microVM/VM on the same SDN. Needs a VM image or disk on the host to apply.
+  vms:
+    - name: worker
+      spec:
+        disk: delonix-vm-base:ubuntu-24.04
+        vcpus: 1
+        memory: 1G
+        network: blog-net
+
   containers:
     - name: web
+      labels: { app: web }     # what the Service below selects by
       spec:
         image: nginx:latest
         network: blog-net
         ports: ["8080:80"]
-        expose: 80
+        expose: 80         # auto-register in the L7 proxy as web.<namespace>.delonix.internal
     - name: db
       spec:
         image: postgres:16
         network: blog-net
-        env: ["POSTGRES_PASSWORD=change-me"]
-  # Every groupable Kind is available: secrets, volumes, storage, shareVolumes,
-  # images, vms, containers, pods, ingress, egress, firewallPolicies,
-  # httpRoutes, tunnels, dependencies.
+        secret: [db-credentials]
+        volumes: ["db-data:/var/lib/postgresql/data"]
+
+  # A pod: several containers sharing ONE network namespace (localhost between them).
+  pods:
+    - name: worker-pod
+      spec:
+        containers:
+          - name: app
+            image: nginx:alpine
+          - name: sidecar
+            image: alpine:3.20
+            command: ["sleep", "infinity"]
+
+  # Round-robin DNS over every container the selector matches, under
+  # web.<namespace>.delonix.internal. No VIP, no daemon.
+  services:
+    - name: web
+      spec:
+        selector: { matchLabels: { app: web } }
+        port: 80
+
+  # A set of host addresses a route can claim with `spec.pool`. Only announce: local is
+  # built: the address must already be on an interface of the host.
+  ipPools:
+    - name: edge
+      spec:
+        addresses: ["127.0.0.10-127.0.0.12"]
+
+  # Kubernetes-shaped L7 Ingress: host/path → backend service.
+  ingress:
+    - name: blog-ingress
+      spec:
+        rules:
+          - host: blog.example.ao
+            http:
+              paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service: { name: web, port: { number: 80 } }
+
+  # Per-container L4 firewall. Each item is the WHOLE desired state of one direction.
+  firewallPolicies:
+    # (`db` ingress is owned by the Dependency below, and two policies for the same
+    # target+direction are refused — so this one protects `web`.)
+    - name: web-ingress
+      spec:
+        target: web
+        direction: ingress
+        defaultPolicy: deny
+        rules:
+          - { action: allow, proto: tcp, port: "80", from: 10.0.0.0/8 }
+    - name: web-egress
+      spec:
+        target: web
+        direction: egress
+        defaultPolicy: allow
+
+  # ONE incremental rule: unlike a firewallPolicy it ADDS to the target's rules
+  # instead of replacing the direction, and removing it removes only itself.
+  networkAccessRules:
+    - name: web-metrics
+      spec:
+        target: web
+        direction: ingress
+        proto: tcp
+        port: "9113"
+        from: 10.0.0.0/8
+
+  # Native L7 reverse proxy, same engine as `ingress:` (both merge into one proxy).
+  httpRoutes:
+    - name: blog-api
+      spec:
+        entrypoints:
+          - { port: 8081 }
+        rules:
+          - host: api.blog.example.ao
+            paths:
+              - path: /
+                backend: { service: web, port: 80 }
+
+  # Directed reachability: `web` may reach `db`, `db` is not exposed to the others.
   dependencies:
     - name: web-knows-db
       spec:
         from: web
         to: db
+        ports: ["5432"]
+        proto: tcp
+
+  # A Workload is lowered at load into the container/pod/VM its `type` names.
+  workloads:
+    - name: batch
+      spec:
+        type: container
+        container:
+          image: alpine:3.20
+          command: ["sleep", "infinity"]
+
+  # Public tunnel to a local port (kind: Gateway). pinggy needs no account.
+  gateways:
+    - name: blog-public
+      spec:
+        provider: pinggy
+        localPort: 8080
