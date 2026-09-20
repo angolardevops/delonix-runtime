@@ -314,7 +314,7 @@ already imported into Postgres — or Grafana past the plugin API the pinned
 kind of drift a golden image exists to prevent; the same reasoning the golden
 Kubernetes image already applies to `kubeadm`/`kubelet`/`kubectl`.
 
-### What the monitoring image carries (revision 4: r3 plus passwordless sudo for `delonix`)
+### What the monitoring image carries (revision 5: r4 plus a tenant VPN, `monitoring-vpn`)
 
 Revision 1 was Zabbix + Grafana. Revision 2 added the layer an operator needs to
 watch a whole estate — servers, network equipment and workstations — with the
@@ -331,6 +331,34 @@ data sources already provisioned and a starter dashboard already loaded.
 | blackbox_exporter | 0.28.0 | `127.0.0.1:9115` | no |
 | node_exporter | 1.12.1 | `127.0.0.1:9100` | no |
 | Loki | 3.7.8 | `127.0.0.1:3100` | no |
+| WireGuard hub (`monitoring-vpn`) | wireguard-tools, `wg0` `10.99.0.1/24` | `:51820` udp | yes, once a host is added |
+
+#### Monitoring a tenant's external hosts over a VPN
+
+One appliance is one tenant, so there is one WireGuard VPN and one `/24`
+(`10.99.0.0/24`, hub at `.1`). Nothing about it is in the image: keys, peer list
+and the agent PSK are generated on the VM the first time they are needed.
+
+```bash
+sudo monitoring-vpn add web-01 --endpoint vpn.example.com   # prints the client kit
+sudo monitoring-vpn ls                                      # hosts + last handshake
+sudo monitoring-vpn rm web-01
+```
+
+The kit holds the host's `wg0.conf` and the Zabbix agent lines (PSK included).
+The host then appears in Zabbix by auto-registration — group `VPN hosts`,
+template `Linux by Zabbix agent active`, interface = its VPN address — with no
+console step. The tunnel reaches only the hub address: it does not route the
+host's other traffic and does not join hosts to each other. `--endpoint` is the
+address the *outside* uses to reach this VM; without it the VM's own address is
+used and the command says so.
+
+Proven on a running appliance: a host in a separate network namespace, given only
+the printed kit, completed the handshake, was created in Zabbix by itself with the
+template linked, and returned `agent.ping = 1`. Not proven: a real host on the
+public internet through NAT, agent packages other than Ubuntu's `zabbix-agent2`,
+and the `.qcow2` rebuilt as revision 5 (the helper was run on revision 4 with
+`wireguard-tools` installed by hand).
 
 Everything not in the "yes" rows is loopback-only on purpose: Grafana reaches it,
 so the extra services add no external surface. It wants **4 GiB** (2 was enough

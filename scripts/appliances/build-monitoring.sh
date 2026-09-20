@@ -65,7 +65,7 @@ GOFLOW2_VERSION=${GOFLOW2_VERSION:-2.2.6}
 GOFLOW2_SHA256=${GOFLOW2_SHA256:-0b8b8b081ff810d01431bfe6f1d10ab0be9de8bbe3da1cb700317fe06b2a0f14}
 ALLOY_VERSION=${ALLOY_VERSION:-1.19.2-1}
 # Bumped when the image changes without any pinned version changing.
-IMAGE_REV=${IMAGE_REV:-4}
+IMAGE_REV=${IMAGE_REV:-5}
 
 BASE_DISTRO=ubuntu
 UBUNTU_SERIES=noble
@@ -109,6 +109,7 @@ fi
 # --------------------------------------------------------------------------
 #  The seed
 # --------------------------------------------------------------------------
+MONITORING_VPN_B64=$(base64 -w0 "$HERE/monitoring-vpn")
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 sed -e "s/@ZABBIX_SERIES@/$ZABBIX_SERIES/g" \
@@ -123,6 +124,7 @@ sed -e "s/@ZABBIX_SERIES@/$ZABBIX_SERIES/g" \
     -e "s/@GOFLOW2_VERSION@/$GOFLOW2_VERSION/g" \
     -e "s/@GOFLOW2_SHA256@/$GOFLOW2_SHA256/g" \
     -e "s/@ALLOY_VERSION@/$ALLOY_VERSION/g" \
+    -e "s|@MONITORING_VPN_B64@|$MONITORING_VPN_B64|g" \
     -e "s/@IMAGE_REV@/$IMAGE_REV/g" \
     "$HERE/monitoring-build.yaml" > "$TMP/user-data"
 cat > "$TMP/meta-data" <<META

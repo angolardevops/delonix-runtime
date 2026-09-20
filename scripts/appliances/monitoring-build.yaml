@@ -20,6 +20,10 @@ write_files:
     permissions: "0440"
     content: |
       delonix ALL=(ALL) NOPASSWD:ALL
+  - path: /usr/local/sbin/monitoring-vpn
+    permissions: "0755"
+    encoding: b64
+    content: @MONITORING_VPN_B64@
   - path: /root/build.sh
     permissions: "0700"
     content: |
@@ -45,7 +49,7 @@ write_files:
 
       echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
       retry "timeout 300 apt-get update"
-      retry "timeout 300 apt-get install -y curl gnupg ca-certificates"
+      retry "timeout 300 apt-get install -y curl gnupg ca-certificates wireguard-tools xxd"
 
       # ------------------------------------------------------------------
       #  PostgreSQL -- installed FIRST, from the Ubuntu archive. Not pinned:
@@ -1212,6 +1216,7 @@ write_files:
         echo "  \"syslog_port\": 1514,"
         echo "  \"goflow2_version\": \"@GOFLOW2_VERSION@\","
         echo "  \"flow_ports\": \"udp 2055 (netflow v5/v9 + ipfix), 6343 (sflow)\","
+        echo "  \"vpn\": \"wireguard wg0 10.99.0.0/24 udp 51820, managed by monitoring-vpn\","
         echo "  \"image_revision\": @IMAGE_REV@"
         echo "}"
       } > /etc/delonix/monitoring-image.json
