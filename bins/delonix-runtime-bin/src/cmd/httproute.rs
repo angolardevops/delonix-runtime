@@ -1356,13 +1356,13 @@ mod tests {
         }
     }
 
-    fn maps() -> (
-        std::collections::HashMap<String, String>,
-        std::collections::HashMap<
-            String,
-            std::result::Result<(String, ingress_proxy::Where), String>,
-        >,
-    ) {
+    type Ctrs = std::collections::HashMap<String, String>;
+    type Vms = std::collections::HashMap<
+        String,
+        std::result::Result<(String, ingress_proxy::Where), String>,
+    >;
+
+    fn maps() -> (Ctrs, Vms) {
         use ingress_proxy::Where;
         let mut c = std::collections::HashMap::new();
         c.insert("ctr".to_string(), "10.1.0.5".to_string());
