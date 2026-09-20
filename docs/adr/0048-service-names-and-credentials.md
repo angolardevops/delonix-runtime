@@ -2,7 +2,9 @@
 
 ## Status
 
-Proposed 2026-09-20. Scope decided with the owner the same day (table below); nothing is built.
+Proposed 2026-09-20. Scope decided with the owner the same day (table below). Phase 1 built
+(names, the shared view, the `SVC` column in `container ls`, `vm ls` and `stack ls`, `describe` and JSON);
+phases 2 and 3 are not.
 
 ## Context
 

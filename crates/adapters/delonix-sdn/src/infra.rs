@@ -7274,6 +7274,13 @@ fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
     None
 }
 
+/// The standard service name of a workload: `<name>.<namespace>.svc.delonix.internal`
+/// (ADR-0048). One spelling for every kind, derived from two facts the record already
+/// holds — never stored, so it cannot drift from the workload.
+pub fn service_fqdn(name: &str, namespace: &str) -> String {
+    format!("{name}.{namespace}.svc.delonix.internal")
+}
+
 /// Resolves an ingress name (container OR VM) → IPv4. Accepts `name` and
 /// `name.delonix.io`. Reads the containers' records and the VMs' metas.
 /// Splits an internal DNS name into `(container, optional_namespace)`. Accepts the
@@ -7282,6 +7289,18 @@ fn forward_dns(q: &[u8]) -> Option<Vec<u8>> {
 /// (testable). Returns `None` if it ends up empty.
 pub fn parse_internal_name(name: &str) -> Option<(String, Option<String>)> {
     let n = name.trim_end_matches('.').to_lowercase();
+    // The standard service name, `<name>.<namespace>.svc.delonix.internal` (ADR-0048).
+    // Matched FIRST and only with exactly two labels before `.svc`: read the ordinary
+    // way, `web.data.svc` would split as name `web.data` in namespace `svc`. One label
+    // (`x.svc.delonix.internal`) is still the old form with a namespace called `svc`,
+    // so an existing namespace of that name keeps working.
+    if let Some(core) = n.strip_suffix(".svc.delonix.internal") {
+        if let Some((cname, ns)) = core.rsplit_once('.') {
+            if !cname.is_empty() && !cname.contains('.') && !ns.is_empty() {
+                return Some((cname.to_string(), Some(ns.to_string())));
+            }
+        }
+    }
     // ONLY `.delonix.internal` does namespace matching (`<name>.<namespace>`) — an
     // EXTERNAL domain `foo.com` CANNOT be hijacked by a container 'foo' in the
     // 'com' namespace. Container names have no `.`, so the last segment is the
@@ -9093,6 +9112,35 @@ Inter-|   Receive                                                |  Transmit
         assert!(!valid_fdb_dst("$(curl evil)"));
         assert!(!valid_fdb_dst("10.0.0.1 dev eth0"));
         assert!(!valid_fdb_dst(&"a".repeat(46))); // above the textual IPv6 cap
+    }
+
+    #[test]
+    fn the_standard_service_name_resolves_to_name_and_namespace() {
+        assert_eq!(
+            parse_internal_name("web.data.svc.delonix.internal"),
+            Some(("web".into(), Some("data".into())))
+        );
+        assert_eq!(
+            parse_internal_name("WEB.Data.svc.delonix.internal."),
+            Some(("web".into(), Some("data".into())))
+        );
+        // One label before `.svc` is the OLD form with a namespace called `svc`.
+        assert_eq!(
+            parse_internal_name("web.svc.delonix.internal"),
+            Some(("web".into(), Some("svc".into())))
+        );
+        // The old spelling keeps meaning what it meant.
+        assert_eq!(
+            parse_internal_name("web.data.delonix.internal"),
+            Some(("web".into(), Some("data".into())))
+        );
+        assert_eq!(service_fqdn("web", "data"), "web.data.svc.delonix.internal");
+        // and the two spellings are each other's inverse
+        let f = service_fqdn("api", "prod");
+        assert_eq!(
+            parse_internal_name(&f),
+            Some(("api".into(), Some("prod".into())))
+        );
     }
 
     #[test]

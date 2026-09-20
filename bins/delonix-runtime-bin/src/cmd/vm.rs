@@ -2405,6 +2405,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     })
                     .collect()
             };
+            let svc_index = super::svc::SvcIndex::load();
             if output == super::output::OutputFormat::Json {
                 let rows: Vec<VmLsRow> = filter(delonix_vm::list(&base)?)
                     .into_iter()
@@ -2423,6 +2424,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                         created_unix: vm.created_unix,
                         // The probe does live network I/O — only when --ports (like the column).
                         ports_open: ports.then(|| fmt_open_ports(vm.ip.as_deref())),
+                        services: svc_index.rows(&vm.name, &vm.namespace, vm.ip.as_deref()),
                     })
                     .collect();
                 return output::print_json(&rows);
@@ -2440,6 +2442,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 "MEMORY",
                 "STATUS",
                 "IP",
+                "SVC",
                 "AGE",
                 "UPTIME",
                 "NAMESPACE",
@@ -2461,6 +2464,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     vm.memory,
                     fmt_vm_status(&vm.status),
                     vm.ip.clone().unwrap_or_else(|| "<none>".into()),
+                    super::svc::cell(&svc_index.rows(&vm.name, &vm.namespace, vm.ip.as_deref())),
                     output::fmt_age(vm.created_unix),
                     fmt_vm_uptime(vm.started_unix),
                     // `default` is what every record that never asked for a
@@ -2797,6 +2801,9 @@ struct VmLsRow {
     created_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     ports_open: Option<String>,
+    /// What a browser can open for this VM (ADR-0048); absent when nothing is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    services: Vec<super::svc::SvcRow>,
 }
 
 /// IMAGE column: the base disk's file stem (`…/truenas-scale_25.10.qcow2` →
@@ -3996,6 +4003,10 @@ fn describe_one(vm: &delonix_compute::Vm) {
     // in" never needs a guess or a look at the JSON.
     d.sub("Namespace", &vm.namespace);
     d.sub("IP", vm.ip.as_deref().unwrap_or("<none>"));
+    let svc = super::svc::SvcIndex::load().rows(&vm.name, &vm.namespace, vm.ip.as_deref());
+    if !svc.is_empty() {
+        d.sub("Services", super::svc::cell(&svc));
+    }
     d.sub("TAP", if vm.tap.is_empty() { "<none>" } else { &vm.tap });
     d.sub("MAC", &vm.mac);
 

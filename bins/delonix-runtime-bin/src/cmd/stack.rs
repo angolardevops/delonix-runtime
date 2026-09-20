@@ -1033,18 +1033,46 @@ fn ls(file: Option<PathBuf>) -> Result<()> {
     // «that resource is not declared», which is the same dishonesty the plan
     // already refuses when it prints a Kind it cannot converge instead of
     // omitting it.
-    let mut t =
-        super::output::Table::new(&["KIND", "DOMAIN", "NAME", "PRESENT", "STATUS", "NAMESPACE"]);
+    // SVC: what a browser can open for a workload the file declares (ADR-0048). Read from
+    // the node, like PRESENT — it says nothing about a workload that is not there yet.
+    let svc_index = super::svc::SvcIndex::load();
+    let vms = delonix_vm::list(&super::util::state_root()).unwrap_or_default();
+    let mut t = super::output::Table::new(&[
+        "KIND",
+        "DOMAIN",
+        "NAME",
+        "PRESENT",
+        "STATUS",
+        "SVC",
+        "NAMESPACE",
+    ]);
     for kind in super::kinds::stack_kinds() {
         for doc in manifest::of_kind(&docs, kind) {
             let name = &doc.metadata.name;
             let (present, status) = presence(kind, doc, &containers);
+            let ns = doc.metadata.namespace.as_deref().unwrap_or_default();
+            let ip: Option<&str> = match kind {
+                k::CONTAINER => containers
+                    .iter()
+                    .find(|c| &c.name == name)
+                    .and_then(|c| c.ip.as_deref()),
+                k::VM => vms
+                    .iter()
+                    .find(|v| &v.name == name)
+                    .and_then(|v| v.ip.as_deref()),
+                _ => None,
+            };
+            let svc = match kind {
+                k::CONTAINER | k::VM => super::svc::cell(&svc_index.rows(name, ns, ip)),
+                _ => "-".to_string(),
+            };
             t.row(vec![
                 kind.to_string(),
                 super::kinds::domain_label(kind).to_string(),
                 name.clone(),
                 present,
                 status,
+                svc,
                 super::output::namespace_cell(
                     doc.metadata.namespace.as_deref().unwrap_or_default(),
                     false,
