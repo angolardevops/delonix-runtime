@@ -17,14 +17,14 @@ OUT=${OUT_DIR:-$(pwd)}
 IMG=${1:-$(ls -1t "$OUT"/monitoring-*.qcow2 2>/dev/null | grep -v -- '-check' | head -1)}
 [ -f "${IMG:-}" ] || { echo "!! no monitoring image found (looked in $OUT)"; exit 1; }
 
-ZP=${ZP:-18081}; GP=${GP:-13000}; SP=${SP:-11514}
+ZP=${ZP:-18081}; GP=${GP:-13000}; SP=${SP:-11514}; FP=${FP:-12055}
 OVL="$OUT/monitoring-verify-check.qcow2"; PIDF="$OUT/monitoring-verify.pid"
 rm -f "$OVL" "$PIDF"
 qemu-img create -q -f qcow2 -b "$IMG" -F qcow2 "$OVL"
 if [ -w /dev/kvm ]; then ACCEL=(-enable-kvm -cpu host); else ACCEL=(-cpu max); fi
 qemu-system-x86_64 "${ACCEL[@]}" -m 4096 -smp 2 \
   -drive file="$OVL",if=virtio,format=qcow2 \
-  -netdev "user,id=n0,hostfwd=tcp::$ZP-:80,hostfwd=tcp::$GP-:3000,hostfwd=udp::$SP-:1514,hostfwd=tcp::$SP-:1514" -device virtio-net-pci,netdev=n0 \
+  -netdev "user,id=n0,hostfwd=tcp::$ZP-:80,hostfwd=tcp::$GP-:3000,hostfwd=udp::$SP-:1514,hostfwd=tcp::$SP-:1514,hostfwd=udp::$FP-:2055" -device virtio-net-pci,netdev=n0 \
   -display none -serial "file:$OUT/monitoring-verify-serial.log" -pidfile "$PIDF" &
 trap 'kill "$(cat "$PIDF" 2>/dev/null)" 2>/dev/null; wait 2>/dev/null; rm -f "$OVL" "$PIDF"' EXIT
 
@@ -98,6 +98,28 @@ for h in verify-udp-host verify-tcp-host; do
 done
 check "Alertmanager datasource answers" \
   "$G/api/alertmanager/alertmanager/api/v2/status | grep -q 'versionInfo'"
+
+# --- NetFlow: a real NetFlow v5 datagram, as a router would export it -------
+python3 - "$FP" <<'PY' 2>/dev/null
+import socket,struct,sys,time
+ip=lambda s: socket.inet_aton(s)
+for i,(src,b) in enumerate((("10.77.0.5",900000),("10.77.0.6",100000))):
+    hdr=struct.pack('!HHIIIIBBH',5,1,123456,int(time.time()),0,i+1,0,0,0)
+    rec=ip(src)+ip('93.184.216.34')+ip('0.0.0.0')+struct.pack('!HHIIIIHHBBBBHHBBH',1,2,42,b,1000,2000,51000,443,0,0x18,6,0,0,0,24,0,0)
+    socket.socket(socket.AF_INET,socket.SOCK_DGRAM).sendto(hdr+rec,('127.0.0.1',int(sys.argv[1])))
+PY
+sleep 25
+check "NetFlow: the record reaches Loki with its exporter label" \
+  "$LK/label/exporter/values | grep -q '10.0.2'"
+check "NetFlow: goflow2 is up (Prometheus scrape of the collector)" \
+  "q prometheus prometheus '\"expr\":\"up{job=\\\"goflow2\\\"}\",\"instant\":true' | J 'sys.exit(0 if d[\"results\"][\"A\"][\"frames\"][0][\"data\"][\"values\"][1][0]==1 else 1)'"
+check "NetFlow: the collector's own metrics reach Prometheus (an exporter is seen)" \
+  "q prometheus prometheus '\"expr\":\"sum(goflow2_flow_traffic_packets_total)\",\"instant\":true' | J 'sys.exit(0 if d[\"results\"][\"A\"][\"frames\"][0][\"data\"][\"values\"][1][0]>=2 else 1)'"
+# The panel's own query: 10.77.0.5 sent 900000 bytes and 10.77.0.6 sent 100000,
+# so the answer must be those two, in that order -- a number, not "some rows".
+NOW=$(date +%s)
+check "NetFlow: top talkers ranks 10.77.0.5 (900000 B) above 10.77.0.6 (100000 B)" \
+  "$LK/query -G --data-urlencode 'query=topk(10, sum by (src_addr) (sum_over_time({job=\"netflow\"} | json | unwrap bytes [15m])))' --data-urlencode time=$NOW | J 'r={x[\"metric\"][\"src_addr\"]:float(x[\"value\"][1]) for x in d[\"data\"][\"result\"]}; sys.exit(0 if r.get(\"10.77.0.5\")==900000 and r.get(\"10.77.0.6\")==100000 else 1)'"
 
 # --- the starter dashboard is really there -----------------------------
 check "starter dashboard 'delonix-overview' is provisioned" \

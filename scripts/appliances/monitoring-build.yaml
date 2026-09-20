@@ -384,6 +384,8 @@ write_files:
           static_configs: [{targets: ['127.0.0.1:9093']}]
         - job_name: loki
           static_configs: [{targets: ['127.0.0.1:3100']}]
+        - job_name: goflow2
+          static_configs: [{targets: ['127.0.0.1:8081']}]
         - job_name: node
           static_configs: [{targets: ['127.0.0.1:9100'], labels: {role: monitoring-host}}]
           file_sd_configs: [{files: ['/etc/prometheus/targets/node-*.yml']}]
@@ -514,6 +516,48 @@ write_files:
       WantedBy=multi-user.target
       UNIT
 
+            # ---- NetFlow / IPFIX / sFlow collector (goflow2, BSD-3-Clause) ------
+      # One process, three protocols: NetFlow v5/v9 and IPFIX all arrive on UDP 2055
+      # (the one `netflow://` listener decodes all three), sFlow on UDP 6343. There is
+      # deliberately NO second `netflow://` listener for IPFIX's registered port 4739:
+      # goflow2 panics at start-up with two of them ("pattern /templates conflicts" --
+      # each registers the same HTTP handler; measured, and it took the first r3 build's
+      # collector down silently). Point an IPFIX exporter at 2055.
+      # Flow RECORDS go to a file that Alloy ships to Loki;
+      # goflow2's own metrics go to Prometheus. Those two are different things, and
+      # the dashboard keeps them apart: `goflow2_flow_traffic_bytes_total` counts the
+      # size of the EXPORT packets (measured: 216 bytes for three v5 datagrams), not
+      # the traffic they describe. Traffic volume lives in each record's `bytes`.
+      id goflow2 >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin goflow2
+      retry "curl -fsSL --max-time 900 -o /usr/local/bin/goflow2 https://github.com/netsampler/goflow2/releases/download/v@GOFLOW2_VERSION@/goflow2-@GOFLOW2_VERSION@-linux-amd64"
+      echo "@GOFLOW2_SHA256@  /usr/local/bin/goflow2" | sha256sum -c - || { echo "!! goflow2 checksum mismatch"; exit 1; }
+      chmod 0755 /usr/local/bin/goflow2
+      cat > /etc/systemd/system/goflow2.service <<'UNIT'
+      [Unit]
+      Description=goflow2 NetFlow/IPFIX/sFlow collector
+      After=network-online.target
+      [Service]
+      User=goflow2
+      Group=alloy
+      UMask=0027
+      ExecStart=/usr/local/bin/goflow2 -listen netflow://:2055,sflow://:6343 -format json -transport file -transport.file /var/log/goflow2/flows.json -addr 127.0.0.1:8081
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      # A flow file with no ceiling would fill the disk on the first busy link.
+      cat > /etc/logrotate.d/goflow2 <<'LR'
+      /var/log/goflow2/flows.json {
+          size 200M
+          rotate 3
+          compress
+          copytruncate
+          missingok
+          notifempty
+          create 0640 goflow2 alloy
+      }
+      LR
+
       # ---- Loki + Alloy, from the Grafana apt repo already configured ---
       retry "timeout 900 apt-get install -y --download-only loki=@LOKI_VERSION@ alloy=@ALLOY_VERSION@"
       retry "dpkg --configure -a; timeout 600 apt-get install -y loki=@LOKI_VERSION@ alloy=@ALLOY_VERSION@"
@@ -613,6 +657,28 @@ write_files:
         }
       }
 
+      local.file_match "flows" {
+        path_targets = [{ "__path__" = "/var/log/goflow2/flows.json", "job" = "netflow" }]
+      }
+
+      loki.source.file "flows" {
+        targets    = local.file_match.flows.targets
+        forward_to = [loki.process.flows.receiver]
+      }
+
+      // Only the exporter and the protocol become labels. Addresses stay inside
+      // the JSON and are queried with `| json`: a label per address would
+      // create a stream per host, which is how a Loki gets too big to search.
+      loki.process "flows" {
+        stage.json {
+          expressions = { exporter = "sampler_address", flow_type = "type" }
+        }
+        stage.labels {
+          values = { exporter = "", flow_type = "" }
+        }
+        forward_to = [loki.write.local.receiver]
+      }
+
       loki.source.journal "host" {
         relabel_rules = loki.relabel.journal.rules
         labels        = { host = "delonix-vm-monitoring" }
@@ -621,9 +687,23 @@ write_files:
       ALLOY
       usermod -aG systemd-journal alloy
 
+      # Group `alloy` and umask 027: the flow file is readable by the shipper and by
+      # nobody else. It holds who talked to whom. This runs HERE and not next to the
+      # goflow2 install because the `alloy` group only exists once its package is in --
+      # the first r3 build died on `install: invalid group 'alloy'`.
+      install -d -o goflow2 -g alloy -m 2750 /var/log/goflow2
+
       systemctl daemon-reload
-      systemctl enable prometheus alertmanager blackbox_exporter node_exporter loki alloy
-      systemctl restart prometheus alertmanager blackbox_exporter node_exporter loki alloy
+      systemctl enable prometheus alertmanager blackbox_exporter node_exporter goflow2 loki alloy
+      systemctl restart prometheus alertmanager blackbox_exporter node_exporter goflow2 loki alloy
+      # An enabled unit is not a running collector. The first r3 build shipped a
+      # goflow2 that crashed on start and nothing said so until a probe found
+      # `up{job="goflow2"} == 0`; the build now fails instead of publishing that.
+      for i in $(seq 1 15); do
+        curl -fs http://127.0.0.1:8081/metrics >/dev/null 2>&1 && break
+        sleep 2
+        [ "$i" -eq 15 ] && { echo "!! goflow2 is not serving metrics"; journalctl -u goflow2 --no-pager | tail -15; exit 1; }
+      done
       for i in $(seq 1 40); do
         curl -fs http://127.0.0.1:9090/-/ready >/dev/null 2>&1 && \
         curl -fs http://127.0.0.1:3100/ready >/dev/null 2>&1 && \
@@ -1035,6 +1115,63 @@ write_files:
           "wrapLogMessage": true,
           "sortOrder": "Descending"
          }
+        },
+        {
+         "id": 11,
+         "type": "timeseries",
+         "title": "Exportadores de flow activos (pacotes de export/s)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 0,
+          "y": 30
+         },
+         "targets": [
+          {
+           "refId": "A",
+           "expr": "sum by (remote_ip, type) (rate(goflow2_flow_traffic_packets_total[5m]))",
+           "legendFormat": "{{remote_ip}} {{type}}"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "pps"
+          },
+          "overrides": []
+         },
+         "description": "Telemetria do coletor: quantos pacotes de exportacao chegam de cada router/switch. NAO e o volume do trafego (esse esta nos registos, no painel ao lado)."
+        },
+        {
+         "id": 12,
+         "type": "table",
+         "title": "Top origens por bytes (NetFlow/IPFIX/sFlow, 5 min)",
+         "datasource": {
+          "type": "loki",
+          "uid": "loki"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 16,
+          "x": 8,
+          "y": 30
+         },
+         "targets": [
+          {
+           "refId": "A",
+           "queryType": "instant",
+           "expr": "topk(10, sum by (src_addr) (sum_over_time({job=\"netflow\"} | json | unwrap bytes [5m])))"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "bytes"
+          },
+          "overrides": []
+         }
         }
        ],
        "editable": true
@@ -1065,6 +1202,8 @@ write_files:
         echo "  \"loki_version\": \"@LOKI_VERSION@\","
         echo "  \"alloy_version\": \"@ALLOY_VERSION@\","
         echo "  \"syslog_port\": 1514,"
+        echo "  \"goflow2_version\": \"@GOFLOW2_VERSION@\","
+        echo "  \"flow_ports\": \"udp 2055 (netflow v5/v9 + ipfix), 6343 (sflow)\","
         echo "  \"image_revision\": @IMAGE_REV@"
         echo "}"
       } > /etc/delonix/monitoring-image.json

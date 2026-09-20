@@ -44,7 +44,7 @@ have.
 ./build-openstack.sh                 # 2026.1 "Gazpacho" on Ubuntu 24.04
 
 # Monitoring (Zabbix + Grafana, pre-wired) — also NOT an appliance
-./build-monitoring.sh                # Zabbix 7.0.30-1 + Grafana 13.2.2 + Prometheus/Loki (r2)
+./build-monitoring.sh                # Zabbix 7.0.30-1 + Grafana 13.2.2 + Prometheus/Loki/NetFlow (r3)
 ./verify-monitoring.sh               # prove the logins, every datasource and the starter dashboard
 
 # Another version, or media you already have
@@ -72,7 +72,7 @@ builds — the checksum is what makes that safe.
 | `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
 | `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
-| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana + Prometheus/Loki stack, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2, Prometheus 3.13.1 (LTS), Loki 3.7.8 | `monitoring-zabbix7.0-grafana13.2.2-r2.qcow2` |
+| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana + Prometheus/Loki + NetFlow stack, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2, Prometheus 3.13.1 (LTS), Loki 3.7.8, goflow2 2.2.6 | `monitoring-zabbix7.0-grafana13.2.2-r3.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant
@@ -136,10 +136,10 @@ The monitoring image registers WITHOUT `--appliance` — see "Monitoring" below
 for why it still wants the NoCloud seed:
 
 ```bash
-delonix image vm import monitoring-zabbix7.0-grafana13.2.2-r2.qcow2 -t monitoring:7.0-r2 \
+delonix image vm import monitoring-zabbix7.0-grafana13.2.2-r3.qcow2 -t monitoring:7.0-r3 \
     --distro ubuntu --release 24.04 --default-vcpus 2 --default-memory 4G
 
-delonix image vm push monitoring:7.0-r2 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r2
+delonix image vm push monitoring:7.0-r3 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r3
 ```
 
 ## Credentials
@@ -314,9 +314,9 @@ already imported into Postgres — or Grafana past the plugin API the pinned
 kind of drift a golden image exists to prevent; the same reasoning the golden
 Kubernetes image already applies to `kubeadm`/`kubelet`/`kubectl`.
 
-### What the monitoring image carries (revision 2)
+### What the monitoring image carries (revision 3)
 
-Revision 1 was Zabbix + Grafana. Revision 2 adds the layer an operator needs to
+Revision 1 was Zabbix + Grafana. Revision 2 added the layer an operator needs to
 watch a whole estate — servers, network equipment and workstations — with the
 data sources already provisioned and a starter dashboard already loaded.
 
@@ -325,6 +325,7 @@ data sources already provisioned and a starter dashboard already loaded.
 | Zabbix server + frontend (PostgreSQL) | 7.0.30-1 | `:80`, trapper `:10051` | yes |
 | Grafana | 13.2.2 | `:3000` | yes |
 | Alloy (syslog receiver + journal reader) | 1.19.2-1 | `:1514` tcp+udp | yes |
+| goflow2 (NetFlow v5/v9, IPFIX, sFlow collector) | 2.2.6 | `:2055` udp, `:6343` udp | yes |
 | Prometheus | 3.13.1 (LTS line) | `127.0.0.1:9090` | no — through Grafana |
 | Alertmanager | 0.34.1 | `127.0.0.1:9093` | no |
 | blackbox_exporter | 0.28.0 | `127.0.0.1:9115` | no |
@@ -375,3 +376,90 @@ written from this document matched nothing), and the first version of its own
 Loki check grepped for the word `values`, which is in the schema of an empty
 answer too — a check that could not fail. Both are fixed; the syslog check now
 sends a real message over each transport and requires it back with its labels.
+
+**NetFlow, IPFIX and sFlow (revision 3).** Point a router, switch or firewall's
+flow export at `<this-vm>:2055` (NetFlow v5/v9 **and** IPFIX) or `:6343` (sFlow).
+Records land in Loki as `job=netflow`; the dashboard ranks the top sources by
+bytes over five minutes. Two things worth knowing before you trust the numbers:
+
+- **IPFIX goes to 2055, not to its registered port 4739.** goflow2 panics at
+  start-up with two `netflow://` listeners (measured — each registers the same
+  HTTP handler), and one listener already decodes all three versions. Most
+  exporters let you choose the port.
+- **`goflow2_flow_traffic_bytes_total` is not traffic.** It counts the size of the
+  *export packets* (216 bytes for three v5 datagrams). It is the collector's
+  telemetry and feeds the "active exporters" panel; the volume of traffic is the
+  `bytes` field of each record, which is what the top-talkers panel sums.
+
+Only the exporter and the protocol become Loki labels — addresses stay inside the
+JSON and are read with `| json`, because a label per address would create a
+stream per host. That is also the honest limit of this design: **Loki is not a
+flow database.** It comfortably serves dozens of exporters; at thousands of flows
+per second the right tool is a columnar store such as Akvorado (AGPL, ClickHouse),
+which belongs in an image of its own. What was proved with real packets is NetFlow
+v5 only; v9, IPFIX and sFlow are decoded by the same collector upstream but were
+not exercised here.
+
+## Carbonio CE — the mail image, and why it is not Zimbra
+
+`build-carbonio.sh` builds the open-source mail and collaboration server that
+Zextras maintains as the successor of Zimbra OSE. It replaces the Zimbra image
+that was asked for, for three facts found while researching it: Zimbra OSE has no
+official binary for Ubuntu 24.04 (the only one is a third party's, behind a
+registration form, and beta on that release); the OSE line is described by Zextras
+as ended in 2023; and its binary EULA governs redistribution, which could not be
+confirmed as allowing a public registry. Carbonio CE is AGPL, has an official
+signed repository for Ubuntu 24.04, and its packages can be pinned.
+
+**It is deliberately PRE-bootstrap.** `carbonio-bootstrap` asks for the machine's
+FQDN, address, mail domain and admin password — none of which exist at build time.
+What is baked in is everything machine-independent: the 28 packages the vendor's
+manual-installation guide names, each **pinned to the exact version the repository
+served and held** so an unattended upgrade cannot move one past the schema its
+database bootstrap expects; PostgreSQL 16; and the repository, whose signing key
+is checked against the fingerprint the vendor documents rather than trusted
+because a keyserver returned it.
+
+**Two deliberate departures from the vendor's guide, both about PostgreSQL:**
+
+- The guide sets `listen_addresses='*'` and a `host all all 0.0.0.0/0 md5` line
+  for a **superuser** role. That is needed only when Carbonio is split across
+  servers; a single-server install talks to `127.0.0.1`, so here PostgreSQL stays
+  on loopback and `verify-carbonio.sh` fails if the world-open line appears.
+- The guide has you type a database password. `carbonio-prepare-db` generates one
+  per installation, keeps it in `/root/.carbonio-db-password` (mode 0600), and is
+  safe to run twice. It is never in the image.
+
+**To finish the installation on the target** (the vendor's steps 3 and 6-10; the
+address below is an example):
+
+```bash
+hostnamectl set-hostname mail.example.com
+echo -e "127.0.0.1 localhost\n172.16.0.10 mail.example.com mail" > /etc/hosts
+carbonio-prepare-db
+systemctl enable --now carbonio-videoserver.service   # then set nat_1_1_mapping in /etc/janus/janus.jcfg
+carbonio-bootstrap                                    # interactive: domain, admin password
+service-discover setup-wizard && pending-setups -a
+systemctl restart carbonio-ws-collaboration-sidecar.service
+for s in files tasks ws-collaboration message-dispatcher; do
+  PGPASSWORD=$(cat /root/.carbonio-db-password) carbonio-$s-db-bootstrap carbonio_adm 127.0.0.1
+done
+```
+
+The vendor asks for **4 cores, 16 GiB of RAM and 50 GB of disk** as a minimum, and
+DNS records (A and MX) for the mail domain. Ports to open: 25, 80, 110, 143, 443,
+465, 587, 993, 995, 6071, 5222, and UDP 20000-40000 for the video server. About 22
+Carbonio services start at boot on the unbootstrapped image, which is normal for
+the vendor's own install and is why a 4 GiB test VM cannot carry them.
+
+**What `verify-carbonio.sh` proves, and what it cannot.** It boots the image and
+checks, from inside the guest: all 28 packages at their pinned versions and held;
+PostgreSQL on loopback only; the helper creating a working role with a 0600
+password file and changing nothing on a second run; and — read from the disk
+*before* boot, because cloud-init renames the guest by then — that the image does
+not carry the build VM's hostname. That last check exists because the first
+version of it could not fail: it passed against an image that still said
+`carbonio-build`. **It does not prove that `carbonio-bootstrap` completes, that
+mail flows, or that the web client and admin panel work.** Those need a real
+deployment with an FQDN and 16 GiB, and the verifier prints that instead of a
+bare "passed".

@@ -58,9 +58,14 @@ ALERTMANAGER_VERSION=${ALERTMANAGER_VERSION:-0.34.1}
 BLACKBOX_VERSION=${BLACKBOX_VERSION:-0.28.0}
 NODE_EXPORTER_VERSION=${NODE_EXPORTER_VERSION:-1.12.1}
 LOKI_VERSION=${LOKI_VERSION:-3.7.8}
+# goflow2 publishes no checksum file, but GitHub computes a sha256 digest for every
+# release asset (`gh api repos/netsampler/goflow2/releases/latest`); this is the
+# one for the linux-amd64 binary, and the build stops if the download differs.
+GOFLOW2_VERSION=${GOFLOW2_VERSION:-2.2.6}
+GOFLOW2_SHA256=${GOFLOW2_SHA256:-0b8b8b081ff810d01431bfe6f1d10ab0be9de8bbe3da1cb700317fe06b2a0f14}
 ALLOY_VERSION=${ALLOY_VERSION:-1.19.2-1}
 # Bumped when the image changes without any pinned version changing.
-IMAGE_REV=${IMAGE_REV:-2}
+IMAGE_REV=${IMAGE_REV:-3}
 
 BASE_DISTRO=ubuntu
 UBUNTU_SERIES=noble
@@ -115,6 +120,8 @@ sed -e "s/@ZABBIX_SERIES@/$ZABBIX_SERIES/g" \
     -e "s/@BLACKBOX_VERSION@/$BLACKBOX_VERSION/g" \
     -e "s/@NODE_EXPORTER_VERSION@/$NODE_EXPORTER_VERSION/g" \
     -e "s/@LOKI_VERSION@/$LOKI_VERSION/g" \
+    -e "s/@GOFLOW2_VERSION@/$GOFLOW2_VERSION/g" \
+    -e "s/@GOFLOW2_SHA256@/$GOFLOW2_SHA256/g" \
     -e "s/@ALLOY_VERSION@/$ALLOY_VERSION/g" \
     -e "s/@IMAGE_REV@/$IMAGE_REV/g" \
     "$HERE/monitoring-build.yaml" > "$TMP/user-data"
