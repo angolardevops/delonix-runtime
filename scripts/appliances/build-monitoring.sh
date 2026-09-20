@@ -48,6 +48,19 @@ ZABBIX_SERIES=${ZABBIX_SERIES:-7.0}
 ZABBIX_VERSION=${ZABBIX_VERSION:-7.0.30-1}
 GRAFANA_VERSION=${GRAFANA_VERSION:-13.2.2}
 ZABBIX_GRAFANA_APP_VERSION=${ZABBIX_GRAFANA_APP_VERSION:-6.7.0}
+# Observability layer, read off the vendors on 2026-09-20. Prometheus is the
+# 3.13 LTS line (its release notes say so; 3.14 is not LTS), for the same
+# reason Zabbix is 7.0. Loki and Alloy are the exact versions apt.grafana.com
+# lists; the four prometheus/* tarballs are checked against the sha256sums.txt
+# each release publishes.
+PROMETHEUS_VERSION=${PROMETHEUS_VERSION:-3.13.1}
+ALERTMANAGER_VERSION=${ALERTMANAGER_VERSION:-0.34.1}
+BLACKBOX_VERSION=${BLACKBOX_VERSION:-0.28.0}
+NODE_EXPORTER_VERSION=${NODE_EXPORTER_VERSION:-1.12.1}
+LOKI_VERSION=${LOKI_VERSION:-3.7.8}
+ALLOY_VERSION=${ALLOY_VERSION:-1.19.2-1}
+# Bumped when the image changes without any pinned version changing.
+IMAGE_REV=${IMAGE_REV:-2}
 
 BASE_DISTRO=ubuntu
 UBUNTU_SERIES=noble
@@ -55,12 +68,12 @@ UBUNTU_VER=24.04
 
 # A single-host Zabbix+Grafana stack is far lighter than the OpenStack
 # image's 20 GiB container pull: two packages, a schema import, no bulk data.
-DISK_GB=${DISK_GB:-12}
-MEM=${MEM:-2560}
+DISK_GB=${DISK_GB:-20}
+MEM=${MEM:-4096}
 SMP=${SMP:-2}
 BUILD_TIMEOUT=${BUILD_TIMEOUT:-1800}
 
-SLUG="monitoring-zabbix$ZABBIX_SERIES-grafana$GRAFANA_VERSION"
+SLUG="monitoring-zabbix$ZABBIX_SERIES-grafana$GRAFANA_VERSION-r$IMAGE_REV"
 RAW="$OUT/$SLUG.raw.qcow2"
 FINAL="$OUT/$SLUG.qcow2"
 LOG="$OUT/$SLUG-build.log"
@@ -97,6 +110,13 @@ sed -e "s/@ZABBIX_SERIES@/$ZABBIX_SERIES/g" \
     -e "s/@ZABBIX_VERSION@/$ZABBIX_VERSION/g" \
     -e "s/@GRAFANA_VERSION@/$GRAFANA_VERSION/g" \
     -e "s/@ZABBIX_GRAFANA_APP_VERSION@/$ZABBIX_GRAFANA_APP_VERSION/g" \
+    -e "s/@PROMETHEUS_VERSION@/$PROMETHEUS_VERSION/g" \
+    -e "s/@ALERTMANAGER_VERSION@/$ALERTMANAGER_VERSION/g" \
+    -e "s/@BLACKBOX_VERSION@/$BLACKBOX_VERSION/g" \
+    -e "s/@NODE_EXPORTER_VERSION@/$NODE_EXPORTER_VERSION/g" \
+    -e "s/@LOKI_VERSION@/$LOKI_VERSION/g" \
+    -e "s/@ALLOY_VERSION@/$ALLOY_VERSION/g" \
+    -e "s/@IMAGE_REV@/$IMAGE_REV/g" \
     "$HERE/monitoring-build.yaml" > "$TMP/user-data"
 cat > "$TMP/meta-data" <<META
 instance-id: delonix-monbuild-$ZABBIX_SERIES-$$
@@ -182,13 +202,13 @@ qemu-img info "$FINAL" | grep -E "virtual size|disk size|compression"
 # Zabbix and Grafana pre-installed and pre-wired.
 echo
 echo "Register it with:"
-echo "  delonix image vm import $FINAL -t monitoring:$ZABBIX_SERIES \\"
+echo "  delonix image vm import $FINAL -t monitoring:$ZABBIX_SERIES-r$IMAGE_REV \\"
 echo "      --distro ubuntu --release $UBUNTU_VER \\"
-echo "      --default-vcpus 2 --default-memory 2G"
+echo "      --default-vcpus 2 --default-memory 4G"
 echo
 echo "Publish it with:"
-echo "  delonix image vm push monitoring:$ZABBIX_SERIES \\"
-echo "      ghcr.io/angolardevops/delonix-vm-appliances:monitoring-$ZABBIX_SERIES"
+echo "  delonix image vm push monitoring:$ZABBIX_SERIES-r$IMAGE_REV \\"
+echo "      ghcr.io/angolardevops/delonix-vm-appliances:monitoring-$ZABBIX_SERIES-r$IMAGE_REV"
 echo
 echo "PROVEN by this script: the versions are pinned, the base image matched"
 echo "  the checksum Canonical published, the guest's own script ran to the"

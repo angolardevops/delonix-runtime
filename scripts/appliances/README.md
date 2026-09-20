@@ -44,7 +44,8 @@ have.
 ./build-openstack.sh                 # 2026.1 "Gazpacho" on Ubuntu 24.04
 
 # Monitoring (Zabbix + Grafana, pre-wired) — also NOT an appliance
-./build-monitoring.sh                # Zabbix 7.0.30-1 + Grafana 13.2.2
+./build-monitoring.sh                # Zabbix 7.0.30-1 + Grafana 13.2.2 + Prometheus/Loki (r2)
+./verify-monitoring.sh               # prove the logins, every datasource and the starter dashboard
 
 # Another version, or media you already have
 ./build-proxmox.sh pve 9.1-1
@@ -71,7 +72,7 @@ builds — the checksum is what makes that safe.
 | `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
 | `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
-| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2 | `monitoring-zabbix7.0-grafana13.2.2.qcow2` |
+| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana + Prometheus/Loki stack, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2, Prometheus 3.13.1 (LTS), Loki 3.7.8 | `monitoring-zabbix7.0-grafana13.2.2-r2.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant
@@ -135,10 +136,10 @@ The monitoring image registers WITHOUT `--appliance` — see "Monitoring" below
 for why it still wants the NoCloud seed:
 
 ```bash
-delonix image vm import monitoring-zabbix7.0-grafana13.2.2.qcow2 -t monitoring:7.0 \
-    --distro ubuntu --release 24.04 --default-vcpus 2 --default-memory 2G
+delonix image vm import monitoring-zabbix7.0-grafana13.2.2-r2.qcow2 -t monitoring:7.0-r2 \
+    --distro ubuntu --release 24.04 --default-vcpus 2 --default-memory 4G
 
-delonix image vm push monitoring:7.0 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0
+delonix image vm push monitoring:7.0-r2 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r2
 ```
 
 ## Credentials
@@ -312,3 +313,65 @@ already imported into Postgres — or Grafana past the plugin API the pinned
 `alexanderzobnin-zabbix-app` build was compiled against — is exactly the
 kind of drift a golden image exists to prevent; the same reasoning the golden
 Kubernetes image already applies to `kubeadm`/`kubelet`/`kubectl`.
+
+### What the monitoring image carries (revision 2)
+
+Revision 1 was Zabbix + Grafana. Revision 2 adds the layer an operator needs to
+watch a whole estate — servers, network equipment and workstations — with the
+data sources already provisioned and a starter dashboard already loaded.
+
+| Component | Version | Listens on | Reachable from outside |
+|---|---|---|---|
+| Zabbix server + frontend (PostgreSQL) | 7.0.30-1 | `:80`, trapper `:10051` | yes |
+| Grafana | 13.2.2 | `:3000` | yes |
+| Alloy (syslog receiver + journal reader) | 1.19.2-1 | `:1514` tcp+udp | yes |
+| Prometheus | 3.13.1 (LTS line) | `127.0.0.1:9090` | no — through Grafana |
+| Alertmanager | 0.34.1 | `127.0.0.1:9093` | no |
+| blackbox_exporter | 0.28.0 | `127.0.0.1:9115` | no |
+| node_exporter | 1.12.1 | `127.0.0.1:9100` | no |
+| Loki | 3.7.8 | `127.0.0.1:3100` | no |
+
+Everything not in the "yes" rows is loopback-only on purpose: Grafana reaches it,
+so the extra services add no external surface. It wants **4 GiB** (2 was enough
+for revision 1); metrics are kept 30 days or 6 GB, logs 30 days. Loki's
+anonymous usage reporting is switched off.
+
+**Data sources, all provisioned, all proved by `verify-monitoring.sh`:**
+Zabbix (API **and** a direct PostgreSQL connection), Zabbix PostgreSQL,
+Prometheus (default), Loki, Alertmanager. The PostgreSQL role Grafana uses,
+`grafana_ro`, is granted `SELECT` on the tables dashboards need — and **not** on
+`users` or `config`, so anyone allowed to query that data source cannot read
+Zabbix's password hashes. That is a check, not a claim: the verifier tries the
+read and requires `permission denied`.
+
+**Watching something is dropping a file, not editing a config.** Prometheus
+re-reads `/etc/prometheus/targets/` without a restart:
+
+```yaml
+# /etc/prometheus/targets/icmp-office.yml  -- ping
+- targets: ['10.10.0.1', '10.10.0.2']
+  labels: {site: office}
+# http-*.yml  -> http_2xx probes      tcp-*.yml -> tcp_connect probes
+# node-*.yml  -> a node_exporter to scrape (host:9100)
+```
+
+The image ships with real self-probes (ICMP, HTTP, TCP against itself) so a
+fresh boot shows data instead of an empty dashboard. **Logs** arrive by pointing
+`rsyslog`, a switch or a firewall at `<this-vm>:1514` (RFC 5424, TCP or UDP);
+they land in Loki labelled `job=syslog` plus `host`, `app` and `severity` taken
+from the message header. The VM's own journal is read as `job=journal`. Which
+hosts to watch, and how they reach this VM (a `--net`, a `kind: NetworkRoute`, a
+tunnel), stays the operator's decision — see the section above.
+
+**Alertmanager is deliberately inert.** It receives alerts (a target down for two
+minutes, a failed probe, a disk predicted to fill within 24 h) and Grafana shows
+them, but it ships no receiver: a guessed webhook or e-mail address would either
+notify a stranger or drop pages silently. Add your own receiver in
+`/etc/alertmanager/alertmanager.yml`.
+
+**What `verify-monitoring.sh` measured that a green boot would not have:** the
+Alloy journal source overwrote the `job` label the README promised (a query
+written from this document matched nothing), and the first version of its own
+Loki check grepped for the word `values`, which is in the schema of an empty
+answer too — a check that could not fail. Both are fixed; the syslog check now
+sends a real message over each transport and requires it back with its labels.

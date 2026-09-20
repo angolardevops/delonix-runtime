@@ -97,6 +97,14 @@ write_files:
       [ -n "$SCHEMA" ] || { echo "!! zabbix-sql-scripts ships no postgresql/server.sql.gz"; exit 1; }
       zcat "$SCHEMA" | sudo -u zabbix psql -v ON_ERROR_STOP=1 zabbix >/dev/null
 
+      # A read-only role for Grafana's direct database connection. SELECT is
+      # granted table by table on purpose, NOT pg_read_all_data: that would let
+      # anyone who can run a query against this data source read Zabbix's
+      # `users` table (bcrypt hashes) and `config`. Only what dashboards need.
+      GRAFANA_RO_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+      sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE grafana_ro LOGIN PASSWORD '$GRAFANA_RO_PASS';"
+      sudo -u postgres psql -v ON_ERROR_STOP=1 zabbix -c "GRANT SELECT ON history, history_uint, history_str, history_text, history_log, trends, trends_uint, items, hosts, hosts_groups, hstgrp, events, problem, triggers, functions, host_tag, item_tag, event_tag, problem_tag TO grafana_ro;"
+
       sed -i "s/^# DBPassword=.*/DBPassword=$ZBX_DB_PASS/" /etc/zabbix/zabbix_server.conf
       grep -q "^DBPassword=$ZBX_DB_PASS$" /etc/zabbix/zabbix_server.conf || \
         echo "DBPassword=$ZBX_DB_PASS" >> /etc/zabbix/zabbix_server.conf
@@ -246,10 +254,11 @@ write_files:
       # self-service flow a platform builds on top), and baking one guess
       # into every clone of this image would be wrong for all but one of them.
       mkdir -p /etc/grafana/provisioning/datasources
-      cat > /etc/grafana/provisioning/datasources/zabbix.yaml <<YAML
+      cat > /etc/grafana/provisioning/datasources/delonix.yaml <<YAML
       apiVersion: 1
       datasources:
         - name: Zabbix
+          uid: zabbix
           type: alexanderzobnin-zabbix-datasource
           access: proxy
           url: http://127.0.0.1/api_jsonrpc.php
@@ -260,10 +269,46 @@ write_files:
             trendsFrom: 7d
             trendsRange: 4d
             cacheTTL: 1h
-            dbConnectionEnable: false
+            dbConnectionEnable: true
+            dbConnectionDatasourceUID: zabbix-postgres
           secureJsonData:
             password: delonix-admin
           version: 1
+          editable: true
+        - name: Zabbix PostgreSQL
+          uid: zabbix-postgres
+          type: grafana-postgresql-datasource
+          access: proxy
+          url: 127.0.0.1:5432
+          user: grafana_ro
+          jsonData:
+            database: zabbix
+            sslmode: disable
+            postgresVersion: 1600
+            timescaledb: false
+          secureJsonData:
+            password: $GRAFANA_RO_PASS
+          editable: true
+        - name: Prometheus
+          uid: prometheus
+          type: prometheus
+          access: proxy
+          url: http://127.0.0.1:9090
+          isDefault: true
+          jsonData: {timeInterval: 15s}
+          editable: true
+        - name: Loki
+          uid: loki
+          type: loki
+          access: proxy
+          url: http://127.0.0.1:3100
+          editable: true
+        - name: Alertmanager
+          uid: alertmanager
+          type: alertmanager
+          access: proxy
+          url: http://127.0.0.1:9093
+          jsonData: {implementation: prometheus}
           editable: true
       YAML
       # Installed is not enabled: a cold boot of the previous build reported the
@@ -276,6 +321,726 @@ write_files:
         - type: alexanderzobnin-zabbix-app
           disabled: false
       YAML
+      # ------------------------------------------------------------------
+      #  Observability stack: Prometheus, Alertmanager, blackbox_exporter,
+      #  node_exporter, Loki, Alloy.
+      #
+      #  Everything listens on 127.0.0.1 EXCEPT what has to be reached from
+      #  outside: Grafana (:3000), the Zabbix frontend (:80) and trapper
+      #  (:10051), and the syslog receiver (:1514). Grafana reaches the rest
+      #  over loopback, so the extra services add no new external surface.
+      #
+      #  Upstream artefacts are pinned AND their published sha256sums.txt is
+      #  checked -- a mismatch aborts the build, same fail-closed rule as
+      #  fetch-media.sh.
+      # ------------------------------------------------------------------
+      fetch_release() {
+        # fetch_release <owner/repo> <tag> <file>  -> extracted in /tmp/rel
+        local repo=$1 tag=$2 file=$3
+        mkdir -p /tmp/rel && cd /tmp/rel
+        retry "curl -fsSL --max-time 900 -o $file https://github.com/$repo/releases/download/$tag/$file"
+        retry "curl -fsSL --max-time 120 -o sha256sums.txt https://github.com/$repo/releases/download/$tag/sha256sums.txt"
+        grep -F "  $file" sha256sums.txt | sha256sum -c - || { echo "!! checksum mismatch for $file"; exit 1; }
+        tar xzf "$file"
+        cd /
+      }
+
+      for u in prometheus alertmanager blackbox_exporter node_exporter; do
+        id "$u" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$u"
+      done
+
+      fetch_release prometheus/prometheus v@PROMETHEUS_VERSION@ prometheus-@PROMETHEUS_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/prometheus-@PROMETHEUS_VERSION@.linux-amd64/prometheus /usr/local/bin/prometheus
+      install -m0755 /tmp/rel/prometheus-@PROMETHEUS_VERSION@.linux-amd64/promtool /usr/local/bin/promtool
+      fetch_release prometheus/alertmanager v@ALERTMANAGER_VERSION@ alertmanager-@ALERTMANAGER_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/alertmanager-@ALERTMANAGER_VERSION@.linux-amd64/alertmanager /usr/local/bin/alertmanager
+      fetch_release prometheus/blackbox_exporter v@BLACKBOX_VERSION@ blackbox_exporter-@BLACKBOX_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/blackbox_exporter-@BLACKBOX_VERSION@.linux-amd64/blackbox_exporter /usr/local/bin/blackbox_exporter
+      fetch_release prometheus/node_exporter v@NODE_EXPORTER_VERSION@ node_exporter-@NODE_EXPORTER_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/node_exporter-@NODE_EXPORTER_VERSION@.linux-amd64/node_exporter /usr/local/bin/node_exporter
+      rm -rf /tmp/rel
+
+      # ---- Prometheus ---------------------------------------------------
+      # Targets are FILES, not config edits: dropping icmp-*.yml / http-*.yml /
+      # tcp-*.yml / node-*.yml into /etc/prometheus/targets/ is all it takes to
+      # start watching a server, a switch or a workstation -- Prometheus
+      # re-reads them without a restart. That is the "no configuration effort"
+      # path for the generic part; deciding WHICH hosts go in is the operator's.
+      mkdir -p /etc/prometheus/targets /etc/prometheus/rules /var/lib/prometheus
+      cat > /etc/prometheus/prometheus.yml <<'YAML'
+      global:
+        scrape_interval: 15s
+        evaluation_interval: 15s
+      alerting:
+        alertmanagers:
+          - static_configs:
+              - targets: ['127.0.0.1:9093']
+      rule_files:
+        - /etc/prometheus/rules/*.yml
+      scrape_configs:
+        - job_name: prometheus
+          static_configs: [{targets: ['127.0.0.1:9090']}]
+        - job_name: alertmanager
+          static_configs: [{targets: ['127.0.0.1:9093']}]
+        - job_name: loki
+          static_configs: [{targets: ['127.0.0.1:3100']}]
+        - job_name: node
+          static_configs: [{targets: ['127.0.0.1:9100'], labels: {role: monitoring-host}}]
+          file_sd_configs: [{files: ['/etc/prometheus/targets/node-*.yml']}]
+        - job_name: blackbox-icmp
+          metrics_path: /probe
+          params: {module: [icmp]}
+          file_sd_configs: [{files: ['/etc/prometheus/targets/icmp-*.yml']}]
+          relabel_configs: &probe
+            - {source_labels: [__address__], target_label: __param_target}
+            - {source_labels: [__param_target], target_label: instance}
+            - {target_label: __address__, replacement: '127.0.0.1:9115'}
+        - job_name: blackbox-http
+          metrics_path: /probe
+          params: {module: [http_2xx]}
+          file_sd_configs: [{files: ['/etc/prometheus/targets/http-*.yml']}]
+          relabel_configs: *probe
+        - job_name: blackbox-tcp
+          metrics_path: /probe
+          params: {module: [tcp_connect]}
+          file_sd_configs: [{files: ['/etc/prometheus/targets/tcp-*.yml']}]
+          relabel_configs: *probe
+      YAML
+      # Real self-checks, so a fresh boot shows data and the probes are proven
+      # rather than empty; an operator adds their own next to these.
+      cat > /etc/prometheus/targets/icmp-self.yml <<'YAML'
+      - targets: ['127.0.0.1']
+        labels: {site: this-host}
+      YAML
+      cat > /etc/prometheus/targets/http-self.yml <<'YAML'
+      - targets: ['http://127.0.0.1:3000/api/health', 'http://127.0.0.1/']
+        labels: {site: this-host}
+      YAML
+      cat > /etc/prometheus/targets/tcp-self.yml <<'YAML'
+      - targets: ['127.0.0.1:10051', '127.0.0.1:5432']
+        labels: {site: this-host}
+      YAML
+      cat > /etc/prometheus/rules/basic.yml <<'YAML'
+      groups:
+        - name: basic
+          rules:
+            - alert: TargetDown
+              expr: up == 0
+              for: 2m
+              labels: {severity: warning}
+              annotations: {summary: "{{ $labels.job }} {{ $labels.instance }} is down"}
+            - alert: ProbeFailed
+              expr: probe_success == 0
+              for: 2m
+              labels: {severity: critical}
+              annotations: {summary: "probe to {{ $labels.instance }} failing ({{ $labels.job }})"}
+            - alert: DiskWillFillIn24h
+              expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24*3600) < 0
+              for: 30m
+              labels: {severity: warning}
+              annotations: {summary: "{{ $labels.instance }} {{ $labels.mountpoint }} fills within 24h"}
+      YAML
+      promtool check config /etc/prometheus/prometheus.yml
+      promtool check rules /etc/prometheus/rules/basic.yml
+
+      # ---- blackbox_exporter -------------------------------------------
+      cat > /etc/prometheus/blackbox.yml <<'YAML'
+      modules:
+        icmp: {prober: icmp, timeout: 5s}
+        http_2xx: {prober: http, timeout: 10s}
+        tcp_connect: {prober: tcp, timeout: 5s}
+      YAML
+
+      # ---- Alertmanager -------------------------------------------------
+      # A valid, deliberately inert route: alerts are received and shown in
+      # Grafana, and nothing is sent anywhere until the operator adds a
+      # receiver (webhook/e-mail/chat). Shipping a guessed destination would
+      # either spam a stranger or silently drop pages.
+      mkdir -p /etc/alertmanager /var/lib/alertmanager
+      cat > /etc/alertmanager/alertmanager.yml <<'YAML'
+      route:
+        receiver: default
+        group_by: [alertname]
+      receivers:
+        - name: default
+      YAML
+
+      chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
+      chown -R alertmanager:alertmanager /etc/alertmanager /var/lib/alertmanager
+
+      cat > /etc/systemd/system/prometheus.service <<'UNIT'
+      [Unit]
+      Description=Prometheus
+      After=network-online.target
+      [Service]
+      User=prometheus
+      ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus --storage.tsdb.retention.time=30d --storage.tsdb.retention.size=6GB --web.listen-address=127.0.0.1:9090
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      cat > /etc/systemd/system/alertmanager.service <<'UNIT'
+      [Unit]
+      Description=Alertmanager
+      After=network-online.target
+      [Service]
+      User=alertmanager
+      ExecStart=/usr/local/bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/var/lib/alertmanager --web.listen-address=127.0.0.1:9093 --cluster.listen-address=
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      cat > /etc/systemd/system/blackbox_exporter.service <<'UNIT'
+      [Unit]
+      Description=Blackbox exporter
+      After=network-online.target
+      [Service]
+      User=blackbox_exporter
+      AmbientCapabilities=CAP_NET_RAW
+      ExecStart=/usr/local/bin/blackbox_exporter --config.file=/etc/prometheus/blackbox.yml --web.listen-address=127.0.0.1:9115
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      cat > /etc/systemd/system/node_exporter.service <<'UNIT'
+      [Unit]
+      Description=Node exporter
+      After=network-online.target
+      [Service]
+      User=node_exporter
+      ExecStart=/usr/local/bin/node_exporter --web.listen-address=127.0.0.1:9100
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+
+      # ---- Loki + Alloy, from the Grafana apt repo already configured ---
+      retry "timeout 900 apt-get install -y --download-only loki=@LOKI_VERSION@ alloy=@ALLOY_VERSION@"
+      retry "dpkg --configure -a; timeout 600 apt-get install -y loki=@LOKI_VERSION@ alloy=@ALLOY_VERSION@"
+      apt-mark hold loki alloy
+      cat > /etc/loki/config.yml <<'YAML'
+      auth_enabled: false
+      server:
+        http_listen_address: 127.0.0.1
+        http_listen_port: 3100
+        grpc_listen_address: 127.0.0.1
+        grpc_listen_port: 9096
+      common:
+        instance_addr: 127.0.0.1
+        path_prefix: /var/lib/loki
+        storage:
+          filesystem: {chunks_directory: /var/lib/loki/chunks, rules_directory: /var/lib/loki/rules}
+        replication_factor: 1
+        ring: {kvstore: {store: inmemory}}
+      schema_config:
+        configs:
+          - {from: "2024-01-01", store: tsdb, object_store: filesystem, schema: v13, index: {prefix: index_, period: 24h}}
+      limits_config:
+        retention_period: 720h
+        allow_structured_metadata: true
+      compactor:
+        working_directory: /var/lib/loki/compactor
+        retention_enabled: true
+        delete_request_store: filesystem
+      analytics:
+        reporting_enabled: false
+      YAML
+      # `loki:` (login group of the user) and not `loki:loki`: the package
+      # creates the user without a group of the same name, and the first r2
+      # build died here after everything before it had succeeded.
+      mkdir -p /var/lib/loki && chown -R loki: /var/lib/loki
+      # Syslog from servers, switches and workstations lands on :1514 (an
+      # unprivileged port: alloy does not run as root). Point rsyslog / a
+      # switch's remote-log setting at <this-vm>:1514. The host's own journal
+      # is read too, so the first panel already has something in it.
+      # Labels are set by RELABEL RULES, not by `labels = {}`: measured on the
+      # first r2 boot, the journal source overwrote `job = "journal"` with its
+      # own component id (`loki.source.journal.host`), so a query written from
+      # this README matched nothing. A rule is applied last and wins. Syslog
+      # gets host/app/severity from the RFC5424 header, which is what makes a
+      # switch's or a workstation's logs findable by name.
+      cat > /etc/alloy/config.alloy <<'ALLOY'
+      loki.write "local" {
+        endpoint { url = "http://127.0.0.1:3100/loki/api/v1/push" }
+      }
+
+      loki.relabel "syslog" {
+        forward_to = []
+        rule {
+          source_labels = ["__syslog_message_hostname"]
+          target_label  = "host"
+        }
+        rule {
+          source_labels = ["__syslog_message_app_name"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__syslog_message_severity"]
+          target_label  = "severity"
+        }
+        rule {
+          target_label = "job"
+          replacement  = "syslog"
+        }
+      }
+
+      loki.source.syslog "network" {
+        listener {
+          address  = "0.0.0.0:1514"
+          protocol = "tcp"
+        }
+        listener {
+          address  = "0.0.0.0:1514"
+          protocol = "udp"
+        }
+        relabel_rules = loki.relabel.syslog.rules
+        forward_to    = [loki.write.local.receiver]
+      }
+
+      loki.relabel "journal" {
+        forward_to = []
+        rule {
+          target_label = "job"
+          replacement  = "journal"
+        }
+        rule {
+          source_labels = ["__journal__systemd_unit"]
+          target_label  = "unit"
+        }
+        rule {
+          source_labels = ["__journal_priority_keyword"]
+          target_label  = "severity"
+        }
+      }
+
+      loki.source.journal "host" {
+        relabel_rules = loki.relabel.journal.rules
+        labels        = { host = "delonix-vm-monitoring" }
+        forward_to    = [loki.write.local.receiver]
+      }
+      ALLOY
+      usermod -aG systemd-journal alloy
+
+      systemctl daemon-reload
+      systemctl enable prometheus alertmanager blackbox_exporter node_exporter loki alloy
+      systemctl restart prometheus alertmanager blackbox_exporter node_exporter loki alloy
+      for i in $(seq 1 40); do
+        curl -fs http://127.0.0.1:9090/-/ready >/dev/null 2>&1 && \
+        curl -fs http://127.0.0.1:3100/ready >/dev/null 2>&1 && \
+        curl -fs http://127.0.0.1:9093/-/ready >/dev/null 2>&1 && break
+        sleep 3
+        [ "$i" -eq 40 ] && { echo "!! prometheus/loki/alertmanager never became ready"; systemctl --no-pager status prometheus loki alertmanager alloy | tail -40; exit 1; }
+      done
+
+      mkdir -p /etc/grafana/provisioning/dashboards /var/lib/grafana/dashboards
+      cat > /etc/grafana/provisioning/dashboards/delonix.yaml <<'YAML'
+      apiVersion: 1
+      providers:
+        - name: delonix
+          folder: Delonix
+          type: file
+          disableDeletion: false
+          allowUiUpdates: true
+          options: {path: /var/lib/grafana/dashboards}
+      YAML
+      cat > /var/lib/grafana/dashboards/delonix-overview.json <<'JSON'
+      {
+       "uid": "delonix-overview",
+       "title": "Delonix — Visão geral",
+       "tags": [
+        "delonix",
+        "monitoring"
+       ],
+       "timezone": "browser",
+       "schemaVersion": 39,
+       "version": 1,
+       "refresh": "30s",
+       "time": {
+        "from": "now-6h",
+        "to": "now"
+       },
+       "panels": [
+        {
+         "id": 1,
+         "type": "stat",
+         "title": "Problemas activos (Zabbix)",
+         "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "zabbix-postgres"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+         },
+         "targets": [
+          {
+           "format": "table",
+           "rawQuery": true,
+           "editorMode": "code",
+           "rawSql": "SELECT count(*) AS problemas FROM problem WHERE r_eventid IS NULL",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             },
+             {
+              "color": "red",
+              "value": 1
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 2,
+         "type": "stat",
+         "title": "Hosts monitorizados (Zabbix)",
+         "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "zabbix-postgres"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+         },
+         "targets": [
+          {
+           "format": "table",
+           "rawQuery": true,
+           "editorMode": "code",
+           "rawSql": "SELECT count(*) AS hosts FROM hosts WHERE status = 0 AND flags = 0",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 3,
+         "type": "stat",
+         "title": "Alvos Prometheus em baixo",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 12,
+          "y": 0
+         },
+         "targets": [
+          {
+           "expr": "count(up == 0) or vector(0)",
+           "legendFormat": "",
+           "instant": true,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             },
+             {
+              "color": "red",
+              "value": 1
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 4,
+         "type": "stat",
+         "title": "Sondas a falhar",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 18,
+          "y": 0
+         },
+         "targets": [
+          {
+           "expr": "count(probe_success == 0) or vector(0)",
+           "legendFormat": "",
+           "instant": true,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             },
+             {
+              "color": "red",
+              "value": 1
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 5,
+         "type": "table",
+         "title": "Problemas em aberto (Zabbix)",
+         "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "zabbix-postgres"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 4
+         },
+         "targets": [
+          {
+           "format": "table",
+           "rawQuery": true,
+           "editorMode": "code",
+           "rawSql": "SELECT to_timestamp(clock) AS \"desde\", severity AS \"gravidade\", name AS \"problema\" FROM problem WHERE r_eventid IS NULL ORDER BY clock DESC LIMIT 20",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {},
+          "overrides": []
+         }
+        },
+        {
+         "id": 6,
+         "type": "table",
+         "title": "Sondas (blackbox)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 4
+         },
+         "targets": [
+          {
+           "expr": "probe_success",
+           "legendFormat": "{{job}} {{instance}}",
+           "instant": true,
+           "format": "table",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {},
+          "overrides": []
+         }
+        },
+        {
+         "id": 7,
+         "type": "timeseries",
+         "title": "Latência das sondas",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 12
+         },
+         "targets": [
+          {
+           "expr": "probe_duration_seconds",
+           "legendFormat": "{{job}} {{instance}}",
+           "instant": false,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "s"
+          },
+          "overrides": []
+         }
+        },
+        {
+         "id": 8,
+         "type": "timeseries",
+         "title": "CPU (%)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 12
+         },
+         "targets": [
+          {
+           "expr": "100 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100",
+           "legendFormat": "{{instance}}",
+           "instant": false,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "percent"
+          },
+          "overrides": []
+         }
+        },
+        {
+         "id": 9,
+         "type": "timeseries",
+         "title": "Memória usada (%)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 12
+         },
+         "targets": [
+          {
+           "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+           "legendFormat": "{{instance}}",
+           "instant": false,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "percent"
+          },
+          "overrides": []
+         }
+        },
+        {
+         "id": 10,
+         "type": "logs",
+         "title": "Logs (syslog da rede + journal)",
+         "datasource": {
+          "type": "loki",
+          "uid": "loki"
+         },
+         "gridPos": {
+          "h": 10,
+          "w": 24,
+          "x": 0,
+          "y": 20
+         },
+         "targets": [
+          {
+           "expr": "{job=~\".+\"}",
+           "refId": "A",
+           "queryType": "range"
+          }
+         ],
+         "options": {
+          "showTime": true,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+         }
+        }
+       ],
+       "editable": true
+      }
+      JSON
+      chown -R grafana:grafana /var/lib/grafana/dashboards
       systemctl restart grafana-server
 
       # ------------------------------------------------------------------
@@ -292,7 +1057,15 @@ write_files:
         echo "  \"grafana_zabbix_app_version\": \"@ZABBIX_GRAFANA_APP_VERSION@\","
         echo "  \"zabbix_db\": \"postgresql-local\","
         echo "  \"zabbix_frontend_port\": 80,"
-        echo "  \"grafana_port\": 3000"
+        echo "  \"grafana_port\": 3000,"
+        echo "  \"prometheus_version\": \"@PROMETHEUS_VERSION@\","
+        echo "  \"alertmanager_version\": \"@ALERTMANAGER_VERSION@\","
+        echo "  \"blackbox_exporter_version\": \"@BLACKBOX_VERSION@\","
+        echo "  \"node_exporter_version\": \"@NODE_EXPORTER_VERSION@\","
+        echo "  \"loki_version\": \"@LOKI_VERSION@\","
+        echo "  \"alloy_version\": \"@ALLOY_VERSION@\","
+        echo "  \"syslog_port\": 1514,"
+        echo "  \"image_revision\": @IMAGE_REV@"
         echo "}"
       } > /etc/delonix/monitoring-image.json
       cat /etc/delonix/monitoring-image.json
