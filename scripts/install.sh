@@ -604,7 +604,10 @@ fi
 # caminho que não precisa de root nenhum.
 if [ -n "$SUDO" ]; then
   msg "some steps need root — sudo may ask for your password"
-  sudo -v || die "sudo authentication failed — run again and enter your password, or run as root"
+  # `sudo -n true` primeiro: com `NOPASSWD: ALL` o `sudo -v` pede password na
+  # mesma (não é um comando), e sem tty o instalador morria aqui num host onde o
+  # sudo funciona sem password — medido a aplicar o --performance neste host.
+  sudo -n true 2>/dev/null || sudo -v || die "sudo authentication failed — run again and enter your password, or run as root"
 fi
 
 # ------------------------------------------------- dependências core (containers)
