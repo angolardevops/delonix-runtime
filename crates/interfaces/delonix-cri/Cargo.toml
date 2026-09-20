@@ -41,6 +41,7 @@ tonic-build = { workspace = true }
 # Só para o round-trip gRPC de `tests/grpc_status.rs` — o cliente gerado precisa
 # de um conector para socket unix, que o tonic não traz por si.
 tower = { workspace = true, features = ["util"] }
+tempfile = { workspace = true }
 hyper-util = { workspace = true, features = ["tokio"] }
 
 [lints]

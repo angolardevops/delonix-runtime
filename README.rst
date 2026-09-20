@@ -27,6 +27,7 @@ bootstrap Kubernetes clusters, from one binary.
 
 :Docs: https://angolardevops.github.io/delonix-runtime/
 :Contributor handbook: https://angolardevops.github.io/delonix-runtime/handbook/ (English, Português de Angola, Français)
+:Rust tutorial: https://angolardevops.github.io/delonix-rust-tutorial/ (Português de Angola — Rust, containers, OCI/CRI and a from-scratch rootless runtime)
 :Repo: https://github.com/angolardevops/delonix-runtime
 
 Why it's different
@@ -602,6 +603,8 @@ Community
 `CONTRIBUTING.md <CONTRIBUTING.md>`_ for how to send a change (and the
 `contributor handbook <https://angolardevops.github.io/delonix-runtime/handbook/>`_
 for everything behind it — environment, build, architecture, crates, conventions),
+the `Rust tutorial <https://angolardevops.github.io/delonix-rust-tutorial/>`_ (Português de Angola)
+if you are new to Rust or to how containers work underneath,
 `GOVERNANCE.md <GOVERNANCE.md>`_ for how decisions get made and by whom,
 `MAINTAINERS.md <MAINTAINERS.md>`_ for who that is today,
 `CODE_OF_CONDUCT.md <CODE_OF_CONDUCT.md>`_ for how we expect people to treat
