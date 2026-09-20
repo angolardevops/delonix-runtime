@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted 2026-09-20. Phase 1 in progress. Decisions of scope were taken with the owner on 2026-09-20
+Accepted 2026-09-20. Phases 1, 1b and 2 built. Decisions of scope were taken with the owner on 2026-09-20
 (below); the open questions at the end need an answer before phase 2.
 
 ## Context
@@ -180,6 +180,39 @@ the route's entrypoint, which a hosts file cannot carry.
 Measured against the real proxy in an isolated root: the block is written after the other lines and
 removed by `httproute rm`, leaving the file as it was; a second apply changes nothing; a conflicting
 line is refused.
+
+## Phase 2 — libvirt VMs through a proxy in the host netns (2026-09-20)
+
+Measured first, because the ADR had left it open: a process with no privilege (uid 1000, in the
+`libvirt` group) in the HOST netns reaches a guest on `virbr0` (a VM in `qemu:///system`, `netMode:
+nat`: ping 0% loss, HTTP answered). So the host-netns proxy of D2 is possible, and it needs no root.
+
+Built: `ingress_proxy::Where { Holder, Host }` threads through every path and lifecycle function, so two
+proxy instances coexist with their own directory (`httproute/` and `httproute-host/`), config, pidfile
+and identity guard. The host instance is the same binary launched WITHOUT `nsenter`, binds `127.0.0.1`
+(new `ProxyConfig.bind`; a route must not reach the LAN as a side effect), and is not published through
+the slirp. `classify()` decides per DOCUMENT from where its backends are reachable: a container or a
+Cloud Hypervisor VM is on the SDN, a libvirt VM in `nat`/`bridge` mode is on the host.
+
+- A document mixing both sides is refused, naming which backend falls on which side.
+- The same listener port on both instances is refused at apply: the holder publishes it on the host
+  loopback and the host instance binds that loopback, so one would fail to bind after `apply` had
+  already said it was serving.
+- A libvirt VM in user-mode networking (`tap == "user"`) has no address the host can reach and is
+  refused with the fix (`netMode: nat` on `qemu:///system`).
+- `hosts: [host]` reads the names of BOTH instances into the one block.
+- `get httproutes` lists both instances (`netns: holder|host` in JSON).
+
+Measured with the real thing: a libvirt VM in `qemu:///system` (`192.168.122.x`), a route with
+`hosts: [host]` on port 18081: the proxy pid's netns was the same as the calling shell's, it listened on
+`127.0.0.1:18081` only, `Host: app.example.pt` returned the guest's response, an unknown host gave 404,
+the hosts block was written, `stack plan` reported no drift, and `httproute rm` killed the proxy, freed
+the port and restored the file.
+
+Not measured: both instances running at the same time (a container route and a libvirt route in the same
+apply), the `expose:` sugar on a libvirt VM by traffic (port 80 was taken on the host; the sugar path
+itself is unchanged from phase 1), a libvirt VM in `bridge` mode, and a proxy restart after the libvirt
+VM gets a new address (the route stores the address at apply time, like every other route).
 
 ## Not validated (phase 1b)
 

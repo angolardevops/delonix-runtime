@@ -97,8 +97,13 @@ pub(crate) fn render(existing: &str, hosts: &[String]) -> Result<String> {
 /// would change, so an unprivileged `apply` of a manifest that does not use
 /// `hosts:` never needs root.
 pub(crate) fn sync(hosts: &[String]) -> Result<()> {
-    let path = hosts_path();
-    let old = match std::fs::read_to_string(&path) {
+    sync_at(&hosts_path(), hosts)
+}
+
+/// [`sync`] against an explicit file (the seam the test uses, so it never has to
+/// touch the process environment).
+fn sync_at(path: &std::path::Path, hosts: &[String]) -> Result<()> {
+    let old = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(Error::Invalid(format!("{}: {e}", path.display()))),
@@ -108,7 +113,7 @@ pub(crate) fn sync(hosts: &[String]) -> Result<()> {
         return Ok(());
     }
     // Through the symlink, if any, so the link itself is not replaced by a file.
-    let target = std::fs::canonicalize(&path).unwrap_or(path.clone());
+    let target = std::fs::canonicalize(path).unwrap_or(path.to_path_buf());
     let dir = target.parent().map(|p| p.to_path_buf()).unwrap_or_default();
     let tmp = dir.join(format!(".hosts.delonix.{}", std::process::id()));
     let write = || -> std::io::Result<()> {
@@ -197,19 +202,17 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("hosts");
         std::fs::write(&f, "127.0.0.1 localhost\n").unwrap();
-        std::env::set_var("DELONIX_HOSTS_FILE", &f);
-        sync(&h(&["a.pt"])).unwrap();
+        sync_at(&f, &h(&["a.pt"])).unwrap();
         let first = std::fs::read_to_string(&f).unwrap();
         assert!(first.contains("127.0.0.1\ta.pt"));
         let m1 = std::fs::metadata(&f).unwrap().modified().unwrap();
-        sync(&h(&["a.pt"])).unwrap();
+        sync_at(&f, &h(&["a.pt"])).unwrap();
         assert_eq!(std::fs::metadata(&f).unwrap().modified().unwrap(), m1);
-        sync(&[]).unwrap();
+        sync_at(&f, &[]).unwrap();
         assert_eq!(
             std::fs::read_to_string(&f).unwrap(),
             "127.0.0.1 localhost\n"
         );
-        std::env::remove_var("DELONIX_HOSTS_FILE");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

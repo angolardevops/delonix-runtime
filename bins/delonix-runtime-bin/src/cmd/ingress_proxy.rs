@@ -28,6 +28,16 @@ use tokio::net::TcpListener;
 
 use delonix_model::{Error, Result};
 
+/// WHERE a proxy instance lives. Two can run at once, because a route's backend is
+/// only reachable from one netns: containers and Cloud Hypervisor VMs are on the SDN
+/// (the holder netns), a libvirt VM sits on `virbr0` in the host netns, which the
+/// holder does not see (ADR-0046, D2). Same binary, same config format.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Where {
+    Holder,
+    Host,
+}
+
 /// The proxy's runtime config (written by Phase 4, read by `run`). Routes already
 /// resolved — the proxy knows no containers or stores.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -44,6 +54,12 @@ pub struct ProxyConfig {
     /// which document asked for which name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub published_hosts: Vec<PublishedHost>,
+    /// Address the listeners bind to. `None` = every address, which is what the
+    /// holder instance wants (the slirp forward decides who reaches it). The host
+    /// instance sets `127.0.0.1`: it is a real socket on the host, and exposing a
+    /// route to the LAN must be a decision, not a side effect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bind: Option<String>,
 }
 
 /// One host name a route publishes to the SDN, with the document that asked for it.
@@ -507,7 +523,12 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
         } else {
             None
         };
-        let addr = SocketAddr::from(([0, 0, 0, 0], l.port));
+        let ip: std::net::IpAddr = cfg
+            .bind
+            .as_deref()
+            .and_then(|b| b.parse().ok())
+            .unwrap_or(std::net::IpAddr::from([0, 0, 0, 0]));
+        let addr = SocketAddr::new(ip, l.port);
         let listener = TcpListener::bind(addr).await.map_err(|e| Error::Runtime {
             context: "ingress-proxy bind",
             message: format!("{addr}: {e}"),
@@ -582,30 +603,33 @@ pub fn run(config_path: &Path) -> Result<()> {
 /// The proxy's state folder (`<root>/httproute/`). On the same filesystem the
 /// holder sees (the holder's mount-ns is a copy of the host's) — the proxy in
 /// there reads the SAME config we write out here.
-fn proxy_dir() -> std::path::PathBuf {
-    crate::cmd::util::state_root().join("httproute")
+fn proxy_dir(w: Where) -> std::path::PathBuf {
+    crate::cmd::util::state_root().join(match w {
+        Where::Holder => "httproute",
+        Where::Host => "httproute-host",
+    })
 }
 /// Canonical path of the `ProxyConfig` (the proxy re-reads it on SIGHUP).
-pub fn config_path() -> std::path::PathBuf {
-    proxy_dir().join("config.json")
+pub fn config_path(w: Where) -> std::path::PathBuf {
+    proxy_dir(w).join("config.json")
 }
-fn pid_path() -> std::path::PathBuf {
-    proxy_dir().join("proxy.pid")
+fn pid_path(w: Where) -> std::path::PathBuf {
+    proxy_dir(w).join("proxy.pid")
 }
-fn log_path() -> std::path::PathBuf {
-    proxy_dir().join("proxy.log")
+fn log_path(w: Where) -> std::path::PathBuf {
+    proxy_dir(w).join("proxy.log")
 }
 /// HTTP port of the auto-routes (`--expose`). **Non-privileged** — in rootless the
 /// slirp refuses to publish ports <1024. Reached with `Host: <fqdn>` on `:8080`.
 const AUTO_HTTP_PORT: u16 = 8080;
 
 /// The MANUAL part of the config (routes/listeners/TLS from `kind: HTTPRoute`).
-fn manual_path() -> std::path::PathBuf {
-    proxy_dir().join("manual.json")
+fn manual_path(w: Where) -> std::path::PathBuf {
+    proxy_dir(w).join("manual.json")
 }
 /// The AUTO-REGISTERED routes of containers (`container run --expose`).
 fn auto_path() -> std::path::PathBuf {
-    proxy_dir().join("auto.json")
+    proxy_dir(Where::Holder).join("auto.json")
 }
 
 /// An auto-registered route of an HTTP container: the internal FQDN
@@ -625,8 +649,8 @@ impl AutoRoute {
     }
 }
 
-pub(crate) fn read_manual_config() -> Option<ProxyConfig> {
-    read_manual()
+pub(crate) fn read_manual_config(w: Where) -> Option<ProxyConfig> {
+    read_manual(w)
 }
 
 /// The config the RUNNING proxy is serving, or `None` if none is running.
@@ -640,13 +664,13 @@ pub(crate) fn read_manual_config() -> Option<ProxyConfig> {
 /// Gated on the proxy being alive: a leftover `config.json` from a proxy that
 /// died would otherwise read as live listeners, and a converge would restart a
 /// proxy that does not exist to serve a port nobody is listening on.
-pub(crate) fn live_config() -> Option<ProxyConfig> {
-    running_pid()?;
-    serde_json::from_slice(&std::fs::read(config_path()).ok()?).ok()
+pub(crate) fn live_config(w: Where) -> Option<ProxyConfig> {
+    running_pid(w)?;
+    serde_json::from_slice(&std::fs::read(config_path(w)).ok()?).ok()
 }
 
-fn read_manual() -> Option<ProxyConfig> {
-    serde_json::from_slice(&std::fs::read(manual_path()).ok()?).ok()
+fn read_manual(w: Where) -> Option<ProxyConfig> {
+    serde_json::from_slice(&std::fs::read(manual_path(w)).ok()?).ok()
 }
 fn read_auto() -> Vec<AutoRoute> {
     std::fs::read(auto_path())
@@ -674,7 +698,8 @@ fn read_auto() -> Vec<AutoRoute> {
 /// `auto.json`.
 fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     use std::os::unix::io::AsRawFd;
-    std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
+    let w = Where::Holder;
+    std::fs::create_dir_all(proxy_dir(w)).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
@@ -683,7 +708,7 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
         .create(true)
         .write(true)
         .truncate(false)
-        .open(proxy_dir().join("auto.lock"))
+        .open(proxy_dir(w).join("auto.lock"))
         .map_err(|e| Error::Runtime {
             context: "auto.lock",
             message: e.to_string(),
@@ -711,7 +736,7 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     })?;
     // Still holding `lock` here — the recompose+publish happens before it's
     // dropped at the end of this scope.
-    rebuild()?;
+    rebuild(Where::Holder)?;
     Ok(true)
 }
 
@@ -719,9 +744,15 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
 /// AUTO-REGISTERED routes, and ensures the proxy is serving (or stops it if it all
 /// went empty). It is the single point that `httproute apply` and auto-registration
 /// call — neither source erases the other.
-fn rebuild() -> Result<()> {
-    let manual = read_manual();
-    let auto = read_auto();
+fn rebuild(w: Where) -> Result<()> {
+    let manual = read_manual(w);
+    // Only the holder instance has auto-registered routes (`container run --expose`
+    // targets containers on the SDN).
+    let auto = if w == Where::Holder {
+        read_auto()
+    } else {
+        Vec::new()
+    };
 
     // The names a document opted into publish in the host's `/etc/hosts`. Synced
     // here — the single point every source of routes goes through — and BEFORE the
@@ -730,10 +761,19 @@ fn rebuild() -> Result<()> {
     // does not resolve is the manual step this feature exists to remove); REMOVING
     // one only warns, because refusing a `rm` for lack of root would leave the route
     // in place.
-    let published: Vec<String> = manual
-        .as_ref()
-        .map(|m| m.published_hosts.iter().map(|d| d.host.clone()).collect())
-        .unwrap_or_default();
+    // Both instances contribute to the ONE block of the host's `/etc/hosts`, so the
+    // names are read from both sources, never just the one being rebuilt.
+    let published: Vec<String> = [Where::Holder, Where::Host]
+        .iter()
+        .filter_map(|x| {
+            if *x == w {
+                manual.clone()
+            } else {
+                read_manual(*x)
+            }
+        })
+        .flat_map(|m| m.published_hosts.into_iter().map(|d| d.host))
+        .collect();
     if let Err(e) = super::hosts_file::sync(&published) {
         if published.is_empty() {
             eprintln!("warning: {e}");
@@ -776,40 +816,44 @@ fn rebuild() -> Result<()> {
 
     if listeners.is_empty() || routes.is_empty() {
         // Nothing declared (neither manual nor auto) → the proxy has no reason to exist.
-        return stop();
+        return stop(w);
     }
-    ensure_running(&ProxyConfig {
-        listeners,
-        routes,
-        tls,
-        published_hosts: Vec::new(),
-    })
+    ensure_running(
+        &ProxyConfig {
+            listeners,
+            routes,
+            tls,
+            published_hosts: Vec::new(),
+            bind: manual.as_ref().and_then(|m| m.bind.clone()),
+        },
+        w,
+    )
 }
 
 /// Writes the MANUAL part (from `httproute apply`) and recomposes the final config.
-pub fn set_manual(cfg: &ProxyConfig) -> Result<()> {
-    std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
+pub fn set_manual(cfg: &ProxyConfig, w: Where) -> Result<()> {
+    std::fs::create_dir_all(proxy_dir(w)).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
     std::fs::write(
-        manual_path(),
+        manual_path(w),
         serde_json::to_vec_pretty(cfg).unwrap_or_default(),
     )
     .map_err(|e| Error::Runtime {
         context: "write manual",
         message: e.to_string(),
     })?;
-    rebuild()
+    rebuild(w)
 }
 
 /// Removes the MANUAL part (on `httproute rm`) and recomposes — the
 /// auto-registered routes of `--expose` containers SURVIVE (the proxy only stops if
 /// nothing else remains). Returns `true` if there were manual routes.
-pub fn clear_manual() -> Result<bool> {
-    let had = manual_path().exists();
-    let _ = std::fs::remove_file(manual_path());
-    rebuild()?;
+pub fn clear_manual(w: Where) -> Result<bool> {
+    let had = manual_path(w).exists();
+    let _ = std::fs::remove_file(manual_path(w));
+    rebuild(w)?;
     Ok(had)
 }
 
@@ -856,7 +900,7 @@ pub fn auto_deregister(name: &str) {
 /// environment, and the machine's default root exports nothing), so the environ
 /// proof that identifies the netns pin is unavailable here — the same reason it
 /// is unavailable for `slirp4netns`, and the same answer: the ownership token is
-/// the path WE choose in the argv. `config_path()` is `state_root()/httproute/
+/// the path WE choose in the argv. `config_path(Where::Holder)` is `state_root()/httproute/
 /// config.json`, it is per-root, and `spawn_proxy` has passed it since the
 /// commit that first spawned a proxy at all (478e09aa) — so there is no
 /// in-place-upgrade trap of a proxy this cannot name.
@@ -893,14 +937,14 @@ fn proxy_argv_is_ours(cmdline: &[u8], cfg: &std::path::Path) -> bool {
 /// terminate). Its first version asked only whether the process was *a* proxy,
 /// which is a different question from whether it is *ours* — see
 /// [`proxy_argv_is_ours`] for what that cost, measured.
-fn running_pid() -> Option<i32> {
-    let pid: i32 = std::fs::read_to_string(pid_path())
+fn running_pid(w: Where) -> Option<i32> {
+    let pid: i32 = std::fs::read_to_string(pid_path(w))
         .ok()?
         .trim()
         .parse()
         .ok()?;
     let is_ours = std::fs::read(format!("/proc/{pid}/cmdline"))
-        .map(|c| proxy_argv_is_ours(&c, &config_path()))
+        .map(|c| proxy_argv_is_ours(&c, &config_path(w)))
         .unwrap_or(false);
     if is_ours {
         Some(pid)
@@ -908,7 +952,7 @@ fn running_pid() -> Option<i32> {
         // Dead, recycled by something else, or ANOTHER root's proxy: in all
         // three the file is a lie about this root's proxy, and removing it is
         // the correct cleanup. Signalling the pid would not be.
-        let _ = std::fs::remove_file(pid_path());
+        let _ = std::fs::remove_file(pid_path(w));
         None
     }
 }
@@ -916,38 +960,38 @@ fn running_pid() -> Option<i32> {
 /// Writes the config and **ensures the proxy is serving**: if already alive, reloads
 /// hot (SIGHUP); otherwise, starts it in the holder's netns and publishes the ports.
 /// Idempotent — it is what `stack apply`/auto-registration always call.
-pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
-    std::fs::create_dir_all(proxy_dir()).map_err(|e| Error::Runtime {
+pub fn ensure_running(cfg: &ProxyConfig, w: Where) -> Result<()> {
+    std::fs::create_dir_all(proxy_dir(w)).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
     // Captures the CURRENT listeners BEFORE overwriting the config (else `prev`
     // would already be the new one).
-    let prev_ports = prev_listener_ports();
+    let prev_ports = prev_listener_ports(w);
     let json = serde_json::to_vec_pretty(cfg).map_err(|e| Error::Runtime {
         context: "serialize config",
         message: e.to_string(),
     })?;
-    std::fs::write(config_path(), &json).map_err(|e| Error::Runtime {
+    std::fs::write(config_path(w), &json).map_err(|e| Error::Runtime {
         context: "write config",
         message: e.to_string(),
     })?;
 
-    // BUG FOUND: the running_pid()-check → spawn_proxy() decision used to
+    // BUG FOUND: the running_pid(w)-check → spawn_proxy(w) decision used to
     // have NO lock at all. When no proxy exists yet, two concurrent callers
     // (e.g. an `httproute apply` racing a `container run --expose`) both
-    // observe `running_pid() == None` and both spawn a proxy; both try to
+    // observe `running_pid(w) == None` and both spawn a proxy; both try to
     // bind the same listener port(s) in the holder netns — one wins, the
     // other crashes at bind, and whichever spawn writes the pidfile LAST
     // wins that race independently of which process actually stayed alive.
-    // If the crashed one wrote last, `running_pid()` later finds it dead
+    // If the crashed one wrote last, `running_pid(w)` later finds it dead
     // and cleans the pidfile while the SURVIVING proxy is left with no
     // pidfile recorded — an orphan that SIGHUP/SIGTERM can no longer reach.
     // Serializing the whole check-then-spawn decision under a dedicated
     // lock (separate from `auto.lock`, which only guards `auto.json`)
     // closes the race: only one caller ever gets to spawn.
-    let _spawn_lock = FileLock::acquire(&proxy_dir().join("spawn.lock"));
-    if let Some(pid) = running_pid() {
+    let _spawn_lock = FileLock::acquire(&proxy_dir(w).join("spawn.lock"));
+    if let Some(pid) = running_pid(w) {
         // Alive → reload the routes hot (SIGHUP). The ports are already published.
         // WARNING: SIGHUP only reloads ROUTES; changing entrypoints/TLS requires a
         // restart (`httproute rm` + apply). We detect the change of the port set so
@@ -977,8 +1021,10 @@ pub fn ensure_running(cfg: &ProxyConfig) -> Result<()> {
         );
         return Ok(());
     }
-    spawn_proxy()?;
-    publish_listeners(cfg)?;
+    spawn_proxy(w)?;
+    if w == Where::Holder {
+        publish_listeners(cfg)?;
+    }
     Ok(())
 }
 
@@ -1014,27 +1060,33 @@ impl Drop for FileLock {
 
 /// The listener ports of the config CURRENTLY in effect (before we overwrite it) —
 /// to detect a change of listeners on re-apply.
-fn prev_listener_ports() -> Option<std::collections::BTreeSet<u16>> {
-    let bytes = std::fs::read(config_path()).ok()?;
+fn prev_listener_ports(w: Where) -> Option<std::collections::BTreeSet<u16>> {
+    let bytes = std::fs::read(config_path(w)).ok()?;
     let cfg: ProxyConfig = serde_json::from_slice(&bytes).ok()?;
     Some(cfg.listeners.iter().map(|l| l.port).collect())
 }
 
 /// Starts the proxy INSIDE the holder's netns (via `infra_join_argv`), detached
 /// (setsid, stdio to a log), and writes the pidfile.
-fn spawn_proxy() -> Result<()> {
+fn spawn_proxy(w: Where) -> Result<()> {
     use std::os::unix::process::CommandExt;
-    // Ensures the holder is up (the proxy lives in its netns).
-    delonix_sdn::infra::ensure_up()?;
-    let join = delonix_sdn::infra::infra_join_argv().ok_or_else(|| Error::Runtime {
-        context: "holder",
-        message: super::po::t("ingress holder is down").into(),
-    })?;
+    // The holder instance lives in the holder's netns and needs it up; the host
+    // instance is an ordinary process in the host netns and needs nothing.
+    let join: Vec<String> = match w {
+        Where::Holder => {
+            delonix_sdn::infra::ensure_up()?;
+            delonix_sdn::infra::infra_join_argv().ok_or_else(|| Error::Runtime {
+                context: "holder",
+                message: super::po::t("ingress holder is down").into(),
+            })?
+        }
+        Where::Host => Vec::new(),
+    };
     let self_exe = std::env::current_exe().map_err(|e| Error::Runtime {
         context: "current_exe",
         message: e.to_string(),
     })?;
-    let cfg_path = config_path();
+    let cfg_path = config_path(w);
 
     // argv = nsenter … -- <delonix> ingress-proxy --config <config>
     let mut argv: Vec<String> = join;
@@ -1046,7 +1098,7 @@ fn spawn_proxy() -> Result<()> {
     let log = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(log_path())
+        .open(log_path(w))
         .map_err(|e| Error::Runtime {
             context: "open proxy log",
             message: e.to_string(),
@@ -1074,7 +1126,7 @@ fn spawn_proxy() -> Result<()> {
         context: "spawn ingress-proxy",
         message: format!("{}: {e}", argv.join(" ")),
     })?;
-    std::fs::write(pid_path(), child.id().to_string()).map_err(|e| Error::Runtime {
+    std::fs::write(pid_path(w), child.id().to_string()).map_err(|e| Error::Runtime {
         context: "write pidfile",
         message: e.to_string(),
     })?;
@@ -1086,15 +1138,25 @@ fn spawn_proxy() -> Result<()> {
             context: "ingress-proxy",
             message: super::po::tf(
                 "the proxy crashed right at startup (port taken?) — see {log}",
-                &[("log", &log_path().display().to_string())],
+                &[("log", &log_path(w).display().to_string())],
             ),
         });
     }
     eprintln!(
         "{}",
         super::po::tf(
-            "httproute: proxy started (#{pid}) in the holder's netns",
-            &[("pid", &child.id().to_string())],
+            "httproute: proxy started (#{pid}) in the {where} netns",
+            &[
+                ("pid", &child.id().to_string()),
+                (
+                    "where",
+                    if w == Where::Holder {
+                        "holder's"
+                    } else {
+                        "host"
+                    }
+                ),
+            ],
         )
     );
     Ok(())
@@ -1138,9 +1200,11 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
 
 /// **Stops the proxy and unpublishes the ports** (teardown of `httproute rm`). Reads
 /// the ports from the config before deleting it. Best-effort/idempotent.
-pub fn stop() -> Result<()> {
-    // Unpublishes the known ports (from the config, if it still exists).
-    if let Ok(bytes) = std::fs::read(config_path()) {
+pub fn stop(w: Where) -> Result<()> {
+    // Unpublishes the known ports (from the config, if it still exists). Only the
+    // holder instance publishes through the slirp; the host one is a plain socket
+    // that dies with the process.
+    if let (Where::Holder, Ok(bytes)) = (w, std::fs::read(config_path(w))) {
         if let Ok(cfg) = serde_json::from_slice::<ProxyConfig>(&bytes) {
             let sock = delonix_sdn::infra::slirp_sock_path();
             for l in &cfg.listeners {
@@ -1148,17 +1212,19 @@ pub fn stop() -> Result<()> {
             }
         }
     }
-    if let Some(pid) = running_pid() {
+    if let Some(pid) = running_pid(w) {
         // SAFETY: SIGTERM to a pid confirmed alive and confirmed to be THIS
         // root's proxy (`proxy_argv_is_ours`).
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
-    let _ = std::fs::remove_file(pid_path());
-    let _ = std::fs::remove_file(config_path());
+    let _ = std::fs::remove_file(pid_path(w));
+    let _ = std::fs::remove_file(config_path(w));
     // Full teardown: also the sources (manual + auto), else a subsequent start would
     // raise phantom routes again.
-    let _ = std::fs::remove_file(manual_path());
-    let _ = std::fs::remove_file(auto_path());
+    let _ = std::fs::remove_file(manual_path(w));
+    if w == Where::Holder {
+        let _ = std::fs::remove_file(auto_path());
+    }
     Ok(())
 }
 
@@ -1175,26 +1241,26 @@ pub fn stop() -> Result<()> {
 /// Unpublishes the live ports here because the caller is about to bind a
 /// different set: leaving the old `hostfwd` in place would keep a port answering
 /// on the host with nothing behind it.
-pub(crate) fn stop_keeping_sources() -> Result<()> {
-    if let Some(cfg) = live_config() {
+pub(crate) fn stop_keeping_sources(w: Where) -> Result<()> {
+    if let (Where::Holder, Some(cfg)) = (w, live_config(w)) {
         let sock = delonix_sdn::infra::slirp_sock_path();
         for l in &cfg.listeners {
             let _ = delonix_sdn::infra::slirp_remove_hostfwd(&sock, &l.port.to_string());
         }
     }
-    if let Some(pid) = running_pid() {
+    if let Some(pid) = running_pid(w) {
         // SAFETY: SIGTERM to a pid confirmed alive and confirmed to be THIS
         // root's proxy (`proxy_argv_is_ours`).
         unsafe { libc::kill(pid, libc::SIGTERM) };
     }
-    let _ = std::fs::remove_file(pid_path());
-    let _ = std::fs::remove_file(config_path());
+    let _ = std::fs::remove_file(pid_path(w));
+    let _ = std::fs::remove_file(config_path(w));
     Ok(())
 }
 
 /// Is the proxy running? (for `httproute ls`/describe).
-pub fn is_running() -> bool {
-    running_pid().is_some()
+pub fn is_running(w: Where) -> bool {
+    running_pid(w).is_some()
 }
 
 #[cfg(test)]
@@ -1443,6 +1509,7 @@ mod tests {
                 mode: "secretRef".into(),
             }),
             published_hosts: Vec::new(),
+            bind: None,
         };
         let js = serde_json::to_string(&cfg).unwrap();
         let back: ProxyConfig = serde_json::from_str(&js).unwrap();
@@ -1465,6 +1532,7 @@ mod tests {
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
             tls: None,
             published_hosts: Vec::new(),
+            bind: None,
         };
         let js = serde_json::to_string(&cfg).unwrap();
         let back: ProxyConfig = serde_json::from_str(&js).unwrap();
