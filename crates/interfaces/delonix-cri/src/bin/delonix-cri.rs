@@ -50,7 +50,12 @@ fn main() {
     // Answered before telemetry, the release check and any socket: asking which
     // release this binary is must work even for one `check_version` would refuse.
     if wants_version(&args) {
-        println!("delonix-cri {}", env!("CARGO_PKG_VERSION"));
+        use std::io::Write;
+        let _ = writeln!(
+            std::io::stdout(),
+            "delonix-cri {}",
+            env!("CARGO_PKG_VERSION")
+        );
         return;
     }
     delonix_telemetry::telemetry::init();
