@@ -12,6 +12,14 @@
 # element, and a monitoring stack that is half-installed still looks like a
 # server that boots.
 write_files:
+  # `delonix vm create --ssh-key` creates the `delonix` account, but a golden
+  # image built from a plain cloud image gives it no sudo -- the operator could log
+  # in and not administer the machine (measured). The account may not exist at
+  # build time, and sudoers does not need it to.
+  - path: /etc/sudoers.d/90-delonix
+    permissions: "0440"
+    content: |
+      delonix ALL=(ALL) NOPASSWD:ALL
   - path: /root/build.sh
     permissions: "0700"
     content: |

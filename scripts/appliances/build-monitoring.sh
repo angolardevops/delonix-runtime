@@ -65,7 +65,7 @@ GOFLOW2_VERSION=${GOFLOW2_VERSION:-2.2.6}
 GOFLOW2_SHA256=${GOFLOW2_SHA256:-0b8b8b081ff810d01431bfe6f1d10ab0be9de8bbe3da1cb700317fe06b2a0f14}
 ALLOY_VERSION=${ALLOY_VERSION:-1.19.2-1}
 # Bumped when the image changes without any pinned version changing.
-IMAGE_REV=${IMAGE_REV:-3}
+IMAGE_REV=${IMAGE_REV:-4}
 
 BASE_DISTRO=ubuntu
 UBUNTU_SERIES=noble

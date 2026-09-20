@@ -72,7 +72,7 @@ builds — the checksum is what makes that safe.
 | `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
 | `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
-| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana + Prometheus/Loki + NetFlow stack, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2, Prometheus 3.13.1 (LTS), Loki 3.7.8, goflow2 2.2.6 | `monitoring-zabbix7.0-grafana13.2.2-r3.qcow2` |
+| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana + Prometheus/Loki + NetFlow stack, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2, Prometheus 3.13.1 (LTS), Loki 3.7.8, goflow2 2.2.6 | `monitoring-zabbix7.0-grafana13.2.2-r4.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant
@@ -136,10 +136,10 @@ The monitoring image registers WITHOUT `--appliance` — see "Monitoring" below
 for why it still wants the NoCloud seed:
 
 ```bash
-delonix image vm import monitoring-zabbix7.0-grafana13.2.2-r3.qcow2 -t monitoring:7.0-r3 \
+delonix image vm import monitoring-zabbix7.0-grafana13.2.2-r4.qcow2 -t monitoring:7.0-r4 \
     --distro ubuntu --release 24.04 --default-vcpus 2 --default-memory 4G
 
-delonix image vm push monitoring:7.0-r3 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r3
+delonix image vm push monitoring:7.0-r4 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r4
 ```
 
 ## Credentials
@@ -314,7 +314,7 @@ already imported into Postgres — or Grafana past the plugin API the pinned
 kind of drift a golden image exists to prevent; the same reasoning the golden
 Kubernetes image already applies to `kubeadm`/`kubelet`/`kubectl`.
 
-### What the monitoring image carries (revision 3)
+### What the monitoring image carries (revision 4: r3 plus passwordless sudo for `delonix`)
 
 Revision 1 was Zabbix + Grafana. Revision 2 added the layer an operator needs to
 watch a whole estate — servers, network equipment and workstations — with the
@@ -430,20 +430,54 @@ because a keyserver returned it.
   per installation, keeps it in `/root/.carbonio-db-password` (mode 0600), and is
   safe to run twice. It is never in the image.
 
-**To finish the installation on the target** (the vendor's steps 3 and 6-10; the
-address below is an example):
+**To finish the installation on the target, one command:**
+
+```bash
+sudo carbonio-finish-install --fqdn mail.example.com      # [--ip A.B.C.D] [--admin-password P]
+```
+
+It sets the identity, prepares the database, runs `carbonio-bootstrap`
+unattended from a config file, sets up service-discover, creates the sidecar
+tokens, initialises the four service schemas, enables the video server, restarts
+the proxy on its final configuration, and **logs in as the admin over HTTPS before
+it says it is done**. Passwords you do not give are generated and saved 0600 under
+`/root` (`.carbonio-admin-password`, `.carbonio-cluster-password`); the admin
+account is `zextras@<domain>`. It takes about 8 minutes and is safe to run twice
+(the second run reports it is already finished; `--force` overrides).
+
+The order is not the vendor guide's order, and the difference is the reason the
+helper exists. Each of these was hit on a real VM before it was written down:
+
+- `carbonio-bootstrap` starts every service and **blocks waiting for
+  service-discover**, which cannot start until `service-discover setup` has run —
+  but that command **refuses until bootstrap has written the LDAP configuration**.
+  So the two run side by side: bootstrap in the background, the setup as soon as
+  LDAP is listening.
+- The four `carbonio-*-db-bootstrap` commands must run **after** the first
+  `pending-setups` pass. Before it there is no Consul token, and they print
+  "empty string is not a valid password, clearing password" and carry on — an
+  empty database password, with exit status 0.
+- The video server must be running before its pending-setup, which prints
+  `Error! No key exists` and then succeeds; that line is informational, not a
+  failure.
+- The proxy that started before the pending setups is up but **not listening on
+  443**; it needs a restart on the final configuration.
+
+The steps by hand, for reading or for a split install (the address is an example):
 
 ```bash
 hostnamectl set-hostname mail.example.com
 echo -e "127.0.0.1 localhost\n172.16.0.10 mail.example.com mail" > /etc/hosts
 carbonio-prepare-db
-systemctl enable --now carbonio-videoserver.service   # then set nat_1_1_mapping in /etc/janus/janus.jcfg
-carbonio-bootstrap                                    # interactive: domain, admin password
-service-discover setup-wizard && pending-setups -a
-systemctl restart carbonio-ws-collaboration-sidecar.service
+carbonio-bootstrap &                                  # blocks on services until:
+service-discover setup --first-instance --password P 172.16.0.10   # needs a tty
+SETUP_CONSUL_TOKEN=$(service-discover bootstrap-token --password P) pending-setups -a
 for s in files tasks ws-collaboration message-dispatcher; do
   PGPASSWORD=$(cat /root/.carbonio-db-password) carbonio-$s-db-bootstrap carbonio_adm 127.0.0.1
 done
+systemctl enable --now carbonio-videoserver.service   # then set nat_1_1_mapping in /etc/janus/janus.jcfg
+SETUP_CONSUL_TOKEN=... pending-setups -a              # second pass
+systemctl restart carbonio-nginx
 ```
 
 The vendor asks for **4 cores, 16 GiB of RAM and 50 GB of disk** as a minimum, and

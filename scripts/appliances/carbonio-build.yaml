@@ -13,6 +13,18 @@
 # need facts about the target. Same seam as build-openstack.sh, for the same
 # reason: a bootstrapped image would ship the build VM's identity.
 write_files:
+  # `delonix vm create --ssh-key` creates the `delonix` account, but a golden
+  # image built from a plain cloud image gives it no sudo -- the operator could log
+  # in and not administer the machine (measured). The account may not exist at
+  # build time, and sudoers does not need it to.
+  - path: /etc/sudoers.d/90-delonix
+    permissions: "0440"
+    content: |
+      delonix ALL=(ALL) NOPASSWD:ALL
+  - path: /usr/local/sbin/carbonio-finish-install
+    permissions: "0755"
+    encoding: b64
+    content: @FINISH_INSTALL_B64@
   - path: /root/build.sh
     permissions: "0700"
     content: |

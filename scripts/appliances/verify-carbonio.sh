@@ -71,6 +71,16 @@ runcmd:
     chk "carbonio-bootstrap is installed" "command -v carbonio-bootstrap || ls /opt/zextras/bin/carbonio-bootstrap"
     chk "the image record is valid JSON, pre-bootstrap, 28 packages" "python3 -c \"import json;d=json.load(open('/etc/delonix/carbonio-image.json'));assert d['state']=='pre-bootstrap' and len(d['packages'])==28\""
 
+    # the finishing helper travelled into the image intact and is usable
+    chk "carbonio-finish-install is installed and executable" "[ -x /usr/local/sbin/carbonio-finish-install ]"
+    chk "carbonio-finish-install parses (bash -n)" "bash -n /usr/local/sbin/carbonio-finish-install"
+    chk "carbonio-finish-install --help answers" "/usr/local/sbin/carbonio-finish-install --help | grep -q -- --fqdn"
+    chk "carbonio-finish-install refuses to run without --fqdn" "! /usr/local/sbin/carbonio-finish-install"
+    chk "carbonio-finish-install refuses a name without a dot" "! /usr/local/sbin/carbonio-finish-install --fqdn mail"
+
+    # the operator account can administer the machine
+    chk "sudoers drop-in for delonix is 0440 and valid" "[ \"\$(stat -c %a /etc/sudoers.d/90-delonix)\" = 440 ] && visudo -cf /etc/sudoers.d/90-delonix"
+
     # the machine identity of the BUILD did not travel
     chk "no database password baked into the image" "[ ! -e /root/.carbonio-db-password ]"
 

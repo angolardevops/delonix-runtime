@@ -127,6 +127,19 @@ check "starter dashboard 'delonix-overview' is provisioned" \
 check "Zabbix app plugin is enabled" \
   "$G/api/plugins/alexanderzobnin-zabbix-app/settings | J 'sys.exit(0 if d.get(\"enabled\") else 1)'"
 
+# --- the operator account can administer the machine ---------------------
+# Read from the disk, not booted: this image is verified without a seed, so no
+# `delonix` account exists yet, and sudoers does not need one.
+export LIBGUESTFS_BACKEND=${LIBGUESTFS_BACKEND:-direct}
+if [ -z "${SUPERMIN_KERNEL:-}" ] && [ ! -r "/boot/vmlinuz-$(uname -r)" ]; then
+  for k in $(ls -1r /boot/vmlinuz-* 2>/dev/null); do
+    kv=${k#/boot/vmlinuz-}
+    if [ -r "$k" ] && [ -d "/lib/modules/$kv" ]; then export SUPERMIN_KERNEL=$k SUPERMIN_MODULES=/lib/modules/$kv; break; fi
+  done
+fi
+check "sudoers drop-in gives delonix passwordless sudo" \
+  "printf 'cat /etc/sudoers.d/90-delonix\n' | guestfish --ro -a '$IMG' -i | grep -q 'delonix ALL=(ALL) NOPASSWD:ALL'"
+
 # --- what the image says it carries ------------------------------------
 echo "==== monitoring verification rc=$rc ($IMG)"
 exit $rc
