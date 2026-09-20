@@ -941,7 +941,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Opt
                     return Err(not_here(ip));
                 }
                 let ip = if commit {
-                    let taken = super::ippool::claim(pool, &claimant)?;
+                    let taken = super::ippool::claim_moving(pool, &claimant)?;
                     // Another claim may have landed between the look and the take.
                     if taken != ip && !super::ippool::address_present(taken) {
                         return Err(not_here(taken));
@@ -985,11 +985,17 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Opt
                         ],
                     )));
                 }
-                Some(l) => l.tls = l.tls || ep.tls,
+                Some(l) => {
+                    l.tls = l.tls || ep.tls;
+                    if !l.sources.contains(name) {
+                        l.sources.push(name.clone());
+                    }
+                }
                 None => listeners.push(Listener {
                     port: ep.port,
                     tls: ep.tls,
                     addr: addr.clone(),
+                    sources: vec![name.clone()],
                 }),
             }
         }
@@ -1046,6 +1052,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Opt
         tls: tls_material,
         published_hosts: published,
         claims,
+        stamps: Vec::new(),
         bind: None,
     }))
 }
@@ -1179,15 +1186,19 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         fields: f,
         converges: true,
         // The routes live in the shared proxy config, not in a record of their
-        // own; `source` says who contributed each one, which is enough to
-        // compare but not to own — a prune would have to rewrite a config other
-        // documents also contribute to.
-        ownable: false,
+        // own, so ownership is a stamp kept beside them (`ingress_proxy::Stamp`) and a
+        // prune rewrites the config WITHOUT this document's contribution
+        // (`remove_for_prune`) instead of deleting a record.
+        ownable: true,
     })
 }
 
-/// What the running proxy has, per document — readable only because each route
-/// now records its `source`.
+/// What the running proxy has, per document — readable because each route records its
+/// `source`, and each listener the documents that asked for it.
+///
+/// Lists every document the proxy holds, INCLUDING the ones the manifest no longer
+/// declares: that is what a `--prune` has to see, and a plan that only looks at the
+/// manifest can never propose removing anything.
 pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
     use ingress_proxy::Where;
     let cfgs: Vec<ProxyConfig> = [Where::Holder, Where::Host]
@@ -1197,13 +1208,30 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
     if cfgs.is_empty() {
         return Ok(Vec::new());
     }
-    let mut out = Vec::new();
-    let both: Vec<&ManifestDoc> = manifest::of_kind(docs, k::HTTP_ROUTE)
+    // (name, kind as declared now) — the manifest first, then whatever the proxy holds
+    // that the manifest does not mention.
+    let mut names: Vec<(String, Option<&ManifestDoc>)> = manifest::of_kind(docs, k::HTTP_ROUTE)
         .into_iter()
         .chain(manifest::of_kind(docs, k::INGRESS))
+        .map(|d| (d.metadata.name.clone(), Some(d)))
         .collect();
-    for doc in both {
-        let name = &doc.metadata.name;
+    for c in &cfgs {
+        for r in &c.routes {
+            if !r.source.is_empty() && !names.iter().any(|(n, _)| n == &r.source) {
+                names.push((r.source.clone(), None));
+            }
+        }
+    }
+    let mut by_ip = container_ips();
+    // A route to a VM stores the VM's address too (`vm_ips`); without mapping it
+    // back the plan read `10.x:8080` against `web01:8080` as drift on every run.
+    for (vm, ip) in vm_ips() {
+        if let Ok((ip, _)) = ip {
+            by_ip.entry(vm).or_insert(ip);
+        }
+    }
+    let mut out = Vec::new();
+    for (name, doc) in &names {
         // A document is served by exactly one instance: find the one that has it.
         let Some(cfg) = cfgs
             .iter()
@@ -1211,31 +1239,43 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         else {
             continue; // nothing of this document is applied yet
         };
+        let stamp = cfg.stamps.iter().find(|s| &s.source == name);
+        let kind = match (doc, stamp) {
+            (Some(d), _) => d.kind.clone(),
+            (None, Some(st)) => st.kind.clone(),
+            (None, None) => k::HTTP_ROUTE.to_string(),
+        };
         let mine: Vec<&ingress_proxy::Route> =
             cfg.routes.iter().filter(|r| &r.source == name).collect();
         let mut f = std::collections::BTreeMap::new();
-        // **Only the listeners THIS document asked for**, matched against the
-        // live ones. `cfg.listeners` is the deduplicated UNION of every
-        // HTTPRoute on the node, so reporting it raw made a document that
-        // declares `:80` claim the `:443` its neighbour opened — and, worse, a
-        // document whose own port had not been bound yet still reported it as
-        // present, because someone else's was.
+        // **Only the listeners THIS document asked for.** `cfg.listeners` is the
+        // deduplicated UNION of every HTTPRoute on the node, so reporting it raw made a
+        // document that declares `:80` claim the `:443` its neighbour opened.
         //
-        // Intersecting keeps the format unchanged (listeners carry no
-        // provenance, unlike routes) and answers the question that matters: is
-        // what THIS document declared actually being served.
-        let want = spec_of_either(doc)
-            .map(|s| effective_entrypoints(&s))
-            .unwrap_or_default();
-        let mut eps: Vec<String> = want
-            .iter()
-            .filter(|e| {
-                cfg.listeners
-                    .iter()
-                    .any(|l| l.port == e.port && l.tls == e.tls)
-            })
-            .map(|e| format!("{}{}", e.port, if e.tls { "/tls" } else { "" }))
-            .collect();
+        // A listener records who asked for it. A config written before that was
+        // recorded carries none, and there the old answer stands: intersect with what
+        // the manifest wants.
+        let has_sources = cfg.listeners.iter().any(|l| !l.sources.is_empty());
+        let mut eps: Vec<String> = if has_sources {
+            cfg.listeners
+                .iter()
+                .filter(|l| l.sources.contains(name))
+                .map(|l| format!("{}{}", l.port, if l.tls { "/tls" } else { "" }))
+                .collect()
+        } else {
+            let want = doc
+                .and_then(|d| spec_of_either(d).ok())
+                .map(|s| effective_entrypoints(&s))
+                .unwrap_or_default();
+            want.iter()
+                .filter(|e| {
+                    cfg.listeners
+                        .iter()
+                        .any(|l| l.port == e.port && l.tls == e.tls)
+                })
+                .map(|e| format!("{}{}", e.port, if e.tls { "/tls" } else { "" }))
+                .collect()
+        };
         eps.sort();
         f.insert("entrypoints".into(), eps.join(","));
         // The mode the material was BUILT with, recorded alongside it. It used
@@ -1250,14 +1290,6 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         // The stored backend is `ip:port`; the manifest names a service. Map it
         // back through the same container→IP table the apply resolved with, so
         // the two sides speak the same language.
-        let mut by_ip = container_ips();
-        // A route to a VM stores the VM's address too (`vm_ips`); without mapping it
-        // back the plan read `10.x:8080` against `web01:8080` as drift on every run.
-        for (vm, ip) in vm_ips() {
-            if let Ok((ip, _)) = ip {
-                by_ip.entry(vm).or_insert(ip);
-            }
-        }
         let mut keys: Vec<String> = mine
             .iter()
             .map(|r| {
@@ -1291,14 +1323,95 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
                 .unwrap_or_default(),
         );
         out.push(super::reconcile::Actual {
-            kind: doc.kind.clone(),
+            kind,
             name: name.clone(),
             fields: f,
-            owner: None,
-            last_applied: None,
+            owner: stamp.map(|s| s.stack.clone()),
+            last_applied: stamp
+                .and_then(|s| super::reconcile::decode_last_applied(&s.last_applied)),
         });
     }
     Ok(out)
+}
+
+/// Records which stack applied `name`, and what it applied (the ownership half of a
+/// reconcile; see [`ingress_proxy::Stamp`]).
+pub(crate) fn stamp(
+    kind: &str,
+    name: &str,
+    stack: &str,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    use ingress_proxy::Where;
+    for w in [Where::Holder, Where::Host] {
+        ingress_proxy::update_manual(w, |cfg| {
+            if !cfg.routes.iter().any(|r| r.source == name) {
+                return false;
+            }
+            let st = ingress_proxy::Stamp {
+                source: name.to_string(),
+                kind: kind.to_string(),
+                stack: stack.to_string(),
+                last_applied: super::reconcile::encode_last_applied(fields),
+            };
+            cfg.stamps.retain(|x| x.source != name);
+            cfg.stamps.push(st);
+            true
+        })?;
+    }
+    Ok(())
+}
+
+/// Removes ONE document's contribution from the proxy config (a `--prune`, a
+/// `destroy`, a `--replace`): its routes, the listeners only it asked for, the names it
+/// published, the address it held. The other documents' contributions stay, and the
+/// proxy stops only when nothing is left to serve.
+pub(crate) fn remove_for_prune(name: &str) -> Result<()> {
+    use ingress_proxy::Where;
+    for w in [Where::Holder, Where::Host] {
+        let Some(mut cfg) = ingress_proxy::read_manual_config(w) else {
+            continue;
+        };
+        if !cfg.routes.iter().any(|r| r.source == name) {
+            continue;
+        }
+        let before: Vec<u16> = cfg.listeners.iter().map(|l| l.port).collect();
+        cfg.routes.retain(|r| r.source != name);
+        cfg.published_hosts.retain(|d| d.source != name);
+        cfg.claims.retain(|c| c.source != name);
+        cfg.stamps.retain(|s| s.source != name);
+        // A listener nobody asks for any more goes; one with no recorded asker (a
+        // config from before that was recorded) is left alone — dropping it would
+        // take a port off a document we cannot prove is not using it.
+        cfg.listeners.retain_mut(|l| {
+            if l.sources.is_empty() {
+                return true;
+            }
+            l.sources.retain(|s| s != name);
+            !l.sources.is_empty()
+        });
+        if cfg.routes.is_empty() {
+            ingress_proxy::clear_manual(w)?;
+        } else {
+            let after: Vec<u16> = cfg.listeners.iter().map(|l| l.port).collect();
+            if after != before {
+                // Listeners are fixed at startup: a port that goes needs a restart.
+                ingress_proxy::stop_keeping_sources(w)?;
+            }
+            ingress_proxy::set_manual(&cfg, w)?;
+        }
+    }
+    // What is still declared anywhere is what keeps a lease.
+    let keep: Vec<String> = [Where::Holder, Where::Host]
+        .into_iter()
+        .filter_map(ingress_proxy::read_manual_config)
+        .flat_map(|c| {
+            c.claims
+                .into_iter()
+                .map(|x| format!("HTTPRoute/{}", x.source))
+        })
+        .collect();
+    super::ippool::release_unlisted("HTTPRoute/", &keep)
 }
 
 /// Converges: re-apply every HTTPRoute document. The config is COLLECTIVE, so

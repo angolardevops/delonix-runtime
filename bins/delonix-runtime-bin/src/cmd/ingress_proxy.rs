@@ -57,12 +57,31 @@ pub struct ProxyConfig {
     /// Addresses documents hold from an `IPPool` (`spec.pool`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub claims: Vec<PoolClaim>,
+    /// Ownership records, one per document (see [`Stamp`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stamps: Vec<Stamp>,
     /// Address the listeners bind to. `None` = every address, which is what the
     /// holder instance wants (the slirp forward decides who reaches it). The host
     /// instance sets `127.0.0.1`: it is a real socket on the host, and exposing a
     /// route to the LAN must be a decision, not a side effect.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bind: Option<String>,
+}
+
+/// Who owns one document's routes: the stack that applied it, and what it applied.
+///
+/// The proxy config is COLLECTIVE, so a route has nowhere else to carry the
+/// `delonix.io/stack` label and last-applied record every other Kind keeps on its own
+/// resource. Without them the Kind cannot be owned, and a resource that cannot be owned
+/// is invisible to `--prune` and `destroy`: the proxy, the hosts block and the leases of
+/// a destroyed stack stayed behind.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Stamp {
+    pub source: String,
+    /// `HTTPRoute` or `Ingress`, as written — the plan names the Kind the user wrote.
+    pub kind: String,
+    pub stack: String,
+    pub last_applied: String,
 }
 
 /// One host name a route publishes to the SDN, with the document that asked for it.
@@ -137,6 +156,12 @@ pub struct Listener {
     /// address only decides where the slirp forward is published.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub addr: Option<String>,
+    /// The documents that asked for this port. Listeners are the UNION of every
+    /// document's, so without this a document could neither be told apart from its
+    /// neighbours (the drift check) nor removed on its own (`--prune`/`destroy`).
+    /// Empty in a config written before it existed, which is read as «unknown».
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<String>,
 }
 
 /// A resolved route: matches by `host` (empty = any) + `path` prefix, and
@@ -832,6 +857,7 @@ fn rebuild(w: Where) -> Result<()> {
             port: AUTO_HTTP_PORT,
             tls: false,
             addr: None,
+            sources: Vec::new(),
         });
     }
     for a in &auto {
@@ -861,6 +887,7 @@ fn rebuild(w: Where) -> Result<()> {
                 .as_ref()
                 .map(|m| m.claims.clone())
                 .unwrap_or_default(),
+            stamps: Vec::new(),
             bind: manual.as_ref().and_then(|m| m.bind.clone()),
         },
         w,
@@ -869,19 +896,52 @@ fn rebuild(w: Where) -> Result<()> {
 
 /// Writes the MANUAL part (from `httproute apply`) and recomposes the final config.
 pub fn set_manual(cfg: &ProxyConfig, w: Where) -> Result<()> {
+    // The ownership records belong to the DOCUMENTS, not to one composition of them:
+    // the config is rebuilt from the manifest on every apply, and a stamp written by the
+    // last one must survive it for every document that is still here.
+    let mut cfg = cfg.clone();
+    if let Some(old) = read_manual(w) {
+        for st in old.stamps {
+            let still_here = cfg.routes.iter().any(|r| r.source == st.source);
+            if still_here && !cfg.stamps.iter().any(|x| x.source == st.source) {
+                cfg.stamps.push(st);
+            }
+        }
+    }
+    write_manual(w, &cfg)?;
+    rebuild(w)
+}
+
+fn write_manual(w: Where, cfg: &ProxyConfig) -> Result<()> {
     std::fs::create_dir_all(proxy_dir(w)).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
-    std::fs::write(
-        manual_path(w),
-        serde_json::to_vec_pretty(cfg).unwrap_or_default(),
-    )
-    .map_err(|e| Error::Runtime {
-        context: "write manual",
+    let json = serde_json::to_vec_pretty(cfg).map_err(|e| Error::Runtime {
+        context: "serialize manual",
         message: e.to_string(),
     })?;
-    rebuild(w)
+    // Atomic: a reader (the other instance's `rebuild`, a plan) must never see half a
+    // file and conclude the routes are gone.
+    delonix_state::write_atomic(&manual_path(w), &json).map_err(|e| Error::Runtime {
+        context: "write manual",
+        message: e.to_string(),
+    })
+}
+
+/// Edits the MANUAL part in place WITHOUT recomposing or signalling the proxy — for
+/// records that do not change what is served (the ownership stamp). `f` returns whether
+/// it changed anything; nothing is written otherwise. `false` when there is no manual
+/// part to edit.
+pub(crate) fn update_manual(w: Where, f: impl FnOnce(&mut ProxyConfig) -> bool) -> Result<bool> {
+    let Some(mut cfg) = read_manual(w) else {
+        return Ok(false);
+    };
+    if !f(&mut cfg) {
+        return Ok(false);
+    }
+    write_manual(w, &cfg)?;
+    Ok(true)
 }
 
 /// Removes the MANUAL part (on `httproute rm`) and recomposes — the
@@ -1304,6 +1364,15 @@ pub fn is_running(w: Where) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_config_from_before_provenance_still_parses() {
+        // Written by an earlier build: no `sources` on the listener, no `stamps`.
+        let old = r#"{"listeners":[{"port":80}],"routes":[]}"#;
+        let c: ProxyConfig = serde_json::from_str(old).unwrap();
+        assert!(c.listeners[0].sources.is_empty());
+        assert!(c.stamps.is_empty());
+    }
+
     /// ACH-017: the proxy's pidfile has to prove the ROOT, not just the shape.
     ///
     /// **Reproduced 2026-09-09**, two isolated roots (`DELONIX_ROOT` +
@@ -1539,6 +1608,7 @@ mod tests {
                 port: 443,
                 tls: true,
                 addr: None,
+                sources: Vec::new(),
             }],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
             tls: Some(TlsMaterial {
@@ -1548,6 +1618,7 @@ mod tests {
             }),
             published_hosts: Vec::new(),
             claims: Vec::new(),
+            stamps: Vec::new(),
             bind: None,
         };
         let js = serde_json::to_string(&cfg).unwrap();
@@ -1563,17 +1634,20 @@ mod tests {
                     port: 80,
                     tls: false,
                     addr: None,
+                    sources: Vec::new(),
                 },
                 Listener {
                     port: 443,
                     tls: true,
                     addr: None,
+                    sources: Vec::new(),
                 },
             ],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
             tls: None,
             published_hosts: Vec::new(),
             claims: Vec::new(),
+            stamps: Vec::new(),
             bind: None,
         };
         let js = serde_json::to_string(&cfg).unwrap();

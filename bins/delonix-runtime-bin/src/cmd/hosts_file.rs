@@ -18,8 +18,34 @@
 use delonix_model::{Error, Result};
 use std::path::PathBuf;
 
-const BEGIN: &str = "# BEGIN delonix (managed — do not edit)";
-const END: &str = "# END delonix";
+const BEGIN_PREFIX: &str = "# BEGIN delonix ";
+const END_PREFIX: &str = "# END delonix ";
+
+/// Identity of one state root, stable across runs and releases (FNV-1a over the path —
+/// `DefaultHasher` is not promised stable, and a block orphaned by a hash change is a
+/// name that never goes away).
+///
+/// Several state roots can share one `/etc/hosts` (an isolated root next to the real
+/// one, root and rootless users). Each rebuilds only its OWN names, so each owns its OWN
+/// block: with a single shared block, whichever root rebuilt last erased the other's
+/// names.
+pub(crate) fn root_id() -> String {
+    let path = super::util::state_root();
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in path.to_string_lossy().as_bytes() {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{:08x}", h & 0xffff_ffff)
+}
+
+fn begin(id: &str) -> String {
+    format!("{BEGIN_PREFIX}{id} (managed — do not edit)")
+}
+
+fn end(id: &str) -> String {
+    format!("{END_PREFIX}{id}")
+}
 
 /// `/etc/hosts`, or `DELONIX_HOSTS_FILE` (a test seam, and a way to keep an
 /// isolated run away from the real file).
@@ -33,7 +59,7 @@ pub(crate) fn hosts_path() -> PathBuf {
 pub(crate) type Entry = (String, String);
 
 /// The block for `hosts`, sorted and deduplicated. Empty for no hosts.
-pub(crate) fn block(hosts: &[Entry]) -> String {
+pub(crate) fn block(id: &str, hosts: &[Entry]) -> String {
     let mut h: Vec<Entry> = hosts
         .iter()
         .map(|(n, a)| (n.to_lowercase(), a.clone()))
@@ -43,27 +69,29 @@ pub(crate) fn block(hosts: &[Entry]) -> String {
     if h.is_empty() {
         return String::new();
     }
-    let mut out = format!("{BEGIN}\n");
+    let mut out = format!("{}\n", begin(id));
     for (name, addr) in h {
         out.push_str(&format!("{addr}\t{name}\n"));
     }
-    out.push_str(END);
+    out.push_str(&end(id));
     out.push('\n');
     out
 }
 
 /// `existing` with the managed block replaced by the block for `hosts`. PURE.
-pub(crate) fn render(existing: &str, hosts: &[Entry]) -> Result<String> {
+pub(crate) fn render(existing: &str, hosts: &[Entry], id: &str) -> Result<String> {
     // Everything outside the block, in order.
     let mut kept: Vec<&str> = Vec::new();
     let mut inside = false;
     for line in existing.lines() {
-        if line.trim() == BEGIN {
+        // Only THIS root's block is ours. Another root's block stays where it is and its
+        // names count as somebody else's entries below.
+        if line.trim() == begin(id) {
             inside = true;
             continue;
         }
         if inside {
-            if line.trim() == END {
+            if line.trim() == end(id) {
                 inside = false;
             }
             continue;
@@ -96,7 +124,7 @@ pub(crate) fn render(existing: &str, hosts: &[Entry]) -> Result<String> {
         }
         if let Some(name) = tokens.find(|n| wanted.iter().any(|w| w == &n.to_lowercase())) {
             return Err(Error::Invalid(super::po::tf(
-                "hosts: '{name}' already has an entry in {path} outside the delonix block — remove it or drop the name from the route: {line}",
+                "hosts: '{name}' already has an entry in {path} outside this state root's delonix block (a hand-written line, or another state root's block) — remove it or drop the name from the route: {line}",
                 &[
                     ("name", name),
                     ("path", &hosts_path().display().to_string()),
@@ -109,7 +137,7 @@ pub(crate) fn render(existing: &str, hosts: &[Entry]) -> Result<String> {
     if !out.is_empty() {
         out.push('\n');
     }
-    out.push_str(&block(hosts));
+    out.push_str(&block(id, hosts));
     Ok(out)
 }
 
@@ -117,18 +145,18 @@ pub(crate) fn render(existing: &str, hosts: &[Entry]) -> Result<String> {
 /// would change, so an unprivileged `apply` of a manifest that does not use
 /// `hosts:` never needs root.
 pub(crate) fn sync(hosts: &[Entry]) -> Result<()> {
-    sync_at(&hosts_path(), hosts)
+    sync_at(&hosts_path(), hosts, &root_id())
 }
 
 /// [`sync`] against an explicit file (the seam the test uses, so it never has to
 /// touch the process environment).
-fn sync_at(path: &std::path::Path, hosts: &[Entry]) -> Result<()> {
+fn sync_at(path: &std::path::Path, hosts: &[Entry], id: &str) -> Result<()> {
     let old = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(Error::Invalid(format!("{}: {e}", path.display()))),
     };
-    let new = render(&old, hosts)?;
+    let new = render(&old, hosts, id)?;
     if new == old {
         return Ok(());
     }
@@ -150,7 +178,7 @@ fn sync_at(path: &std::path::Path, hosts: &[Entry]) -> Result<()> {
                 "hosts: cannot write {path} without root. Apply again as root, or add this block yourself:\n{block}",
                 &[
                     ("path", &target.display().to_string()),
-                    ("block", block(hosts).trim_end()),
+                    ("block", block(id, hosts).trim_end()),
                 ],
             ))
         } else {
@@ -163,6 +191,9 @@ fn sync_at(path: &std::path::Path, hosts: &[Entry]) -> Result<()> {
 mod tests {
     use super::*;
 
+    const ID: &str = "aaaa0001";
+    const OTHER: &str = "bbbb0002";
+
     fn h(v: &[&str]) -> Vec<Entry> {
         v.iter()
             .map(|s| (s.to_string(), "127.0.0.1".to_string()))
@@ -171,15 +202,20 @@ mod tests {
 
     #[test]
     fn a_block_is_added_after_the_existing_lines_and_nothing_else_moves() {
-        let out = render("127.0.0.1\tlocalhost\n10.0.0.5 db\n", &h(&["b.pt", "a.pt"])).unwrap();
+        let out = render(
+            "127.0.0.1\tlocalhost\n10.0.0.5 db\n",
+            &h(&["b.pt", "a.pt"]),
+            ID,
+        )
+        .unwrap();
         assert!(out.starts_with("127.0.0.1\tlocalhost\n10.0.0.5 db\n"));
         assert!(out.contains("127.0.0.1\ta.pt\n127.0.0.1\tb.pt\n"));
-        assert!(out.trim_end().ends_with(END));
+        assert!(out.trim_end().ends_with(&end(ID)));
     }
 
     #[test]
     fn a_name_can_point_at_a_reserved_address_and_two_addresses_for_one_name_are_refused() {
-        let out = render("", &[("a.pt".into(), "203.0.113.7".into())]).unwrap();
+        let out = render("", &[("a.pt".into(), "203.0.113.7".into())], ID).unwrap();
         assert!(out.contains("203.0.113.7\ta.pt"));
         let e = render(
             "",
@@ -187,6 +223,7 @@ mod tests {
                 ("a.pt".into(), "203.0.113.7".into()),
                 ("A.pt".into(), "203.0.113.8".into()),
             ],
+            ID,
         )
         .unwrap_err()
         .to_string();
@@ -195,43 +232,73 @@ mod tests {
 
     #[test]
     fn rendering_twice_is_the_same_as_once() {
-        let once = render("127.0.0.1 localhost\n", &h(&["a.pt"])).unwrap();
-        assert_eq!(render(&once, &h(&["a.pt"])).unwrap(), once);
+        let once = render("127.0.0.1 localhost\n", &h(&["a.pt"]), ID).unwrap();
+        assert_eq!(render(&once, &h(&["a.pt"]), ID).unwrap(), once);
     }
 
     #[test]
     fn no_hosts_removes_the_block_and_leaves_the_rest_byte_for_byte() {
         let base = "127.0.0.1 localhost\n10.0.0.5 db\n";
-        let with = render(base, &h(&["a.pt"])).unwrap();
-        assert_eq!(render(&with, &[]).unwrap(), base);
+        let with = render(base, &h(&["a.pt"]), ID).unwrap();
+        assert_eq!(render(&with, &[], ID).unwrap(), base);
         // and with no block to begin with, nothing is invented
-        assert_eq!(render(base, &[]).unwrap(), base);
+        assert_eq!(render(base, &[], ID).unwrap(), base);
     }
 
     #[test]
     fn a_name_that_already_has_an_entry_is_refused() {
-        let e = render("10.0.0.9 app.example.pt other\n", &h(&["App.Example.pt"])).unwrap_err();
-        assert!(e.to_string().contains("outside the delonix block"), "{e}");
+        let e = render(
+            "10.0.0.9 app.example.pt other\n",
+            &h(&["App.Example.pt"]),
+            ID,
+        )
+        .unwrap_err();
+        assert!(e.to_string().contains("outside this state root's"), "{e}");
         // a comment that merely mentions the name is not an entry
         assert!(render(
             "# app.example.pt is documented here\n",
-            &h(&["app.example.pt"])
+            &h(&["app.example.pt"]),
+            ID
         )
         .is_ok());
     }
 
     #[test]
     fn a_name_inside_our_own_block_is_not_a_conflict() {
-        let with = render("127.0.0.1 localhost\n", &h(&["a.pt"])).unwrap();
-        assert!(render(&with, &h(&["a.pt", "b.pt"])).is_ok());
+        let with = render("127.0.0.1 localhost\n", &h(&["a.pt"]), ID).unwrap();
+        assert!(render(&with, &h(&["a.pt", "b.pt"]), ID).is_ok());
     }
 
     #[test]
     fn an_unterminated_block_is_replaced_not_stacked() {
-        let broken = format!("127.0.0.1 localhost\n{BEGIN}\n127.0.0.1\told.pt\n");
-        let out = render(&broken, &h(&["new.pt"])).unwrap();
+        let broken = format!("127.0.0.1 localhost\n{}\n127.0.0.1\told.pt\n", begin(ID));
+        let out = render(&broken, &h(&["new.pt"]), ID).unwrap();
         assert!(!out.contains("old.pt"));
-        assert_eq!(out.matches(BEGIN).count(), 1);
+        assert_eq!(out.matches(&begin(ID)).count(), 1);
+    }
+
+    #[test]
+    fn two_state_roots_keep_their_own_blocks_and_never_erase_each_other() {
+        let a = render("127.0.0.1 localhost\n", &h(&["a.pt"]), ID).unwrap();
+        let both = render(&a, &h(&["b.pt"]), OTHER).unwrap();
+        assert!(both.contains("\ta.pt\n") && both.contains("\tb.pt\n"));
+        // the second root rebuilding with NOTHING to publish removes only its own block
+        let after = render(&both, &[], OTHER).unwrap();
+        assert!(
+            after.contains("\ta.pt\n"),
+            "the other root's names survived"
+        );
+        assert!(!after.contains("\tb.pt\n"));
+        // and the first root emptying does not touch a block it does not own
+        let after2 = render(&both, &[], ID).unwrap();
+        assert!(after2.contains("\tb.pt\n") && !after2.contains("\ta.pt\n"));
+    }
+
+    #[test]
+    fn a_name_published_by_another_root_is_refused_not_shadowed() {
+        let a = render("127.0.0.1 localhost\n", &h(&["a.pt"]), ID).unwrap();
+        let e = render(&a, &h(&["a.pt"]), OTHER).unwrap_err().to_string();
+        assert!(e.contains("another state root"), "{e}");
     }
 
     #[test]
@@ -240,13 +307,13 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let f = dir.join("hosts");
         std::fs::write(&f, "127.0.0.1 localhost\n").unwrap();
-        sync_at(&f, &h(&["a.pt"])).unwrap();
+        sync_at(&f, &h(&["a.pt"]), ID).unwrap();
         let first = std::fs::read_to_string(&f).unwrap();
         assert!(first.contains("127.0.0.1\ta.pt"));
         let m1 = std::fs::metadata(&f).unwrap().modified().unwrap();
-        sync_at(&f, &h(&["a.pt"])).unwrap();
+        sync_at(&f, &h(&["a.pt"]), ID).unwrap();
         assert_eq!(std::fs::metadata(&f).unwrap().modified().unwrap(), m1);
-        sync_at(&f, &[]).unwrap();
+        sync_at(&f, &[], ID).unwrap();
         assert_eq!(
             std::fs::read_to_string(&f).unwrap(),
             "127.0.0.1 localhost\n"

@@ -237,19 +237,33 @@ pub fn address_present(ip: Ipv4Addr) -> bool {
 
 // ---- the ledger -----------------------------------------------------------------
 
-/// The address `claimant` holds in `pool`, taking the first free one if it holds none.
-/// Idempotent: the same claimant always gets the same address back.
-pub fn claim(pool: &str, claimant: &str) -> Result<Ipv4Addr> {
-    claim_in(&dir(), pool, claimant, true)
+/// The address `claimant` holds in `pool`, taking the first free one if it holds none;
+/// idempotent. A claimant that holds an address in ANOTHER pool moves: the new
+/// lease is written first and the old one is given back in the same critical section.
+/// This is what a route changing its `pool:` needs — refusing it
+/// left the reconciler planning an update that could never be applied.
+pub fn claim_moving(pool: &str, claimant: &str) -> Result<Ipv4Addr> {
+    claim_in(&dir(), pool, claimant, Mode::Move)
 }
 
-/// The address [`claim`] would return, without taking it. For a plan: computing what an
-/// apply would do must not change what the ledger says.
+/// The address [`claim_moving`] would return, without taking it. For a plan: computing what an
+/// apply would do must not change what the ledger says, and must not fail because of a
+/// lease the apply is about to move.
 pub fn peek(pool: &str, claimant: &str) -> Result<Ipv4Addr> {
-    claim_in(&dir(), pool, claimant, false)
+    claim_in(&dir(), pool, claimant, Mode::Peek)
 }
 
-fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, commit: bool) -> Result<Ipv4Addr> {
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Mode {
+    /// Look, do not write.
+    Peek,
+    /// Take an address; refuse if the claimant already holds one in another pool.
+    Take,
+    /// Take an address and give back the one held in another pool.
+    Move,
+}
+
+fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, mode: Mode) -> Result<Ipv4Addr> {
     let _l = Lock::acquire(d)?;
     let mut p = get_in(d, pool).ok_or_else(|| {
         Error::NotFound(format!(
@@ -259,6 +273,9 @@ fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, commit: bool) -> Re
     // One claimant, one address, ONE pool: holding two would make "which address is
     // mine" depend on which file was read.
     for other in list_in(d).iter().filter(|o| o.name != pool) {
+        if mode != Mode::Take {
+            break;
+        }
         if let Some(ip) = other.leases.get(claimant) {
             return Err(Error::Conflict(format!(
                 "{claimant} already holds {ip} from IPPool '{}' — release it before claiming from '{pool}'",
@@ -268,6 +285,13 @@ fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, commit: bool) -> Re
     }
     if let Some(ip) = p.leases.get(claimant) {
         if let Ok(a) = ip.parse::<Ipv4Addr>() {
+            if mode == Mode::Move {
+                for mut other in list_in(d).into_iter().filter(|o| o.name != pool) {
+                    if other.leases.remove(claimant).is_some() {
+                        write_in(d, &other)?;
+                    }
+                }
+            }
             return Ok(a);
         }
     }
@@ -281,9 +305,18 @@ fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, commit: bool) -> Re
                 p.addresses.len()
             ))
         })?;
-    if commit {
+    if mode != Mode::Peek {
         p.leases.insert(claimant.to_string(), free.to_string());
         write_in(d, &p)?;
+    }
+    if mode == Mode::Move {
+        // The new lease is already on disk; only now is the old one given back, so a
+        // failure in between leaves the claimant with an address, never with none.
+        for mut other in list_in(d).into_iter().filter(|o| o.name != pool) {
+            if other.leases.remove(claimant).is_some() {
+                write_in(d, &other)?;
+            }
+        }
     }
     Ok(free)
 }
@@ -641,16 +674,19 @@ mod tests {
     fn a_claim_is_idempotent_and_an_address_has_one_holder() {
         let d = scratch("claim");
         seed(&d, "edge", &["203.0.113.1-203.0.113.2"]);
-        let first = claim_in(&d, "edge", "HTTPRoute/a", true).unwrap();
+        let first = claim_in(&d, "edge", "HTTPRoute/a", Mode::Take).unwrap();
         assert_eq!(first.to_string(), "203.0.113.1");
-        assert_eq!(claim_in(&d, "edge", "HTTPRoute/a", true).unwrap(), first);
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/b", true)
+            claim_in(&d, "edge", "HTTPRoute/a", Mode::Take).unwrap(),
+            first
+        );
+        assert_eq!(
+            claim_in(&d, "edge", "HTTPRoute/b", Mode::Take)
                 .unwrap()
                 .to_string(),
             "203.0.113.2"
         );
-        let e = claim_in(&d, "edge", "HTTPRoute/c", true).unwrap_err();
+        let e = claim_in(&d, "edge", "HTTPRoute/c", Mode::Take).unwrap_err();
         assert_eq!(
             delonix_model::exitcode::for_error(&e),
             delonix_model::exitcode::CONFLICT,
@@ -665,7 +701,7 @@ mod tests {
         let d = scratch("peek");
         seed(&d, "edge", &["203.0.113.1"]);
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/a", false)
+            claim_in(&d, "edge", "HTTPRoute/a", Mode::Peek)
                 .unwrap()
                 .to_string(),
             "203.0.113.1"
@@ -676,7 +712,7 @@ mod tests {
         );
         // and the same address is still free for a real claim by someone else
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/b", true)
+            claim_in(&d, "edge", "HTTPRoute/b", Mode::Take)
                 .unwrap()
                 .to_string(),
             "203.0.113.1"
@@ -688,11 +724,11 @@ mod tests {
     fn a_released_address_goes_back_to_the_pool_and_release_is_idempotent() {
         let d = scratch("release");
         seed(&d, "edge", &["203.0.113.1"]);
-        claim_in(&d, "edge", "HTTPRoute/a", true).unwrap();
+        claim_in(&d, "edge", "HTTPRoute/a", Mode::Take).unwrap();
         release_unlisted_in(&d, "HTTPRoute/", &[]).unwrap();
         release_unlisted_in(&d, "HTTPRoute/", &[]).unwrap();
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/b", true)
+            claim_in(&d, "edge", "HTTPRoute/b", Mode::Take)
                 .unwrap()
                 .to_string(),
             "203.0.113.1"
@@ -705,7 +741,7 @@ mod tests {
         let d = scratch("unlisted");
         seed(&d, "edge", &["203.0.113.1-203.0.113.4"]);
         for c in ["HTTPRoute/keep", "HTTPRoute/gone", "Other/x"] {
-            claim_in(&d, "edge", c, true).unwrap();
+            claim_in(&d, "edge", c, Mode::Take).unwrap();
         }
         release_unlisted_in(&d, "HTTPRoute/", &["HTTPRoute/keep".to_string()]).unwrap();
         let p = get_in(&d, "edge").unwrap();
@@ -723,8 +759,40 @@ mod tests {
         let d = scratch("two");
         seed(&d, "a", &["203.0.113.1"]);
         seed(&d, "b", &["198.51.100.1"]);
-        claim_in(&d, "a", "HTTPRoute/x", true).unwrap();
-        let e = claim_in(&d, "b", "HTTPRoute/x", true)
+        claim_in(&d, "a", "HTTPRoute/x", Mode::Take).unwrap();
+        let e = claim_in(&d, "b", "HTTPRoute/x", Mode::Take)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("already holds"), "{e}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_claimant_can_move_between_pools_and_a_peek_never_fails_on_the_old_lease() {
+        let d = scratch("move");
+        seed(&d, "a", &["203.0.113.1"]);
+        seed(&d, "b", &["198.51.100.1"]);
+        claim_in(&d, "a", "HTTPRoute/x", Mode::Take).unwrap();
+        // a plan looking at the move must not fail, nor write
+        assert_eq!(
+            claim_in(&d, "b", "HTTPRoute/x", Mode::Peek)
+                .unwrap()
+                .to_string(),
+            "198.51.100.1"
+        );
+        assert_eq!(get_in(&d, "a").unwrap().leases.len(), 1);
+        assert!(get_in(&d, "b").unwrap().leases.is_empty());
+        // the apply moves it: new lease written, old one given back
+        assert_eq!(
+            claim_in(&d, "b", "HTTPRoute/x", Mode::Move)
+                .unwrap()
+                .to_string(),
+            "198.51.100.1"
+        );
+        assert!(get_in(&d, "a").unwrap().leases.is_empty());
+        assert_eq!(get_in(&d, "b").unwrap().leases.len(), 1);
+        // and the plain Take still refuses to hold two
+        let e = claim_in(&d, "a", "HTTPRoute/x", Mode::Take)
             .unwrap_err()
             .to_string();
         assert!(e.contains("already holds"), "{e}");
@@ -734,7 +802,7 @@ mod tests {
     #[test]
     fn claiming_from_a_pool_that_does_not_exist_says_how_to_declare_it() {
         let d = scratch("missing");
-        let e = claim_in(&d, "nope", "HTTPRoute/x", true).unwrap_err();
+        let e = claim_in(&d, "nope", "HTTPRoute/x", Mode::Take).unwrap_err();
         assert_eq!(
             delonix_model::exitcode::for_error(&e),
             delonix_model::exitcode::NOT_FOUND,

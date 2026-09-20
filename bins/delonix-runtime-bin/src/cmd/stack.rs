@@ -1782,11 +1782,7 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         // prune or a destroy, and a `Replace` is just a pull.
         k::IMAGE => "an image is shared content-addressed cache, owned by no stack",
         k::APP => "an App's output is an image — shared content-addressed cache, owned by no stack",
-        // Routes live in the shared proxy config with no per-document
-        // provenance; a tunnel's record is keyed by a live agent.
-        k::HTTP_ROUTE | k::INGRESS => {
-            "routes live in the proxy's shared config, with no per-document provenance"
-        }
+        // A tunnel's record is keyed by a live agent.
         k::GATEWAY => "a tunnel has no labels to stamp ownership on",
         _ => return None,
     })
@@ -1819,6 +1815,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
         k::SERVICE => super::service::remove_for_replace(name),
         k::IPPOOL => super::ippool::remove_for_replace(name),
+        k::HTTP_ROUTE | k::INGRESS => super::httproute::remove_for_prune(name),
         k::POD => super::pod::remove_pod(name, true),
         k::VM => super::vm::remove_for_replace(name),
         k::NETWORK_ACCESS_RULE => super::network_access_rule::remove_for_replace(name),
@@ -2146,6 +2143,9 @@ fn stamp_all(
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
             k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
             k::IPPOOL => super::ippool::stamp(&d.name, stack, &d.fields),
+            k::HTTP_ROUTE | k::INGRESS => {
+                super::httproute::stamp(&d.kind, &d.name, stack, &d.fields)
+            }
             k::POD => super::pod::stamp(&d.name, stack, &d.fields),
             k::VM => super::vm::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ACCESS_RULE => super::network_access_rule::stamp(&d.name, stack, &d.fields),
