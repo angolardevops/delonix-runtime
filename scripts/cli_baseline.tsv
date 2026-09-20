@@ -67,6 +67,7 @@
 ~	diff
 =	explain
 ~	get
+~	hosts sync
 ~	image apply
 ~	image describe
 =	image export

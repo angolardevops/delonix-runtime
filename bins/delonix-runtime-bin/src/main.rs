@@ -370,6 +370,13 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::mcp::McpCmd,
     },
+    /// The service names of exposed containers in the operator's `/etc/hosts`.
+    ///
+    /// ADR-0048. NOT stable: see `docs/cli-stability.md`.
+    Hosts {
+        #[command(subcommand)]
+        action: cmd::hosts::HostsCmd,
+    },
     /// Runtime summary/KPI dashboard (interactive htop-style TUI).
     ///
     /// Global by default, or focused with `--scope`. Renamed from `dash` (§22):
@@ -583,6 +590,7 @@ fn run() -> Result<()> {
         Cmd::Compatibility { action } => cmd::compatibility::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::Mcp { action } => cmd::mcp::run(action),
+        Cmd::Hosts { action } => cmd::hosts::run(action),
         Cmd::IngressProxy { config } => cmd::ingress_proxy::run(&config),
         Cmd::Dashboard { scope, once, json } => {
             cmd::dash::run(scope.unwrap_or(cmd::dash::DashScope::Global), once, json)
@@ -1067,6 +1075,7 @@ mod cli_stability_classification_tests {
         "diff",
         "explain",
         "get",
+        "hosts",
         "init",
         "man",
         "manifest",

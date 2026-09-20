@@ -531,6 +531,8 @@ não é um grupo real). A superfície deles vive hoje em <code>delonix volume</c
 <li><strong><code>system</code>, <code>dashboard</code>, <code>completion</code>, <code>init</code>, <code>man</code>, <code>config</code>,
   <code>explain</code>, <code>api-resources</code>, <code>version</code></strong> — utilitários/introspecção, sem
   promessa declarada em nenhuma versão.</li>
+<li><strong><code>hosts</code></strong> — <code>hosts sync</code> publica no <code>/etc/hosts</code> os nomes de serviço dos
+  containers expostos (ADR-0048); superfície nova, sem promessa ainda.</li>
 <li><strong><code>mcp</code></strong> — o servidor Model Context Protocol (ADR-0025), superfície nova. O
   transporte <code>stdio</code> é o suportado (um processo filho do cliente de IA por
   sessão, nunca um daemon); um transporte HTTP local, se vier a existir, seria

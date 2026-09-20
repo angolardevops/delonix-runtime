@@ -2,9 +2,9 @@
 
 ## Status
 
-Proposed 2026-09-20. Scope decided with the owner the same day (table below). Phase 1 built
-(names, the shared view, the `SVC` column in `container ls`, `vm ls` and `stack ls`, `describe` and JSON);
-phases 2 and 3 are not.
+Proposed 2026-09-20. Scope decided with the owner the same day (table below). Phases 1 (names, the shared
+view, the `SVC` column in `container ls`, `vm ls` and `stack ls`, `describe` and JSON) and 2 (`delonix hosts
+sync`) are built; phase 3 (credentials) is not.
 
 ## Context
 
@@ -86,6 +86,11 @@ ADR-0046 (per-state-root block, refusal on foreign entries, `DELONIX_HOSTS_FILE`
   no-op. The names still work **inside the SDN** through the holder DNS, and from the host with
   `curl --resolve <fqdn>:<port>:127.0.0.1 …`, which the listings print.
 - It is a state, not a default: nothing writes `/etc/hosts` until the user ran the command once.
+- As built, `hosts sync` publishes the standard names of the containers `--expose` registers, at
+  `127.0.0.1`. The hosts of a declared `HTTPRoute` stay under their own `hosts: [host]` opt-in, so a
+  route's choice is never overridden by a blanket command. The flag is a marker file
+  (`<root>/hosts-sync`) written only after the write succeeded, and once it is on a failed rewrite
+  (an unprivileged `run --expose`) only warns.
 
 ### D4 — Credentials
 

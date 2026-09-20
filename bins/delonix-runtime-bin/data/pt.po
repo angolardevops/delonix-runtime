@@ -13053,3 +13053,45 @@ msgstr "httproute: não há routes manuais para remover"
 
 msgid "httproute: WARNING — :{port} is a TLS listener of a declared route, and `--expose` routes are served on it too, over TLS"
 msgstr "httproute: AVISO — :{port} é um listener TLS de uma route declarada, e as routes de `--expose` também são servidas nele, sobre TLS"
+
+msgid "The service names of exposed containers in the operator's `/etc/hosts`"
+msgstr "Os nomes de serviço dos containers expostos no `/etc/hosts` do operador"
+
+msgid "The service names of exposed containers in the operator's `/etc/hosts`.\n\nADR-0048. NOT stable: see `docs/cli-stability.md`."
+msgstr "Os nomes de serviço dos containers expostos no `/etc/hosts` do operador.\n\nADR-0048. NÃO estável: ver `docs/cli-stability.md`."
+
+msgid "Publish the service names of exposed containers in `/etc/hosts` and keep them current"
+msgstr "Publica os nomes de serviço dos containers expostos no `/etc/hosts` e mantém-nos actuais"
+
+msgid "Publish the service names of exposed containers in `/etc/hosts` and keep them current.\n\nWrites one delimited block (`# BEGIN delonix <root> … # END`) pointing every name at `127.0.0.1` — the L7 proxy's published port is how the host reaches a workload on the SDN. Rewriting `/etc/hosts` needs root: without it the command refuses and prints the block to add by hand. After the first run, `container run --expose` and `rm` keep the block current (best effort — a failed write only warns). `--off` removes the block and stops maintaining it."
+msgstr "Publica os nomes de serviço dos containers expostos no `/etc/hosts` e mantém-nos actuais.\n\nEscreve um bloco delimitado (`# BEGIN delonix <root> … # END`) que aponta cada nome a `127.0.0.1` — a porta publicada do proxy L7 é como o host chega a um workload na SDN. Reescrever o `/etc/hosts` precisa de root: sem ele o comando recusa e imprime o bloco para juntares à mão. Depois da primeira execução, `container run --expose` e `rm` mantêm o bloco actual (melhor esforço — uma escrita falhada só avisa). `--off` remove o bloco e deixa de o manter."
+
+msgid "Print the block that would be written and touch nothing"
+msgstr "Imprime o bloco que seria escrito e não toca em nada"
+
+msgid "Remove the block and stop keeping it current"
+msgstr "Remove o bloco e deixa de o manter actual"
+
+msgid "see the block the service names would become, and write nothing"
+msgstr "vê o bloco em que os nomes de serviço se tornariam, sem escrever nada"
+
+msgid "publish the service names of exposed containers in /etc/hosts (needs root)"
+msgstr "publica no /etc/hosts os nomes de serviço dos containers expostos (precisa de root)"
+
+msgid "take the block out and stop maintaining it"
+msgstr "tira o bloco e deixa de o manter"
+
+msgid "print the block first — the names it would publish, one per line"
+msgstr "imprime primeiro o bloco — os nomes que publicaria, um por linha"
+
+msgid "write it, and keep it current as containers are exposed and removed"
+msgstr "escreve-o e mantém-no actual à medida que os containers são expostos e removidos"
+
+msgid "remove the block"
+msgstr "remove o bloco"
+
+msgid "hosts: service names removed from /etc/hosts"
+msgstr "hosts: nomes de serviço removidos do /etc/hosts"
+
+msgid "hosts: {n} service name(s) published in {path}"
+msgstr "hosts: {n} nome(s) de serviço publicados em {path}"

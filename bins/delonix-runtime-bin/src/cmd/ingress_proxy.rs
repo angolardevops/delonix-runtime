@@ -832,6 +832,82 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
 /// AUTO-REGISTERED routes, and ensures the proxy is serving (or stops it if it all
 /// went empty). It is the single point that `httproute apply` and auto-registration
 /// call — neither source erases the other.
+/// Marker file: `delonix hosts sync` was run, so the standard service names of the
+/// containers `--expose` registers are kept in the host's `/etc/hosts` (ADR-0048 D3).
+fn hosts_sync_flag() -> std::path::PathBuf {
+    super::util::state_root().join("hosts-sync")
+}
+
+pub(crate) fn hosts_sync_enabled() -> bool {
+    hosts_sync_flag().exists()
+}
+
+pub(crate) fn set_hosts_sync(on: bool) -> Result<()> {
+    let p = hosts_sync_flag();
+    if on {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        delonix_state::write_atomic(&p, b"on\n").map_err(|e| Error::Runtime {
+            context: "hosts sync",
+            message: e.to_string(),
+        })
+    } else {
+        let _ = std::fs::remove_file(&p);
+        Ok(())
+    }
+}
+
+/// `(name, address)` pairs of the hosts block.
+type HostEntries = Vec<(String, String)>;
+
+/// The names of the hosts block: `(asked-for by a document, published by hosts sync)`.
+/// `current` substitutes the manual config of the instance being rebuilt, which is not
+/// on disk yet when this runs.
+fn desired_hosts(
+    current: Option<(Where, Option<ProxyConfig>)>,
+    include_auto: bool,
+) -> (HostEntries, HostEntries) {
+    // Both instances contribute to the ONE block of the host's `/etc/hosts`, so the
+    // names are read from both sources, never just the one being rebuilt.
+    let strict: Vec<(String, String)> = [Where::Holder, Where::Host]
+        .iter()
+        .filter_map(|x| match &current {
+            Some((w, m)) if w == x => m.clone(),
+            _ => read_manual(*x),
+        })
+        .flat_map(|m| {
+            m.published_hosts
+                .into_iter()
+                .map(|d| (d.host, d.addr.unwrap_or_else(|| "127.0.0.1".to_string())))
+        })
+        .collect();
+    let mut auto_names: Vec<(String, String)> = Vec::new();
+    if include_auto || hosts_sync_enabled() {
+        for a in read_auto() {
+            let e = (a.fqdn(), "127.0.0.1".to_string());
+            if !strict.contains(&e) && !auto_names.contains(&e) {
+                auto_names.push(e);
+            }
+        }
+    }
+    (strict, auto_names)
+}
+
+/// The names `hosts sync` would publish right now, without writing anything.
+pub(crate) fn hosts_block_now() -> String {
+    let (strict, auto_names) = desired_hosts(None, true);
+    let all: Vec<(String, String)> = strict.into_iter().chain(auto_names).collect();
+    super::hosts_file::block(&super::hosts_file::root_id(), &all)
+}
+
+/// Writes the block now, LOUDLY: this is the command the operator ran on purpose.
+pub(crate) fn sync_hosts_now() -> Result<()> {
+    let (strict, auto_names) = desired_hosts(None, false);
+    let all: Vec<(String, String)> = strict.into_iter().chain(auto_names).collect();
+    super::hosts_file::sync(&all)
+}
+
 fn rebuild(w: Where) -> Result<()> {
     let manual = read_manual(w);
     // Only the holder instance has auto-registered routes (`container run --expose`
@@ -851,23 +927,13 @@ fn rebuild(w: Where) -> Result<()> {
     // in place.
     // Both instances contribute to the ONE block of the host's `/etc/hosts`, so the
     // names are read from both sources, never just the one being rebuilt.
-    let published: Vec<(String, String)> = [Where::Holder, Where::Host]
-        .iter()
-        .filter_map(|x| {
-            if *x == w {
-                manual.clone()
-            } else {
-                read_manual(*x)
-            }
-        })
-        .flat_map(|m| {
-            m.published_hosts
-                .into_iter()
-                .map(|d| (d.host, d.addr.unwrap_or_else(|| "127.0.0.1".to_string())))
-        })
-        .collect();
+    let (strict, auto_names) = desired_hosts(Some((w, manual.clone())), false);
+    let published: Vec<(String, String)> = strict.iter().chain(&auto_names).cloned().collect();
     if let Err(e) = super::hosts_file::sync(&published) {
-        if published.is_empty() {
+        // Names a document ASKED for fail the apply; names published by `hosts sync` are
+        // a convenience the operator switched on, and an unprivileged `container run
+        // --expose` must not fail because the file needs root.
+        if strict.is_empty() {
             eprintln!("warning: {e}");
         } else {
             return Err(e);
