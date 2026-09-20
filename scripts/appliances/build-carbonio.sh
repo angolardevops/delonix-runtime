@@ -27,7 +27,7 @@ CACHE=${MEDIA_CACHE:-$HERE/.media}
 # reports Carbonio CE 26.6.0.
 CARBONIO_RELEASE=${CARBONIO_RELEASE:-26.6.0}
 CARBONIO_PINS=${CARBONIO_PINS:-"service-discover-server=0.7.4-1noble carbonio-directory-server=5.0.2-1noble carbonio-proxy=4.14.4-1noble carbonio-webui=4.5.6-1noble carbonio-files-ui=2.17.0-1ubuntu carbonio-mta=4.2.8-1noble carbonio-appserver=4.5.1-1noble carbonio-user-management=1.2.1-1noble carbonio-files-ce=1.2.4-1noble carbonio-files-public-folder-ui=0.0.9-1ubuntu carbonio-files-db=0.4.2-1noble carbonio-tasks-ce=1.1.4-1noble carbonio-tasks-db=0.2.2-1noble carbonio-tasks-ui=0.1.0-1ubuntu carbonio-storages-ce=1.0.17-1ubuntu carbonio-preview-ce=1.3.1-1noble carbonio-docs-connector-ce=1.1.3-1noble carbonio-docs-editor=25.04.8-6noble carbonio-prometheus=3.9.1-1noble carbonio-message-broker=0.3.3-1noble carbonio-message-dispatcher-ce=1.2.5-1noble carbonio-message-dispatcher-db=0.4.4-1noble carbonio-ws-collaboration-ce=1.7.1-1noble carbonio-ws-collaboration-db=0.5.2-1noble carbonio-ws-collaboration-ui=0.9.20-1ubuntu carbonio-videoserver-ce=1.2.6-1noble carbonio-catalog=0.5.3-1noble carbonio-memcached=1.6.42-1noble"}
-IMAGE_REV=${IMAGE_REV:-2}
+IMAGE_REV=${IMAGE_REV:-3}
 
 BASE_DISTRO=ubuntu
 UBUNTU_SERIES=noble

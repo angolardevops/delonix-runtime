@@ -78,6 +78,12 @@ runcmd:
     chk "carbonio-finish-install refuses to run without --fqdn" "! /usr/local/sbin/carbonio-finish-install"
     chk "carbonio-finish-install refuses a name without a dot" "! /usr/local/sbin/carbonio-finish-install --fqdn mail"
 
+    # amavisd's Perl dependencies: without them carbonio-mailthreat loops in restart
+    chk "amavis can load Unix::Syslog and ZMQ::LibZMQ3" "perl -MUnix::Syslog -MZMQ::LibZMQ3 -e 1"
+    chk "libzmq5 is installed (ZMQ::LibZMQ3 links it)" "dpkg -s libzmq5"
+    chk "the build tools used for ZMQ::LibZMQ3 were removed" "! dpkg -s build-essential cpanminus libzmq3-dev"
+    chk "amavis-services gets past its module checks" "! (sudo -u zextras timeout 5 /opt/zextras/common/sbin/amavis-services msg-forwarder 2>&1 | grep -qE 'not available|Can.t locate')"
+
     # the operator account can administer the machine
     chk "sudoers drop-in for delonix is 0440 and valid" "[ \"\$(stat -c %a /etc/sudoers.d/90-delonix)\" = 440 ] && visudo -cf /etc/sudoers.d/90-delonix"
 

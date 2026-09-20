@@ -83,6 +83,24 @@ write_files:
       retry "dpkg --configure -a; timeout 1500 apt-get install -y $PINS" 5
       apt-mark hold $(echo "$PINS" | tr ' ' '\n' | cut -d= -f1)
 
+      # ------------------------------------------------------------------
+      #  amavisd (carbonio-mailthreat, the anti-virus/anti-spam hook in the
+      #  mail path) needs two Perl modules the vendor packages do not pull in
+      #  on Ubuntu 24.04. Measured on a bootstrapped VM: without them every
+      #  amavis-services child dies at once ("Can't locate Unix/Syslog.pm",
+      #  then "Perl modules ZMQ::LibZMQ3 ... not available"), the unit loops
+      #  in restart, and no message is scanned. Unix::Syslog is packaged;
+      #  ZMQ::LibZMQ3 was dropped from Ubuntu, so it is built from CPAN here
+      #  and the build tools are removed again afterwards.
+      # ------------------------------------------------------------------
+      retry "timeout 900 apt-get install -y libunix-syslog-perl libzmq5 libzmq3-dev build-essential cpanminus" 5
+      apt-mark manual libzmq5 libunix-syslog-perl
+      retry "cpanm --notest ZMQ::LibZMQ3" 3
+      perl -MZMQ::LibZMQ3 -MUnix::Syslog -e 'print "amavis perl modules OK\n"'
+      apt-get purge -y build-essential cpanminus libzmq3-dev
+      apt-get autoremove -y --purge
+      perl -MZMQ::LibZMQ3 -MUnix::Syslog -e 'print "amavis perl modules still OK\n"'
+
       # The vendor's guide wants the video server enabled; it needs the host's
       # public IP in janus.jcfg, which is a fact of the target. Left for after
       # bootstrap, exactly as documented.
@@ -128,6 +146,7 @@ write_files:
         echo "{"
         echo "  \"carbonio_ce_release\": \"@CARBONIO_RELEASE@\","
         echo "  \"state\": \"pre-bootstrap\","
+        echo "  \"amavis_perl_modules\": \"Unix::Syslog $(dpkg-query -W -f='${Version}' libunix-syslog-perl), ZMQ::LibZMQ3 $(perl -MZMQ::LibZMQ3 -e 'print $ZMQ::LibZMQ3::VERSION')\","
         echo "  \"postgresql\": \"$(dpkg-query -W -f='${Version}' postgresql-16)\","
         echo "  \"packages\": {"
         first=1

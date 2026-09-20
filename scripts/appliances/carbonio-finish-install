@@ -139,10 +139,33 @@ say "proxy: pick up the final configuration"
 systemctl restart carbonio-nginx
 for i in $(seq 1 30); do ss -H -ltn 'sport = :443' | grep -q . && break; sleep 2; done
 
+say "mail transport: restart postfix on the final configuration"
+# Postfix was started before amavis and the pending setups existed, so its master
+# process has no smtp-amavis transport: every message is deferred with "mail
+# transport unavailable" until it is restarted (measured).
+systemctl restart carbonio-postfix
+for i in $(seq 1 30); do ss -H -ltn 'sport = :10025' | grep -q . && break; sleep 2; done
+
 say "proof: log in as the admin over HTTPS"
 REPLY=$(curl -sk -m 60 "https://127.0.0.1:6071/service/admin/soap/" -H 'Content-Type: application/soap+xml' \
   -d "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Body><AuthRequest xmlns=\"urn:zimbraAdmin\"><name>zextras@$DOMAIN</name><password>$ADMIN_PW</password></AuthRequest></soap:Body></soap:Envelope>" || true)
 echo "$REPLY" | grep -q authToken || { echo "the admin could not log in over HTTPS; nothing is marked as finished" >&2; exit 1; }
+
+say "proof: a message travels SMTP -> amavis -> LMTP -> the admin's inbox"
+TOKEN="delonix-install-probe-$(openssl rand -hex 4)"
+python3 - "$DOMAIN" "$TOKEN" <<'PY'
+import smtplib, sys
+from email.message import EmailMessage
+m = EmailMessage(); m["From"] = "zextras@" + sys.argv[1]; m["To"] = "zextras@" + sys.argv[1]
+m["Subject"] = sys.argv[2]; m.set_content("installation probe")
+s = smtplib.SMTP("127.0.0.1", 25, timeout=30); s.send_message(m); s.quit()
+PY
+DELIVERED=0
+for i in $(seq 1 30); do
+  if su - zextras -c "zmmailbox -z -m zextras@$DOMAIN s -t message 'subject:$TOKEN'" 2>/dev/null | grep -q "$TOKEN"; then DELIVERED=1; break; fi
+  sleep 5
+done
+[ "$DELIVERED" = 1 ] || { echo "the probe message never reached the inbox; nothing is marked as finished (see /var/log/mail.log)" >&2; exit 1; }
 
 umask 077
 printf '%s\n' "$ADMIN_PW" > /root/.carbonio-admin-password
