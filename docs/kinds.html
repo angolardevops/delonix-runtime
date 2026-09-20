@@ -1532,6 +1532,7 @@ spec:
 #   containers          Container          full-container.yaml
 #   pods                Pod                full-pod.yaml
 #   services            Service            full-service.yaml
+#   ipPools             IPPool             full-ippool.yaml
 #   ingress             Ingress            full-ingress.yaml
 #   firewallPolicies    NetworkPolicy      full-networkpolicy.yaml
 #   networkAccessRules  NetworkAccessRule  full-networkaccessrule.yaml
@@ -1637,6 +1638,13 @@ spec:
       spec:
         selector: { matchLabels: { app: web } }
         port: 80
+
+  # A set of host addresses a route can claim with `spec.pool`. Only announce: local is
+  # built: the address must already be on an interface of the host.
+  ipPools:
+    - name: edge
+      spec:
+        addresses: [&quot;127.0.0.10-127.0.0.12&quot;]
 
   # Kubernetes-shaped L7 Ingress: host/path → backend service.
   ingress:

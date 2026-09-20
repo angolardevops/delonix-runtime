@@ -38,6 +38,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::NETWORK_ROUTE,
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
+    kinds::IPPOOL,
 ];
 
 /// Kinds whose listing has no `-o json` today. Listed rather than discovered,
@@ -63,6 +64,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::NETWORK_ROUTE,
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
+    kinds::IPPOOL,
     kinds::CLUSTER,
 ];
 pub(crate) const DELETE_ROUTES: &[&str] = &[
@@ -77,6 +79,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::NETWORK_ROUTE,
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
+    kinds::IPPOOL,
 ];
 
 /// A generic verb, as DATA — so the table below and its test can name one
@@ -302,6 +305,7 @@ pub(crate) fn get(
         // identity — so there is nothing else `get` could key on.
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
         k if k == kinds::SERVICE => super::service::cmd_ls(output),
+        k if k == kinds::IPPOOL => super::ippool::cmd_ls(output),
         // Both directions of every governed container, one row each — the
         // listing `net ingress ls`/`net egress ls` never had between them
         // (each answers only its own direction). Identity is `<target>/
@@ -376,6 +380,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
         }
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_describe(&n),
         k if k == kinds::SERVICE => super::service::cmd_describe(&n),
+        k if k == kinds::IPPOOL => super::ippool::cmd_describe(&n),
         k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_describe_policy(&n),
         k if k == kinds::CLUSTER => {
             for name in names {
@@ -477,6 +482,16 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             Ok(())
         }
         k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_delete_policy(names),
+        k if k == kinds::IPPOOL => {
+            for n in names {
+                super::ippool::remove_for_replace(n)?;
+                println!(
+                    "{}",
+                    super::po::tf("ippool {name}: removed", &[("name", n)])
+                );
+            }
+            Ok(())
+        }
         k if k == kinds::SERVICE => {
             for n in names {
                 super::service::remove_for_replace(n)?;

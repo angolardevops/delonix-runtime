@@ -134,6 +134,11 @@ pub(crate) struct VmSpec {
     /// Static IP (libvirt `nat` mode): DHCP reservation on the libvirt network.
     #[serde(default)]
     ip: Option<String>,
+    /// HTTP/S services listening inside the guest, published by name (ADR-0046).
+    /// Lowered at load into a synthetic `kind: HTTPRoute` named `<vm>-expose`; the
+    /// key never reaches the VM apply. See [`super::vm_expose`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    expose: Vec<super::vm_expose::VmExposeSpec>,
 
     // --- Advanced libvirt knobs (libvirt backend) — full XML parity ---------
     /// Machine type (default `q35`).
@@ -227,6 +232,7 @@ struct VmVolumeSpec {
 /// for the unknown-field warning. Kept aligned with `VmSpec` by the
 /// test `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
+    "expose",
     "disk",
     "build",
     "vcpus",

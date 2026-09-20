@@ -879,6 +879,20 @@
           },
           "type": "array"
         },
+        "hosts": {
+          "description": "Where to publish this route's host names, so they RESOLVE without editing\nany `hosts` file by hand (ADR-0046). Only `host` exists so far: each rule\n`host` gets `127.0.0.1` in a delimited block of the operator host's\n`/etc/hosts` (needs root, refused otherwise). `containers` and `guest` are\nplanned (ADR-0047 for the first). The PORT is the route's entrypoint, which\na hosts file cannot carry.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "pool": {
+          "description": "`kind: IPPool` this route takes its address from (ADR-0046 D3). The route holds\nONE address of the pool for as long as it is declared, and every listener of it\nis reachable there instead of on loopback; `hosts: [host]` then points the name\nat that address. The address must already be on an interface of this host\n(`announce: local`) — the apply says so and stops when it is not.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "rules": {
           "default": [],
           "description": "Routing rules (by Host and/or path prefix). Required and non-empty.",
@@ -1100,6 +1114,37 @@
         },
         "secretName": {
           "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IpPoolSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: IPPool`.",
+      "properties": {
+        "addresses": {
+          "default": [],
+          "description": "Addresses the pool owns: a single address, a range `a.b.c.d-e.f.g.h`, or a CIDR.\nA CIDR wider than /31 leaves out its network and broadcast addresses.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "announce": {
+          "default": null,
+          "description": "How a claimed address is made reachable. `local` (default): it is already on an\ninterface of this host. `l2` is planned (ADR-0046 phase 4) and refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null,
+          "description": "Interface `announce: l2` would add the address to. Only valid with `l2`.",
           "type": [
             "string",
             "null"
@@ -2281,6 +2326,39 @@
           },
           "type": "array"
         },
+        "ipPools": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/IpPoolSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "networkAccessRules": {
           "items": {
             "additionalProperties": false,
@@ -2799,6 +2877,60 @@
       },
       "type": "object"
     },
+    "VmExposeSpec": {
+      "description": "One published service of a VM.",
+      "properties": {
+        "host": {
+          "description": "Host name to match (`app.example.pt`).",
+          "type": "string"
+        },
+        "hosts": {
+          "default": [],
+          "description": "Where to publish `host` so it resolves: `[host]` puts it in a delimited block\nof the operator host's `/etc/hosts` (root). The route publishes ONE list for\nall its names, so every entry must say the same.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "path": {
+          "default": "/",
+          "description": "Path prefix. Default `/`.",
+          "type": "string"
+        },
+        "pool": {
+          "default": null,
+          "description": "`kind: IPPool` the route takes its address from (ADR-0046 D3). One address per\nroute, so every entry must name the same pool.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "port": {
+          "description": "Port the service listens on INSIDE the guest.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "tls": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TlsSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "TLS termination, the same block as `kind: HTTPRoute` (`mode: selfSigned`\nor `mode: secretRef` + `secretRef`). The proxy has ONE certificate per\nroute set, so every entry that sets it must set the same one."
+        }
+      },
+      "required": [
+        "host",
+        "port"
+      ],
+      "type": "object"
+    },
     "VmModeSpec": {
       "description": "`spec.vm` block — only read in `mode: vm`.",
       "properties": {
@@ -2931,6 +3063,13 @@
           "default": "",
           "description": "The base disk: a VM image name in the store, or a path.\n\nOptional ONLY because [`build`](Self::build) can produce it. Exactly one\nof the two — a `kind: VirtualMachine` with neither has no disk to boot, and one with\nboth is two answers to the same question (see [`VmSpec::resolve_disk`]).",
           "type": "string"
+        },
+        "expose": {
+          "description": "HTTP/S services listening inside the guest, published by name (ADR-0046).\nLowered at load into a synthetic `kind: HTTPRoute` named `<vm>-expose`; the\nkey never reaches the VM apply. See [`super::vm_expose`].",
+          "items": {
+            "$ref": "#/$defs/VmExposeSpec"
+          },
+          "type": "array"
         },
         "extraDisks": {
           "default": [],
@@ -3702,6 +3841,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "IPPool"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/IpPoolSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Workload"
           }
         },
@@ -3796,6 +3960,7 @@
         "FirewallPolicy",
         "Gateway",
         "HTTPRoute",
+        "IPPool",
         "Image",
         "Ingress",
         "KnowDepends",

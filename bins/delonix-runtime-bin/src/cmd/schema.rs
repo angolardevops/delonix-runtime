@@ -62,6 +62,7 @@ const TYPED_KINDS: &[&str] = &[
     k::FIREWALL_POLICY,
     k::NETWORK_ACCESS_RULE,
     k::SERVICE,
+    k::IPPOOL,
     k::WORKLOAD,
     k::CLUSTER,
     k::STACK,
@@ -212,6 +213,11 @@ fn typed_spec_parts(
             generator.subschema_for::<super::service::ServiceSpec>(),
             "ServiceSpec",
             super::service::SERVICE_SPEC_FIELDS,
+        ),
+        k::IPPOOL => (
+            generator.subschema_for::<super::ippool::IpPoolSpec>(),
+            "IpPoolSpec",
+            super::ippool::IPPOOL_SPEC_FIELDS,
         ),
         k::HTTP_ROUTE => (
             generator.subschema_for::<super::httproute::HttpRouteSpec>(),

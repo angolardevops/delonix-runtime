@@ -389,6 +389,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::NETWORK => super::network::desired(doc)?,
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
                 k::SERVICE => super::service::desired(doc)?,
+                k::IPPOOL => super::ippool::desired(doc)?,
                 k::POD => super::pod::desired(doc)?,
                 k::IMAGE => super::image::desired(doc)?,
                 k::APP => super::app::desired(doc)?,
@@ -423,6 +424,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
     out.extend(super::service::actual()?);
+    out.extend(super::ippool::actual()?);
     out.extend(super::pod::actual()?);
     out.extend(super::image::actual(docs)?);
     out.extend(super::app::actual(docs)?);
@@ -687,6 +689,7 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
         (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
+        (k::IPPOOL, super::ippool::RECONCILED_IPPOOL_FIELDS),
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
         (k::APP, super::app::RECONCILED_APP_FIELDS),
         (k::VM, super::vm::RECONCILED_VM_FIELDS),
@@ -1291,6 +1294,7 @@ fn presence(
         // kind` — `stack ls` could not say anything about a path it had opened.
         k::NETWORK_ROUTE => super::netroute::presence_of(doc),
         k::SERVICE => super::service::presence_of(doc),
+        k::IPPOOL => super::ippool::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
@@ -1717,6 +1721,7 @@ fn run_layers(
     // After the compute Kinds it selects, so the match-count warning it
     // prints reflects workloads that already exist in this same apply.
     layers.run(k::SERVICE, "🧭", || super::service::apply(docs))?;
+    layers.run(k::IPPOOL, "🎫", || super::ippool::apply(docs))?;
     layers.run(k::FIREWALL_POLICY, "🧱", || super::firewall::apply(docs))?;
     layers.run(k::NETWORK_ACCESS_RULE, "🎯", || {
         super::network_access_rule::apply(docs)
@@ -1777,11 +1782,7 @@ pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
         // prune or a destroy, and a `Replace` is just a pull.
         k::IMAGE => "an image is shared content-addressed cache, owned by no stack",
         k::APP => "an App's output is an image — shared content-addressed cache, owned by no stack",
-        // Routes live in the shared proxy config with no per-document
-        // provenance; a tunnel's record is keyed by a live agent.
-        k::HTTP_ROUTE | k::INGRESS => {
-            "routes live in the proxy's shared config, with no per-document provenance"
-        }
+        // A tunnel's record is keyed by a live agent.
         k::GATEWAY => "a tunnel has no labels to stamp ownership on",
         _ => return None,
     })
@@ -1813,6 +1814,8 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::NETWORK => super::network::remove_for_replace(name),
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
         k::SERVICE => super::service::remove_for_replace(name),
+        k::IPPOOL => super::ippool::remove_for_replace(name),
+        k::HTTP_ROUTE | k::INGRESS => super::httproute::remove_for_prune(name),
         k::POD => super::pod::remove_pod(name, true),
         k::VM => super::vm::remove_for_replace(name),
         k::NETWORK_ACCESS_RULE => super::network_access_rule::remove_for_replace(name),
@@ -2062,6 +2065,18 @@ fn converge_and_stamp(
                         })?;
                     super::service::converge_doc(doc)?
                 }
+                k::IPPOOL => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "IPPool/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::ippool::converge_doc(doc)?
+                }
                 // Same shape as a firewall policy: `apply_one` is already
                 // idempotent and updates the record in place, so converging IS
                 // applying — a per-field path would be a second way to write the
@@ -2127,6 +2142,10 @@ fn stamp_all(
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
             k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
+            k::IPPOOL => super::ippool::stamp(&d.name, stack, &d.fields),
+            k::HTTP_ROUTE | k::INGRESS => {
+                super::httproute::stamp(&d.kind, &d.name, stack, &d.fields)
+            }
             k::POD => super::pod::stamp(&d.name, stack, &d.fields),
             k::VM => super::vm::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ACCESS_RULE => super::network_access_rule::stamp(&d.name, stack, &d.fields),
@@ -2474,10 +2493,16 @@ fn validate_graph(docs: &[manifest::ManifestDoc]) -> Vec<String> {
         .and_then(|s| s.list())
         .map(|vs| vs.into_iter().map(|v| v.name).collect())
         .unwrap_or_default();
-    let existing_containers: Vec<String> = super::util::open_stores()
+    let mut existing_containers: Vec<String> = super::util::open_stores()
         .and_then(|(_, cstore)| Ok(cstore.list()?))
         .map(|cs| cs.into_iter().map(|c| c.name).collect())
         .unwrap_or_default();
+    existing_containers.extend(
+        delonix_vm::list(&root)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|v| v.name),
+    );
     let existing_secrets: Vec<String> = delonix_state::SecretStore::open(&root)
         .map(|s| s.list().into_iter().map(|sec| sec.name).collect())
         .unwrap_or_default();
@@ -2522,7 +2547,10 @@ fn validate_graph_with(
     // A Pod's members are named `<pod>-cN` unless the member names itself, but
     // the reference is to the POD: that is the name the netns, the address and
     // the firewall chain all hang off.
-    let mut containers = declared(&[k::CONTAINER, k::POD]);
+    // A VM is a workload target too: a route published by `VirtualMachine.spec.expose`
+    // names it as its backend (ADR-0046), and `Dependency` documents already say
+    // «containers/VMs».
+    let mut containers = declared(&[k::CONTAINER, k::POD, k::VM]);
     let mut secrets = declared(&[k::SECRET]);
     networks.extend(existing_networks.iter().cloned());
     volumes.extend(existing_volumes.iter().cloned());
@@ -2809,6 +2837,17 @@ fn validate_graph_with(
                     Ok(spec) => {
                         if let Err(e) = super::httproute::validate_spec(name, &spec) {
                             issues.push(e.to_string());
+                        }
+                        if let Some(pool) = &spec.pool {
+                            let declared = docs
+                                .iter()
+                                .any(|d| d.kind == k::IPPOOL && &d.metadata.name == pool);
+                            if !declared && super::ippool::pool_get(pool).is_none() {
+                                issues.push(super::po::tf(
+                                    "{kind} '{name}' → pool '{pool}' is not a declared or existing IPPool",
+                                    &[("kind", &doc.kind), ("name", name), ("pool", pool)],
+                                ));
+                            }
                         }
                         for rule in &spec.rules {
                             for pr in &rule.paths {
