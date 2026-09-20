@@ -158,6 +158,7 @@ untrusted network as-is.
 | TrueNAS SCALE | `truenas_admin` | `delonix-admin` | `http://<ip>/` — API at `https://<ip>/api/v2.0` |
 | Monitoring — Zabbix | `Admin` | `delonix-admin` | `http://<ip>/` |
 | Monitoring — Grafana | `admin` | `delonix-admin` | `http://<ip>:3000/` |
+| GLPI | `glpi` | `delonix-admin` | `http://<ip>/` (the vendor's `tech`, `normal` and `post-only` sample accounts are switched off) |
 
 The monitoring image does not ship the vendor's own default (Zabbix's is
 `Admin`/`zabbix`, Grafana's is `admin`/`admin`) — both are reset at build time
@@ -525,3 +526,40 @@ version of it could not fail: it passed against an image that still said
 mail flows, or that the web client and admin panel work.** Those need a real
 deployment with an FQDN and 16 GiB, and the verifier prints that instead of a
 bare "passed".
+
+## GLPI 11 + GLPI Agent — asset inventory and ITSM, also not an appliance
+
+`build-glpi.sh` → `verify-glpi.sh`, same shape as the monitoring image: a cloud
+image, one provisioning script run once inside QEMU, a guest-reported verdict.
+
+| Component | Version | Listens on |
+|---|---|---|
+| GLPI (release tarball, sha256 checked against GitHub's digest) | 11.0.9 | `:80` (nginx, document root `public/`) |
+| GLPI Agent (`.deb`, sha256 checked, on hold) | 1.19 | status page on `127.0.0.1:62354` only |
+| MariaDB, PHP-FPM 8.3, cron | Ubuntu 24.04 | MariaDB on loopback only |
+
+GLPI's scheduled tasks run from `/etc/cron.d/glpi`. The agent is pointed at the
+local GLPI and native inventory is switched on, so a fresh VM appears in
+*Assets → Computers* by itself. To inventory other machines, install the agent
+there with `server = http://<this-vm>/front/inventory.php`.
+
+Two things a deployer should know. The database password and GLPI's encryption
+key (`config/glpicrypt.key`) are generated at **build** time, so every clone of
+one image shares them — the database only listens on loopback, but if you store
+secrets in GLPI (LDAP or mail-collector passwords) rebuild the image or re-key
+it first. And the installer's four sample accounts use the vendor's well-known
+passwords; here `glpi` is `delonix-admin` and the other three are inactive.
+
+`verify-glpi.sh` (18 checks) boots the image and proves: the schema is 11.0.9;
+the login page answers; `config/config_db.php` is **not** served; the database is
+loopback-only; GLPI's own `system:check_requirements` passes; `glpi/delonix-admin`
+verifies and `glpi/glpi` does not; the agent is 1.19 and held; and — the point of
+shipping the agent — the machine inventoried itself into its own GLPI (1 computer).
+It also caught two defects in the first build that a green run would have hidden:
+the inventory switch was set under the wrong name (`enable_inventory`; the real
+one is `enabled_inventory`), which made GLPI answer the agent with 403, and the
+image still carried the build VM's hostname.
+
+**Not proven:** the web UI in a browser, LDAP or mail-collector integrations, a
+second machine reporting to this GLPI, and upgrades from a database created by
+another GLPI version.
