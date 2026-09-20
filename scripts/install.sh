@@ -1300,7 +1300,13 @@ ExecStop=/usr/local/sbin/delonix-performance revert
 WantedBy=multi-user.target
 UNIT
     $SUDO systemctl daemon-reload 2>/dev/null || true
-    if $SUDO systemctl enable --now delonix-performance.service >/dev/null 2>&1; then
+    # `restart` e não `enable --now`: o serviço é oneshot com RemainAfterExit, e um
+    # `--now` sobre um serviço já activo não volta a correr o apply — uma segunda
+    # passagem do instalador com respostas diferentes ficava com o estado antigo
+    # (medido numa VM: THP=1 no conf e o THP por mudar). O restart faz revert e
+    # apply, por isso o estado guardado continua a ser o do arranque.
+    if $SUDO systemctl enable delonix-performance.service >/dev/null 2>&1 \
+       && $SUDO systemctl restart delonix-performance.service >/dev/null 2>&1; then
       stepok performance helper
     else
       warn "delonix-performance.service did not start — see: systemctl status delonix-performance"
@@ -1308,7 +1314,11 @@ UNIT
     if [ "$PERF_CPU" = 1 ]; then
       GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo n/a)
       step performance cpu "governor now: $GOV"
-      [ "$GOV" = performance ] || warn "the governor is not 'performance' (this driver may not offer it) — check: cpupower frequency-info"
+      if [ "$GOV" = n/a ]; then
+        warn "this machine exposes no CPU frequency control (a VM, or a driver without cpufreq) — nothing to set for the CPU"
+      elif [ "$GOV" != performance ]; then
+        warn "the governor is '$GOV', not 'performance' (this driver may not offer it) — check: cpupower frequency-info"
+      fi
     fi
   fi
 
@@ -1321,14 +1331,21 @@ UNIT
     step performance gc "installing the disk GC user timer..."
     GC_BIN="${BIN_DIR:-/usr/local/bin}/delonix"
     $SUDO mkdir -p /etc/systemd/user
-    $SUDO tee /etc/systemd/user/delonix-gc.service >/dev/null <<UNIT
+    # ExecStartPre: num utilizador que ainda não correu nada o directório de estado
+    # não existe, e o `system prune --auto` RECUSA-SE a actuar às cegas (é o certo:
+    # sem poder medir o disco não reclama). Medido numa VM acabada de instalar: o
+    # serviço falhava com exit 1 a cada hora até ao primeiro `delonix run`. `$$` é
+    # o escape do systemd para o `$` literal que o `sh -c` tem de ver.
+    $SUDO tee /etc/systemd/user/delonix-gc.service >/dev/null <<'UNIT'
 [Unit]
 Description=Delonix Runtime — reclaim disk when it passes 75% (never touches volumes)
 
 [Service]
 Type=oneshot
-ExecStart=$GC_BIN system prune --auto --threshold 75
+ExecStartPre=/bin/sh -c 'mkdir -p "$${XDG_DATA_HOME:-$$HOME/.local/share}/delonix"'
+ExecStart=@GC_BIN@ system prune --auto --threshold 75
 UNIT
+    $SUDO sed -i "s|@GC_BIN@|$GC_BIN|" /etc/systemd/user/delonix-gc.service
     $SUDO tee /etc/systemd/user/delonix-gc.timer >/dev/null <<'UNIT'
 [Unit]
 Description=Delonix Runtime — disk GC check
