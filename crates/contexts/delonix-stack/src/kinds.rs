@@ -67,6 +67,7 @@ pub const NETWORK_ACCESS_RULE: &str = "NetworkAccessRule";
 pub const HTTP_ROUTE: &str = "HTTPRoute";
 pub const GATEWAY: &str = "Gateway";
 pub const SERVICE: &str = "Service";
+pub const IPPOOL: &str = "IPPool";
 pub const WORKLOAD: &str = "Workload";
 pub const DEPENDENCY: &str = "Dependency";
 pub const SHARE_VOLUME: &str = "ShareVolume";
@@ -471,6 +472,23 @@ const FACTS: &[KindFacts] = &[
         teardown: true,
         namespaced: Namespaced::Never,
         presence: Presence::Declarative,
+    },
+    KindFacts {
+        // ADR-0046 D3: a reservation ledger routes claim addresses from. It sits
+        // BEFORE `HTTPRoute` because a route with `spec.pool` claims at apply time and
+        // the pool has to exist by then.
+        kind: IPPOOL,
+        plural: "ippools",
+        short: &["pool"],
+        api_version: "networking.delonix.io/v1alpha1",
+        domain: Domain::NetExposure,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "ipPools",
+        converges: true,
+        teardown: true,
+        namespaced: Namespaced::Never,
+        presence: Presence::Registry,
     },
     KindFacts {
         kind: HTTP_ROUTE,

@@ -7,9 +7,10 @@
 //! rather than shadowed or overwritten: the operator wrote that line, and a second
 //! answer for the same name is a silent change of where it points.
 //!
-//! The address is `127.0.0.1`: the proxy runs in the holder netns and reaches the
-//! host through the slirp forward, which binds loopback by default. The PORT is the
-//! route's entrypoint — a hosts file cannot carry one.
+//! The address is `127.0.0.1` by default: the proxy runs in the holder netns and reaches
+//! the host through the slirp forward, which binds loopback by default. A route that
+//! claims an `IPPool` address gets that address instead. The PORT is the route's
+//! entrypoint — a hosts file cannot carry one.
 //!
 //! Writing needs root. Without it the apply STOPS with the exact block to add, and
 //! does not pretend: an unprivileged run is not a reason to skip the name silently.
@@ -19,7 +20,6 @@ use std::path::PathBuf;
 
 const BEGIN: &str = "# BEGIN delonix (managed — do not edit)";
 const END: &str = "# END delonix";
-const ADDR: &str = "127.0.0.1";
 
 /// `/etc/hosts`, or `DELONIX_HOSTS_FILE` (a test seam, and a way to keep an
 /// isolated run away from the real file).
@@ -29,17 +29,23 @@ pub(crate) fn hosts_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/etc/hosts"))
 }
 
+/// One published name and the address it points at.
+pub(crate) type Entry = (String, String);
+
 /// The block for `hosts`, sorted and deduplicated. Empty for no hosts.
-pub(crate) fn block(hosts: &[String]) -> String {
-    let mut h: Vec<String> = hosts.iter().map(|h| h.to_lowercase()).collect();
+pub(crate) fn block(hosts: &[Entry]) -> String {
+    let mut h: Vec<Entry> = hosts
+        .iter()
+        .map(|(n, a)| (n.to_lowercase(), a.clone()))
+        .collect();
     h.sort();
     h.dedup();
     if h.is_empty() {
         return String::new();
     }
     let mut out = format!("{BEGIN}\n");
-    for name in h {
-        out.push_str(&format!("{ADDR}\t{name}\n"));
+    for (name, addr) in h {
+        out.push_str(&format!("{addr}\t{name}\n"));
     }
     out.push_str(END);
     out.push('\n');
@@ -47,7 +53,7 @@ pub(crate) fn block(hosts: &[String]) -> String {
 }
 
 /// `existing` with the managed block replaced by the block for `hosts`. PURE.
-pub(crate) fn render(existing: &str, hosts: &[String]) -> Result<String> {
+pub(crate) fn render(existing: &str, hosts: &[Entry]) -> Result<String> {
     // Everything outside the block, in order.
     let mut kept: Vec<&str> = Vec::new();
     let mut inside = false;
@@ -67,7 +73,21 @@ pub(crate) fn render(existing: &str, hosts: &[String]) -> Result<String> {
     // An unterminated block (a hand edit that removed the END line) is dropped up
     // to the end of the file. Refusing would leave the file impossible to fix
     // from here, and everything after BEGIN was ours to begin with.
-    let wanted: Vec<String> = hosts.iter().map(|h| h.to_lowercase()).collect();
+    let wanted: Vec<String> = hosts.iter().map(|(h, _)| h.to_lowercase()).collect();
+    // One name, two addresses is two answers to one question: refuse it rather than
+    // let whichever line the resolver reads first win.
+    let mut by_name: std::collections::BTreeMap<String, &str> = std::collections::BTreeMap::new();
+    for (name, addr) in hosts {
+        match by_name.insert(name.to_lowercase(), addr) {
+            Some(prev) if prev != addr => {
+                return Err(Error::Invalid(super::po::tf(
+                    "hosts: '{name}' is published with two addresses ({a} and {b}) — two routes claim it from different pools",
+                    &[("name", name), ("a", prev), ("b", addr)],
+                )))
+            }
+            _ => {}
+        }
+    }
     for line in &kept {
         let body = line.split('#').next().unwrap_or("");
         let mut tokens = body.split_whitespace();
@@ -96,13 +116,13 @@ pub(crate) fn render(existing: &str, hosts: &[String]) -> Result<String> {
 /// Brings the block in `/etc/hosts` in line with `hosts`. No write when nothing
 /// would change, so an unprivileged `apply` of a manifest that does not use
 /// `hosts:` never needs root.
-pub(crate) fn sync(hosts: &[String]) -> Result<()> {
+pub(crate) fn sync(hosts: &[Entry]) -> Result<()> {
     sync_at(&hosts_path(), hosts)
 }
 
 /// [`sync`] against an explicit file (the seam the test uses, so it never has to
 /// touch the process environment).
-fn sync_at(path: &std::path::Path, hosts: &[String]) -> Result<()> {
+fn sync_at(path: &std::path::Path, hosts: &[Entry]) -> Result<()> {
     let old = match std::fs::read_to_string(path) {
         Ok(s) => s,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
@@ -143,8 +163,10 @@ fn sync_at(path: &std::path::Path, hosts: &[String]) -> Result<()> {
 mod tests {
     use super::*;
 
-    fn h(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
+    fn h(v: &[&str]) -> Vec<Entry> {
+        v.iter()
+            .map(|s| (s.to_string(), "127.0.0.1".to_string()))
+            .collect()
     }
 
     #[test]
@@ -153,6 +175,22 @@ mod tests {
         assert!(out.starts_with("127.0.0.1\tlocalhost\n10.0.0.5 db\n"));
         assert!(out.contains("127.0.0.1\ta.pt\n127.0.0.1\tb.pt\n"));
         assert!(out.trim_end().ends_with(END));
+    }
+
+    #[test]
+    fn a_name_can_point_at_a_reserved_address_and_two_addresses_for_one_name_are_refused() {
+        let out = render("", &[("a.pt".into(), "203.0.113.7".into())]).unwrap();
+        assert!(out.contains("203.0.113.7\ta.pt"));
+        let e = render(
+            "",
+            &[
+                ("a.pt".into(), "203.0.113.7".into()),
+                ("A.pt".into(), "203.0.113.8".into()),
+            ],
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("two addresses"), "{e}");
     }
 
     #[test]

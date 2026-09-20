@@ -54,6 +54,9 @@ pub struct ProxyConfig {
     /// which document asked for which name.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub published_hosts: Vec<PublishedHost>,
+    /// Addresses documents hold from an `IPPool` (`spec.pool`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub claims: Vec<PoolClaim>,
     /// Address the listeners bind to. `None` = every address, which is what the
     /// holder instance wants (the slirp forward decides who reaches it). The host
     /// instance sets `127.0.0.1`: it is a real socket on the host, and exposing a
@@ -67,6 +70,18 @@ pub struct ProxyConfig {
 pub struct PublishedHost {
     pub host: String,
     pub source: String,
+    /// Address the name points at: the route's reserved address, or loopback.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub addr: Option<String>,
+}
+
+/// An `IPPool` address a document holds, recorded so the reconciler can compare the
+/// pool it DECLARES with the one it actually got.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PoolClaim {
+    pub source: String,
+    pub pool: String,
+    pub addr: String,
 }
 
 /// Cert + key in PEM, ready to load into rustls (Phase 4 resolves them).
@@ -116,6 +131,12 @@ pub struct Listener {
     pub port: u16,
     #[serde(default)]
     pub tls: bool,
+    /// Host address this listener is reachable on (a reserved `IPPool` address). `None`
+    /// = the default: loopback through the slirp for the holder instance, `bind` for the
+    /// host one. Inside the holder netns the proxy still binds every address; the
+    /// address only decides where the slirp forward is published.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub addr: Option<String>,
 }
 
 /// A resolved route: matches by `host` (empty = any) + `path` prefix, and
@@ -523,11 +544,18 @@ async fn serve(cfg: ProxyConfig, config_path: std::path::PathBuf) -> Result<()> 
         } else {
             None
         };
-        let ip: std::net::IpAddr = cfg
-            .bind
-            .as_deref()
-            .and_then(|b| b.parse().ok())
-            .unwrap_or(std::net::IpAddr::from([0, 0, 0, 0]));
+        // The host instance binds the listener's reserved address (or `bind`); the
+        // holder instance binds everything inside its own netns, where a host address
+        // does not exist.
+        let ip: std::net::IpAddr = match &cfg.bind {
+            Some(default) => l
+                .addr
+                .as_deref()
+                .unwrap_or(default)
+                .parse()
+                .unwrap_or(std::net::IpAddr::from([127, 0, 0, 1])),
+            None => std::net::IpAddr::from([0, 0, 0, 0]),
+        };
         let addr = SocketAddr::new(ip, l.port);
         let listener = TcpListener::bind(addr).await.map_err(|e| Error::Runtime {
             context: "ingress-proxy bind",
@@ -763,7 +791,7 @@ fn rebuild(w: Where) -> Result<()> {
     // in place.
     // Both instances contribute to the ONE block of the host's `/etc/hosts`, so the
     // names are read from both sources, never just the one being rebuilt.
-    let published: Vec<String> = [Where::Holder, Where::Host]
+    let published: Vec<(String, String)> = [Where::Holder, Where::Host]
         .iter()
         .filter_map(|x| {
             if *x == w {
@@ -772,7 +800,11 @@ fn rebuild(w: Where) -> Result<()> {
                 read_manual(*x)
             }
         })
-        .flat_map(|m| m.published_hosts.into_iter().map(|d| d.host))
+        .flat_map(|m| {
+            m.published_hosts
+                .into_iter()
+                .map(|d| (d.host, d.addr.unwrap_or_else(|| "127.0.0.1".to_string())))
+        })
         .collect();
     if let Err(e) = super::hosts_file::sync(&published) {
         if published.is_empty() {
@@ -799,6 +831,7 @@ fn rebuild(w: Where) -> Result<()> {
         listeners.push(Listener {
             port: AUTO_HTTP_PORT,
             tls: false,
+            addr: None,
         });
     }
     for a in &auto {
@@ -824,6 +857,10 @@ fn rebuild(w: Where) -> Result<()> {
             routes,
             tls,
             published_hosts: Vec::new(),
+            claims: manual
+                .as_ref()
+                .map(|m| m.claims.clone())
+                .unwrap_or_default(),
             bind: manual.as_ref().and_then(|m| m.bind.clone()),
         },
         w,
@@ -1174,7 +1211,7 @@ fn publish_listeners(cfg: &ProxyConfig) -> Result<()> {
         // fatal, the desired state (port published) is already there. Only warns on other errors.
         // No per-listener host address: an HTTPRoute listener has no `-p`-style spec,
         // so it keeps the `DELONIX_PUBLISH_ADDR`/`127.0.0.1` fallback of `publish_bind_addr`.
-        if let Err(e) = delonix_sdn::slirp_add_hostfwd(&sock, &p, &p, "tcp", None) {
+        if let Err(e) = delonix_sdn::slirp_add_hostfwd(&sock, &p, &p, "tcp", l.addr.as_deref()) {
             let msg = e.to_string();
             if msg.contains("already") || msg.to_lowercase().contains("exist") {
                 eprintln!(
@@ -1501,6 +1538,7 @@ mod tests {
             listeners: vec![Listener {
                 port: 443,
                 tls: true,
+                addr: None,
             }],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
             tls: Some(TlsMaterial {
@@ -1509,6 +1547,7 @@ mod tests {
                 mode: "secretRef".into(),
             }),
             published_hosts: Vec::new(),
+            claims: Vec::new(),
             bind: None,
         };
         let js = serde_json::to_string(&cfg).unwrap();
@@ -1523,15 +1562,18 @@ mod tests {
                 Listener {
                     port: 80,
                     tls: false,
+                    addr: None,
                 },
                 Listener {
                     port: 443,
                     tls: true,
+                    addr: None,
                 },
             ],
             routes: vec![r("loja.ex", "/", "10.0.0.2:8080")],
             tls: None,
             published_hosts: Vec::new(),
+            claims: Vec::new(),
             bind: None,
         };
         let js = serde_json::to_string(&cfg).unwrap();

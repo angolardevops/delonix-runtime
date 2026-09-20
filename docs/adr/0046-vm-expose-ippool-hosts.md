@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted 2026-09-20. Phases 1, 1b and 2 built. Decisions of scope were taken with the owner on 2026-09-20
+Accepted 2026-09-20. Phases 1, 1b, 2 and 3 built. Decisions of scope were taken with the owner on 2026-09-20
 (below); the open questions at the end need an answer before phase 2.
 
 ## Context
@@ -213,6 +213,46 @@ Not measured: both instances running at the same time (a container route and a l
 apply), the `expose:` sugar on a libvirt VM by traffic (port 80 was taken on the host; the sugar path
 itself is unchanged from phase 1), a libvirt VM in `bridge` mode, and a proxy restart after the libvirt
 VM gets a new address (the route stores the address at apply time, like every other route).
+
+## Phase 3 — `kind: IPPool`, `announce: local` (2026-09-20)
+
+`kind: IPPool` (`networking.delonix.io`, `cmd/ippool.rs`) is a reservation ledger of host addresses:
+`addresses` (single address, range, or CIDR; IPv4 only), `announce: local` (the only mode built) and
+`interface` (only with the planned `l2`). It is a full Kind — apply, plan, drift, `--prune`, `get`,
+`describe`, `delete`, schema — and it applies BEFORE `HTTPRoute`, which claims from it.
+
+An `HTTPRoute` with `spec.pool: <name>` (and `expose[].pool`) holds ONE address of the pool for as long
+as it is declared. Its listeners are reachable on that address instead of on loopback (the holder
+instance publishes the slirp forward there, the host instance binds it), and `hosts: [host]` points the
+name at it.
+
+- **Same claimant, same address; one holder per address; one pool per claimant.** Exhaustion and a
+  second pool are `Conflict` (exit 5). A plan only PEEKS (`resolve_configs(.., commit=false)`): computing
+  what an apply would do never changes the ledger.
+- **`announce: local` checks by binding the address.** It must already be on an interface of the host; if
+  not the apply stops and says how to add it. The check runs BEFORE the claim, so an address that is not
+  here is never left leased to a route whose apply failed (this was a real defect found by the live run:
+  the first version claimed first and left the pool at `1/1 leased` after a failed apply).
+- **Release is by declaration, not by sweep.** Leases of claimants no longer declared are released by the
+  apply that resolves the live set, and by `httproute rm`. There is no reaper guessing who is alive — the
+  ledger is observable first (`get ippools`, `describe ippools`), the lesson of the IPAM.
+- **A pool with leases cannot be deleted, and its addresses cannot shrink under a lease.**
+- The same port on two different addresses is refused (a listener holds one address), and one host name
+  published with two different addresses is refused.
+- `announce: l2`, `interface`, IPv6 and BGP are refused or out of scope (phase 4).
+
+Measured with the real thing, in an isolated root, with `127.0.0.10-11` as the pool (every 127/8 address is
+on the loopback, so no setup or root): the route took `127.0.0.10` (`describe ippools` showed
+`HTTPRoute/site=127.0.0.10`, `get ippools` `1/2`); `curl -H 'Host: app.example.pt' http://127.0.0.10:18082/`
+returned the nginx backend's page and the same port on `127.0.0.1` did not answer (the socket listened only
+on `127.0.0.10`); the hosts block read `127.0.0.10 app.example.pt`; `stack plan` reported no drift; `delete
+ippools` and a shrinking apply were refused while the lease held; `httproute rm` released the lease, emptied
+the block and allowed the delete; an address that is not on the host was refused with the command to add
+it and left the pool at `0/1`.
+
+Not measured: a real routable address (everything above used loopback aliases), two claimants exhausting a
+pool through two live routes, the host instance with a pooled address (the holder instance was the one
+exercised), `expose[].pool` by traffic, and `validate` refusing `announce: l2` (only `apply` does).
 
 ## Not validated (phase 1b)
 

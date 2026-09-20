@@ -886,6 +886,13 @@
           },
           "type": "array"
         },
+        "pool": {
+          "description": "`kind: IPPool` this route takes its address from (ADR-0046 D3). The route holds\nONE address of the pool for as long as it is declared, and every listener of it\nis reachable there instead of on loopback; `hosts: [host]` then points the name\nat that address. The address must already be on an interface of this host\n(`announce: local`) — the apply says so and stops when it is not.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "rules": {
           "default": [],
           "description": "Routing rules (by Host and/or path prefix). Required and non-empty.",
@@ -1107,6 +1114,37 @@
         },
         "secretName": {
           "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IpPoolSpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: IPPool`.",
+      "properties": {
+        "addresses": {
+          "default": [],
+          "description": "Addresses the pool owns: a single address, a range `a.b.c.d-e.f.g.h`, or a CIDR.\nA CIDR wider than /31 leaves out its network and broadcast addresses.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "announce": {
+          "default": null,
+          "description": "How a claimed address is made reachable. `local` (default): it is already on an\ninterface of this host. `l2` is planned (ADR-0046 phase 4) and refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "interface": {
+          "default": null,
+          "description": "Interface `announce: l2` would add the address to. Only valid with `l2`.",
           "type": [
             "string",
             "null"
@@ -2288,6 +2326,39 @@
           },
           "type": "array"
         },
+        "ipPools": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/IpPoolSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "networkAccessRules": {
           "items": {
             "additionalProperties": false,
@@ -2825,6 +2896,14 @@
           "default": "/",
           "description": "Path prefix. Default `/`.",
           "type": "string"
+        },
+        "pool": {
+          "default": null,
+          "description": "`kind: IPPool` the route takes its address from (ADR-0046 D3). One address per\nroute, so every entry must name the same pool.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "port": {
           "description": "Port the service listens on INSIDE the guest.",
@@ -3762,6 +3841,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "IPPool"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/IpPoolSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Workload"
           }
         },
@@ -3856,6 +3960,7 @@
         "FirewallPolicy",
         "Gateway",
         "HTTPRoute",
+        "IPPool",
         "Image",
         "Ingress",
         "KnowDepends",

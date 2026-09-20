@@ -39,6 +39,10 @@ pub(crate) struct VmExposeSpec {
     /// all its names, so every entry must say the same.
     #[serde(default)]
     pub hosts: Vec<String>,
+    /// `kind: IPPool` the route takes its address from (ADR-0046 D3). One address per
+    /// route, so every entry must name the same pool.
+    #[serde(default)]
+    pub pool: Option<String>,
 }
 
 fn default_path() -> String {
@@ -98,6 +102,7 @@ fn route_for(vm: &ManifestDoc, exposes: &[VmExposeSpec]) -> Result<ManifestDoc> 
     }
     let mut tls: Option<&Value> = None;
     let hosts = &exposes[0].hosts;
+    let pool = &exposes[0].pool;
     let mut rules: Vec<Value> = Vec::new();
     let mut seen: Vec<(&str, &str)> = Vec::new();
     for (i, e) in exposes.iter().enumerate() {
@@ -112,6 +117,11 @@ fn route_for(vm: &ManifestDoc, exposes: &[VmExposeSpec]) -> Result<ManifestDoc> 
                 "[{i}].path '{}' is not a valid path prefix",
                 e.path
             )));
+        }
+        if &e.pool != pool {
+            return Err(bad(
+                "`pool` must be the same on every entry: the route holds ONE address".into(),
+            ));
         }
         if &e.hosts != hosts {
             return Err(bad(
@@ -164,6 +174,9 @@ fn route_for(vm: &ManifestDoc, exposes: &[VmExposeSpec]) -> Result<ManifestDoc> 
             Value::from("hosts"),
             Value::Sequence(hosts.iter().cloned().map(Value::from).collect()),
         );
+    }
+    if let Some(p) = pool {
+        spec.insert(Value::from("pool"), Value::from(p.clone()));
     }
     spec.insert(Value::from("rules"), Value::Sequence(rules));
     Ok(ManifestDoc {
@@ -251,6 +264,21 @@ mod tests {
         .unwrap_err()
         .to_string();
         assert!(e.contains("same on every entry"), "{e}");
+    }
+
+    #[test]
+    fn pool_is_carried_to_the_route_and_must_agree_across_entries() {
+        let out = lower_vm_expose(vec![vm(
+            "expose:\n  - {host: a.pt, port: 80, pool: edge}\n  - {host: b.pt, port: 81, pool: edge}",
+        )])
+        .unwrap();
+        assert_eq!(out[1].spec["pool"], "edge");
+        let e = lower_vm_expose(vec![vm(
+            "expose:\n  - {host: a.pt, port: 80, pool: edge}\n  - {host: b.pt, port: 81, pool: other}",
+        )])
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("`pool` must be the same"), "{e}");
     }
 
     #[test]

@@ -1,0 +1,24 @@
+# Complete reference for `kind: IPPool` (ADR-0046, D3) — a reservation ledger of HOST
+# addresses that routes claim. A route with `spec.pool: <name>` holds ONE address of the
+# pool for as long as it is declared, is reachable on that address instead of loopback,
+# and (with `hosts: [host]`) has its names pointed at it in the operator's /etc/hosts.
+#
+# spec fields:
+#   addresses  a single address, a range `a.b.c.d-e.f.g.h`, or a CIDR (a CIDR wider than
+#              /31 leaves out its network and broadcast address). IPv4 only.
+#   announce   `local` (default): the address must ALREADY be on an interface of this
+#              host — the apply checks it and stops when it is not. `l2` (the engine adds
+#              it and announces it) is planned and refused.
+#   interface  only with `announce: l2`.
+#
+# The ledger is observable: `delonix get ippools`, `delonix describe ippools edge`.
+# A pool cannot be removed, and its addresses cannot shrink under a lease, while a route
+# holds an address — remove or change the route first. 127.0.0.10-12 are used here
+# because every 127/8 address is on the loopback and needs no setup.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: IPPool
+metadata: { name: edge }
+spec:
+  addresses: ["127.0.0.10-127.0.0.12"]
+  announce: local

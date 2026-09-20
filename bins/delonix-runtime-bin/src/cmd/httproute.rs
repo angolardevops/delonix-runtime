@@ -194,6 +194,7 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
             // survive and the proxy only stops if nothing else remains.
             ingress_proxy::clear_manual(ingress_proxy::Where::Host)?;
             ingress_proxy::clear_manual(ingress_proxy::Where::Holder)?;
+            super::ippool::release_unlisted("HTTPRoute/", &[])?;
             if ingress_proxy::is_running(ingress_proxy::Where::Holder) {
                 println!(
                     "{}",
@@ -233,6 +234,13 @@ pub struct HttpRouteSpec {
     /// a hosts file cannot carry.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub hosts: Vec<String>,
+    /// `kind: IPPool` this route takes its address from (ADR-0046 D3). The route holds
+    /// ONE address of the pool for as long as it is declared, and every listener of it
+    /// is reachable there instead of on loopback; `hosts: [host]` then points the name
+    /// at that address. The address must already be on an interface of this host
+    /// (`announce: local`) — the apply says so and stops when it is not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
 }
 
 /// Values `spec.hosts` accepts.
@@ -294,7 +302,7 @@ pub struct Backend {
 }
 
 /// Known fields of the `spec` (drift-guard — see `manifest::warn_unknown_fields`).
-pub const HTTP_ROUTE_SPEC_FIELDS: &[&str] = &["entrypoints", "tls", "rules", "hosts"];
+pub const HTTP_ROUTE_SPEC_FIELDS: &[&str] = &["entrypoints", "tls", "rules", "hosts", "pool"];
 
 /// A valid DNS host name to match against the `Host:` header. Strict on purpose
 /// (the audit's `valid_*` discipline): letters/digits/`.`/`-`, no scheme, no
@@ -371,6 +379,14 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             return Err(err(super::po::tf(
                 "entrypoint :{port} requests tls but spec.tls is not defined",
                 &[("port", &ep.port.to_string())],
+            )));
+        }
+    }
+    if let Some(pool) = &spec.pool {
+        if !valid_service(pool) {
+            return Err(err(super::po::tf(
+                "pool '{pool}' is not a valid IPPool name",
+                &[("pool", pool)],
             )));
         }
     }
@@ -688,6 +704,7 @@ fn ingress_to_httproute(name: &str, ing: IngressSpec) -> Result<HttpRouteSpec> {
         tls,
         rules,
         hosts: Vec::new(),
+        pool: None,
     })
 }
 
@@ -850,6 +867,7 @@ fn classify(
 /// had already said it was serving.
 fn resolve_configs(
     specs: &[(String, HttpRouteSpec)],
+    commit: bool,
 ) -> Result<(Option<ProxyConfig>, Option<ProxyConfig>)> {
     use ingress_proxy::Where;
     let ctrs = container_ips();
@@ -878,15 +896,17 @@ fn resolve_configs(
             &[("ports", &clash.join(", "))],
         )));
     }
-    let h = resolve_config(&holder)?;
-    let x = resolve_config(&host)?.map(|mut c| {
+    let h = resolve_config(&holder, commit)?;
+    let x = resolve_config(&host, commit)?.map(|mut c| {
         c.bind = Some("127.0.0.1".to_string());
         c
     });
     Ok((h, x))
 }
 
-fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfig>> {
+/// `commit` decides whether an `IPPool` claim is TAKEN or only looked at: an apply takes
+/// it, a plan computing what an apply would do must not change the ledger.
+fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Option<ProxyConfig>> {
     if specs.is_empty() {
         return Ok(None);
     }
@@ -898,25 +918,78 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
     let mut tls_material: Option<TlsMaterial> = None;
     let mut secret_ref: Option<String> = None;
     let mut published: Vec<ingress_proxy::PublishedHost> = Vec::new();
+    let mut claims: Vec<ingress_proxy::PoolClaim> = Vec::new();
 
     for (name, spec) in specs {
+        // The address this document is reachable on: one reserved from its IPPool, or
+        // `None` for the default (loopback).
+        let addr: Option<String> = match &spec.pool {
+            None => None,
+            Some(pool) => {
+                let claimant = format!("HTTPRoute/{name}");
+                let not_here = |ip: std::net::Ipv4Addr| {
+                    Error::Invalid(super::po::tf(
+                        "HTTPRoute '{name}': IPPool '{pool}' gave {ip}, which is not on any interface of this host. Add it (for example `ip addr add {ip}/32 dev lo`) or put another address in the pool — `announce: l2` (the engine adding it) is not built yet",
+                        &[("name", name), ("pool", pool), ("ip", &ip.to_string())],
+                    ))
+                };
+                // Look BEFORE taking: an address that is not on this host must not end
+                // up leased to a route whose apply then fails, holding it until somebody
+                // notices in the ledger.
+                let ip = super::ippool::peek(pool, &claimant)?;
+                if !super::ippool::address_present(ip) {
+                    return Err(not_here(ip));
+                }
+                let ip = if commit {
+                    let taken = super::ippool::claim(pool, &claimant)?;
+                    // Another claim may have landed between the look and the take.
+                    if taken != ip && !super::ippool::address_present(taken) {
+                        return Err(not_here(taken));
+                    }
+                    taken
+                } else {
+                    ip
+                };
+                claims.push(ingress_proxy::PoolClaim {
+                    source: name.clone(),
+                    pool: pool.clone(),
+                    addr: ip.to_string(),
+                });
+                Some(ip.to_string())
+            }
+        };
         if spec.hosts.iter().any(|h| h == "host") {
             for rule in &spec.rules {
                 if let Some(h) = &rule.host {
                     published.push(ingress_proxy::PublishedHost {
                         host: h.clone(),
                         source: name.clone(),
+                        addr: addr.clone(),
                     });
                 }
             }
         }
         for ep in effective_entrypoints(spec) {
-            // Dedup by port; on collision, TLS wins (more restrictive/secure).
+            // Dedup by port; on collision, TLS wins (more restrictive/secure). The same
+            // port on two different addresses is two different sockets, and a listener
+            // holds one address, so it is refused instead of half applied.
             match listeners.iter_mut().find(|l| l.port == ep.port) {
+                Some(l) if l.addr != addr => {
+                    return Err(Error::Invalid(super::po::tf(
+                        "HTTPRoute '{name}': port :{port} is already listened on {other} by another route, and this one asks for {mine} — give one of them another entrypoint",
+                        &[
+                            ("name", name),
+                            ("port", &ep.port.to_string()),
+                            ("other", l.addr.as_deref().unwrap_or("loopback")),
+                            ("mine", addr.as_deref().unwrap_or("loopback")),
+                        ],
+                    )));
+                }
                 Some(l) => l.tls = l.tls || ep.tls,
                 None => listeners.push(Listener {
                     port: ep.port,
                     tls: ep.tls,
+                    addr: addr.clone(),
                 }),
             }
         }
@@ -972,6 +1045,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
         routes,
         tls: tls_material,
         published_hosts: published,
+        claims,
         bind: None,
     }))
 }
@@ -986,7 +1060,8 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
 /// changing them needs an `httproute rm` + apply) and the apply already warns
 /// about that; the plan showing them as an update is not a promise the executor
 /// breaks — the warning is what tells the truth about the listener.
-pub(crate) const RECONCILED_HTTPROUTE_FIELDS: &[&str] = &["entrypoints", "tls", "rules", "hosts"];
+pub(crate) const RECONCILED_HTTPROUTE_FIELDS: &[&str] =
+    &["entrypoints", "tls", "rules", "hosts", "pool"];
 
 /// One route rendered comparably: host, path and the backend as WRITTEN.
 ///
@@ -1094,6 +1169,7 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
     );
     f.insert("rules".into(), route_keys(&spec));
     f.insert("hosts".into(), desired_published_hosts(&spec));
+    f.insert("pool".into(), spec.pool.clone().unwrap_or_default());
     Ok(super::reconcile::Desired {
         // Keyed by the document's OWN kind, so an `Ingress` matches the
         // `Ingress` half of the actual side and the plan names the Kind the
@@ -1206,6 +1282,14 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         published.sort();
         published.dedup();
         f.insert("hosts".into(), published.join(","));
+        f.insert(
+            "pool".into(),
+            cfg.claims
+                .iter()
+                .find(|c| &c.source == name)
+                .map(|c| c.pool.clone())
+                .unwrap_or_default(),
+        );
         out.push(super::reconcile::Actual {
             kind: doc.kind.clone(),
             name: name.clone(),
@@ -1266,13 +1350,13 @@ fn pending_listener_changes(docs: &[ManifestDoc]) -> Vec<ingress_proxy::Where> {
     let Ok(specs) = parse_and_validate(docs) else {
         return Vec::new();
     };
-    let Ok((holder, host)) = resolve_configs(&specs) else {
+    let Ok((holder, host)) = resolve_configs(&specs, false) else {
         return Vec::new();
     };
     let ports = |c: &ingress_proxy::ProxyConfig| {
         c.listeners
             .iter()
-            .map(|l| (l.port, l.tls))
+            .map(|l| (l.port, l.tls, l.addr.clone()))
             .collect::<std::collections::BTreeSet<_>>()
     };
     let mut out = Vec::new();
@@ -1290,10 +1374,19 @@ fn pending_listener_changes(docs: &[ManifestDoc]) -> Vec<ingress_proxy::Where> {
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
     use ingress_proxy::Where;
     let specs = parse_and_validate(docs)?;
-    let (holder, host) = resolve_configs(&specs)?;
+    let (holder, host) = resolve_configs(&specs, true)?;
     if holder.is_none() && host.is_none() {
         return Ok(()); // no HTTPRoute — nothing to do
     }
+    // A claim is kept only by a document that still declares it: what this apply just
+    // resolved IS the set of live claimants, so the rest are let go here — never by a
+    // sweep that guesses who is alive.
+    let keep: Vec<String> = [&holder, &host]
+        .iter()
+        .filter_map(|c| c.as_ref())
+        .flat_map(|c| c.claims.iter().map(|x| format!("HTTPRoute/{}", x.source)))
+        .collect();
+    super::ippool::release_unlisted("HTTPRoute/", &keep)?;
     for (w, cfg) in [(Where::Holder, holder), (Where::Host, host)] {
         let Some(cfg) = cfg else {
             // This instance has nothing to serve any more (its routes moved, or
@@ -1353,6 +1446,7 @@ mod tests {
                 })
                 .collect(),
             hosts: Vec::new(),
+            pool: None,
         }
     }
 
