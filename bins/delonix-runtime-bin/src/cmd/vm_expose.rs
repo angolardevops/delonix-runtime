@@ -67,6 +67,17 @@ pub(crate) fn lower_vm_expose(docs: Vec<ManifestDoc>) -> Result<Vec<ManifestDoc>
             continue;
         }
         let route = route_for(&doc, &exposes)?;
+        // `<vm>-expose` is a name the user may have taken for a route of their own:
+        // two documents with one (kind, name) would have the later silently win.
+        if out.iter().any(|d| {
+            (d.kind == k::HTTP_ROUTE || d.kind == k::INGRESS)
+                && d.metadata.name == route.metadata.name
+        }) {
+            return Err(Error::Invalid(super::po::tf(
+                "VirtualMachine/{vm}: spec.expose generates the route '{route}', but a route with that name is already declared — rename one of them",
+                &[("vm", &doc.metadata.name), ("route", &route.metadata.name)],
+            )));
+        }
         out.push(doc);
         out.push(route);
     }

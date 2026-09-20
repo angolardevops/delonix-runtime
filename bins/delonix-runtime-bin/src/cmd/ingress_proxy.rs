@@ -876,6 +876,15 @@ fn rebuild(w: Where) -> Result<()> {
     // The auto-routes are served over HTTP on the AUTO_HTTP_PORT port (internal
     // FQDN). NOT :80 — in rootless the slirp does not publish privileged ports
     // (add_hostfwd refuses <1024). Ensures the listener if there is any auto-route.
+    if !auto.is_empty() && listeners.iter().any(|l| l.port == AUTO_HTTP_PORT && l.tls) {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "httproute: WARNING — :{port} is a TLS listener of a declared route, and `--expose` routes are served on it too, over TLS",
+                &[("port", &AUTO_HTTP_PORT.to_string())],
+            )
+        );
+    }
     if !auto.is_empty() && !listeners.iter().any(|l| l.port == AUTO_HTTP_PORT) {
         listeners.push(Listener {
             port: AUTO_HTTP_PORT,

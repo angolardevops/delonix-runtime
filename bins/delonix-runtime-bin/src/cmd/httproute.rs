@@ -192,9 +192,13 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
         HttpRouteCmd::Rm => {
             // Remove only the MANUAL routes; the auto-registered ones (`--expose`)
             // survive and the proxy only stops if nothing else remains.
-            ingress_proxy::clear_manual(ingress_proxy::Where::Host)?;
-            ingress_proxy::clear_manual(ingress_proxy::Where::Holder)?;
+            let host = ingress_proxy::clear_manual(ingress_proxy::Where::Host)?;
+            let holder = ingress_proxy::clear_manual(ingress_proxy::Where::Holder)?;
             super::ippool::release_unlisted("HTTPRoute/", &[])?;
+            if !host && !holder {
+                println!("{}", super::po::t("httproute: no manual routes to remove"));
+                return Ok(());
+            }
             if ingress_proxy::is_running(ingress_proxy::Where::Holder) {
                 println!(
                     "{}",
@@ -928,6 +932,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Opt
     let mut secret_ref: Option<String> = None;
     let mut published: Vec<ingress_proxy::PublishedHost> = Vec::new();
     let mut claims: Vec<ingress_proxy::PoolClaim> = Vec::new();
+    let mut peeked: Vec<std::net::Ipv4Addr> = Vec::new();
 
     for (name, spec) in specs {
         // The address this document is reachable on: one reserved from its IPPool, or
@@ -945,7 +950,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Opt
                 // Look BEFORE taking: an address that is not on this host must not end
                 // up leased to a route whose apply then fails, holding it until somebody
                 // notices in the ledger.
-                let ip = super::ippool::peek(pool, &claimant)?;
+                let ip = super::ippool::peek(pool, &claimant, &peeked)?;
                 if !super::ippool::address_present(ip) {
                     return Err(not_here(ip));
                 }
@@ -957,6 +962,7 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Opt
                     }
                     taken
                 } else {
+                    peeked.push(ip);
                     ip
                 };
                 claims.push(ingress_proxy::PoolClaim {
@@ -1304,7 +1310,11 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             .map(|r| {
                 let backend = by_ip
                     .iter()
-                    .find(|(_, ip)| r.backend.starts_with(&format!("{ip}:")))
+                    .filter(|(_, ip)| r.backend.starts_with(&format!("{ip}:")))
+                    // Two backends can share an address (a container and a VM, a
+                    // restarted container's old lease): the map's iteration order must
+                    // not decide which name the plan reports.
+                    .min_by_key(|(svc, _)| svc.as_str())
                     .map(|(svc, ip)| {
                         format!("{svc}:{}", r.backend.trim_start_matches(&format!("{ip}:")))
                     })

@@ -81,13 +81,19 @@ pub(crate) fn block(id: &str, hosts: &[Entry]) -> String {
 /// `existing` with the managed block replaced by the block for `hosts`. PURE.
 pub(crate) fn render(existing: &str, hosts: &[Entry], id: &str) -> Result<String> {
     // Everything outside the block, in order.
+    // Lines keep their own endings: splitting with `lines()` and re-joining with `\n`
+    // rewrote a CRLF file and added a newline the file never had.
     let mut kept: Vec<&str> = Vec::new();
     let mut inside = false;
-    for line in existing.lines() {
+    // Where our block was, so it is rewritten in place and two roots' blocks do not swap
+    // places at every sync.
+    let mut at: Option<usize> = None;
+    for line in existing.split_inclusive('\n') {
         // Only THIS root's block is ours. Another root's block stays where it is and its
         // names count as somebody else's entries below.
         if line.trim() == begin(id) {
             inside = true;
+            at = Some(kept.len());
             continue;
         }
         if inside {
@@ -142,11 +148,19 @@ pub(crate) fn render(existing: &str, hosts: &[Entry], id: &str) -> Result<String
             )));
         }
     }
-    let mut out = kept.join("\n");
-    if !out.is_empty() {
-        out.push('\n');
+    let mut out = String::new();
+    let at = at.unwrap_or(kept.len());
+    for (i, line) in kept.iter().enumerate() {
+        if i == at {
+            close_line(&mut out);
+            out.push_str(&block(id, hosts));
+        }
+        out.push_str(line);
     }
-    out.push_str(&block(id, hosts));
+    if at >= kept.len() {
+        close_line(&mut out);
+        out.push_str(&block(id, hosts));
+    }
     Ok(out)
 }
 
@@ -222,6 +236,14 @@ fn sync_at(path: &std::path::Path, hosts: &[Entry], id: &str) -> Result<()> {
             Error::Invalid(format!("hosts: {}: {e}", target.display()))
         }
     })
+}
+
+/// Makes sure what was written so far ends its last line, so the next thing starts on
+/// its own line — without adding a newline to an empty string.
+fn close_line(out: &mut String) {
+    if !out.is_empty() && !out.ends_with('\n') {
+        out.push('\n');
+    }
 }
 
 /// Holds an exclusive `flock` on a lock file beside the hosts file for as long as the
@@ -332,6 +354,25 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(e.contains("no END line"), "{e}");
+    }
+
+    #[test]
+    fn crlf_and_a_missing_final_newline_are_left_as_they_were() {
+        let out = render("127.0.0.1 localhost\r\n10.0.0.1 x", &h(&["a.pt"]), ID).unwrap();
+        assert!(
+            out.starts_with("127.0.0.1 localhost\r\n10.0.0.1 x\n"),
+            "{out:?}"
+        );
+        let again = render(&out, &h(&["a.pt"]), ID).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn our_block_is_rewritten_where_it_was() {
+        let a = render("127.0.0.1 localhost\n", &h(&["a.pt"]), ID).unwrap();
+        let both = render(&a, &h(&["b.pt"]), OTHER).unwrap();
+        let again = render(&both, &h(&["a.pt", "c.pt"]), ID).unwrap();
+        assert!(again.find("a.pt").unwrap() < again.find("b.pt").unwrap());
     }
 
     #[test]

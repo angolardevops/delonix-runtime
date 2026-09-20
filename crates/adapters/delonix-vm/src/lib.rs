@@ -2513,6 +2513,33 @@ fn libvirt_cleanup(name: &str) -> Result<()> {
         })
 }
 
+/// The domain XML without the settings a session (unprivileged) libvirt cannot apply:
+/// the `<memtune>` hard limit and the `<cputune>` period/quota. CPU pinning stays — it
+/// is an affinity, not a cgroup limit. Pure.
+fn strip_cgroup_tuning(xml: &str) -> String {
+    let mut out = String::with_capacity(xml.len());
+    let mut in_memtune = false;
+    for line in xml.split_inclusive('\n') {
+        let t = line.trim();
+        if t == "<memtune>" {
+            in_memtune = true;
+            continue;
+        }
+        if in_memtune {
+            if t == "</memtune>" {
+                in_memtune = false;
+            }
+            continue;
+        }
+        if t.starts_with("<period>") || t.starts_with("<quota>") {
+            continue;
+        }
+        out.push_str(line);
+    }
+    // A `<cputune>` left with nothing inside is not valid to define.
+    out.replace("  <cputune>\n  </cputune>\n", "")
+}
+
 /// Generates the libvirt (KVM) domain XML. **Pure function** — tested without a daemon.
 ///
 /// Covers: vCPUs (+ pinning via `<cputune>`), memory (+ hugepages via
@@ -3392,6 +3419,20 @@ impl VmBackend for LibvirtBackend {
             ensure_antispoof_filter(uri)?;
         }
         let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
+        if uri == "qemu:///session" {
+            // A session daemon has no cgroup controller to hand out: it REFUSES a domain
+            // with a memory or CPU-quota ceiling («Memory tuning is not available in
+            // session mode»), so the guest never started. The ceilings are protections for
+            // a shared host; without them the guest still runs, and this says so.
+            let bare = strip_cgroup_tuning(&xml);
+            if bare != xml {
+                tracing::warn!(
+                    vm = %cfg.name,
+                    "libvirt session mode cannot enforce the memory/CPU ceilings — this VM runs without them (use `--net-mode nat` on qemu:///system to keep them)"
+                );
+                xml = bare;
+            }
+        }
         // On `qemu:///system` the QEMU process runs as the `libvirt-qemu` user,
         // which cannot read the overlay under a 0700 `$HOME`. A static DAC label
         // pins QEMU to the invoking uid/gid (the disk owner) and `relabel='no'`
@@ -3414,7 +3455,11 @@ impl VmBackend for LibvirtBackend {
         let defined = capture("virsh", &["-c", uri, "domstate", "--", &cfg.name]).is_some();
         if !defined {
             on(CreateStage::Define);
-            run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])?;
+            if let Err(e) = run_quiet("virsh", &["-c", uri, "define", &xml_path.to_string_lossy()])
+            {
+                let _ = std::fs::remove_file(&xml_path);
+                return Err(e.into());
+            }
             // A domain defined here is a domain libvirt has never seen before,
             // so any snapshot this VM had is metadata WE are holding — from the
             // `stop` that undefined it. Hand it back now, before the guest
@@ -3437,9 +3482,37 @@ impl VmBackend for LibvirtBackend {
             })?;
         // 'start' fails if it is already running — we tolerate that (auto-heal).
         if !out.status.success() && !self.is_running_uri(uri, &cfg.name) {
+            // What libvirt said is the only diagnosis there is: without it a failed
+            // start reads as «KVM, permissions or image?» and nothing else.
+            let why = String::from_utf8_lossy(&out.stderr);
+            let why = why.trim().trim_start_matches("error:").trim().to_string();
+            if !defined {
+                // We defined this domain a moment ago and it never ran: leave nothing
+                // of it behind — not the definition, not the rendered XML, and (for the
+                // session connection) not libvirt's per-domain log, whose tail is in
+                // the error below.
+                let _ = libvirt_cleanup(&cfg.name);
+                let _ = std::fs::remove_file(&xml_path);
+                if uri == "qemu:///session" {
+                    let cache = std::env::var_os("XDG_CACHE_HOME")
+                        .map(PathBuf::from)
+                        .or_else(|| {
+                            std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cache"))
+                        });
+                    if let Some(c) = cache {
+                        let _ = std::fs::remove_file(
+                            c.join("libvirt/qemu/log").join(format!("{}.log", cfg.name)),
+                        );
+                    }
+                }
+            }
             return Err(Error::Command {
                 context: "vm",
-                message: "failed to start the libvirt domain (KVM/permissions/image?)".into(),
+                message: if why.is_empty() {
+                    "failed to start the libvirt domain (KVM/permissions/image?)".into()
+                } else {
+                    format!("failed to start the libvirt domain: {why}")
+                },
             }
             .into());
         }
@@ -5324,6 +5397,19 @@ mod tests {
         assert_eq!(mem_mib("2Gi"), 2048); // k8s suffix tolerated (before it gave 1024)
         assert_eq!(mem_mib("512Mi"), 512);
         assert_eq!(mem_mib("lixo"), 1024); // robust fallback
+    }
+
+    #[test]
+    fn a_session_domain_loses_the_ceilings_it_cannot_have_and_keeps_pinning() {
+        let xml = "  <memtune>\n    <hard_limit unit='KiB'>1</hard_limit>\n  </memtune>\n  <cputune>\n    <period>100000</period>\n    <quota>50000</quota>\n  </cputune>\n  <cputune>\n    <period>100000</period>\n    <vcpupin vcpu='0' cpuset='1'/>\n  </cputune>\n";
+        let out = strip_cgroup_tuning(xml);
+        assert!(!out.contains("memtune") && !out.contains("quota") && !out.contains("period"));
+        assert!(out.contains("vcpupin"));
+        assert_eq!(
+            out.matches("<cputune>").count(),
+            1,
+            "the empty one is gone: {out}"
+        );
     }
 
     #[test]

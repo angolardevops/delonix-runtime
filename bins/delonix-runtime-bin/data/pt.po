@@ -13044,3 +13044,12 @@ msgstr "httproute: os listeners mudaram — a reiniciar o proxy (as ligações a
 
 msgid "{kind} '{name}' → pool '{pool}' is not a declared or existing IPPool"
 msgstr "{kind} '{name}' → o pool '{pool}' não é um IPPool declarado nem existente"
+
+msgid "VirtualMachine/{vm}: spec.expose generates the route '{route}', but a route with that name is already declared — rename one of them"
+msgstr "VirtualMachine/{vm}: spec.expose gera a route '{route}', mas já existe uma route com esse nome — muda o nome de uma delas"
+
+msgid "httproute: no manual routes to remove"
+msgstr "httproute: não há routes manuais para remover"
+
+msgid "httproute: WARNING — :{port} is a TLS listener of a declared route, and `--expose` routes are served on it too, over TLS"
+msgstr "httproute: AVISO — :{port} é um listener TLS de uma route declarada, e as routes de `--expose` também são servidas nele, sobre TLS"

@@ -82,10 +82,14 @@ impl Lock {
     fn acquire(d: &std::path::Path) -> Result<Lock> {
         use std::os::unix::io::AsRawFd;
         std::fs::create_dir_all(d).map_err(|e| Error::Invalid(format!("ippool: {e}")))?;
+        use std::os::unix::fs::OpenOptionsExt;
         let f = std::fs::OpenOptions::new()
             .create(true)
             .truncate(false)
             .write(true)
+            // Not group/world writable whatever the umask: a lock file another user can
+            // open is a lock another user can hold forever.
+            .mode(0o600)
             .open(d.join(".lock"))
             .map_err(|e| Error::Invalid(format!("ippool lock: {e}")))?;
         // SAFETY: valid open fd; LOCK_EX blocks until the lock is ours.
@@ -251,7 +255,39 @@ fn validate(spec: &IpPoolSpec) -> Result<()> {
 /// question a publish asks, it needs no `ip` binary and no privilege, and a stale
 /// `ip addr` parse cannot disagree with the kernel.
 pub fn address_present(ip: Ipv4Addr) -> bool {
-    std::net::TcpListener::bind((ip, 0)).is_ok()
+    if std::net::TcpListener::bind((ip, 0)).is_err() {
+        return false;
+    }
+    // With `ip_nonlocal_bind=1` the kernel lets a process bind an address that is on no
+    // interface, so a successful bind proves nothing there: ask the routing table.
+    let nonlocal = std::fs::read_to_string("/proc/sys/net/ipv4/ip_nonlocal_bind")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+    if !nonlocal || ip.is_loopback() {
+        return true;
+    }
+    match std::fs::read_to_string("/proc/net/fib_trie") {
+        Ok(t) => fib_trie_has_local(&t, ip),
+        // Cannot tell: the bind said yes, keep that answer.
+        Err(_) => true,
+    }
+}
+
+/// Does a `/proc/net/fib_trie` dump list `ip` as a LOCAL host address (one of this
+/// machine's own)?
+fn fib_trie_has_local(trie: &str, ip: Ipv4Addr) -> bool {
+    let needle = format!("|-- {ip}");
+    let mut lines = trie.lines();
+    while let Some(l) = lines.next() {
+        if l.trim() == needle {
+            if let Some(next) = lines.next() {
+                if next.trim().starts_with("/32 host LOCAL") {
+                    return true;
+                }
+            }
+        }
+    }
+    false
 }
 
 // ---- the ledger -----------------------------------------------------------------
@@ -268,8 +304,8 @@ pub fn claim_moving(pool: &str, claimant: &str) -> Result<Ipv4Addr> {
 /// The address [`claim_moving`] would return, without taking it. For a plan: computing what an
 /// apply would do must not change what the ledger says, and must not fail because of a
 /// lease the apply is about to move.
-pub fn peek(pool: &str, claimant: &str) -> Result<Ipv4Addr> {
-    claim_in(&dir(), pool, claimant, Mode::Peek)
+pub fn peek(pool: &str, claimant: &str, exclude: &[Ipv4Addr]) -> Result<Ipv4Addr> {
+    claim_in_excluding(&dir(), pool, claimant, Mode::Peek, exclude)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -283,6 +319,19 @@ enum Mode {
 }
 
 fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, mode: Mode) -> Result<Ipv4Addr> {
+    claim_in_excluding(d, pool, claimant, mode, &[])
+}
+
+/// [`claim_in`], leaving out `exclude` when looking for a free address. A plan that
+/// peeks for several new claimants in a row would otherwise hand all of them the same
+/// first-free address, since nothing is written between the looks.
+fn claim_in_excluding(
+    d: &std::path::Path,
+    pool: &str,
+    claimant: &str,
+    mode: Mode,
+    exclude: &[Ipv4Addr],
+) -> Result<Ipv4Addr> {
     let _l = Lock::acquire(d)?;
     let mut p = read_in(d, pool)?.ok_or_else(|| {
         Error::NotFound(format!(
@@ -317,7 +366,7 @@ fn claim_in(d: &std::path::Path, pool: &str, claimant: &str, mode: Mode) -> Resu
     let taken: std::collections::HashSet<&String> = p.leases.values().collect();
     let free = expand(&p.addresses)?
         .into_iter()
-        .find(|a| !taken.contains(&a.to_string()))
+        .find(|a| !taken.contains(&a.to_string()) && !exclude.contains(a))
         .ok_or_else(|| {
             Error::Conflict(format!(
                 "IPPool '{pool}' is exhausted: {} address(es), all leased (see `delonix get ippools`)",
@@ -765,6 +814,24 @@ mod tests {
         assert!(e.contains("damaged"), "{e}");
         assert_eq!(std::fs::read(path_in(&d, "edge")).unwrap(), b"{ not json");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_plan_that_peeks_twice_does_not_hand_out_one_address_twice() {
+        let d = scratch("peek2");
+        seed(&d, "edge", &["203.0.113.1-203.0.113.3"]);
+        let a = claim_in_excluding(&d, "edge", "HTTPRoute/a", Mode::Peek, &[]).unwrap();
+        let b = claim_in_excluding(&d, "edge", "HTTPRoute/b", Mode::Peek, &[a]).unwrap();
+        assert_ne!(a, b);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn the_routing_table_tells_a_local_address_from_a_bindable_one() {
+        let trie = "  |-- 10.0.0.5\n     /32 host LOCAL\n  |-- 10.0.0.9\n     /32 link BROADCAST\n";
+        assert!(fib_trie_has_local(trie, "10.0.0.5".parse().unwrap()));
+        assert!(!fib_trie_has_local(trie, "10.0.0.9".parse().unwrap()));
+        assert!(!fib_trie_has_local(trie, "10.0.0.50".parse().unwrap()));
     }
 
     #[test]
