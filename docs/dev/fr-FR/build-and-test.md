@@ -269,6 +269,7 @@ des cgroups, du holder réseau ou du démarrage des VM fonctionne — cela exige
 | `cli-surface` | cli surface |
 | `clippy` | clippy -D warnings |
 | `test` | test |
+| `test-arm64` | test (arm64) |
 | `deny` | cargo-deny |
 | `docs` | generated docs and valid examples |
 <!-- dev-docs:end ci-gates -->
