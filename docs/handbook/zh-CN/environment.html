@@ -331,11 +331,15 @@ rootfs is mounted, not at startup (ADR-0037 records this as a deliberate choice)
 official installer (it is published as a release asset). It detects the package manager through
 <code>/etc/os-release</code> and supports <strong>apt</strong> (Debian, Ubuntu and derivatives), <strong>dnf</strong> (Fedora, RHEL,
 CentOS Stream, Rocky, AlmaLinux), <strong>zypper</strong> (openSUSE, SLES) and <strong>pacman</strong> (Arch and
-derivatives). The installer only installs <strong>x86_64</strong> binaries: on any other architecture it stops
-with "no prebuilt binary for <arch> yet" (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, the <code>uname -m</code> check), so build from
-source. Since v4.2.0 the release workflow also builds aarch64 binaries, but that job had never run
-before that tag and the installer does not use them yet — treat aarch64 as build-from-source until
-the installer changes.</p>
+derivatives). The installer installs prebuilt binaries for <strong>x86_64</strong> and <strong>aarch64</strong> (<code>arm64</code> is
+normalised): the asset name is composed from <code>uname -m</code> as <code>&lt;name&gt;-&lt;arch&gt;-linux</code>, and any other
+architecture stops with "no prebuilt binary for <arch> yet", so build from source. Three things differ
+on aarch64: the <code>-v3</code> variant is an x86-64 microarchitecture level and does not exist there; the pinned
+static Cloud Hypervisor, the EDK2 <code>CLOUDHV.fd</code> and <code>hypervisor-fw</code> are x86-64 builds, so they are not
+downloaded and the VM backend is libvirt; and the QEMU probe asks for <code>qemu-system-aarch64</code>. The
+aarch64 release assets exist since v4.2.0 (the <code>build-arm64</code> job ran for the first time on that tag).
+<strong>Not validated:</strong> a complete install on a real aarch64 host, and the QEMU package names per distro
+on arm64 — what has been checked is the asset-name composition against the published v4.2.0 assets.</p>
 <p>To run containers the engine needs:</p>
 <div class="tablewrap"><table>
 <thead>
