@@ -282,6 +282,17 @@ or an existing file (`build.file`) — so there is no second build engine. Rules
   a different day, so it is opt-in and the refusal says so.
 - `remove.paths` must be absolute, without `..`, and never a top-level system directory.
 
+**Appliances** (`appliance:`). Some images cannot be described as edits to a cloud image: the
+vendor's installer has to run (Proxmox from its ISO, OpenStack pulling ~20 GiB of containers).
+For those the recipe names a **builder**, not a path: `appliance: {builder: proxmox, args: [pve,
+"9.2-1"]}` runs `scripts/appliances/build-proxmox.sh` (found in the `vm.yaml`'s folder or any
+folder above it) with an isolated `OUT_DIR` next to the image store, takes the one `*.qcow2` it
+leaves (a `.raw.qcow2` is ignored), and registers it with `image vm import` semantics —
+`--appliance` unless `cloud_init: true`. Because the name is validated (`[a-z0-9-]`) and resolved
+inside `scripts/appliances/`, a `vm.yaml` cannot make the host run a file of its choosing; `args`
+and `env` are validated too (no leading `-`, no `PATH`/`LD_*`/`BASH_ENV`…). The fields a builder
+decides itself (`packages`, `users`, `hostname`, `network`, `profile`…) are refused by name.
+
 The per-distro folders under `images/` (`images/ubuntu/` first) each carry a `vm.yaml`, the
 cloud-init file, the artefacts and a README.
 
