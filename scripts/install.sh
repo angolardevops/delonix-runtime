@@ -207,7 +207,11 @@ done
 # ---------------------------------------------------------------- pré-condições
 [ "$(uname -s)" = Linux ] || die "Delonix Runtime is Linux-only."
 ARCH=$(uname -m)
-[ "$ARCH" = x86_64 ] || die "no prebuilt binary for $ARCH yet (only x86_64). Build from source: cargo build --release -p delonix-runtime-bin"
+case "$ARCH" in
+  x86_64|aarch64) ;;
+  arm64) ARCH=aarch64 ;; # some kernels/containers report arm64 for the same CPU
+  *) die "no prebuilt binary for $ARCH yet (only x86_64 and aarch64). Build from source: cargo build --release -p delonix-runtime-bin" ;;
+esac
 
 # O utilizador REAL (o script pode correr sob sudo já): é para ele que se
 # configuram subuid/grupos, não para o root.
@@ -277,11 +281,14 @@ elif [ -d /sys/class/drm ] && ls /sys/class/drm/card[0-9] >/dev/null 2>&1; then
   GPU_INFO="present (install pciutils for details)"
 fi
 CPU_VARIANT=""
+# The -v3 variant is an x86-64 microarchitecture level: it does not exist on
+# aarch64, where every component is a single binary.
 # x86-64-v3 = AVX2+BMI2+FMA. O teu binário genérico continua a ser o fallback.
-if grep -qm1 avx2 /proc/cpuinfo && grep -qm1 bmi2 /proc/cpuinfo && grep -qm1 fma /proc/cpuinfo; then
+if [ "$ARCH" = x86_64 ] && grep -qm1 avx2 /proc/cpuinfo && grep -qm1 bmi2 /proc/cpuinfo && grep -qm1 fma /proc/cpuinfo; then
   CPU_VARIANT="-v3"
 fi
-if [ -n "$CPU_VARIANT" ]; then VARIANT_LABEL="x86-64-v3 (AVX2)"; else VARIANT_LABEL="x86-64 baseline"; fi
+if [ "$ARCH" = aarch64 ]; then VARIANT_LABEL="aarch64"
+elif [ -n "$CPU_VARIANT" ]; then VARIANT_LABEL="x86-64-v3 (AVX2)"; else VARIANT_LABEL="x86-64 baseline"; fi
 step host cpu "${CPU_MODEL:-unknown} (${NCPU} cpus, $VARIANT_LABEL)"
 step host resources "${RAM_GB}GB RAM · ${DISK_FREE_GB:-?}GB free at $REAL_HOME"
 [ -n "$GPU_INFO" ] && step host gpu "$GPU_INFO"
@@ -381,14 +388,14 @@ if [ "$WITH_BINARY" = 1 ]; then
   # `|| return 1` explícito em cada `curl` que tem de ser fatal — controlo de
   # fluxo explícito não depende do estado (in)consistente do `errexit`.
   fetch_asset() { # $1 nome-base (delonix|delonix-cri|delonix-mcp|delonix-mgmt) → devolve o nome descarregado, ou falha
-    local base="$1" asset="$1-x86_64${CPU_VARIANT}-linux"
+    local base="$1" asset="$1-${ARCH}${CPU_VARIANT}-linux"
     if [ -n "$CPU_VARIANT" ]; then
       if curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" 2>/dev/null; then
         echo "$asset"
         return 0
       fi
       warn "$asset is not in this release — falling back to the generic binary"
-      asset="$base-x86_64-linux"
+      asset="$base-${ARCH}-linux"
     fi
     curl -fsSL -o "$TMP/$asset" "$BASE_URL/$asset" || return 1
     echo "$asset"
@@ -692,6 +699,9 @@ if [ "$WITH_VM" = 1 ]; then
   if ! command -v cloud-hypervisor >/dev/null 2>&1; then
     if pkg_install cloud-hypervisor >/dev/null 2>&1; then
       stepok vm cloud-hypervisor
+    elif [ "$ARCH" != x86_64 ]; then
+      # The pinned static binary and its checksum are the x86-64 build.
+      warn "cloud-hypervisor is not packaged on this distro and the pinned static build is x86-64 only — the libvirt backend below is the VM backend on $ARCH"
     else
       CH_URL="https://github.com/cloud-hypervisor/cloud-hypervisor/releases/download/$CH_STATIC_VERSION/cloud-hypervisor-static"
       fetch_ch() {
@@ -724,7 +734,9 @@ if [ "$WITH_VM" = 1 ]; then
   # mais depressa onde funcione, e tirá-lo mudaria o comportamento de uma VM
   # que hoje dependa dele).
   EDK2_DEST=/usr/local/share/delonix/CLOUDHV.fd
-  if [ ! -e "$EDK2_DEST" ]; then
+  if [ "$ARCH" != x86_64 ]; then
+    step vm CLOUDHV.fd "x86-64 only — not installed on $ARCH"
+  elif [ ! -e "$EDK2_DEST" ]; then
     EDK2_URL="https://github.com/cloud-hypervisor/edk2/releases/download/$EDK2_TAG/CLOUDHV.fd"
     fetch_edk2() {
       $SUDO mkdir -p /usr/local/share/delonix \
@@ -743,7 +755,9 @@ if [ "$WITH_VM" = 1 ]; then
     skip vm CLOUDHV.fd
   fi
   FW_DEST=/usr/local/share/delonix/hypervisor-fw
-  if [ ! -e "$FW_DEST" ]; then
+  if [ "$ARCH" != x86_64 ]; then
+    step vm hypervisor-fw "x86-64 only — not installed on $ARCH"
+  elif [ ! -e "$FW_DEST" ]; then
     FW_URL="https://github.com/cloud-hypervisor/rust-hypervisor-firmware/releases/download/$HYPFW_VERSION/hypervisor-fw"
     fetch_fw() {
       $SUDO mkdir -p /usr/local/share/delonix \
@@ -762,9 +776,18 @@ if [ "$WITH_VM" = 1 ]; then
     skip vm hypervisor-fw
   fi
   optional_dep vm virsh "libvirt-clients|libvirt-client|libvirt"                    "libvirt VM backend (fallback)"
-  if ! command -v qemu-system-x86_64 >/dev/null 2>&1 && [ ! -e /usr/libexec/qemu-kvm ]; then
+  # The emulator must match the host: asking for qemu-system-x86_64 on aarch64
+  # reported QEMU missing and then installed the wrong (x86) emulator.
+  if [ "$ARCH" = aarch64 ]; then
+    QEMU_BIN=qemu-system-aarch64
+    QEMU_PKGS="qemu-system-arm|qemu-system-aarch64|qemu-kvm|qemu-base|qemu"
+  else
+    QEMU_BIN=qemu-system-x86_64
+    QEMU_PKGS="qemu-system-x86|qemu-kvm|qemu-base|qemu"
+  fi
+  if ! command -v "$QEMU_BIN" >/dev/null 2>&1 && [ ! -e /usr/libexec/qemu-kvm ]; then
     step vm qemu-kvm "installing..."
-    pkg_install "qemu-system-x86|qemu-kvm|qemu-base|qemu" >/dev/null 2>&1 \
+    pkg_install "$QEMU_PKGS" >/dev/null 2>&1 \
       && stepok vm qemu-kvm || warn "could not install QEMU — libvirt VMs will not start"
   else
     skip vm qemu-kvm
