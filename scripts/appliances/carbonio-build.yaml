@@ -1,0 +1,188 @@
+#cloud-config
+# ===========================================================================
+#  The build seed for the Carbonio CE mail image. Consumed ONLY by
+#  build-carbonio.sh, inside QEMU, and never by a deployed VM.
+# ===========================================================================
+# `@CARBONIO_PINS@` and `@CARBONIO_RELEASE@` are substituted by the script.
+#
+# What this builds is deliberately PRE-bootstrap. `carbonio-bootstrap` asks for
+# the machine's FQDN, its address, the mail domain and the admin password, and
+# none of those can be known here. The image carries everything that is
+# machine-independent -- the pinned packages, PostgreSQL 16, the repository and
+# its verified key -- and stops exactly where the vendor's own guide starts to
+# need facts about the target. Same seam as build-openstack.sh, for the same
+# reason: a bootstrapped image would ship the build VM's identity.
+write_files:
+  # `delonix vm create --ssh-key` creates the `delonix` account, but a golden
+  # image built from a plain cloud image gives it no sudo -- the operator could log
+  # in and not administer the machine (measured). The account may not exist at
+  # build time, and sudoers does not need it to.
+  - path: /etc/sudoers.d/90-delonix
+    permissions: "0440"
+    content: |
+      delonix ALL=(ALL) NOPASSWD:ALL
+  - path: /usr/local/sbin/carbonio-finish-install
+    permissions: "0755"
+    encoding: b64
+    content: @FINISH_INSTALL_B64@
+  - path: /root/build.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/delonix-carbonio-build.log) 2>&1
+      echo "=== delonix carbonio build: CE @CARBONIO_RELEASE@ ==="
+      export DEBIAN_FRONTEND=noninteractive
+
+      retry() {
+        local n=0 max=${2:-5}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*10))s: $1"
+          sleep $((n*10))
+        done
+      }
+
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "timeout 300 apt-get update"
+      retry "timeout 300 apt-get install -y curl gnupg ca-certificates"
+
+      # ------------------------------------------------------------------
+      #  The vendor's signing key, and proof it is THE key.
+      #  The guide fetches it from a public keyserver by fingerprint; a
+      #  keyserver is not an authority, so the fingerprint is compared against
+      #  the one the vendor documents, and the build stops if they differ.
+      # ------------------------------------------------------------------
+      WANT_FPR=5DC7680BC4378C471A7FA80F52FD40243E584A21
+      retry "curl -fsSL -m 120 -o /tmp/zextras.key 'https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x5dc7680bc4378c471a7fa80f52fd40243e584a21'"
+      GOT_FPR=$(gpg --show-keys --with-colons /tmp/zextras.key | awk -F: '/^fpr/{print $10; exit}')
+      [ "$GOT_FPR" = "$WANT_FPR" ] || { echo "!! Zextras key fingerprint mismatch: got $GOT_FPR want $WANT_FPR"; exit 1; }
+      gpg --dearmor < /tmp/zextras.key > /usr/share/keyrings/zextras.gpg
+      chmod 644 /usr/share/keyrings/zextras.gpg
+      rm -f /tmp/zextras.key
+      echo "deb [arch=amd64 signed-by=/usr/share/keyrings/zextras.gpg] https://repo.zextras.io/release/ubuntu noble main" \
+        > /etc/apt/sources.list.d/zextras.list
+
+      # ------------------------------------------------------------------
+      #  PostgreSQL 16 from the Ubuntu archive. The vendor's guide adds the
+      #  PGDG repository for the same major version; Noble already ships 16,
+      #  so this drops one third-party trust root for the same database.
+      # ------------------------------------------------------------------
+      retry "timeout 600 apt-get install -y postgresql-16"
+      systemctl enable postgresql
+
+      # ------------------------------------------------------------------
+      #  Carbonio CE -- every package pinned to the version read off the
+      #  repository, then held, so an unattended upgrade cannot move a
+      #  component past the schema its database bootstrap expects.
+      # ------------------------------------------------------------------
+      retry "timeout 300 apt-get update"
+      PINS="@CARBONIO_PINS@"
+      retry "timeout 1800 apt-get install -y --download-only $PINS" 5
+      retry "dpkg --configure -a; timeout 1500 apt-get install -y $PINS" 5
+      apt-mark hold $(echo "$PINS" | tr ' ' '\n' | cut -d= -f1)
+
+      # ------------------------------------------------------------------
+      #  amavisd (carbonio-mailthreat, the anti-virus/anti-spam hook in the
+      #  mail path) needs two Perl modules the vendor packages do not pull in
+      #  on Ubuntu 24.04. Measured on a bootstrapped VM: without them every
+      #  amavis-services child dies at once ("Can't locate Unix/Syslog.pm",
+      #  then "Perl modules ZMQ::LibZMQ3 ... not available"), the unit loops
+      #  in restart, and no message is scanned. Unix::Syslog is packaged;
+      #  ZMQ::LibZMQ3 was dropped from Ubuntu, so it is built from CPAN here
+      #  and the build tools are removed again afterwards.
+      # ------------------------------------------------------------------
+      retry "timeout 900 apt-get install -y libunix-syslog-perl libzmq5 libzmq3-dev build-essential cpanminus" 5
+      apt-mark manual libzmq5 libunix-syslog-perl
+      retry "cpanm --notest ZMQ::LibZMQ3" 3
+      perl -MZMQ::LibZMQ3 -MUnix::Syslog -e 'print "amavis perl modules OK\n"'
+      apt-get purge -y build-essential cpanminus libzmq3-dev
+      apt-get autoremove -y --purge
+      perl -MZMQ::LibZMQ3 -MUnix::Syslog -e 'print "amavis perl modules still OK\n"'
+
+      # The vendor's guide wants the video server enabled; it needs the host's
+      # public IP in janus.jcfg, which is a fact of the target. Left for after
+      # bootstrap, exactly as documented.
+      systemctl disable carbonio-videoserver.service 2>/dev/null || true
+
+      # ------------------------------------------------------------------
+      #  Database preparation, WITHOUT the guide's network exposure.
+      #  The guide sets listen_addresses='*' and a `host all all 0.0.0.0/0 md5`
+      #  line for a SUPERUSER role -- needed only when Carbonio is split across
+      #  servers. A single-server install talks to 127.0.0.1, so this image
+      #  keeps PostgreSQL on loopback. The role password is generated per
+      #  installation by the helper below and never lives in the image.
+      # ------------------------------------------------------------------
+      cat > /usr/local/sbin/carbonio-prepare-db <<'HELPER'
+      #!/bin/bash
+      # Creates the carbonio_adm role and database with a random password and
+      # applies the vendor's PostgreSQL parameters. Idempotent: run twice and
+      # the second run changes nothing.
+      set -euo pipefail
+      [ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
+      PWFILE=/root/.carbonio-db-password
+      if [ -s "$PWFILE" ]; then
+        echo "already prepared: password is in $PWFILE"; exit 0
+      fi
+      systemctl start postgresql
+      PW=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+      su - postgres -c "psql -v ON_ERROR_STOP=1 --command=\"CREATE ROLE carbonio_adm WITH LOGIN SUPERUSER encrypted password '$PW';\""
+      su - postgres -c "psql -v ON_ERROR_STOP=1 --command=\"CREATE DATABASE carbonio_adm owner carbonio_adm;\""
+      su - postgres -c "psql -v ON_ERROR_STOP=1 --command=\"ALTER SYSTEM SET max_connections = 500;\""
+      su - postgres -c "psql -v ON_ERROR_STOP=1 --command=\"ALTER SYSTEM SET shared_buffers = 5000;\""
+      systemctl restart postgresql
+      umask 077; printf '%s\n' "$PW" > "$PWFILE"
+      echo "carbonio_adm ready on 127.0.0.1; password saved to $PWFILE (mode 0600)"
+      echo "use it as:  PGPASSWORD=\$(cat $PWFILE) carbonio-files-db-bootstrap carbonio_adm 127.0.0.1"
+      HELPER
+      chmod 0755 /usr/local/sbin/carbonio-prepare-db
+
+      # ------------------------------------------------------------------
+      #  What a clone actually has, readable from inside it.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/delonix
+      {
+        echo "{"
+        echo "  \"carbonio_ce_release\": \"@CARBONIO_RELEASE@\","
+        echo "  \"state\": \"pre-bootstrap\","
+        echo "  \"amavis_perl_modules\": \"Unix::Syslog $(dpkg-query -W -f='${Version}' libunix-syslog-perl), ZMQ::LibZMQ3 $(perl -MZMQ::LibZMQ3 -e 'print $ZMQ::LibZMQ3::VERSION')\","
+        echo "  \"postgresql\": \"$(dpkg-query -W -f='${Version}' postgresql-16)\","
+        echo "  \"packages\": {"
+        first=1
+        for p in $(echo "$PINS" | tr ' ' '\n' | cut -d= -f1); do
+          [ $first = 1 ] || echo ","
+          first=0
+          printf '    "%s": "%s"' "$p" "$(dpkg-query -W -f='${Version}' "$p")"
+        done
+        echo
+        echo "  }"
+        echo "}"
+      } > /etc/delonix/carbonio-image.json
+      python3 -c "import json;json.load(open('/etc/delonix/carbonio-image.json'))"
+      dpkg-query -W -f='${Package}\t${Version}\t${Architecture}\n' | sort > /usr/share/delonix-packages.tsv
+
+      # The build VM's name must not survive into a deployment. Measured on the
+      # first build: it was written to /etc/hostname and NOWHERE else -- Carbonio
+      # records no hostname before `carbonio-bootstrap` -- so resetting this one
+      # file is the whole fix. An install that passes no hostname gets a neutral
+      # one instead of `carbonio-build`; a mail server's FQDN is the operator's.
+      echo localhost > /etc/hostname
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+      cloud-init clean --logs --seed
+      truncate -s 0 /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+runcmd:
+  - |
+    if /root/build.sh; then
+      echo "DELONIX-CARBONIO-BUILD-OK" > /dev/console
+    else
+      echo "DELONIX-CARBONIO-BUILD-FAIL rc=$?" > /dev/console
+      tail -60 /var/log/delonix-carbonio-build.log > /dev/console
+    fi
+    sync
+    poweroff

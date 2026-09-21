@@ -1,0 +1,168 @@
+#cloud-config
+# ===========================================================================
+#  The build seed for the GLPI image (GLPI + MariaDB + nginx/php-fpm + GLPI
+#  Agent). Consumed ONLY by build-glpi.sh, inside QEMU, never by a deployed VM.
+# ===========================================================================
+# `@GLPI_VERSION@`/`@GLPI_SHA256@`/`@GLPI_AGENT_VERSION@`/`@GLPI_AGENT_SHA256@`/
+# `@IMAGE_REV@` are substituted by the script.
+#
+# One script, not a list of `runcmd` entries: cloud-init keeps going after a
+# failed `runcmd` element, and a half-installed GLPI still looks like a server
+# that boots.
+
+write_files:
+  # `delonix vm create --ssh-key` creates the `delonix` account, but a golden
+  # image built from a plain cloud image gives it no sudo.
+  - path: /etc/sudoers.d/90-delonix
+    permissions: "0440"
+    content: |
+      delonix ALL=(ALL) NOPASSWD:ALL
+  - path: /root/build.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/delonix-glpi-build.log) 2>&1
+      echo "=== delonix glpi build: GLPI @GLPI_VERSION@ + agent @GLPI_AGENT_VERSION@ ==="
+      export DEBIAN_FRONTEND=noninteractive
+
+      retry() {
+        local n=0 max=${2:-5}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*10))s: $1"
+          sleep $((n*10))
+        done
+      }
+
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "timeout 300 apt-get update"
+      # GLPI 11 needs PHP >= 8.2 (Ubuntu 24.04 ships 8.3) and these extensions.
+      retry "timeout 900 apt-get install -y curl ca-certificates openssl cron \
+        mariadb-server nginx php8.3-fpm php8.3-cli php8.3-mysql php8.3-curl php8.3-gd \
+        php8.3-intl php8.3-mbstring php8.3-xml php8.3-zip php8.3-bcmath php8.3-bz2 \
+        php8.3-ldap php8.3-opcache php8.3-apcu"
+      systemctl enable --now mariadb
+
+      # ------------------------------------------------------------------
+      #  GLPI, from the release tarball, verified against the sha256 GitHub
+      #  publishes for that asset. Nothing is extracted before it matches.
+      # ------------------------------------------------------------------
+      retry "curl -fsSL --max-time 900 -o /tmp/glpi.tgz https://github.com/glpi-project/glpi/releases/download/@GLPI_VERSION@/glpi-@GLPI_VERSION@.tgz"
+      echo "@GLPI_SHA256@  /tmp/glpi.tgz" | sha256sum -c - || { echo "!! GLPI tarball checksum mismatch"; exit 1; }
+      tar -xzf /tmp/glpi.tgz -C /var/www
+      rm -f /tmp/glpi.tgz
+      chown -R www-data:www-data /var/www/glpi
+
+      # Database + a per-build password. Every clone of the image shares it,
+      # exactly like the monitoring image's PostgreSQL role: it only ever
+      # listens on loopback.
+      GLPI_DB_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+      mysql -e "CREATE DATABASE glpi CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+                CREATE USER 'glpi'@'localhost' IDENTIFIED BY '$GLPI_DB_PASS';
+                GRANT ALL ON glpi.* TO 'glpi'@'localhost';
+                GRANT SELECT ON mysql.time_zone_name TO 'glpi'@'localhost';
+                FLUSH PRIVILEGES;"
+      mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql mysql
+
+      sudo -u www-data php /var/www/glpi/bin/console database:install \
+        --db-host=localhost --db-name=glpi --db-user=glpi --db-password="$GLPI_DB_PASS" \
+        --default-language=pt_PT --no-interaction --reconfigure --force
+      sudo -u www-data php /var/www/glpi/bin/console database:enable_timezones --no-interaction || \
+        echo "!! could not enable timezones (non-fatal)"
+
+      # The installer creates four accounts with the vendor's well-known
+      # passwords (glpi/glpi, tech/tech, normal/normal, post-only/postonly).
+      # Same rule as every other appliance here: one documented, changeable
+      # credential -- glpi / delonix-admin -- and the three sample accounts off.
+      ADMIN_HASH=$(php -r 'echo password_hash("delonix-admin", PASSWORD_DEFAULT);')
+      mysql glpi -e "UPDATE glpi_users SET password='$ADMIN_HASH' WHERE name='glpi';
+                     UPDATE glpi_users SET is_active=0 WHERE name IN ('tech','normal','post-only');"
+
+      # ------------------------------------------------------------------
+      #  nginx + php-fpm. GLPI 11's document root is public/, never the tree.
+      # ------------------------------------------------------------------
+      cat > /etc/nginx/sites-available/glpi <<'NGINX'
+      server {
+          listen 80 default_server;
+          listen [::]:80 default_server;
+          root /var/www/glpi/public;
+          client_max_body_size 100m;
+          location / { try_files $uri /index.php$is_args$args; }
+          location ~ ^/index\.php$ {
+              include fastcgi_params;
+              fastcgi_pass unix:/run/php/php8.3-fpm.sock;
+              fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+              fastcgi_read_timeout 300;
+          }
+      }
+      NGINX
+      rm -f /etc/nginx/sites-enabled/default
+      ln -sf /etc/nginx/sites-available/glpi /etc/nginx/sites-enabled/glpi
+      sed -i 's/^;\?session.cookie_httponly.*/session.cookie_httponly = On/' /etc/php/8.3/fpm/php.ini
+      sed -i 's/^;\?memory_limit.*/memory_limit = 256M/' /etc/php/8.3/fpm/php.ini
+      nginx -t
+      systemctl enable nginx php8.3-fpm
+      systemctl restart php8.3-fpm nginx
+
+      # GLPI's scheduled tasks (mail collector, inventory housekeeping, alerts).
+      echo '* * * * * www-data /usr/bin/php /var/www/glpi/front/cron.php &>/dev/null' > /etc/cron.d/glpi
+      chmod 0644 /etc/cron.d/glpi
+
+      # ------------------------------------------------------------------
+      #  GLPI Agent, pinned and checked, pointed at the local GLPI so the
+      #  appliance inventories itself. Native inventory has to be switched on
+      #  in GLPI for the server to accept it.
+      # ------------------------------------------------------------------
+      retry "curl -fsSL --max-time 300 -o /tmp/glpi-agent.deb https://github.com/glpi-project/glpi-agent/releases/download/@GLPI_AGENT_VERSION@/glpi-agent_@GLPI_AGENT_VERSION@-1_all.deb"
+      echo "@GLPI_AGENT_SHA256@  /tmp/glpi-agent.deb" | sha256sum -c - || { echo "!! GLPI Agent checksum mismatch"; exit 1; }
+      retry "timeout 600 apt-get install -y /tmp/glpi-agent.deb"
+      rm -f /tmp/glpi-agent.deb
+      apt-mark hold glpi-agent
+      mysql glpi -e "INSERT INTO glpi_configs (context,name,value) VALUES ('inventory','enabled_inventory','1')
+                     ON DUPLICATE KEY UPDATE value='1';"
+      cat > /etc/glpi-agent/conf.d/00-delonix.cfg <<'AGENT'
+      server = http://127.0.0.1/front/inventory.php
+      # The agent's own status page is not for the network.
+      httpd-ip = 127.0.0.1
+      AGENT
+      systemctl enable glpi-agent
+
+      # ------------------------------------------------------------------
+      #  The record of what is in the image.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/delonix
+      {
+        echo "{"
+        echo "  \"glpi_version\": \"@GLPI_VERSION@\","
+        echo "  \"glpi_agent_version\": \"@GLPI_AGENT_VERSION@\","
+        echo "  \"php\": \"$(php -r 'echo PHP_VERSION;')\","
+        echo "  \"database\": \"mariadb-local\","
+        echo "  \"web_port\": 80,"
+        echo "  \"image_revision\": @IMAGE_REV@"
+        echo "}"
+      } > /etc/delonix/glpi-image.json
+      cat /etc/delonix/glpi-image.json
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+      # No build identity in a golden image: hostname, machine-id, SSH host keys.
+      echo localhost > /etc/hostname
+      cloud-init clean --logs --seed
+      truncate -s 0 /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+runcmd:
+  # The marker, and only the marker, is what the build script believes.
+  - |
+    if /root/build.sh; then
+      echo "DELONIX-GLPI-BUILD-OK" > /dev/console
+    else
+      echo "DELONIX-GLPI-BUILD-FAIL rc=$?" > /dev/console
+      tail -60 /var/log/delonix-glpi-build.log > /dev/console
+    fi
+    sync
+    poweroff

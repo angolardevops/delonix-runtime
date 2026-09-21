@@ -1,0 +1,246 @@
+#!/bin/bash
+# monitoring-vpn -- let a tenant's external hosts join a WireGuard VPN that
+# terminates on this appliance, so Zabbix monitors them over the tunnel.
+#
+#   monitoring-vpn init [--endpoint HOST[:PORT]]
+#   monitoring-vpn add  NAME [--endpoint HOST[:PORT]]   -> prints the client kit
+#   monitoring-vpn ls
+#   monitoring-vpn rm   NAME
+#   monitoring-vpn status
+#
+# One appliance is one tenant, so there is one VPN and one subnet. Everything
+# that identifies this VPN (server key, peer list, agent PSK) is generated
+# HERE, on the machine, the first time it is needed -- the image carries none
+# of it, so two VMs from the same image never share a key.
+#
+# What `add` prints is everything the tenant needs and nothing they must
+# discover: the WireGuard config, and the Zabbix agent config with the PSK
+# already in it. The host then shows up in Zabbix by itself (auto-registration,
+# host group "VPN hosts", Linux template) -- no console step.
+set -euo pipefail
+
+STATE=/etc/delonix/vpn
+WG_IF=wg0
+WG_CONF=/etc/wireguard/$WG_IF.conf
+NET_PREFIX=10.99.0
+HUB_IP=$NET_PREFIX.1
+PORT=51820
+PSK_ID=delonix-vpn
+GROUP="VPN hosts"
+TEMPLATE="Linux by Zabbix agent active"
+ZBX_API=http://127.0.0.1/api_jsonrpc.php
+ZBX_USER=${ZBX_USER:-Admin}
+ZBX_PASSWORD=${ZBX_PASSWORD:-delonix-admin}
+
+die() { echo "!! $*" >&2; exit 1; }
+[ "$(id -u)" -eq 0 ] || exec sudo -E "$0" "$@"
+
+mkdir -p "$STATE"; chmod 700 "$STATE"
+exec 9>"$STATE/.lock"; flock 9
+
+zbx() { # zbx METHOD JSON-PARAMS [TOKEN]  -> prints .result, dies on .error
+  python3 - "$@" <<'PY'
+import json, sys, urllib.request
+method, params = sys.argv[1], json.loads(sys.argv[2])
+token = sys.argv[3] if len(sys.argv) > 3 else None
+h = {"Content-Type": "application/json-rpc"}
+if token: h["Authorization"] = "Bearer " + token
+req = urllib.request.Request("http://127.0.0.1/api_jsonrpc.php",
+    json.dumps({"jsonrpc": "2.0", "method": method, "params": params, "id": 1}).encode(), h)
+r = json.load(urllib.request.urlopen(req, timeout=30))
+if "error" in r:
+    sys.exit("zabbix %s: %s" % (method, r["error"].get("data") or r["error"]))
+print(json.dumps(r["result"]))
+PY
+}
+jget() { python3 -c "import json,sys; d=json.load(sys.stdin); print($1)"; }
+
+default_endpoint() {
+  local ip
+  ip=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="src") print $(i+1)}')
+  echo "$ip"
+}
+
+configure_zabbix() {
+  # Idempotent: a marker records that the action exists, so a rerun after a
+  # partial failure resumes and a rerun after success does nothing.
+  [ -f "$STATE/zabbix.done" ] && return 0
+  local tok gid tid
+  tok=$(zbx user.login "{\"username\":\"$ZBX_USER\",\"password\":\"$ZBX_PASSWORD\"}" | jget 'd') \
+    || die "cannot log in to Zabbix as $ZBX_USER; if the admin password was changed, set ZBX_PASSWORD"
+  tok=${tok//\"/}
+  zbx autoregistration.update \
+    "{\"tls_accept\":2,\"tls_psk_identity\":\"$PSK_ID\",\"tls_psk\":\"$(cat "$STATE/agent.psk")\"}" "$tok" >/dev/null
+  gid=$(zbx hostgroup.get "{\"filter\":{\"name\":[\"$GROUP\"]}}" "$tok" | jget 'd[0]["groupid"] if d else ""')
+  if [ -z "$gid" ]; then
+    gid=$(zbx hostgroup.create "{\"name\":\"$GROUP\"}" "$tok" | jget 'd["groupids"][0]')
+  fi
+  tid=$(zbx template.get "{\"filter\":{\"host\":[\"$TEMPLATE\"]}}" "$tok" | jget 'd[0]["templateid"] if d else ""')
+  [ -n "$tid" ] || die "Zabbix template '$TEMPLATE' not found"
+  if [ "$(zbx action.get '{"filter":{"name":["Delonix VPN hosts"],"eventsource":"2"}}' "$tok" | jget 'len(d)')" = 0 ]; then
+    zbx action.create "{\"name\":\"Delonix VPN hosts\",\"eventsource\":2,\"status\":0,
+      \"filter\":{\"evaltype\":0,\"conditions\":[{\"conditiontype\":24,\"operator\":2,\"value\":\"$PSK_ID\"}]},
+      \"operations\":[{\"operationtype\":2},
+        {\"operationtype\":4,\"opgroup\":[{\"groupid\":\"$gid\"}]},
+        {\"operationtype\":6,\"optemplate\":[{\"templateid\":\"$tid\"}]}]}" "$tok" >/dev/null
+  fi
+  touch "$STATE/zabbix.done"
+}
+
+cmd_init() {
+  local endpoint=""
+  while [ $# -gt 0 ]; do
+    case $1 in --endpoint) endpoint=$2; shift 2;; *) die "init: unknown option $1";; esac
+  done
+  command -v wg >/dev/null || die "wireguard-tools is not installed"
+  if [ ! -f "$STATE/server.key" ]; then
+    umask 077
+    wg genkey > "$STATE/server.key"
+    wg pubkey < "$STATE/server.key" > "$STATE/server.pub"
+    head -c 32 /dev/urandom | xxd -p -c 64 > "$STATE/agent.psk"
+    : > "$STATE/peers.tsv"
+  fi
+  [ -n "$endpoint" ] && echo "$endpoint" > "$STATE/endpoint"
+  if [ ! -f "$WG_CONF" ]; then
+    umask 077
+    cat > "$WG_CONF" <<EOF
+[Interface]
+Address = $HUB_IP/24
+ListenPort = $PORT
+PrivateKey = $(cat "$STATE/server.key")
+EOF
+  fi
+  systemctl enable --now wg-quick@$WG_IF >/dev/null 2>&1 || true
+  ip link show "$WG_IF" >/dev/null 2>&1 || die "$WG_IF did not come up (systemctl status wg-quick@$WG_IF)"
+  configure_zabbix
+}
+
+next_ip() {
+  local i
+  for i in $(seq 2 254); do
+    grep -q "^[^	]*	$NET_PREFIX.$i	" "$STATE/peers.tsv" || { echo "$NET_PREFIX.$i"; return; }
+  done
+  die "the /24 is full (253 hosts)"
+}
+
+cmd_add() {
+  local name=${1:-}; shift || true
+  local endpoint=""
+  [ -n "$name" ] || die "add: a host NAME is required"
+  [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$ ]] || die "add: '$name' is not a valid host name"
+  while [ $# -gt 0 ]; do
+    case $1 in --endpoint) endpoint=$2; shift 2;; *) die "add: unknown option $1";; esac
+  done
+  cmd_init ${endpoint:+--endpoint "$endpoint"}
+  ! grep -q "^$name	" "$STATE/peers.tsv" || die "'$name' already exists (monitoring-vpn rm $name first)"
+
+  local ip priv pub psk ep
+  ip=$(next_ip)
+  priv=$(wg genkey); pub=$(echo "$priv" | wg pubkey); psk=$(wg genpsk)
+  ep=$(cat "$STATE/endpoint" 2>/dev/null || true)
+  if [ -z "$ep" ]; then
+    ep=$(default_endpoint)
+    echo "!! no public endpoint configured; using $ep, which is this VM's own address." >&2
+    echo "   If hosts outside connect through a different address, run:" >&2
+    echo "   monitoring-vpn init --endpoint <public-host>[:$PORT]   and re-issue this kit." >&2
+  fi
+  case $ep in *:*) ;; *) ep=$ep:$PORT;; esac
+
+  # Live first: if the kernel rejects the peer, nothing is recorded.
+  printf '%s' "$psk" > "$STATE/.psk.$$"
+  wg set "$WG_IF" peer "$pub" allowed-ips "$ip/32" preshared-key "$STATE/.psk.$$"
+  rm -f "$STATE/.psk.$$"
+  cat >> "$WG_CONF" <<EOF
+
+# $name
+[Peer]
+PublicKey = $pub
+PresharedKey = $psk
+AllowedIPs = $ip/32
+EOF
+  printf '%s\t%s\t%s\t%s\n' "$name" "$ip" "$pub" "$(date -u +%FT%TZ)" >> "$STATE/peers.tsv"
+
+  cat <<EOF
+==== Kit for $name  (VPN address $ip) ====
+
+--- 1. /etc/wireguard/wg0.conf  on the host ---
+[Interface]
+Address = $ip/32
+PrivateKey = $priv
+
+[Peer]
+PublicKey = $(cat "$STATE/server.pub")
+PresharedKey = $psk
+Endpoint = $ep
+AllowedIPs = $HUB_IP/32
+PersistentKeepalive = 25
+
+--- 2. /etc/zabbix/zabbix_agent2.conf  (the lines to set) ---
+Server=$HUB_IP
+ServerActive=$HUB_IP
+Hostname=$name
+HostMetadata=$PSK_ID
+TLSConnect=psk
+TLSAccept=psk
+TLSPSKIdentity=$PSK_ID
+TLSPSKFile=/etc/zabbix/agent.psk
+# /etc/zabbix/agent.psk contains exactly:
+$(cat "$STATE/agent.psk")
+
+--- 3. On the host ---
+  sudo apt install wireguard-tools zabbix-agent2      # or your distro's equivalent
+  sudo systemctl enable --now wg-quick@wg0 zabbix-agent2
+
+The host appears in Zabbix (group "$GROUP") within about a minute. Only
+$HUB_IP is reachable from the host: the tunnel does not route the host's
+other traffic and does not connect hosts to each other.
+EOF
+}
+
+cmd_ls() {
+  [ -s "$STATE/peers.tsv" ] || { echo "no hosts"; return; }
+  local now; now=$(date +%s)
+  printf '%-24s %-14s %s\n' NAME ADDRESS LAST-HANDSHAKE
+  while IFS=$'\t' read -r name ip pub _; do
+    hs=$(wg show "$WG_IF" latest-handshakes 2>/dev/null | awk -v k="$pub" '$1==k{print $2}')
+    if [ -z "${hs:-}" ] || [ "$hs" = 0 ]; then age="never"; else age="$((now-hs))s ago"; fi
+    printf '%-24s %-14s %s\n' "$name" "$ip" "$age"
+  done < "$STATE/peers.tsv"
+}
+
+cmd_rm() {
+  local name=${1:-}
+  [ -n "$name" ] || die "rm: a host NAME is required"
+  local line pub
+  line=$(grep "^$name	" "$STATE/peers.tsv" || true)
+  [ -n "$line" ] || die "no such host: $name"
+  pub=$(echo "$line" | cut -f3)
+  wg set "$WG_IF" peer "$pub" remove || true
+  python3 - "$WG_CONF" "$pub" <<'PY'
+import re, sys
+path, pub = sys.argv[1], sys.argv[2]
+text = open(path).read()
+blocks = re.split(r'\n(?=\n# )', text)
+kept = [b for b in blocks if ('PublicKey = ' + pub) not in b]
+open(path, 'w').write('\n'.join(kept).rstrip('\n') + '\n')
+PY
+  grep -v "^$name	" "$STATE/peers.tsv" > "$STATE/peers.tmp" || true
+  mv "$STATE/peers.tmp" "$STATE/peers.tsv"
+  echo "removed $name from the VPN. Its Zabbix host and history are kept; delete the host in Zabbix if you want them gone."
+}
+
+cmd_status() {
+  [ -f "$STATE/server.key" ] || { echo "not initialised (run: monitoring-vpn init)"; return; }
+  ip link show "$WG_IF" >/dev/null 2>&1 && echo "interface $WG_IF: up ($HUB_IP/24, udp $PORT)" || echo "interface $WG_IF: DOWN"
+  [ -f "$STATE/zabbix.done" ] && echo "zabbix auto-registration: configured" || echo "zabbix auto-registration: NOT configured"
+  echo "hosts: $(wc -l < "$STATE/peers.tsv")"
+}
+
+case ${1:-} in
+  init) shift; cmd_init "$@";;
+  add) shift; cmd_add "$@";;
+  ls) cmd_ls;;
+  rm) shift; cmd_rm "$@";;
+  status) cmd_status;;
+  *) sed -n '2,14p' "$0" | sed 's/^# \?//'; exit 2;;
+esac
