@@ -2302,6 +2302,10 @@ ingress proxy in-process.</p>
 <td>node runtime policy via <code>delonix-security-runtime</code></td>
 </tr>
 <tr>
+<td><code>cmd/hosts.rs</code>, <code>cmd/hosts_file.rs</code></td>
+<td><code>hosts sync</code> (not a stable group) and the per-state-root managed block of the host's <code>/etc/hosts</code>, shared with <code>hosts: [host]</code> on an <code>HTTPRoute</code> (ADR-0046, ADR-0048 phase 2); the recompute is <code>desired_hosts</code>/<code>sync_hosts_now</code> in <code>cmd/ingress_proxy.rs</code>, called from <code>rebuild()</code></td>
+</tr>
+<tr>
 <td><code>cmd/vmbackends.rs</code></td>
 <td>registers configured remote VM backends</td>
 </tr>

@@ -399,7 +399,7 @@ and how to tear the isolated infra down, is in
 <tr>
 <td><code>DELONIX_HOSTS_FILE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>hosts_file.<wbr>rs:hosts_path</code></a></td>
-<td>The hosts file that <code>hosts: [host]</code> on an <code>HTTPRoute</code> writes its managed block into.</td>
+<td>The hosts file that <code>hosts: [host]</code> on an <code>HTTPRoute</code> and <code>delonix hosts sync</code> write their managed block into.</td>
 <td>A file path; default <code>/etc/hosts</code>.</td>
 <td>Point it at a scratch file in an isolated run so the real <code>/etc/hosts</code> is never touched (writing it needs root).</td>
 </tr>

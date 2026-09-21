@@ -1102,6 +1102,7 @@ ingress proxy in-process.
 | `cmd/serve.rs`, `cmd/mcp.rs` | `exec` into the server binaries; `serve docker-api` in-process |
 | `cmd/dockerapi.rs` | Docker Engine API slice; `run_from_spec_file` for `__apirun` |
 | `cmd/policy.rs` | node runtime policy via `delonix-security-runtime` |
+| `cmd/hosts.rs`, `cmd/hosts_file.rs` | `hosts sync` (not a stable group) and the per-state-root managed block of the host's `/etc/hosts`, shared with `hosts: [host]` on an `HTTPRoute` (ADR-0046, ADR-0048 phase 2); the recompute is `desired_hosts`/`sync_hosts_now` in `cmd/ingress_proxy.rs`, called from `rebuild()` |
 | `cmd/vmbackends.rs` | registers configured remote VM backends |
 | `cmd/output.rs`, `cmd/po.rs` | tables/describe output, translation catalog |
 

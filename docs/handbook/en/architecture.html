@@ -1354,6 +1354,11 @@ answer "does A depend on B", and read the per-layer figures above to understand 
 <td><code>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></td>
 </tr>
 <tr>
+<td><code>hosts-sync</code></td>
+<td>marker file: <code>delonix hosts sync</code> was run, so the service names of <code>--expose</code> containers are kept in the host's <code>/etc/hosts</code> (it sits at the root, not under <code>ingress/</code>)</td>
+<td><code>hosts_sync_flag</code> in <code>cmd/ingress_proxy.rs</code></td>
+</tr>
+<tr>
 <td><code>ipam/</code></td>
 <td>per-prefix address leases</td>
 <td><code>delonix-sdn/src/ipam.rs</code></td>

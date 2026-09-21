@@ -81,8 +81,8 @@ normalised): the asset name is composed from `uname -m` as `<name>-<arch>-linux`
 architecture stops with "no prebuilt binary for <arch> yet", so build from source. Three things differ
 on aarch64: the `-v3` variant is an x86-64 microarchitecture level and does not exist there; the pinned
 static Cloud Hypervisor, the EDK2 `CLOUDHV.fd` and `hypervisor-fw` are x86-64 builds, so they are not
-downloaded and the VM backend is libvirt; and the QEMU probe asks for `qemu-system-aarch64`. The
-aarch64 release assets exist since v4.2.0 (the `build-arm64` job ran for the first time on that tag).
+downloaded (a distro-packaged `cloud-hypervisor` is still installed if the package manager has it) and the VM backend is libvirt; and the QEMU probe asks for `qemu-system-aarch64`. The
+aarch64 release assets exist since v4.2.0 (the v4.1.0 release has none).
 **Not validated:** a complete install on a real aarch64 host, and the QEMU package names per distro
 on arm64 — what has been checked is the asset-name composition against the published v4.2.0 assets.
 
