@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:f63e73d420c6754687d52f97013a60eaff3547f38bc24b47ee559d3910182f24 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:16ac2cc5b199b5914e1dadc9be3d70cd285c0991f4618a9e1db95713c841dc02 -->
 # Delonixfile e VMfile
 
 **Antes de leres:** [Clonar, construir e testar](build-and-test.md) (um binário e um state root
@@ -262,14 +262,54 @@ ficheiro.
 ### Construir
 
 ```bash
-delonix image vm build -t web:1.0 [-f VMfile] [--network] [--no-compress] [CONTEXT]
+delonix vm build [-f vm.yaml|VMfile] [-t <tag>] [--target <image>] [--network] [--no-compress] [CONTEXT]
 ```
 
-Não há `delonix vm build`; o build vive em `image vm`. Sem `-f`, um `VMfile` no contexto é apanhado
-automaticamente (tal como um `Delonixfile` ganha a um `Dockerfile`); sem `VMfile`, o mesmo comando
-corre em vez disso a receita dourada embutida (ver [Construir microVMs](microvm-setup.md)). As flags da receita
-dourada (`--k8s-version`, `--extra-package`, `--extra-run`, `--offline`, `--no-k8s`, `--cri-bin`,
-`--delonix-bin`) são **recusadas** com um VMfile, e `--network` é recusada sem um.
+O `delonix image vm build` é o mesmo comando (os dois partilham um único `BuildArgs`). Qual receita
+corre decide-se como o `docker build` decide entre ficheiros: um `-f` explícito ganha (um
+`.yaml`/`.yml` é lido como `vm.yaml`, qualquer outra coisa como `VMfile`); sem `-f`, um `vm.yaml` no
+contexto ganha a um `VMfile`, que ganha à receita dourada embutida (ver [Construir microVMs](microvm-setup.md)). As
+flags da receita dourada (`--k8s-version`, `--extra-package`, `--extra-run`, `--offline`, `--no-k8s`,
+`--cri-bin`, `--delonix-bin`) são **recusadas** com um `vm.yaml` ou um `VMfile`, e `--network` é
+recusada sem um deles.
+
+### `vm.yaml`: o front end ao estilo compose
+
+Um `VMfile` está para uma imagem de VM como um `Dockerfile` está para uma imagem de container. Um
+`vm.yaml` é o que um `compose.yaml` é para ela: nomeia as imagens de uma pasta e leva os parâmetros
+que tornam o qcow2 completo — `size`, `packages.install`, `users`, `services`, `files`, `env`,
+`cloud_init`, `run`, o que **remover** (`remove.packages/paths/users/services`, aplicado depois de
+tudo o resto para poder podar o que um pacote ou um `run:` trouxe) e `cleanup` (cache de pacotes,
+logs, histórico, `/tmp`, `machine-id`).
+
+É só um front end (`cmd/vmspec.rs`). Cada imagem compila para um builder que já existe — um `VMfile`
+sintetizado (`profile: custom`, o valor por omissão), a receita dourada (`profile: rootless|k8s`) ou um
+ficheiro existente (`build.file`) — por isso não há um segundo motor de build. Regras que vale a
+pena conhecer:
+
+- **Estrito**: uma chave desconhecida é um erro, e também o é um campo que a via escolhida não
+  consegue honrar (um `hostname:` com `profile: k8s` é recusado pelo nome, não ignorado).
+- **`${TAG}` / `${VAR:-default}`** são expandidos sobre os valores já analisados (um `${TAG}` num
+  comentário não é avaliado). O `-t` é a tag do resultado **e** o `${TAG}`.
+- **Os caminhos relativos são relativos à pasta do próprio `vm.yaml`**, diga o contexto o que disser.
+- **`packages` precisa de `network: true`**: um build que chega à internet dá uma imagem diferente
+  num dia diferente, por isso é opt-in e a recusa di-lo.
+- `remove.paths` tem de ser absoluto, sem `..`, e nunca um directório de sistema de topo.
+
+**Appliances** (`appliance:`). Algumas imagens não se descrevem como edições a uma cloud image: o
+instalador do fabricante tem de correr (o Proxmox a partir do seu ISO, o OpenStack a puxar ~20 GiB de
+containers). Para essas a receita nomeia um **builder**, não um caminho: `appliance: {builder:
+proxmox, args: [pve, "9.2-1"]}` corre `scripts/appliances/build-proxmox.sh` (encontrado na pasta do
+`vm.yaml` ou em qualquer pasta acima dela) com um `OUT_DIR` isolado junto ao store de imagens, toma o
+único `*.qcow2` que ele deixa (um `.raw.qcow2` é ignorado), e regista-o com a semântica do `image vm
+import` — `--appliance` a menos que `cloud_init: true`. Como o nome é validado (`[a-z0-9-]`) e
+resolvido dentro de `scripts/appliances/`, um `vm.yaml` não consegue fazer o host correr um ficheiro
+à sua escolha; `args` e `env` também são validados (sem `-` inicial, sem `PATH`/`LD_*`/`BASH_ENV`…).
+Os campos que um builder decide por si (`packages`, `users`, `hostname`, `network`, `profile`…) são
+recusados pelo nome.
+
+As pastas por distro em `images/` (primeiro `images/ubuntu/`) levam cada uma um `vm.yaml`, o ficheiro
+cloud-init, os artefactos e um README.
 
 ### Instruções
 
