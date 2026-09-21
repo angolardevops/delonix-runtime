@@ -552,13 +552,47 @@ meant to be a working recipe, and the <code>parseia_o_scaffold_que_escrevemos</c
 Two things to correct by hand in the "Next:" hint it prints: the flag is <code>vm create --disk</code>, not
 <code>--disk-image</code>; and see the <code>CLOUDINIT</code> note below about the file name.</p>
 <h3 id="building">Building<a class="hanchor" href="#building" aria-label="#">#</a></h3>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix image vm build -t web:1.0 [-f VMfile] [--network] [--no-compress] [CONTEXT]
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm build [-f vm.yaml|VMfile] [-t &lt;tag&gt;] [--target &lt;image&gt;] [--network] [--no-compress] [CONTEXT]
 </code></pre></div>
-<p>There is no <code>delonix vm build</code>; the build lives under <code>image vm</code>. Without <code>-f</code>, a <code>VMfile</code> in the
-context is picked up automatically (like a <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> beating a <code>Dockerfile</code>); with no <code>VMfile</code>,
-the same command runs the built-in golden recipe instead (see <a href="microvm-setup.html">Building microVMs</a>). The
+<p><code>delonix image vm build</code> is the same command (both share one <code>BuildArgs</code>). Which recipe runs is
+decided like <code>docker build</code> decides between files: an explicit <code>-f</code> wins (a <code>.yaml</code>/<code>.yml</code> is read
+as a <code>vm.yaml</code>, anything else as a <code>VMfile</code>); with no <code>-f</code>, a <code>vm.yaml</code> in the context beats a
+<code>VMfile</code>, which beats the built-in golden recipe (see <a href="microvm-setup.html">Building microVMs</a>). The
 golden-recipe flags (<code>--k8s-version</code>, <code>--extra-package</code>, <code>--extra-run</code>, <code>--offline</code>, <code>--no-k8s</code>,
-<code>--cri-bin</code>, <code>--delonix-bin</code>) are <strong>refused</strong> with a VMfile, and <code>--network</code> is refused without one.</p>
+<code>--cri-bin</code>, <code>--delonix-bin</code>) are <strong>refused</strong> with a <code>vm.yaml</code> or a <code>VMfile</code>, and <code>--network</code> is
+refused without one of them.</p>
+<h3 id="vmyaml-the-compose-style-front-end"><code>vm.yaml</code>: the compose-style front end<a class="hanchor" href="#vmyaml-the-compose-style-front-end" aria-label="#">#</a></h3>
+<p>A <code>VMfile</code> is to a VM image what a <code>Dockerfile</code> is to a container image. A <code>vm.yaml</code> is what a
+<code>compose.yaml</code> is to it: it names the images of a folder and carries the parameters that make the
+qcow2 complete — <code>size</code>, <code>packages.install</code>, <code>users</code>, <code>services</code>, <code>files</code>, <code>env</code>, <code>cloud_init</code>,
+<code>run</code>, what to <strong>remove</strong> (<code>remove.packages/paths/users/services</code>, applied after everything else so
+it can prune what a package or a <code>run:</code> pulled in) and <code>cleanup</code> (package cache, logs, history,
+<code>/tmp</code>, <code>machine-id</code>).</p>
+<p>It is a front end only (<code>cmd/vmspec.rs</code>). Each image compiles to a builder that already exists —
+a synthesised <code>VMfile</code> (<code>profile: custom</code>, the default), the golden recipe (<code>profile: rootless|k8s</code>)
+or an existing file (<code>build.file</code>) — so there is no second build engine. Rules worth knowing:</p>
+<ul>
+<li><strong>Strict</strong>: an unknown key is an error, and so is a field the chosen route cannot honour (a
+  <code>hostname:</code> with <code>profile: k8s</code> is refused by name, not ignored).</li>
+<li><strong><code>${TAG}</code> / <code>${VAR:-default}</code></strong> are expanded on the parsed values (a <code>${TAG}</code> in a comment is not
+  evaluated). <code>-t</code> is the tag of the result <strong>and</strong> <code>${TAG}</code>.</li>
+<li><strong>Relative paths are relative to the <code>vm.yaml</code>'s own folder</strong>, whatever the context says.</li>
+<li><strong><code>packages</code> needs <code>network: true</code></strong>: a build that reaches the internet gives a different image on
+  a different day, so it is opt-in and the refusal says so.</li>
+<li><code>remove.paths</code> must be absolute, without <code>..</code>, and never a top-level system directory.</li>
+</ul>
+<p><strong>Appliances</strong> (<code>appliance:</code>). Some images cannot be described as edits to a cloud image: the
+vendor's installer has to run (Proxmox from its ISO, OpenStack pulling ~20 GiB of containers).
+For those the recipe names a <strong>builder</strong>, not a path: <code>appliance: {builder: proxmox, args: [pve,
+"9.2-1"]}</code> runs <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/appliances/build-proxmox.sh" target="_blank" rel="noopener"><code>scripts/appliances/build-proxmox.sh</code></a> (found in the <code>vm.yaml</code>'s folder or any
+folder above it) with an isolated <code>OUT_DIR</code> next to the image store, takes the one <code>*.qcow2</code> it
+leaves (a <code>.raw.qcow2</code> is ignored), and registers it with <code>image vm import</code> semantics —
+<code>--appliance</code> unless <code>cloud_init: true</code>. Because the name is validated (<code>[a-z0-9-]</code>) and resolved
+inside <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>, a <code>vm.yaml</code> cannot make the host run a file of its choosing; <code>args</code>
+and <code>env</code> are validated too (no leading <code>-</code>, no <code>PATH</code>/<code>LD_*</code>/<code>BASH_ENV</code>…). The fields a builder
+decides itself (<code>packages</code>, <code>users</code>, <code>hostname</code>, <code>network</code>, <code>profile</code>…) are refused by name.</p>
+<p>The per-distro folders under <code>images/</code> (<code>images/ubuntu/</code> first) each carry a <code>vm.yaml</code>, the
+cloud-init file, the artefacts and a README.</p>
 <h3 id="instructions">Instructions<a class="hanchor" href="#instructions" aria-label="#">#</a></h3>
 <p><code>parse</code> is fail-closed: an unknown instruction is an error naming the supported set. Only <code>FROM</code>
 may come first. <code>\</code> continuations are joined; a <code>#</code> starts a comment only at the start of a line
@@ -884,6 +918,7 @@ VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cl
 <li><a href="#where-the-code-lives_1">Where the code lives</a></li>
 <li><a href="#scaffold">Scaffold</a></li>
 <li><a href="#building">Building</a></li>
+<li><a href="#vmyaml-the-compose-style-front-end">vm.yaml: the compose-style front end</a></li>
 <li><a href="#instructions">Instructions</a></li>
 <li><a href="#what-from-accepts">What FROM accepts</a></li>
 <li><a href="#what-a-stage-is-and-where-the-result-lands">What a stage is, and where the result lands</a></li>
