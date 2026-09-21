@@ -109,7 +109,7 @@ PAGES = [
     ("setup", ["environment.md", "build-and-test.md"]),
     ("architecture", ["project-structure.md", "architecture.md", "crates.md", "system-design-interview.md"]),
     ("images", ["delonixfile-and-vmfile.md", "microvm-setup.md"]),
-    ("operate", ["troubleshooting.md"]),
+    ("operate", ["troubleshooting.md", "service-names-and-hosts.md"]),
     ("contributing", ["coding-conventions.md", "adding-a-kind.md", "contributing-workflow.md",
                       "releases-and-stability.md", "publishing-docs.md"]),
     ("reference", ["cloud-native-standards.md", "environment-variables.md", "glossary.md"]),

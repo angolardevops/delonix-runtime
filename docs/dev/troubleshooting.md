@@ -160,4 +160,4 @@ already states.
 
 ---
 
-**Next:** [Coding conventions](coding-conventions.md) — how code in this repository must be written, each rule tagged with the gate or decision behind it.
+**Next:** [How names reach `/etc/hosts`](service-names-and-hosts.md) — the block that publishes service names and route hosts, and why it refuses. Then [Coding conventions](coding-conventions.md) — how code in this repository must be written, each rule tagged with the gate or decision behind it.

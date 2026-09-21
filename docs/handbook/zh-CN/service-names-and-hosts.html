@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Contribution workflow · Delonix Runtime — 贡献者手册</title>
+<title>How names reach /etc/hosts · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -200,207 +200,241 @@ th:first-child,td:first-child{white-space:nowrap}
   <a class="brand" href="index.html" aria-label="手册首页"><span class="mark">D</span><span class="word">Delonix Runtime</span><span class="sep"></span><span class="sub">贡献者手册</span></a>
   <button class="searchbtn" type="button"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><span class="label">搜索手册…</span><kbd>Ctrl K</kbd></button>
   <div class="actions">
-    <select class="lang" id="lang" aria-label="Language"><option value="../en/contributing-workflow.html">EN · English</option><option value="../pt-AO/contributing-workflow.html">PT-AO · Português (Angola)</option><option value="../fr-FR/contributing-workflow.html">FR-FR · Français</option><option value="../zh-CN/contributing-workflow.html" selected>ZH-CN · 简体中文</option></select>
+    <select class="lang" id="lang" aria-label="Language"><option value="../en/service-names-and-hosts.html">EN · English</option><option value="../pt-AO/service-names-and-hosts.html">PT-AO · Português (Angola)</option><option value="../fr-FR/service-names-and-hosts.html">FR-FR · Français</option><option value="../zh-CN/service-names-and-hosts.html" selected>ZH-CN · 简体中文</option></select>
     <button class="iconbtn themebtn" type="button" aria-label="切换配色主题" title="切换配色主题"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 3a9 9 0 0 0 0 18z" fill="currentColor"/></svg></button>
     <a class="iconbtn ghbtn" href="https://github.com/angolardevops/delonix-runtime" target="_blank" rel="noopener" aria-label="GitHub" title="GitHub"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.41c.58.1.79-.25.79-.56v-2c-3.2.7-3.87-1.37-3.87-1.37-.53-1.33-1.28-1.69-1.28-1.69-1.05-.72.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.77 2.7 1.26 3.36.96.1-.75.4-1.26.73-1.55-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.58.23 2.75.11 3.04.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 12 .5z"/></svg></a>
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a class="on" aria-current="page" href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a class="on" aria-current="page" href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
 <main><div class="content">
-<p class="kicker">贡献</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="contribution-workflow">Contribution workflow</h1>
-<p><strong>Before you read:</strong> <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> (the gates) and <a href="coding-conventions.html">Coding conventions</a> (what reviewers check).</p>
-<p>This page is the "how we work" part of the handbook: where to make changes, which rules the gates
-enforce and why, when a change needs a written decision first, and how to send it. The gates
-themselves, and how to run them, are in <a href="build-and-test.html">Clone, build and test</a>. After it you
-can take a change from an issue to a merged pull request without breaking a gate or another
-session's work.</p>
-<p>For anything non-trivial — a new command, a new manifest Kind, a change to namespace or cgroup
-setup, a new backend — open an issue first and agree on the approach. It saves a rewrite.</p>
-<h2 id="start-from-the-latest-tag-not-from-memory">Start from the latest tag, not from memory<a class="hanchor" href="#start-from-the-latest-tag-not-from-memory" aria-label="#">#</a></h2>
-<p>Before you write code:</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git fetch --tags origin
-git describe --tags --abbrev=0 origin/main          # the newest release
-git log --oneline &quot;$(git describe --tags --abbrev=0 origin/main)&quot;..origin/main | wc -l   # how far main is past it
-git log --oneline -- &lt;path you will touch&gt;          # what was already decided, fixed or removed there
-</code></pre></div>
-<p>Reading the history of the area you touch is not ceremony: a lot of this codebase is a record of
-things that were tried, measured and changed. What was already decided or removed is not redone
-out of unawareness. The long-form record lives in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> (organised by
-area) and in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a>.</p>
-<h2 id="one-worktree-per-task">One worktree per task<a class="hanchor" href="#one-worktree-per-task" aria-label="#">#</a></h2>
-<p>Several people and tools often work on the same clone at the same time. Editing in a shared
-checkout has already cost real work here: edits absorbed into someone else's commit, <code>HEAD</code>
-switching branches in the middle of a task, and a green <code>cargo test</code> on a dirty tree that did not
-prove <code>HEAD</code> compiled. So every task gets its own git worktree and branch, created from
-<code>origin/main</code>:</p>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git fetch origin
-git worktree add -b &lt;topic&gt;/&lt;task&gt; &lt;workspace&gt;/.worktrees/delonix-runtime/&lt;task&gt; origin/main
-cd &lt;workspace&gt;/.worktrees/delonix-runtime/&lt;task&gt;
+<p class="kicker">运维与排障</p>
+<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="how-names-reach-etchosts">How names reach <code>/etc/hosts</code></h1>
+<p><strong>Before you read:</strong> <a href="architecture.html#state-on-disk">Architecture</a> (state root, <code>httproute/</code>), <a href="environment-variables.html">Environment variables</a> (<code>DELONIX_ROOT</code>, <code>DELONIX_HOSTS_FILE</code>) and <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> (isolating the engine's state).</p>
+<p>A workload on the SDN is not reachable from the host by its IP; the way in is the L7 proxy, which the
+slirp forward publishes on loopback. So a browser on the operator's machine only opens
+<code>http://app.example.pt:8080/</code> once the name <code>app.example.pt</code> resolves to <code>127.0.0.1</code> (or to an
+address the route reserved). The engine can write that mapping for you. This page explains the one
+mechanism behind it, the two ways a name gets into it, and what each refuses to do. Everything
+below is read from the files named next to it; the decisions are ADR-0046 (<code>hosts: [host]</code>) and
+ADR-0048 (<code>hosts sync</code>), which you should read for the <em>why</em>.</p>
+<h2 id="one-block-per-state-root">One block per state root<a class="hanchor" href="#one-block-per-state-root" aria-label="#">#</a></h2>
+<p>All of it lives in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a>. The engine never rewrites the
+hosts file: it owns <strong>one delimited block</strong> and leaves every other byte alone.</p>
+<div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text"># BEGIN delonix 3fa2c1d0 (managed — do not edit)
+127.0.0.1	app.example.pt
+127.0.0.1	web.default.svc.delonix.internal
+# END delonix 3fa2c1d0
 </code></pre></div>
 <ul>
-<li><strong>Never put a worktree in <code>/tmp</code>.</strong> Many systems empty <code>/tmp</code> on boot; a reboot mid-task takes the
-  uncommitted work, and can leave half-written objects in the shared <code>.git</code>. Use a persistent
-  directory outside the repository (the convention here is a <code>.worktrees/</code> directory next to the
-  repositories), so no <code>grep -r</code>, <code>docker build</code> context or gate script picks it up.</li>
-<li><strong>Commit and push early</strong>, at every step that passes its checks. A persistent worktree survives a
-  reboot; a pushed branch survives everything else.</li>
-<li><strong>Stage files by name</strong>: <code>git add &lt;file&gt; &lt;file&gt;</code>, never <code>git add -A</code>, <code>-u</code> or <code>.</code>. Check
-  <code>git branch --show-current</code> and recognise every entry of <code>git status --short</code> as yours before
-  committing.</li>
-<li><strong>Never <code>git checkout -- &lt;path&gt;</code></strong> in a tree someone else may be using: it reverts to <code>HEAD</code>
-  without a stash and destroys their uncommitted work.</li>
-<li><strong>Rebase, do not merge</strong>, when your push is rejected for divergence: <code>git pull --rebase</code>. The
-  history is linear.</li>
-<li><strong>When the task is done, remove both</strong> the worktree and the branch — the branch survives
-  <code>worktree remove</code>, and that is how stale branches pile up:</li>
+<li><strong>The id names the state root.</strong> <code>root_id()</code> is an FNV-1a hash of <code>state_root()</code>, truncated to 32
+  bits and printed as eight hex digits. It is a hand-rolled hash on purpose: <code>DefaultHasher</code> is not
+  promised stable, and a block orphaned by a hash change is a name that never goes away. Two roots
+  on one machine (an isolated root next to the real one; root and a rootless user) each own their
+  own block, so neither erases the other's names when it rebuilds.</li>
+<li><strong>The block is rewritten whole</strong> (<code>block</code>, <code>render</code>). Entries are lowercased, sorted and
+  deduplicated, and <code>render</code> is pure: it takes the existing text and the wanted entries and returns
+  the new text, so the cases that matter are unit tests. A name that no longer has a source simply
+  is not in the next rewrite; there is nothing to reap. An empty list removes the block.</li>
+<li><strong>The block is rewritten in place</strong>, where it was. Two roots' blocks do not swap places at every
+  sync. Lines keep their own endings (CRLF and a missing final newline are preserved).</li>
 </ul>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git worktree remove &lt;path&gt;
-git branch -D &lt;topic&gt;/&lt;task&gt;
-git worktree list
-</code></pre></div>
-<h2 id="version-alignment">Version alignment<a class="hanchor" href="#version-alignment" aria-label="#">#</a></h2>
-<p>The <code>version</code> in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> is load-bearing: it selects which release <code>delonix-cri</code> is
-downloaded from, it is reported as the Docker API <code>ServerVersion</code>, it is recorded in every backup,
-and the release workflow compares it with the built binary. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (CI job
-<code>version</code>) allows exactly two states:</p>
+<h3 id="what-render-refuses">What <code>render</code> refuses<a class="hanchor" href="#what-render-refuses" aria-label="#">#</a></h3>
+<p>Each of these is an <code>Error::Invalid</code> returned <em>before</em> any write, so the file is untouched:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Why it is refused</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A wanted name already has an entry <strong>outside</strong> this root's block (a hand-written line, or another root's block)</td>
+<td>The operator, or another root, wrote that line. A second answer for the same name would silently change where it points. Comments that merely mention the name do not count.</td>
+</tr>
+<tr>
+<td>One name with <strong>two different addresses</strong> in the same rewrite</td>
+<td>Two routes claiming it from different pools: the resolver would take whichever line it read first.</td>
+</tr>
+<tr>
+<td>This root's block has a <code># BEGIN</code> line but <strong>no <code># END</code></strong></td>
+<td>Usually a hand edit. Treating "up to the end of the file" as the block would erase the hand-written lines and other roots' blocks that follow. The message tells you which line to restore.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="how-it-writes-sync_at">How it writes (<code>sync_at</code>)<a class="hanchor" href="#how-it-writes-sync_at" aria-label="#">#</a></h3>
 <ol>
-<li><strong>Equal to the newest tag the commit contains</strong> — all ordinary work. Do not bump the version in
-   a feature PR, and do not use a <code>-dev</code> suffix (it would send the <code>delonix-cri</code> download to a
-   release that does not exist).</li>
-<li><strong>Greater, only in the release commit</strong>, together with <code>docs/releases/v&lt;version&gt;.md</code>.</li>
+<li>Read the file; <code>render</code>; if the result equals what was read, <strong>return without writing</strong>. This is
+   why a manifest that does not use <code>hosts:</code> never needs root.</li>
+<li>Resolve symlinks (<code>canonicalize</code>), so a symlinked hosts file is edited through the link and the
+   link is not replaced by a regular file.</li>
+<li>Take an exclusive <code>flock</code> on <code>.hosts.delonix.lock</code> beside the target, re-read, and re-render if
+   the file changed meanwhile. Two writers must not interleave a read-modify-write.</li>
+<li>Write a temporary file <code>.hosts.delonix.&lt;pid&gt;.&lt;nanos&gt;</code> beside the target, opened with
+   <code>create_new</code> (<code>O_EXCL</code>): a name nobody can guess that cannot be pre-created as a symlink to
+   redirect the write. Copy the target's permissions, <code>sync_all</code> (a crash between the rename and the
+   data reaching disk must not leave an empty name→address map), then <code>rename</code> over the target.</li>
 </ol>
-<p>It also fails a branch that <strong>does not contain the newest tag</strong>: the branch started before that
-release, and merging it as-is would undo what the release published. Rebase onto <code>origin/main</code>.</p>
-<p>Between releases, <code>delonix --version</code> tells builds apart by commit and distance
-(<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>), because two builds with the same version number are
-not the same build.</p>
-<h2 id="language-english-in-the-code-lang-01">Language: English in the code (LANG-01)<a class="hanchor" href="#language-english-in-the-code-lang-01" aria-label="#">#</a></h2>
-<p>Identifiers, comments and user-facing messages are written in <strong>English</strong>. Portuguese reaches the
-operator only through the translation catalogue:</p>
+<p>The engine does not test "am I root?". It tries the write and, on <code>PermissionDenied</code>, returns an
+error that prints the exact block to paste. An unprivileged run therefore stops with the block on
+the screen; it does not skip the name silently. (If the lock file cannot be created the lock is
+simply not held; the write then fails with the same message.)</p>
+<h2 id="where-the-names-come-from">Where the names come from<a class="hanchor" href="#where-the-names-come-from" aria-label="#">#</a></h2>
+<p>There are two inputs, and they end up in the same block through the same function
+(<code>sync</code> in <code>hosts_file.rs</code>), called from <code>rebuild</code> in <code>cmd/ingress_proxy.rs</code>.</p>
+<pre class="mermaid">graph LR
+    A[&quot;HTTPRoute hosts: [host]&lt;br/&gt;VM expose[].hosts&quot;] --&gt; M[&quot;manual.json&lt;br/&gt;published_hosts&quot;]
+    C[&quot;container run --expose&quot;] --&gt; U[&quot;auto.json&lt;br/&gt;AutoRoute list&quot;]
+    M --&gt; D[&quot;desired_hosts&quot;]
+    U --&gt;|&quot;only if hosts-sync marker exists&quot;| D
+    D --&gt; R[&quot;rebuild → hosts_file::sync&quot;]
+    S[&quot;delonix hosts sync&quot;] --&gt;|&quot;writes the marker, then&quot;| N[&quot;sync_hosts_now&quot;]
+    N --&gt; R
+    R --&gt; F[&quot;# BEGIN delonix … # END&quot;]
+</pre>
+<h3 id="path-a-hosts-host-on-a-route-adr-0046">Path A: <code>hosts: [host]</code> on a route (ADR-0046)<a class="hanchor" href="#path-a-hosts-host-on-a-route-adr-0046" aria-label="#">#</a></h3>
+<p><code>HttpRouteSpec.hosts</code> (<code>cmd/httproute.rs</code>) accepts one value today, <code>host</code> (<code>HOSTS_TARGETS</code>);
+anything else is refused at validation, and the message says <code>containers</code> needs ADR-0047 and <code>guest</code>
+is planned. When a route lists <code>host</code>, <code>apply</code> records one <code>PublishedHost { host, source, addr }</code> per
+rule host in the route's manual config (<code>published_hosts</code>, in <code>&lt;root&gt;/httproute/manual.json</code>, or
+<code>httproute-host/</code> for a route served by the host-netns proxy — see <code>Where</code> in <code>ingress_proxy.rs</code>).
+<code>source</code> is the document that asked, so the reconciler can tell whose name it is, and <code>remove_for_prune</code>
+can drop exactly that document's names.</p>
+<p>A <code>VirtualMachine</code> reaches the same path through <code>spec.expose[]</code> (<code>cmd/vm_expose.rs</code>): the sugar
+lowers at load into a synthetic <code>HTTPRoute</code> named <code>&lt;vm&gt;-expose</code>, and <code>expose[].hosts</code> is copied onto
+it. The route publishes one list for all its names, so every <code>expose</code> entry must carry the same
+<code>hosts</code>; a difference is an error, covered by
+<code>hosts_are_carried_to_the_route_and_must_agree_across_entries</code>.</p>
+<p><strong>The address</strong> is <code>127.0.0.1</code> unless the route has <code>spec.pool</code>. Then <code>apply</code> reserves one address
+from that <code>kind: IPPool</code> (<code>cmd/ippool.rs</code>: <code>peek</code>, <code>claim_moving</code>, <code>address_present</code>) and the name
+points at it. Two conditions worth knowing: the address must already be on an interface of the host
+(the apply stops and suggests <code>ip addr add … dev lo</code>; the engine adding it, <code>announce: l2</code>, is not
+built), and the reservation is looked at <em>before</em> it is taken so a failed apply does not leave a
+lease held. <strong>The port is not in the hosts file</strong>: a hosts file cannot carry one, so the URL you
+open still has the route's entrypoint port.</p>
+<h3 id="path-b-delonix-hosts-sync-adr-0048-phase-2">Path B: <code>delonix hosts sync</code> (ADR-0048, phase 2)<a class="hanchor" href="#path-b-delonix-hosts-sync-adr-0048-phase-2" aria-label="#">#</a></h3>
+<p><code>cmd/hosts.rs</code>. The standard service name of a container registered with <code>container run --expose</code> is
+<code>&lt;name&gt;.&lt;ns&gt;.svc.delonix.internal</code> (<code>AutoRoute::fqdn</code>, which calls
+<code>delonix_sdn::infra::service_fqdn</code>). Those registrations are <code>AutoRoute { name, namespace, ip, port }</code>
+entries in <code>&lt;root&gt;/httproute/auto.json</code>. <code>hosts sync</code> is an explicit opt-in:</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>delonix hosts sync --print</code></td>
+<td>Prints the block that would be written (<code>hosts_block_now</code>) and touches nothing, so it needs no root.</td>
+</tr>
+<tr>
+<td><code>delonix hosts sync</code></td>
+<td>Writes the marker <code>&lt;root&gt;/hosts-sync</code>, then rewrites the block (<code>sync_hosts_now</code>). If the write is refused the marker is removed again, so a failed first run does not leave later <code>--expose</code> runs warning about a block nobody accepted.</td>
+</tr>
+<tr>
+<td><code>delonix hosts sync --off</code></td>
+<td>Removes the marker and rewrites the block.</td>
+</tr>
+</tbody>
+</table></div>
+<p>Once the marker exists, <code>desired_hosts</code> includes the auto-routes' names, and <code>container run --expose</code>
+(<code>auto_register</code>) and <code>container rm</code> (<code>auto_deregister</code>) rebuild the block on their own. Auto names
+always point at <code>127.0.0.1</code>; a container's <code>--expose</code> has no pool. The <code>hosts:</code> names of declared
+routes are <strong>not</strong> published by <code>hosts sync</code> (their own opt-in wins), and <code>--off</code> therefore removes
+only the auto names: names asked for by a route's <code>hosts: [host]</code> stay in the block. The command's
+own message ("service names removed") is about the former.</p>
+<h3 id="two-kinds-of-name-two-failure-policies">Two kinds of name, two failure policies<a class="hanchor" href="#two-kinds-of-name-two-failure-policies" aria-label="#">#</a></h3>
+<p><code>desired_hosts</code> returns a pair: names a <strong>document asked for</strong> (<code>strict</code>) and names <strong>published by
+<code>hosts sync</code></strong>. <code>rebuild</code> calls <code>hosts_file::sync</code> and, if it fails:</p>
 <ul>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> — <code>po::t("…")</code> for fixed strings, <code>po::tf("… {name} …",
-  &amp;[("name", value)])</code> for interpolated ones (named placeholders, because a translation may reorder
-  them). CLI <code>--help</code> text is translated at runtime by <code>po::translate_help</code>.</li>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> — the Portuguese entries, embedded in the binary and
-  selected with <code>--l18n pt</code> or <code>DELONIX_L18N=pt</code>.</li>
+<li>with <strong>no</strong> strict names at all, it only prints <code>warning: …</code> (an unprivileged <code>container run
+  --expose</code> must not fail because <code>/etc/hosts</code> needs root);</li>
+<li>with <strong>any</strong> strict name present, it returns the error and the apply fails.</li>
 </ul>
-<p>A missing catalogue entry degrades to English; a Portuguese string written directly in the code is a
-bug. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> (CI job <code>lang</code>) counts the Portuguese still left in identifiers,
-comments and messages against <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a>. It is a <strong>ratchet</strong>, not a ceiling: it
-fails when a count rises (new Portuguese entered) <strong>and</strong> when it falls without the baseline being
-lowered. When you translate something, run <code>python3 scripts/lang_ratchet.py --update</code> and commit the
-new baseline <strong>in the same commit</strong> as the translation. Tests in the CLI crate also check that
-command help has a Portuguese entry — add one when you add a command or flag.</p>
-<h2 id="architecture-rules-the-gates-enforce">Architecture rules the gates enforce<a class="hanchor" href="#architecture-rules-the-gates-enforce" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (CI job <code>arch</code>) enforces the structure decided in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>. The layer of each crate
-and the allowed direction are listed in <a href="architecture.html">Architecture</a>. What it means for
-a change:</p>
-<ul>
-<li><strong>The engine knows no consumer.</strong> No name of any product, platform, control plane, console or
-  agent that uses the engine — nor tenant, account, plan or billing — in <code>crates/</code>, <code>bins/</code>,
-  <code>proto/</code> or the manifests, comments included. A requirement that comes from a consumer is written
-  as the generic capability it is, in the engine's own vocabulary, and only enters if it makes sense
-  for any client. History that needs external names lives in <code>docs/</code>, never in code.</li>
-<li><strong>Dependencies point inward.</strong> Foundation depends only on foundation; contexts do not depend on
-  adapters; adapters and providers do not depend on interfaces; a binary composes <strong>one</strong> interface.</li>
-<li><strong>The directory is the layer.</strong> A crate lives under <code>crates/&lt;layer&gt;/</code> matching its entry in the
-  <code>LAYERS</code> table. A new crate enters <code>LAYERS</code> and the right directory in the same commit.</li>
-<li><strong>Dependency versions live only in the root</strong> <code>[workspace.dependencies]</code>; a member crate writes
-  <code>{ workspace = true, features = [...] }</code> and nothing else.</li>
-<li><strong>Exceptions name the phase that removes them.</strong> An exception without a phase fails, and so does
-  an exception that no longer applies.</li>
-<li><strong>Debt ratchets</strong> — for example <code>self_exec_sites</code> (a library re-running the engine's own binary
-  instead of calling a function), <code>library_prints</code> (<code>println!</code>/<code>eprintln!</code> in a library crate —
-  libraries emit <code>tracing</code>, interfaces print), <code>env_writes</code> (<code>env::set_var</code>/<code>remove_var</code>) and
-  <code>shared_error_imports</code> (an adapter or provider using the shared <code>Error</code> as its own instead of a
-  crate error that converts into it). The current list is generated:</li>
-</ul>
-<!-- dev-docs:begin ratchets -->
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> keeps <strong>5 debt ratchets</strong> (baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>):</p>
-<ul>
-<li><code>self_exec_sites</code></li>
-<li><code>library_prints</code></li>
-<li><code>env_writes</code></li>
-<li><code>shared_error_imports</code></li>
-<li><code>raw_error_variant_matches</code></li>
-</ul>
-<!-- dev-docs:end ratchets -->
-<p>Same semantics as the language ratchet (<code>--list</code>, <code>--update</code>).</p>
-<p>Beyond what the gate can see, three principles decide reviews: <strong>daemonless</strong> (a new resident
-process needs an ADR with evidence of what systemd units, timers or socket activation could not
-do), <strong>rootless-first</strong> (privilege is an explicit, announced opt-in, never a silent default), and
-<strong>no silent failure</strong> (a flag that is accepted and ignored is worse than a flag that does not exist
-— refuse it with a clear error instead).</p>
-<h2 id="when-to-write-an-adr">When to write an ADR<a class="hanchor" href="#when-to-write-an-adr" aria-label="#">#</a></h2>
-<p>Write an Architecture Decision Record in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> <strong>before</strong> the code when a change moves a
-structural boundary, for example:</p>
-<ul>
-<li>a new backend or provider (a hypervisor, a storage system), or a new port;</li>
-<li>a new external dependency in an engine crate, or a new daemon or resident process;</li>
-<li>a new privilege boundary — which also needs a GO/NO-GO spike first;</li>
-<li>a change to the node contract, the manifest schema's stability, or the layer structure.</li>
-</ul>
-<p>A routine feature inside an existing boundary does not need one. Format and the current list are in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>: one file per decision, <code>NNNN-title.md</code>, in English.
-<strong>Accepted ADRs are never rewritten</strong> — a new ADR supersedes them.</p>
-<h2 id="adding-or-changing-a-cli-command">Adding or changing a CLI command<a class="hanchor" href="#adding-or-changing-a-cli-command" aria-label="#">#</a></h2>
-<ul>
-<li><strong>Wire every entry point.</strong> Several commands are reachable by more than one path (for example
-  <code>delonix vm pull</code> and <code>delonix image vm pull</code>). Change all of them, then check each one with the
-  binary you built — including shell completion, because the <code>clap</code> declaration you edited may
-  not be the one the user's path parses. The completion engine can be probed directly;
-  <code>_CLAP_COMPLETE_INDEX</code> is the position of the word being completed:</li>
-</ul>
-<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">COMPLETE=bash _CLAP_COMPLETE_INDEX=3 ./target/debug/delonix -- delonix image vm &#x27;&#x27;
+<p>Read that condition carefully: it looks at whether strict names exist in the block, not at which
+name caused the failure. So while a route with <code>hosts: [host]</code> is declared, a failing write caused
+only by an auto name also fails the operation that triggered the rebuild.</p>
+<h2 id="running-it-as-root-sudo">Running it as root: <code>sudo</code><a class="hanchor" href="#running-it-as-root-sudo" aria-label="#">#</a></h2>
+<p><code>delonix hosts sync</code> calls <code>cmd::vmbridge::adopt_invoking_user_root()</code> first. Under <code>sudo</code> the state
+root would be root's (<code>/var/lib/delonix</code>), which has no registrations, and the command would publish
+zero names instead of the invoking user's. The function reads <code>SUDO_USER</code>, looks its home up with
+<code>getent passwd</code>, and sets <code>DELONIX_ROOT</code> to <code>&lt;home&gt;/.local/share/delonix</code>. An explicit <code>DELONIX_ROOT</code>
+wins, and outside <code>sudo</code> nothing changes. The block's id is the hash of the resulting root, so
+<code>sudo delonix hosts sync</code> and the user's own <code>delonix container run --expose</code> agree on the same
+block.</p>
+<h2 id="testing-it-without-touching-etchosts">Testing it without touching <code>/etc/hosts</code><a class="hanchor" href="#testing-it-without-touching-etchosts" aria-label="#">#</a></h2>
+<p>Set <code>DELONIX_HOSTS_FILE</code> (read by <code>hosts_path()</code>) and isolate the state, as
+<a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> describes. Path B needs no proxy and no
+container to <em>write</em> the block, only the registration file, so you can fabricate it:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">S=$(mktemp -d)                                   # or your scratch directory
+export DELONIX_ROOT=$S/root DELONIX_NET_RUNTIME_DIR=$S/run DELONIX_HOSTS_FILE=$S/hosts
+mkdir -p &quot;$DELONIX_ROOT/httproute&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
+printf &#x27;127.0.0.1\tlocalhost\n&#x27; &gt; &quot;$DELONIX_HOSTS_FILE&quot;
+printf &#x27;[{&quot;name&quot;:&quot;web&quot;,&quot;namespace&quot;:&quot;default&quot;,&quot;ip&quot;:&quot;10.210.0.5&quot;,&quot;port&quot;:80}]&#x27; \
+  &gt; &quot;$DELONIX_ROOT/httproute/auto.json&quot;
+
+delonix hosts sync --print      # the block, nothing written
+delonix hosts sync              # writes it into $DELONIX_HOSTS_FILE
+delonix hosts sync --off        # removes it; the rest of the file is as it was
 </code></pre></div>
+<p>Run this way, the engine printed the block for <code>--print</code> without creating <code>hosts-sync</code>; <code>hosts sync</code>
+wrote the block after the existing <code>localhost</code> line and created the marker; <code>--off</code> removed the marker
+and left the file as it was; a hand-written line for the same name made <code>hosts sync</code> fail with the
+offending line and write nothing; and a hosts file in a read-only directory made it fail with the block
+to paste and <strong>remove the marker again</strong>. (<code>--off</code> prints "removed from /etc/hosts" whatever
+<code>DELONIX_HOSTS_FILE</code> says; the message is fixed text.) Path A was checked only up to validation:
+<code>hosts: [guest]</code> is refused with the message above, and <code>stack apply --dry-run</code> keeps <code>hosts: [host]</code>
+in the rendered document. No proxy was started.</p>
+<p>The unit tests in <code>hosts_file.rs</code> exercise <code>render</code> and <code>sync_at</code> directly (<code>sync_at</code> takes the path
+so the tests never touch the process environment). Run <code>cargo test -p delonix-runtime-bin hosts_file</code>.</p>
+<h2 id="what-is-not-validated">What is not validated<a class="hanchor" href="#what-is-not-validated" aria-label="#">#</a></h2>
+<p>Say so in a review rather than assuming:</p>
 <ul>
-<li><strong>Validate against the binary</strong>, not the source: <code>./target/debug/delonix &lt;group&gt; &lt;command&gt; --help</code>
-  and a real run with the state roots isolated (see <a href="build-and-test.html#isolating-the-engines-state">Clone, build and test</a>).</li>
-<li><strong>Update the CLI baseline</strong> (<code>scripts/cli-tree.sh --update</code>) in the same commit when you add or
-  remove a leaf, and regenerate the site (<code>python3 docs/gen.py</code> with a release build) when help text
-  changes.</li>
-<li><strong>Unit-test every new pure function</strong> — parsers, validators, argument builders. This codebase has
-  a long record of real bugs caught exactly there.</li>
-<li><strong>Classify errors.</strong> Exit codes carry a class (not found, conflict, …) decided in one place from
-  the error type; return the right <code>Error</code> variant rather than a generic one.</li>
+<li><strong>The real <code>/etc/hosts</code>.</strong> Every run above used a scratch file. Writing the real file, as root,
+  was not observed by this page.</li>
+<li><strong>A client resolving a name from the block and reaching the backend.</strong> ADR-0046 records that this
+  traffic step was not observed either (the block, the refusals and the removal were measured).
+  The <code>expose:</code> sugar with <code>hosts:</code> was covered by unit tests and <code>--dry-run</code>, not by traffic.</li>
+<li><strong><code>hosts: guest</code></strong> and <strong><code>announce: l2</code></strong> are not built: <code>guest</code> is refused by validation, and an
+  address that is not on the host is refused rather than added.</li>
+<li><strong>Automatic maintenance needs a process that can write the file.</strong> A rootless <code>container run
+  --expose</code> after <code>sudo delonix hosts sync</code> only warns when it cannot rewrite <code>/etc/hosts</code>; the block
+  then keeps the old names until something with permission rewrites it.</li>
+<li>The <strong>removal</strong> side of the failure policy above (a <code>rm</code> that cannot write the file) was read
+  in the code, not run without root.</li>
 </ul>
-<h2 id="commits-and-pull-requests">Commits and pull requests<a class="hanchor" href="#commits-and-pull-requests" aria-label="#">#</a></h2>
+<h2 id="where-to-read-next">Where to read next<a class="hanchor" href="#where-to-read-next" aria-label="#">#</a></h2>
 <ul>
-<li>One logical change per commit; say <strong>why</strong> in the message — the diff already shows what.</li>
-<li>Reference the issue when there is one.</li>
-<li>Open the PR against <code>main</code> and fill in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/PULL_REQUEST_TEMPLATE.md" target="_blank" rel="noopener">the template</a>:
-  what you ran, and for runtime, namespace, cgroup or network code, what you ran <strong>live</strong> on a real
-  host, with the command and its output.</li>
-<li>"It compiles" and "the command returned 0" do not close a change. Say what was proved and, just
-  as explicitly, what was not validated and why.</li>
-<li>Every change is reviewed by the code owners listed in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/CODEOWNERS" target="_blank" rel="noopener"><code>.github/CODEOWNERS</code></a>.</li>
+<li><code>cmd/hosts_file.rs</code> for the mechanism, <code>cmd/ingress_proxy.rs</code> (<code>desired_hosts</code>, <code>rebuild</code>,
+  <code>hosts_block_now</code>, <code>sync_hosts_now</code>, <code>hosts_sync_flag</code>) for the two inputs.</li>
+<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a> for
+  the decisions and what each says was measured.</li>
 </ul>
-<h2 id="security-sensitive-changes">Security-sensitive changes<a class="hanchor" href="#security-sensitive-changes" aria-label="#">#</a></h2>
-<p>Call it out explicitly in the PR when a change crosses a privilege or namespace boundary: user
-namespace mapping, the network holder or its control socket, <code>setns</code>/<code>unshare</code>, capability or
-seccomp handling, or path handling driven by user or manifest input. These get extra review.</p>
-<p>If you found a <strong>vulnerability</strong> rather than a bug — privilege escalation, namespace escape, command
-injection, path traversal — do not open a public issue or PR. Follow <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
-(GitHub Private Vulnerability Reporting).</p>
 <hr />
-<p><strong>Next:</strong> <a href="releases-and-stability.html">Releases and stability</a> — what a pushed tag does, and what the CLI and manifest schema promise not to break.</p>
-<nav class="pager"><a href="adding-a-kind.html"><span>← 上一页</span>Adding a Kind</a><a class="next" href="releases-and-stability.html"><span>下一页 →</span>Releases and stability</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/contributing-workflow.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/contributing-workflow.md</code></footer>
+<p><strong>Next:</strong> <a href="coding-conventions.html">Coding conventions</a> — how code in this repository must be written, each rule tagged with the gate or decision behind it.</p>
+<nav class="pager"><a href="troubleshooting.html"><span>← 上一页</span>Troubleshooting</a><a class="next" href="coding-conventions.html"><span>下一页 →</span>Coding conventions</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/service-names-and-hosts.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/service-names-and-hosts.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#start-from-the-latest-tag-not-from-memory">Start from the latest tag, not from memory</a></li>
-<li><a href="#one-worktree-per-task">One worktree per task</a></li>
-<li><a href="#version-alignment">Version alignment</a></li>
-<li><a href="#language-english-in-the-code-lang-01">Language: English in the code (LANG-01)</a></li>
-<li><a href="#architecture-rules-the-gates-enforce">Architecture rules the gates enforce</a></li>
-<li><a href="#when-to-write-an-adr">When to write an ADR</a></li>
-<li><a href="#adding-or-changing-a-cli-command">Adding or changing a CLI command</a></li>
-<li><a href="#commits-and-pull-requests">Commits and pull requests</a></li>
-<li><a href="#security-sensitive-changes">Security-sensitive changes</a></li>
+<li><a href="#one-block-per-state-root">One block per state root</a><ul>
+<li><a href="#what-render-refuses">What render refuses</a></li>
+<li><a href="#how-it-writes-sync_at">How it writes (sync_at)</a></li>
+</ul>
+</li>
+<li><a href="#where-the-names-come-from">Where the names come from</a><ul>
+<li><a href="#path-a-hosts-host-on-a-route-adr-0046">Path A: hosts: [host] on a route (ADR-0046)</a></li>
+<li><a href="#path-b-delonix-hosts-sync-adr-0048-phase-2">Path B: delonix hosts sync (ADR-0048, phase 2)</a></li>
+<li><a href="#two-kinds-of-name-two-failure-policies">Two kinds of name, two failure policies</a></li>
+</ul>
+</li>
+<li><a href="#running-it-as-root-sudo">Running it as root: sudo</a></li>
+<li><a href="#testing-it-without-touching-etchosts">Testing it without touching /etc/hosts</a></li>
+<li><a href="#what-is-not-validated">What is not validated</a></li>
+<li><a href="#where-to-read-next">Where to read next</a></li>
 </ul>
 </div>
 </aside>

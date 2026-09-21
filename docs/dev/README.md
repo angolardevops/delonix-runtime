@@ -62,7 +62,7 @@ The course is grouped in eight parts:
 | **Set up & build** | [Preparing your environment](environment.md) · [Clone, build and test](build-and-test.md) | A host that can run the live paths, and every CI gate as a local command |
 | **Architecture** | [Project structure](project-structure.md) · [Architecture](architecture.md) · [The crates](crates.md) · [System Design Interview](system-design-interview.md) | Where things are, why they are split that way, what each crate owns, and the reasoning behind the design |
 | **Images & microVMs** | [Delonixfile and VMfile](delonixfile-and-vmfile.md) · [Building microVMs](microvm-setup.md) | The two build grammars, and VMs from host prerequisites to boot |
-| **Operate & debug** | [Troubleshooting](troubleshooting.md) | A symptom-first index: the literal text a gate or a live run prints, and where to read the fix |
+| **Operate & debug** | [Troubleshooting](troubleshooting.md) · [How names reach `/etc/hosts`](service-names-and-hosts.md) | A symptom-first index of what a gate or a live run prints, and the mechanism that publishes service names and route hosts on the operator's machine |
 | **Contributing** | [Coding conventions](coding-conventions.md) · [Adding a Kind](adding-a-kind.md) · [Contribution workflow](contributing-workflow.md) · [Releases and stability](releases-and-stability.md) · [Publishing the documentation](publishing-docs.md) | How code must be written, how a declarative Kind is added, how a change is sent, what a release promises not to break, and how docs follow it |
 | **Reference** | [Cloud native standards](cloud-native-standards.md) · [Environment variables](environment-variables.md) · [Glossary](glossary.md) | Pages you look things up in: conformance per standard, every `DELONIX_*` name, every term |
 
@@ -108,6 +108,7 @@ Two narrower tasks have their own shortcut: **changing how documentation is prod
 | [Delonixfile and VMfile](delonixfile-and-vmfile.md) | The build file grammars and how they differ from a Dockerfile |
 | [Building microVMs](microvm-setup.md) | KVM, Cloud Hypervisor and firmware, libvirt, VM images |
 | [Troubleshooting](troubleshooting.md) | A symptom index: gate failure messages, host traps and their fixes, in one place |
+| [How names reach `/etc/hosts`](service-names-and-hosts.md) | The one delimited block, the two ways a name gets into it (`hosts: [host]` and `delonix hosts sync`), what it refuses, and how to test it without root |
 | [Coding conventions](coding-conventions.md) | How code in this repository is written, and the checklist reviewers apply |
 | [Adding a Kind](adding-a-kind.md) | The table, the schema and the reconciler wiring a new declarative Kind needs, worked through `Service` |
 | [Contribution workflow](contributing-workflow.md) | Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs |
