@@ -159,6 +159,7 @@ untrusted network as-is.
 | Monitoring — Zabbix | `Admin` | `delonix-admin` | `http://<ip>/` |
 | Monitoring — Grafana | `admin` | `delonix-admin` | `http://<ip>:3000/` |
 | GLPI | `glpi` | `delonix-admin` | `http://<ip>/` (the vendor's `tech`, `normal` and `post-only` sample accounts are switched off) |
+| Wazuh | `admin` (indexer/dashboard), `wazuh` (API) | **gerada no 1.º arranque** — em `/root/wazuh-passwords.txt` | `https://<ip>/` |
 
 The monitoring image does not ship the vendor's own default (Zabbix's is
 `Admin`/`zabbix`, Grafana's is `admin`/`admin`) — both are reset at build time
@@ -563,3 +564,46 @@ image still carried the build VM's hostname.
 **Not proven:** the web UI in a browser, LDAP or mail-collector integrations, a
 second machine reporting to this GLPI, and upgrades from a database created by
 another GLPI version.
+
+## Wazuh 4.14.7 — SIEM/XDR, também não é uma appliance
+
+`build-wazuh.sh` → `verify-wazuh.sh`. Manager, indexer, dashboard e filebeat
+numa só VM, todos em 4.14.7-1 (filebeat 7.10.2-2), fixados e em *hold*. A chave
+de assinatura do repositório tem de bater com a impressão digital documentada, e
+cada artefacto auxiliar do fabricante é verificado por sha256.
+
+**Esta imagem não leva nenhum segredo, e é a diferença que importa.** O
+instalador do Wazuh cria uma CA privada e logins por omissão; uma imagem que os
+trouxesse daria a todos os clones a mesma CA e a mesma password de admin — num
+produto de segurança, o pior default possível. O `wazuh-first-boot` (uma unit
+`oneshot`) gera na própria VM, no primeiro arranque: a CA e os certificados, o
+par TLS do `authd`, as passwords (ferramenta do fabricante; ficam em
+`/root/wazuh-passwords.txt`, modo 600) e a password de registo de agentes
+(`/root/wazuh-agent-enrolment-password`). Demora alguns minutos.
+
+| Porta | Serviço | Exposição |
+|---|---|---|
+| 443 | dashboard | rede |
+| 1514 | eventos dos agentes | rede |
+| 1515 | registo de agentes (com password) | rede |
+| 55000 | API do manager | rede |
+| 9200 | indexer | **só loopback** |
+
+Requisitos: 4 vCPU e 8 GiB (o *heap* do indexer está fixado a 2 GiB).
+
+`verify-wazuh.sh` (23 checks) prova, contra o disco ANTES de arrancar, que a
+imagem não traz certificados, passwords nem `authd.pass`; e, depois do primeiro
+arranque, que os quatro serviços estão activos, que o indexer só escuta em
+loopback, que `admin/admin` e `wazuh/wazuh` são recusados e as passwords geradas
+aceites, que o registo de um agente com password errada é recusado, e — o ponto
+de um SIEM — que um evento de autenticação falhada vira um alerta no indexer.
+Apanhou três defeitos da primeira versão: a ferramenta de passwords só aceita
+`-au/-ap` com `-A` (senão imprime o help e o 1.º arranque falha), o manager não
+arranca sem o par TLS do `authd`, e um check de loopback que não reconhecia
+`[::ffff:127.0.0.1]`.
+
+**Não provado:** um agente real a registar-se e a reportar, a interface no
+browser, os feeds de vulnerabilidades (precisam de internet) e o modo cluster.
+Os certificados são emitidos para `127.0.0.1`: para agentes noutras máquinas
+verificarem o dashboard ou o manager pelo nome, é preciso regenerá-los com o
+endereço real.

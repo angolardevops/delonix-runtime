@@ -1,0 +1,137 @@
+#!/bin/bash
+# wazuh-first-boot -- give THIS VM its own certificates and credentials, then
+# start the Wazuh stack. Runs once (a systemd oneshot); safe to run again by
+# hand if it stopped half way, because every step checks what is already done.
+#
+# Why this is not baked into the image: Wazuh's stack talks TLS between the
+# manager, indexer, dashboard and filebeat, and its installer creates a private
+# CA plus default logins. An image that carried them would give every clone the
+# same CA and the same admin password. So the image holds packages and the
+# vendor's helper assets, and this script makes the secrets on the machine.
+#
+# Everything internal stays on 127.0.0.1 (the indexer's :9200 is never exposed).
+# What listens outward: the dashboard :443, agent events :1514, agent
+# enrolment :1515 (password protected here), and the manager API :55000.
+set -euo pipefail
+
+STATE=/etc/delonix/wazuh
+ASSETS=/opt/delonix-wazuh
+[ -f "$STATE/initialised" ] && { echo "already initialised"; exit 0; }
+mkdir -p "$STATE"; chmod 700 "$STATE"
+exec > >(tee -a /var/log/delonix-wazuh-first-boot.log) 2>&1
+echo "=== wazuh first boot: $(date -u +%FT%TZ) ==="
+
+WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
+cd "$WORK"
+
+wait_for() { # wait_for DESCRIPTION SECONDS COMMAND...
+  local what=$1 secs=$2; shift 2
+  local i
+  for i in $(seq 1 "$secs"); do "$@" >/dev/null 2>&1 && return 0; sleep 1; done
+  echo "!! $what did not come up within ${secs}s" >&2; return 1
+}
+
+# ---------------------------------------------------------------- certificates
+if [ ! -f "$STATE/certs.done" ]; then
+  cat > config.yml <<'EOF'
+nodes:
+  indexer:
+    - name: node-1
+      ip: "127.0.0.1"
+  server:
+    - name: wazuh-1
+      ip: "127.0.0.1"
+  dashboard:
+    - name: dashboard
+      ip: "127.0.0.1"
+EOF
+  cp "$ASSETS/wazuh-certs-tool.sh" .
+  bash wazuh-certs-tool.sh -A
+  C=wazuh-certificates
+
+  install -d -m 500 -o wazuh-indexer -g wazuh-indexer /etc/wazuh-indexer/certs
+  install -m 400 -o wazuh-indexer -g wazuh-indexer $C/node-1.pem        /etc/wazuh-indexer/certs/indexer.pem
+  install -m 400 -o wazuh-indexer -g wazuh-indexer $C/node-1-key.pem    /etc/wazuh-indexer/certs/indexer-key.pem
+  install -m 400 -o wazuh-indexer -g wazuh-indexer $C/admin.pem         /etc/wazuh-indexer/certs/admin.pem
+  install -m 400 -o wazuh-indexer -g wazuh-indexer $C/admin-key.pem     /etc/wazuh-indexer/certs/admin-key.pem
+  install -m 400 -o wazuh-indexer -g wazuh-indexer $C/root-ca.pem       /etc/wazuh-indexer/certs/root-ca.pem
+
+  install -d -m 500 /etc/filebeat/certs
+  install -m 400 $C/wazuh-1.pem      /etc/filebeat/certs/filebeat.pem
+  install -m 400 $C/wazuh-1-key.pem  /etc/filebeat/certs/filebeat-key.pem
+  install -m 400 $C/root-ca.pem      /etc/filebeat/certs/root-ca.pem
+
+  install -d -m 500 -o wazuh-dashboard -g wazuh-dashboard /etc/wazuh-dashboard/certs
+  install -m 400 -o wazuh-dashboard -g wazuh-dashboard $C/dashboard.pem      /etc/wazuh-dashboard/certs/dashboard.pem
+  install -m 400 -o wazuh-dashboard -g wazuh-dashboard $C/dashboard-key.pem  /etc/wazuh-dashboard/certs/dashboard-key.pem
+  install -m 400 -o wazuh-dashboard -g wazuh-dashboard $C/root-ca.pem        /etc/wazuh-dashboard/certs/root-ca.pem
+  touch "$STATE/certs.done"
+fi
+
+# ------------------------------------------------------------------- indexer
+# Loopback only: filebeat and the dashboard are on this host, nothing else needs it.
+sed -i 's/^network.host:.*/network.host: "127.0.0.1"/' /etc/wazuh-indexer/opensearch.yml
+grep -q '^network.host: "127.0.0.1"' /etc/wazuh-indexer/opensearch.yml \
+  || { echo "!! could not pin the indexer to loopback"; exit 1; }
+systemctl daemon-reload
+systemctl enable --now wazuh-indexer
+wait_for "the indexer" 240 sh -c 'curl -sk -m 5 https://127.0.0.1:9200 | grep -q .'
+if [ ! -f "$STATE/security.done" ]; then
+  /usr/share/wazuh-indexer/bin/indexer-security-init.sh
+  touch "$STATE/security.done"
+fi
+
+# ------------------------------------------------------------------- manager
+# Enrolment must need a secret: without it any host that can reach :1515 can
+# register itself as an agent.
+if [ ! -f "$STATE/enroll.done" ]; then
+  # authd refuses to start without its own TLS pair, and the image carries none
+  # (the build removes it so no two VMs share it): make this VM's, the way the
+  # vendor's package postinst does.
+  openssl req -x509 -batch -nodes -days 3650 -newkey rsa:2048 \
+    -subj "/C=US/ST=California/CN=wazuh" \
+    -keyout /var/ossec/etc/sslmanager.key -out /var/ossec/etc/sslmanager.cert
+  chown root:wazuh /var/ossec/etc/sslmanager.key /var/ossec/etc/sslmanager.cert
+  chmod 640 /var/ossec/etc/sslmanager.key /var/ossec/etc/sslmanager.cert
+  head -c 24 /dev/urandom | base64 | tr -d '/+=' | head -c 24 > /var/ossec/etc/authd.pass
+  chown root:wazuh /var/ossec/etc/authd.pass; chmod 640 /var/ossec/etc/authd.pass
+  sed -i 's|<use_password>no</use_password>|<use_password>yes</use_password>|' /var/ossec/etc/ossec.conf
+  grep -q '<use_password>yes</use_password>' /var/ossec/etc/ossec.conf \
+    || { echo "!! could not require a password for agent enrolment"; exit 1; }
+  touch "$STATE/enroll.done"
+fi
+systemctl enable --now wazuh-manager
+
+# ------------------------------------------------------------------- filebeat
+# The credentials filebeat uses live in its keystore, not in filebeat.yml. They
+# start as the indexer's defaults and are replaced by the password tool below.
+if [ ! -f "$STATE/filebeat.done" ]; then
+  filebeat keystore create --force >/dev/null
+  echo -n admin | filebeat keystore add username --stdin --force >/dev/null
+  echo -n admin | filebeat keystore add password --stdin --force >/dev/null
+  touch "$STATE/filebeat.done"
+fi
+systemctl enable --now filebeat
+systemctl enable --now wazuh-dashboard
+
+wait_for "the manager API" 240 sh -c 'curl -sk -m 5 https://127.0.0.1:55000 | grep -q .'
+
+# ----------------------------------------------------------------- passwords
+# The vendor's own tool: it changes the indexer users, the API users and the
+# filebeat/dashboard keystores together, so none of them can drift apart. Its
+# output is the only place the new passwords exist, so it is kept.
+if [ ! -f "$STATE/passwords.done" ]; then
+  cp "$ASSETS/wazuh-passwords-tool.sh" .
+  bash wazuh-passwords-tool.sh -a -A -au wazuh -ap wazuh 2>&1 | tee "$WORK/passwords.out"
+  # strip terminal colours and the timestamps the tool prefixes
+  sed -E 's/\x1b\[[0-9;]*m//g; s/^[0-9\/ :]+ //' "$WORK/passwords.out" > /root/wazuh-passwords.txt
+  chmod 600 /root/wazuh-passwords.txt
+  grep -qi "admin" /root/wazuh-passwords.txt \
+    || { echo "!! the password tool printed no admin password; see /var/log/delonix-wazuh-first-boot.log"; exit 1; }
+  touch "$STATE/passwords.done"
+fi
+cp /var/ossec/etc/authd.pass /root/wazuh-agent-enrolment-password
+chmod 600 /root/wazuh-agent-enrolment-password
+
+touch "$STATE/initialised"
+echo "=== wazuh first boot complete ==="
