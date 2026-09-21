@@ -36,8 +36,9 @@ From the repository root:
 delonix vm build -f images/ubuntu/vm.yaml -t 26.04
 ```
 
-`-t` is two things at once: the release (it fills `${TAG}` in `vm.yaml`) and the
-name of the result. The same file therefore builds any release:
+`-t` is two things at once: the name of the result **and** `${TAG}` inside
+`vm.yaml`, which this file uses as the Ubuntu release. So `-t` must be a release
+here (`26.04`, `24.04`); the same file builds any of them:
 
 ```bash
 delonix vm build -f images/ubuntu/vm.yaml -t 24.04
@@ -48,6 +49,11 @@ Or, from inside the folder, exactly like `docker build .`:
 ```bash
 cd images/ubuntu && delonix vm build .
 ```
+
+If you want an image name that is not the release (`-t ubuntu-24.04`), give the
+release another way: `RELEASE=24.04 delonix vm build … -t ubuntu-24.04`, after
+changing `release:` in `vm.yaml` to `"${RELEASE:-26.04}"`. Any `${NAME}` is read
+from the environment when it is not `TAG`.
 
 `vm build .` looks for a `vm.yaml` in the folder (then a `VMfile`, then falls
 back to the built-in golden recipe). With `-t` omitted, the image's own `tag:`
@@ -78,7 +84,9 @@ The VM takes the image's recorded vCPU/memory unless you pass `--vcpus` or
 
 ## 5. Change what goes in, and what comes out
 
-Open `vm.yaml`; each block is one decision.
+Open `vm.yaml`; each block is one decision. Relative paths in it (`files.src`,
+`cloud_init`) are relative to **the folder of `vm.yaml`**, wherever you run the
+command from.
 
 | You want to… | Edit |
 |---|---|
@@ -89,7 +97,7 @@ Open `vm.yaml`; each block is one decision.
 | **remove** files or directories | `remove.paths: [/usr/share/doc]` |
 | **remove** an account or a service | `remove.users: [...]`, `remove.services: [...]` (disabled *and* masked) |
 | a user with sudo and keys | `users: [{name: ops, sudo: true, ssh_keys: [~/.ssh/id_ed25519.pub]}]` |
-| put a file in the image | drop it in `artifacts/`, then `files: [{src, dst, mode}]` |
+| put a file in the image | drop it in `artifacts/`, then `files: [{src, dst, mode}]` — `dst` is the full path of the file inside the image |
 | run a command | `run: ['...']` |
 | first-boot config | edit `cloud-init/user-data` |
 | keep something the cleanup removes | `cleanup: {logs: false}` |

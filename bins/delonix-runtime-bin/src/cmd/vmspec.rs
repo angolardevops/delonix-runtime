@@ -374,6 +374,10 @@ const PROTECTED: &[&str] = &[
     "/var/log",
 ];
 
+fn valid_remove_path_like(p: &str) -> std::result::Result<(), String> {
+    valid_remove_path(p)
+}
+
 fn valid_remove_path(p: &str) -> std::result::Result<(), String> {
     if !p.starts_with('/') {
         return Err("must be absolute".into());
@@ -670,20 +674,42 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
         st.steps.push(Step::RootPassword(pw.clone()));
     }
 
-    for f in &img.files {
+    for (i, f) in img.files.iter().enumerate() {
         if f.src.is_empty() || f.dst.is_empty() {
             return Err(ctx("each `files` entry needs `src` and `dst`".into()));
         }
+        // `dst` is the full path of the file inside the image, as with `cp`.
+        // The engine underneath (`virt-customize --copy-in`) only copies INTO
+        // a directory and keeps the name, so the file goes through a staging
+        // directory and is moved to where the recipe said. Found by building a
+        // real image: a recipe with `dst: /etc/motd` failed with "target is not
+        // a directory".
+        valid_remove_path_like(&f.dst).map_err(|m| ctx(format!("files.dst '{}': {m}", f.dst)))?;
+        let base = Path::new(&f.src)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|n| {
+                !n.is_empty() && !n.chars().any(|c| c == '\'' || c == '"' || c.is_control())
+            })
+            .ok_or_else(|| bad("files.src", &f.src))?
+            .to_string();
+        let stage = format!("/tmp/.delonix-files-{i}");
+        run(&mut st, format!("mkdir -p {stage}"));
         st.steps.push(Step::Copy {
             src: f.src.clone(),
-            dst: f.dst.clone(),
+            dst: stage.clone(),
         });
+        run(
+            &mut st,
+            format!(
+                "mkdir -p -- \"$(dirname -- {d})\" && mv -f -- {stage}/{b} {d} && rm -rf {stage}",
+                d = sq(&f.dst),
+                b = sq(&base),
+            ),
+        );
         if let Some(m) = &f.mode {
             if m.is_empty() || m.len() > 4 || !m.chars().all(|c| ('0'..='7').contains(&c)) {
                 return Err(bad("file mode", m));
-            }
-            if f.dst.chars().any(|c| c == '\'' || c.is_control()) {
-                return Err(bad("files.dst", &f.dst));
             }
             run(&mut st, format!("chmod {m} {}", sq(&f.dst)));
         }
@@ -1008,6 +1034,26 @@ mod tests {
         assert!(e.to_string().contains("package manager"), "{e}");
         let vf = vmfile("images:\n  u:\n    from: https://x/y.qcow2\n    package_manager: dnf\n    network: true\n    packages: {install: [curl]}\n");
         assert!(runs(&vf).iter().any(|c| c == "dnf install -y curl"));
+    }
+
+    #[test]
+    fn a_file_goes_to_its_full_destination_through_a_staging_dir() {
+        let vf = vmfile("images/u:\n".replace("images/u:\n","images:\n  u:\n    distro: ubuntu\n    release: '26.04'\n    files: [{src: artifacts/motd, dst: /etc/motd, mode: '0644'}]\n").as_str());
+        let steps = &vf.stages[0].steps;
+        let copy = steps
+            .iter()
+            .position(
+                |s| matches!(s, Step::Copy { dst, .. } if dst.starts_with("/tmp/.delonix-files-")),
+            )
+            .expect("copies into a staging dir, not onto the final name");
+        let mv = steps.iter().position(|s| matches!(s, Step::Run(c) if c.contains("mv -f --") && c.contains("'/etc/motd'"))).expect("moves to the final path");
+        assert!(copy < mv);
+        assert!(runs(&vf).iter().any(|c| c == "chmod 0644 '/etc/motd'"));
+        let bad = "images:\n  u:\n    distro: ubuntu\n    release: '26.04'\n    files: [{src: a, dst: /etc}]\n";
+        assert!(
+            one(bad).is_err(),
+            "a protected directory is not a file destination"
+        );
     }
 
     #[test]
