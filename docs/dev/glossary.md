@@ -132,7 +132,8 @@ adapters, providers, interfaces, binaries. Dependencies point inward, and the cr
 
 **Lowering (sugar Kinds)** — Rewriting a convenience Kind into the Kind that actually does the work
 while the manifest is loaded, so the rest of the engine never sees it. `Workload` lowers to
-`Container`/`Pod`/`VirtualMachine`, `Dependency` to `NetworkPolicy`. The `FORM` column of
+`Container`/`Pod`/`VirtualMachine`, `Dependency` to `NetworkPolicy`; a `VirtualMachine`'s `spec.expose`
+lowers to an `HTTPRoute` named `<vm>-expose` (`cmd/vm_expose.rs`). The `FORM` column of
 `delonix api-resources` says what each Kind becomes: `primary`, `sugar → X` (lowered), `compat → X`
 (a foreign schema kept but compiled onto X), `sunset → X` (still applied as itself, successor
 announced), `aggregate` (expands into the documents it contains, like `Stack`). See:

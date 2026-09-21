@@ -198,7 +198,9 @@ Linux networking building blocks:
 - Firewall: `table ip dlxing` with base chains `fwguard`, `fwdeny`, `fwcont` and the `fwmap`
   verdict map (`FWMAP`), generated in `infra.rs` (`do_firewall`, `apply_firewall_all`,
   `ns_set_join` for namespace isolation sets).
-- Internal DNS (`<name>.<namespace>.delonix.internal`): `dns_server_main`, `handle_dns`,
+- Internal DNS (standard name `<name>.<namespace>.svc.delonix.internal`, the older
+  `<name>.<namespace>.delonix.internal` still answers; `service_fqdn`, `parse_internal_name`):
+  `dns_server_main`, `handle_dns`,
   `dns_resolve_for`, `dns_resolve_multi_for` in `infra.rs`.
 - Overlay networks: `set_vxlan` (`infra.rs`) and the WireGuard helpers in
   `crates/adapters/delonix-sdn/src/wg.rs`, orchestrated by `realize_overlay` in

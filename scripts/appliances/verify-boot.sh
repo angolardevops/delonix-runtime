@@ -21,6 +21,8 @@ CASES=(
   "pmg:pmg:8006:/"
   "pdm:pdm:8443:/"
   "truenas:truenas:80:/"
+  "monitoring-zabbix:monitoring:80:/"
+  "monitoring-grafana:monitoring:3000:/api/health"
 )
 
 # KVM when the host has it, TCG when it does not (a CI runner may not expose

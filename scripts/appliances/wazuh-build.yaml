@@ -1,0 +1,143 @@
+#cloud-config
+# ===========================================================================
+#  The build seed for the Wazuh all-in-one image. Consumed ONLY by
+#  build-wazuh.sh, inside QEMU, never by a deployed VM.
+# ===========================================================================
+# `@...@` tokens are substituted by the script. One script, not a list of
+# `runcmd` entries: cloud-init keeps going after a failed `runcmd` element.
+
+write_files:
+  - path: /etc/sudoers.d/90-delonix
+    permissions: "0440"
+    content: |
+      delonix ALL=(ALL) NOPASSWD:ALL
+  - path: /usr/local/sbin/wazuh-first-boot
+    permissions: "0755"
+    encoding: b64
+    content: @FIRST_BOOT_B64@
+  - path: /etc/systemd/system/wazuh-first-boot.service
+    permissions: "0644"
+    content: |
+      [Unit]
+      Description=Give this VM its own Wazuh certificates and credentials, then start the stack
+      After=network-online.target
+      Wants=network-online.target
+      ConditionPathExists=!/etc/delonix/wazuh/initialised
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      TimeoutStartSec=1800
+      ExecStart=/usr/local/sbin/wazuh-first-boot
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/sysctl.d/99-wazuh-indexer.conf
+    permissions: "0644"
+    content: |
+      vm.max_map_count=262144
+  - path: /root/build.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/delonix-wazuh-build.log) 2>&1
+      echo "=== delonix wazuh build: @WAZUH_VERSION@ ==="
+      export DEBIAN_FRONTEND=noninteractive
+
+      retry() {
+        local n=0 max=${2:-5}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*10))s: $1"
+          sleep $((n*10))
+        done
+      }
+      fetch() { # fetch URL DEST SHA256
+        retry "curl -fsSL --max-time 300 -o $2 $1"
+        echo "$3  $2" | sha256sum -c - || { echo "!! checksum mismatch: $2"; exit 1; }
+      }
+
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "timeout 300 apt-get update"
+      retry "timeout 300 apt-get install -y curl gnupg ca-certificates openssl unzip"
+
+      # ------------------------------------------------------------------
+      #  The vendor's repository. Its key must match the documented
+      #  fingerprint before anything is installed from it.
+      # ------------------------------------------------------------------
+      retry "curl -fsSL -o /tmp/wazuh.key https://packages.wazuh.com/key/GPG-KEY-WAZUH"
+      GOT=$(gpg --show-keys --with-colons /tmp/wazuh.key | awk -F: '/^fpr:/{print $10; exit}')
+      [ "$GOT" = "@WAZUH_KEY_FPR@" ] || { echo "!! Wazuh signing key fingerprint is $GOT, expected @WAZUH_KEY_FPR@"; exit 1; }
+      gpg --dearmor < /tmp/wazuh.key > /usr/share/keyrings/wazuh.gpg
+      chmod 644 /usr/share/keyrings/wazuh.gpg
+      echo "deb [signed-by=/usr/share/keyrings/wazuh.gpg] https://packages.wazuh.com/4.x/apt/ stable main" > /etc/apt/sources.list.d/wazuh.list
+      retry "timeout 120 apt-get update"
+
+      # The indexer alone is ~700 MB; give the download room, install from the cache.
+      PKGS="wazuh-manager=@WAZUH_VERSION@ wazuh-indexer=@WAZUH_VERSION@ wazuh-dashboard=@WAZUH_VERSION@ filebeat=@FILEBEAT_VERSION@"
+      retry "timeout 1800 apt-get install -y --download-only $PKGS"
+      retry "dpkg --configure -a; timeout 900 apt-get install -y $PKGS"
+      apt-mark hold wazuh-manager wazuh-indexer wazuh-dashboard filebeat
+
+      # Nothing may start with the image's own (absent) certificates.
+      systemctl disable --now wazuh-manager wazuh-indexer wazuh-dashboard filebeat 2>/dev/null || true
+
+      # ------------------------------------------------------------------
+      #  The vendor's helper assets, kept in the image and checked by sha256.
+      # ------------------------------------------------------------------
+      mkdir -p /opt/delonix-wazuh
+      fetch https://packages.wazuh.com/4.14/wazuh-certs-tool.sh /opt/delonix-wazuh/wazuh-certs-tool.sh @CERTS_TOOL_SHA256@
+      fetch https://packages.wazuh.com/4.14/wazuh-passwords-tool.sh /opt/delonix-wazuh/wazuh-passwords-tool.sh @PASSWORDS_TOOL_SHA256@
+      fetch https://packages.wazuh.com/4.14/tpl/wazuh/filebeat/filebeat.yml /etc/filebeat/filebeat.yml @FILEBEAT_YML_SHA256@
+      fetch https://raw.githubusercontent.com/wazuh/wazuh/v4.14.7/extensions/elasticsearch/7.x/wazuh-template.json /etc/filebeat/wazuh-template.json @ALERTS_TEMPLATE_SHA256@
+      fetch https://packages.wazuh.com/4.x/filebeat/wazuh-filebeat-0.5.tar.gz /tmp/wazuh-filebeat.tgz @FILEBEAT_MODULE_SHA256@
+      chmod 644 /etc/filebeat/wazuh-template.json
+      tar -xzf /tmp/wazuh-filebeat.tgz -C /usr/share/filebeat/module
+      rm -f /tmp/wazuh-filebeat.tgz
+      chmod 700 /opt/delonix-wazuh; chmod 700 /opt/delonix-wazuh/*.sh
+
+      # JVM heap: the vendor default (1 GiB) is sized for a demo; 2 GiB fits the
+      # 8 GiB the image asks for alongside the manager and the dashboard.
+      sed -i 's/^-Xms.*/-Xms2g/; s/^-Xmx.*/-Xmx2g/' /etc/wazuh-indexer/jvm.options
+      grep -q '^-Xms2g' /etc/wazuh-indexer/jvm.options || { echo "!! could not set the indexer heap"; exit 1; }
+
+      systemctl enable wazuh-first-boot.service
+
+      # The build VM's own state must not reach the image: anything the packages
+      # generated (manager keys, indexer data) is recreated on the first boot.
+      rm -rf /var/lib/wazuh-indexer/* /var/ossec/etc/sslmanager.key /var/ossec/etc/sslmanager.cert
+
+      mkdir -p /etc/delonix
+      {
+        echo "{"
+        echo "  \"wazuh_version\": \"@WAZUH_VERSION@\","
+        echo "  \"filebeat_version\": \"@FILEBEAT_VERSION@\","
+        echo "  \"state\": \"secrets-generated-at-first-boot\","
+        echo "  \"dashboard_port\": 443,"
+        echo "  \"agent_ports\": \"tcp 1514 (events), tcp 1515 (enrolment, password protected)\","
+        echo "  \"api_port\": 55000,"
+        echo "  \"image_revision\": @IMAGE_REV@"
+        echo "}"
+      } > /etc/delonix/wazuh-image.json
+      cat /etc/delonix/wazuh-image.json
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+      # No build identity in a golden image: hostname, machine-id, SSH host keys.
+      echo localhost > /etc/hostname
+      cloud-init clean --logs --seed
+      truncate -s 0 /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+runcmd:
+  - |
+    if /root/build.sh; then
+      echo "DELONIX-WAZUH-BUILD-OK" > /dev/console
+    else
+      echo "DELONIX-WAZUH-BUILD-FAIL rc=$?" > /dev/console
+      tail -60 /var/log/delonix-wazuh-build.log > /dev/console
+    fi
+    sync
+    poweroff

@@ -1,0 +1,1249 @@
+#cloud-config
+# ===========================================================================
+#  The build seed for the monitoring host image (Zabbix + Grafana). Consumed
+#  ONLY by build-monitoring.sh, inside QEMU, and never by a deployed VM.
+# ===========================================================================
+# `@ZABBIX_SERIES@`/`@ZABBIX_VERSION@`/`@GRAFANA_VERSION@`/`@ZABBIX_GRAFANA_APP_VERSION@`
+# are substituted by the script. They are not cloud-init syntax -- keep them
+# out of anything cloud-init parses as a value.
+#
+# One script, not a list of `runcmd` entries, for the same reason
+# openstack-build.yaml gives: cloud-init keeps going after a failed `runcmd`
+# element, and a monitoring stack that is half-installed still looks like a
+# server that boots.
+write_files:
+  # `delonix vm create --ssh-key` creates the `delonix` account, but a golden
+  # image built from a plain cloud image gives it no sudo -- the operator could log
+  # in and not administer the machine (measured). The account may not exist at
+  # build time, and sudoers does not need it to.
+  - path: /etc/sudoers.d/90-delonix
+    permissions: "0440"
+    content: |
+      delonix ALL=(ALL) NOPASSWD:ALL
+  - path: /usr/local/sbin/monitoring-vpn
+    permissions: "0755"
+    encoding: b64
+    content: @MONITORING_VPN_B64@
+  - path: /root/build.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail
+      exec > >(tee -a /var/log/delonix-monitoring-build.log) 2>&1
+      echo "=== delonix monitoring build: Zabbix @ZABBIX_VERSION@ + Grafana @GRAFANA_VERSION@ ==="
+
+      export DEBIAN_FRONTEND=noninteractive
+
+      # Same wrapper and the same reason as the OpenStack build: a stalled
+      # connection is not a failure, and nothing that only handles failure
+      # protects against one.
+      retry() {
+        local n=0 max=${2:-5}
+        until eval "$1"; do
+          n=$((n+1))
+          [ "$n" -ge "$max" ] && { echo "!! gave up after $max attempts: $1"; return 1; }
+          echo "==> attempt $n failed, retrying in $((n*10))s: $1"
+          sleep $((n*10))
+        done
+      }
+
+      echo 'Acquire::Retries "5";' > /etc/apt/apt.conf.d/99delonix-retries
+      retry "timeout 300 apt-get update"
+      retry "timeout 300 apt-get install -y curl gnupg ca-certificates wireguard-tools xxd"
+
+      # ------------------------------------------------------------------
+      #  PostgreSQL -- installed FIRST, from the Ubuntu archive. Not pinned:
+      #  it is the OS's own package, the same convention every other build
+      #  here follows for its base distro's dependencies (only the vendor's
+      #  OWN artifact gets a version pin).
+      # ------------------------------------------------------------------
+      retry "timeout 300 apt-get install -y postgresql"
+
+      # ------------------------------------------------------------------
+      #  Zabbix, from the vendor's own repository -- pinned to the release
+      #  bootstrap .deb AND to every zabbix-* package version, so that a
+      #  rebuild next month installs the exact same bytes and not whatever
+      #  7.0.x happens to be current that day.
+      # ------------------------------------------------------------------
+      retry "curl -fsSL -o /tmp/zabbix-release.deb https://repo.zabbix.com/zabbix/@ZABBIX_SERIES@/ubuntu/pool/main/z/zabbix-release/zabbix-release_@ZABBIX_SERIES@-5+ubuntu24.04_all.deb"
+      dpkg -i /tmp/zabbix-release.deb
+      rm -f /tmp/zabbix-release.deb
+      retry "timeout 120 apt-get update"
+
+      ZBX_PKG="@ZABBIX_VERSION@+ubuntu24.04"
+      retry "timeout 600 apt-get install -y \
+        zabbix-server-pgsql=1:\$ZBX_PKG \
+        zabbix-frontend-php=1:\$ZBX_PKG \
+        php8.3-pgsql \
+        zabbix-nginx-conf=1:\$ZBX_PKG \
+        zabbix-sql-scripts=1:\$ZBX_PKG \
+        zabbix-agent2=1:\$ZBX_PKG"
+
+      # Hold them: an unattended `apt upgrade` on a running appliance must
+      # not silently move the server and the DB schema it already imported
+      # to a different minor -- the same reasoning the golden k8s image
+      # applies to kubeadm/kubelet/kubectl.
+      apt-mark hold zabbix-server-pgsql zabbix-frontend-php zabbix-nginx-conf \
+        zabbix-sql-scripts zabbix-agent2
+
+      # ------------------------------------------------------------------
+      #  Database -- a password generated HERE, once per build, never
+      #  printed and never leaving this host: Postgres listens only on
+      #  localhost, so this is an internal secret between two processes on
+      #  the same machine, not a credential an operator is meant to know or
+      #  rotate. Same reasoning as why the OpenStack image never bakes
+      #  kolla's passwords.yml: what differs is that THIS secret has no
+      #  external surface at all, so baking one per build (not per clone)
+      #  is the right amount of caution -- generating it per-VM would need
+      #  cloud-init, and this is an appliance that deliberately has none.
+      # ------------------------------------------------------------------
+      ZBX_DB_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+      sudo -u postgres createuser zabbix
+      sudo -u postgres psql -c "ALTER USER zabbix WITH PASSWORD '$ZBX_DB_PASS';"
+      sudo -u postgres createdb -O zabbix -E Unicode -T template0 zabbix
+      # Asked of dpkg and not assumed: the 7.0 packages keep the schema under
+      # /usr/share/zabbix-sql-scripts/, while 7.2+ moved it to
+      # /usr/share/zabbix/sql-scripts/ -- the first build here died on exactly
+      # that guess, after the role and database already existed.
+      SCHEMA=$(dpkg -L zabbix-sql-scripts | grep 'postgresql/server\.sql\.gz$' | head -1)
+      [ -n "$SCHEMA" ] || { echo "!! zabbix-sql-scripts ships no postgresql/server.sql.gz"; exit 1; }
+      zcat "$SCHEMA" | sudo -u zabbix psql -v ON_ERROR_STOP=1 zabbix >/dev/null
+
+      # A read-only role for Grafana's direct database connection. SELECT is
+      # granted table by table on purpose, NOT pg_read_all_data: that would let
+      # anyone who can run a query against this data source read Zabbix's
+      # `users` table (bcrypt hashes) and `config`. Only what dashboards need.
+      GRAFANA_RO_PASS=$(openssl rand -base64 24 | tr -d '/+=' | head -c 32)
+      sudo -u postgres psql -v ON_ERROR_STOP=1 -c "CREATE ROLE grafana_ro LOGIN PASSWORD '$GRAFANA_RO_PASS';"
+      sudo -u postgres psql -v ON_ERROR_STOP=1 zabbix -c "GRANT SELECT ON history, history_uint, history_str, history_text, history_log, trends, trends_uint, items, hosts, hosts_groups, hstgrp, events, problem, triggers, functions, host_tag, item_tag, event_tag, problem_tag TO grafana_ro;"
+
+      sed -i "s/^# DBPassword=.*/DBPassword=$ZBX_DB_PASS/" /etc/zabbix/zabbix_server.conf
+      grep -q "^DBPassword=$ZBX_DB_PASS$" /etc/zabbix/zabbix_server.conf || \
+        echo "DBPassword=$ZBX_DB_PASS" >> /etc/zabbix/zabbix_server.conf
+
+      # ------------------------------------------------------------------
+      #  Frontend -- pre-seeded so the appliance answers ready-to-use and
+      #  never shows the setup wizard. This IS the point of a golden image:
+      #  a wizard an operator must click through by hand is a manual step
+      #  in the path this VM exists to remove.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/zabbix/web
+      cat > /etc/zabbix/web/zabbix.conf.php <<PHP
+      <?php
+      \$DB['TYPE']     = 'POSTGRESQL';
+      \$DB['SERVER']   = 'localhost';
+      \$DB['PORT']     = '0';
+      \$DB['DATABASE'] = 'zabbix';
+      \$DB['USER']     = 'zabbix';
+      \$DB['PASSWORD'] = '$ZBX_DB_PASS';
+      \$DB['SCHEMA']   = '';
+
+      \$DB['ENCRYPTION']  = false;
+      \$DB['KEY_FILE']    = '';
+      \$DB['CERT_FILE']   = '';
+      \$DB['CA_FILE']     = '';
+      \$DB['VERIFY_HOST'] = false;
+      \$DB['CIPHER_LIST'] = '';
+
+      \$DB['VAULT_URL']           = '';
+      \$DB['VAULT_DB_PATH']       = '';
+      \$DB['VAULT_TOKEN']         = '';
+      \$DB['VAULT_TLS_CERT_FILE'] = '';
+      \$DB['VAULT_TLS_KEY_FILE']  = '';
+
+      \$ZBX_SERVER      = 'localhost';
+      \$ZBX_SERVER_PORT = '10051';
+      \$ZBX_SERVER_NAME = 'delonix-vm-monitoring';
+
+      \$IMAGE_FORMAT_DEFAULT = IMAGE_FORMAT_PNG;
+      PHP
+      chown www-data:www-data /etc/zabbix/web/zabbix.conf.php
+      chmod 0640 /etc/zabbix/web/zabbix.conf.php
+
+      # nginx package ships the vhost DISABLED (listen commented out) on
+      # purpose, so an install never grabs a port the operator did not ask
+      # for. Listen on 80 -- this VM does nothing else.
+      sed -i 's/^\s*#\s*listen\s*8080;/    listen 80;/' /etc/zabbix/nginx.conf
+      sed -i 's/^\s*#\s*server_name\s*example.com;/    server_name _;/' /etc/zabbix/nginx.conf
+      # The shipped pool has NO date.timezone line at all (checked in the built
+      # disk), so editing an existing one would silently do nothing: append.
+      grep -q 'date.timezone' /etc/zabbix/php-fpm.conf || \
+        echo 'php_value[date.timezone] = UTC' >> /etc/zabbix/php-fpm.conf
+
+      # Ubuntu's nginx ships a `default` site that is the default_server on :80,
+      # so with it enabled every request without a matching Host -- including
+      # this VM's own probes by IP -- gets the welcome page and a 404 for the
+      # Zabbix API. The first build of this image died there, with the vhost
+      # above correctly edited and nothing wrong with it.
+      rm -f /etc/nginx/sites-enabled/default
+
+      # `enable --now` does NOT restart a unit that is already running, and the
+      # Ubuntu packages start nginx and php-fpm at install time -- before
+      # zabbix-nginx-conf has dropped its vhost and its php-fpm pool. Left at
+      # that, the guest keeps serving the OLD config until a reboot: every
+      # probe here got nginx's own 404, while a cold boot of the very same disk
+      # answered 200 on `/` and on the API. Measured, not inferred -- this cost
+      # two builds, one of which blamed the default site (removing it is still
+      # right, but was not the cause).
+      systemctl enable postgresql zabbix-server zabbix-agent2 php8.3-fpm nginx
+      systemctl restart postgresql php8.3-fpm nginx
+      systemctl restart zabbix-server zabbix-agent2
+
+      # Point the bundled agent at the server it shares a machine with, so
+      # the appliance monitors itself out of the box.
+      sed -i 's/^Server=.*/Server=127.0.0.1/' /etc/zabbix/zabbix_agent2.conf
+      sed -i 's/^ServerActive=.*/ServerActive=127.0.0.1/' /etc/zabbix/zabbix_agent2.conf
+      sed -i 's/^Hostname=.*/Hostname=delonix-vm-monitoring/' /etc/zabbix/zabbix_agent2.conf
+      systemctl restart zabbix-agent2
+
+      # Wait for the API to actually answer before touching the DB it backs --
+      # nginx/php-fpm/postgres/zabbix-server all just started, and a race here
+      # would silently skip the Admin password below on a slow boot.
+      for i in $(seq 1 30); do
+        curl -fs http://127.0.0.1/api_jsonrpc.php \
+          -H 'Content-Type: application/json-rpc' \
+          -d '{"jsonrpc":"2.0","method":"apiinfo.version","id":1}' >/dev/null 2>&1 && break
+        sleep 2
+        [ "$i" -eq 30 ] && { echo "!! Zabbix API never answered"; exit 1; }
+      done
+
+      # Same known, documented, "change me" credential every other appliance
+      # in this directory ships (README has the table) -- not the vendor
+      # default 'zabbix', so grepping this repo for the password does not
+      # also unlock every unpatched Zabbix on the internet.
+      ADMIN_HASH=$(php -r 'echo password_hash("delonix-admin", PASSWORD_BCRYPT);')
+      sudo -u postgres psql zabbix -c "UPDATE users SET passwd='$ADMIN_HASH' WHERE username='Admin';"
+
+      # ------------------------------------------------------------------
+      #  Grafana, from the vendor's own repository -- pinned exactly like
+      #  Zabbix, for the same reason.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/apt/keyrings
+      retry "curl -fsSL -o /etc/apt/keyrings/grafana.asc https://apt.grafana.com/gpg-full.key"
+      chmod 644 /etc/apt/keyrings/grafana.asc
+      echo "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main" \
+        > /etc/apt/sources.list.d/grafana.list
+      retry "timeout 120 apt-get update"
+      # The Grafana package is ~200 MB, and 300 s was too short on the slow
+      # link this repo builds on: `timeout` killed apt mid-unpack and left dpkg
+      # interrupted, so every retry then failed on "dpkg was interrupted" and
+      # the build gave up with a healthy package and a healthy mirror. Fetch it
+      # with a generous limit first, install from the local cache, and let the
+      # retry repair a half-finished dpkg before it tries again.
+      retry "timeout 1500 apt-get install -y --download-only grafana=@GRAFANA_VERSION@"
+      retry "dpkg --configure -a; timeout 600 apt-get install -y grafana=@GRAFANA_VERSION@"
+      apt-mark hold grafana
+
+      sed -i 's/^;\?admin_password =.*/admin_password = delonix-admin/' /etc/grafana/grafana.ini
+      sed -i 's/^;\?http_port =.*/http_port = 3000/' /etc/grafana/grafana.ini
+
+      systemctl enable --now grafana-server
+      for i in $(seq 1 30); do
+        curl -fs http://127.0.0.1:3000/api/health >/dev/null 2>&1 && break
+        sleep 2
+        [ "$i" -eq 30 ] && { echo "!! Grafana never answered"; exit 1; }
+      done
+
+      # The Zabbix app for Grafana, pinned, Grafana-signed (no
+      # allow_loading_unsigned_plugins needed -- checked against the
+      # catalog API before writing this, not assumed).
+      # `grafana cli`, not `grafana-cli`: 13.x prints a deprecation notice for
+      # the old name. And --homepath is mandatory outside the systemd unit --
+      # without it the CLI dies with "Could not find config defaults", which is
+      # what the previous build reported five times in a row against a healthy
+      # network. Run as root, so hand the plugin tree to the service user.
+      retry "grafana cli --homepath /usr/share/grafana --pluginsDir /var/lib/grafana/plugins plugins install alexanderzobnin-zabbix-app @ZABBIX_GRAFANA_APP_VERSION@"
+      chown -R grafana:grafana /var/lib/grafana/plugins
+
+      # The datasource, provisioned -- this is the "no configuration effort"
+      # promise for the piece that is actually generic: whatever network this
+      # VM is attached to (a delonix `--net`, a `kind: NetworkRoute` to
+      # another network, a VPN/gateway tunnel already reaching the API on
+      # 127.0.0.1 of THIS host), Grafana already has Zabbix as a data source
+      # the moment it boots. What it does NOT do, on purpose, is decide
+      # which remote network to monitor -- that is a per-deployment choice
+      # (SNMP/agent targets configured IN Zabbix, or the tenant-facing
+      # self-service flow a platform builds on top), and baking one guess
+      # into every clone of this image would be wrong for all but one of them.
+      mkdir -p /etc/grafana/provisioning/datasources
+      cat > /etc/grafana/provisioning/datasources/delonix.yaml <<YAML
+      apiVersion: 1
+      datasources:
+        - name: Zabbix
+          uid: zabbix
+          type: alexanderzobnin-zabbix-datasource
+          access: proxy
+          url: http://127.0.0.1/api_jsonrpc.php
+          jsonData:
+            authType: userLogin
+            username: Admin
+            trends: true
+            trendsFrom: 7d
+            trendsRange: 4d
+            cacheTTL: 1h
+            dbConnectionEnable: true
+            dbConnectionDatasourceUID: zabbix-postgres
+          secureJsonData:
+            password: delonix-admin
+          version: 1
+          editable: true
+        - name: Zabbix PostgreSQL
+          uid: zabbix-postgres
+          type: grafana-postgresql-datasource
+          access: proxy
+          url: 127.0.0.1:5432
+          user: grafana_ro
+          jsonData:
+            database: zabbix
+            sslmode: disable
+            postgresVersion: 1600
+            timescaledb: false
+          secureJsonData:
+            password: $GRAFANA_RO_PASS
+          editable: true
+        - name: Prometheus
+          uid: prometheus
+          type: prometheus
+          access: proxy
+          url: http://127.0.0.1:9090
+          isDefault: true
+          jsonData: {timeInterval: 15s}
+          editable: true
+        - name: Loki
+          uid: loki
+          type: loki
+          access: proxy
+          url: http://127.0.0.1:3100
+          editable: true
+        - name: Alertmanager
+          uid: alertmanager
+          type: alertmanager
+          access: proxy
+          url: http://127.0.0.1:9093
+          jsonData: {implementation: prometheus}
+          editable: true
+      YAML
+      # Installed is not enabled: a cold boot of the previous build reported the
+      # app at 6.7.0 with enabled=False, so its bundled dashboards were absent
+      # even though the data source itself answered. Provision it on.
+      mkdir -p /etc/grafana/provisioning/plugins
+      cat > /etc/grafana/provisioning/plugins/zabbix.yaml <<YAML
+      apiVersion: 1
+      apps:
+        - type: alexanderzobnin-zabbix-app
+          disabled: false
+      YAML
+      # ------------------------------------------------------------------
+      #  Observability stack: Prometheus, Alertmanager, blackbox_exporter,
+      #  node_exporter, Loki, Alloy.
+      #
+      #  Everything listens on 127.0.0.1 EXCEPT what has to be reached from
+      #  outside: Grafana (:3000), the Zabbix frontend (:80) and trapper
+      #  (:10051), and the syslog receiver (:1514). Grafana reaches the rest
+      #  over loopback, so the extra services add no new external surface.
+      #
+      #  Upstream artefacts are pinned AND their published sha256sums.txt is
+      #  checked -- a mismatch aborts the build, same fail-closed rule as
+      #  fetch-media.sh.
+      # ------------------------------------------------------------------
+      fetch_release() {
+        # fetch_release <owner/repo> <tag> <file>  -> extracted in /tmp/rel
+        local repo=$1 tag=$2 file=$3
+        mkdir -p /tmp/rel && cd /tmp/rel
+        retry "curl -fsSL --max-time 900 -o $file https://github.com/$repo/releases/download/$tag/$file"
+        retry "curl -fsSL --max-time 120 -o sha256sums.txt https://github.com/$repo/releases/download/$tag/sha256sums.txt"
+        grep -F "  $file" sha256sums.txt | sha256sum -c - || { echo "!! checksum mismatch for $file"; exit 1; }
+        tar xzf "$file"
+        cd /
+      }
+
+      for u in prometheus alertmanager blackbox_exporter node_exporter; do
+        id "$u" >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin "$u"
+      done
+
+      fetch_release prometheus/prometheus v@PROMETHEUS_VERSION@ prometheus-@PROMETHEUS_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/prometheus-@PROMETHEUS_VERSION@.linux-amd64/prometheus /usr/local/bin/prometheus
+      install -m0755 /tmp/rel/prometheus-@PROMETHEUS_VERSION@.linux-amd64/promtool /usr/local/bin/promtool
+      fetch_release prometheus/alertmanager v@ALERTMANAGER_VERSION@ alertmanager-@ALERTMANAGER_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/alertmanager-@ALERTMANAGER_VERSION@.linux-amd64/alertmanager /usr/local/bin/alertmanager
+      fetch_release prometheus/blackbox_exporter v@BLACKBOX_VERSION@ blackbox_exporter-@BLACKBOX_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/blackbox_exporter-@BLACKBOX_VERSION@.linux-amd64/blackbox_exporter /usr/local/bin/blackbox_exporter
+      fetch_release prometheus/node_exporter v@NODE_EXPORTER_VERSION@ node_exporter-@NODE_EXPORTER_VERSION@.linux-amd64.tar.gz
+      install -m0755 /tmp/rel/node_exporter-@NODE_EXPORTER_VERSION@.linux-amd64/node_exporter /usr/local/bin/node_exporter
+      rm -rf /tmp/rel
+
+      # ---- Prometheus ---------------------------------------------------
+      # Targets are FILES, not config edits: dropping icmp-*.yml / http-*.yml /
+      # tcp-*.yml / node-*.yml into /etc/prometheus/targets/ is all it takes to
+      # start watching a server, a switch or a workstation -- Prometheus
+      # re-reads them without a restart. That is the "no configuration effort"
+      # path for the generic part; deciding WHICH hosts go in is the operator's.
+      mkdir -p /etc/prometheus/targets /etc/prometheus/rules /var/lib/prometheus
+      cat > /etc/prometheus/prometheus.yml <<'YAML'
+      global:
+        scrape_interval: 15s
+        evaluation_interval: 15s
+      alerting:
+        alertmanagers:
+          - static_configs:
+              - targets: ['127.0.0.1:9093']
+      rule_files:
+        - /etc/prometheus/rules/*.yml
+      scrape_configs:
+        - job_name: prometheus
+          static_configs: [{targets: ['127.0.0.1:9090']}]
+        - job_name: alertmanager
+          static_configs: [{targets: ['127.0.0.1:9093']}]
+        - job_name: loki
+          static_configs: [{targets: ['127.0.0.1:3100']}]
+        - job_name: goflow2
+          static_configs: [{targets: ['127.0.0.1:8081']}]
+        - job_name: node
+          static_configs: [{targets: ['127.0.0.1:9100'], labels: {role: monitoring-host}}]
+          file_sd_configs: [{files: ['/etc/prometheus/targets/node-*.yml']}]
+        - job_name: blackbox-icmp
+          metrics_path: /probe
+          params: {module: [icmp]}
+          file_sd_configs: [{files: ['/etc/prometheus/targets/icmp-*.yml']}]
+          relabel_configs: &probe
+            - {source_labels: [__address__], target_label: __param_target}
+            - {source_labels: [__param_target], target_label: instance}
+            - {target_label: __address__, replacement: '127.0.0.1:9115'}
+        - job_name: blackbox-http
+          metrics_path: /probe
+          params: {module: [http_2xx]}
+          file_sd_configs: [{files: ['/etc/prometheus/targets/http-*.yml']}]
+          relabel_configs: *probe
+        - job_name: blackbox-tcp
+          metrics_path: /probe
+          params: {module: [tcp_connect]}
+          file_sd_configs: [{files: ['/etc/prometheus/targets/tcp-*.yml']}]
+          relabel_configs: *probe
+      YAML
+      # Real self-checks, so a fresh boot shows data and the probes are proven
+      # rather than empty; an operator adds their own next to these.
+      cat > /etc/prometheus/targets/icmp-self.yml <<'YAML'
+      - targets: ['127.0.0.1']
+        labels: {site: this-host}
+      YAML
+      cat > /etc/prometheus/targets/http-self.yml <<'YAML'
+      - targets: ['http://127.0.0.1:3000/api/health', 'http://127.0.0.1/']
+        labels: {site: this-host}
+      YAML
+      cat > /etc/prometheus/targets/tcp-self.yml <<'YAML'
+      - targets: ['127.0.0.1:10051', '127.0.0.1:5432']
+        labels: {site: this-host}
+      YAML
+      cat > /etc/prometheus/rules/basic.yml <<'YAML'
+      groups:
+        - name: basic
+          rules:
+            - alert: TargetDown
+              expr: up == 0
+              for: 2m
+              labels: {severity: warning}
+              annotations: {summary: "{{ $labels.job }} {{ $labels.instance }} is down"}
+            - alert: ProbeFailed
+              expr: probe_success == 0
+              for: 2m
+              labels: {severity: critical}
+              annotations: {summary: "probe to {{ $labels.instance }} failing ({{ $labels.job }})"}
+            - alert: DiskWillFillIn24h
+              expr: predict_linear(node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}[6h], 24*3600) < 0
+              for: 30m
+              labels: {severity: warning}
+              annotations: {summary: "{{ $labels.instance }} {{ $labels.mountpoint }} fills within 24h"}
+      YAML
+      promtool check config /etc/prometheus/prometheus.yml
+      promtool check rules /etc/prometheus/rules/basic.yml
+
+      # ---- blackbox_exporter -------------------------------------------
+      cat > /etc/prometheus/blackbox.yml <<'YAML'
+      modules:
+        icmp: {prober: icmp, timeout: 5s}
+        http_2xx: {prober: http, timeout: 10s}
+        tcp_connect: {prober: tcp, timeout: 5s}
+      YAML
+
+      # ---- Alertmanager -------------------------------------------------
+      # A valid, deliberately inert route: alerts are received and shown in
+      # Grafana, and nothing is sent anywhere until the operator adds a
+      # receiver (webhook/e-mail/chat). Shipping a guessed destination would
+      # either spam a stranger or silently drop pages.
+      mkdir -p /etc/alertmanager /var/lib/alertmanager
+      cat > /etc/alertmanager/alertmanager.yml <<'YAML'
+      route:
+        receiver: default
+        group_by: [alertname]
+      receivers:
+        - name: default
+      YAML
+
+      chown -R prometheus:prometheus /etc/prometheus /var/lib/prometheus
+      chown -R alertmanager:alertmanager /etc/alertmanager /var/lib/alertmanager
+
+      cat > /etc/systemd/system/prometheus.service <<'UNIT'
+      [Unit]
+      Description=Prometheus
+      After=network-online.target
+      [Service]
+      User=prometheus
+      ExecStart=/usr/local/bin/prometheus --config.file=/etc/prometheus/prometheus.yml --storage.tsdb.path=/var/lib/prometheus --storage.tsdb.retention.time=30d --storage.tsdb.retention.size=6GB --web.listen-address=127.0.0.1:9090
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      cat > /etc/systemd/system/alertmanager.service <<'UNIT'
+      [Unit]
+      Description=Alertmanager
+      After=network-online.target
+      [Service]
+      User=alertmanager
+      ExecStart=/usr/local/bin/alertmanager --config.file=/etc/alertmanager/alertmanager.yml --storage.path=/var/lib/alertmanager --web.listen-address=127.0.0.1:9093 --cluster.listen-address=
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      cat > /etc/systemd/system/blackbox_exporter.service <<'UNIT'
+      [Unit]
+      Description=Blackbox exporter
+      After=network-online.target
+      [Service]
+      User=blackbox_exporter
+      AmbientCapabilities=CAP_NET_RAW
+      ExecStart=/usr/local/bin/blackbox_exporter --config.file=/etc/prometheus/blackbox.yml --web.listen-address=127.0.0.1:9115
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      cat > /etc/systemd/system/node_exporter.service <<'UNIT'
+      [Unit]
+      Description=Node exporter
+      After=network-online.target
+      [Service]
+      User=node_exporter
+      ExecStart=/usr/local/bin/node_exporter --web.listen-address=127.0.0.1:9100
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+
+            # ---- NetFlow / IPFIX / sFlow collector (goflow2, BSD-3-Clause) ------
+      # One process, three protocols: NetFlow v5/v9 and IPFIX all arrive on UDP 2055
+      # (the one `netflow://` listener decodes all three), sFlow on UDP 6343. There is
+      # deliberately NO second `netflow://` listener for IPFIX's registered port 4739:
+      # goflow2 panics at start-up with two of them ("pattern /templates conflicts" --
+      # each registers the same HTTP handler; measured, and it took the first r3 build's
+      # collector down silently). Point an IPFIX exporter at 2055.
+      # Flow RECORDS go to a file that Alloy ships to Loki;
+      # goflow2's own metrics go to Prometheus. Those two are different things, and
+      # the dashboard keeps them apart: `goflow2_flow_traffic_bytes_total` counts the
+      # size of the EXPORT packets (measured: 216 bytes for three v5 datagrams), not
+      # the traffic they describe. Traffic volume lives in each record's `bytes`.
+      id goflow2 >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin goflow2
+      retry "curl -fsSL --max-time 900 -o /usr/local/bin/goflow2 https://github.com/netsampler/goflow2/releases/download/v@GOFLOW2_VERSION@/goflow2-@GOFLOW2_VERSION@-linux-amd64"
+      echo "@GOFLOW2_SHA256@  /usr/local/bin/goflow2" | sha256sum -c - || { echo "!! goflow2 checksum mismatch"; exit 1; }
+      chmod 0755 /usr/local/bin/goflow2
+      cat > /etc/systemd/system/goflow2.service <<'UNIT'
+      [Unit]
+      Description=goflow2 NetFlow/IPFIX/sFlow collector
+      After=network-online.target
+      [Service]
+      User=goflow2
+      Group=alloy
+      UMask=0027
+      ExecStart=/usr/local/bin/goflow2 -listen netflow://:2055,sflow://:6343 -format json -transport file -transport.file /var/log/goflow2/flows.json -addr 127.0.0.1:8081
+      Restart=on-failure
+      [Install]
+      WantedBy=multi-user.target
+      UNIT
+      # A flow file with no ceiling would fill the disk on the first busy link.
+      cat > /etc/logrotate.d/goflow2 <<'LR'
+      /var/log/goflow2/flows.json {
+          size 200M
+          rotate 3
+          compress
+          copytruncate
+          missingok
+          notifempty
+          create 0640 goflow2 alloy
+      }
+      LR
+
+      # ---- Loki + Alloy, from the Grafana apt repo already configured ---
+      retry "timeout 900 apt-get install -y --download-only loki=@LOKI_VERSION@ alloy=@ALLOY_VERSION@"
+      retry "dpkg --configure -a; timeout 600 apt-get install -y loki=@LOKI_VERSION@ alloy=@ALLOY_VERSION@"
+      apt-mark hold loki alloy
+      cat > /etc/loki/config.yml <<'YAML'
+      auth_enabled: false
+      server:
+        http_listen_address: 127.0.0.1
+        http_listen_port: 3100
+        grpc_listen_address: 127.0.0.1
+        grpc_listen_port: 9096
+      common:
+        instance_addr: 127.0.0.1
+        path_prefix: /var/lib/loki
+        storage:
+          filesystem: {chunks_directory: /var/lib/loki/chunks, rules_directory: /var/lib/loki/rules}
+        replication_factor: 1
+        ring: {kvstore: {store: inmemory}}
+      schema_config:
+        configs:
+          - {from: "2024-01-01", store: tsdb, object_store: filesystem, schema: v13, index: {prefix: index_, period: 24h}}
+      limits_config:
+        retention_period: 720h
+        allow_structured_metadata: true
+      compactor:
+        working_directory: /var/lib/loki/compactor
+        retention_enabled: true
+        delete_request_store: filesystem
+      analytics:
+        reporting_enabled: false
+      YAML
+      # `loki:` (login group of the user) and not `loki:loki`: the package
+      # creates the user without a group of the same name, and the first r2
+      # build died here after everything before it had succeeded.
+      mkdir -p /var/lib/loki && chown -R loki: /var/lib/loki
+      # Syslog from servers, switches and workstations lands on :1514 (an
+      # unprivileged port: alloy does not run as root). Point rsyslog / a
+      # switch's remote-log setting at <this-vm>:1514. The host's own journal
+      # is read too, so the first panel already has something in it.
+      # Labels are set by RELABEL RULES, not by `labels = {}`: measured on the
+      # first r2 boot, the journal source overwrote `job = "journal"` with its
+      # own component id (`loki.source.journal.host`), so a query written from
+      # this README matched nothing. A rule is applied last and wins. Syslog
+      # gets host/app/severity from the RFC5424 header, which is what makes a
+      # switch's or a workstation's logs findable by name.
+      cat > /etc/alloy/config.alloy <<'ALLOY'
+      loki.write "local" {
+        endpoint { url = "http://127.0.0.1:3100/loki/api/v1/push" }
+      }
+
+      loki.relabel "syslog" {
+        forward_to = []
+        rule {
+          source_labels = ["__syslog_message_hostname"]
+          target_label  = "host"
+        }
+        rule {
+          source_labels = ["__syslog_message_app_name"]
+          target_label  = "app"
+        }
+        rule {
+          source_labels = ["__syslog_message_severity"]
+          target_label  = "severity"
+        }
+        rule {
+          target_label = "job"
+          replacement  = "syslog"
+        }
+      }
+
+      loki.source.syslog "network" {
+        listener {
+          address  = "0.0.0.0:1514"
+          protocol = "tcp"
+        }
+        listener {
+          address  = "0.0.0.0:1514"
+          protocol = "udp"
+        }
+        relabel_rules = loki.relabel.syslog.rules
+        forward_to    = [loki.write.local.receiver]
+      }
+
+      loki.relabel "journal" {
+        forward_to = []
+        rule {
+          target_label = "job"
+          replacement  = "journal"
+        }
+        rule {
+          source_labels = ["__journal__systemd_unit"]
+          target_label  = "unit"
+        }
+        rule {
+          source_labels = ["__journal_priority_keyword"]
+          target_label  = "severity"
+        }
+      }
+
+      local.file_match "flows" {
+        path_targets = [{ "__path__" = "/var/log/goflow2/flows.json", "job" = "netflow" }]
+      }
+
+      loki.source.file "flows" {
+        targets    = local.file_match.flows.targets
+        forward_to = [loki.process.flows.receiver]
+      }
+
+      // Only the exporter and the protocol become labels. Addresses stay inside
+      // the JSON and are queried with `| json`: a label per address would
+      // create a stream per host, which is how a Loki gets too big to search.
+      loki.process "flows" {
+        stage.json {
+          expressions = { exporter = "sampler_address", flow_type = "type" }
+        }
+        stage.labels {
+          values = { exporter = "", flow_type = "" }
+        }
+        forward_to = [loki.write.local.receiver]
+      }
+
+      loki.source.journal "host" {
+        relabel_rules = loki.relabel.journal.rules
+        labels        = { host = "delonix-vm-monitoring" }
+        forward_to    = [loki.write.local.receiver]
+      }
+      ALLOY
+      usermod -aG systemd-journal alloy
+
+      # Group `alloy` and umask 027: the flow file is readable by the shipper and by
+      # nobody else. It holds who talked to whom. This runs HERE and not next to the
+      # goflow2 install because the `alloy` group only exists once its package is in --
+      # the first r3 build died on `install: invalid group 'alloy'`.
+      install -d -o goflow2 -g alloy -m 2750 /var/log/goflow2
+
+      systemctl daemon-reload
+      systemctl enable prometheus alertmanager blackbox_exporter node_exporter goflow2 loki alloy
+      systemctl restart prometheus alertmanager blackbox_exporter node_exporter goflow2 loki alloy
+      # An enabled unit is not a running collector. The first r3 build shipped a
+      # goflow2 that crashed on start and nothing said so until a probe found
+      # `up{job="goflow2"} == 0`; the build now fails instead of publishing that.
+      for i in $(seq 1 15); do
+        curl -fs http://127.0.0.1:8081/metrics >/dev/null 2>&1 && break
+        sleep 2
+        [ "$i" -eq 15 ] && { echo "!! goflow2 is not serving metrics"; journalctl -u goflow2 --no-pager | tail -15; exit 1; }
+      done
+      for i in $(seq 1 40); do
+        curl -fs http://127.0.0.1:9090/-/ready >/dev/null 2>&1 && \
+        curl -fs http://127.0.0.1:3100/ready >/dev/null 2>&1 && \
+        curl -fs http://127.0.0.1:9093/-/ready >/dev/null 2>&1 && break
+        sleep 3
+        [ "$i" -eq 40 ] && { echo "!! prometheus/loki/alertmanager never became ready"; systemctl --no-pager status prometheus loki alertmanager alloy | tail -40; exit 1; }
+      done
+
+      mkdir -p /etc/grafana/provisioning/dashboards /var/lib/grafana/dashboards
+      cat > /etc/grafana/provisioning/dashboards/delonix.yaml <<'YAML'
+      apiVersion: 1
+      providers:
+        - name: delonix
+          folder: Delonix
+          type: file
+          disableDeletion: false
+          allowUiUpdates: true
+          options: {path: /var/lib/grafana/dashboards}
+      YAML
+      cat > /var/lib/grafana/dashboards/delonix-overview.json <<'JSON'
+      {
+       "uid": "delonix-overview",
+       "title": "Delonix — Visão geral",
+       "tags": [
+        "delonix",
+        "monitoring"
+       ],
+       "timezone": "browser",
+       "schemaVersion": 39,
+       "version": 1,
+       "refresh": "30s",
+       "time": {
+        "from": "now-6h",
+        "to": "now"
+       },
+       "panels": [
+        {
+         "id": 1,
+         "type": "stat",
+         "title": "Problemas activos (Zabbix)",
+         "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "zabbix-postgres"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+         },
+         "targets": [
+          {
+           "format": "table",
+           "rawQuery": true,
+           "editorMode": "code",
+           "rawSql": "SELECT count(*) AS problemas FROM problem WHERE r_eventid IS NULL",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             },
+             {
+              "color": "red",
+              "value": 1
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 2,
+         "type": "stat",
+         "title": "Hosts monitorizados (Zabbix)",
+         "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "zabbix-postgres"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+         },
+         "targets": [
+          {
+           "format": "table",
+           "rawQuery": true,
+           "editorMode": "code",
+           "rawSql": "SELECT count(*) AS hosts FROM hosts WHERE status = 0 AND flags = 0",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 3,
+         "type": "stat",
+         "title": "Alvos Prometheus em baixo",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 12,
+          "y": 0
+         },
+         "targets": [
+          {
+           "expr": "count(up == 0) or vector(0)",
+           "legendFormat": "",
+           "instant": true,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             },
+             {
+              "color": "red",
+              "value": 1
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 4,
+         "type": "stat",
+         "title": "Sondas a falhar",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 18,
+          "y": 0
+         },
+         "targets": [
+          {
+           "expr": "count(probe_success == 0) or vector(0)",
+           "legendFormat": "",
+           "instant": true,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "short",
+           "thresholds": {
+            "mode": "absolute",
+            "steps": [
+             {
+              "color": "green",
+              "value": null
+             },
+             {
+              "color": "red",
+              "value": 1
+             }
+            ]
+           }
+          },
+          "overrides": []
+         },
+         "options": {
+          "reduceOptions": {
+           "calcs": [
+            "lastNotNull"
+           ],
+           "values": false,
+           "fields": ""
+          },
+          "colorMode": "background"
+         }
+        },
+        {
+         "id": 5,
+         "type": "table",
+         "title": "Problemas em aberto (Zabbix)",
+         "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "zabbix-postgres"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 4
+         },
+         "targets": [
+          {
+           "format": "table",
+           "rawQuery": true,
+           "editorMode": "code",
+           "rawSql": "SELECT to_timestamp(clock) AS \"desde\", severity AS \"gravidade\", name AS \"problema\" FROM problem WHERE r_eventid IS NULL ORDER BY clock DESC LIMIT 20",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {},
+          "overrides": []
+         }
+        },
+        {
+         "id": 6,
+         "type": "table",
+         "title": "Sondas (blackbox)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 4
+         },
+         "targets": [
+          {
+           "expr": "probe_success",
+           "legendFormat": "{{job}} {{instance}}",
+           "instant": true,
+           "format": "table",
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {},
+          "overrides": []
+         }
+        },
+        {
+         "id": 7,
+         "type": "timeseries",
+         "title": "Latência das sondas",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 12
+         },
+         "targets": [
+          {
+           "expr": "probe_duration_seconds",
+           "legendFormat": "{{job}} {{instance}}",
+           "instant": false,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "s"
+          },
+          "overrides": []
+         }
+        },
+        {
+         "id": 8,
+         "type": "timeseries",
+         "title": "CPU (%)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 12,
+          "y": 12
+         },
+         "targets": [
+          {
+           "expr": "100 - avg by (instance) (rate(node_cpu_seconds_total{mode=\"idle\"}[5m])) * 100",
+           "legendFormat": "{{instance}}",
+           "instant": false,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "percent"
+          },
+          "overrides": []
+         }
+        },
+        {
+         "id": 9,
+         "type": "timeseries",
+         "title": "Memória usada (%)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 18,
+          "y": 12
+         },
+         "targets": [
+          {
+           "expr": "100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)",
+           "legendFormat": "{{instance}}",
+           "instant": false,
+           "refId": "A"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "percent"
+          },
+          "overrides": []
+         }
+        },
+        {
+         "id": 10,
+         "type": "logs",
+         "title": "Logs (syslog da rede + journal)",
+         "datasource": {
+          "type": "loki",
+          "uid": "loki"
+         },
+         "gridPos": {
+          "h": 10,
+          "w": 24,
+          "x": 0,
+          "y": 20
+         },
+         "targets": [
+          {
+           "expr": "{job=~\".+\"}",
+           "refId": "A",
+           "queryType": "range"
+          }
+         ],
+         "options": {
+          "showTime": true,
+          "wrapLogMessage": true,
+          "sortOrder": "Descending"
+         }
+        },
+        {
+         "id": 11,
+         "type": "timeseries",
+         "title": "Exportadores de flow activos (pacotes de export/s)",
+         "datasource": {
+          "type": "prometheus",
+          "uid": "prometheus"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 8,
+          "x": 0,
+          "y": 30
+         },
+         "targets": [
+          {
+           "refId": "A",
+           "expr": "sum by (remote_ip, type) (rate(goflow2_flow_traffic_packets_total[5m]))",
+           "legendFormat": "{{remote_ip}} {{type}}"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "pps"
+          },
+          "overrides": []
+         },
+         "description": "Telemetria do coletor: quantos pacotes de exportacao chegam de cada router/switch. NAO e o volume do trafego (esse esta nos registos, no painel ao lado)."
+        },
+        {
+         "id": 12,
+         "type": "table",
+         "title": "Top origens por bytes (NetFlow/IPFIX/sFlow, 5 min)",
+         "datasource": {
+          "type": "loki",
+          "uid": "loki"
+         },
+         "gridPos": {
+          "h": 8,
+          "w": 16,
+          "x": 8,
+          "y": 30
+         },
+         "targets": [
+          {
+           "refId": "A",
+           "queryType": "instant",
+           "expr": "topk(10, sum by (src_addr) (sum_over_time({job=\"netflow\"} | json | unwrap bytes [5m])))"
+          }
+         ],
+         "fieldConfig": {
+          "defaults": {
+           "unit": "bytes"
+          },
+          "overrides": []
+         }
+        }
+       ],
+       "editable": true
+      }
+      JSON
+      chown -R grafana:grafana /var/lib/grafana/dashboards
+      systemctl restart grafana-server
+
+      # ------------------------------------------------------------------
+      #  What a clone actually has -- readable from inside any VM cloned
+      #  from this image, same two-carrier idea as the golden k8s template
+      #  and the OpenStack image: the filename says what was asked for,
+      #  this file says what is there.
+      # ------------------------------------------------------------------
+      mkdir -p /etc/delonix
+      {
+        echo "{"
+        echo "  \"zabbix_version\": \"@ZABBIX_VERSION@\","
+        echo "  \"grafana_version\": \"@GRAFANA_VERSION@\","
+        echo "  \"grafana_zabbix_app_version\": \"@ZABBIX_GRAFANA_APP_VERSION@\","
+        echo "  \"zabbix_db\": \"postgresql-local\","
+        echo "  \"zabbix_frontend_port\": 80,"
+        echo "  \"grafana_port\": 3000,"
+        echo "  \"prometheus_version\": \"@PROMETHEUS_VERSION@\","
+        echo "  \"alertmanager_version\": \"@ALERTMANAGER_VERSION@\","
+        echo "  \"blackbox_exporter_version\": \"@BLACKBOX_VERSION@\","
+        echo "  \"node_exporter_version\": \"@NODE_EXPORTER_VERSION@\","
+        echo "  \"loki_version\": \"@LOKI_VERSION@\","
+        echo "  \"alloy_version\": \"@ALLOY_VERSION@\","
+        echo "  \"syslog_port\": 1514,"
+        echo "  \"goflow2_version\": \"@GOFLOW2_VERSION@\","
+        echo "  \"flow_ports\": \"udp 2055 (netflow v5/v9 + ipfix), 6343 (sflow)\","
+        echo "  \"vpn\": \"wireguard wg0 10.99.0.0/24 udp 51820, managed by monitoring-vpn\","
+        echo "  \"image_revision\": @IMAGE_REV@"
+        echo "}"
+      } > /etc/delonix/monitoring-image.json
+      cat /etc/delonix/monitoring-image.json
+
+      apt-get clean
+      rm -rf /var/lib/apt/lists/*
+
+      # This image must not carry this boot's identity -- the same lesson
+      # every golden image in this repo already learned: without it every
+      # clone comes up with the same machine-id and SSH host keys.
+      cloud-init clean --logs --seed
+      truncate -s 0 /etc/machine-id
+      rm -f /var/lib/dbus/machine-id
+      rm -f /etc/ssh/ssh_host_*_key /etc/ssh/ssh_host_*_key.pub
+
+runcmd:
+  # The marker, and only the marker, is what the build script believes --
+  # the same two lessons openstack-build.yaml already paid for: QEMU exits 0
+  # whether the guest finished or panicked, and cloud-init reports success
+  # for a `runcmd` whose script failed.
+  - |
+    if /root/build.sh; then
+      echo "DELONIX-MONITORING-BUILD-OK" > /dev/console
+    else
+      echo "DELONIX-MONITORING-BUILD-FAIL rc=$?" > /dev/console
+      tail -60 /var/log/delonix-monitoring-build.log > /dev/console
+    fi
+    sync
+    poweroff

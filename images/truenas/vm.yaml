@@ -1,0 +1,25 @@
+# TrueNAS SCALE — built by the repository's appliance builder.
+#
+#   delonix vm build -f images/truenas/vm.yaml -t 25.10.5
+#
+# This image is not described as edits to a cloud image: the vendor's installer has
+# to RUN. So the recipe names a BUILDER, not a script path — `builder: X` runs
+# scripts/appliances/build-X.sh from this repository, with an isolated OUT_DIR,
+# and registers the disk it leaves there. Nothing outside that directory can be
+# reached from this file.
+#
+# `-t` is the name of the result AND `${TAG}`, which this file uses as the version.
+version: 1
+
+images:
+  truenas:
+    tag: "truenas-scale-${TAG:-25.10.5}"
+    distro: truenas
+    release: "${TAG:-25.10.5}"
+    vcpus: 2
+    memory: 8G
+    appliance:
+      builder: truenas
+      args: ["${TAG:-25.10.5}"]
+      # false: a true appliance, no cloud-init. true: a cloud image with software installed.
+      cloud_init: false

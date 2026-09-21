@@ -76,8 +76,15 @@ The source of truth is [`scripts/install.sh`](../../scripts/install.sh), which i
 official installer (it is published as a release asset). It detects the package manager through
 `/etc/os-release` and supports **apt** (Debian, Ubuntu and derivatives), **dnf** (Fedora, RHEL,
 CentOS Stream, Rocky, AlmaLinux), **zypper** (openSUSE, SLES) and **pacman** (Arch and
-derivatives). Prebuilt binaries exist only for **x86_64**; on other architectures build from
-source.
+derivatives). The installer installs prebuilt binaries for **x86_64** and **aarch64** (`arm64` is
+normalised): the asset name is composed from `uname -m` as `<name>-<arch>-linux`, and any other
+architecture stops with "no prebuilt binary for <arch> yet", so build from source. Three things differ
+on aarch64: the `-v3` variant is an x86-64 microarchitecture level and does not exist there; the pinned
+static Cloud Hypervisor, the EDK2 `CLOUDHV.fd` and `hypervisor-fw` are x86-64 builds, so they are not
+downloaded and the VM backend is libvirt; and the QEMU probe asks for `qemu-system-aarch64`. The
+aarch64 release assets exist since v4.2.0 (the `build-arm64` job ran for the first time on that tag).
+**Not validated:** a complete install on a real aarch64 host, and the QEMU package names per distro
+on arm64 — what has been checked is the asset-name composition against the published v4.2.0 assets.
 
 To run containers the engine needs:
 
@@ -108,7 +115,11 @@ bash scripts/install.sh --no-binary
 Read the flag list at the top of the script first: some flags change host-wide security settings
 (`--low-ports` lets any local program bind ports from 80, `--with-image-build` makes
 `/boot/vmlinuz-*` world-readable), and `--no-tune` skips the kernel modules and sysctls, including
-`br_netfilter`.
+`br_netfilter`. `--performance` / `--no-performance` control CPU performance mode, transparent
+hugepages with `irqbalance`, and a user timer that runs `system prune --auto --threshold 75`; with
+neither flag the installer asks about each and, with no terminal, answers no. The CPU part is a
+systemd service that stores the boot-time values and puts them back on `stop`. None of this is
+needed for development.
 
 ### Memory and disk
 

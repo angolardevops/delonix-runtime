@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a class="on" aria-current="page" href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">15</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Images et microVM</p>
-<h1 id="delonixfile-and-vmfile">Delonixfile et VMfile</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/delonixfile-and-vmfile.html">Lire la page en anglais</a></span></div><h1 id="delonixfile-et-vmfile">Delonixfile et VMfile</h1>
 <p><strong>Avant de lire :</strong> <a href="build-and-test.html">Cloner, construire et tester</a> (un binaire et une racine d'état isolée) et <a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">Images OCI, stockage adressé par contenu et overlayfs</a> dans le manuel de cloud native.</p>
 <p>Delonix a deux fichiers de build, et ils se ressemblent volontairement : quiconque a écrit un
 Dockerfile peut lire les deux. Ce qu'ils construisent est différent.</p>
@@ -232,8 +232,8 @@ relecture</strong> (ils nécessitent un accès au registre/au réseau et, pour l
 plusieurs Go de RAM et de disque).</p>
 </blockquote>
 <hr />
-<h2 id="part-1-delonixfile">Partie 1 — Delonixfile<a class="hanchor" href="#part-1-delonixfile" aria-label="#">#</a></h2>
-<h3 id="where-the-code-lives">Où se trouve le code<a class="hanchor" href="#where-the-code-lives" aria-label="#">#</a></h3>
+<h2 id="partie-1-delonixfile">Partie 1 — Delonixfile<a class="hanchor" href="#partie-1-delonixfile" aria-label="#">#</a></h2>
+<h3 id="ou-se-trouve-le-code">Où se trouve le code<a class="hanchor" href="#ou-se-trouve-le-code" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -265,7 +265,7 @@ plusieurs Go de RAM et de disque).</p>
 </tr>
 </tbody>
 </table></div>
-<h3 id="file-lookup">Recherche du fichier<a class="hanchor" href="#file-lookup" aria-label="#">#</a></h3>
+<h3 id="recherche-du-fichier">Recherche du fichier<a class="hanchor" href="#recherche-du-fichier" aria-label="#">#</a></h3>
 <p><code>delonix build [CONTEXT]</code> sans <code>-f</code> appelle <code>default_build_file</code> (<code>cmd/build.rs</code>) : il utilise
 <code>&lt;context&gt;/Delonixfile</code> s'il existe, sinon <code>&lt;context&gt;/Dockerfile</code>. <strong>La grammaire est la même pour
 les deux noms</strong> — les instructions Delonix ci-dessous sont aussi acceptées dans un fichier nommé
@@ -273,7 +273,7 @@ les deux noms</strong> — les instructions Delonix ci-dessous sont aussi accept
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">delonix build -t myapp:dev .                 # Delonixfile, else Dockerfile
 delonix build -t myapp:dev -f build/Other .  # explicit file
 </code></pre></div>
-<h3 id="instructions-the-parser-accepts">Instructions acceptées par le parseur<a class="hanchor" href="#instructions-the-parser-accepts" aria-label="#">#</a></h3>
+<h3 id="instructions-acceptees-par-le-parseur">Instructions acceptées par le parseur<a class="hanchor" href="#instructions-acceptees-par-le-parseur" aria-label="#">#</a></h3>
 <p><code>parse_dockerfile_with_args</code> <strong>échoue de manière fermée</strong> : une instruction qu'il ne connaît pas est
 une erreur avec le numéro de ligne, et toute instruction autre que <code>ARG</code> avant le premier <code>FROM</code> est
 une erreur. Les lignes terminées par <code>\</code> sont jointes ; les lignes commençant par <code>#</code> sont des
@@ -387,7 +387,7 @@ câblez, mettez à jour ce tableau.</p>
   source.</li>
 <li><code>RUN --network=…</code>, <code>RUN --security=…</code> et toute autre option <code>RUN --&lt;flag&gt;</code> sont refusés.</li>
 </ul>
-<h3 id="multi-stage-copy-from-and-target">Multi-étapes, <code>COPY --from</code> et <code>--target</code><a class="hanchor" href="#multi-stage-copy-from-and-target" aria-label="#">#</a></h3>
+<h3 id="multi-etapes-copy-from-et-target">Multi-étapes, <code>COPY --from</code> et <code>--target</code><a class="hanchor" href="#multi-etapes-copy-from-et-target" aria-label="#">#</a></h3>
 <p>Chaque étape (y compris la finale) reçoit son <strong>propre container de travail et son propre rootfs</strong>
 (<code>build_one_stage</code>). Le container de travail (<code>sleep infinity</code> au-dessus du rootfs de l'étape) est
 créé par <code>ensure_container</code> à travers le même <code>WorkloadRuntime</code> que celui qu'utilisent
@@ -410,7 +410,7 @@ disque jusqu'à la fin du build complet, donc :</p>
 l'étape finale ne peut pas être <code>FROM &lt;earlier-stage&gt;</code> (le commit OCI a besoin d'une vraie image de
 base pour la filiation), et <code>--target</code> sur une étape intermédiaire est refusé. Le mode rootless n'a
 aucune de ces restrictions.</p>
-<h3 id="build-secrets">Secrets de build<a class="hanchor" href="#build-secrets" aria-label="#">#</a></h3>
+<h3 id="secrets-de-build">Secrets de build<a class="hanchor" href="#secrets-de-build" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">delonix build -t app:dev --secret id=npmrc,src=$HOME/.npmrc .
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-dockerfile">RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
@@ -427,13 +427,13 @@ aucune de ces restrictions.</p>
   le cache de couches ne le contient jamais. Le contenu du secret n'entre pas non plus dans le hash de
   la clé de cache.</li>
 </ul>
-<h3 id="-platform-and-binfmt"><code>--platform</code> et binfmt<a class="hanchor" href="#-platform-and-binfmt" aria-label="#">#</a></h3>
+<h3 id="-platform-et-binfmt"><code>--platform</code> et binfmt<a class="hanchor" href="#-platform-et-binfmt" aria-label="#">#</a></h3>
 <p><code>--platform linux/&lt;arch&gt;</code> (<code>parse_platform</code> : seul <code>linux/</code> est accepté) résout l'image de base pour
 cette architecture et appose l'architecture sur le résultat. <strong>Exécuter</strong> un <code>RUN</code> d'une architecture
 étrangère nécessite l'enregistrement <code>binfmt_misc</code> + <code>qemu-user-static</code> propre à l'hôte, que Delonix
 ne gère pas. <code>build_from_spec</code> vérifie <code>/proc/sys/fs/binfmt_misc/qemu-&lt;arch&gt;</code> avant de construire et
 refuse en nommant l'interpréteur s'il est absent ou désactivé.</p>
-<h3 id="rootless-vs-root-and-the-layer-cache">Rootless ou root, et le cache de couches<a class="hanchor" href="#rootless-vs-root-and-the-layer-cache" aria-label="#">#</a></h3>
+<h3 id="rootless-ou-root-et-le-cache-de-couches">Rootless ou root, et le cache de couches<a class="hanchor" href="#rootless-ou-root-et-le-cache-de-couches" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -472,7 +472,7 @@ ne fait que croître.</p>
 <p>Comme chaque <code>RUN</code> s'exécute dans un vrai container, les prérequis d'hôte de
 <a href="environment.html">Préparer votre environnement</a> (user namespaces, subuid/subgid, AppArmor sur
 Ubuntu) s'appliquent aussi aux builds.</p>
-<h3 id="worked-example-a-template">Exemple détaillé : un modèle<a class="hanchor" href="#worked-example-a-template" aria-label="#">#</a></h3>
+<h3 id="exemple-detaille-un-modele">Exemple détaillé : un modèle<a class="hanchor" href="#exemple-detaille-un-modele" aria-label="#">#</a></h3>
 <p><code>delonix init -t &lt;template&gt; [DIR]</code> (ou <code>delonix stack init --template &lt;template&gt;</code>) rend
 <code>bins/delonix-runtime-bin/templates/&lt;template&gt;/</code>, en remplaçant <code>__NAME__</code>, <code>__PORT__</code> et
 <code>__TEMPLATE_VERSION__</code> (la valeur par défaut <code>version=</code> de <code>template.meta</code>, ou
@@ -523,15 +523,15 @@ error invalid argument: --platform &#x27;windows/amd64&#x27;: only &#x27;linux/&
 </code></pre></div>
 <p>(Certaines erreurs du parseur sont encore en portugais ; elles comptent comme dette LANG-01 — voir
 <a href="contributing-workflow.html">Flux de contribution</a>.)</p>
-<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> du dépôt lui-même n'est pas construit par <code>delonix</code><a class="hanchor" href="#the-repositorys-own-delonixfile-is-not-built-by-delonix" aria-label="#">#</a></h3>
+<h3 id="le-delonixfile-du-depot-lui-meme-nest-pas-construit-par-delonix">Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> du dépôt lui-même n'est pas construit par <code>delonix</code><a class="hanchor" href="#le-delonixfile-du-depot-lui-meme-nest-pas-construit-par-delonix" aria-label="#">#</a></h3>
 <p>Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> à la racine du dépôt empaquette la CLI <code>delonix</code> dans une image de container. Il est
 construit avec <strong>Docker ou Podman</strong> (<code>docker build -f Delonixfile …</code>, ou <code>make image</code>), et non avec
 <code>delonix build</code> : il utilise <code># syntax=docker/dockerfile:1</code> et <code>RUN --mount=type=cache</code>, que
 <code>delonix build</code> refuse. Ne l'utilisez pas comme exemple de la grammaire Delonix ; utilisez les
 modèles.</p>
 <hr />
-<h2 id="part-2-vmfile">Partie 2 — VMfile<a class="hanchor" href="#part-2-vmfile" aria-label="#">#</a></h2>
-<h3 id="where-the-code-lives_1">Où se trouve le code<a class="hanchor" href="#where-the-code-lives_1" aria-label="#">#</a></h3>
+<h2 id="partie-2-vmfile">Partie 2 — VMfile<a class="hanchor" href="#partie-2-vmfile" aria-label="#">#</a></h2>
+<h3 id="ou-se-trouve-le-code_1">Où se trouve le code<a class="hanchor" href="#ou-se-trouve-le-code_1" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -566,7 +566,7 @@ scaffold est censé être une recette fonctionnelle, et le test <code>parseia_o_
 garde analysable. Deux choses sont à corriger à la main dans l'indication « Next: » qu'il affiche :
 l'option est <code>vm create --disk</code>, et non <code>--disk-image</code> ; et voyez la remarque sur <code>CLOUDINIT</code>
 ci-dessous à propos du nom de fichier.</p>
-<h3 id="building">Construire<a class="hanchor" href="#building" aria-label="#">#</a></h3>
+<h3 id="construire">Construire<a class="hanchor" href="#construire" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">delonix image vm build -t web:1.0 [-f VMfile] [--network] [--no-compress] [CONTEXT]
 </code></pre></div>
 <p>Il n'existe pas de <code>delonix vm build</code> ; le build se trouve sous <code>image vm</code>. Sans <code>-f</code>, un <code>VMfile</code>
@@ -672,7 +672,7 @@ un commentaire qu'en début de ligne (ainsi <code>RUN sed 's/#x/y/'</code> n'est
 </table></div>
 <p>Il n'y a ni <code>CMD</code> ni <code>ENTRYPOINT</code> : une VM démarre un init. <code>CLOUDINIT</code> est l'équivalent le plus
 proche.</p>
-<h3 id="what-from-accepts">Ce que <code>FROM</code> accepte<a class="hanchor" href="#what-from-accepts" aria-label="#">#</a></h3>
+<h3 id="ce-que-from-accepte">Ce que <code>FROM</code> accepte<a class="hanchor" href="#ce-que-from-accepte" aria-label="#">#</a></h3>
 <p><code>classify_base</code> est pure et décide du type de référence :</p>
 <ol>
 <li><strong>Une étape antérieure nommée</strong> — l'emporte sur tout le reste (<code>resolve_base</code>).</li>
@@ -686,7 +686,7 @@ proche.</p>
 <li><strong>Tout le reste</strong> — une image VM déjà présente dans le store local (<code>delonix image vm ls</code>). Tout
    autre <code>name:tag</code> est traité comme un tag local, et non comme une distribution inconnue.</li>
 </ol>
-<h3 id="what-a-stage-is-and-where-the-result-lands">Ce qu'est une étape, et où arrive le résultat<a class="hanchor" href="#what-a-stage-is-and-where-the-result-lands" aria-label="#">#</a></h3>
+<h3 id="ce-quest-une-etape-et-ou-arrive-le-resultat">Ce qu'est une étape, et où arrive le résultat<a class="hanchor" href="#ce-quest-une-etape-et-ou-arrive-le-resultat" aria-label="#">#</a></h3>
 <p>Une étape est un <strong>disque entier</strong>, pas une couche (<code>build</code>) :</p>
 <ol>
 <li>La base est <strong>aplatie</strong> dans <code>&lt;work&gt;/&lt;stage&gt;.qcow2</code> avec <code>qemu-img convert</code> (pas de backing file,
@@ -722,12 +722,12 @@ de <code>passt</code>, qui comporte des pièges côté hôte documentés dans
 étape. Faites pointer <code>TMPDIR</code> vers un système de fichiers qui a de la place — <code>/tmp</code> est souvent un
 petit tmpfs et est vidé au redémarrage. Un build qui échoue laisse ce répertoire derrière lui
 (observé lors de cette relecture) ; supprimez-le à la main.</p>
-<h3 id="declarative-build">Build déclaratif<a class="hanchor" href="#declarative-build" aria-label="#">#</a></h3>
+<h3 id="build-declaratif">Build déclaratif<a class="hanchor" href="#build-declaratif" aria-label="#">#</a></h3>
 <p><code>kind: VirtualMachine</code> peut construire son propre disque avec <code>spec.build</code> (<code>VmBuildSpec</code>) :
 <code>context</code> (relatif au répertoire du <strong>manifeste</strong>), <code>file</code> (par défaut <code>&lt;context&gt;/VMfile</code>), <code>tag</code> (par
 défaut <code>&lt;metadata.name&gt;:latest</code>), <code>compress</code>, <code>network</code>. <code>apply</code> appelle le même <code>vmfile::build</code>.
 <code>disk</code> et <code>build</code> sont mutuellement exclusifs.</p>
-<h3 id="worked-example-parse-checked">Exemple détaillé (parse-checked)<a class="hanchor" href="#worked-example-parse-checked" aria-label="#">#</a></h3>
+<h3 id="exemple-detaille-parse-checked">Exemple détaillé (parse-checked)<a class="hanchor" href="#exemple-detaille-parse-checked" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-dockerfile">FROM my-base:1.0 AS builder
 RUN make -C /src
 
@@ -757,7 +757,7 @@ VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cl
 <p>Un build complet (<code>virt-customize</code>, téléchargements, compression) n'a <strong>pas été exécuté lors de cette
 relecture</strong>.</p>
 <hr />
-<h2 id="comparison">Comparaison<a class="hanchor" href="#comparison" aria-label="#">#</a></h2>
+<h2 id="comparaison">Comparaison<a class="hanchor" href="#comparaison" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -872,7 +872,7 @@ relecture</strong>.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="if-you-change-a-grammar">Si vous modifiez une grammaire<a class="hanchor" href="#if-you-change-a-grammar" aria-label="#">#</a></h2>
+<h2 id="si-vous-modifiez-une-grammaire">Si vous modifiez une grammaire<a class="hanchor" href="#si-vous-modifiez-une-grammaire" aria-label="#">#</a></h2>
 <ul>
 <li>Gardez les deux parseurs <strong>fermés en cas d'échec</strong> : une instruction inconnue est une erreur, jamais
   une ligne ignorée.</li>
@@ -892,31 +892,31 @@ relecture</strong>.</p>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#part-1-delonixfile">Partie 1 — Delonixfile</a><ul>
-<li><a href="#where-the-code-lives">Où se trouve le code</a></li>
-<li><a href="#file-lookup">Recherche du fichier</a></li>
-<li><a href="#instructions-the-parser-accepts">Instructions acceptées par le parseur</a></li>
-<li><a href="#multi-stage-copy-from-and-target">Multi-étapes, COPY --from et --target</a></li>
-<li><a href="#build-secrets">Secrets de build</a></li>
-<li><a href="#-platform-and-binfmt">--platform et binfmt</a></li>
-<li><a href="#rootless-vs-root-and-the-layer-cache">Rootless ou root, et le cache de couches</a></li>
-<li><a href="#worked-example-a-template">Exemple détaillé : un modèle</a></li>
-<li><a href="#the-repositorys-own-delonixfile-is-not-built-by-delonix">Le Delonixfile du dépôt lui-même n'est pas construit par delonix</a></li>
+<li><a href="#partie-1-delonixfile">Partie 1 — Delonixfile</a><ul>
+<li><a href="#ou-se-trouve-le-code">Où se trouve le code</a></li>
+<li><a href="#recherche-du-fichier">Recherche du fichier</a></li>
+<li><a href="#instructions-acceptees-par-le-parseur">Instructions acceptées par le parseur</a></li>
+<li><a href="#multi-etapes-copy-from-et-target">Multi-étapes, COPY --from et --target</a></li>
+<li><a href="#secrets-de-build">Secrets de build</a></li>
+<li><a href="#-platform-et-binfmt">--platform et binfmt</a></li>
+<li><a href="#rootless-ou-root-et-le-cache-de-couches">Rootless ou root, et le cache de couches</a></li>
+<li><a href="#exemple-detaille-un-modele">Exemple détaillé : un modèle</a></li>
+<li><a href="#le-delonixfile-du-depot-lui-meme-nest-pas-construit-par-delonix">Le Delonixfile du dépôt lui-même n'est pas construit par delonix</a></li>
 </ul>
 </li>
-<li><a href="#part-2-vmfile">Partie 2 — VMfile</a><ul>
-<li><a href="#where-the-code-lives_1">Où se trouve le code</a></li>
+<li><a href="#partie-2-vmfile">Partie 2 — VMfile</a><ul>
+<li><a href="#ou-se-trouve-le-code_1">Où se trouve le code</a></li>
 <li><a href="#scaffold">Scaffold</a></li>
-<li><a href="#building">Construire</a></li>
+<li><a href="#construire">Construire</a></li>
 <li><a href="#instructions">Instructions</a></li>
-<li><a href="#what-from-accepts">Ce que FROM accepte</a></li>
-<li><a href="#what-a-stage-is-and-where-the-result-lands">Ce qu'est une étape, et où arrive le résultat</a></li>
-<li><a href="#declarative-build">Build déclaratif</a></li>
-<li><a href="#worked-example-parse-checked">Exemple détaillé (parse-checked)</a></li>
+<li><a href="#ce-que-from-accepte">Ce que FROM accepte</a></li>
+<li><a href="#ce-quest-une-etape-et-ou-arrive-le-resultat">Ce qu'est une étape, et où arrive le résultat</a></li>
+<li><a href="#build-declaratif">Build déclaratif</a></li>
+<li><a href="#exemple-detaille-parse-checked">Exemple détaillé (parse-checked)</a></li>
 </ul>
 </li>
-<li><a href="#comparison">Comparaison</a></li>
-<li><a href="#if-you-change-a-grammar">Si vous modifiez une grammaire</a></li>
+<li><a href="#comparaison">Comparaison</a></li>
+<li><a href="#si-vous-modifiez-une-grammaire">Si vous modifiez une grammaire</a></li>
 </ul>
 </div>
 </aside>

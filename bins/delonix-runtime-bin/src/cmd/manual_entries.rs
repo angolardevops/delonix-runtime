@@ -901,6 +901,7 @@ pub static ENTRIES: &[Entry] = &[
             ("a golden with no Kubernetes at all — just `delonix` itself, rootless ready on first boot", "delonix image vm build --no-k8s --distro debian --debian-release bookworm -t delonix-vm-base:debian-bookworm"),
             ("your own image from a `VMfile`, with network during `RUN` so a package can be installed", "delonix image vm build -f VMfile --network -t myimage:1 ."),
             ("extra packages on top of the golden recipe, without touching the code", "delonix image vm build --offline -t node:1.34 --extra-package htop --extra-package jq"),
+            ("a `vm.yaml` in the folder — the same as `delonix vm build .`", "delonix image vm build ."),
         ],
         see_also: &["image vm init", "image vm push", "vm create", "cluster kubeadm"],
     },
@@ -2410,6 +2411,18 @@ pub static ENTRIES: &[Entry] = &[
             ("actually tear the veth and the routes down, as root", "sudo delonix vm unbridge app --apply"),
         ],
         see_also: &["vm bridge", "vm reach", "network ls"],
+    },
+    Entry {
+        path: "vm build",
+        group: "Storage",
+        examples: &[
+            ("a `vm.yaml` in this folder: build every image it declares, like `docker build .`", "delonix vm build ."),
+            ("a specific file, tagged — `-t` is also `${TAG}` inside the file, so the same file builds any release", "delonix vm build -f images/ubuntu/vm.yaml -t 26.04"),
+            ("one image out of a `vm.yaml` that declares several", "delonix vm build -f vm.yaml --target ubuntu -t 26.04"),
+            ("a `VMfile` of your own, with network during `RUN` so a package can be installed", "delonix vm build -f VMfile --network -t myimage:1 ."),
+            ("the built-in golden recipe, offline, when there is no file at all", "delonix vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34"),
+        ],
+        see_also: &["vm init", "vm push", "vm create", "image vm build"],
     },
     Entry {
         path: "vm convert",

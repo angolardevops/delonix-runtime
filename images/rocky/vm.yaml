@@ -1,0 +1,69 @@
+# Rocky Linux cloud image, built by `delonix vm build`.
+#
+#   delonix vm build -f images/rocky/vm.yaml -t 9
+#
+# `-t` is the name of the result AND `${TAG}` below, which this file uses as
+# the major version of the base (`9`, `10`). Every relative path in this file
+# is relative to THIS folder, wherever you run the command from.
+#
+# It builds with NO network inside the guest, so the first build works on any
+# host. Turn `network` on and use `packages` when you need to install software.
+version: 1
+
+images:
+  rocky:
+    tag: rocky-${TAG:-9}
+
+    # ── base ──────────────────────────────────────────────────────────────
+    distro: rocky
+    release: "${TAG:-9}"
+    size: 10G                     # grown BEFORE any step runs
+
+    # ── identity & defaults recorded in the image (used by `vm create`) ────
+    hostname: rocky
+    vcpus: 2
+    memory: 2G
+    labels:
+      org.delonix.image: rocky
+
+    # ── build-time network. Off: a build that reaches the internet gives a ─
+    # ── different image depending on the day.                              ─
+    network: false
+
+    # ── what goes IN ──────────────────────────────────────────────────────
+    # To install software: set `network: true` above and list it here
+    # (the guest agent is already in the base image). Installed with dnf.
+    # packages:
+    #   upgrade: false
+    #   install: [jq]
+    files:
+      - src: artifacts/motd
+        dst: /etc/motd
+        mode: "0644"
+    env:
+      DELONIX_IMAGE: rocky
+    users:
+      - name: delonix
+        sudo: true
+        groups: [wheel]
+        shell: /bin/bash
+
+    # ── what goes OUT — removed after everything above ran ────────────────
+    # Here: the `cockpit` web console packages, which listen on a port nobody asked for.
+    remove:
+      packages: [cockpit-ws, cockpit-bridge, cockpit-system, cockpit-ws-selinux]
+      paths:
+        - /usr/share/info
+        - /usr/share/man
+
+    # ── first boot ────────────────────────────────────────────────────────
+    cloud_init: cloud-init/user-data
+
+    # ── housekeeping (these are the defaults; say false to keep) ──────────
+    cleanup:
+      package_cache: true
+      logs: true
+      history: true
+      tmp: true
+      machine_id: true
+      ssh_host_keys: false

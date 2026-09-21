@@ -206,6 +206,7 @@
 =	version
 ~	vm apply
 →	vm bridge
+~	vm build
 =	vm console
 ~	vm convert
 ~	vm create
