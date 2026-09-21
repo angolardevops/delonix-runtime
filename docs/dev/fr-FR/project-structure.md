@@ -1,4 +1,4 @@
-<!-- translated-from: project-structure.md sha256:dbc2d2309e9a7e9f250643cd7eb6b88089b3d1a56446e2de2a9409e984d8c49f -->
+<!-- translated-from: project-structure.md sha256:75e7e79156cf21d6baed4c5c38622782b7954f4556a9c82d4c5897b6417ef172 -->
 # Structure du projet
 
 **Avant de lire :** [Cloner, compiler et tester](build-and-test.md) — vous avez un checkout qui compile, et vous savez quels gates existent.
@@ -74,6 +74,7 @@ chercher, mais certaines parties sont obsolètes ; vérifiez dans le code ce qu�
 │   └── schema/                   manifest JSON Schema — generated from code
 ├── scripts/                      CI gates, generators, E2E/chaos harnesses, installer
 ├── examples/                     manifests validated by CI
+├── images/                       one folder per VM image: a `vm.yaml` recipe and a README
 ├── dist/                         systemd unit for delonix-cri
 ├── editors/                      VMfile syntax for Vim and VS Code
 └── reports/                      dated audit reports (historical)
@@ -158,6 +159,7 @@ par `docs/gen.py` ; `gen.py` lui-même et du Markdown comme `cli-stability.md`, 
 | `dist/` | `delonix-cri.service`, l’unité systemd du serveur CRI (aussi embarquée dans le binaire). | Quiconque change la façon dont `delonix-cri` s’exécute sous systemd. | [Standards cloud native](cloud-native-standards.md) |
 | `editors/` | Coloration syntaxique du VMfile : `vim/` (ftdetect + syntax) et `vscode/` (configuration de langage + grammaire TextMate). | Quiconque change la grammaire du VMfile. | [Delonixfile et VMfile](delonixfile-and-vmfile.md) |
 | `examples/` | Manifestes d’exemple par Kind, un labo réseau multi-fichiers (`lab-rede/`) et un petit projet complet (`delonix-temp/`). Le job `docs` de la CI fait un dry-run de chaque `examples/*.yaml`, donc un exemple obsolète ou cassé fait échouer le build. | Toute fonctionnalité qui ajoute ou change un Kind. | [Delonixfile et VMfile](delonixfile-and-vmfile.md) |
+| `images/` | Un dossier par image de VM : `ubuntu`, `debian`, `rocky`, `fedora` (recettes personnalisées qui se construisent hors ligne) et huit appliances (`opnsense`, `proxmox`, `truenas`, `openstack`, `monitoring`, `carbonio`, `glpi`, `wazuh`) dont le `vm.yaml` nomme un builder dans `scripts/appliances/`. Chacun a un README ; `images/README.md` les indexe et explique `scripts/verify-images.sh`. Un test unitaire (`vmspec::every_shipped_recipe_is_valid_and_complete`) échoue si une recette cesse de se parser ou pointe vers un fichier ou un builder absent. | Quiconque ajoute une distribution ou une appliance, ou change le schéma de `vm.yaml`. | [Delonixfile et VMfile](delonixfile-and-vmfile.md) |
 | `reports/` | Rapports d’audit datés : `code-quality/` et `production-readiness/<version>/` (inventaire, matrice d’écarts, backlog). Archives historiques d’un audit à un commit — ne pas réécrire ; rien n’y est implémenté du seul fait d’y être listé. | Quiconque mène un nouvel audit (nouveaux fichiers). | — |
 | `third_party/` | Protos `googleapis` vendorisés (`google/api/annotations.proto`, `http.proto`) utilisés pour le mappage HTTP du contrat de nœud. Apache-2.0, en-têtes de licence conservés ; le commit source est consigné dans son `README.md`. Jamais édité ici. | Quiconque met à jour les protos vendorisés, les deux fichiers depuis un même commit amont. | `third_party/googleapis/README.md` |
 | `.ai/` | Skills neutres vis-à-vis de l’outil pour les assistants d’IA : `skills/delonix-runtime-e2e-quality/` (taxonomie de tests, contrat de provider, vérifications de sécurité, modèles de rapport). | Les mainteneurs. | — |

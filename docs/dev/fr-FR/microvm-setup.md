@@ -1,4 +1,4 @@
-<!-- translated-from: microvm-setup.md sha256:90b3c976c5f086be4734500b81c5e673cff0a7d3f684e2a423f2849320d57300 -->
+<!-- translated-from: microvm-setup.md sha256:10d65caba96f8246274f99b813161fdd1de0d0b5d43e81ebe5352b2b5f524247 -->
 # Construire des microVMs
 
 **Avant de lire :** [Préparer votre environnement](environment.md), [Cloner, compiler et tester](build-and-test.md), la [section virtualisation du manuel de cloud native](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), et la Partie 2 de [Delonixfile et VMfile](delonixfile-and-vmfile.md#part-2-vmfile).
@@ -91,7 +91,7 @@ propre overlay démarre sans que son propriétaire soit changé.
 | `qemu-img` | `qemu-utils` / `qemu-img` | overlays par VM, `vm convert`, snapshots sur CH, construction d'images |
 | `cloud-localds` | `cloud-image-utils` / `cloud-utils` | ISO de seed NoCloud — générée à **chaque** `vm create` d'une image cloud-init sauf si `--seed` est fourni (`crates/adapters/delonix-vm/src/cloudinit.rs`) |
 | `virsh` | `libvirt-clients` / `libvirt-client` | backend libvirt |
-| `virt-customize`, `virt-sparsify`, `virt-copy-out` | `libguestfs-tools` / `guestfs-tools` | `image vm build` uniquement |
+| `virt-customize`, `virt-sparsify`, `virt-copy-out` | `libguestfs-tools` / `guestfs-tools` | `vm build` / `image vm build` uniquement |
 
 `vmimage::tool_package` associe un binaire manquant à son paquet, de sorte qu'un outil manquant est
 signalé par son nom plutôt que par un simple `No such file or directory`.
@@ -263,7 +263,9 @@ sans image locale télécharge l'image dorée officielle ; il a donc besoin du 
 
 ### Construire la recette dorée
 
-`delonix image vm build -t <tag>` sans `VMfile` dans le contexte exécute la recette intégrée :
+`delonix vm build -t <tag>` (la même commande que `delonix image vm build` ; les deux partagent un seul jeu
+d'arguments) sans `vm.yaml` ni `VMfile` dans le contexte exécute la recette intégrée. Les exemples
+ci-dessous utilisent la graphie `image vm` :
 
 ```bash
 # Kubernetes node, packages fetched and verified on the HOST, guest offline
@@ -277,7 +279,11 @@ Options pertinentes (consultez `image vm build --help` pour les valeurs par déf
 `--fedora-release` (release **et** build, p. ex. `42-1.1`), `--k8s-version`, `--offline`,
 `--no-k8s`, `--extra-package`, `--extra-run`, `--cri-bin`, `--delonix-bin`, `--root-password` (sans
 elle, aucun compte n'a de mot de passe), `--node-exporter[=<addr>]`, `--no-compress`. Votre propre
-recette est un `VMfile` — voir [Delonixfile et VMfile](delonixfile-and-vmfile.md). Les
+recette est un `VMfile` ou un `vm.yaml` — voir [Delonixfile et VMfile](delonixfile-and-vmfile.md). Le dossier `images/` du
+dépôt fournit un `vm.yaml` par distribution (`ubuntu`, `debian`, `rocky`, `fedora`, construites hors ligne) et par appliance ;
+`scripts/verify-images.sh` les construit dans un `DELONIX_ROOT` isolé et relit le qcow2
+(`--self-test` prouve que ses vérifications peuvent échouer). L'installation de paquets, les profils de la recette dorée, le démarrage
+des images construites et les builders d'appliances **n'ont pas encore été validés** (notes de release v4.2.0). Les
 builds d'images sont uniquement amd64 ([ADR-0018](../../adr/0018-vm-images-stay-amd64.md)).
 
 ### Convertir et importer

@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:f63e73d420c6754687d52f97013a60eaff3547f38bc24b47ee559d3910182f24 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:16ac2cc5b199b5914e1dadc9be3d70cd285c0991f4618a9e1db95713c841dc02 -->
 # Delonixfile et VMfile
 
 **Avant de lire :** [Cloner, construire et tester](build-and-test.md) (un binaire et une racine d'état isolée) et [Images OCI, stockage adressé par contenu et overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs) dans le manuel de cloud native.
@@ -265,15 +265,52 @@ ci-dessous à propos du nom de fichier.
 ### Construire
 
 ```bash
-delonix image vm build -t web:1.0 [-f VMfile] [--network] [--no-compress] [CONTEXT]
+delonix vm build [-f vm.yaml|VMfile] [-t <tag>] [--target <image>] [--network] [--no-compress] [CONTEXT]
 ```
 
-Il n'existe pas de `delonix vm build` ; le build se trouve sous `image vm`. Sans `-f`, un `VMfile`
-présent dans le contexte est pris automatiquement (comme un `Delonixfile` l'emporte sur un
-`Dockerfile`) ; sans `VMfile`, la même commande exécute à la place la recette dorée intégrée (voir
-[Construire des microVMs](microvm-setup.md)). Les options de la recette dorée (`--k8s-version`, `--extra-package`,
-`--extra-run`, `--offline`, `--no-k8s`, `--cri-bin`, `--delonix-bin`) sont **refusées** avec un
-VMfile, et `--network` est refusé sans VMfile.
+`delonix image vm build` est la même commande (les deux partagent un seul `BuildArgs`). La recette exécutée se
+décide comme `docker build` choisit entre des fichiers : un `-f` explicite l'emporte (un `.yaml`/`.yml` est lu
+comme un `vm.yaml`, tout le reste comme un `VMfile`) ; sans `-f`, un `vm.yaml` dans le contexte l'emporte sur un
+`VMfile`, qui l'emporte sur la recette dorée intégrée (voir [Construire des microVMs](microvm-setup.md)). Les
+options de la recette dorée (`--k8s-version`, `--extra-package`, `--extra-run`, `--offline`, `--no-k8s`,
+`--cri-bin`, `--delonix-bin`) sont **refusées** avec un `vm.yaml` ou un `VMfile`, et `--network` est
+refusé sans l'un des deux.
+
+### `vm.yaml` : le front end de style compose
+
+Un `VMfile` est à une image de VM ce qu'un `Dockerfile` est à une image de container. Un `vm.yaml` est à celle-ci ce
+qu'un `compose.yaml` est à un container : il nomme les images d'un dossier et porte les paramètres qui rendent le
+qcow2 complet — `size`, `packages.install`, `users`, `services`, `files`, `env`, `cloud_init`,
+`run`, ce qu'il faut **retirer** (`remove.packages/paths/users/services`, appliqué après tout le reste pour
+pouvoir élaguer ce qu'un paquet ou un `run:` a fait entrer) et `cleanup` (cache des paquets, logs, historique,
+`/tmp`, `machine-id`).
+
+C'est uniquement un front end (`cmd/vmspec.rs`). Chaque image se compile vers un builder qui existe déjà —
+un `VMfile` synthétisé (`profile: custom`, le défaut), la recette dorée (`profile: rootless|k8s`)
+ou un fichier existant (`build.file`) — il n'y a donc pas de second moteur de build. Règles à connaître :
+
+- **Strict** : une clé inconnue est une erreur, tout comme un champ que la voie choisie ne peut pas honorer (un
+  `hostname:` avec `profile: k8s` est refusé par son nom, pas ignoré).
+- **`${TAG}` / `${VAR:-default}`** sont développés sur les valeurs parsées (un `${TAG}` dans un commentaire n'est
+  pas évalué). `-t` est la tag du résultat **et** `${TAG}`.
+- **Les chemins relatifs sont relatifs au dossier propre du `vm.yaml`**, quoi que dise le contexte.
+- **`packages` requiert `network: true`** : un build qui atteint internet donne une image différente un jour
+  différent, donc c'est opt-in et le refus le dit.
+- `remove.paths` doit être absolu, sans `..`, et jamais un répertoire système de premier niveau.
+
+**Appliances** (`appliance:`). Certaines images ne peuvent pas se décrire comme des modifications d'une image
+cloud : l'installateur du fournisseur doit s'exécuter (Proxmox depuis son ISO, OpenStack qui tire ~20 GiB de
+containers). Pour celles-ci, la recette nomme un **builder**, pas un chemin : `appliance: {builder: proxmox, args: [pve,
+"9.2-1"]}` exécute `scripts/appliances/build-proxmox.sh` (trouvé dans le dossier du `vm.yaml` ou dans n'importe quel
+dossier au-dessus) avec un `OUT_DIR` isolé à côté du store d'images, prend l'unique `*.qcow2` qu'il
+laisse (un `.raw.qcow2` est ignoré), et l'enregistre avec la sémantique de `image vm import` —
+`--appliance` sauf si `cloud_init: true`. Comme le nom est validé (`[a-z0-9-]`) et résolu
+à l'intérieur de `scripts/appliances/`, un `vm.yaml` ne peut pas faire exécuter à l'hôte un fichier de son choix ; `args`
+et `env` sont eux aussi validés (pas de `-` initial, pas de `PATH`/`LD_*`/`BASH_ENV`…). Les champs qu'un builder
+décide lui-même (`packages`, `users`, `hostname`, `network`, `profile`…) sont refusés par leur nom.
+
+Les dossiers par distribution sous `images/` (`images/ubuntu/` en premier) portent chacun un `vm.yaml`, le
+fichier cloud-init, les artefacts et un README.
 
 ### Instructions
 
