@@ -17,8 +17,9 @@ pub enum HostsCmd {
     /// `127.0.0.1` — the L7 proxy's published port is how the host reaches a workload on the
     /// SDN. Rewriting `/etc/hosts` needs root: without it the command refuses and prints the
     /// block to add by hand. After the first run, `container run --expose` and `rm` keep the
-    /// block current (best effort — a failed write only warns). `--off` removes the block and
-    /// stops maintaining it.
+    /// block current. When the file cannot be written that only warns — unless a route asked
+    /// for names with `hosts:`, and then the operation fails instead. `--off` removes the block
+    /// and stops maintaining it.
     Sync {
         /// Print the block that would be written and touch nothing.
         #[arg(long, conflicts_with = "off")]
