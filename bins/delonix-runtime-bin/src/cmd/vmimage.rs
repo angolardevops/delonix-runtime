@@ -583,93 +583,103 @@ pub enum VmImageCmd {
     /// Build a VM image: from a `VMfile` when there is one, otherwise the
     /// built-in golden recipe (Ubuntu cloud image + kubeadm/kubelet/kubectl +
     /// `delonix-cri`), via `virt-customize`.
-    Build {
-        #[arg(short = 't', long = "tag")]
-        tag: String,
-        /// Build from a `VMfile` instead of the built-in golden recipe.
-        ///
-        /// With no `-f`, a `VMfile` in the context directory is used if there
-        /// is one — same rule `delonix build` follows for `Delonixfile`. The
-        /// flags below (`--distro`, `--k8s-version`, …) belong to the golden
-        /// recipe and are REFUSED with a VMfile, which describes all of that
-        /// itself; accepting and ignoring them is the failure this repo names
-        /// as its worst.
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
-        /// Build context — the directory `COPY` reads from (default: `.`).
-        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
-        context: PathBuf,
-        /// Base distro for the cloud image.
-        #[arg(long, value_enum, default_value = "ubuntu")]
-        distro: Distro,
-        #[arg(long, default_value = "26.04")]
-        ubuntu_release: String,
-        /// Debian codename (`bookworm`, `trixie`, ...) — only used with `--distro debian`.
-        #[arg(long, default_value = "bookworm")]
-        debian_release: String,
-        /// Rocky Linux major version (`8`, `9`, `10`) — only used with `--distro
-        /// rocky`. Rocky currently only supports `--no-k8s` builds.
-        #[arg(long, default_value = "9")]
-        rocky_release: String,
-        /// Fedora release AND build, as shown on Fedora's download page
-        /// (e.g. `42-1.1`) — only used with `--distro fedora`. The build
-        /// number is not derivable from the release, and Fedora's redirector
-        /// offers no listing to look it up, so it is asked for rather than
-        /// guessed.
-        #[arg(long, default_value = "42-1.1")]
-        fedora_release: String,
-        /// Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION`
-        /// (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam
-        /// disponíveis passando-as aqui.
-        #[arg(long)]
-        k8s_version: Option<String>,
-        /// Extra apt package, repeatable — extensibility without touching the code.
-        #[arg(long = "extra-package")]
-        extra_packages: Vec<String>,
-        /// Extra command to run inside the guest during the build, repeatable.
-        #[arg(long = "extra-run")]
-        extra_run: Vec<String>,
-        /// Explicit path of the `delonix-cri` binary to install (otherwise:
-        /// looks next to the current `delonix`, then tries to build from the
-        /// workspace if a `Cargo.toml` is detected from the cwd).
-        #[arg(value_hint = clap::ValueHint::FilePath, long)]
-        cri_bin: Option<PathBuf>,
-        /// Do not compress the final qcow2 (larger, but no decompression cost
-        /// on backing-file reads at runtime).
-        #[arg(long)]
-        no_compress: bool,
-        /// Give the guest network access during `RUN` — VMfile builds only.
-        /// The golden recipe already decides this with `--offline`.
-        #[arg(long)]
-        network: bool,
-        /// Fetch the k8s .deb files on the HOST (verified: InRelease signature +
-        /// SHA256) and install them with `dpkg` — the appliance runs without
-        /// network (`--no-network`). Dispenses with DHCP/DNS in the guest, so it
-        /// dispenses with the host workarounds (passt/dhclient) the online mode requires.
-        #[arg(long)]
-        offline: bool,
-        /// Build a golden image with NO Kubernetes at all — just the
-        /// `delonix` engine binary, ready for rootless containers (mutually
-        /// exclusive with `--k8s-version`/`--offline`, which don't apply).
-        #[arg(long)]
-        no_k8s: bool,
-        /// Explicit path of the `delonix` binary to install when `--no-k8s`
-        /// (otherwise: the currently running `delonix`, then a workspace
-        /// build, then a verified download from the matching release).
-        #[arg(value_hint = clap::ValueHint::FilePath, long)]
-        delonix_bin: Option<PathBuf>,
-        /// Set a root password in the image. WITHOUT this, no account ships
-        /// with one (the supported ways in are the SSH key cloud-init injects
-        /// and the key `cluster kubeadm` generates). Use it only when you need
-        /// the serial console to take a login — and remember the image is an
-        /// artefact you may publish.
-        #[arg(long)]
-        root_password: Option<String>,
-        /// Install the Prometheus node_exporter and enable it on this address
-        /// (bare flag: `0.0.0.0:9100`). Without it the image ships no listener.
-        #[arg(long, require_equals = true, num_args = 0..=1, default_missing_value = "0.0.0.0:9100")]
-        node_exporter: Option<String>,
-    },
+    Build(BuildArgs),
+}
+
+/// Everything `vm build` / `image vm build` accept — ONE struct behind every
+/// entry point, so they cannot drift (the same reason as [`ImportArgs`]).
+#[derive(clap::Args, Clone, Debug)]
+pub struct BuildArgs {
+    /// Tag of the resulting image. With a `vm.yaml` it defaults to the
+    /// image's own `tag:`; without one it is required.
+    #[arg(short = 't', long = "tag")]
+    pub tag: Option<String>,
+    /// Build from a `VMfile` instead of the built-in golden recipe.
+    ///
+    /// With no `-f`, a `VMfile` in the context directory is used if there
+    /// is one — same rule `delonix build` follows for `Delonixfile`. The
+    /// flags below (`--distro`, `--k8s-version`, …) belong to the golden
+    /// recipe and are REFUSED with a VMfile, which describes all of that
+    /// itself; accepting and ignoring them is the failure this repo names
+    /// as its worst.
+    #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
+    pub file: Option<PathBuf>,
+    /// With a `vm.yaml` that declares several images, build only this one.
+    #[arg(long)]
+    pub target: Option<String>,
+    /// Build context — the directory `COPY` reads from (default: `.`).
+    #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
+    pub context: PathBuf,
+    /// Base distro for the cloud image.
+    #[arg(long, value_enum, default_value = "ubuntu")]
+    pub distro: Distro,
+    #[arg(long, default_value = "26.04")]
+    pub ubuntu_release: String,
+    /// Debian codename (`bookworm`, `trixie`, ...) — only used with `--distro debian`.
+    #[arg(long, default_value = "bookworm")]
+    pub debian_release: String,
+    /// Rocky Linux major version (`8`, `9`, `10`) — only used with `--distro
+    /// rocky`. Rocky currently only supports `--no-k8s` builds.
+    #[arg(long, default_value = "9")]
+    pub rocky_release: String,
+    /// Fedora release AND build, as shown on Fedora's download page
+    /// (e.g. `42-1.1`) — only used with `--distro fedora`. The build
+    /// number is not derivable from the release, and Fedora's redirector
+    /// offers no listing to look it up, so it is asked for rather than
+    /// guessed.
+    #[arg(long, default_value = "42-1.1")]
+    pub fedora_release: String,
+    /// Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION`
+    /// (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam
+    /// disponíveis passando-as aqui.
+    #[arg(long)]
+    pub k8s_version: Option<String>,
+    /// Extra apt package, repeatable — extensibility without touching the code.
+    #[arg(long = "extra-package")]
+    pub extra_packages: Vec<String>,
+    /// Extra command to run inside the guest during the build, repeatable.
+    #[arg(long = "extra-run")]
+    pub extra_run: Vec<String>,
+    /// Explicit path of the `delonix-cri` binary to install (otherwise:
+    /// looks next to the current `delonix`, then tries to build from the
+    /// workspace if a `Cargo.toml` is detected from the cwd).
+    #[arg(value_hint = clap::ValueHint::FilePath, long)]
+    pub cri_bin: Option<PathBuf>,
+    /// Do not compress the final qcow2 (larger, but no decompression cost
+    /// on backing-file reads at runtime).
+    #[arg(long)]
+    pub no_compress: bool,
+    /// Give the guest network access during `RUN` — VMfile builds only.
+    /// The golden recipe already decides this with `--offline`.
+    #[arg(long)]
+    pub network: bool,
+    /// Fetch the k8s .deb files on the HOST (verified: InRelease signature +
+    /// SHA256) and install them with `dpkg` — the appliance runs without
+    /// network (`--no-network`). Dispenses with DHCP/DNS in the guest, so it
+    /// dispenses with the host workarounds (passt/dhclient) the online mode requires.
+    #[arg(long)]
+    pub offline: bool,
+    /// Build a golden image with NO Kubernetes at all — just the
+    /// `delonix` engine binary, ready for rootless containers (mutually
+    /// exclusive with `--k8s-version`/`--offline`, which don't apply).
+    #[arg(long)]
+    pub no_k8s: bool,
+    /// Explicit path of the `delonix` binary to install when `--no-k8s`
+    /// (otherwise: the currently running `delonix`, then a workspace
+    /// build, then a verified download from the matching release).
+    #[arg(value_hint = clap::ValueHint::FilePath, long)]
+    pub delonix_bin: Option<PathBuf>,
+    /// Set a root password in the image. WITHOUT this, no account ships
+    /// with one (the supported ways in are the SSH key cloud-init injects
+    /// and the key `cluster kubeadm` generates). Use it only when you need
+    /// the serial console to take a login — and remember the image is an
+    /// artefact you may publish.
+    #[arg(long)]
+    pub root_password: Option<String>,
+    /// Install the Prometheus node_exporter and enable it on this address
+    /// (bare flag: `0.0.0.0:9100`). Without it the image ships no listener.
+    #[arg(long, require_equals = true, num_args = 0..=1, default_missing_value = "0.0.0.0:9100")]
+    pub node_exporter: Option<String>,
 }
 
 pub fn run(action: VmImageCmd) -> Result<()> {
@@ -724,38 +734,45 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             None => cmd_ls_remote_official(),
         },
         VmImageCmd::Init { name, dir, force } => cmd_init(&name, dir, force),
-        VmImageCmd::Build {
-            tag,
-            file,
-            context,
-            distro,
-            ubuntu_release,
-            debian_release,
-            rocky_release,
-            fedora_release,
-            k8s_version,
-            extra_packages,
-            extra_run,
-            cri_bin,
-            no_compress,
-            network,
-            offline,
-            no_k8s,
-            delonix_bin,
-            root_password,
-            node_exporter,
-        } => {
-            // A `VMfile` in the context beats the golden recipe, the same way a
-            // `Delonixfile` beats a `Dockerfile` for `delonix build`. Explicit
-            // `-f` always wins.
-            let vmfile = file.or_else(|| {
-                let p = context.join("VMfile");
-                p.exists().then_some(p)
-            });
-            if let Some(path) = vmfile {
-                // The golden-recipe flags describe a recipe the VMfile replaces.
-                // Silently ignoring them would let someone believe their
-                // `--k8s-version` took effect.
+        VmImageCmd::Build(a) => {
+            let BuildArgs {
+                tag,
+                file,
+                target,
+                context,
+                distro,
+                ubuntu_release,
+                debian_release,
+                rocky_release,
+                fedora_release,
+                k8s_version,
+                extra_packages,
+                extra_run,
+                cri_bin,
+                no_compress,
+                network,
+                offline,
+                no_k8s,
+                delonix_bin,
+                root_password,
+                node_exporter,
+            } = a;
+            // Precedence, the one `docker build` users expect: an explicit
+            // `-f` decides; otherwise a `vm.yaml` in the context beats a
+            // `VMfile`, which beats the golden recipe.
+            let spec_path = super::vmspec::locate(file.as_deref(), &context);
+            let vmfile = if spec_path.is_some() {
+                None
+            } else {
+                file.or_else(|| {
+                    let p = context.join("VMfile");
+                    p.exists().then_some(p)
+                })
+            };
+            // The golden-recipe flags describe a recipe a `vm.yaml`/`VMfile`
+            // replaces. Silently ignoring them would let someone believe their
+            // `--k8s-version` took effect.
+            if spec_path.is_some() || vmfile.is_some() {
                 let golden: &[(&str, bool)] = &[
                     ("--k8s-version", k8s_version.is_some()),
                     ("--extra-package", !extra_packages.is_empty()),
@@ -772,10 +789,18 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                     .collect();
                 if !used.is_empty() {
                     return Err(Error::Invalid(super::po::tf(
-                        "{flags} belong to the built-in golden recipe and mean nothing with a VMfile — the VMfile describes all of that itself",
+                        "{flags} belong to the built-in golden recipe and mean nothing with a vm.yaml or a VMfile — the file describes all of that itself",
                         &[("flags", &used.join(", "))],
                     ).to_string()));
                 }
+            }
+            if let Some(path) = spec_path {
+                return build_spec(&store, &path, tag.as_deref(), target.as_deref(), no_compress, network);
+            }
+            if let Some(path) = vmfile {
+                let tag = tag.ok_or_else(|| {
+                    Error::Invalid(super::po::t("`-t <tag>` is required to build a VMfile").to_string())
+                })?;
                 // This path (`image vm build -f VMfile`) has no `--verbose` of
                 // its own; `DELONIX_VERBOSE` still unfolds it, which is what
                 // `Progress::new` reads.
@@ -795,6 +820,12 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                 )
                 .to_string()));
             }
+            if target.is_some() {
+                return Err(Error::Invalid(super::po::t("`--target` needs a vm.yaml").to_string()));
+            }
+            let tag = tag.ok_or_else(|| {
+                Error::Invalid(super::po::t("`-t <tag>` is required to build the golden recipe").to_string())
+            })?;
             cmd_build(
                 &store,
                 &tag,
@@ -816,6 +847,101 @@ pub fn run(action: VmImageCmd) -> Result<()> {
             )
         }
     }
+}
+
+/// Builds the images a `vm.yaml` declares.
+///
+/// Relative paths in the file are relative to the file's own folder (as in a
+/// `compose.yaml`), whatever the context argument says. `-t` names the result
+/// and is also `${TAG}` inside the file; with several images it would name all
+/// of them, so it is refused there.
+fn build_spec(
+    store: &VmImageStore,
+    path: &std::path::Path,
+    tag: Option<&str>,
+    target: Option<&str>,
+    no_compress: bool,
+    network: bool,
+) -> Result<()> {
+    use super::vmspec::{self, Route};
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))?;
+    let spec = vmspec::parse(&text, tag)?;
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    let chosen = vmspec::select(&spec, target)?;
+    if chosen.len() > 1 && tag.is_some() {
+        return Err(Error::Invalid(super::po::t(
+            "`-t` names one image, but this vm.yaml declares several — pick one with `--target <name>`",
+        )
+        .to_string()));
+    }
+    // Everything is validated BEFORE the first download: a typo in the last
+    // image must not cost the first one's build.
+    let plans = chosen
+        .iter()
+        .map(|(n, i)| vmspec::plan(n, i, &dir))
+        .collect::<Result<Vec<_>>>()?;
+    for p in &plans {
+        if p.tag.is_none() && tag.is_none() {
+            return Err(Error::Invalid(super::po::tf(
+                "image '{name}' has no `tag:` — add one to the vm.yaml or pass `-t`",
+                &[("name", &p.name)],
+            )
+            .to_string()));
+        }
+    }
+    for p in plans {
+        let tag = tag.map(str::to_string).or(p.tag.clone()).expect("checked above");
+        let compress = p.compress && !no_compress;
+        let net = p.network || network;
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "building '{name}' as {tag}",
+                &[("name", &p.name), ("tag", &tag)]
+            )
+        );
+        match p.route {
+            Route::Custom(vf) => {
+                super::vmfile::build_parsed(store, &vf, &dir, &tag, compress, net, false)?
+            }
+            Route::File { file, context } => {
+                super::vmfile::build(store, &file, &context, &tag, compress, net, false)?
+            }
+            Route::Golden(g) => {
+                let distro = match g.distro.as_str() {
+                    "debian" => Distro::Debian,
+                    "rocky" => Distro::Rocky,
+                    "fedora" => Distro::Fedora,
+                    _ => Distro::Ubuntu,
+                };
+                cmd_build(
+                    store,
+                    &tag,
+                    distro,
+                    &g.ubuntu_release,
+                    &g.debian_release,
+                    &g.rocky_release,
+                    &g.fedora_release,
+                    g.k8s_version,
+                    g.extra_packages,
+                    g.extra_run,
+                    None,
+                    compress,
+                    g.offline,
+                    g.no_k8s,
+                    None,
+                    g.root_password,
+                    g.node_exporter,
+                )?
+            }
+        }
+    }
+    Ok(())
 }
 
 /// `vm init` — writes the scaffold.
@@ -2003,7 +2129,7 @@ fn image_type_label(cloud_init: Option<&str>) -> String {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn cmd_build(
+pub(crate) fn cmd_build(
     store: &VmImageStore,
     tag: &str,
     distro: Distro,

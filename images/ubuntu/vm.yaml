@@ -1,0 +1,69 @@
+# Ubuntu cloud image, built by `delonix vm build`.
+#
+#   delonix vm build -f images/ubuntu/vm.yaml -t 26.04
+#
+# `-t` is both the tag of the result and `${TAG}` below, so the same file
+# builds any release: `-t 24.04` gives an Ubuntu 24.04 image.
+# Every relative path in this file is relative to THIS folder.
+version: 1
+
+images:
+  ubuntu:
+    tag: ubuntu-${TAG:-26.04}
+
+    # ── base ──────────────────────────────────────────────────────────────
+    distro: ubuntu
+    release: "${TAG:-26.04}"
+    size: 10G                     # grown BEFORE any step runs
+
+    # ── identity & defaults recorded in the image (used by `vm create`) ────
+    hostname: ubuntu
+    vcpus: 2
+    memory: 2G
+    labels:
+      org.delonix.image: ubuntu
+
+    # ── build-time network. Off unless you ask: a build that reaches the ──
+    # ── internet gives a different image depending on the day.           ──
+    network: true
+
+    # ── what goes IN ──────────────────────────────────────────────────────
+    packages:
+      upgrade: false
+      install:
+        - qemu-guest-agent
+        - curl
+        - ca-certificates
+    files:
+      - src: artifacts/motd
+        dst: /etc/motd
+        mode: "0644"
+    env:
+      DELONIX_IMAGE: ubuntu
+    users:
+      - name: delonix
+        sudo: true
+        groups: [adm]
+        shell: /bin/bash
+    services:
+      enable: [qemu-guest-agent]
+
+    # ── what goes OUT — removed after everything above ran ────────────────
+    remove:
+      packages: [snapd]
+      paths:
+        - /usr/share/doc
+        - /usr/share/man
+      services: [ModemManager]
+
+    # ── first boot ────────────────────────────────────────────────────────
+    cloud_init: cloud-init/user-data
+
+    # ── housekeeping (these are the defaults; say false to keep) ──────────
+    cleanup:
+      package_cache: true
+      logs: true
+      history: true
+      tmp: true
+      machine_id: true
+      ssh_host_keys: false

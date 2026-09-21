@@ -671,6 +671,11 @@ pub enum VmCmd {
         #[arg(long)]
         compress: bool,
     },
+    /// Build a VM image (qcow2) from a `vm.yaml`, a `VMfile`, or the golden recipe.
+    ///
+    /// The `docker build` experience for VMs: `vm build .` finds a `vm.yaml`
+    /// (then a `VMfile`) in the context; `-f <file> -t <tag>` names both.
+    Build(super::vmimage::BuildArgs),
     /// Get or set the default VM backend.
     ///
     /// Used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND`
@@ -2343,6 +2348,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             super::vmimage::cmd_convert(&store, &source, to, output, compress)
         }
+        VmCmd::Build(args) => super::vmimage::run(super::vmimage::VmImageCmd::Build(args)),
         VmCmd::DefaultBackend { set, clear } => {
             if clear {
                 delonix_vm::clear_default_backend(&base)?;

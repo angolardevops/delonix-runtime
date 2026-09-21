@@ -77,6 +77,7 @@ pub mod vm_expose;
 pub mod vmbackends;
 pub mod vmbridge;
 pub mod vmfile;
+pub mod vmspec;
 pub mod vmimage;
 pub mod volume;
 pub mod workload;

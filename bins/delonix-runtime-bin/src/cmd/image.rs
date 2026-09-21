@@ -16,7 +16,6 @@ use serde::{Deserialize, Serialize};
 
 use super::manifest::{self, ManifestDoc};
 use super::util::{effective_command, open_stores, resolve_or_pull};
-use super::vmimage::Distro;
 
 /// `spec` of `kind: Image` — either `pull: <ref>` or `build: {...}` (mutually
 /// exclusive; clear error if both are missing).
@@ -459,63 +458,10 @@ pub enum VmSub {
         #[arg(long)]
         force: bool,
     },
-    /// Build a VM image: the built-in golden recipe, or your own `VMfile`.
+    /// Build a VM image: a `vm.yaml`, your own `VMfile`, or the golden recipe.
     ///
-    /// The golden recipe is Ubuntu + kubeadm/kubelet/kubectl + `delonix-cri`;
-    /// build a `VMfile` of your own with `-f`.
-    Build {
-        #[arg(short = 't', long = "tag")]
-        tag: String,
-        /// Build from a `VMfile` instead of the built-in golden recipe.
-        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
-        file: Option<PathBuf>,
-        /// Build context — the directory `COPY` reads from.
-        #[arg(value_hint = clap::ValueHint::DirPath, default_value = ".")]
-        context: PathBuf,
-        #[arg(long, value_enum, default_value = "ubuntu")]
-        distro: Distro,
-        #[arg(long, default_value = "26.04")]
-        ubuntu_release: String,
-        #[arg(long, default_value = "bookworm")]
-        debian_release: String,
-        #[arg(long, default_value = "9")]
-        rocky_release: String,
-        /// Fedora release AND build (e.g. `42-1.1`) — only with `--distro fedora`.
-        #[arg(long, default_value = "42-1.1")]
-        fedora_release: String,
-        #[arg(long)]
-        k8s_version: Option<String>,
-        #[arg(long = "extra-package")]
-        extra_packages: Vec<String>,
-        #[arg(long = "extra-run")]
-        extra_run: Vec<String>,
-        #[arg(value_hint = clap::ValueHint::FilePath, long)]
-        cri_bin: Option<PathBuf>,
-        /// Do not compress the final qcow2 (larger, but with no decompression
-        /// cost on backing-file reads at runtime).
-        #[arg(long)]
-        no_compress: bool,
-        /// Give the guest network access during `RUN` — VMfile builds only.
-        /// The golden recipe already decides this with `--offline`.
-        #[arg(long)]
-        network: bool,
-        /// Fetch the k8s .deb packages on the HOST (verified) and install them with `dpkg` —
-        /// the appliance runs without network. No DHCP/DNS needed in the guest.
-        #[arg(long)]
-        offline: bool,
-        /// Build a golden image with NO Kubernetes — just `delonix` itself.
-        #[arg(long)]
-        no_k8s: bool,
-        #[arg(value_hint = clap::ValueHint::FilePath, long)]
-        delonix_bin: Option<PathBuf>,
-        /// Set a root password in the image (without it, no account has one).
-        #[arg(long)]
-        root_password: Option<String>,
-        /// Install the Prometheus node_exporter and enable it on this address
-        /// (bare flag: `0.0.0.0:9100`). Without it the image ships no listener.
-        #[arg(long, require_equals = true, num_args = 0..=1, default_missing_value = "0.0.0.0:9100")]
-        node_exporter: Option<String>,
-    },
+    /// Same as `delonix vm build`.
+    Build(super::vmimage::BuildArgs),
 }
 
 pub fn run(action: ImageCmd) -> Result<()> {
@@ -571,47 +517,7 @@ pub fn run(action: ImageCmd) -> Result<()> {
                 compress,
             },
             VmSub::Init { name, dir, force } => VmImageCmd::Init { name, dir, force },
-            VmSub::Build {
-                tag,
-                file,
-                context,
-                distro,
-                ubuntu_release,
-                debian_release,
-                rocky_release,
-                fedora_release,
-                k8s_version,
-                extra_packages,
-                extra_run,
-                cri_bin,
-                no_compress,
-                network,
-                offline,
-                no_k8s,
-                delonix_bin,
-                root_password,
-                node_exporter,
-            } => VmImageCmd::Build {
-                tag,
-                file,
-                context,
-                distro,
-                ubuntu_release,
-                debian_release,
-                rocky_release,
-                fedora_release,
-                k8s_version,
-                extra_packages,
-                extra_run,
-                cri_bin,
-                no_compress,
-                network,
-                offline,
-                no_k8s,
-                delonix_bin,
-                root_password,
-                node_exporter,
-            },
+            VmSub::Build(args) => VmImageCmd::Build(args),
         });
     }
     let (images, store) = open_stores()?;

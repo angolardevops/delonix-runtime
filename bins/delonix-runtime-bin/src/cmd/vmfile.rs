@@ -486,7 +486,20 @@ pub(crate) fn build(
     let text = std::fs::read_to_string(path)
         .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))?;
     let vf = parse(&text)?;
+    build_parsed(store, &vf, context, tag, compress, network, verbose)
+}
 
+/// The build itself, from a recipe that is already parsed — what a `vm.yaml`
+/// compiles to (`cmd::vmspec`), so both front ends run the SAME builder.
+pub(crate) fn build_parsed(
+    store: &VmImageStore,
+    vf: &VmFile,
+    context: &std::path::Path,
+    tag: &str,
+    compress: bool,
+    network: bool,
+    verbose: bool,
+) -> Result<()> {
     let work_dir = std::env::temp_dir().join(format!("delonix-vmfile-{}", std::process::id()));
     std::fs::create_dir_all(&work_dir)?;
     // Every stage's disk, by name, so `COPY --from=` can reach it. Unnamed
