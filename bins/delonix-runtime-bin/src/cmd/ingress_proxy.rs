@@ -828,10 +828,6 @@ fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
     Ok(true)
 }
 
-/// **Composes the final config** from the MANUAL part (HTTPRoute) + the
-/// AUTO-REGISTERED routes, and ensures the proxy is serving (or stops it if it all
-/// went empty). It is the single point that `httproute apply` and auto-registration
-/// call — neither source erases the other.
 /// Marker file: `delonix hosts sync` was run, so the standard service names of the
 /// containers `--expose` registers are kept in the host's `/etc/hosts` (ADR-0048 D3).
 fn hosts_sync_flag() -> std::path::PathBuf {
@@ -908,6 +904,10 @@ pub(crate) fn sync_hosts_now() -> Result<()> {
     super::hosts_file::sync(&all)
 }
 
+/// **Composes the final config** from the MANUAL part (HTTPRoute) + the
+/// AUTO-REGISTERED routes, and ensures the proxy is serving (or stops it if it all
+/// went empty). It is the single point that `httproute apply` and auto-registration
+/// call — neither source erases the other.
 fn rebuild(w: Where) -> Result<()> {
     let manual = read_manual(w);
     // Only the holder instance has auto-registered routes (`container run --expose`

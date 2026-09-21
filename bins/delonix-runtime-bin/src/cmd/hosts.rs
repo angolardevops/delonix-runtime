@@ -30,6 +30,12 @@ pub enum HostsCmd {
 }
 
 pub fn run(cmd: HostsCmd) -> Result<()> {
+    // Writing `/etc/hosts` needs root, so the natural way to run this is `sudo delonix hosts
+    // sync`. As root, `state_root()` is `/var/lib/delonix`: it would read root's (empty)
+    // registrations and publish "0 service names", not the containers of the user who ran
+    // `--expose`. The `vm bridge` had the same bug; it already has the fix. An explicit
+    // `DELONIX_ROOT` still wins.
+    super::vmbridge::adopt_invoking_user_root();
     match cmd {
         HostsCmd::Sync { print, off } => sync(print, off),
     }
