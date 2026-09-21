@@ -795,11 +795,20 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                 }
             }
             if let Some(path) = spec_path {
-                return build_spec(&store, &path, tag.as_deref(), target.as_deref(), no_compress, network);
+                return build_spec(
+                    &store,
+                    &path,
+                    tag.as_deref(),
+                    target.as_deref(),
+                    no_compress,
+                    network,
+                );
             }
             if let Some(path) = vmfile {
                 let tag = tag.ok_or_else(|| {
-                    Error::Invalid(super::po::t("`-t <tag>` is required to build a VMfile").to_string())
+                    Error::Invalid(
+                        super::po::t("`-t <tag>` is required to build a VMfile").to_string(),
+                    )
                 })?;
                 // This path (`image vm build -f VMfile`) has no `--verbose` of
                 // its own; `DELONIX_VERBOSE` still unfolds it, which is what
@@ -821,10 +830,14 @@ pub fn run(action: VmImageCmd) -> Result<()> {
                 .to_string()));
             }
             if target.is_some() {
-                return Err(Error::Invalid(super::po::t("`--target` needs a vm.yaml").to_string()));
+                return Err(Error::Invalid(
+                    super::po::t("`--target` needs a vm.yaml").to_string(),
+                ));
             }
             let tag = tag.ok_or_else(|| {
-                Error::Invalid(super::po::t("`-t <tag>` is required to build the golden recipe").to_string())
+                Error::Invalid(
+                    super::po::t("`-t <tag>` is required to build the golden recipe").to_string(),
+                )
             })?;
             cmd_build(
                 &store,
@@ -887,15 +900,20 @@ fn build_spec(
         .collect::<Result<Vec<_>>>()?;
     for p in &plans {
         if p.tag.is_none() && tag.is_none() {
-            return Err(Error::Invalid(super::po::tf(
-                "image '{name}' has no `tag:` — add one to the vm.yaml or pass `-t`",
-                &[("name", &p.name)],
-            )
-            .to_string()));
+            return Err(Error::Invalid(
+                super::po::tf(
+                    "image '{name}' has no `tag:` — add one to the vm.yaml or pass `-t`",
+                    &[("name", &p.name)],
+                )
+                .to_string(),
+            ));
         }
     }
     for p in plans {
-        let tag = tag.map(str::to_string).or(p.tag.clone()).expect("checked above");
+        let tag = tag
+            .map(str::to_string)
+            .or(p.tag.clone())
+            .expect("checked above");
         let compress = p.compress && !no_compress;
         let net = p.network || network;
         eprintln!(

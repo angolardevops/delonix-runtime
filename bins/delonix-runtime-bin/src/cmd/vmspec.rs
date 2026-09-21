@@ -233,19 +233,15 @@ pub(crate) fn expand(text: &str, vars: &BTreeMap<String, String>) -> Result<Stri
     while let Some(i) = rest.find("${") {
         out.push_str(&rest[..i]);
         let after = &rest[i + 2..];
-        let end = after
-            .find('}')
-            .ok_or_else(|| Error::Invalid("vm.yaml: unterminated `${` — close it with `}`".into()))?;
+        let end = after.find('}').ok_or_else(|| {
+            Error::Invalid("vm.yaml: unterminated `${` — close it with `}`".into())
+        })?;
         let body = &after[..end];
         let (name, default) = match body.split_once(":-") {
             Some((n, d)) => (n, Some(d)),
             None => (body, None),
         };
-        if name.is_empty()
-            || !name
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
+        if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
             return Err(Error::Invalid(format!(
                 "vm.yaml: `${{{body}}}` is not a variable name (letters, digits and `_` only)"
             )));
@@ -299,8 +295,8 @@ pub(crate) fn parse(text: &str, tag: Option<&str>) -> Result<Spec> {
     let mut value: serde_yaml::Value =
         serde_yaml::from_str(text).map_err(|e| Error::Invalid(format!("vm.yaml: {e}")))?;
     expand_value(&mut value, &vars)?;
-    let spec: Spec = serde_yaml::from_value(value)
-        .map_err(|e| Error::Invalid(format!("vm.yaml: {e}")))?;
+    let spec: Spec =
+        serde_yaml::from_value(value).map_err(|e| Error::Invalid(format!("vm.yaml: {e}")))?;
     match spec.version {
         None | Some(1) => {}
         Some(v) => {
@@ -355,9 +351,27 @@ fn valid_account(u: &str) -> bool {
 /// them by NAME is a floor, not a guarantee — a `run:` can still do anything —
 /// but a typo in `remove.paths` should not be able to empty `/etc`.
 const PROTECTED: &[&str] = &[
-    "/", "/bin", "/boot", "/dev", "/etc", "/lib", "/lib64", "/proc", "/root", "/run", "/sbin",
-    "/sys", "/usr", "/var", "/home", "/usr/bin", "/usr/lib", "/usr/sbin", "/etc/systemd",
-    "/var/lib", "/var/log",
+    "/",
+    "/bin",
+    "/boot",
+    "/dev",
+    "/etc",
+    "/lib",
+    "/lib64",
+    "/proc",
+    "/root",
+    "/run",
+    "/sbin",
+    "/sys",
+    "/usr",
+    "/var",
+    "/home",
+    "/usr/bin",
+    "/usr/lib",
+    "/usr/sbin",
+    "/etc/systemd",
+    "/var/lib",
+    "/var/log",
 ];
 
 fn valid_remove_path(p: &str) -> std::result::Result<(), String> {
@@ -411,7 +425,10 @@ fn used_content_fields(img: &Image) -> Vec<&'static str> {
     add(img.memory.is_some(), "memory");
     add(img.hypervisor.is_some(), "hypervisor");
     add(!img.labels.is_empty(), "labels");
-    add(!img.packages.install.is_empty() || img.packages.upgrade, "packages");
+    add(
+        !img.packages.install.is_empty() || img.packages.upgrade,
+        "packages",
+    );
     add(
         !img.remove.packages.is_empty()
             || !img.remove.paths.is_empty()
@@ -482,10 +499,17 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
     let profile = img.profile.as_deref().unwrap_or("custom");
     match profile {
         "custom" => {}
-        "rootless" | "k8s" => return plan_golden(name, img, profile, base(Route::File {
-            file: PathBuf::new(),
-            context: PathBuf::new(),
-        })),
+        "rootless" | "k8s" => {
+            return plan_golden(
+                name,
+                img,
+                profile,
+                base(Route::File {
+                    file: PathBuf::new(),
+                    context: PathBuf::new(),
+                }),
+            )
+        }
         other => {
             return Err(ctx(format!(
                 "profile '{other}' unknown — custom, rootless or k8s"
@@ -542,7 +566,13 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
             return Err(bad("package name", p));
         }
     }
-    for u in img.services.enable.iter().chain(&img.services.disable).chain(&img.remove.services) {
+    for u in img
+        .services
+        .enable
+        .iter()
+        .chain(&img.services.disable)
+        .chain(&img.remove.services)
+    {
         if !valid_unit(u) {
             return Err(bad("service name", u));
         }
@@ -568,7 +598,9 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
     if let Some(h) = &img.hostname {
         if h.is_empty()
             || h.starts_with('-')
-            || !h.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
+            || !h
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '.')
         {
             return Err(bad("hostname", h));
         }
@@ -601,7 +633,10 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
             }
         }
         if !u.groups.is_empty() {
-            run(&mut st, format!("usermod -aG {} {}", u.groups.join(","), u.name));
+            run(
+                &mut st,
+                format!("usermod -aG {} {}", u.groups.join(","), u.name),
+            );
         }
         if let Some(sh) = &u.shell {
             if !sh.starts_with('/') || sh.chars().any(|c| c.is_whitespace() || c == '\'') {
@@ -719,13 +754,19 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
     let c = &img.cleanup;
     if c.package_cache {
         match pm {
-            Some("apt") => run(&mut st, "apt-get clean && rm -rf /var/lib/apt/lists/*".into()),
+            Some("apt") => run(
+                &mut st,
+                "apt-get clean && rm -rf /var/lib/apt/lists/*".into(),
+            ),
             Some(_) => run(&mut st, "dnf clean all".into()),
             None => {}
         }
     }
     if c.history {
-        run(&mut st, "rm -f /root/.bash_history /home/*/.bash_history".into());
+        run(
+            &mut st,
+            "rm -f /root/.bash_history /home/*/.bash_history".into(),
+        );
     }
     if c.tmp {
         run(&mut st, "rm -rf /tmp/* /var/tmp/*".into());
@@ -761,7 +802,11 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
             .map(|h| delonix_vm::valid_backend_name(h).map(str::to_string))
             .transpose()
             .map_err(|e| ctx(e.to_string()))?,
-        labels: img.labels.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        labels: img
+            .labels
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect(),
     };
     Ok(base(Route::Custom(Box::new(vf))))
 }
@@ -920,7 +965,10 @@ mod tests {
         v.insert("TAG".into(), "26.04".into());
         assert_eq!(expand("a-${TAG}", &v).unwrap(), "a-26.04");
         assert_eq!(expand("${NOPE_XYZ:-d}", &v).unwrap(), "d");
-        assert!(expand("${NOPE_XYZ}", &v).is_err(), "unset without default must fail");
+        assert!(
+            expand("${NOPE_XYZ}", &v).is_err(),
+            "unset without default must fail"
+        );
         assert!(expand("${", &v).is_err());
         assert!(expand("${a b}", &v).is_err());
     }
@@ -975,7 +1023,15 @@ mod tests {
 
     #[test]
     fn protected_paths_and_traversal_are_refused() {
-        for p in ["/", "/etc", "/etc/", "/usr", "relative", "/a/../etc", "/x'y"] {
+        for p in [
+            "/",
+            "/etc",
+            "/etc/",
+            "/usr",
+            "relative",
+            "/a/../etc",
+            "/x'y",
+        ] {
             let y = format!("images:\n  u:\n    distro: ubuntu\n    release: '26.04'\n    remove: {{paths: ['{p}']}}\n");
             assert!(one(&y).is_err(), "{p} must be refused");
         }
@@ -1016,8 +1072,13 @@ mod tests {
             }
             _ => panic!(),
         }
-        let e = one("images:\n  g:\n    profile: k8s\n    hostname: x\n    users: [{name: a}]\n").err().unwrap();
-        assert!(e.to_string().contains("hostname") && e.to_string().contains("users"), "{e}");
+        let e = one("images:\n  g:\n    profile: k8s\n    hostname: x\n    users: [{name: a}]\n")
+            .err()
+            .unwrap();
+        assert!(
+            e.to_string().contains("hostname") && e.to_string().contains("users"),
+            "{e}"
+        );
         assert!(one("images:\n  g:\n    profile: rootless\n    k8s: {version: '1.36'}\n").is_err());
     }
 
@@ -1025,14 +1086,19 @@ mod tests {
     fn build_file_is_exclusive_with_content() {
         let p = one("images:\n  b:\n    build: {file: VMfile}\n    tag: t\n").unwrap();
         assert!(matches!(p.route, Route::File { .. }));
-        assert!(one("images:\n  b:\n    build: {file: VMfile}\n    packages: {upgrade: true}\n").is_err());
+        assert!(
+            one("images:\n  b:\n    build: {file: VMfile}\n    packages: {upgrade: true}\n")
+                .is_err()
+        );
     }
 
     #[test]
     fn a_base_is_required_and_unambiguous() {
         assert!(one("images:\n  a: {}\n").is_err());
         assert!(one("images:\n  a:\n    distro: ubuntu\n").is_err());
-        assert!(one("images:\n  a:\n    from: x:1\n    distro: ubuntu\n    release: '1'\n").is_err());
+        assert!(
+            one("images:\n  a:\n    from: x:1\n    distro: ubuntu\n    release: '1'\n").is_err()
+        );
         assert!(one("images:\n  a:\n    distro: gentoo\n    release: '1'\n").is_err());
     }
 
