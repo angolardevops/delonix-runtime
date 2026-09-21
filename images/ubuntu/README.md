@@ -1,6 +1,6 @@
 # Ubuntu — build a qcow2 image
 
-This folder builds a Ubuntu cloud image with `delonix vm build`. Everything the build
+This folder builds an Ubuntu cloud image with `delonix vm build`. Everything the build
 needs is here. It works **offline inside the guest** (`network: false`), so the
 first build succeeds on any host; the only download is the Ubuntu base image,
 checksum-verified, and only when it is not already in your local store.
