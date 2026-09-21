@@ -342,6 +342,17 @@ When you are done, tear down the isolated network infra with the same two variab
 ./target/debug/delonix net netns down
 ```
 
+## VM image recipes (`scripts/verify-images.sh`)
+
+The recipes in `images/` are checked in two ways. A unit test in the CLI crate
+(`vmspec::every_shipped_recipe_is_valid_and_complete`) fails if a recipe stops parsing or points at
+a file or builder that does not exist. `scripts/verify-images.sh` goes further: it builds the four
+cloud-image distros offline in an isolated `DELONIX_ROOT` and reads the resulting qcow2 back against
+what the recipe declared; `--self-test` proves the checks can fail on an image nobody built. It
+needs `libguestfs-tools` (see [Building microVMs](microvm-setup.md)) and is not part of the CI
+gates. The `--packages`, `--profile`, `--boot` and `--appliance` phases exist but had not been run
+when v4.2.0 was released.
+
 ## End-to-end battery (`scripts/e2e.sh`)
 
 `e2e.sh` runs the CLI against the real kernel: every leaf's `--help`, plus real executions of a

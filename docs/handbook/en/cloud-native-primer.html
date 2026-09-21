@@ -382,7 +382,9 @@ where changes are copied up, and a <code>workdir</code>. Many containers can sha
 <li>Firewall: <code>table ip dlxing</code> with base chains <code>fwguard</code>, <code>fwdeny</code>, <code>fwcont</code> and the <code>fwmap</code>
   verdict map (<code>FWMAP</code>), generated in <code>infra.rs</code> (<code>do_firewall</code>, <code>apply_firewall_all</code>,
   <code>ns_set_join</code> for namespace isolation sets).</li>
-<li>Internal DNS (<code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>): <code>dns_server_main</code>, <code>handle_dns</code>,
+<li>Internal DNS (standard name <code>&lt;name&gt;.&lt;namespace&gt;.svc.delonix.internal</code>, the older
+  <code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code> still answers; <code>service_fqdn</code>, <code>parse_internal_name</code>):
+  <code>dns_server_main</code>, <code>handle_dns</code>,
   <code>dns_resolve_for</code>, <code>dns_resolve_multi_for</code> in <code>infra.rs</code>.</li>
 <li>Overlay networks: <code>set_vxlan</code> (<code>infra.rs</code>) and the WireGuard helpers in
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/wg.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/wg.rs</code></a>, orchestrated by <code>realize_overlay</code> in

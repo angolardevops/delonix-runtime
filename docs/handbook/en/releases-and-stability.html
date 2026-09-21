@@ -262,7 +262,12 @@ does not exist.</p>
 <li>Builds <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code> and <code>delonix-mgmt</code> twice — once generic
    x86-64, once with <code>-C target-cpu=x86-64-v3</code> (AVX2/BMI2/FMA) — on <code>ubuntu-22.04</code> specifically,
    so the glibc baseline (2.35) stays compatible with RHEL 9 and Debian 12, not just the newest
-   Ubuntu. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> picks the <code>-v3</code> build automatically when the host CPU supports it.</li>
+   Ubuntu. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> picks the <code>-v3</code> build automatically when the host CPU supports it.
+   A separate <code>build-arm64</code> job builds the same four binaries natively on an aarch64 runner (one
+   per component, no <code>-v3</code> variant), and they are published as <code>&lt;name&gt;-aarch64-linux</code> under the same
+   <code>SHA256SUMS</code>. <code>install.sh</code> does not install them yet. The job only runs on a <code>v*</code> tag, so its
+   first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
+   <code>test (arm64)</code> job on every PR.</li>
 <li><strong>Regenerates the user site against this exact release build and fails if <code>docs/</code> differs.</strong>
    This gate exists because it once did not: a site gap shipped live in v0.48.0, hiding a new
    command for hours while a parallel CI job was already red about it — the two workflows just

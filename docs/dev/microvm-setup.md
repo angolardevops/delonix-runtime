@@ -84,7 +84,7 @@ uid/gid with `relabel='no'`, so your own overlay boots without being chowned awa
 | `qemu-img` | `qemu-utils` / `qemu-img` | per-VM overlays, `vm convert`, snapshots on CH, image builds |
 | `cloud-localds` | `cloud-image-utils` / `cloud-utils` | NoCloud seed ISO — generated on **every** `vm create` of a cloud-init image unless `--seed` is given (`crates/adapters/delonix-vm/src/cloudinit.rs`) |
 | `virsh` | `libvirt-clients` / `libvirt-client` | libvirt backend |
-| `virt-customize`, `virt-sparsify`, `virt-copy-out` | `libguestfs-tools` / `guestfs-tools` | `image vm build` only |
+| `virt-customize`, `virt-sparsify`, `virt-copy-out` | `libguestfs-tools` / `guestfs-tools` | `vm build` / `image vm build` only |
 
 `vmimage::tool_package` maps a missing binary to its package, so a missing tool is reported by
 name rather than as a bare `No such file or directory`.
@@ -246,7 +246,9 @@ needs network.
 
 ### Building the golden recipe
 
-`delonix image vm build -t <tag>` with no `VMfile` in the context runs the built-in recipe:
+`delonix vm build -t <tag>` (the same command as `delonix image vm build`; both share one set of
+arguments) with no `vm.yaml` and no `VMfile` in the context runs the built-in recipe. The examples
+below use the `image vm` spelling:
 
 ```bash
 # Kubernetes node, packages fetched and verified on the HOST, guest offline
@@ -259,8 +261,12 @@ Relevant flags (check `image vm build --help` for defaults): `--distro ubuntu|de
 `--ubuntu-release`, `--debian-release`, `--rocky-release`, `--fedora-release` (release **and** build,
 e.g. `42-1.1`), `--k8s-version`, `--offline`, `--no-k8s`, `--extra-package`, `--extra-run`,
 `--cri-bin`, `--delonix-bin`, `--root-password` (without it no account has a password),
-`--node-exporter[=<addr>]`, `--no-compress`. Your own recipe is a `VMfile` — see
-[Delonixfile and VMfile](delonixfile-and-vmfile.md). Image builds are amd64 only
+`--node-exporter[=<addr>]`, `--no-compress`. Your own recipe is a `VMfile` or a `vm.yaml` — see
+[Delonixfile and VMfile](delonixfile-and-vmfile.md). The `images/` folder in the repository ships one
+`vm.yaml` per distro (`ubuntu`, `debian`, `rocky`, `fedora`, built offline) and per appliance;
+`scripts/verify-images.sh` builds them in an isolated `DELONIX_ROOT` and reads the qcow2 back
+(`--self-test` proves its checks can fail). Package installation, the golden-recipe profiles, booting
+the built images and the appliance builders have **not been validated yet** (v4.2.0 release notes). Image builds are amd64 only
 ([ADR-0018](../adr/0018-vm-images-stay-amd64.md)).
 
 ### Converting and importing

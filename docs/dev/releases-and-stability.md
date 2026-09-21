@@ -44,6 +44,11 @@ does not exist.
    x86-64, once with `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — on `ubuntu-22.04` specifically,
    so the glibc baseline (2.35) stays compatible with RHEL 9 and Debian 12, not just the newest
    Ubuntu. `scripts/install.sh` picks the `-v3` build automatically when the host CPU supports it.
+   A separate `build-arm64` job builds the same four binaries natively on an aarch64 runner (one
+   per component, no `-v3` variant), and they are published as `<name>-aarch64-linux` under the same
+   `SHA256SUMS`. `install.sh` does not install them yet. The job only runs on a `v*` tag, so its
+   first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
+   `test (arm64)` job on every PR.
 2. **Regenerates the user site against this exact release build and fails if `docs/` differs.**
    This gate exists because it once did not: a site gap shipped live in v0.48.0, hiding a new
    command for hours while a parallel CI job was already red about it — the two workflows just

@@ -316,7 +316,7 @@ uid/gid with <code>relabel='no'</code>, so your own overlay boots without being 
 <tr>
 <td><code>virt-customize</code>, <code>virt-sparsify</code>, <code>virt-copy-out</code></td>
 <td><code>libguestfs-tools</code> / <code>guestfs-tools</code></td>
-<td><code>image vm build</code> only</td>
+<td><code>vm build</code> / <code>image vm build</code> only</td>
 </tr>
 </tbody>
 </table></div>
@@ -522,7 +522,9 @@ the metadata from manifest annotations. The same verbs exist as <code>delonix im
 <strong>Note:</strong> <code>vm create</code> with no <code>--disk</code> and no local image downloads the official golden image, so it
 needs network.</p>
 <h3 id="building-the-golden-recipe">Building the golden recipe<a class="hanchor" href="#building-the-golden-recipe" aria-label="#">#</a></h3>
-<p><code>delonix image vm build -t &lt;tag&gt;</code> with no <code>VMfile</code> in the context runs the built-in recipe:</p>
+<p><code>delonix vm build -t &lt;tag&gt;</code> (the same command as <code>delonix image vm build</code>; both share one set of
+arguments) with no <code>vm.yaml</code> and no <code>VMfile</code> in the context runs the built-in recipe. The examples
+below use the <code>image vm</code> spelling:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash"># Kubernetes node, packages fetched and verified on the HOST, guest offline
 delonix image vm build --offline --k8s-version 1.34 -t delonix-vm-k8s:1.34
 # no Kubernetes: just the engine, rootless-ready
@@ -532,8 +534,12 @@ delonix image vm build --no-k8s --distro debian --debian-release bookworm -t del
 <code>--ubuntu-release</code>, <code>--debian-release</code>, <code>--rocky-release</code>, <code>--fedora-release</code> (release <strong>and</strong> build,
 e.g. <code>42-1.1</code>), <code>--k8s-version</code>, <code>--offline</code>, <code>--no-k8s</code>, <code>--extra-package</code>, <code>--extra-run</code>,
 <code>--cri-bin</code>, <code>--delonix-bin</code>, <code>--root-password</code> (without it no account has a password),
-<code>--node-exporter[=&lt;addr&gt;]</code>, <code>--no-compress</code>. Your own recipe is a <code>VMfile</code> — see
-<a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a>. Image builds are amd64 only
+<code>--node-exporter[=&lt;addr&gt;]</code>, <code>--no-compress</code>. Your own recipe is a <code>VMfile</code> or a <code>vm.yaml</code> — see
+<a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a>. The <code>images/</code> folder in the repository ships one
+<code>vm.yaml</code> per distro (<code>ubuntu</code>, <code>debian</code>, <code>rocky</code>, <code>fedora</code>, built offline) and per appliance;
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> builds them in an isolated <code>DELONIX_ROOT</code> and reads the qcow2 back
+(<code>--self-test</code> proves its checks can fail). Package installation, the golden-recipe profiles, booting
+the built images and the appliance builders have <strong>not been validated yet</strong> (v4.2.0 release notes). Image builds are amd64 only
 (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>).</p>
 <h3 id="converting-and-importing">Converting and importing<a class="hanchor" href="#converting-and-importing" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm convert &lt;image-or-path&gt; --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
