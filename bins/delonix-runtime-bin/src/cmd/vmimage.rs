@@ -923,6 +923,7 @@ fn build_spec(
             Route::File { file, context } => {
                 super::vmfile::build(store, &file, &context, &tag, compress, net, false)?
             }
+            Route::Appliance(a) => run_appliance(store, &a, &dir, &tag, compress, network)?,
             Route::Golden(g) => {
                 let distro = match g.distro.as_str() {
                     "debian" => Distro::Debian,
@@ -953,6 +954,117 @@ fn build_spec(
         }
     }
     Ok(())
+}
+
+/// Runs one appliance builder and registers what it produced.
+///
+/// Every builder in `scripts/appliances/` honours `OUT_DIR` and writes exactly
+/// one `<slug>.qcow2` there (next to a `.raw.qcow2` it discards), so the output
+/// is found by looking, not by guessing a name that depends on the version.
+/// The builders print the `image vm import` command to run by hand; this does
+/// the same import with the same flags, which is the point of `vm build`.
+fn run_appliance(
+    store: &VmImageStore,
+    a: &super::vmspec::ApplianceRun,
+    dir: &std::path::Path,
+    tag: &str,
+    compress: bool,
+    network: bool,
+) -> Result<()> {
+    if network {
+        return Err(Error::Invalid(
+            super::po::t(
+                "`--network` means nothing for an appliance build: the builder decides its own network",
+            )
+            .to_string(),
+        ));
+    }
+    let script = super::vmspec::locate_builder(dir, &a.builder)?;
+    // Beside the store, not in /tmp: the intermediate disks are several GiB and
+    // /tmp is often a small tmpfs, and the final move stays on one filesystem.
+    let out = super::util::state_root().join(format!("appliance-build-{}", std::process::id()));
+    std::fs::create_dir_all(&out)?;
+    eprintln!(
+        "{}",
+        super::po::tf(
+            "running builder {script} {args}",
+            &[
+                ("script", &script.display().to_string()),
+                ("args", &a.args.join(" "))
+            ]
+        )
+    );
+    let status = std::process::Command::new("bash")
+        .arg(&script)
+        .args(&a.args)
+        .current_dir(script.parent().unwrap_or(dir))
+        .envs(&a.env)
+        .env("OUT_DIR", &out)
+        .stdin(std::process::Stdio::null())
+        .status();
+    let result = (|| {
+        let status = status
+            .map_err(|e| Error::Invalid(format!("could not start {}: {e}", script.display())))?;
+        if !status.success() {
+            return Err(Error::Invalid(
+                super::po::tf(
+                    "builder {name} failed ({status}) — its own output is above",
+                    &[("name", &a.builder), ("status", &status.to_string())],
+                )
+                .to_string(),
+            ));
+        }
+        let mut found: Vec<PathBuf> = std::fs::read_dir(&out)?
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| {
+                p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| n.ends_with(".qcow2") && !n.ends_with(".raw.qcow2"))
+            })
+            .collect();
+        found.sort();
+        let source = match found.as_slice() {
+            [one] => one.clone(),
+            [] => {
+                return Err(Error::Invalid(format!(
+                    "builder {} finished but left no .qcow2 in {}",
+                    a.builder,
+                    out.display()
+                )))
+            }
+            many => {
+                return Err(Error::Invalid(format!(
+                    "builder {} left {} disk images ({}); expected exactly one",
+                    a.builder,
+                    many.len(),
+                    many.iter()
+                        .filter_map(|p| p.file_name().and_then(|n| n.to_str()))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )))
+            }
+        };
+        cmd_import(
+            store,
+            ImportArgs {
+                source,
+                tag: tag.to_string(),
+                appliance: !a.cloud_init,
+                distro: a.distro.clone(),
+                release: a.release.clone(),
+                default_vcpus: a.vcpus,
+                default_memory: a.memory.clone(),
+                // Same as every other build: `-t` names the result, and building
+                // it again replaces it.
+                force: true,
+                no_compress: !compress,
+                kernel_version: None,
+            },
+        )
+    })();
+    // The intermediates are several GiB; they go whether it worked or not.
+    let _ = std::fs::remove_dir_all(&out);
+    result
 }
 
 /// `vm init` — writes the scaffold.

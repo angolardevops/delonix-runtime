@@ -61,6 +61,9 @@ pub(crate) struct Image {
     pub(crate) profile: Option<String>,
     /// Point at a `VMfile` instead of describing the image here.
     pub(crate) build: Option<BuildRef>,
+    /// Build by running one of the repository's appliance builders
+    /// (`scripts/appliances/build-<builder>.sh`).
+    pub(crate) appliance: Option<Appliance>,
     pub(crate) size: Option<String>,
     pub(crate) hostname: Option<String>,
     pub(crate) vcpus: Option<u32>,
@@ -86,6 +89,30 @@ pub(crate) struct Image {
     pub(crate) k8s: Option<K8s>,
     /// Bare `true` means `0.0.0.0:9100`; a string is the listen address.
     pub(crate) node_exporter: Option<NodeExporter>,
+}
+
+/// An image that cannot be described as edits to a cloud image: the vendor's
+/// installer has to RUN (Proxmox from its ISO, OpenStack pulling ~20 GiB of
+/// containers, Zabbix initialising its database). The recipe therefore names a
+/// **builder**, not a script path: it selects among the scripts the repository
+/// already ships in `scripts/appliances/`, so a `vm.yaml` from elsewhere cannot
+/// make the host run a file of its choosing.
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct Appliance {
+    /// `proxmox` runs `scripts/appliances/build-proxmox.sh`.
+    pub(crate) builder: String,
+    /// Positional arguments of the builder (`[pve, "9.2-1"]`).
+    #[serde(default)]
+    pub(crate) args: Vec<String>,
+    /// Environment for the builder (`MEM`, `SMP`, `DISK_GB`, `BUILD_TIMEOUT`…).
+    #[serde(default)]
+    pub(crate) env: BTreeMap<String, String>,
+    /// `false` (default): a true appliance — it does not run cloud-init, so
+    /// `vm create` refuses `--hostname`/`--ssh-key`/`--user-data` for it.
+    /// `true`: the image is a cloud image with software pre-installed.
+    #[serde(default)]
+    pub(crate) cloud_init: bool,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -195,6 +222,20 @@ pub(crate) enum Route {
     Golden(Box<Golden>),
     /// A `VMfile` that already exists on disk.
     File { file: PathBuf, context: PathBuf },
+    /// A vendor installer driven by one of `scripts/appliances/build-*.sh`.
+    Appliance(Box<ApplianceRun>),
+}
+
+/// A validated appliance build.
+pub(crate) struct ApplianceRun {
+    pub(crate) builder: String,
+    pub(crate) args: Vec<String>,
+    pub(crate) env: BTreeMap<String, String>,
+    pub(crate) cloud_init: bool,
+    pub(crate) distro: Option<String>,
+    pub(crate) release: Option<String>,
+    pub(crate) vcpus: Option<u32>,
+    pub(crate) memory: Option<String>,
 }
 
 /// The arguments `vmimage::cmd_build` takes, resolved from the fields.
@@ -472,8 +513,11 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
     // ── build.file: a VMfile that already exists ───────────────────────────
     if let Some(b) = &img.build {
         let used = used_content_fields(img);
-        if !used.is_empty() || img.profile.is_some() {
+        if !used.is_empty() || img.profile.is_some() || img.appliance.is_some() {
             let mut all: Vec<&str> = used;
+            if img.appliance.is_some() {
+                all.push("appliance");
+            }
             if img.profile.is_some() {
                 all.push("profile");
             }
@@ -488,6 +532,19 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
             file,
             context: ctxdir,
         }));
+    }
+
+    // ── appliance: a vendor installer, driven by a shipped builder script ──
+    if let Some(a) = &img.appliance {
+        return plan_appliance(
+            name,
+            img,
+            a,
+            base(Route::File {
+                file: PathBuf::new(),
+                context: PathBuf::new(),
+            }),
+        );
     }
 
     if let Some(v) = &img.vcpus {
@@ -837,6 +894,140 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
     Ok(base(Route::Custom(Box::new(vf))))
 }
 
+/// Environment names a builder must never receive from a recipe: they change
+/// how the host's shell or dynamic loader behaves, not how the image is built.
+const FORBIDDEN_ENV: &[&str] = &[
+    "PATH",
+    "LD_PRELOAD",
+    "LD_LIBRARY_PATH",
+    "LD_AUDIT",
+    "BASH_ENV",
+    "ENV",
+    "IFS",
+    "SHELLOPTS",
+    "BASHOPTS",
+    "PS4",
+    "PROMPT_COMMAND",
+    "HOME",
+    "USER",
+    "SHELL",
+    "CDPATH",
+    "GLOBIGNORE",
+    "OUT_DIR",
+    "DELONIX_ROOT",
+];
+
+fn valid_arg(a: &str) -> bool {
+    !a.is_empty()
+        && !a.starts_with('-')
+        && a.chars()
+            .all(|c| c.is_ascii_alphanumeric() || "._:/+=-".contains(c))
+}
+
+fn plan_appliance(name: &str, img: &Image, a: &Appliance, mut p: Plan) -> Result<Plan> {
+    let ctx = |m: String| Error::Invalid(format!("vm.yaml, image '{name}': {m}"));
+    // A builder owns everything about how the image is made; the fields of a
+    // custom image would be ignored, and ignoring is the failure this file
+    // exists to avoid. Only what `image vm import` can record is allowed.
+    let mut refused: Vec<&str> = used_content_fields(img)
+        .into_iter()
+        .filter(|f| !matches!(*f, "distro" | "release" | "vcpus" | "memory"))
+        .collect();
+    if img.profile.is_some() {
+        refused.push("profile");
+    }
+    if img.network {
+        refused.push("network");
+    }
+    if !refused.is_empty() {
+        return Err(ctx(format!(
+            "`appliance:` runs a builder script, which decides all of that itself — remove {}",
+            refused.join(", ")
+        )));
+    }
+    if a.builder.is_empty()
+        || !a
+            .builder
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit())
+        || !a
+            .builder
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
+        return Err(bad("appliance.builder", &a.builder));
+    }
+    for x in &a.args {
+        if !valid_arg(x) {
+            return Err(bad("appliance.args entry", x));
+        }
+    }
+    for (k, v) in &a.env {
+        let ok = k.chars().next().is_some_and(|c| c.is_ascii_uppercase())
+            && k.chars()
+                .all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_');
+        if !ok
+            || FORBIDDEN_ENV.contains(&k.as_str())
+            || k.starts_with("LD_")
+            || k.starts_with("BASH_FUNC_")
+        {
+            return Err(ctx(format!("appliance.env '{k}' is not allowed")));
+        }
+        if v.chars().any(char::is_control) {
+            return Err(bad("appliance.env value", k));
+        }
+    }
+    for (what, v) in [("distro", &img.distro), ("release", &img.release)] {
+        if let Some(v) = v {
+            if v.is_empty()
+                || !v
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "._-".contains(c))
+            {
+                return Err(bad(what, v));
+            }
+        }
+    }
+    if img.vcpus == Some(0) {
+        return Err(ctx("`vcpus` must be at least 1".into()));
+    }
+    p.route = Route::Appliance(Box::new(ApplianceRun {
+        builder: a.builder.clone(),
+        args: a.args.clone(),
+        env: a.env.clone(),
+        cloud_init: a.cloud_init,
+        distro: img.distro.clone(),
+        release: img.release.clone(),
+        vcpus: img.vcpus,
+        memory: img.memory.clone(),
+    }));
+    Ok(p)
+}
+
+/// Finds `scripts/appliances/build-<builder>.sh`, looking in `dir` and every
+/// folder above it — the repository root is wherever that directory lives.
+/// The builder is a NAME (validated by `plan`), so nothing outside that
+/// directory can be reached through a recipe.
+pub(crate) fn locate_builder(dir: &Path, builder: &str) -> Result<PathBuf> {
+    let start = dir
+        .canonicalize()
+        .map_err(|e| Error::Invalid(format!("vm.yaml folder {}: {e}", dir.display())))?;
+    for d in start.ancestors() {
+        let cand = d
+            .join("scripts/appliances")
+            .join(format!("build-{builder}.sh"));
+        if cand.is_file() {
+            return Ok(cand);
+        }
+    }
+    Err(Error::Invalid(format!(
+        "no builder '{builder}': scripts/appliances/build-{builder}.sh was not found in {} or any folder above it — \
+         appliance images are built from a checkout of the repository",
+        start.display()
+    )))
+}
+
 fn plan_golden(name: &str, img: &Image, profile: &str, mut p: Plan) -> Result<Plan> {
     let ctx = |m: String| Error::Invalid(format!("vm.yaml, image '{name}': {m}"));
     // What the golden recipe cannot honour is refused BY NAME.
@@ -1106,6 +1297,94 @@ mod tests {
             seen >= 4,
             "expected ubuntu, debian, rocky and fedora, found {seen}"
         );
+    }
+
+    fn appliance(y: &str) -> Result<ApplianceRun> {
+        match one(y)?.route {
+            Route::Appliance(a) => Ok(*a),
+            _ => panic!("expected an appliance route"),
+        }
+    }
+
+    #[test]
+    fn an_appliance_names_a_builder_and_carries_what_import_records() {
+        let a = appliance("images:\n  p:\n    distro: proxmox-ve\n    release: '9.2-1'\n    vcpus: 4\n    memory: 8G\n    appliance: {builder: proxmox, args: [pve, '9.2-1'], env: {MEM: '4096'}}\n").unwrap();
+        assert_eq!(a.builder, "proxmox");
+        assert_eq!(a.args, vec!["pve", "9.2-1"]);
+        assert_eq!(a.env["MEM"], "4096");
+        assert!(!a.cloud_init, "a true appliance does not run cloud-init");
+        assert_eq!((a.vcpus, a.memory.as_deref()), (Some(4), Some("8G")));
+        assert!(
+            appliance("images:\n  m:\n    appliance: {builder: monitoring, cloud_init: true}\n")
+                .unwrap()
+                .cloud_init
+        );
+    }
+
+    #[test]
+    fn an_appliance_recipe_cannot_reach_outside_the_shipped_builders() {
+        for b in [
+            "../x",
+            "a/b",
+            "Proxmox",
+            "a b",
+            "",
+            "-x",
+            "a;b",
+            "/etc/passwd",
+        ] {
+            let y = format!("images:\n  p:\n    appliance: {{builder: '{b}'}}\n");
+            assert!(one(&y).is_err(), "builder '{b}' must be refused");
+        }
+        for a in ["-rf", "a;b", "$(x)", "a b", ""] {
+            let y = format!("images:\n  p:\n    appliance: {{builder: proxmox, args: ['{a}']}}\n");
+            assert!(one(&y).is_err(), "arg '{a}' must be refused");
+        }
+        for k in ["PATH", "LD_PRELOAD", "BASH_ENV", "OUT_DIR", "lower", "A-B"] {
+            let y =
+                format!("images:\n  p:\n    appliance: {{builder: proxmox, env: {{'{k}': x}}}}\n");
+            assert!(one(&y).is_err(), "env '{k}' must be refused");
+        }
+    }
+
+    #[test]
+    fn an_appliance_refuses_the_fields_the_builder_would_ignore() {
+        let e = one("images:\n  p:\n    hostname: x\n    packages: {install: [curl]}\n    hypervisor: libvirt\n    network: true\n    appliance: {builder: proxmox}\n").err().unwrap().to_string();
+        for f in ["hostname", "packages", "hypervisor", "network"] {
+            assert!(e.contains(f), "{f} missing from: {e}");
+        }
+        assert!(
+            one("images:\n  p:\n    profile: k8s\n    appliance: {builder: proxmox}\n").is_err()
+        );
+        assert!(one(
+            "images:\n  p:\n    build: {file: VMfile}\n    appliance: {builder: proxmox}\n"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn locate_builder_walks_up_and_stays_inside_scripts_appliances() {
+        let root = std::env::temp_dir().join(format!("vmspec-builder-{}", std::process::id()));
+        let deep = root.join("images/x");
+        std::fs::create_dir_all(&deep).unwrap();
+        std::fs::create_dir_all(root.join("scripts/appliances")).unwrap();
+        std::fs::write(
+            root.join("scripts/appliances/build-fake.sh"),
+            "#!/bin/bash\n",
+        )
+        .unwrap();
+        assert_eq!(
+            locate_builder(&deep, "fake").unwrap(),
+            root.canonicalize()
+                .unwrap()
+                .join("scripts/appliances/build-fake.sh")
+        );
+        let e = locate_builder(&deep, "missing").unwrap_err().to_string();
+        assert!(
+            e.contains("build-missing.sh") && e.contains("checkout"),
+            "{e}"
+        );
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
