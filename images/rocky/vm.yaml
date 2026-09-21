@@ -1,9 +1,9 @@
-# Ubuntu cloud image, built by `delonix vm build`.
+# Rocky Linux cloud image, built by `delonix vm build`.
 #
-#   delonix vm build -f images/ubuntu/vm.yaml -t 26.04
+#   delonix vm build -f images/rocky/vm.yaml -t 9
 #
 # `-t` is the name of the result AND `${TAG}` below, which this file uses as
-# the release of the base (`26.04`, `24.04`). Every relative path in this file
+# the major version of the base (`9`, `10`). Every relative path in this file
 # is relative to THIS folder, wherever you run the command from.
 #
 # It builds with NO network inside the guest, so the first build works on any
@@ -11,20 +11,20 @@
 version: 1
 
 images:
-  ubuntu:
-    tag: ubuntu-${TAG:-26.04}
+  rocky:
+    tag: rocky-${TAG:-9}
 
     # ── base ──────────────────────────────────────────────────────────────
-    distro: ubuntu
-    release: "${TAG:-26.04}"
+    distro: rocky
+    release: "${TAG:-9}"
     size: 10G                     # grown BEFORE any step runs
 
     # ── identity & defaults recorded in the image (used by `vm create`) ────
-    hostname: ubuntu
+    hostname: rocky
     vcpus: 2
     memory: 2G
     labels:
-      org.delonix.image: ubuntu
+      org.delonix.image: rocky
 
     # ── build-time network. Off: a build that reaches the internet gives a ─
     # ── different image depending on the day.                              ─
@@ -32,30 +32,29 @@ images:
 
     # ── what goes IN ──────────────────────────────────────────────────────
     # To install software: set `network: true` above and list it here
-    # (the guest agent is not in the base image). Installed with apt.
+    # (the guest agent is already in the base image). Installed with dnf.
     # packages:
     #   upgrade: false
-    #   install: [qemu-guest-agent]
+    #   install: [htop]
     files:
       - src: artifacts/motd
         dst: /etc/motd
         mode: "0644"
     env:
-      DELONIX_IMAGE: ubuntu
+      DELONIX_IMAGE: rocky
     users:
       - name: delonix
         sudo: true
-        groups: [adm]
+        groups: [wheel]
         shell: /bin/bash
 
     # ── what goes OUT — removed after everything above ran ────────────────
-    # Here: `snapd` (the snap daemon) and the `ModemManager` service, neither of which a VM needs.
+    # Here: the `cockpit` web console packages, which listen on a port nobody asked for.
     remove:
-      packages: [snapd]
+      packages: [cockpit-ws, cockpit-bridge, cockpit-system, cockpit-ws-selinux]
       paths:
         - /usr/share/info
         - /usr/share/man
-      services: [ModemManager]
 
     # ── first boot ────────────────────────────────────────────────────────
     cloud_init: cloud-init/user-data

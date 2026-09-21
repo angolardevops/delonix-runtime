@@ -1,9 +1,9 @@
-# Ubuntu cloud image, built by `delonix vm build`.
+# Fedora cloud image, built by `delonix vm build`.
 #
-#   delonix vm build -f images/ubuntu/vm.yaml -t 26.04
+#   delonix vm build -f images/fedora/vm.yaml -t 42
 #
 # `-t` is the name of the result AND `${TAG}` below, which this file uses as
-# the release of the base (`26.04`, `24.04`). Every relative path in this file
+# the release of the base (`42`). Every relative path in this file
 # is relative to THIS folder, wherever you run the command from.
 #
 # It builds with NO network inside the guest, so the first build works on any
@@ -11,20 +11,20 @@
 version: 1
 
 images:
-  ubuntu:
-    tag: ubuntu-${TAG:-26.04}
+  fedora:
+    tag: fedora-${TAG:-42}
 
     # ── base ──────────────────────────────────────────────────────────────
-    distro: ubuntu
-    release: "${TAG:-26.04}"
+    distro: fedora
+    release: "${TAG:-42}"
     size: 10G                     # grown BEFORE any step runs
 
     # ── identity & defaults recorded in the image (used by `vm create`) ────
-    hostname: ubuntu
+    hostname: fedora
     vcpus: 2
     memory: 2G
     labels:
-      org.delonix.image: ubuntu
+      org.delonix.image: fedora
 
     # ── build-time network. Off: a build that reaches the internet gives a ─
     # ── different image depending on the day.                              ─
@@ -32,30 +32,28 @@ images:
 
     # ── what goes IN ──────────────────────────────────────────────────────
     # To install software: set `network: true` above and list it here
-    # (the guest agent is not in the base image). Installed with apt.
+    # (the guest agent is already in the base image). Installed with dnf.
     # packages:
     #   upgrade: false
-    #   install: [qemu-guest-agent]
+    #   install: [htop]
     files:
       - src: artifacts/motd
         dst: /etc/motd
         mode: "0644"
     env:
-      DELONIX_IMAGE: ubuntu
+      DELONIX_IMAGE: fedora
     users:
       - name: delonix
         sudo: true
-        groups: [adm]
+        groups: [wheel]
         shell: /bin/bash
 
     # ── what goes OUT — removed after everything above ran ────────────────
-    # Here: `snapd` (the snap daemon) and the `ModemManager` service, neither of which a VM needs.
+    # Here: man and info pages (the licence files in /usr/share/doc stay: a published image redistributes them).
     remove:
-      packages: [snapd]
       paths:
         - /usr/share/info
         - /usr/share/man
-      services: [ModemManager]
 
     # ── first boot ────────────────────────────────────────────────────────
     cloud_init: cloud-init/user-data

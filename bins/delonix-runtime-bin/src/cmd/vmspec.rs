@@ -1056,6 +1056,58 @@ mod tests {
         );
     }
 
+    /// The recipes shipped under `images/` are documentation people copy, so
+    /// they must never rot: every one parses under the strict schema, plans
+    /// with its defaults, and every file it points at exists.
+    #[test]
+    fn every_shipped_recipe_is_valid_and_complete() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../images");
+        let mut seen = 0;
+        for entry in std::fs::read_dir(&root).expect("images/ exists") {
+            let dir = entry.unwrap().path();
+            let file = dir.join("vm.yaml");
+            if !file.is_file() {
+                continue;
+            }
+            seen += 1;
+            let text = std::fs::read_to_string(&file).unwrap();
+            let spec = parse(&text, None).unwrap_or_else(|e| panic!("{}: {e}", file.display()));
+            for (name, img) in &spec.images {
+                let p = plan(name, img, &dir, false)
+                    .unwrap_or_else(|e| panic!("{} / {name}: {e}", file.display()));
+                assert!(
+                    p.tag.is_some(),
+                    "{}: image '{name}' has no tag",
+                    file.display()
+                );
+                assert!(
+                    dir.join("README.md").is_file(),
+                    "{}: no README.md",
+                    dir.display()
+                );
+                for f in &img.files {
+                    assert!(
+                        dir.join(&f.src).exists(),
+                        "{}: files.src {} missing",
+                        dir.display(),
+                        f.src
+                    );
+                }
+                if let Some(ci) = &img.cloud_init {
+                    assert!(
+                        dir.join(ci).is_file(),
+                        "{}: cloud_init {ci} missing",
+                        dir.display()
+                    );
+                }
+            }
+        }
+        assert!(
+            seen >= 4,
+            "expected ubuntu, debian, rocky and fedora, found {seen}"
+        );
+    }
+
     #[test]
     fn the_network_flag_satisfies_packages() {
         let y = "images:\n  u:\n    distro: ubuntu\n    release: '26.04'\n    packages: {install: [curl]}\n";

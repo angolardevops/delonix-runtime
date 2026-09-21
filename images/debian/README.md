@@ -1,12 +1,12 @@
-# Ubuntu — build a qcow2 image
+# Debian — build a qcow2 image
 
-This folder builds a Ubuntu cloud image with `delonix vm build`. Everything the build
+This folder builds a Debian cloud image with `delonix vm build`. Everything the build
 needs is here. It works **offline inside the guest** (`network: false`), so the
-first build succeeds on any host; the only download is the Ubuntu base image,
+first build succeeds on any host; the only download is the Debian base image,
 checksum-verified, and only when it is not already in your local store.
 
 ```
-images/ubuntu/
+images/debian/
 ├── vm.yaml            the recipe — every parameter is documented inline
 ├── cloud-init/
 │   └── user-data      default first-boot config baked into the image
@@ -36,31 +36,31 @@ Install the tools on Debian/Ubuntu with `sudo apt install libguestfs-tools qemu-
 From the repository root:
 
 ```bash
-delonix vm build -f images/ubuntu/vm.yaml -t 26.04
+delonix vm build -f images/debian/vm.yaml -t bookworm
 ```
 
 `-t` is two things at once: the name of the result **and** `${TAG}` inside
-`vm.yaml`, which this file uses as the Ubuntu release (`26.04`, `24.04`). So `-t` must
-be a release here.
+`vm.yaml`, which this file uses as the Debian codename (`bookworm`, `trixie`). So `-t` must
+be a codename here.
 
 ```bash
-delonix vm build -f images/ubuntu/vm.yaml -t 24.04
+delonix vm build -f images/debian/vm.yaml -t trixie
 ```
 
 From inside the folder, exactly like `docker build .`:
 
 ```bash
-cd images/ubuntu && delonix vm build .
+cd images/debian && delonix vm build .
 ```
 
 `vm build .` looks for a `vm.yaml` in the folder (then a `VMfile`, then falls back
 to the built-in golden recipe). With `-t` omitted, the image's own `tag:` is used
-(`ubuntu-26.04` here). To name the image differently from the release, read the
-release from another variable: change `release:` to `"${RELEASE:-26.04}"` and run
-`RELEASE=24.04 delonix vm build … -t ubuntu-24.04`. Any `${NAME}` other than
+(`debian-bookworm` here). To name the image differently from the codename, read the
+codename from another variable: change `release:` to `"${RELEASE:-bookworm}"` and run
+`RELEASE=trixie delonix vm build … -t debian-trixie`. Any `${NAME}` other than
 `TAG` is read from the environment.
 
-The base is resolved in this order: your local store (`delonix-vm-base:ubuntu-<release>`), the
+The base is resolved in this order: your local store (`delonix-vm-base:debian-<codename>`), the
 official Delonix base on ghcr, then the distro's own cloud image. Add
 `DELONIX_VERBOSE=1` to unfold the output of each step.
 
@@ -68,16 +68,16 @@ official Delonix base on ghcr, then the distro's own cloud image. Add
 
 ```bash
 delonix image vm ls
-delonix image vm describe 26.04
+delonix image vm describe bookworm
 ```
 
-`describe` shows the size, the distro (`ubuntu:26.04`), the recorded defaults
+`describe` shows the size, the distro (`debian:bookworm`), the recorded defaults
 (2 vCPU, 2G) and that the image runs cloud-init.
 
 ## 4. Boot a VM from it
 
 ```bash
-delonix vm create web1 --disk 26.04 --ssh-key @$HOME/.ssh/id_ed25519.pub --wait
+delonix vm create web1 --disk bookworm --ssh-key @$HOME/.ssh/id_ed25519.pub --wait
 ```
 
 The VM takes the image's recorded vCPU/memory unless you pass `--vcpus` or
@@ -87,13 +87,13 @@ The VM takes the image's recorded vCPU/memory unless you pass `--vcpus` or
 ## 5. What this recipe does, and how to change it
 
 It adds a file (`/etc/motd`, mode 0644), an `env` variable, and a `delonix`
-account. It **removes** `snapd` and the `ModemManager` service and the man and info pages, then
+account. It **removes** `unattended-upgrades` and the man and info pages, then
 cleans up: logs, shell history, `/tmp` and `/etc/machine-id` (so each VM cloned
 from the image gets its own identity).
 
 | You want to… | Edit |
 |---|---|
-| a different release | `-t <release>` — no edit needed |
+| a different codename | `-t <codename>` — no edit needed |
 | a bigger disk | `size: 20G` (grown *before* any step runs) |
 | install software | `network: true`, then `packages.install: [...]` (installed with `apt`) |
 | **remove** packages | `remove.packages: [...]` |
@@ -120,9 +120,9 @@ published image has to redistribute.
 The file is **strict**: an unknown key is an error, and a field the chosen route
 cannot honour is refused by name rather than ignored.
 
-### Ubuntu-specific
+### Debian-specific
 
-The base image does **not** ship `qemu-guest-agent`. Without it the hypervisor cannot read the VM's IP or freeze its filesystem for a consistent snapshot. Add it with `network: true` and `packages.install: [qemu-guest-agent]`.
+The release is the **codename** (`bookworm`), not the number (`12`). The base image does **not** ship `qemu-guest-agent`; add it with `network: true` and `packages.install: [qemu-guest-agent]`.
 
 ## 6. With Kubernetes (or rootless-only) instead
 
@@ -130,11 +130,11 @@ The same schema selects the built-in golden recipes:
 
 ```yaml
 images:
-  ubuntu-rootless:
-    tag: ubuntu-rootless-26.04
+  debian-rootless:
+    tag: debian-rootless-bookworm
     profile: rootless       # or: k8s (Ubuntu and Debian only)
-    distro: ubuntu
-    release: "26.04"
+    distro: debian
+    release: "bookworm"
 ```
 
 Those recipes install their own software and ignore custom fields like
@@ -144,7 +144,7 @@ Those recipes install their own software and ignore custom fields like
 ## Troubleshooting
 
 - **`${TAG} is not set`** — the file uses `${TAG}` with no default; pass `-t`,
-  or write `${TAG:-26.04}`.
+  or write `${TAG:-bookworm}`.
 - **`packages needs the network inside the guest`** — set `network: true`, or
   pass `--network`. It is opt-in because a build that reaches the internet is
   not reproducible.
