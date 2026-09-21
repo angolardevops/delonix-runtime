@@ -393,6 +393,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Serve a protocol endpoint on a unix socket, grouped: ``cri`` (Kubernetes ``runtime.v1``), ``api`` (management API, HTTP+JSON, plus Prometheus ``/metrics``), ``docker-api`` (a slice of the Docker Engine API, full container lifecycle).
    * - ``mcp``
      - Model Context Protocol server — a LOCAL, tenancy-free AI control surface: ``serve``, ``capabilities`` (the tool risk table), ``doctor``.
+   * - ``hosts``
+     - The service names of exposed containers in the operator's ``/etc/hosts`` (ADR-0048, not stable): ``sync`` publishes ``<name>.<ns>.svc.delonix.internal`` in a delimited block and keeps it current (needs root; without it the command refuses and prints the block), ``--print`` shows it, ``--off`` removes it.
    * - ``compatibility``
      - What this engine covers of another tool's surface — served, refused with a reason, never in silence. ``docker`` today (the same table ``serve docker-api --matrix`` publishes, plus ``-o json``); ``compose``/``cri``/``oci`` are future work.
    * - ``system``

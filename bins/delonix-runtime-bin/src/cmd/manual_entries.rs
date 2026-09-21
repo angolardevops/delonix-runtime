@@ -1769,6 +1769,26 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["secret ls", "secret inspect", "secret create"],
     },
     Entry {
+        path: "hosts",
+        group: "Networking",
+        examples: &[
+            ("see the block the service names would become, and write nothing", "delonix hosts sync --print"),
+            ("publish the service names of exposed containers in /etc/hosts (needs root)", "sudo delonix hosts sync"),
+            ("take the block out and stop maintaining it", "sudo delonix hosts sync --off"),
+        ],
+        see_also: &["hosts sync", "container ls", "net httproute"],
+    },
+    Entry {
+        path: "hosts sync",
+        group: "Lifecycle",
+        examples: &[
+            ("print the block first — the names it would publish, one per line", "delonix hosts sync --print"),
+            ("write it, and keep it current as containers are exposed and removed", "sudo delonix hosts sync"),
+            ("remove the block", "sudo delonix hosts sync --off"),
+        ],
+        see_also: &["hosts", "container run", "container ls"],
+    },
+    Entry {
         path: "mcp",
         group: "Serve",
         examples: &[

@@ -1427,6 +1427,18 @@ constroem shell arbitrário; é <code>stdio</code>-only nesta fase, pensado para
 local operar o motor sem sair da máquina.""",
         "subs": {},
     },
+    "hosts": {
+        "title": "delonix hosts",
+        "tagline": "Os nomes de serviço dos containers expostos, no /etc/hosts do operador.",
+        "intro": """ADR-0048, fase 2. <strong>Não estável</strong> — ver <code>docs/cli-stability.md</code>.
+<code>hosts sync</code> publica o nome padrão de cada container exposto
+(<code>&lt;nome&gt;.&lt;ns&gt;.svc.delonix.internal</code>) num bloco delimitado do
+<code>/etc/hosts</code>, o mesmo bloco por raiz de estado do ADR-0046, e mantém-no actual
+depois de ligado. Escrever o <code>/etc/hosts</code> exige root: sem root o comando recusa e
+imprime o bloco a acrescentar à mão. <code>--print</code> mostra o bloco sem tocar em nada;
+<code>--off</code> remove-o e deixa de o manter.""",
+        "subs": {},
+    },
     "compatibility": {
         "title": "delonix compatibility",
         "tagline": "O que este motor cobre da superfície de outra ferramenta — servido, recusado com razão, nunca em silêncio.",
@@ -1872,6 +1884,16 @@ hand-written <code>kind:</code> will actually become once the engine reads it.""
 The exposed tools call the <code>Store</code>/domain crates directly, never build arbitrary
 shell; it is <code>stdio</code>-only in this phase, meant for a local AI assistant to operate the
 engine without leaving the machine.""",
+    },
+    "hosts": {
+        "tagline": "The service names of exposed containers, in the operator's /etc/hosts.",
+        "intro": """ADR-0048, phase 2. <strong>Not stable</strong> — see <code>docs/cli-stability.md</code>.
+<code>hosts sync</code> publishes the standard name of every exposed container
+(<code>&lt;name&gt;.&lt;ns&gt;.svc.delonix.internal</code>) in a delimited block of
+<code>/etc/hosts</code> — the per-state-root block of ADR-0046 — and keeps it current once
+enabled. Writing <code>/etc/hosts</code> needs root: without it the command refuses and prints
+the block to add by hand. <code>--print</code> shows the block and touches nothing;
+<code>--off</code> removes it and stops maintaining it.""",
     },
     "compatibility": {
         "tagline": "What this engine covers of another tool's surface — served, refused with a reason, never in silence.",

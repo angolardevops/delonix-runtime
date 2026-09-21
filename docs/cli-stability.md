@@ -349,6 +349,8 @@ diz quais são, em vez de os omitir.
 * **`system`, `dashboard`, `completion`, `init`, `man`, `config`,
   `explain`, `api-resources`, `version`** — utilitários/introspecção, sem
   promessa declarada em nenhuma versão.
+* **`hosts`** — `hosts sync` publica no `/etc/hosts` os nomes de serviço dos
+  containers expostos (ADR-0048); superfície nova, sem promessa ainda.
 * **`mcp`** — o servidor Model Context Protocol (ADR-0025), superfície nova. O
   transporte `stdio` é o suportado (um processo filho do cliente de IA por
   sessão, nunca um daemon); um transporte HTTP local, se vier a existir, seria

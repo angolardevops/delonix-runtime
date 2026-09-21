@@ -190,7 +190,7 @@ fn home_from_passwd_line(line: &str) -> Option<String> {
 /// would resolve to `/var/lib/delonix` and NOT find `kaeso-net` (real bug:
 /// `sudo delonix vm bridge` → "network does not exist"). Honors an explicit
 /// `DELONIX_ROOT` if already set (power users / custom `XDG_DATA_HOME`).
-fn adopt_invoking_user_root() {
+pub(crate) fn adopt_invoking_user_root() {
     if std::env::var_os("DELONIX_ROOT").is_some() {
         return;
     }
