@@ -1,0 +1,185 @@
+#!/bin/bash
+# carbonio-finish-install -- take the pre-bootstrap Carbonio CE image to a working
+# mail server, with no prompt.
+#
+#   carbonio-finish-install --fqdn mail.example.com [--ip 192.0.2.10]
+#                           [--admin-password P] [--cluster-password P]
+#
+# The vendor's guide is a dozen interactive steps in an order that matters, and
+# two of them deadlock if done in the order a first read suggests: `carbonio-
+# bootstrap` starts every service and waits for service-discover, which cannot
+# start until `service-discover setup` has run; and the sidecars then wait for
+# tokens that only `pending-setups` creates, which in turn needs the databases
+# and the video server. This script does them in the order that completes.
+#
+# Passwords: anything not given is generated, saved 0600 under /root and printed
+# once. Nothing is baked into the image.
+set -euo pipefail
+
+FQDN="" IP="" ADMIN_PW="" CLUSTER_PW="" FORCE=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --fqdn) FQDN=$2; shift 2 ;;
+    --ip) IP=$2; shift 2 ;;
+    --admin-password) ADMIN_PW=$2; shift 2 ;;
+    --cluster-password) CLUSTER_PW=$2; shift 2 ;;
+    --force) FORCE=1; shift ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+done
+[ "$(id -u)" = 0 ] || { echo "run as root" >&2; exit 1; }
+[ -n "$FQDN" ] || { echo "--fqdn is required (a fully qualified name, e.g. mail.example.com)" >&2; exit 2; }
+case "$FQDN" in *.*) ;; *) echo "--fqdn must contain a dot: '$FQDN'" >&2; exit 2 ;; esac
+echo "$FQDN" | grep -Eq '^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$' || { echo "invalid FQDN: $FQDN" >&2; exit 2; }
+DOMAIN=${FQDN#*.}
+SHORT=${FQDN%%.*}
+MARK=/etc/delonix/carbonio-installed
+if [ -e "$MARK" ] && [ "$FORCE" != 1 ]; then
+  echo "already finished on $(cat "$MARK") -- nothing to do (--force to run again)"; exit 0
+fi
+[ -n "$IP" ] || IP=$(ip -4 -o addr show scope global | awk '{sub("/.*","",$4); print $4; exit}')
+[ -n "$IP" ] || { echo "no IPv4 address found; pass --ip" >&2; exit 1; }
+gen() { openssl rand -base64 24 | tr -d '/+=' | head -c 20; }
+[ -n "$ADMIN_PW" ] || ADMIN_PW=$(gen)
+[ -n "$CLUSTER_PW" ] || CLUSTER_PW=$(gen)
+say() { echo "==> $*"; }
+
+say "identity: $FQDN ($IP), mail domain $DOMAIN"
+hostnamectl set-hostname "$FQDN"
+printf '127.0.0.1 localhost\n%s %s %s\n' "$IP" "$FQDN" "$SHORT" > /etc/hosts
+
+say "database: the PostgreSQL role for Carbonio"
+carbonio-prepare-db >/dev/null
+DBPW=$(cat /root/.carbonio-db-password)
+
+say "carbonio-bootstrap (unattended) alongside service-discover"
+# The two wait on each other, so neither can go first. `carbonio-bootstrap`
+# writes the LDAP configuration early and then blocks starting the services;
+# `service-discover setup` needs that configuration (it refuses without it) and
+# is what lets those services start. So: bootstrap in the background, set up
+# service-discover as soon as the configuration exists, then wait for bootstrap.
+CFG=$(mktemp); trap 'rm -f "$CFG"' EXIT
+cat > "$CFG" <<EOF
+HOSTNAME="$FQDN"
+LDAPHOST="$FQDN"
+CREATEDOMAIN="$DOMAIN"
+DOCREATEDOMAIN="yes"
+CREATEADMIN="zextras@$DOMAIN"
+DOCREATEADMIN="yes"
+STARTSERVERS="yes"
+EOF
+BLOG=/var/log/carbonio-bootstrap-unattended.log
+carbonio-bootstrap -c "$CFG" > "$BLOG" 2>&1 &
+BPID=$!
+# The point where it starts blocking on the services is the point where every
+# localconfig field service-discover asks for has been written.
+ldap_ready() { grep -q 'starting carbonio-directory-server.target' "$BLOG"; }
+for i in $(seq 1 120); do
+  ldap_ready && break
+  kill -0 "$BPID" 2>/dev/null || { echo "carbonio-bootstrap ended early:" >&2; tail -20 "$BLOG" >&2; exit 1; }
+  sleep 5
+done
+ldap_ready || { echo "bootstrap never wrote the LDAP configuration" >&2; tail -20 "$BLOG" >&2; exit 1; }
+
+# The CLI insists on a terminal; `script` provides one without a human. LDAP must
+# be listening (bootstrap writes its config a moment before slapd accepts), so the
+# setup is retried from a clean state rather than trusted to win the race once.
+sd_setup() {
+  systemctl stop service-discover 2>/dev/null || true
+  find /var/lib/service-discover -mindepth 1 -delete 2>/dev/null || true
+  rm -f /etc/zextras/service-discover/main.json
+  systemctl reset-failed service-discover 2>/dev/null || true
+  script -qec "service-discover setup --first-instance --password '$CLUSTER_PW' $IP" /dev/null
+}
+for i in $(seq 1 12); do
+  ss -H -ltn 'sport = :389' | grep -q . && sd_setup && break
+  sleep 10
+done
+for i in $(seq 1 30); do systemctl is-active --quiet service-discover && break; sleep 2; done
+systemctl is-active --quiet service-discover || { echo "service-discover did not start" >&2; exit 1; }
+
+# pending-setups creates the tokens the services are waiting for, so it is what
+# lets bootstrap finish: run it repeatedly until bootstrap returns.
+export SETUP_CONSUL_TOKEN
+SETUP_CONSUL_TOKEN=$(service-discover bootstrap-token --password "$CLUSTER_PW")
+for i in $(seq 1 60); do
+  kill -0 "$BPID" 2>/dev/null || break
+  pending-setups -a >/dev/null 2>&1 || true
+  sleep 10
+done
+wait "$BPID" || { echo "carbonio-bootstrap failed:" >&2; tail -20 "$BLOG" >&2; exit 1; }
+
+say "pending setups, first pass"
+# It is EXPECTED to stop at the message dispatcher: that setup needs its database
+# password, and the database bootstrap below needs the token this pass creates.
+# Running the schemas before this pass registers an EMPTY password (measured).
+pending-setups -a || true
+
+say "database schemas for the four services"
+for s in files tasks ws-collaboration message-dispatcher; do
+  PGPASSWORD=$DBPW "carbonio-$s-db-bootstrap" carbonio_adm 127.0.0.1 >/dev/null
+done
+
+say "video server (its pending-setup needs the service running)"
+systemctl enable --now carbonio-videoserver.service
+
+say "pending setups, second pass (must finish clean)"
+pending-setups -a | tee /tmp/pending-setups.log
+if grep -qE 'terminated with error|Setup script failed' /tmp/pending-setups.log; then
+  echo "a pending setup still fails -- see /tmp/pending-setups.log" >&2; exit 1
+fi
+
+say "admin password"
+su - zextras -c "carbonio prov sp zextras@$DOMAIN '$ADMIN_PW'" >/dev/null
+
+say "proxy: pick up the final configuration"
+# nginx's configuration is only complete once the pending setups have run; the
+# instance started earlier is up but is not listening on 443 (measured).
+systemctl restart carbonio-nginx
+for i in $(seq 1 30); do ss -H -ltn 'sport = :443' | grep -q . && break; sleep 2; done
+
+say "mail transport: restart postfix on the final configuration"
+# Postfix was started before amavis and the pending setups existed, so its master
+# process has no smtp-amavis transport: every message is deferred with "mail
+# transport unavailable" until it is restarted (measured).
+systemctl restart carbonio-postfix
+for i in $(seq 1 30); do ss -H -ltn 'sport = :10025' | grep -q . && break; sleep 2; done
+
+say "proof: log in as the admin over HTTPS"
+REPLY=$(curl -sk -m 60 "https://127.0.0.1:6071/service/admin/soap/" -H 'Content-Type: application/soap+xml' \
+  -d "<soap:Envelope xmlns:soap=\"http://www.w3.org/2003/05/soap-envelope\"><soap:Body><AuthRequest xmlns=\"urn:zimbraAdmin\"><name>zextras@$DOMAIN</name><password>$ADMIN_PW</password></AuthRequest></soap:Body></soap:Envelope>" || true)
+echo "$REPLY" | grep -q authToken || { echo "the admin could not log in over HTTPS; nothing is marked as finished" >&2; exit 1; }
+
+say "proof: a message travels SMTP -> amavis -> LMTP -> the admin's inbox"
+TOKEN="delonix-install-probe-$(openssl rand -hex 4)"
+python3 - "$DOMAIN" "$TOKEN" <<'PY'
+import smtplib, sys
+from email.message import EmailMessage
+m = EmailMessage(); m["From"] = "zextras@" + sys.argv[1]; m["To"] = "zextras@" + sys.argv[1]
+m["Subject"] = sys.argv[2]; m.set_content("installation probe")
+s = smtplib.SMTP("127.0.0.1", 25, timeout=30); s.send_message(m); s.quit()
+PY
+DELIVERED=0
+for i in $(seq 1 30); do
+  if su - zextras -c "zmmailbox -z -m zextras@$DOMAIN s -t message 'subject:$TOKEN'" 2>/dev/null | grep -q "$TOKEN"; then DELIVERED=1; break; fi
+  sleep 5
+done
+[ "$DELIVERED" = 1 ] || { echo "the probe message never reached the inbox; nothing is marked as finished (see /var/log/mail.log)" >&2; exit 1; }
+
+umask 077
+printf '%s\n' "$ADMIN_PW" > /root/.carbonio-admin-password
+printf '%s\n' "$CLUSTER_PW" > /root/.carbonio-cluster-password
+mkdir -p /etc/delonix
+date -u +%FT%TZ > "$MARK"
+
+cat <<EOF
+
+Carbonio is installed.
+  web client:   https://$FQDN/
+  admin panel:  https://$FQDN:6071/     account zextras@$DOMAIN
+  admin password    -> /root/.carbonio-admin-password
+  cluster password  -> /root/.carbonio-cluster-password  (needed to add servers)
+Still yours to do: DNS (A and MX for $DOMAIN), a real TLS certificate, and the
+video server's public IP in /etc/janus/janus.jcfg (nat_1_1_mapping).
+EOF
