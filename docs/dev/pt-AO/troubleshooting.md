@@ -1,4 +1,4 @@
-<!-- translated-from: troubleshooting.md sha256:4f476510e80876a2c686420756ad008e3c21bba548c7747dd97a6db8e6aa6f95 -->
+<!-- translated-from: troubleshooting.md sha256:47d1c5984d20cc95f303cbc9d9579447fa3fec9218d0e0c4f6e052daf1781f74 -->
 # Diagnóstico de problemas
 
 **Antes de leres:** [Preparar o teu ambiente](environment.md) (armadilhas do host) e [Clonar, compilar e testar](build-and-test.md#the-gates-ci-runs) (os gates, e isolar o estado do motor).
@@ -165,4 +165,4 @@ enuncia.
 
 ---
 
-**A seguir:** [Convenções de código](coding-conventions.md) — como o código neste repositório tem de ser escrito, cada regra etiquetada com o gate ou a decisão que está por trás.
+**A seguir:** [Como os nomes chegam ao `/etc/hosts`](service-names-and-hosts.md) — o bloco que publica os nomes de serviço e os hosts de rota, e porque é que ele recusa. Depois, [Convenções de código](coding-conventions.md) — como o código neste repositório tem de ser escrito, cada regra etiquetada com o gate ou a decisão que está por trás.
