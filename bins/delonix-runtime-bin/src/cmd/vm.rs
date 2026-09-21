@@ -672,9 +672,6 @@ pub enum VmCmd {
         compress: bool,
     },
     /// Build a VM image (qcow2) from a `vm.yaml`, a `VMfile`, or the golden recipe.
-    ///
-    /// The `docker build` experience for VMs: `vm build .` finds a `vm.yaml`
-    /// (then a `VMfile`) in the context; `-f <file> -t <tag>` names both.
     Build(super::vmimage::BuildArgs),
     /// Get or set the default VM backend.
     ///

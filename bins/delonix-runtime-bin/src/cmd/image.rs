@@ -459,8 +459,6 @@ pub enum VmSub {
         force: bool,
     },
     /// Build a VM image: a `vm.yaml`, your own `VMfile`, or the golden recipe.
-    ///
-    /// Same as `delonix vm build`.
     Build(super::vmimage::BuildArgs),
 }
 

@@ -594,14 +594,7 @@ pub struct BuildArgs {
     /// image's own `tag:`; without one it is required.
     #[arg(short = 't', long = "tag")]
     pub tag: Option<String>,
-    /// Build from a `VMfile` instead of the built-in golden recipe.
-    ///
-    /// With no `-f`, a `VMfile` in the context directory is used if there
-    /// is one — same rule `delonix build` follows for `Delonixfile`. The
-    /// flags below (`--distro`, `--k8s-version`, …) belong to the golden
-    /// recipe and are REFUSED with a VMfile, which describes all of that
-    /// itself; accepting and ignoring them is the failure this repo names
-    /// as its worst.
+    /// Build from a `vm.yaml` or a `VMfile` instead of the built-in golden recipe.
     #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
     pub file: Option<PathBuf>,
     /// With a `vm.yaml` that declares several images, build only this one.

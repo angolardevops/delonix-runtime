@@ -13053,3 +13053,64 @@ msgstr "httproute: não há routes manuais para remover"
 
 msgid "httproute: WARNING — :{port} is a TLS listener of a declared route, and `--expose` routes are served on it too, over TLS"
 msgstr "httproute: AVISO — :{port} é um listener TLS de uma route declarada, e as routes de `--expose` também são servidas nele, sobre TLS"
+
+# vm build / vm.yaml
+msgid "Tag of the resulting image. With a `vm.yaml` it defaults to the image's own `tag:`; without one it is required"
+msgstr "Etiqueta da imagem resultante. Com um `vm.yaml` assume por omissão o `tag:` da própria imagem; sem ele é obrigatória"
+
+msgid "Build from a `vm.yaml` or a `VMfile` instead of the built-in golden recipe"
+msgstr "Construir a partir de um `vm.yaml` ou de um `VMfile` em vez da receita dourada incorporada"
+
+msgid "With a `vm.yaml` that declares several images, build only this one"
+msgstr "Com um `vm.yaml` que declara várias imagens, construir só esta"
+
+msgid "Build context — the directory `COPY` reads from (default: `.`)"
+msgstr "Contexto de build — o directório de onde o `COPY` lê (por omissão: `.`)"
+
+msgid "Base distro for the cloud image"
+msgstr "Distro base da cloud image"
+
+msgid "Debian codename (`bookworm`, `trixie`, ...) — only used with `--distro debian`"
+msgstr "Codinome do Debian (`bookworm`, `trixie`, ...) — só usado com `--distro debian`"
+
+msgid "Rocky Linux major version (`8`, `9`, `10`) — only used with `--distro rocky`. Rocky currently only supports `--no-k8s` builds"
+msgstr "Versão major do Rocky Linux (`8`, `9`, `10`) — só usada com `--distro rocky`. O Rocky só suporta, por agora, builds `--no-k8s`"
+
+msgid "Fedora release AND build, as shown on Fedora's download page (e.g. `42-1.1`) — only used with `--distro fedora`. The build number is not derivable from the release, and Fedora's redirector offers no listing to look it up, so it is asked for rather than guessed"
+msgstr "Release E build do Fedora, como aparece na página de downloads do Fedora (ex.: `42-1.1`) — só usado com `--distro fedora`. O número de build não se deduz da release e o redirector do Fedora não dá listagem para o consultar, por isso pede-se em vez de se adivinhar"
+
+msgid "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam disponíveis passando-as aqui"
+msgstr "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam disponíveis passando-as aqui"
+
+msgid "Build a golden image with NO Kubernetes at all — just the `delonix` engine binary, ready for rootless containers (mutually exclusive with `--k8s-version`/`--offline`, which don't apply)"
+msgstr "Constrói uma golden SEM Kubernetes — só o binário do motor `delonix`, pronta para containers rootless (mutuamente exclusiva com `--k8s-version`/`--offline`, que não se aplicam)"
+
+msgid "Explicit path of the `delonix` binary to install when `--no-k8s` (otherwise: the currently running `delonix`, then a workspace build, then a verified download from the matching release)"
+msgstr "Caminho explícito do binário `delonix` a instalar com `--no-k8s` (senão: o `delonix` em execução, depois um build do workspace, depois um download verificado da release correspondente)"
+
+msgid "Set a root password in the image. WITHOUT this, no account ships with one (the supported ways in are the SSH key cloud-init injects and the key `cluster kubeadm` generates). Use it only when you need the serial console to take a login — and remember the image is an artefact you may publish"
+msgstr "Define uma password de root na imagem. SEM isto, nenhuma conta traz password (as vias de entrada suportadas são a chave SSH que o cloud-init injecta e a que o `cluster kubeadm` gera). Usa-o só quando precisas que a consola série aceite um login — e lembra-te de que a imagem é um artefacto que podes publicar"
+
+msgid "Build a VM image (qcow2) from a `vm.yaml`, a `VMfile`, or the golden recipe"
+msgstr "Constrói uma imagem VM (qcow2) a partir de um `vm.yaml`, de um `VMfile` ou da receita dourada"
+
+msgid "Build a VM image: a `vm.yaml`, your own `VMfile`, or the golden recipe"
+msgstr "Constrói uma imagem VM: um `vm.yaml`, o teu próprio `VMfile` ou a receita dourada"
+
+msgid "a `vm.yaml` in the folder — the same as `delonix vm build .`"
+msgstr "um `vm.yaml` na pasta — o mesmo que `delonix vm build .`"
+
+msgid "a `vm.yaml` in this folder: build every image it declares, like `docker build .`"
+msgstr "um `vm.yaml` nesta pasta: constrói todas as imagens que declara, como o `docker build .`"
+
+msgid "a specific file, tagged — `-t` is also `${TAG}` inside the file, so the same file builds any release"
+msgstr "um ficheiro concreto, com etiqueta — o `-t` é também o `${TAG}` dentro do ficheiro, por isso o mesmo ficheiro constrói qualquer release"
+
+msgid "one image out of a `vm.yaml` that declares several"
+msgstr "uma só imagem de um `vm.yaml` que declara várias"
+
+msgid "a `VMfile` of your own, with network during `RUN` so a package can be installed"
+msgstr "um `VMfile` teu, com rede durante o `RUN` para poder instalar um pacote"
+
+msgid "the built-in golden recipe, offline, when there is no file at all"
+msgstr "a receita dourada incorporada, offline, quando não há ficheiro nenhum"
