@@ -848,6 +848,7 @@ There is no database. State is files under one **state root**:
 | `secrets/` | encrypted secrets | `SecretStore` (`delonix-state/src/secret.rs`) |
 | `tunnels/keyring.key`, `tunnels/cred/` | the host master key and encrypted credentials | `CredVault` (`delonix-state/src/cred_vault.rs`) |
 | `ingress/` | pidfiles (`holder.pid` is the pin), `refs/` markers, network and route definitions, logs | `delonix-sdn/src/infra.rs` |
+| `hosts-sync` | marker file: `delonix hosts sync` was run, so the service names of `--expose` containers are kept in the host's `/etc/hosts` (it sits at the root, not under `ingress/`) | `hosts_sync_flag` in `cmd/ingress_proxy.rs` |
 | `ipam/` | per-prefix address leases | `delonix-sdn/src/ipam.rs` |
 | `cri/{sandboxes,containers}/` | the CRI's own records | `delonix-cri/src/runtime_svc/lifecycle.rs` (`sb_dir`, `ct_dir`) |
 | `clusters/` | kubeconfigs, keys and PKI of clusters | `cmd/cluster.rs` |
