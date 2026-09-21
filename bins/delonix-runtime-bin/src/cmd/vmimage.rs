@@ -889,7 +889,7 @@ fn build_spec(
     // image must not cost the first one's build.
     let plans = chosen
         .iter()
-        .map(|(n, i)| vmspec::plan(n, i, &dir))
+        .map(|(n, i)| vmspec::plan(n, i, &dir, network))
         .collect::<Result<Vec<_>>>()?;
     for p in &plans {
         if p.tag.is_none() && tag.is_none() {

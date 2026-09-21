@@ -454,7 +454,7 @@ fn used_content_fields(img: &Image) -> Vec<&'static str> {
 /// Validates one image and decides how it is built. `dir` is the folder of the
 /// `vm.yaml`: every relative path in the file is relative to it, exactly as in
 /// a `compose.yaml`.
-pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
+pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Result<Plan> {
     let ctx = |m: String| Error::Invalid(format!("vm.yaml, image '{name}': {m}"));
     let compress = img.compress.unwrap_or(true);
     let base = |route| Plan {
@@ -548,7 +548,7 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path) -> Result<Plan> {
 
     let pm = pkg_manager(img);
     let installs = !img.packages.install.is_empty() || img.packages.upgrade;
-    if installs && !img.network {
+    if installs && !(img.network || cli_network) {
         return Err(ctx(
             "`packages` needs the network inside the guest — set `network: true` \
              (a build that reaches the internet is not reproducible; that is why it is opt-in)"
@@ -938,7 +938,7 @@ mod tests {
     fn one(y: &str) -> Result<Plan> {
         let spec = parse(y, None)?;
         let (n, i) = spec.images.iter().next().unwrap();
-        plan(n, i, Path::new("."))
+        plan(n, i, Path::new("."), false)
     }
 
     fn vmfile(y: &str) -> VmFile {
@@ -1008,6 +1008,15 @@ mod tests {
         assert!(e.to_string().contains("package manager"), "{e}");
         let vf = vmfile("images:\n  u:\n    from: https://x/y.qcow2\n    package_manager: dnf\n    network: true\n    packages: {install: [curl]}\n");
         assert!(runs(&vf).iter().any(|c| c == "dnf install -y curl"));
+    }
+
+    #[test]
+    fn the_network_flag_satisfies_packages() {
+        let y = "images:\n  u:\n    distro: ubuntu\n    release: '26.04'\n    packages: {install: [curl]}\n";
+        let spec = parse(y, None).unwrap();
+        let (n, i) = spec.images.iter().next().unwrap();
+        assert!(plan(n, i, Path::new("."), false).is_err());
+        assert!(plan(n, i, Path::new("."), true).is_ok());
     }
 
     #[test]
