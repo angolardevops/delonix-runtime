@@ -1,4 +1,4 @@
-<!-- translated-from: troubleshooting.md sha256:4f476510e80876a2c686420756ad008e3c21bba548c7747dd97a6db8e6aa6f95 -->
+<!-- translated-from: troubleshooting.md sha256:47d1c5984d20cc95f303cbc9d9579447fa3fec9218d0e0c4f6e052daf1781f74 -->
 # Dépannage
 
 **À lire avant :** [Préparer votre environnement](environment.md) (pièges de l'hôte) et [Cloner, compiler et tester](build-and-test.md#the-gates-ci-runs) (les gates, et l'isolation de l'état du moteur).
@@ -170,4 +170,4 @@ compromis que [Cloner, compiler et tester](build-and-test.md#build) énonce déj
 
 ---
 
-**Ensuite :** [Conventions de code](coding-conventions.md) — comment le code de ce dépôt doit être écrit, chaque règle étant associée au gate ou à la décision qui la justifie.
+**Ensuite :** [Comment les noms atteignent `/etc/hosts`](service-names-and-hosts.md) — le bloc qui publie les noms de service et les hôtes de route, et pourquoi il refuse. Puis [Conventions de code](coding-conventions.md) — comment le code de ce dépôt doit être écrit, chaque règle étant associée au gate ou à la décision qui la justifie.
