@@ -1,4 +1,4 @@
-<!-- translated-from: releases-and-stability.md sha256:43f9e63a27ad9f8f69a64ae5eac90dd592bcd08a4309871320a609f4f209fdc1 -->
+<!-- translated-from: releases-and-stability.md sha256:38c64cb15968ed86136ea555f0d3b7515baa85a8a5e7439fcf65700807c8df37 -->
 # Releases e estabilidade
 
 **Antes de leres:** [Fluxo de contribuição](contributing-workflow.md#version-alignment) (o gate de versão) e [Publicar a documentação](publishing-docs.md) (o que uma release regenera).
@@ -46,7 +46,11 @@ release que não existe.
    x86-64, outra com `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — especificamente em
    `ubuntu-22.04`, para a linha de base do glibc (2.35) ficar compatível com o RHEL 9 e o
    Debian 12, não só com o Ubuntu mais recente. O `scripts/install.sh` escolhe a build `-v3`
-   automaticamente quando o CPU do host a suporta.
+   automaticamente quando o CPU do host a suporta. Um job `build-arm64` separado constrói os mesmos
+   quatro binários nativamente num runner aarch64 (um por componente, sem variante `-v3`), e são
+   publicados como `<name>-aarch64-linux` sob o mesmo `SHA256SUMS`. O `install.sh` ainda não os
+   instala. O job só corre numa tag `v*`, por isso a sua primeira execução foi a própria release
+   v4.2.0; a CI corre a suite de testes nativamente em arm64 no job `test (arm64)` em cada PR.
 2. **Regenera o site do utilizador contra esta build de release exacta e falha se `docs/`
    divergir.** Este gate existe porque uma vez não existia: um buraco no site saiu ao vivo na
    v0.48.0, escondendo um comando novo durante horas enquanto um job de CI paralelo já estava

@@ -1,4 +1,4 @@
-<!-- translated-from: environment.md sha256:29a46c673dae7f412b2e88dbcf5a56a00385849cb1bff2804877d0ab9b85a677 -->
+<!-- translated-from: environment.md sha256:0505a35c5a1e921e51ecd51f7feb5352158dd1985176b27ff3e1a76b6adc1719 -->
 # Preparar o teu ambiente
 
 **Antes de leres:** [Começa aqui](start-here.md#day-0-in-30-minutes) (Dia 0) e [Fundações de Linux](linux-foundations.md) — as armadilhas do host abaixo são explicadas em termos de user namespaces e delegação de cgroup.
@@ -77,8 +77,18 @@ A fonte de verdade é o [`scripts/install.sh`](../../../scripts/install.sh), que
 instalador oficial (é publicado como asset de release). Detecta o gestor de pacotes através de
 `/etc/os-release` e suporta **apt** (Debian, Ubuntu e derivados), **dnf** (Fedora, RHEL,
 CentOS Stream, Rocky, AlmaLinux), **zypper** (openSUSE, SLES) e **pacman** (Arch e
-derivados). Só existem binários pré-compilados para **x86_64**; noutras arquitecturas compila a partir
-do código-fonte.
+derivados). O instalador instala binários pré-compilados para **x86_64** e **aarch64** (`arm64` é
+normalizado): o nome do asset compõe-se a partir de `uname -m` como `<name>-<arch>-linux`, e qualquer
+outra arquitectura pára com "no prebuilt binary for <arch> yet", por isso compila a partir do
+código-fonte. Três coisas diferem em aarch64: a variante `-v3` é um nível de microarquitectura x86-64 e
+não existe lá; o Cloud Hypervisor estático fixado, o EDK2 `CLOUDHV.fd` e o `hypervisor-fw` são builds
+x86-64, por isso não são descarregados (um `cloud-hypervisor` empacotado pela distro continua a ser
+instalado se o gestor de pacotes o tiver) e o backend de VM é o libvirt; e a sonda do QEMU procura
+`qemu-system-aarch64`. Os assets de release para aarch64 existem desde a v4.2.0 (a release v4.1.0 não
+tem nenhum).
+**Não validado:** uma instalação completa num host aarch64 real, e os nomes dos pacotes QEMU por
+distro em arm64 — o que foi verificado é a composição do nome do asset contra os assets publicados da
+v4.2.0.
 
 Para correr containers o motor precisa de:
 
@@ -109,7 +119,11 @@ bash scripts/install.sh --no-binary
 Lê primeiro a lista de flags no topo do script: algumas flags mudam definições de segurança de todo o
 host (`--low-ports` deixa qualquer programa local ligar-se a portas a partir da 80, `--with-image-build`
 torna `/boot/vmlinuz-*` legível por todos), e `--no-tune` salta os módulos de kernel e os sysctls,
-incluindo o `br_netfilter`.
+incluindo o `br_netfilter`. `--performance` / `--no-performance` controlam o modo de desempenho do CPU, as
+hugepages transparentes com `irqbalance`, e um timer de utilizador que corre `system prune --auto
+--threshold 75`; sem nenhuma das flags o instalador pergunta por cada um e, sem terminal, responde
+não. A parte do CPU é um serviço systemd que guarda os valores do arranque e os repõe no `stop`.
+Nada disto é preciso para desenvolver.
 
 ### Memória e disco
 

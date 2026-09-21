@@ -1,4 +1,4 @@
-<!-- translated-from: architecture.md sha256:d0a7488dceef674583e8614914305b14a9325e18423f1883faa4d4d6462b28ae -->
+<!-- translated-from: architecture.md sha256:ce0b4cc047eb967f418349a1b81b6096f61bd47fdc80136d63667a1c6ea1c28e -->
 # Arquitectura
 
 **Antes de leres:** [Estrutura do projecto](project-structure.md) (onde as coisas estão), [IaaS e cloud native](iaas-and-cloud-native.md) (o lugar e os princípios do motor) e [Introdução ao cloud native](cloud-native-primer.md) (os mecanismos que as figuras nomeiam).
@@ -856,6 +856,7 @@ Não há base de dados. O estado são ficheiros debaixo de um **state root**:
 | `secrets/` | segredos cifrados | `SecretStore` (`delonix-state/src/secret.rs`) |
 | `tunnels/keyring.key`, `tunnels/cred/` | a chave mestra do host e credenciais cifradas | `CredVault` (`delonix-state/src/cred_vault.rs`) |
 | `ingress/` | pidfiles (`holder.pid` é o pin), marcadores `refs/`, definições de rede e rota, logs | `delonix-sdn/src/infra.rs` |
+| `hosts-sync` | ficheiro marcador: o `delonix hosts sync` foi corrido, por isso os nomes de serviço dos containers `--expose` são mantidos no `/etc/hosts` do host (fica na raiz, não em `ingress/`) | `hosts_sync_flag` em `cmd/ingress_proxy.rs` |
 | `ipam/` | leases de endereço por-prefixo | `delonix-sdn/src/ipam.rs` |
 | `cri/{sandboxes,containers}/` | os próprios registos do CRI | `delonix-cri/src/runtime_svc/lifecycle.rs` (`sb_dir`, `ct_dir`) |
 | `clusters/` | kubeconfigs, chaves e PKI de clusters | `cmd/cluster.rs` |
