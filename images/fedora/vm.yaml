@@ -35,7 +35,7 @@ images:
     # (the guest agent is already in the base image). Installed with dnf.
     # packages:
     #   upgrade: false
-    #   install: [htop]
+    #   install: [jq]
     files:
       - src: artifacts/motd
         dst: /etc/motd
