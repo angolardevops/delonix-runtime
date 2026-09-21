@@ -1003,8 +1003,15 @@ fn run_appliance(
         .stdin(std::process::Stdio::null())
         .status();
     let result = (|| {
-        let status = status
-            .map_err(|e| Error::Invalid(format!("could not start {}: {e}", script.display())))?;
+        let status = status.map_err(|e| {
+            Error::Invalid(super::po::tf(
+                "could not start {script}: {e}",
+                &[
+                    ("script", &script.display().to_string()),
+                    ("e", &e.to_string()),
+                ],
+            ))
+        })?;
         if !status.success() {
             return Err(Error::Invalid(
                 super::po::tf(
@@ -1026,21 +1033,26 @@ fn run_appliance(
         let source = match found.as_slice() {
             [one] => one.clone(),
             [] => {
-                return Err(Error::Invalid(format!(
-                    "builder {} finished but left no .qcow2 in {}",
-                    a.builder,
-                    out.display()
+                return Err(Error::Invalid(super::po::tf(
+                    "builder {name} finished but left no .qcow2 in {out}",
+                    &[("name", &a.builder), ("out", &out.display().to_string())],
                 )))
             }
             many => {
-                return Err(Error::Invalid(format!(
-                    "builder {} left {} disk images ({}); expected exactly one",
-                    a.builder,
-                    many.len(),
-                    many.iter()
-                        .filter_map(|p| p.file_name().and_then(|n| n.to_str()))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                return Err(Error::Invalid(super::po::tf(
+                    "builder {name} left {n} disk images ({files}); expected exactly one",
+                    &[
+                        ("name", &a.builder),
+                        ("n", &many.len().to_string()),
+                        (
+                            "files",
+                            &many
+                                .iter()
+                                .filter_map(|p| p.file_name().and_then(|n| n.to_str()))
+                                .collect::<Vec<_>>()
+                                .join(", "),
+                        ),
+                    ],
                 )))
             }
         };

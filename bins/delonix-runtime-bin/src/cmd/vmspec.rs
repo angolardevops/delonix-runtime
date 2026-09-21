@@ -274,18 +274,19 @@ pub(crate) fn expand(text: &str, vars: &BTreeMap<String, String>) -> Result<Stri
     while let Some(i) = rest.find("${") {
         out.push_str(&rest[..i]);
         let after = &rest[i + 2..];
-        let end = after.find('}').ok_or_else(|| {
-            Error::Invalid("vm.yaml: unterminated `${` — close it with `}`".into())
-        })?;
+        let end = after
+            .find('}')
+            .ok_or_else(|| inv("vm.yaml: unterminated `${` — close it with `}`", &[]))?;
         let body = &after[..end];
         let (name, default) = match body.split_once(":-") {
             Some((n, d)) => (n, Some(d)),
             None => (body, None),
         };
         if name.is_empty() || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            return Err(Error::Invalid(format!(
-                "vm.yaml: `${{{body}}}` is not a variable name (letters, digits and `_` only)"
-            )));
+            return Err(inv(
+                "vm.yaml: `${{body}}` is not a variable name (letters, digits and `_` only)",
+                &[("body", body)],
+            ));
         }
         let val = vars
             .get(name)
@@ -295,9 +296,10 @@ pub(crate) fn expand(text: &str, vars: &BTreeMap<String, String>) -> Result<Stri
         match val {
             Some(v) => out.push_str(&v),
             None => {
-                return Err(Error::Invalid(format!(
-                    "vm.yaml: `${{{name}}}` is not set — pass `-t`, export it, or write `${{{name}:-default}}`"
-                )))
+                return Err(inv(
+                    "vm.yaml: `${{name}}` is not set — pass `-t`, export it, or write `${{name}:-default}`",
+                    &[("name", name)],
+                ))
             }
         }
         rest = &after[end + 1..];
@@ -341,27 +343,39 @@ pub(crate) fn parse(text: &str, tag: Option<&str>) -> Result<Spec> {
     match spec.version {
         None | Some(1) => {}
         Some(v) => {
-            return Err(Error::Invalid(format!(
-                "vm.yaml: version {v} is newer than this engine understands (1)"
-            )))
+            return Err(inv(
+                "vm.yaml: version {v} is newer than this engine understands (1)",
+                &[("v", &v.to_string())],
+            ))
         }
     }
     if spec.images.is_empty() {
-        return Err(Error::Invalid(
-            "vm.yaml: `images:` is empty — nothing to build".into(),
-        ));
+        return Err(inv("vm.yaml: `images:` is empty — nothing to build", &[]));
     }
     Ok(spec)
 }
 
 // ─── validation of values that end up inside a shell ────────────────────────
 
+/// An error whose text is a catalogue entry (`pt.po`), with named placeholders.
+fn inv(en: &'static str, subs: &[(&str, &str)]) -> Error {
+    Error::Invalid(super::po::tf(en, subs))
+}
+
+/// The prefix every per-image message carries.
+fn ctx_err(name: &str, m: String) -> Error {
+    inv("vm.yaml, image '{name}': {m}", &[("name", name), ("m", &m)])
+}
+
 fn sq(s: &str) -> String {
     format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 fn bad(what: &str, v: &str) -> Error {
-    Error::Invalid(format!("vm.yaml: {what} '{v}' is not valid"))
+    inv(
+        "vm.yaml: {what} '{v}' is not valid",
+        &[("what", what), ("v", v)],
+    )
 }
 
 fn valid_pkg(p: &str) -> bool {
@@ -421,19 +435,20 @@ fn valid_remove_path_like(p: &str) -> std::result::Result<(), String> {
 
 fn valid_remove_path(p: &str) -> std::result::Result<(), String> {
     if !p.starts_with('/') {
-        return Err("must be absolute".into());
+        return Err(super::po::t("must be absolute").into());
     }
     if p.split('/').any(|c| c == "..") {
-        return Err("must not contain `..`".into());
+        return Err(super::po::t("must not contain `..`").into());
     }
     if p.chars().any(|c| c.is_control() || c == '\'' || c == '"') {
-        return Err("must not contain quotes or control characters".into());
+        return Err(super::po::t("must not contain quotes or control characters").into());
     }
     let trimmed = p.trim_end_matches('/');
     let norm = if trimmed.is_empty() { "/" } else { trimmed };
     if PROTECTED.contains(&norm) {
-        return Err(format!(
-            "`{norm}` is protected — remove something inside it instead"
+        return Err(super::po::tf(
+            "`{norm}` is protected — remove something inside it instead",
+            &[("norm", norm)],
         ));
     }
     Ok(())
@@ -500,7 +515,7 @@ fn used_content_fields(img: &Image) -> Vec<&'static str> {
 /// `vm.yaml`: every relative path in the file is relative to it, exactly as in
 /// a `compose.yaml`.
 pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Result<Plan> {
-    let ctx = |m: String| Error::Invalid(format!("vm.yaml, image '{name}': {m}"));
+    let ctx = |m: String| ctx_err(name, m);
     let compress = img.compress.unwrap_or(true);
     let base = |route| Plan {
         name: name.to_string(),
@@ -521,9 +536,9 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
             if img.profile.is_some() {
                 all.push("profile");
             }
-            return Err(ctx(format!(
-                "`build:` points at a VMfile, which describes the image itself — remove {}",
-                all.join(", ")
+            return Err(ctx(super::po::tf(
+                "`build:` points at a VMfile, which describes the image itself — remove {fields}",
+                &[("fields", &all.join(", "))],
             )));
         }
         let ctxdir = dir.join(b.context.as_deref().unwrap_or("."));
@@ -549,7 +564,7 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
 
     if let Some(v) = &img.vcpus {
         if *v == 0 {
-            return Err(ctx("`vcpus` must be at least 1".into()));
+            return Err(ctx(super::po::t("`vcpus` must be at least 1").into()));
         }
     }
     if let Some(h) = &img.hypervisor {
@@ -572,15 +587,17 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
             )
         }
         other => {
-            return Err(ctx(format!(
-                "profile '{other}' unknown — custom, rootless or k8s"
+            return Err(ctx(super::po::tf(
+                "profile '{other}' unknown — custom, rootless or k8s",
+                &[("other", other)],
             )))
         }
     }
     if img.k8s.is_some() || img.node_exporter.is_some() {
-        return Err(ctx(
-            "`k8s:` and `node_exporter:` belong to `profile: rootless|k8s`".into(),
-        ));
+        return Err(ctx(super::po::t(
+            "`k8s:` and `node_exporter:` belong to `profile: rootless|k8s`",
+        )
+        .into()));
     }
 
     // ── custom: compile to a VMfile ────────────────────────────────────────
@@ -588,22 +605,27 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
         (Some(f), None, None) => f.clone(),
         (None, Some(d), Some(r)) => {
             if !matches!(d.as_str(), "ubuntu" | "debian" | "rocky" | "fedora") {
-                return Err(ctx(format!(
-                    "distro '{d}' unknown — ubuntu, debian, rocky or fedora"
+                return Err(ctx(super::po::tf(
+                    "distro '{d}' unknown — ubuntu, debian, rocky or fedora",
+                    &[("d", d)],
                 )));
             }
             format!("{d}:{r}")
         }
-        (None, Some(_), None) => return Err(ctx("`distro` needs a `release`".into())),
+        (None, Some(_), None) => {
+            return Err(ctx(super::po::t("`distro` needs a `release`").into()))
+        }
         (None, None, _) => {
-            return Err(ctx(
-                "needs a base: `distro` + `release`, or `from`, or `build`".into(),
-            ))
+            return Err(ctx(super::po::t(
+                "needs a base: `distro` + `release`, or `from`, or `build`",
+            )
+            .into()))
         }
         (Some(_), _, _) => {
-            return Err(ctx(
-                "`from` and `distro`/`release` are two ways to say the same thing — use one".into(),
-            ))
+            return Err(ctx(super::po::t(
+                "`from` and `distro`/`release` are two ways to say the same thing — use one",
+            )
+            .into()))
         }
     };
 
@@ -611,16 +633,18 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
     let installs = !img.packages.install.is_empty() || img.packages.upgrade;
     if installs && !(img.network || cli_network) {
         return Err(ctx(
-            "`packages` needs the network inside the guest — set `network: true` \
-             (a build that reaches the internet is not reproducible; that is why it is opt-in)"
-                .into(),
+            super::po::t(
+                "`packages` needs the network inside the guest — set `network: true` (a build that reaches the internet is not reproducible; that is why it is opt-in)",
+            )
+            .into(),
         ));
     }
     let touches_packages = installs || !img.remove.packages.is_empty();
     if touches_packages && pm.is_none() {
-        return Err(ctx(
-            "cannot tell the package manager — set `distro`, or `package_manager: apt|dnf`".into(),
-        ));
+        return Err(ctx(super::po::t(
+            "cannot tell the package manager — set `distro`, or `package_manager: apt|dnf`",
+        )
+        .into()));
     }
     for p in img.packages.install.iter().chain(&img.remove.packages) {
         if !valid_pkg(p) {
@@ -639,7 +663,12 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
         }
     }
     for p in &img.remove.paths {
-        valid_remove_path(p).map_err(|m| ctx(format!("remove.paths '{p}': {m}")))?;
+        valid_remove_path(p).map_err(|m| {
+            ctx(super::po::tf(
+                "remove.paths '{p}': {m}",
+                &[("p", p), ("m", &m)],
+            ))
+        })?;
     }
     for u in &img.remove.users {
         if !valid_account(u) || u == "root" {
@@ -733,7 +762,10 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
 
     for (i, f) in img.files.iter().enumerate() {
         if f.src.is_empty() || f.dst.is_empty() {
-            return Err(ctx("each `files` entry needs `src` and `dst`".into()));
+            return Err(ctx(super::po::t(
+                "each `files` entry needs `src` and `dst`",
+            )
+            .into()));
         }
         // `dst` is the full path of the file inside the image, as with `cp`.
         // The engine underneath (`virt-customize --copy-in`) only copies INTO
@@ -741,7 +773,12 @@ pub(crate) fn plan(name: &str, img: &Image, dir: &Path, cli_network: bool) -> Re
         // directory and is moved to where the recipe said. Found by building a
         // real image: a recipe with `dst: /etc/motd` failed with "target is not
         // a directory".
-        valid_remove_path_like(&f.dst).map_err(|m| ctx(format!("files.dst '{}': {m}", f.dst)))?;
+        valid_remove_path_like(&f.dst).map_err(|m| {
+            ctx(super::po::tf(
+                "files.dst '{dst}': {m}",
+                &[("dst", &f.dst), ("m", &m)],
+            ))
+        })?;
         let base = Path::new(&f.src)
             .file_name()
             .and_then(|n| n.to_str())
@@ -925,7 +962,7 @@ fn valid_arg(a: &str) -> bool {
 }
 
 fn plan_appliance(name: &str, img: &Image, a: &Appliance, mut p: Plan) -> Result<Plan> {
-    let ctx = |m: String| Error::Invalid(format!("vm.yaml, image '{name}': {m}"));
+    let ctx = |m: String| ctx_err(name, m);
     // A builder owns everything about how the image is made; the fields of a
     // custom image would be ignored, and ignoring is the failure this file
     // exists to avoid. Only what `image vm import` can record is allowed.
@@ -940,9 +977,9 @@ fn plan_appliance(name: &str, img: &Image, a: &Appliance, mut p: Plan) -> Result
         refused.push("network");
     }
     if !refused.is_empty() {
-        return Err(ctx(format!(
-            "`appliance:` runs a builder script, which decides all of that itself — remove {}",
-            refused.join(", ")
+        return Err(ctx(super::po::tf(
+            "`appliance:` runs a builder script, which decides all of that itself — remove {fields}",
+            &[("fields", &refused.join(", "))],
         )));
     }
     if a.builder.is_empty()
@@ -972,7 +1009,10 @@ fn plan_appliance(name: &str, img: &Image, a: &Appliance, mut p: Plan) -> Result
             || k.starts_with("LD_")
             || k.starts_with("BASH_FUNC_")
         {
-            return Err(ctx(format!("appliance.env '{k}' is not allowed")));
+            return Err(ctx(super::po::tf(
+                "appliance.env '{k}' is not allowed",
+                &[("k", k)],
+            )));
         }
         if v.chars().any(char::is_control) {
             return Err(bad("appliance.env value", k));
@@ -990,7 +1030,7 @@ fn plan_appliance(name: &str, img: &Image, a: &Appliance, mut p: Plan) -> Result
         }
     }
     if img.vcpus == Some(0) {
-        return Err(ctx("`vcpus` must be at least 1".into()));
+        return Err(ctx(super::po::t("`vcpus` must be at least 1").into()));
     }
     p.route = Route::Appliance(Box::new(ApplianceRun {
         builder: a.builder.clone(),
@@ -1010,9 +1050,12 @@ fn plan_appliance(name: &str, img: &Image, a: &Appliance, mut p: Plan) -> Result
 /// The builder is a NAME (validated by `plan`), so nothing outside that
 /// directory can be reached through a recipe.
 pub(crate) fn locate_builder(dir: &Path, builder: &str) -> Result<PathBuf> {
-    let start = dir
-        .canonicalize()
-        .map_err(|e| Error::Invalid(format!("vm.yaml folder {}: {e}", dir.display())))?;
+    let start = dir.canonicalize().map_err(|e| {
+        inv(
+            "vm.yaml folder {dir}: {e}",
+            &[("dir", &dir.display().to_string()), ("e", &e.to_string())],
+        )
+    })?;
     for d in start.ancestors() {
         let cand = d
             .join("scripts/appliances")
@@ -1021,15 +1064,14 @@ pub(crate) fn locate_builder(dir: &Path, builder: &str) -> Result<PathBuf> {
             return Ok(cand);
         }
     }
-    Err(Error::Invalid(format!(
-        "no builder '{builder}': scripts/appliances/build-{builder}.sh was not found in {} or any folder above it — \
-         appliance images are built from a checkout of the repository",
-        start.display()
-    )))
+    Err(inv(
+        "no builder '{builder}': scripts/appliances/build-{builder}.sh was not found in {start} or any folder above it — appliance images are built from a checkout of the repository",
+        &[("builder", builder), ("start", &start.display().to_string())],
+    ))
 }
 
 fn plan_golden(name: &str, img: &Image, profile: &str, mut p: Plan) -> Result<Plan> {
-    let ctx = |m: String| Error::Invalid(format!("vm.yaml, image '{name}': {m}"));
+    let ctx = |m: String| ctx_err(name, m);
     // What the golden recipe cannot honour is refused BY NAME.
     let mut refused: Vec<&str> = Vec::new();
     let mut chk = |on: bool, n: &'static str| {
@@ -1062,15 +1104,17 @@ fn plan_golden(name: &str, img: &Image, profile: &str, mut p: Plan) -> Result<Pl
     chk(img.cloud_init.is_some(), "cloud_init");
     chk(img.network, "network");
     if !refused.is_empty() {
-        return Err(ctx(format!(
-            "`profile: {profile}` is the built-in golden recipe and does not honour {} — \
-             use `profile: custom` to describe the image yourself",
-            refused.join(", ")
+        return Err(ctx(super::po::tf(
+            "`profile: {profile}` is the built-in golden recipe and does not honour {fields} — use `profile: custom` to describe the image yourself",
+            &[("profile", profile), ("fields", &refused.join(", "))],
         )));
     }
     let distro = img.distro.clone().unwrap_or_else(|| "ubuntu".into());
     if !matches!(distro.as_str(), "ubuntu" | "debian" | "rocky" | "fedora") {
-        return Err(ctx(format!("distro '{distro}' unknown")));
+        return Err(ctx(super::po::tf(
+            "distro '{d}' unknown — ubuntu, debian, rocky or fedora",
+            &[("d", &distro)],
+        )));
     }
     let mut g = Golden {
         distro: distro.clone(),
@@ -1100,7 +1144,7 @@ fn plan_golden(name: &str, img: &Image, profile: &str, mut p: Plan) -> Result<Pl
     }
     if let Some(k) = &img.k8s {
         if profile == "rootless" {
-            return Err(ctx("`k8s:` needs `profile: k8s`".into()));
+            return Err(ctx(super::po::t("`k8s:` needs `profile: k8s`").into()));
         }
         g.k8s_version = k.version.clone();
         g.offline = k.offline;
@@ -1139,10 +1183,10 @@ pub(crate) fn select<'a>(
             .map(|kv| vec![kv])
             .ok_or_else(|| {
                 let known: Vec<&str> = spec.images.keys().map(String::as_str).collect();
-                Error::Invalid(format!(
-                    "vm.yaml has no image '{t}' — it declares: {}",
-                    known.join(", ")
-                ))
+                inv(
+                    "vm.yaml has no image '{t}' — it declares: {known}",
+                    &[("t", t), ("known", &known.join(", "))],
+                )
             }),
         None => Ok(spec.images.iter().collect()),
     }

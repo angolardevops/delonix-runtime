@@ -13114,3 +13114,105 @@ msgstr "um `VMfile` teu, com rede durante o `RUN` para poder instalar um pacote"
 
 msgid "the built-in golden recipe, offline, when there is no file at all"
 msgstr "a receita dourada incorporada, offline, quando não há ficheiro nenhum"
+
+# vm.yaml errors
+msgid "vm.yaml, image '{name}': {m}"
+msgstr "vm.yaml, imagem '{name}': {m}"
+
+msgid "vm.yaml: unterminated `${` — close it with `}`"
+msgstr "vm.yaml: `${` sem fecho — fecha-o com `}`"
+
+msgid "vm.yaml: `${{body}}` is not a variable name (letters, digits and `_` only)"
+msgstr "vm.yaml: `${{body}}` não é um nome de variável (só letras, dígitos e `_`)"
+
+msgid "vm.yaml: `${{name}}` is not set — pass `-t`, export it, or write `${{name}:-default}`"
+msgstr "vm.yaml: `${{name}}` não está definida — passa `-t`, exporta-a, ou escreve `${{name}:-valor}`"
+
+msgid "vm.yaml: version {v} is newer than this engine understands (1)"
+msgstr "vm.yaml: a versão {v} é mais recente do que este motor entende (1)"
+
+msgid "vm.yaml: `images:` is empty — nothing to build"
+msgstr "vm.yaml: `images:` está vazio — nada para construir"
+
+msgid "vm.yaml: {what} '{v}' is not valid"
+msgstr "vm.yaml: {what} '{v}' não é válido"
+
+msgid "must be absolute"
+msgstr "tem de ser absoluto"
+
+msgid "must not contain `..`"
+msgstr "não pode conter `..`"
+
+msgid "must not contain quotes or control characters"
+msgstr "não pode conter aspas nem caracteres de controlo"
+
+msgid "`{norm}` is protected — remove something inside it instead"
+msgstr "`{norm}` está protegido — remove algo lá dentro em vez disso"
+
+msgid "`build:` points at a VMfile, which describes the image itself — remove {fields}"
+msgstr "`build:` aponta para um VMfile, que descreve a própria imagem — remove {fields}"
+
+msgid "`vcpus` must be at least 1"
+msgstr "`vcpus` tem de ser pelo menos 1"
+
+msgid "profile '{other}' unknown — custom, rootless or k8s"
+msgstr "o perfil '{other}' é desconhecido — custom, rootless ou k8s"
+
+msgid "`k8s:` and `node_exporter:` belong to `profile: rootless|k8s`"
+msgstr "`k8s:` e `node_exporter:` pertencem a `profile: rootless|k8s`"
+
+msgid "distro '{d}' unknown — ubuntu, debian, rocky or fedora"
+msgstr "a distro '{d}' é desconhecida — ubuntu, debian, rocky ou fedora"
+
+msgid "`distro` needs a `release`"
+msgstr "`distro` precisa de uma `release`"
+
+msgid "needs a base: `distro` + `release`, or `from`, or `build`"
+msgstr "precisa de uma base: `distro` + `release`, ou `from`, ou `build`"
+
+msgid "`from` and `distro`/`release` are two ways to say the same thing — use one"
+msgstr "`from` e `distro`/`release` são duas formas de dizer o mesmo — usa uma só"
+
+msgid "`packages` needs the network inside the guest — set `network: true` (a build that reaches the internet is not reproducible; that is why it is opt-in)"
+msgstr "`packages` precisa de rede dentro do convidado — define `network: true` (um build que chega à internet não é reprodutível; por isso é opcional)"
+
+msgid "cannot tell the package manager — set `distro`, or `package_manager: apt|dnf`"
+msgstr "não consigo saber o gestor de pacotes — define `distro`, ou `package_manager: apt|dnf`"
+
+msgid "remove.paths '{p}': {m}"
+msgstr "remove.paths '{p}': {m}"
+
+msgid "each `files` entry needs `src` and `dst`"
+msgstr "cada entrada de `files` precisa de `src` e `dst`"
+
+msgid "files.dst '{dst}': {m}"
+msgstr "files.dst '{dst}': {m}"
+
+msgid "appliance.env '{k}' is not allowed"
+msgstr "appliance.env '{k}' não é permitida"
+
+msgid "`appliance:` runs a builder script, which decides all of that itself — remove {fields}"
+msgstr "`appliance:` corre um script construtor, que decide tudo isso sozinho — remove {fields}"
+
+msgid "vm.yaml folder {dir}: {e}"
+msgstr "pasta do vm.yaml {dir}: {e}"
+
+msgid "no builder '{builder}': scripts/appliances/build-{builder}.sh was not found in {start} or any folder above it — appliance images are built from a checkout of the repository"
+msgstr "não há o construtor '{builder}': scripts/appliances/build-{builder}.sh não foi encontrado em {start} nem em nenhuma pasta acima — as imagens de appliance constroem-se a partir de um checkout do repositório"
+
+msgid "`profile: {profile}` is the built-in golden recipe and does not honour {fields} — use `profile: custom` to describe the image yourself"
+msgstr "`profile: {profile}` é a receita dourada incorporada e não respeita {fields} — usa `profile: custom` para descreveres tu a imagem"
+
+msgid "`k8s:` needs `profile: k8s`"
+msgstr "`k8s:` precisa de `profile: k8s`"
+
+msgid "vm.yaml has no image '{t}' — it declares: {known}"
+msgstr "o vm.yaml não tem a imagem '{t}' — declara: {known}"
+msgid "could not start {script}: {e}"
+msgstr "não consegui arrancar {script}: {e}"
+
+msgid "builder {name} finished but left no .qcow2 in {out}"
+msgstr "o construtor {name} terminou mas não deixou nenhum .qcow2 em {out}"
+
+msgid "builder {name} left {n} disk images ({files}); expected exactly one"
+msgstr "o construtor {name} deixou {n} imagens de disco ({files}); esperava-se exatamente uma"
