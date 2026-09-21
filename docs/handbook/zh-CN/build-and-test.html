@@ -639,6 +639,15 @@ the socket path short and under your control, and it is what <a class="src" href
 <p>When you are done, tear down the isolated network infra with the same two variables exported:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">./target/debug/delonix net netns down
 </code></pre></div>
+<h2 id="vm-image-recipes-scriptsverify-imagessh">VM image recipes (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a>)<a class="hanchor" href="#vm-image-recipes-scriptsverify-imagessh" aria-label="#">#</a></h2>
+<p>The recipes in <code>images/</code> are checked in two ways. A unit test in the CLI crate
+(<code>vmspec::every_shipped_recipe_is_valid_and_complete</code>) fails if a recipe stops parsing or points at
+a file or builder that does not exist. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/verify-images.sh</code></a> goes further: it builds the four
+cloud-image distros offline in an isolated <code>DELONIX_ROOT</code> and reads the resulting qcow2 back against
+what the recipe declared; <code>--self-test</code> proves the checks can fail on an image nobody built. It
+needs <code>libguestfs-tools</code> (see <a href="microvm-setup.html">Building microVMs</a>) and is not part of the CI
+gates. The <code>--packages</code>, <code>--profile</code>, <code>--boot</code> and <code>--appliance</code> phases exist but had not been run
+when v4.2.0 was released.</p>
 <h2 id="end-to-end-battery-scriptse2esh">End-to-end battery (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)<a class="hanchor" href="#end-to-end-battery-scriptse2esh" aria-label="#">#</a></h2>
 <p><code>e2e.sh</code> runs the CLI against the real kernel: every leaf's <code>--help</code>, plus real executions of a
 large part of the surface, and prints a PASS/FAIL/SKIP/XFAIL report (JSONL detail in
@@ -703,6 +712,7 @@ not — see <a href="contributing-workflow.html#one-worktree-per-task">Contribut
 <li><a href="#run-the-tests">Run the tests</a></li>
 <li><a href="#the-gates-ci-runs">The gates CI runs</a></li>
 <li><a href="#isolating-the-engines-state">Isolating the engine's state</a></li>
+<li><a href="#vm-image-recipes-scriptsverify-imagessh">VM image recipes (scripts/verify-images.sh)</a></li>
 <li><a href="#end-to-end-battery-scriptse2esh">End-to-end battery (scripts/e2e.sh)</a></li>
 <li><a href="#chaos-harness-scriptschaossh">Chaos harness (scripts/chaos.sh)</a></li>
 </ul>

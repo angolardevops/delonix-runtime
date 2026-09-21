@@ -331,8 +331,11 @@ rootfs is mounted, not at startup (ADR-0037 records this as a deliberate choice)
 official installer (it is published as a release asset). It detects the package manager through
 <code>/etc/os-release</code> and supports <strong>apt</strong> (Debian, Ubuntu and derivatives), <strong>dnf</strong> (Fedora, RHEL,
 CentOS Stream, Rocky, AlmaLinux), <strong>zypper</strong> (openSUSE, SLES) and <strong>pacman</strong> (Arch and
-derivatives). Prebuilt binaries exist only for <strong>x86_64</strong>; on other architectures build from
-source.</p>
+derivatives). The installer only installs <strong>x86_64</strong> binaries: on any other architecture it stops
+with "no prebuilt binary for <arch> yet" (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, the <code>uname -m</code> check), so build from
+source. Since v4.2.0 the release workflow also builds aarch64 binaries, but that job had never run
+before that tag and the installer does not use them yet — treat aarch64 as build-from-source until
+the installer changes.</p>
 <p>To run containers the engine needs:</p>
 <div class="tablewrap"><table>
 <thead>
@@ -383,7 +386,11 @@ configuration, keeping the binary you build yourself:</p>
 <p>Read the flag list at the top of the script first: some flags change host-wide security settings
 (<code>--low-ports</code> lets any local program bind ports from 80, <code>--with-image-build</code> makes
 <code>/boot/vmlinuz-*</code> world-readable), and <code>--no-tune</code> skips the kernel modules and sysctls, including
-<code>br_netfilter</code>.</p>
+<code>br_netfilter</code>. <code>--performance</code> / <code>--no-performance</code> control CPU performance mode, transparent
+hugepages with <code>irqbalance</code>, and a user timer that runs <code>system prune --auto --threshold 75</code>; with
+neither flag the installer asks about each and, with no terminal, answers no. The CPU part is a
+systemd service that stores the boot-time values and puts them back on <code>stop</code>. None of this is
+needed for development.</p>
 <h3 id="memory-and-disk">Memory and disk<a class="hanchor" href="#memory-and-disk" aria-label="#">#</a></h3>
 <p>There is no fixed minimum. What costs resources is what you run: container images and layers,
 VM disks, and the Rust <code>target/</code> directory itself (debug builds of the whole workspace take

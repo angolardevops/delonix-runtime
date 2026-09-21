@@ -319,7 +319,8 @@ adapters, providers, interfaces, binaries. Dependencies point inward, and the cr
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>.</p>
 <p><strong>Lowering (sugar Kinds)</strong> — Rewriting a convenience Kind into the Kind that actually does the work
 while the manifest is loaded, so the rest of the engine never sees it. <code>Workload</code> lowers to
-<code>Container</code>/<code>Pod</code>/<code>VirtualMachine</code>, <code>Dependency</code> to <code>NetworkPolicy</code>. The <code>FORM</code> column of
+<code>Container</code>/<code>Pod</code>/<code>VirtualMachine</code>, <code>Dependency</code> to <code>NetworkPolicy</code>; a <code>VirtualMachine</code>'s <code>spec.expose</code>
+lowers to an <code>HTTPRoute</code> named <code>&lt;vm&gt;-expose</code> (<code>cmd/vm_expose.rs</code>). The <code>FORM</code> column of
 <code>delonix api-resources</code> says what each Kind becomes: <code>primary</code>, <code>sugar → X</code> (lowered), <code>compat → X</code>
 (a foreign schema kept but compiled onto X), <code>sunset → X</code> (still applied as itself, successor
 announced), <code>aggregate</code> (expands into the documents it contains, like <code>Stack</code>). See:
