@@ -1,0 +1,25 @@
+# GLPI (asset inventory and ITSM) — built by the repository's appliance builder.
+#
+#   delonix vm build -f images/glpi/vm.yaml
+#
+# This image is not described as edits to a cloud image: the vendor's installer has
+# to RUN. So the recipe names a BUILDER, not a script path — `builder: X` runs
+# scripts/appliances/build-X.sh from this repository, with an isolated OUT_DIR,
+# and registers the disk it leaves there. Nothing outside that directory can be
+# reached from this file.
+version: 1
+
+images:
+  glpi:
+    tag: "glpi-${GLPI_VERSION:-11.0.9}-r${IMAGE_REV:-1}"
+    distro: ubuntu
+    release: "24.04"
+    vcpus: 2
+    memory: 4G
+    appliance:
+      builder: glpi
+      env:
+        GLPI_VERSION: "${GLPI_VERSION:-11.0.9}"
+        IMAGE_REV: "${IMAGE_REV:-1}"
+      # false: a true appliance, no cloud-init. true: a cloud image with software installed.
+      cloud_init: true

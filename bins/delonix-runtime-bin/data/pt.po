@@ -13053,3 +13053,166 @@ msgstr "httproute: não há routes manuais para remover"
 
 msgid "httproute: WARNING — :{port} is a TLS listener of a declared route, and `--expose` routes are served on it too, over TLS"
 msgstr "httproute: AVISO — :{port} é um listener TLS de uma route declarada, e as routes de `--expose` também são servidas nele, sobre TLS"
+
+# vm build / vm.yaml
+msgid "Tag of the resulting image. With a `vm.yaml` it defaults to the image's own `tag:`; without one it is required"
+msgstr "Etiqueta da imagem resultante. Com um `vm.yaml` assume por omissão o `tag:` da própria imagem; sem ele é obrigatória"
+
+msgid "Build from a `vm.yaml` or a `VMfile` instead of the built-in golden recipe"
+msgstr "Construir a partir de um `vm.yaml` ou de um `VMfile` em vez da receita dourada incorporada"
+
+msgid "With a `vm.yaml` that declares several images, build only this one"
+msgstr "Com um `vm.yaml` que declara várias imagens, construir só esta"
+
+msgid "Build context — the directory `COPY` reads from (default: `.`)"
+msgstr "Contexto de build — o directório de onde o `COPY` lê (por omissão: `.`)"
+
+msgid "Base distro for the cloud image"
+msgstr "Distro base da cloud image"
+
+msgid "Debian codename (`bookworm`, `trixie`, ...) — only used with `--distro debian`"
+msgstr "Codinome do Debian (`bookworm`, `trixie`, ...) — só usado com `--distro debian`"
+
+msgid "Rocky Linux major version (`8`, `9`, `10`) — only used with `--distro rocky`. Rocky currently only supports `--no-k8s` builds"
+msgstr "Versão major do Rocky Linux (`8`, `9`, `10`) — só usada com `--distro rocky`. O Rocky só suporta, por agora, builds `--no-k8s`"
+
+msgid "Fedora release AND build, as shown on Fedora's download page (e.g. `42-1.1`) — only used with `--distro fedora`. The build number is not derivable from the release, and Fedora's redirector offers no listing to look it up, so it is asked for rather than guessed"
+msgstr "Release E build do Fedora, como aparece na página de downloads do Fedora (ex.: `42-1.1`) — só usado com `--distro fedora`. O número de build não se deduz da release e o redirector do Fedora não dá listagem para o consultar, por isso pede-se em vez de se adivinhar"
+
+msgid "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam disponíveis passando-as aqui"
+msgstr "Kubernetes version (e.g. `1.31`) — omit for `DEFAULT_K8S_VERSION` (1.36, o tecto do control-plane alojado). 1.34/1.35 continuam disponíveis passando-as aqui"
+
+msgid "Build a golden image with NO Kubernetes at all — just the `delonix` engine binary, ready for rootless containers (mutually exclusive with `--k8s-version`/`--offline`, which don't apply)"
+msgstr "Constrói uma golden SEM Kubernetes — só o binário do motor `delonix`, pronta para containers rootless (mutuamente exclusiva com `--k8s-version`/`--offline`, que não se aplicam)"
+
+msgid "Explicit path of the `delonix` binary to install when `--no-k8s` (otherwise: the currently running `delonix`, then a workspace build, then a verified download from the matching release)"
+msgstr "Caminho explícito do binário `delonix` a instalar com `--no-k8s` (senão: o `delonix` em execução, depois um build do workspace, depois um download verificado da release correspondente)"
+
+msgid "Set a root password in the image. WITHOUT this, no account ships with one (the supported ways in are the SSH key cloud-init injects and the key `cluster kubeadm` generates). Use it only when you need the serial console to take a login — and remember the image is an artefact you may publish"
+msgstr "Define uma password de root na imagem. SEM isto, nenhuma conta traz password (as vias de entrada suportadas são a chave SSH que o cloud-init injecta e a que o `cluster kubeadm` gera). Usa-o só quando precisas que a consola série aceite um login — e lembra-te de que a imagem é um artefacto que podes publicar"
+
+msgid "Build a VM image (qcow2) from a `vm.yaml`, a `VMfile`, or the golden recipe"
+msgstr "Constrói uma imagem VM (qcow2) a partir de um `vm.yaml`, de um `VMfile` ou da receita dourada"
+
+msgid "Build a VM image: a `vm.yaml`, your own `VMfile`, or the golden recipe"
+msgstr "Constrói uma imagem VM: um `vm.yaml`, o teu próprio `VMfile` ou a receita dourada"
+
+msgid "a `vm.yaml` in the folder — the same as `delonix vm build .`"
+msgstr "um `vm.yaml` na pasta — o mesmo que `delonix vm build .`"
+
+msgid "a `vm.yaml` in this folder: build every image it declares, like `docker build .`"
+msgstr "um `vm.yaml` nesta pasta: constrói todas as imagens que declara, como o `docker build .`"
+
+msgid "a specific file, tagged — `-t` is also `${TAG}` inside the file, so the same file builds any release"
+msgstr "um ficheiro concreto, com etiqueta — o `-t` é também o `${TAG}` dentro do ficheiro, por isso o mesmo ficheiro constrói qualquer release"
+
+msgid "one image out of a `vm.yaml` that declares several"
+msgstr "uma só imagem de um `vm.yaml` que declara várias"
+
+msgid "a `VMfile` of your own, with network during `RUN` so a package can be installed"
+msgstr "um `VMfile` teu, com rede durante o `RUN` para poder instalar um pacote"
+
+msgid "the built-in golden recipe, offline, when there is no file at all"
+msgstr "a receita dourada incorporada, offline, quando não há ficheiro nenhum"
+
+# vm.yaml errors
+msgid "vm.yaml, image '{name}': {m}"
+msgstr "vm.yaml, imagem '{name}': {m}"
+
+msgid "vm.yaml: unterminated `${` — close it with `}`"
+msgstr "vm.yaml: `${` sem fecho — fecha-o com `}`"
+
+msgid "vm.yaml: `${{body}}` is not a variable name (letters, digits and `_` only)"
+msgstr "vm.yaml: `${{body}}` não é um nome de variável (só letras, dígitos e `_`)"
+
+msgid "vm.yaml: `${{name}}` is not set — pass `-t`, export it, or write `${{name}:-default}`"
+msgstr "vm.yaml: `${{name}}` não está definida — passa `-t`, exporta-a, ou escreve `${{name}:-valor}`"
+
+msgid "vm.yaml: version {v} is newer than this engine understands (1)"
+msgstr "vm.yaml: a versão {v} é mais recente do que este motor entende (1)"
+
+msgid "vm.yaml: `images:` is empty — nothing to build"
+msgstr "vm.yaml: `images:` está vazio — nada para construir"
+
+msgid "vm.yaml: {what} '{v}' is not valid"
+msgstr "vm.yaml: {what} '{v}' não é válido"
+
+msgid "must be absolute"
+msgstr "tem de ser absoluto"
+
+msgid "must not contain `..`"
+msgstr "não pode conter `..`"
+
+msgid "must not contain quotes or control characters"
+msgstr "não pode conter aspas nem caracteres de controlo"
+
+msgid "`{norm}` is protected — remove something inside it instead"
+msgstr "`{norm}` está protegido — remove algo lá dentro em vez disso"
+
+msgid "`build:` points at a VMfile, which describes the image itself — remove {fields}"
+msgstr "`build:` aponta para um VMfile, que descreve a própria imagem — remove {fields}"
+
+msgid "`vcpus` must be at least 1"
+msgstr "`vcpus` tem de ser pelo menos 1"
+
+msgid "profile '{other}' unknown — custom, rootless or k8s"
+msgstr "o perfil '{other}' é desconhecido — custom, rootless ou k8s"
+
+msgid "`k8s:` and `node_exporter:` belong to `profile: rootless|k8s`"
+msgstr "`k8s:` e `node_exporter:` pertencem a `profile: rootless|k8s`"
+
+msgid "distro '{d}' unknown — ubuntu, debian, rocky or fedora"
+msgstr "a distro '{d}' é desconhecida — ubuntu, debian, rocky ou fedora"
+
+msgid "`distro` needs a `release`"
+msgstr "`distro` precisa de uma `release`"
+
+msgid "needs a base: `distro` + `release`, or `from`, or `build`"
+msgstr "precisa de uma base: `distro` + `release`, ou `from`, ou `build`"
+
+msgid "`from` and `distro`/`release` are two ways to say the same thing — use one"
+msgstr "`from` e `distro`/`release` são duas formas de dizer o mesmo — usa uma só"
+
+msgid "`packages` needs the network inside the guest — set `network: true` (a build that reaches the internet is not reproducible; that is why it is opt-in)"
+msgstr "`packages` precisa de rede dentro do convidado — define `network: true` (um build que chega à internet não é reprodutível; por isso é opcional)"
+
+msgid "cannot tell the package manager — set `distro`, or `package_manager: apt|dnf`"
+msgstr "não consigo saber o gestor de pacotes — define `distro`, ou `package_manager: apt|dnf`"
+
+msgid "remove.paths '{p}': {m}"
+msgstr "remove.paths '{p}': {m}"
+
+msgid "each `files` entry needs `src` and `dst`"
+msgstr "cada entrada de `files` precisa de `src` e `dst`"
+
+msgid "files.dst '{dst}': {m}"
+msgstr "files.dst '{dst}': {m}"
+
+msgid "appliance.env '{k}' is not allowed"
+msgstr "appliance.env '{k}' não é permitida"
+
+msgid "`appliance:` runs a builder script, which decides all of that itself — remove {fields}"
+msgstr "`appliance:` corre um script construtor, que decide tudo isso sozinho — remove {fields}"
+
+msgid "vm.yaml folder {dir}: {e}"
+msgstr "pasta do vm.yaml {dir}: {e}"
+
+msgid "no builder '{builder}': scripts/appliances/build-{builder}.sh was not found in {start} or any folder above it — appliance images are built from a checkout of the repository"
+msgstr "não há o construtor '{builder}': scripts/appliances/build-{builder}.sh não foi encontrado em {start} nem em nenhuma pasta acima — as imagens de appliance constroem-se a partir de um checkout do repositório"
+
+msgid "`profile: {profile}` is the built-in golden recipe and does not honour {fields} — use `profile: custom` to describe the image yourself"
+msgstr "`profile: {profile}` é a receita dourada incorporada e não respeita {fields} — usa `profile: custom` para descreveres tu a imagem"
+
+msgid "`k8s:` needs `profile: k8s`"
+msgstr "`k8s:` precisa de `profile: k8s`"
+
+msgid "vm.yaml has no image '{t}' — it declares: {known}"
+msgstr "o vm.yaml não tem a imagem '{t}' — declara: {known}"
+msgid "could not start {script}: {e}"
+msgstr "não consegui arrancar {script}: {e}"
+
+msgid "builder {name} finished but left no .qcow2 in {out}"
+msgstr "o construtor {name} terminou mas não deixou nenhum .qcow2 em {out}"
+
+msgid "builder {name} left {n} disk images ({files}); expected exactly one"
+msgstr "o construtor {name} deixou {n} imagens de disco ({files}); esperava-se exatamente uma"

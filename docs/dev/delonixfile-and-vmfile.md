@@ -249,14 +249,52 @@ Two things to correct by hand in the "Next:" hint it prints: the flag is `vm cre
 ### Building
 
 ```bash
-delonix image vm build -t web:1.0 [-f VMfile] [--network] [--no-compress] [CONTEXT]
+delonix vm build [-f vm.yaml|VMfile] [-t <tag>] [--target <image>] [--network] [--no-compress] [CONTEXT]
 ```
 
-There is no `delonix vm build`; the build lives under `image vm`. Without `-f`, a `VMfile` in the
-context is picked up automatically (like a `Delonixfile` beating a `Dockerfile`); with no `VMfile`,
-the same command runs the built-in golden recipe instead (see [Building microVMs](microvm-setup.md)). The
+`delonix image vm build` is the same command (both share one `BuildArgs`). Which recipe runs is
+decided like `docker build` decides between files: an explicit `-f` wins (a `.yaml`/`.yml` is read
+as a `vm.yaml`, anything else as a `VMfile`); with no `-f`, a `vm.yaml` in the context beats a
+`VMfile`, which beats the built-in golden recipe (see [Building microVMs](microvm-setup.md)). The
 golden-recipe flags (`--k8s-version`, `--extra-package`, `--extra-run`, `--offline`, `--no-k8s`,
-`--cri-bin`, `--delonix-bin`) are **refused** with a VMfile, and `--network` is refused without one.
+`--cri-bin`, `--delonix-bin`) are **refused** with a `vm.yaml` or a `VMfile`, and `--network` is
+refused without one of them.
+
+### `vm.yaml`: the compose-style front end
+
+A `VMfile` is to a VM image what a `Dockerfile` is to a container image. A `vm.yaml` is what a
+`compose.yaml` is to it: it names the images of a folder and carries the parameters that make the
+qcow2 complete — `size`, `packages.install`, `users`, `services`, `files`, `env`, `cloud_init`,
+`run`, what to **remove** (`remove.packages/paths/users/services`, applied after everything else so
+it can prune what a package or a `run:` pulled in) and `cleanup` (package cache, logs, history,
+`/tmp`, `machine-id`).
+
+It is a front end only (`cmd/vmspec.rs`). Each image compiles to a builder that already exists —
+a synthesised `VMfile` (`profile: custom`, the default), the golden recipe (`profile: rootless|k8s`)
+or an existing file (`build.file`) — so there is no second build engine. Rules worth knowing:
+
+- **Strict**: an unknown key is an error, and so is a field the chosen route cannot honour (a
+  `hostname:` with `profile: k8s` is refused by name, not ignored).
+- **`${TAG}` / `${VAR:-default}`** are expanded on the parsed values (a `${TAG}` in a comment is not
+  evaluated). `-t` is the tag of the result **and** `${TAG}`.
+- **Relative paths are relative to the `vm.yaml`'s own folder**, whatever the context says.
+- **`packages` needs `network: true`**: a build that reaches the internet gives a different image on
+  a different day, so it is opt-in and the refusal says so.
+- `remove.paths` must be absolute, without `..`, and never a top-level system directory.
+
+**Appliances** (`appliance:`). Some images cannot be described as edits to a cloud image: the
+vendor's installer has to run (Proxmox from its ISO, OpenStack pulling ~20 GiB of containers).
+For those the recipe names a **builder**, not a path: `appliance: {builder: proxmox, args: [pve,
+"9.2-1"]}` runs `scripts/appliances/build-proxmox.sh` (found in the `vm.yaml`'s folder or any
+folder above it) with an isolated `OUT_DIR` next to the image store, takes the one `*.qcow2` it
+leaves (a `.raw.qcow2` is ignored), and registers it with `image vm import` semantics —
+`--appliance` unless `cloud_init: true`. Because the name is validated (`[a-z0-9-]`) and resolved
+inside `scripts/appliances/`, a `vm.yaml` cannot make the host run a file of its choosing; `args`
+and `env` are validated too (no leading `-`, no `PATH`/`LD_*`/`BASH_ENV`…). The fields a builder
+decides itself (`packages`, `users`, `hostname`, `network`, `profile`…) are refused by name.
+
+The per-distro folders under `images/` (`images/ubuntu/` first) each carry a `vm.yaml`, the
+cloud-init file, the artefacts and a README.
 
 ### Instructions
 

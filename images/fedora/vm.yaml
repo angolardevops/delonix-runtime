@@ -1,0 +1,68 @@
+# Fedora cloud image, built by `delonix vm build`.
+#
+#   delonix vm build -f images/fedora/vm.yaml -t 42
+#
+# `-t` is the name of the result AND `${TAG}` below, which this file uses as
+# the release of the base (`42`). Every relative path in this file
+# is relative to THIS folder, wherever you run the command from.
+#
+# It builds with NO network inside the guest, so the first build works on any
+# host. Turn `network` on and use `packages` when you need to install software.
+version: 1
+
+images:
+  fedora:
+    tag: fedora-${TAG:-42}
+
+    # ── base ──────────────────────────────────────────────────────────────
+    distro: fedora
+    release: "${TAG:-42}"
+    size: 10G                     # grown BEFORE any step runs
+
+    # ── identity & defaults recorded in the image (used by `vm create`) ────
+    hostname: fedora
+    vcpus: 2
+    memory: 2G
+    labels:
+      org.delonix.image: fedora
+
+    # ── build-time network. Off: a build that reaches the internet gives a ─
+    # ── different image depending on the day.                              ─
+    network: false
+
+    # ── what goes IN ──────────────────────────────────────────────────────
+    # To install software: set `network: true` above and list it here
+    # (the guest agent is already in the base image). Installed with dnf.
+    # packages:
+    #   upgrade: false
+    #   install: [jq]
+    files:
+      - src: artifacts/motd
+        dst: /etc/motd
+        mode: "0644"
+    env:
+      DELONIX_IMAGE: fedora
+    users:
+      - name: delonix
+        sudo: true
+        groups: [wheel]
+        shell: /bin/bash
+
+    # ── what goes OUT — removed after everything above ran ────────────────
+    # Here: man and info pages (the licence files in /usr/share/doc stay: a published image redistributes them).
+    remove:
+      paths:
+        - /usr/share/info
+        - /usr/share/man
+
+    # ── first boot ────────────────────────────────────────────────────────
+    cloud_init: cloud-init/user-data
+
+    # ── housekeeping (these are the defaults; say false to keep) ──────────
+    cleanup:
+      package_cache: true
+      logs: true
+      history: true
+      tmp: true
+      machine_id: true
+      ssh_host_keys: false

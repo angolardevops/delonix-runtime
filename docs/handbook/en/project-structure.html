@@ -275,6 +275,7 @@ below, or when a table names a path that no longer exists.</p>
 │   └── schema/                   manifest JSON Schema — generated from code
 ├── scripts/                      CI gates, generators, E2E/chaos harnesses, installer
 ├── examples/                     manifests validated by CI
+├── images/                       one folder per VM image: a `vm.yaml` recipe and a README
 ├── dist/                         systemd unit for delonix-cri
 ├── editors/                      VMfile syntax for Vim and VS Code
 └── reports/                      dated audit reports (historical)
@@ -630,6 +631,12 @@ below, or when a table names a path that no longer exists.</p>
 <td><code>examples/</code></td>
 <td>Example manifests per Kind, a multi-file network lab (<code>lab-rede/</code>) and a small complete project (<code>delonix-temp/</code>). The CI <code>docs</code> job dry-runs every <code>examples/*.yaml</code>, so a deprecated or broken example fails the build.</td>
 <td>Every feature that adds or changes a Kind.</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+</tr>
+<tr>
+<td><code>images/</code></td>
+<td>One folder per VM image: <code>ubuntu</code>, <code>debian</code>, <code>rocky</code>, <code>fedora</code> (custom recipes that build offline) and eight appliances (<code>opnsense</code>, <code>proxmox</code>, <code>truenas</code>, <code>openstack</code>, <code>monitoring</code>, <code>carbonio</code>, <code>glpi</code>, <code>wazuh</code>) whose <code>vm.yaml</code> names a builder in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>. Each has a README; <code>images/README.md</code> indexes them and explains <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/<wbr>verify-images.<wbr>sh</code></a>. A unit test (<code>vmspec::<wbr>every_shipped_recipe_is_valid_and_complete</code>) fails if a recipe stops parsing or points at a missing file or builder.</td>
+<td>Whoever adds a distro or an appliance, or changes the <code>vm.yaml</code> schema.</td>
 <td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
 </tr>
 <tr>

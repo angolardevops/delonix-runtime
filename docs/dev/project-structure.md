@@ -72,6 +72,7 @@ Start at the root and follow the dependencies inward:
 │   └── schema/                   manifest JSON Schema — generated from code
 ├── scripts/                      CI gates, generators, E2E/chaos harnesses, installer
 ├── examples/                     manifests validated by CI
+├── images/                       one folder per VM image: a `vm.yaml` recipe and a README
 ├── dist/                         systemd unit for delonix-cri
 ├── editors/                      VMfile syntax for Vim and VS Code
 └── reports/                      dated audit reports (historical)
@@ -156,6 +157,7 @@ The crate list, each crate's layer and who depends on whom are generated facts i
 | `dist/` | `delonix-cri.service`, the systemd unit for the CRI server (also embedded in the binary). | Whoever changes how `delonix-cri` runs under systemd. | [Cloud native standards](cloud-native-standards.md) |
 | `editors/` | VMfile syntax highlighting: `vim/` (ftdetect + syntax) and `vscode/` (language configuration + TextMate grammar). | Whoever changes the VMfile grammar. | [Delonixfile and VMfile](delonixfile-and-vmfile.md) |
 | `examples/` | Example manifests per Kind, a multi-file network lab (`lab-rede/`) and a small complete project (`delonix-temp/`). The CI `docs` job dry-runs every `examples/*.yaml`, so a deprecated or broken example fails the build. | Every feature that adds or changes a Kind. | [Delonixfile and VMfile](delonixfile-and-vmfile.md) |
+| `images/` | One folder per VM image: `ubuntu`, `debian`, `rocky`, `fedora` (custom recipes that build offline) and eight appliances (`opnsense`, `proxmox`, `truenas`, `openstack`, `monitoring`, `carbonio`, `glpi`, `wazuh`) whose `vm.yaml` names a builder in `scripts/appliances/`. Each has a README; `images/README.md` indexes them and explains `scripts/verify-images.sh`. A unit test (`vmspec::every_shipped_recipe_is_valid_and_complete`) fails if a recipe stops parsing or points at a missing file or builder. | Whoever adds a distro or an appliance, or changes the `vm.yaml` schema. | [Delonixfile and VMfile](delonixfile-and-vmfile.md) |
 | `reports/` | Dated audit reports: `code-quality/` and `production-readiness/<version>/` (inventory, gap matrix, backlog). Historical records of an audit at a commit — do not rewrite; nothing in them is implemented by being listed. | Whoever runs a new audit (new files). | — |
 | `third_party/` | Vendored `googleapis` protos (`google/api/annotations.proto`, `http.proto`) used for the HTTP mapping of the node contract. Apache-2.0, licence headers kept; the source commit is recorded in its `README.md`. Never edited here. | Whoever updates the vendored protos, both files from one upstream commit. | `third_party/googleapis/README.md` |
 | `.ai/` | Tool-neutral skills for AI assistants: `skills/delonix-runtime-e2e-quality/` (test taxonomy, provider contract, security checks, report templates). | Maintainers. | — |

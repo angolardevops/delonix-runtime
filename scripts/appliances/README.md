@@ -22,6 +22,11 @@ that in the image's metadata, and `vm create` then:
 
 ## Building
 
+Every script below can also be run through the same command as any other image:
+`delonix vm build -f images/<name>/vm.yaml` (see `images/<name>/README.md`). It runs the script
+with an isolated `OUT_DIR`, registers the result for you and removes the scratch directory; the
+scripts themselves stay here, unchanged.
+
 Every script fetches its own media and **verifies it against the vendor's
 published SHA-256** before using it. Pass nothing and you get the pinned version
 below; pass a version to get another one; pass a path to use an ISO you already
