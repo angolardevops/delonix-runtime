@@ -61,5 +61,4 @@ docs/dev/architecture.md	delonix netns run	hidden entry point intercepted in mai
 docs/dev/system-design-interview.md	delonix netns pin	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
 docs/dev/system-design-interview.md	delonix netns control	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
 docs/dev/system-design-interview.md	delonix netns run	hidden entry point intercepted in main.rs before clap (network pin/control/run of the rootless infra) — named on purpose to explain the processes
-docs/dev/delonixfile-and-vmfile.md	delonix vm build	the sentence says this command does NOT exist and points to `image vm build`
 docs/dev/releases-and-stability.md	delonix netns attach	same historical lesson as docs/cli-stability.md — the CRI server kept invoking the removed spelling for months

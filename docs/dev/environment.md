@@ -76,8 +76,11 @@ The source of truth is [`scripts/install.sh`](../../scripts/install.sh), which i
 official installer (it is published as a release asset). It detects the package manager through
 `/etc/os-release` and supports **apt** (Debian, Ubuntu and derivatives), **dnf** (Fedora, RHEL,
 CentOS Stream, Rocky, AlmaLinux), **zypper** (openSUSE, SLES) and **pacman** (Arch and
-derivatives). Prebuilt binaries exist only for **x86_64**; on other architectures build from
-source.
+derivatives). The installer only installs **x86_64** binaries: on any other architecture it stops
+with "no prebuilt binary for <arch> yet" (`scripts/install.sh`, the `uname -m` check), so build from
+source. Since v4.2.0 the release workflow also builds aarch64 binaries, but that job had never run
+before that tag and the installer does not use them yet — treat aarch64 as build-from-source until
+the installer changes.
 
 To run containers the engine needs:
 
@@ -108,7 +111,11 @@ bash scripts/install.sh --no-binary
 Read the flag list at the top of the script first: some flags change host-wide security settings
 (`--low-ports` lets any local program bind ports from 80, `--with-image-build` makes
 `/boot/vmlinuz-*` world-readable), and `--no-tune` skips the kernel modules and sysctls, including
-`br_netfilter`.
+`br_netfilter`. `--performance` / `--no-performance` control CPU performance mode, transparent
+hugepages with `irqbalance`, and a user timer that runs `system prune --auto --threshold 75`; with
+neither flag the installer asks about each and, with no terminal, answers no. The CPU part is a
+systemd service that stores the boot-time values and puts them back on `stop`. None of this is
+needed for development.
 
 ### Memory and disk
 

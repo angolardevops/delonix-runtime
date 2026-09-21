@@ -1,0 +1,5 @@
+#cloud-config
+# Default user-data baked into the image. `vm create --user-data <file>` or
+# `--ssh-key` replace it per instance.
+package_update: false
+ssh_pwauth: false

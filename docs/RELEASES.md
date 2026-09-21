@@ -4,6 +4,164 @@
 > (regenerado automaticamente pelo pipeline de release a cada tag publicada).
 > Não editar à mão — edita a nota da release respectiva.
 
+## v4.2.0 — `vm build` com `vm.yaml`, receitas por distro e por appliance, serviços de VM por nome
+
+Dezassete commits desde a `v4.1.1`. Numerada como MINOR: há superfície nova de
+CLI (`vm build`, o ficheiro `vm.yaml`), um Kind novo (`IPPool`) e novos campos
+de manifesto. A série vem
+de várias frentes independentes, e cada secção diz o que foi provado e o que
+não foi — o que não foi validado está listado no fim, junto.
+
+### `vm build` e o `vm.yaml` — a experiência do `docker build` para VMs (#451)
+
+- **`delonix vm build` existe agora.** Até aqui só havia `delonix image vm
+  build`; os dois partilham o mesmo conjunto de argumentos e fazem o mesmo.
+- **`vm build .` escolhe a receita como o `docker build`:** um `-f` explícito
+  decide (um `.yaml`/`.yml` lê-se como `vm.yaml`, o resto como `VMfile`); sem
+  `-f`, um `vm.yaml` na pasta vence um `VMfile`, que vence a receita dourada.
+  `-t` dá o nome do resultado **e** o `${TAG}` dentro do ficheiro; `--target`
+  escolhe uma imagem quando o ficheiro declara várias. Com um `vm.yaml`, o `-t`
+  passa a ser opcional (usa o `tag:` da imagem).
+- **`vm.yaml` é o «compose» do `VMfile`** (o «Dockerfile»). Esquema estrito — uma
+  chave desconhecida é erro, e um campo que a rota escolhida não cumpre é
+  recusado pelo nome, nunca ignorado. Descreve o qcow2 completo: base, tamanho,
+  hostname, vcpus/memória, pacotes, utilizadores (sudo, grupos, shell, chaves),
+  serviços, ficheiros (com o caminho de destino completo e o modo), `env`,
+  cloud-init, `run:`, **o que remover** (`remove.packages/paths/users/services`,
+  aplicado depois de tudo o resto, para também podar o que um pacote trouxe) e a
+  limpeza (`cache de pacotes, logs, histórico, /tmp, machine-id`). `${TAG}` e
+  `${VAR:-valor}` expandem-se nos valores, não nos comentários.
+- **Sem segundo motor de build.** Cada imagem compila para um construtor que já
+  existia: um `VMfile` sintetizado, a receita dourada (`profile: rootless|k8s`),
+  um `VMfile` existente (`build.file`) ou um construtor de appliance.
+- **Rota `appliance:`** para o que não se descreve como edições a uma cloud image
+  (Proxmox a partir da ISO, OpenStack a puxar ~20 GiB de contentores). O
+  `vm.yaml` **nomeia um construtor** (`builder: proxmox`), nunca um caminho: o
+  motor resolve-o para `scripts/appliances/build-<nome>.sh` dentro do
+  repositório, valida os argumentos e as variáveis de ambiente (sem `PATH`,
+  `LD_*`, `BASH_ENV`…), corre-o com um `OUT_DIR` isolado ao lado do store,
+  importa o único qcow2 que ele deixa e apaga a pasta de trabalho, mesmo em
+  falha. Um `vm.yaml` alheio não consegue fazer o host correr um ficheiro à sua
+  escolha.
+- **`images/`**: uma pasta por imagem, cada uma com `vm.yaml` e README de ponta a
+  ponta. Quatro distros que constroem **offline** (`ubuntu`, `debian`, `rocky`,
+  `fedora`) e oito appliances (`opnsense`, `proxmox`, `truenas`, `openstack`,
+  `monitoring`, `carbonio`, `glpi`, `wazuh`). Os scripts continuam em
+  `scripts/appliances/`, de onde o workflow que publica as imagens os lê. As
+  receitas mantêm `/usr/share/doc` de propósito: tem as licenças que uma imagem
+  publicada tem de redistribuir.
+- **`scripts/verify-images.sh`** constrói as receitas num `DELONIX_ROOT` isolado e
+  **lê o conteúdo** do qcow2 (ou da VM) contra o que a receita declarou. Tem uma
+  receita-sonda com valores que a base não pode ter (a base já traz uma conta
+  `delonix` com sudo, por isso verificar isso na receita entregue não provava
+  nada) e um `--self-test` que exige que as verificações **falhem** numa imagem
+  que ninguém construiu.
+- **Um teste fecha o ciclo**: `every_shipped_recipe_is_valid_and_complete` falha
+  se uma receita entregue deixar de ser válida ou apontar para um ficheiro ou
+  construtor que não existe.
+- Mensagens de erro do `vm.yaml` e dos appliances passam pelo catálogo (`pt.po`).
+
+### Serviços de VM por nome (#444, #448, ADR-0046/0047/0048)
+
+- **`VirtualMachine.spec.expose`** publica um serviço HTTP/S de uma VM por nome:
+  baixa no `load` para um `HTTPRoute/<vm>-expose`. O resolvedor de rotas conhece
+  VMs **Cloud Hypervisor** (na SDN) e VMs **libvirt** em `nat`/`bridge` (ADR-0046,
+  fase 2): estas chegam-se por uma segunda instância do proxy no netns do host,
+  sem root, que escuta só em `127.0.0.1`. Uma VM libvirt em modo *user-mode* não
+  tem endereço alcançável e é recusada com a correção (`netMode: nat` em
+  `qemu:///system`); um documento que mistura backends das duas metades é
+  recusado, com a indicação de qual cai em qual.
+- **`kind: IPPool`** (grupo `networking`; ADR-0046, fase 3): um livro de reservas
+  de endereços **do host** (um endereço, um intervalo ou um CIDR; só IPv4) que as
+  rotas reclamam com `spec.pool` (e `expose[].pool`). Uma rota reclama um só
+  endereço enquanto estiver declarada, fica alcançável nele em vez de em
+  `127.0.0.1`, e o `hosts: [host]` aponta o nome para ele. É um Kind completo
+  (`apply`, `plan`, deriva, `--prune`, `get`/`describe`/`delete ippools`) e aplica-se
+  antes do `HTTPRoute`. **Só `announce: local`**: o endereço já tem de estar numa
+  interface do host, e o `apply` verifica-o ligando-o; `announce: l2`,
+  `interface`, IPv6 e BGP são recusados (fase 4, por fazer). Um pool com leases
+  não se apaga nem encolhe por baixo de um lease, e a libertação é por
+  declaração — não há um ceifador a adivinhar quem está vivo.
+- **`hosts: [nome]`** num `HTTPRoute` (e em `expose[].hosts`) escreve cada host
+  como `127.0.0.1 <host>` num bloco delimitado do `/etc/hosts` do operador
+  (`cmd/hosts_file.rs`), lendo os nomes das duas instâncias do proxy. Só o bloco
+  é tocado; um nome já presente fora dele é recusado, e um bloco sem linha `END`
+  é recusado em vez de apagar o resto do ficheiro. Sem root, recusa e mostra o
+  bloco a acrescentar.
+- **Deriva corrigida**: uma rota para uma VM lia-se como deriva permanente,
+  porque o `actual()` só mapeava endereços para nomes de containers.
+- **ADR-0048, fase 1 (#448)**: o nome padrão de serviço `<nome>.<ns>.svc.delonix.
+  internal` (o FQDN antigo continua como alias) e a coluna `SVC` em
+  `container/vm/stack ls`. O ADR-0047 (o proxy L7 autorizar origens de
+  containers, para `hosts: containers`) fica **só como proposta**, e o
+  `hosts: guest` e o `announce: l2` do ADR-0046 (fase 4) estão por fazer.
+
+### Appliances de monitorização e correio (#450)
+
+Só scripts em `scripts/appliances/` (sem código do motor): imagens de
+monitorização (`monitoring-7.0-r5`: Zabbix 7.0 LTS + Grafana + Prometheus + Loki
++ NetFlow, já ligados, com um hub WireGuard `monitoring-vpn`), Carbonio CE
+(`carbonio-26.6.0-r3`), GLPI 11 (`glpi-11.0.9-r1`) e Wazuh 4.14.7. Cada uma com o
+seu `verify-*.sh`.
+
+### Instalador: `--performance` (#440)
+
+`install.sh --performance` / `--no-performance`; sem elas pergunta cada ponto
+(Enter = sim; sem terminal, não). CPU em modo performance (perfil de energia,
+governor, EPP) por um serviço que guarda o estado do arranque e o repõe no
+`stop`; THP em `madvise` com `irqbalance`; e um timer de utilizador
+`system prune --auto --threshold 75` (nunca toca em volumes). Avisa se houver um
+`delonix-cri`/`-mcp`/`-mgmt` diferente noutro ponto do `PATH`.
+
+### `--version` nos servidores irmãos (#442, #443, #445)
+
+`delonix-cri`, `delonix-mcp` e `delonix-mgmt` respondem a `--version`/`-V` e
+saem, em vez de arrancarem o servidor.
+
+### Binários aarch64 (#439, #446)
+
+- Um job de CI **nativo** em aarch64 (`test (arm64)`) faz build e corre a suite
+  completa; antes, os ramos `#[cfg(target_arch)]` nunca eram executados.
+- O workflow de release passa a construir e publicar `delonix`, `delonix-cri`,
+  `delonix-mcp` e `delonix-mgmt` para aarch64, com o mesmo `SHA256SUMS`,
+  assinatura e proveniência. **Este é o primeiro release que os produz** — ver
+  a lista abaixo. O `install.sh` **continua a recusar aarch64** (o passo
+  seguinte não está nesta release).
+
+### O que NÃO foi validado
+
+- **`vm build`:** a instalação de pacotes (`network: true`), os perfis
+  `rootless`/`k8s` de ponta a ponta e o arranque de uma VM a partir das imagens
+  construídas nunca correram; nenhum construtor de appliance real foi executado
+  (a canalização foi provada com um construtor falso). As fases `--packages`,
+  `--profile`, `--boot` e `--appliance` do `verify-images.sh` estão escritas mas
+  nunca executaram. O que foi provado com imagens reais: as quatro distros
+  offline, os dois ramos (`dpkg` e `rpm`) e o auto-teste.
+- **Serviços de VM** (o que o próprio ADR-0046 marca como não medido):
+  - um cliente a resolver um nome do bloco do `/etc/hosts` real e a receber
+    resposta de um backend (escrever o ficheiro real exige root); o açúcar
+    `expose:` foi coberto por `validate`, `--dry-run` e testes unitários, não
+    por tráfego;
+  - as duas instâncias do proxy a correr ao mesmo tempo (uma rota de container e
+    uma de VM libvirt no mesmo `apply`), uma VM libvirt em modo `bridge`, e o
+    reinício do proxy depois de a VM ganhar outro endereço (a rota guarda o
+    endereço no `apply`);
+  - `IPPool`: um endereço realmente encaminhável (tudo foi medido com aliases de
+    loopback, `127.0.0.10-11`), dois reclamantes a esgotar um pool por duas
+    rotas vivas, a instância do host com um endereço do pool, `expose[].pool`
+    por tráfego, e o `validate` a recusar `announce: l2` (só o `apply` recusa).
+- **Appliances #450:** o cliente web do Carbonio num browser e a entrega de
+  correio de/para o exterior; uma falha de arranque do `carbonio-videoserver`
+  na primeira passagem, não investigada.
+- **Instalador `--performance`:** o instalador de ponta a ponta, o serviço systemd
+  real, o timer de GC e o ganho medido.
+- **Binários aarch64 da release:** o job `build-arm64` do `release.yml` só corre
+  com uma tag `v*`, por isso nunca tinha sido executado antes desta. O
+  `strip` em aarch64, a assinatura e a proveniência dos novos assets são a
+  primeira execução.
+
+---
+
 ## v4.1.1 — endurecimento de segurança, `vm destroy`, e o CRI de um cluster deixa de vir do cwd
 
 Cinquenta e dois commits desde a `v4.1.0`, numerados como PATCH por decisão do

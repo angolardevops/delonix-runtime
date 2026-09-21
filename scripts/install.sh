@@ -30,6 +30,11 @@
 #                  chmod baixa uma fronteira de seguranca do host.
 #   --production   tuning de ESCALA para um no de producao (conntrack, ARP,
 #                  portas efemeras, fds, pids). Ver a seccao dedicada.
+#   --performance  máximo desempenho SEM perguntar: modo performance do CPU
+#                  (governor + EPP + perfil de energia), THP em madvise +
+#                  irqbalance, e o timer de GC do disco. Sem esta flag nem
+#                  --no-performance o instalador PERGUNTA cada ponto (Enter = sim).
+#   --no-performance  não aplica nem pergunta nada disto.
 #   --no-delegate  NÃO escreve o drop-in de delegação de cgroup (ver abaixo).
 #                  NÃO é o default — ver a secção "portas privilegiadas" abaixo.
 #   --insecure-skip-signature
@@ -97,6 +102,8 @@ USER_INSTALL=0
 LOW_PORTS=0
 WITH_IMAGE_BUILD=0
 PRODUCTION=0
+# ask = perguntar (Enter = sim) · 1 = --performance · 0 = --no-performance
+PERFORMANCE=ask
 SKIP_SIG=0
 
 # `command -v` falha para binários de admin (/usr/sbin) quando o PATH do
@@ -130,6 +137,23 @@ skip()  { printf '[%s] %s: %salready satisfied (SKIP)%s\n' "$1" "$2" "$C_SKIP" "
 stepok(){ printf '[%s] %s: %sOK%s\n' "$1" "$2" "$C_OK" "$C_0"; }
 warn()  { printf '%swarning%s %s\n' "$C_WARN" "$C_0" "$*" >&2; }
 die()   { printf '%serror%s %s\n' "$C_ERR" "$C_0" "$*" >&2; exit 1; }
+
+# Pergunta sim/não com o DEFAULT sim (Enter = sim): `ask_yn <pergunta>` → 0 = sim.
+# Lê do /dev/tty e não do stdin, porque `curl … | bash` põe o script no stdin.
+# Sem terminal nenhum (CI, ssh sem tty) a resposta é NÃO: o instalador não altera
+# o governor do CPU de uma máquina sem ninguém para dizer que sim. Quem quer isso
+# sem perguntas escreve --performance.
+ask_yn() {
+  local ans=""
+  case "$PERFORMANCE" in 1) return 0 ;; 0) return 1 ;; esac
+  if ! { : </dev/tty; } 2>/dev/null; then
+    warn "no terminal to ask: \"$1\" — skipped (pass --performance to accept without asking)"
+    return 1
+  fi
+  printf '%s [Y/n] ' "$1" >/dev/tty
+  read -r ans </dev/tty || ans=""
+  case "$ans" in [nN]|[nN][oO]|[nN][aA][oO]|não) return 1 ;; *) return 0 ;; esac
+}
 
 # Corre um comando com um SPINNER animado na linha do passo (só em tty; em
 # pipe/CI degrada para a linha estática de sempre). O comando corre em
@@ -168,6 +192,8 @@ while [ $# -gt 0 ]; do
     --low-ports)  LOW_PORTS=1 ;;
     --with-image-build) WITH_IMAGE_BUILD=1 ;;
     --production) PRODUCTION=1 ;;
+    --performance) PERFORMANCE=1 ;;
+    --no-performance) PERFORMANCE=0 ;;
     --no-delegate) WITH_DELEGATE=0 ;;
     --insecure-skip-signature) SKIP_SIG=1 ;;
     --user)       USER_INSTALL=1 ;;
@@ -555,6 +581,17 @@ if [ "$WITH_BINARY" = 1 ]; then
   if [ -n "$ACTIVE" ] && [ "$ACTIVE" != "$BIN_DIR/delonix" ]; then
     warn "another delonix shadows the one just installed: '$ACTIVE' ($("$ACTIVE" --version 2>/dev/null || echo unknown version)) comes first in PATH — remove it (rm $ACTIVE) to use $BIN_DIR/delonix"
   fi
+  # Os três servidores irmãos podem ter uma cópia antiga noutro sítio do PATH
+  # (medido: um `delonix-cri` em ~/.local/bin ao lado de um `delonix` novo em
+  # /usr/local/bin). NÃO se corre `--version` aqui: o `delonix-cri` ignora-o e
+  # ARRANCA o servidor. Compara-se o conteúdo, que não executa nada.
+  for SIB in delonix-cri delonix-mcp delonix-mgmt; do
+    for OTHER in $(type -ap "$SIB" 2>/dev/null | awk '!seen[$0]++'); do
+      [ "$OTHER" = "$BIN_DIR/$SIB" ] && continue
+      if [ -f "$BIN_DIR/$SIB" ] && cmp -s "$OTHER" "$BIN_DIR/$SIB"; then continue; fi
+      warn "a different $SIB is in PATH at '$OTHER' (not the release just installed) — it can be refused for being another version; remove it: rm $OTHER"
+    done
+  done
 else
   BIN_DIR=$(dirname "$(command -v delonix 2>/dev/null || echo /usr/local/bin/delonix)")
 fi
@@ -574,7 +611,10 @@ fi
 # caminho que não precisa de root nenhum.
 if [ -n "$SUDO" ]; then
   msg "some steps need root — sudo may ask for your password"
-  sudo -v || die "sudo authentication failed — run again and enter your password, or run as root"
+  # `sudo -n true` primeiro: com `NOPASSWD: ALL` o `sudo -v` pede password na
+  # mesma (não é um comando), e sem tty o instalador morria aqui num host onde o
+  # sudo funciona sem password — medido a aplicar o --performance neste host.
+  sudo -n true 2>/dev/null || sudo -v || die "sudo authentication failed — run again and enter your password, or run as root"
 fi
 
 # ------------------------------------------------- dependências core (containers)
@@ -1155,6 +1195,206 @@ UNIT
   $SUDO systemctl daemon-reload 2>/dev/null || true
   stepok kernel user-limits
   warn "user@.service limits take effect on the NEXT login (or: systemctl restart user@$(id -u "$REAL_USER").service, which kills that user's running workloads)"
+fi
+
+# ----------------------------------- desempenho máximo (PERGUNTA, Enter = sim)
+# Três pontos, cada um com a sua pergunta — ou tudo de uma vez com --performance:
+#
+#   1. CPU em modo performance. Medido num portátil Ryzen 9 (32 threads): governor
+#      `powersave`, EPP `power` e perfil `power-saver` de fábrica. Nenhum sysctl
+#      compensa isto — o CPU fica limitado a montante, por muito bem afinada que
+#      a rede esteja. Custa consumo e calor, por isso é pergunta e não omissão.
+#   2. THP em `madvise` (só as aplicações que o pedem recebem hugepages: o
+#      `always` dá pausas de compactação a bases de dados) + irqbalance (espalha
+#      as interrupções de rede/disco pelos cores em vez de as deixar num só).
+#   3. Timer de GC do disco: `system prune --auto`, que abaixo do limiar não
+#      toca em nada e nunca toca em volumes. Sem ele, um nó com carga contínua
+#      enche o disco de imagens que ninguém usa.
+#
+# REVERSÍVEL: o serviço guarda o estado anterior e o `stop` repõe-no —
+#     sudo systemctl disable --now delonix-performance
+# O que o helper escreve (governor, EPP, THP, perfil) NÃO é um sysctl e por isso
+# não sobrevive a um reboot sem o serviço: é ele que o reaplica a cada arranque.
+if [ "$PERFORMANCE" != 0 ] && [ -d /run/systemd/system ]; then
+  PERF_CPU=0; PERF_MEM=0; PERF_GC=0
+  ask_yn "Set the CPU to performance mode (governor, EPP and power profile — more speed, more power draw and heat)?" && PERF_CPU=1
+  ask_yn "Tune memory/interrupts (transparent hugepages=madvise, irqbalance)?" && PERF_MEM=1
+  ask_yn "Schedule the disk GC timer (delonix system prune --auto at 75% full, never touches volumes)?" && PERF_GC=1
+
+  if [ "$PERF_CPU" = 1 ] || [ "$PERF_MEM" = 1 ]; then
+    step performance helper "installing /usr/local/sbin/delonix-performance..."
+    $SUDO mkdir -p /etc/delonix /usr/local/sbin
+    printf 'CPU=%s\nTHP=%s\n' "$PERF_CPU" "$PERF_MEM" | $SUDO tee /etc/delonix/performance.conf >/dev/null
+    $SUDO tee /usr/local/sbin/delonix-performance >/dev/null <<'PERFSH'
+#!/bin/sh
+# Delonix Runtime — desempenho máximo (gerado pelo install.sh).
+#   delonix-performance apply    guarda o estado actual e aplica
+#   delonix-performance revert   repõe o que o apply guardou
+# Reverter tudo: systemctl disable --now delonix-performance
+CONF=${DELONIX_PERF_CONF:-/etc/delonix/performance.conf}
+STATE=${DELONIX_PERF_STATE:-/var/lib/delonix-performance}
+CPUDIR=${DELONIX_PERF_CPU:-/sys/devices/system/cpu}
+THPF=${DELONIX_PERF_THP:-/sys/kernel/mm/transparent_hugepage/enabled}
+PREV=$STATE/prev
+CPU=0; THP=0
+[ -r "$CONF" ] && . "$CONF"
+
+# Um write que falha (governor que o driver não oferece, perfil indisponível) não
+# pára o resto: cada ajuste é independente e o que não existe nesta máquina é
+# simplesmente saltado.
+put() { printf '%s' "$2" > "$1" 2>/dev/null; }
+
+apply() {
+  mkdir -p "$STATE" || exit 1
+  # O estado guardado é o do ARRANQUE: um apply repetido não pode sobrescrevê-lo
+  # com o que ele próprio já tinha escrito.
+  if [ ! -e "$PREV" ]; then
+    : > "$PREV.tmp"
+    if [ "$CPU" = 1 ]; then
+      for d in "$CPUDIR"/cpu[0-9]*/cpufreq; do
+        [ -d "$d" ] || continue
+        [ -r "$d/scaling_governor" ] && echo "gov $d $(cat "$d/scaling_governor")" >> "$PREV.tmp"
+        [ -r "$d/energy_performance_preference" ] && echo "epp $d $(cat "$d/energy_performance_preference")" >> "$PREV.tmp"
+      done
+      if command -v powerprofilesctl >/dev/null 2>&1; then
+        P=$(powerprofilesctl get 2>/dev/null) && [ -n "$P" ] && echo "ppd - $P" >> "$PREV.tmp"
+      fi
+    fi
+    if [ "$THP" = 1 ] && [ -r "$THPF" ]; then
+      # o ficheiro mostra «always [madvise] never»: o valor activo é o do []
+      T=$(sed -n 's/.*\[\(.*\)\].*/\1/p' "$THPF")
+      [ -n "$T" ] && echo "thp - $T" >> "$PREV.tmp"
+    fi
+    mv "$PREV.tmp" "$PREV"
+  fi
+  if [ "$CPU" = 1 ]; then
+    # O perfil PRIMEIRO: o power-profiles-daemon reescreve governor e EPP ao
+    # mudar de perfil, e o que se escrevesse antes ficava por cima do dele.
+    command -v powerprofilesctl >/dev/null 2>&1 && powerprofilesctl set performance 2>/dev/null
+    for d in "$CPUDIR"/cpu[0-9]*/cpufreq; do
+      [ -d "$d" ] || continue
+      case " $(cat "$d/scaling_available_governors" 2>/dev/null) " in
+        *" performance "*) put "$d/scaling_governor" performance ;;
+      esac
+      case " $(cat "$d/energy_performance_available_preferences" 2>/dev/null) " in
+        *" performance "*) put "$d/energy_performance_preference" performance ;;
+      esac
+    done
+  fi
+  if [ "$THP" = 1 ] && [ -w "$THPF" ]; then
+    put "$THPF" madvise
+  fi
+  return 0
+}
+
+revert() {
+  [ -r "$PREV" ] || exit 0
+  # ppd primeiro, pela mesma razão do apply; os sysfs repostos a seguir mandam.
+  while read -r kind path val; do
+    [ "$kind" = ppd ] && command -v powerprofilesctl >/dev/null 2>&1 && powerprofilesctl set "$val" 2>/dev/null
+  done < "$PREV"
+  while read -r kind path val; do
+    case "$kind" in
+      gov) put "$path/scaling_governor" "$val" ;;
+      epp) put "$path/energy_performance_preference" "$val" ;;
+      thp) put "$THPF" "$val" ;;
+    esac
+  done < "$PREV"
+  rm -f "$PREV"
+  return 0
+}
+
+case "$1" in
+  apply) apply ;;
+  revert) revert ;;
+  *) echo "usage: delonix-performance apply|revert" >&2; exit 2 ;;
+esac
+PERFSH
+    $SUDO chmod 0755 /usr/local/sbin/delonix-performance
+    $SUDO tee /etc/systemd/system/delonix-performance.service >/dev/null <<'UNIT'
+[Unit]
+Description=Delonix Runtime — CPU/memory performance mode (revert: systemctl disable --now delonix-performance)
+After=power-profiles-daemon.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/delonix-performance apply
+ExecStop=/usr/local/sbin/delonix-performance revert
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    $SUDO systemctl daemon-reload 2>/dev/null || true
+    # `restart` e não `enable --now`: o serviço é oneshot com RemainAfterExit, e um
+    # `--now` sobre um serviço já activo não volta a correr o apply — uma segunda
+    # passagem do instalador com respostas diferentes ficava com o estado antigo
+    # (medido numa VM: THP=1 no conf e o THP por mudar). O restart faz revert e
+    # apply, por isso o estado guardado continua a ser o do arranque.
+    if $SUDO systemctl enable delonix-performance.service >/dev/null 2>&1 \
+       && $SUDO systemctl restart delonix-performance.service >/dev/null 2>&1; then
+      stepok performance helper
+    else
+      warn "delonix-performance.service did not start — see: systemctl status delonix-performance"
+    fi
+    if [ "$PERF_CPU" = 1 ]; then
+      GOV=$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null || echo n/a)
+      step performance cpu "governor now: $GOV"
+      if [ "$GOV" = n/a ]; then
+        warn "this machine exposes no CPU frequency control (a VM, or a driver without cpufreq) — nothing to set for the CPU"
+      elif [ "$GOV" != performance ]; then
+        warn "the governor is '$GOV', not 'performance' (this driver may not offer it) — check: cpupower frequency-info"
+      fi
+    fi
+  fi
+
+  if [ "$PERF_MEM" = 1 ]; then
+    optional_dep performance irqbalance irqbalance "spreading interrupts across cores"
+    has_cmd irqbalance && $SUDO systemctl enable --now irqbalance.service >/dev/null 2>&1 || true
+  fi
+
+  if [ "$PERF_GC" = 1 ]; then
+    step performance gc "installing the disk GC user timer..."
+    GC_BIN="${BIN_DIR:-/usr/local/bin}/delonix"
+    $SUDO mkdir -p /etc/systemd/user
+    # ExecStartPre: num utilizador que ainda não correu nada o directório de estado
+    # não existe, e o `system prune --auto` RECUSA-SE a actuar às cegas (é o certo:
+    # sem poder medir o disco não reclama). Medido numa VM acabada de instalar: o
+    # serviço falhava com exit 1 a cada hora até ao primeiro `delonix run`. `$$` é
+    # o escape do systemd para o `$` literal que o `sh -c` tem de ver.
+    $SUDO tee /etc/systemd/user/delonix-gc.service >/dev/null <<'UNIT'
+[Unit]
+Description=Delonix Runtime — reclaim disk when it passes 75% (never touches volumes)
+
+[Service]
+Type=oneshot
+ExecStartPre=/bin/sh -c 'mkdir -p "$${XDG_DATA_HOME:-$$HOME/.local/share}/delonix"'
+ExecStart=@GC_BIN@ system prune --auto --threshold 75
+UNIT
+    $SUDO sed -i "s|@GC_BIN@|$GC_BIN|" /etc/systemd/user/delonix-gc.service
+    $SUDO tee /etc/systemd/user/delonix-gc.timer >/dev/null <<'UNIT'
+[Unit]
+Description=Delonix Runtime — disk GC check
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+    # --global: vale para o utilizador de qualquer sessão, sem precisar do bus do
+    # utilizador (que não existe quando isto corre sob sudo).
+    if $SUDO systemctl --global enable delonix-gc.timer >/dev/null 2>&1; then
+      stepok performance gc
+      msg "GC timer active from the next login (linger keeps it running afterwards); undo: sudo systemctl --global disable delonix-gc.timer"
+    else
+      warn "could not enable delonix-gc.timer — enable it with: sudo systemctl --global enable delonix-gc.timer"
+    fi
+  fi
+elif [ "$PERFORMANCE" = 1 ]; then
+  warn "--performance needs systemd (/run/systemd/system) — skipped"
 fi
 
 # ------------------------------------------------ completion (bash/zsh/fish)

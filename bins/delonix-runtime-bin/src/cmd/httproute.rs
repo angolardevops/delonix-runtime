@@ -48,6 +48,9 @@ pub enum HttpRouteCmd {
 struct HttpRouteLs {
     /// `stopped` | `serving` | `config-unreadable`.
     state: &'static str,
+    /// Where this instance runs: `holder` (containers and Cloud Hypervisor VMs on
+    /// the SDN) or `host` (libvirt VMs, ADR-0046).
+    netns: &'static str,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     listeners: Vec<ListenerRow>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -77,89 +80,104 @@ struct RouteRow {
 /// CLI leaf `net httproute ls` was removed as a duplicate (B4 of the CLI
 /// restructuring): same store, same output, zero divergence risk either way.
 pub(crate) fn cmd_ls(output: super::output::OutputFormat) -> Result<()> {
+    use ingress_proxy::Where;
     let output = super::config::resolve_output(&super::util::state_root(), output);
+    let instances = [(Where::Holder, "holder"), (Where::Host, "host")];
+    let live: Vec<(Where, &str)> = instances
+        .iter()
+        .copied()
+        .filter(|(w, _)| ingress_proxy::is_running(*w))
+        .collect();
+    let read = |w: Where| {
+        std::fs::read(ingress_proxy::config_path(w))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok())
+    };
     if output == super::output::OutputFormat::Json {
-        if !ingress_proxy::is_running() {
+        if live.is_empty() {
             return super::output::print_json(&[HttpRouteLs {
                 state: "stopped",
+                netns: "holder",
                 listeners: Vec::new(),
                 routes: Vec::new(),
             }]);
         }
-        let cfg = std::fs::read(ingress_proxy::config_path())
-            .ok()
-            .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
-        let row = match cfg {
-            Some(c) => HttpRouteLs {
-                state: "serving",
-                listeners: c
-                    .listeners
-                    .iter()
-                    .map(|l| ListenerRow {
-                        port: l.port,
-                        tls: l.tls,
-                    })
-                    .collect(),
-                routes: c
-                    .routes
-                    .iter()
-                    .map(|r| RouteRow {
-                        host: (!r.host.is_empty()).then(|| r.host.clone()),
-                        path: r.path.clone(),
-                        backend: r.backend.clone(),
-                    })
-                    .collect(),
-            },
-            None => HttpRouteLs {
-                state: "config-unreadable",
-                listeners: Vec::new(),
-                routes: Vec::new(),
-            },
-        };
-        return super::output::print_json(&[row]);
+        let rows: Vec<HttpRouteLs> = live
+            .iter()
+            .map(|(w, name)| match read(*w) {
+                Some(c) => HttpRouteLs {
+                    state: "serving",
+                    netns: name,
+                    listeners: c
+                        .listeners
+                        .iter()
+                        .map(|l| ListenerRow {
+                            port: l.port,
+                            tls: l.tls,
+                        })
+                        .collect(),
+                    routes: c
+                        .routes
+                        .iter()
+                        .map(|r| RouteRow {
+                            host: (!r.host.is_empty()).then(|| r.host.clone()),
+                            path: r.path.clone(),
+                            backend: r.backend.clone(),
+                        })
+                        .collect(),
+                },
+                None => HttpRouteLs {
+                    state: "config-unreadable",
+                    netns: name,
+                    listeners: Vec::new(),
+                    routes: Vec::new(),
+                },
+            })
+            .collect();
+        return super::output::print_json(&rows);
     }
-    if !ingress_proxy::is_running() {
+    if live.is_empty() {
         println!(
             "{}",
             super::po::t("httproute: proxy stopped (no active HTTPRoute)")
         );
         return Ok(());
     }
-    let cfg = std::fs::read(ingress_proxy::config_path())
-        .ok()
-        .and_then(|b| serde_json::from_slice::<ProxyConfig>(&b).ok());
-    match cfg {
-        Some(c) => {
-            println!(
-                "{}",
-                super::po::tf(
-                    "httproute: proxy SERVING — {listeners} listener(s), {routes} route(s)",
-                    &[
-                        ("listeners", &c.listeners.len().to_string()),
-                        ("routes", &c.routes.len().to_string()),
-                    ],
-                )
-            );
-            for l in &c.listeners {
+    for (w, name) in live {
+        match read(w) {
+            Some(c) => {
                 println!(
-                    "  listener :{} {}",
-                    l.port,
-                    if l.tls { "(TLS)" } else { "" }
+                    "{}",
+                    super::po::tf(
+                        "httproute: proxy SERVING ({netns}) — {listeners} listener(s), {routes} route(s)",
+                        &[
+                            ("netns", name),
+                            ("listeners", &c.listeners.len().to_string()),
+                            ("routes", &c.routes.len().to_string()),
+                        ],
+                    )
                 );
+                for l in &c.listeners {
+                    println!(
+                        "  listener :{} {}",
+                        l.port,
+                        if l.tls { "(TLS)" } else { "" }
+                    );
+                }
+                for r in &c.routes {
+                    println!(
+                        "  {} {} → {}",
+                        if r.host.is_empty() { "*" } else { &r.host },
+                        r.path,
+                        r.backend
+                    );
+                }
             }
-            for r in &c.routes {
-                println!(
-                    "  {} {} → {}",
-                    if r.host.is_empty() { "*" } else { &r.host },
-                    r.path,
-                    r.backend
-                );
-            }
+            None => println!(
+                "httproute: {}",
+                super::po::t("proxy running but its config would not parse")
+            ),
         }
-        None => println!(
-            "httproute: {}",
-            super::po::t("proxy running but its config would not parse")
-        ),
     }
     Ok(())
 }
@@ -174,8 +192,14 @@ pub fn run(action: HttpRouteCmd) -> Result<()> {
         HttpRouteCmd::Rm => {
             // Remove only the MANUAL routes; the auto-registered ones (`--expose`)
             // survive and the proxy only stops if nothing else remains.
-            ingress_proxy::clear_manual()?;
-            if ingress_proxy::is_running() {
+            let host = ingress_proxy::clear_manual(ingress_proxy::Where::Host)?;
+            let holder = ingress_proxy::clear_manual(ingress_proxy::Where::Holder)?;
+            super::ippool::release_unlisted("HTTPRoute/", &[])?;
+            if !host && !holder {
+                println!("{}", super::po::t("httproute: no manual routes to remove"));
+                return Ok(());
+            }
+            if ingress_proxy::is_running(ingress_proxy::Where::Holder) {
                 println!(
                     "{}",
                     super::po::t(
@@ -206,7 +230,25 @@ pub struct HttpRouteSpec {
     /// Routing rules (by Host and/or path prefix). Required and non-empty.
     #[serde(default)]
     pub rules: Vec<RouteRule>,
+    /// Where to publish this route's host names, so they RESOLVE without editing
+    /// any `hosts` file by hand (ADR-0046). Only `host` exists so far: each rule
+    /// `host` gets `127.0.0.1` in a delimited block of the operator host's
+    /// `/etc/hosts` (needs root, refused otherwise). `containers` and `guest` are
+    /// planned (ADR-0047 for the first). The PORT is the route's entrypoint, which
+    /// a hosts file cannot carry.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub hosts: Vec<String>,
+    /// `kind: IPPool` this route takes its address from (ADR-0046 D3). The route holds
+    /// ONE address of the pool for as long as it is declared, and every listener of it
+    /// is reachable there instead of on loopback; `hosts: [host]` then points the name
+    /// at that address. The address must already be on an interface of this host
+    /// (`announce: local`) — the apply says so and stops when it is not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool: Option<String>,
 }
+
+/// Values `spec.hosts` accepts.
+pub const HOSTS_TARGETS: &[&str] = &["host"];
 
 /// An entry point (proxy listen port).
 #[derive(Debug, Clone, Deserialize, Serialize, schemars::JsonSchema)]
@@ -264,7 +306,7 @@ pub struct Backend {
 }
 
 /// Known fields of the `spec` (drift-guard — see `manifest::warn_unknown_fields`).
-pub const HTTP_ROUTE_SPEC_FIELDS: &[&str] = &["entrypoints", "tls", "rules"];
+pub const HTTP_ROUTE_SPEC_FIELDS: &[&str] = &["entrypoints", "tls", "rules", "hosts", "pool"];
 
 /// A valid DNS host name to match against the `Host:` header. Strict on purpose
 /// (the audit's `valid_*` discipline): letters/digits/`.`/`-`, no scheme, no
@@ -341,6 +383,22 @@ pub fn validate_spec(name: &str, spec: &HttpRouteSpec) -> Result<()> {
             return Err(err(super::po::tf(
                 "entrypoint :{port} requests tls but spec.tls is not defined",
                 &[("port", &ep.port.to_string())],
+            )));
+        }
+    }
+    if let Some(pool) = &spec.pool {
+        if !valid_service(pool) {
+            return Err(err(super::po::tf(
+                "pool '{pool}' is not a valid IPPool name",
+                &[("pool", pool)],
+            )));
+        }
+    }
+    for h in &spec.hosts {
+        if !HOSTS_TARGETS.contains(&h.as_str()) {
+            return Err(err(super::po::tf(
+                "hosts: '{target}' is not supported (only: {allowed}) — `containers` needs the proxy to authorise container sources first (ADR-0047), `guest` is planned",
+                &[("target", h), ("allowed", &HOSTS_TARGETS.join(", "))],
             )));
         }
     }
@@ -649,6 +707,8 @@ fn ingress_to_httproute(name: &str, ing: IngressSpec) -> Result<HttpRouteSpec> {
         entrypoints: ing.entrypoints,
         tls,
         rules,
+        hosts: Vec::new(),
+        pool: None,
     })
 }
 
@@ -693,6 +753,49 @@ fn container_ips() -> std::collections::HashMap<String, String> {
     m
 }
 
+/// IPs of the VMs a route may name as a backend (ADR-0046).
+///
+/// **Only VMs that are ON the SDN.** The proxy runs inside the holder netns, so a
+/// backend has to be reachable from there: a Cloud Hypervisor VM has a tap on the
+/// SDN bridge, a libvirt VM sits on `virbr0` in the host netns, which the holder
+/// does not see. A libvirt VM is therefore mapped to `Err(reason)` instead of being
+/// left out — so the caller can say WHY, and not "does not exist".
+fn vm_ips(
+) -> std::collections::HashMap<String, std::result::Result<(String, ingress_proxy::Where), String>>
+{
+    use ingress_proxy::Where;
+    let mut m = std::collections::HashMap::new();
+    for vm in delonix_vm::list(&super::util::state_root()).unwrap_or_default() {
+        // A stopped VM keeps the address it had, and a route to it would be accepted and
+        // «served» while every request fails — the address is a memory, not a fact.
+        if !matches!(vm.status, delonix_model::records::Status::Running) {
+            m.insert(
+                vm.name.clone(),
+                Err(format!("it is not running (status: {:?})", vm.status)),
+            );
+            continue;
+        }
+        let entry = match (vm.backend.as_str(), vm.ip.clone()) {
+            (_, None) => Err("it has no IP yet (is it running?)".to_string()),
+            ("cloud-hypervisor", Some(ip)) => Ok((ip, Where::Holder)),
+            // libvirt in `nat`/`bridge` mode has an address on the host's `virbr`, a
+            // different L2 the holder does not see — the host-netns instance serves it.
+            // User-mode networking (`tap == "user"`) has no address the host can reach
+            // at all.
+            ("libvirt", Some(_)) if vm.tap == "user" => Err(
+                "it uses libvirt user-mode networking, which has no address reachable from the host (use `netMode: nat` on `qemu:///system`)"
+                    .to_string(),
+            ),
+            ("libvirt", Some(ip)) => Ok((ip, Where::Host)),
+            (other, _) => Err(format!(
+                "its backend is '{other}': only Cloud Hypervisor and libvirt VMs can be a route backend"
+            )),
+        };
+        m.insert(vm.name, entry);
+    }
+    m
+}
+
 /// Reads the cert/key pair (PEM) from a `kind: Secret`. Accepts the k8s-style keys
 /// (`tls.crt`/`tls.key`) OR the variant with `_` (the vault does not allow `.` in
 /// env keys — see `valid_env_key`), whichever is found.
@@ -721,25 +824,193 @@ fn tls_from_secret(name: &str) -> Result<TlsMaterial> {
 
 /// Resolves ALL the manifest's HTTPRoutes into a single `ProxyConfig` (one proxy
 /// serves all the routes). `None` = there are no HTTPRoutes (nothing to do).
-fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfig>> {
+/// Which instance serves a document: where ITS backends are reachable from.
+///
+/// A route's backends are only reachable from one netns, and a document is served
+/// whole by one proxy, so a document that mixes a libvirt VM with a container (or a
+/// Cloud Hypervisor VM) is refused, by name, instead of being half served. Split it
+/// in two documents — the error says which backends fall on which side.
+fn classify(
+    name: &str,
+    spec: &HttpRouteSpec,
+    ctrs: &std::collections::HashMap<String, String>,
+    vms: &std::collections::HashMap<
+        String,
+        std::result::Result<(String, ingress_proxy::Where), String>,
+    >,
+) -> Result<ingress_proxy::Where> {
+    use ingress_proxy::Where;
+    let mut holder: Vec<&str> = Vec::new();
+    let mut host: Vec<&str> = Vec::new();
+    for rule in &spec.rules {
+        for p in &rule.paths {
+            let svc = p.backend.service.as_str();
+            let w = match (ctrs.contains_key(svc), vms.get(svc)) {
+                (true, _) => Where::Holder,
+                (false, Some(Ok((_, w)))) => *w,
+                // Unknown or unresolvable: the resolver reports WHY, with the name.
+                _ => Where::Holder,
+            };
+            if w == Where::Host {
+                host.push(svc);
+            } else {
+                holder.push(svc);
+            }
+        }
+    }
+    match (holder.is_empty(), host.is_empty()) {
+        (false, false) => Err(Error::Invalid(super::po::tf(
+            "HTTPRoute '{name}': its backends live in two netns and one document is served by one proxy — on the SDN: {holder}; on the host (libvirt): {host}. Split it into two documents",
+            &[
+                ("name", name),
+                ("holder", &holder.join(", ")),
+                ("host", &host.join(", ")),
+            ],
+        ))),
+        (true, false) => Ok(Where::Host),
+        _ => Ok(Where::Holder),
+    }
+}
+
+/// The two proxy configs a set of documents asks for: `(holder, host)`.
+///
+/// The same listener port on both is refused: the holder instance publishes it on
+/// the host loopback through the slirp, the host instance binds that loopback
+/// directly, and one of the two would fail to bind at startup, after the apply
+/// had already said it was serving.
+fn resolve_configs(
+    specs: &[(String, HttpRouteSpec)],
+    commit: bool,
+) -> Result<(Option<ProxyConfig>, Option<ProxyConfig>)> {
+    use ingress_proxy::Where;
+    let ctrs = container_ips();
+    let vms = vm_ips();
+    let mut holder = Vec::new();
+    let mut host = Vec::new();
+    for (name, spec) in specs {
+        match classify(name, spec, &ctrs, &vms)? {
+            Where::Holder => holder.push((name.clone(), spec.clone())),
+            Where::Host => host.push((name.clone(), spec.clone())),
+        }
+    }
+    let ports = |v: &[(String, HttpRouteSpec)]| -> std::collections::BTreeSet<u16> {
+        v.iter()
+            .flat_map(|(_, s)| effective_entrypoints(s))
+            .map(|e| e.port)
+            .collect()
+    };
+    let clash: Vec<String> = ports(&holder)
+        .intersection(&ports(&host))
+        .map(|p| p.to_string())
+        .collect();
+    if !clash.is_empty() {
+        return Err(Error::Invalid(super::po::tf(
+            "HTTPRoute: port(s) {ports} are asked for by a route on the SDN and by a route on the host (libvirt) — the two proxies cannot share a port. Give one of them another entrypoint",
+            &[("ports", &clash.join(", "))],
+        )));
+    }
+    let h = resolve_config(&holder, commit)?;
+    let x = resolve_config(&host, commit)?.map(|mut c| {
+        c.bind = Some("127.0.0.1".to_string());
+        c
+    });
+    Ok((h, x))
+}
+
+/// `commit` decides whether an `IPPool` claim is TAKEN or only looked at: an apply takes
+/// it, a plan computing what an apply would do must not change the ledger.
+fn resolve_config(specs: &[(String, HttpRouteSpec)], commit: bool) -> Result<Option<ProxyConfig>> {
     if specs.is_empty() {
         return Ok(None);
     }
     let ips = container_ips();
+    let vms = vm_ips();
     let mut listeners: Vec<Listener> = Vec::new();
     let mut routes: Vec<Route> = Vec::new();
     let mut all_hosts: Vec<String> = Vec::new();
     let mut tls_material: Option<TlsMaterial> = None;
     let mut secret_ref: Option<String> = None;
+    let mut published: Vec<ingress_proxy::PublishedHost> = Vec::new();
+    let mut claims: Vec<ingress_proxy::PoolClaim> = Vec::new();
+    let mut peeked: Vec<std::net::Ipv4Addr> = Vec::new();
 
     for (name, spec) in specs {
+        // The address this document is reachable on: one reserved from its IPPool, or
+        // `None` for the default (loopback).
+        let addr: Option<String> = match &spec.pool {
+            None => None,
+            Some(pool) => {
+                let claimant = format!("HTTPRoute/{name}");
+                let not_here = |ip: std::net::Ipv4Addr| {
+                    Error::Invalid(super::po::tf(
+                        "HTTPRoute '{name}': IPPool '{pool}' gave {ip}, which is not on any interface of this host. Add it (for example `ip addr add {ip}/32 dev lo`) or put another address in the pool — `announce: l2` (the engine adding it) is not built yet",
+                        &[("name", name), ("pool", pool), ("ip", &ip.to_string())],
+                    ))
+                };
+                // Look BEFORE taking: an address that is not on this host must not end
+                // up leased to a route whose apply then fails, holding it until somebody
+                // notices in the ledger.
+                let ip = super::ippool::peek(pool, &claimant, &peeked)?;
+                if !super::ippool::address_present(ip) {
+                    return Err(not_here(ip));
+                }
+                let ip = if commit {
+                    let taken = super::ippool::claim_moving(pool, &claimant)?;
+                    // Another claim may have landed between the look and the take.
+                    if taken != ip && !super::ippool::address_present(taken) {
+                        return Err(not_here(taken));
+                    }
+                    taken
+                } else {
+                    peeked.push(ip);
+                    ip
+                };
+                claims.push(ingress_proxy::PoolClaim {
+                    source: name.clone(),
+                    pool: pool.clone(),
+                    addr: ip.to_string(),
+                });
+                Some(ip.to_string())
+            }
+        };
+        if spec.hosts.iter().any(|h| h == "host") {
+            for rule in &spec.rules {
+                if let Some(h) = &rule.host {
+                    published.push(ingress_proxy::PublishedHost {
+                        host: h.clone(),
+                        source: name.clone(),
+                        addr: addr.clone(),
+                    });
+                }
+            }
+        }
         for ep in effective_entrypoints(spec) {
-            // Dedup by port; on collision, TLS wins (more restrictive/secure).
+            // Dedup by port; on collision, TLS wins (more restrictive/secure). The same
+            // port on two different addresses is two different sockets, and a listener
+            // holds one address, so it is refused instead of half applied.
             match listeners.iter_mut().find(|l| l.port == ep.port) {
-                Some(l) => l.tls = l.tls || ep.tls,
+                Some(l) if l.addr != addr => {
+                    return Err(Error::Invalid(super::po::tf(
+                        "HTTPRoute '{name}': port :{port} is already listened on {other} by another route, and this one asks for {mine} — give one of them another entrypoint",
+                        &[
+                            ("name", name),
+                            ("port", &ep.port.to_string()),
+                            ("other", l.addr.as_deref().unwrap_or("loopback")),
+                            ("mine", addr.as_deref().unwrap_or("loopback")),
+                        ],
+                    )));
+                }
+                Some(l) => {
+                    l.tls = l.tls || ep.tls;
+                    if !l.sources.contains(name) {
+                        l.sources.push(name.clone());
+                    }
+                }
                 None => listeners.push(Listener {
                     port: ep.port,
                     tls: ep.tls,
+                    addr: addr.clone(),
+                    sources: vec![name.clone()],
                 }),
             }
         }
@@ -755,12 +1026,23 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
                 all_hosts.push(h.clone());
             }
             for pr in &rule.paths {
-                let ip = ips.get(&pr.backend.service).ok_or_else(|| {
-                    Error::Invalid(super::po::tf(
-                        "HTTPRoute '{name}': backend '{service}' has no IP on the SDN (does it exist and is it on a custom network?)",
-                        &[("name", name), ("service", &pr.backend.service)],
-                    ))
-                })?;
+                // A container wins a name clash: it is what a route always meant.
+                let ip = match (ips.get(&pr.backend.service), vms.get(&pr.backend.service)) {
+                    (Some(ip), _) => ip.clone(),
+                    (None, Some(Ok((ip, _))) ) => ip.clone(),
+                    (None, Some(Err(why))) => {
+                        return Err(Error::Invalid(super::po::tf(
+                            "HTTPRoute '{name}': backend VM '{service}' cannot be served — {why}",
+                            &[("name", name), ("service", &pr.backend.service), ("why", why)],
+                        )))
+                    }
+                    (None, None) => {
+                        return Err(Error::Invalid(super::po::tf(
+                            "HTTPRoute '{name}': backend '{service}' has no IP on the SDN (does it exist and is it on a custom network?)",
+                            &[("name", name), ("service", &pr.backend.service)],
+                        )))
+                    }
+                };
                 routes.push(Route {
                     host: rule.host.clone().unwrap_or_default(),
                     path: pr.path.clone(),
@@ -783,6 +1065,10 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
         listeners,
         routes,
         tls: tls_material,
+        published_hosts: published,
+        claims,
+        stamps: Vec::new(),
+        bind: None,
     }))
 }
 
@@ -796,7 +1082,8 @@ fn resolve_config(specs: &[(String, HttpRouteSpec)]) -> Result<Option<ProxyConfi
 /// changing them needs an `httproute rm` + apply) and the apply already warns
 /// about that; the plan showing them as an update is not a promise the executor
 /// breaks — the warning is what tells the truth about the listener.
-pub(crate) const RECONCILED_HTTPROUTE_FIELDS: &[&str] = &["entrypoints", "tls", "rules"];
+pub(crate) const RECONCILED_HTTPROUTE_FIELDS: &[&str] =
+    &["entrypoints", "tls", "rules", "hosts", "pool"];
 
 /// One route rendered comparably: host, path and the backend as WRITTEN.
 ///
@@ -819,6 +1106,22 @@ fn route_keys(spec: &HttpRouteSpec) -> String {
     }
     keys.sort();
     keys.join(",")
+}
+
+/// The host names a spec asks to publish in the host's `/etc/hosts` — empty unless it opted
+/// in. Same shape as what `actual` reads back from the manual config.
+fn desired_published_hosts(spec: &HttpRouteSpec) -> String {
+    if !spec.hosts.iter().any(|h| h == "host") {
+        return String::new();
+    }
+    let mut v: Vec<&str> = spec
+        .rules
+        .iter()
+        .filter_map(|r| r.host.as_deref())
+        .collect();
+    v.sort();
+    v.dedup();
+    v.join(",")
 }
 
 /// The `tls.mode` a document declares, defaulted the way the apply defaults it.
@@ -887,6 +1190,8 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         },
     );
     f.insert("rules".into(), route_keys(&spec));
+    f.insert("hosts".into(), desired_published_hosts(&spec));
+    f.insert("pool".into(), spec.pool.clone().unwrap_or_default());
     Ok(super::reconcile::Desired {
         // Keyed by the document's OWN kind, so an `Ingress` matches the
         // `Ingress` half of the actual side and the plan names the Kind the
@@ -896,54 +1201,96 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         fields: f,
         converges: true,
         // The routes live in the shared proxy config, not in a record of their
-        // own; `source` says who contributed each one, which is enough to
-        // compare but not to own — a prune would have to rewrite a config other
-        // documents also contribute to.
-        ownable: false,
+        // own, so ownership is a stamp kept beside them (`ingress_proxy::Stamp`) and a
+        // prune rewrites the config WITHOUT this document's contribution
+        // (`remove_for_prune`) instead of deleting a record.
+        ownable: true,
     })
 }
 
-/// What the running proxy has, per document — readable only because each route
-/// now records its `source`.
+/// What the running proxy has, per document — readable because each route records its
+/// `source`, and each listener the documents that asked for it.
+///
+/// Lists every document the proxy holds, INCLUDING the ones the manifest no longer
+/// declares: that is what a `--prune` has to see, and a plan that only looks at the
+/// manifest can never propose removing anything.
 pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actual>> {
-    let Some(cfg) = ingress_proxy::read_manual_config() else {
+    use ingress_proxy::Where;
+    let cfgs: Vec<ProxyConfig> = [Where::Holder, Where::Host]
+        .into_iter()
+        .filter_map(ingress_proxy::read_manual_config)
+        .collect();
+    if cfgs.is_empty() {
         return Ok(Vec::new());
-    };
-    let mut out = Vec::new();
-    let both: Vec<&ManifestDoc> = manifest::of_kind(docs, k::HTTP_ROUTE)
+    }
+    // (name, kind as declared now) — the manifest first, then whatever the proxy holds
+    // that the manifest does not mention.
+    let mut names: Vec<(String, Option<&ManifestDoc>)> = manifest::of_kind(docs, k::HTTP_ROUTE)
         .into_iter()
         .chain(manifest::of_kind(docs, k::INGRESS))
+        .map(|d| (d.metadata.name.clone(), Some(d)))
         .collect();
-    for doc in both {
-        let name = &doc.metadata.name;
+    for c in &cfgs {
+        for r in &c.routes {
+            if !r.source.is_empty() && !names.iter().any(|(n, _)| n == &r.source) {
+                names.push((r.source.clone(), None));
+            }
+        }
+    }
+    let mut by_ip = container_ips();
+    // A route to a VM stores the VM's address too (`vm_ips`); without mapping it
+    // back the plan read `10.x:8080` against `web01:8080` as drift on every run.
+    for (vm, ip) in vm_ips() {
+        if let Ok((ip, _)) = ip {
+            by_ip.entry(vm).or_insert(ip);
+        }
+    }
+    let mut out = Vec::new();
+    for (name, doc) in &names {
+        // A document is served by exactly one instance: find the one that has it.
+        let Some(cfg) = cfgs
+            .iter()
+            .find(|c| c.routes.iter().any(|r| &r.source == name))
+        else {
+            continue; // nothing of this document is applied yet
+        };
+        let stamp = cfg.stamps.iter().find(|s| &s.source == name);
+        let kind = match (doc, stamp) {
+            (Some(d), _) => d.kind.clone(),
+            (None, Some(st)) => st.kind.clone(),
+            (None, None) => k::HTTP_ROUTE.to_string(),
+        };
         let mine: Vec<&ingress_proxy::Route> =
             cfg.routes.iter().filter(|r| &r.source == name).collect();
-        if mine.is_empty() {
-            continue; // nothing of this document is applied yet
-        }
         let mut f = std::collections::BTreeMap::new();
-        // **Only the listeners THIS document asked for**, matched against the
-        // live ones. `cfg.listeners` is the deduplicated UNION of every
-        // HTTPRoute on the node, so reporting it raw made a document that
-        // declares `:80` claim the `:443` its neighbour opened — and, worse, a
-        // document whose own port had not been bound yet still reported it as
-        // present, because someone else's was.
+        // **Only the listeners THIS document asked for.** `cfg.listeners` is the
+        // deduplicated UNION of every HTTPRoute on the node, so reporting it raw made a
+        // document that declares `:80` claim the `:443` its neighbour opened.
         //
-        // Intersecting keeps the format unchanged (listeners carry no
-        // provenance, unlike routes) and answers the question that matters: is
-        // what THIS document declared actually being served.
-        let want = spec_of_either(doc)
-            .map(|s| effective_entrypoints(&s))
-            .unwrap_or_default();
-        let mut eps: Vec<String> = want
-            .iter()
-            .filter(|e| {
-                cfg.listeners
-                    .iter()
-                    .any(|l| l.port == e.port && l.tls == e.tls)
-            })
-            .map(|e| format!("{}{}", e.port, if e.tls { "/tls" } else { "" }))
-            .collect();
+        // A listener records who asked for it. A config written before that was
+        // recorded carries none, and there the old answer stands: intersect with what
+        // the manifest wants.
+        let has_sources = cfg.listeners.iter().any(|l| !l.sources.is_empty());
+        let mut eps: Vec<String> = if has_sources {
+            cfg.listeners
+                .iter()
+                .filter(|l| l.sources.contains(name))
+                .map(|l| format!("{}{}", l.port, if l.tls { "/tls" } else { "" }))
+                .collect()
+        } else {
+            let want = doc
+                .and_then(|d| spec_of_either(d).ok())
+                .map(|s| effective_entrypoints(&s))
+                .unwrap_or_default();
+            want.iter()
+                .filter(|e| {
+                    cfg.listeners
+                        .iter()
+                        .any(|l| l.port == e.port && l.tls == e.tls)
+                })
+                .map(|e| format!("{}{}", e.port, if e.tls { "/tls" } else { "" }))
+                .collect()
+        };
         eps.sort();
         f.insert("entrypoints".into(), eps.join(","));
         // The mode the material was BUILT with, recorded alongside it. It used
@@ -958,13 +1305,16 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         // The stored backend is `ip:port`; the manifest names a service. Map it
         // back through the same container→IP table the apply resolved with, so
         // the two sides speak the same language.
-        let by_ip = container_ips();
         let mut keys: Vec<String> = mine
             .iter()
             .map(|r| {
                 let backend = by_ip
                     .iter()
-                    .find(|(_, ip)| r.backend.starts_with(&format!("{ip}:")))
+                    .filter(|(_, ip)| r.backend.starts_with(&format!("{ip}:")))
+                    // Two backends can share an address (a container and a VM, a
+                    // restarted container's old lease): the map's iteration order must
+                    // not decide which name the plan reports.
+                    .min_by_key(|(svc, _)| svc.as_str())
                     .map(|(svc, ip)| {
                         format!("{svc}:{}", r.backend.trim_start_matches(&format!("{ip}:")))
                     })
@@ -974,15 +1324,113 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
             .collect();
         keys.sort();
         f.insert("rules".into(), keys.join(","));
+        let mut published: Vec<&str> = cfg
+            .published_hosts
+            .iter()
+            .filter(|d| &d.source == name)
+            .map(|d| d.host.as_str())
+            .collect();
+        published.sort();
+        published.dedup();
+        f.insert("hosts".into(), published.join(","));
+        f.insert(
+            "pool".into(),
+            cfg.claims
+                .iter()
+                .find(|c| &c.source == name)
+                .map(|c| c.pool.clone())
+                .unwrap_or_default(),
+        );
         out.push(super::reconcile::Actual {
-            kind: doc.kind.clone(),
+            kind,
             name: name.clone(),
             fields: f,
-            owner: None,
-            last_applied: None,
+            owner: stamp.map(|s| s.stack.clone()),
+            last_applied: stamp
+                .and_then(|s| super::reconcile::decode_last_applied(&s.last_applied)),
         });
     }
     Ok(out)
+}
+
+/// Records which stack applied `name`, and what it applied (the ownership half of a
+/// reconcile; see [`ingress_proxy::Stamp`]).
+pub(crate) fn stamp(
+    kind: &str,
+    name: &str,
+    stack: &str,
+    fields: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    use ingress_proxy::Where;
+    for w in [Where::Holder, Where::Host] {
+        ingress_proxy::update_manual(w, |cfg| {
+            if !cfg.routes.iter().any(|r| r.source == name) {
+                return false;
+            }
+            let st = ingress_proxy::Stamp {
+                source: name.to_string(),
+                kind: kind.to_string(),
+                stack: stack.to_string(),
+                last_applied: super::reconcile::encode_last_applied(fields),
+            };
+            cfg.stamps.retain(|x| x.source != name);
+            cfg.stamps.push(st);
+            true
+        })?;
+    }
+    Ok(())
+}
+
+/// Removes ONE document's contribution from the proxy config (a `--prune`, a
+/// `destroy`, a `--replace`): its routes, the listeners only it asked for, the names it
+/// published, the address it held. The other documents' contributions stay, and the
+/// proxy stops only when nothing is left to serve.
+pub(crate) fn remove_for_prune(name: &str) -> Result<()> {
+    use ingress_proxy::Where;
+    for w in [Where::Holder, Where::Host] {
+        let Some(mut cfg) = ingress_proxy::read_manual_config(w) else {
+            continue;
+        };
+        if !cfg.routes.iter().any(|r| r.source == name) {
+            continue;
+        }
+        let before: Vec<u16> = cfg.listeners.iter().map(|l| l.port).collect();
+        cfg.routes.retain(|r| r.source != name);
+        cfg.published_hosts.retain(|d| d.source != name);
+        cfg.claims.retain(|c| c.source != name);
+        cfg.stamps.retain(|s| s.source != name);
+        // A listener nobody asks for any more goes; one with no recorded asker (a
+        // config from before that was recorded) is left alone — dropping it would
+        // take a port off a document we cannot prove is not using it.
+        cfg.listeners.retain_mut(|l| {
+            if l.sources.is_empty() {
+                return true;
+            }
+            l.sources.retain(|s| s != name);
+            !l.sources.is_empty()
+        });
+        if cfg.routes.is_empty() {
+            ingress_proxy::clear_manual(w)?;
+        } else {
+            let after: Vec<u16> = cfg.listeners.iter().map(|l| l.port).collect();
+            if after != before {
+                // Listeners are fixed at startup: a port that goes needs a restart.
+                ingress_proxy::stop_keeping_sources(w)?;
+            }
+            ingress_proxy::set_manual(&cfg, w)?;
+        }
+    }
+    // What is still declared anywhere is what keeps a lease.
+    let keep: Vec<String> = [Where::Holder, Where::Host]
+        .into_iter()
+        .filter_map(ingress_proxy::read_manual_config)
+        .flat_map(|c| {
+            c.claims
+                .into_iter()
+                .map(|x| format!("HTTPRoute/{}", x.source))
+        })
+        .collect();
+    super::ippool::release_unlisted("HTTPRoute/", &keep)
 }
 
 /// Converges: re-apply every HTTPRoute document. The config is COLLECTIVE, so
@@ -1002,8 +1450,8 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
 /// COLLECTIVE config cannot express — removing one document's listener would
 /// mean tearing down the config every other document shares.
 pub(crate) fn converge_all(docs: &[ManifestDoc]) -> Result<()> {
-    let listener_change = pending_listener_change(docs).unwrap_or(false);
-    if listener_change {
+    let changed = pending_listener_changes(docs);
+    if !changed.is_empty() {
         println!(
             "{}",
             super::po::t(
@@ -1014,65 +1462,390 @@ pub(crate) fn converge_all(docs: &[ManifestDoc]) -> Result<()> {
         // NOT `stop()`: that is a teardown and deletes `auto.json` too, which
         // would take down every `--expose` route on the node to rebind one
         // document's port.
-        ingress_proxy::stop_keeping_sources()?;
+        for w in changed {
+            ingress_proxy::stop_keeping_sources(w)?;
+        }
     }
     apply(docs)
 }
 
-/// Would this apply change the LISTENER surface (ports or TLS) of the running
-/// proxy?
+/// The proxy instances whose LISTENER surface (ports or TLS) this apply would
+/// change.
 ///
-/// Compared against the config the proxy is actually serving, not against the
+/// Compared against the config each proxy is actually serving, not against the
 /// manifest's previous revision: the question is whether the live sockets match
-/// what is being asked for, and only the live config answers it. `None` when
-/// there is nothing running to compare with — then the normal start-up path
-/// binds whatever the config says and there is nothing to restart.
-fn pending_listener_change(docs: &[ManifestDoc]) -> Option<bool> {
-    let specs = parse_and_validate(docs).ok()?;
-    let wanted = resolve_config(&specs).ok()??;
-    let live = ingress_proxy::live_config()?;
+/// what is being asked for, and only the live config answers it. An instance with
+/// nothing running is not listed — then the normal start-up path binds whatever the
+/// config says and there is nothing to restart.
+fn pending_listener_changes(docs: &[ManifestDoc]) -> Vec<ingress_proxy::Where> {
+    use ingress_proxy::Where;
+    let Ok(specs) = parse_and_validate(docs) else {
+        return Vec::new();
+    };
+    let Ok((holder, host)) = resolve_configs(&specs, false) else {
+        return Vec::new();
+    };
     let ports = |c: &ingress_proxy::ProxyConfig| {
         c.listeners
             .iter()
-            .map(|l| (l.port, l.tls))
+            .map(|l| (l.port, l.tls, l.addr.clone()))
             .collect::<std::collections::BTreeSet<_>>()
     };
-    Some(ports(&wanted) != ports(&live) || wanted.tls.is_some() != live.tls.is_some())
+    let mut out = Vec::new();
+    for (w, wanted) in [(Where::Holder, holder), (Where::Host, host)] {
+        let (Some(wanted), Some(live)) = (wanted, ingress_proxy::live_config(w)) else {
+            continue;
+        };
+        if ports(&wanted) != ports(&live) || wanted.tls.is_some() != live.tls.is_some() {
+            out.push(w);
+        }
+    }
+    out
+}
+
+/// The proxy config of ONE instance after applying `names`: what was there from
+/// documents that are NOT being applied now, plus `new` (this apply's contribution).
+///
+/// `apply` used to replace the whole collective config with what the manifest in hand
+/// declared, so applying a second manifest silently dropped the first one's routes.
+/// Removing a document is `--prune`/`destroy`'s job, like every other Kind.
+fn merge_with_existing(
+    existing: Option<ProxyConfig>,
+    names: &[String],
+    new: Option<ProxyConfig>,
+) -> Result<Option<ProxyConfig>> {
+    let Some(old) = existing else {
+        return Ok(new);
+    };
+    let foreign = |src: &str| !names.iter().any(|n| n == src);
+    let mut cfg = new.unwrap_or(ProxyConfig {
+        listeners: Vec::new(),
+        routes: Vec::new(),
+        tls: None,
+        published_hosts: Vec::new(),
+        claims: Vec::new(),
+        stamps: Vec::new(),
+        bind: None,
+    });
+    let kept_routes: Vec<Route> = old
+        .routes
+        .into_iter()
+        .filter(|r| foreign(&r.source))
+        .collect();
+    let kept_tls = old.tls.clone();
+    for mut l in old.listeners {
+        // Provenance known: keep the listener only for the documents that stay.
+        // Unknown (a config from before it was recorded): keep it as it was.
+        let legacy = l.sources.is_empty();
+        l.sources.retain(|s| foreign(s));
+        if !legacy && l.sources.is_empty() {
+            continue;
+        }
+        match cfg.listeners.iter_mut().find(|x| x.port == l.port) {
+            Some(x) if x.addr != l.addr => {
+                return Err(Error::Invalid(super::po::tf(
+                    "HTTPRoute: port :{port} is already listened on {other} by a route applied earlier, and this apply asks for {mine} — give one of them another entrypoint",
+                    &[
+                        ("port", &l.port.to_string()),
+                        ("other", l.addr.as_deref().unwrap_or("loopback")),
+                        ("mine", x.addr.as_deref().unwrap_or("loopback")),
+                    ],
+                )));
+            }
+            Some(x) => {
+                x.tls = x.tls || l.tls;
+                for s in l.sources {
+                    if !x.sources.contains(&s) {
+                        x.sources.push(s);
+                    }
+                }
+            }
+            None => cfg.listeners.push(l),
+        }
+    }
+    cfg.routes.extend(kept_routes);
+    cfg.published_hosts.extend(
+        old.published_hosts
+            .into_iter()
+            .filter(|d| foreign(&d.source)),
+    );
+    cfg.claims
+        .extend(old.claims.into_iter().filter(|c| foreign(&c.source)));
+    cfg.stamps
+        .extend(old.stamps.into_iter().filter(|s| foreign(&s.source)));
+    if cfg.tls.is_none() && cfg.listeners.iter().any(|l| l.tls) {
+        cfg.tls = kept_tls;
+    }
+    if cfg.bind.is_none() {
+        cfg.bind = old.bind;
+    }
+    Ok(if cfg.routes.is_empty() {
+        None
+    } else {
+        Some(cfg)
+    })
 }
 
 pub fn apply(docs: &[ManifestDoc]) -> Result<()> {
+    use ingress_proxy::Where;
     let specs = parse_and_validate(docs)?;
-    let Some(cfg) = resolve_config(&specs)? else {
-        return Ok(()); // no HTTPRoute — nothing to do
-    };
-    // Write the MANUAL part and recompose (composes with the auto-registered routes
-    // of `--expose` containers, without one erasing the other).
-    ingress_proxy::set_manual(&cfg)?;
-    println!(
-        "{}",
-        super::po::tf(
-            "httproute: {routes} route(s) on {listeners} listener(s){tls} — proxy {state}",
-            &[
-                ("routes", &cfg.routes.len().to_string()),
-                ("listeners", &cfg.listeners.len().to_string()),
-                ("tls", if cfg.tls.is_some() { " (TLS)" } else { "" }),
-                (
-                    "state",
-                    if ingress_proxy::is_running() {
-                        "serving"
-                    } else {
-                        "started"
-                    },
-                ),
-            ],
-        )
-    );
+    if specs.is_empty() {
+        // Nothing to add — and `apply` never removes (that is `--prune`/`destroy`).
+        return Ok(());
+    }
+    // Resolve everything WITHOUT touching the ledger first: a document further down that
+    // cannot be served must not leave the leases of the ones before it taken.
+    resolve_configs(&specs, false)?;
+    let (holder, host) = resolve_configs(&specs, true)?;
+    let names: Vec<String> = specs.iter().map(|(n, _)| n.clone()).collect();
+    let mut merged = Vec::new();
+    for (w, cfg) in [(Where::Holder, holder), (Where::Host, host)] {
+        let cfg = merge_with_existing(ingress_proxy::read_manual_config(w), &names, cfg)?;
+        merged.push((w, cfg));
+    }
+    for (w, cfg) in &merged {
+        let Some(cfg) = cfg else {
+            // This instance has nothing to serve any more (its routes moved to the other
+            // one): stop what an earlier apply left behind.
+            if ingress_proxy::read_manual_config(*w).is_some() {
+                ingress_proxy::clear_manual(*w)?;
+            }
+            continue;
+        };
+        let w = *w;
+        let before = ingress_proxy::read_manual_config(w);
+        let served = (|| -> Result<()> {
+            // Listeners are bound once, at startup: a changed port, TLS flag or address
+            // needs the proxy restarted, and SIGHUP would leave the old sockets serving.
+            if ingress_proxy::listeners_changed(w, &cfg.listeners) {
+                eprintln!(
+                "{}",
+                super::po::t(
+                    "httproute: the listeners changed — restarting the proxy (open connections are cut)"
+                )
+            );
+                ingress_proxy::stop_keeping_sources(w)?;
+            }
+            // Write the MANUAL part and recompose (composes with the auto-registered
+            // routes of `--expose` containers, without one erasing the other).
+            ingress_proxy::set_manual(cfg, w)
+        })();
+        if let Err(e) = served {
+            // Put back what was there: leaving this apply's half-served contribution in
+            // the config would have the NEXT apply carry it along as if it were live,
+            // and would keep leases for routes that never came up.
+            let _ = match before {
+                Some(b) => ingress_proxy::set_manual(&b, w),
+                None => ingress_proxy::clear_manual(w).map(|_| ()),
+            };
+            let keep: Vec<String> = [Where::Holder, Where::Host]
+                .into_iter()
+                .filter_map(ingress_proxy::read_manual_config)
+                .flat_map(|c| {
+                    c.claims
+                        .into_iter()
+                        .map(|x| format!("HTTPRoute/{}", x.source))
+                })
+                .collect();
+            let _ = super::ippool::release_unlisted("HTTPRoute/", &keep);
+            return Err(e);
+        }
+        println!(
+            "{}",
+            super::po::tf(
+                "httproute: {routes} route(s) on {listeners} listener(s){tls} — proxy {state}{netns}",
+                &[
+                    ("routes", &cfg.routes.len().to_string()),
+                    ("listeners", &cfg.listeners.len().to_string()),
+                    ("tls", if cfg.tls.is_some() { " (TLS)" } else { "" }),
+                    (
+                        "state",
+                        if ingress_proxy::is_running(w) {
+                            "serving"
+                        } else {
+                            "started"
+                        },
+                    ),
+                    ("netns", if w == Where::Host { " (host netns)" } else { "" }),
+                ],
+            )
+        );
+    }
+    // Only NOW — with the proxy serving — let go of the leases nobody declares any more.
+    // Releasing first freed an address the previous config was still listening on
+    // whenever the write or the start failed.
+    let keep: Vec<String> = merged
+        .iter()
+        .filter_map(|(_, c)| c.as_ref())
+        .flat_map(|c| c.claims.iter().map(|x| format!("HTTPRoute/{}", x.source)))
+        .collect();
+    super::ippool::release_unlisted("HTTPRoute/", &keep)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cfg_of(source: &str, port: u16, pool: Option<&str>) -> ProxyConfig {
+        ProxyConfig {
+            listeners: vec![Listener {
+                port,
+                tls: false,
+                addr: None,
+                sources: vec![source.into()],
+            }],
+            routes: vec![Route {
+                host: format!("{source}.pt"),
+                path: "/".into(),
+                backend: "10.0.0.1:80".into(),
+                source: source.into(),
+            }],
+            tls: None,
+            published_hosts: Vec::new(),
+            claims: pool
+                .map(|p| {
+                    vec![ingress_proxy::PoolClaim {
+                        source: source.into(),
+                        pool: p.into(),
+                        addr: "127.0.0.10".into(),
+                    }]
+                })
+                .unwrap_or_default(),
+            stamps: Vec::new(),
+            bind: None,
+        }
+    }
+
+    #[test]
+    fn applying_a_second_manifest_keeps_the_routes_of_the_first() {
+        let old = cfg_of("a", 80, Some("edge"));
+        let new = cfg_of("b", 81, None);
+        let m = merge_with_existing(Some(old), &["b".into()], Some(new))
+            .unwrap()
+            .unwrap();
+        let src: Vec<&str> = m.routes.iter().map(|r| r.source.as_str()).collect();
+        assert!(src.contains(&"a") && src.contains(&"b"), "{src:?}");
+        assert_eq!(m.listeners.len(), 2);
+        assert_eq!(m.claims.len(), 1, "a's lease is still declared");
+    }
+
+    #[test]
+    fn re_applying_a_document_replaces_its_own_contribution_only() {
+        let mut old = cfg_of("a", 80, None);
+        let extra = cfg_of("b", 80, None);
+        old.routes.extend(extra.routes);
+        old.listeners[0].sources.push("b".into());
+        let new = cfg_of("a", 90, None);
+        let m = merge_with_existing(Some(old), &["a".into()], Some(new))
+            .unwrap()
+            .unwrap();
+        assert_eq!(m.routes.iter().filter(|r| r.source == "a").count(), 1);
+        assert!(m.listeners.iter().any(|l| l.port == 90));
+        let l80 = m.listeners.iter().find(|l| l.port == 80).unwrap();
+        assert_eq!(
+            l80.sources,
+            vec!["b".to_string()],
+            "a let go of :80, b keeps it"
+        );
+    }
+
+    #[test]
+    fn a_document_that_moved_away_leaves_nothing_behind() {
+        let old = cfg_of("a", 80, None);
+        assert!(merge_with_existing(Some(old), &["a".into()], None)
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn the_same_port_on_two_addresses_across_applies_is_refused() {
+        let mut old = cfg_of("a", 80, None);
+        old.listeners[0].addr = Some("127.0.0.10".into());
+        let new = cfg_of("b", 80, None);
+        let e = merge_with_existing(Some(old), &["b".into()], Some(new))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(":80"), "{e}");
+    }
+
+    fn spec_to(services: &[&str]) -> HttpRouteSpec {
+        HttpRouteSpec {
+            entrypoints: Vec::new(),
+            tls: None,
+            rules: services
+                .iter()
+                .enumerate()
+                .map(|(i, svc)| RouteRule {
+                    host: Some(format!("h{i}.example.pt")),
+                    paths: vec![PathRule {
+                        path: "/".into(),
+                        backend: Backend {
+                            service: svc.to_string(),
+                            port: 8080,
+                        },
+                    }],
+                })
+                .collect(),
+            hosts: Vec::new(),
+            pool: None,
+        }
+    }
+
+    type Ctrs = std::collections::HashMap<String, String>;
+    type Vms = std::collections::HashMap<
+        String,
+        std::result::Result<(String, ingress_proxy::Where), String>,
+    >;
+
+    fn maps() -> (Ctrs, Vms) {
+        use ingress_proxy::Where;
+        let mut c = std::collections::HashMap::new();
+        c.insert("ctr".to_string(), "10.1.0.5".to_string());
+        let mut v = std::collections::HashMap::new();
+        v.insert(
+            "ch".to_string(),
+            Ok(("10.1.0.6".to_string(), Where::Holder)),
+        );
+        v.insert(
+            "lv".to_string(),
+            Ok(("192.168.122.9".to_string(), Where::Host)),
+        );
+        v.insert("down".to_string(), Err("it has no IP yet".to_string()));
+        (c, v)
+    }
+
+    #[test]
+    fn a_libvirt_backend_is_served_by_the_host_instance_and_the_rest_by_the_holder() {
+        use ingress_proxy::Where;
+        let (c, v) = maps();
+        assert_eq!(
+            classify("r", &spec_to(&["lv"]), &c, &v).unwrap(),
+            Where::Host
+        );
+        assert_eq!(
+            classify("r", &spec_to(&["ctr", "ch"]), &c, &v).unwrap(),
+            Where::Holder
+        );
+        // an unresolvable backend stays on the holder side: the resolver names WHY
+        assert_eq!(
+            classify("r", &spec_to(&["down"]), &c, &v).unwrap(),
+            Where::Holder
+        );
+    }
+
+    #[test]
+    fn a_document_mixing_both_netns_is_refused_and_names_each_side() {
+        let (c, v) = maps();
+        let e = classify("site", &spec_to(&["ctr", "lv"]), &c, &v)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            e.contains("site") && e.contains("ctr") && e.contains("lv"),
+            "{e}"
+        );
+        assert!(e.contains("Split"), "{e}");
+    }
 
     #[test]
     fn valid_host_rejeita_lixo_e_aceita_dns() {

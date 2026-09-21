@@ -82,6 +82,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         k::NETWORK => cmd::network::spec_with_defaults(doc),
         k::NETWORK_ROUTE => cmd::netroute::spec_with_defaults(doc),
         k::SERVICE => cmd::service::spec_with_defaults(doc),
+        k::IPPOOL => cmd::ippool::spec_with_defaults(doc),
         k::VOLUME => cmd::volume::spec_with_defaults(doc),
         // Secret DOES get a round-trip, and its values are redacted on the way
         // (`secret::spec_with_defaults`). It used to be the one Kind skipped
@@ -399,6 +400,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
         k::SERVICE => Some(crate::cmd::service::SERVICE_SPEC_FIELDS),
+        k::IPPOOL => Some(crate::cmd::ippool::IPPOOL_SPEC_FIELDS),
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
         k::SHARE_VOLUME => Some(crate::cmd::sharevolume::SHAREVOLUME_SPEC_FIELDS),
         k::WORKLOAD => Some(crate::cmd::workload::WORKLOAD_SPEC_FIELDS),
@@ -621,6 +623,8 @@ pub fn load_str(text: &str, label: &str) -> Result<Vec<ManifestDoc>> {
         docs.retain(|d| d.kind != k::DEPENDENCY);
         docs.extend(lowered);
     }
+    // `VirtualMachine.spec.expose` lowers to a synthetic `kind: HTTPRoute` (ADR-0046).
+    let docs = crate::cmd::vm_expose::lower_vm_expose(docs)?;
     // The unknown-field guard, for EVERY document and therefore for every
     // command that reads a manifest — `validate`, `plan`, `apply`, and each
     // group's own `apply`, which all arrive here. See `spec_fields_for` for what
@@ -1449,6 +1453,7 @@ spec: { image: nginx }
                 "{ selector: { matchLabels: { app: web } }, port: 80 }",
                 "Service",
             ),
+            "ipPools" => ("{ addresses: [203.0.113.10] }", "IPPool"),
             "ingress" => ("{ rules: [] }", "Ingress"),
             "firewallPolicies" => ("{ target: c, direction: egress }", "NetworkPolicy"),
             "networkAccessRules" => (

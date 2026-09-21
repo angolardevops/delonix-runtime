@@ -22,6 +22,11 @@ that in the image's metadata, and `vm create` then:
 
 ## Building
 
+Every script below can also be run through the same command as any other image:
+`delonix vm build -f images/<name>/vm.yaml` (see `images/<name>/README.md`). It runs the script
+with an isolated `OUT_DIR`, registers the result for you and removes the scratch directory; the
+scripts themselves stay here, unchanged.
+
 Every script fetches its own media and **verifies it against the vendor's
 published SHA-256** before using it. Pass nothing and you get the pinned version
 below; pass a version to get another one; pass a path to use an ISO you already
@@ -42,6 +47,10 @@ have.
 
 # OpenStack — NOT an appliance; see the section at the end
 ./build-openstack.sh                 # 2026.1 "Gazpacho" on Ubuntu 24.04
+
+# Monitoring (Zabbix + Grafana, pre-wired) — also NOT an appliance
+./build-monitoring.sh                # Zabbix 7.0.30-1 + Grafana 13.2.2 + Prometheus/Loki/NetFlow (r3)
+./verify-monitoring.sh               # prove the logins, every datasource and the starter dashboard
 
 # Another version, or media you already have
 ./build-proxmox.sh pve 9.1-1
@@ -68,6 +77,7 @@ builds — the checksum is what makes that safe.
 | `build-proxmox.sh pdm` | Proxmox Datacenter Manager | 1.1-1 | `pdm-1.1-1.qcow2` |
 | `build-truenas.sh` | TrueNAS SCALE | 25.10.5 | `truenas-25.10.5.qcow2` |
 | `build-openstack.sh` | OpenStack via kolla-ansible 22.1.0 | 2026.1 Gazpacho | `openstack-2026.1-ubuntu-24.04.qcow2` |
+| `build-monitoring.sh` | Zabbix 7.0 LTS + Grafana + Prometheus/Loki + NetFlow stack, pre-wired | Zabbix 7.0.30-1, Grafana 13.2.2, Prometheus 3.13.1 (LTS), Loki 3.7.8, goflow2 2.2.6 | `monitoring-zabbix7.0-grafana13.2.2-r4.qcow2` |
 
 The version is in the output name on purpose: without it, building 9.2 quietly
 overwrites the 9.1 image sitting in the same directory, and both tags are meant
@@ -92,6 +102,7 @@ assumed:
 | OPNsense | the `MIRROR` in `build-opnsense.sh` (dotsrc by default) |
 | TrueNAS SCALE | `download.sys.truenas.net/TrueNAS-SCALE-<train>/<version>/` |
 | OpenStack | `cloud-images.ubuntu.com` for the host OS; `opendev.org` for kolla-ansible; quay.io for the service images |
+| Monitoring | `cloud-images.ubuntu.com` for the host OS; `repo.zabbix.com` for Zabbix; `apt.grafana.com` for Grafana; `grafana.com/api/plugins` for the Zabbix app |
 
 `download.proxmox.com` is **not** where these ISOs live — it serves the apt
 repositories, and none of the four pages links to it. An earlier note in the CI
@@ -126,6 +137,16 @@ reads them back, so a pulled appliance stays an appliance. Without that, the
 image would land on the other side looking like a cloud image and get a seed
 it cannot read.
 
+The monitoring image registers WITHOUT `--appliance` — see "Monitoring" below
+for why it still wants the NoCloud seed:
+
+```bash
+delonix image vm import monitoring-zabbix7.0-grafana13.2.2-r4.qcow2 -t monitoring:7.0-r4 \
+    --distro ubuntu --release 24.04 --default-vcpus 2 --default-memory 4G
+
+delonix image vm push monitoring:7.0-r4 ghcr.io/angolardevops/delonix-vm-appliances:monitoring-7.0-r4
+```
+
 ## Credentials
 
 Every image ships with a **known, public** password — they are in this
@@ -140,6 +161,16 @@ untrusted network as-is.
 | Proxmox Mail Gateway | `root` | `delonix-admin` | `https://<ip>:8006/` |
 | Proxmox Datacenter Manager | `root` | `delonix-admin` | `https://<ip>:8443/` |
 | TrueNAS SCALE | `truenas_admin` | `delonix-admin` | `http://<ip>/` — API at `https://<ip>/api/v2.0` |
+| Monitoring — Zabbix | `Admin` | `delonix-admin` | `http://<ip>/` |
+| Monitoring — Grafana | `admin` | `delonix-admin` | `http://<ip>:3000/` |
+| GLPI | `glpi` | `delonix-admin` | `http://<ip>/` (the vendor's `tech`, `normal` and `post-only` sample accounts are switched off) |
+| Wazuh | `admin` (indexer/dashboard), `wazuh` (API) | **gerada no 1.º arranque** — em `/root/wazuh-passwords.txt` | `https://<ip>/` |
+
+The monitoring image does not ship the vendor's own default (Zabbix's is
+`Admin`/`zabbix`, Grafana's is `admin`/`admin`) — both are reset at build time
+to the same `delonix-admin` this directory already uses everywhere else, so a
+password grepped out of this repository does not also unlock every
+unpatched Zabbix/Grafana on the internet still on its factory default.
 
 Every account above also works on the console. The ports are not a guess: they
 are the `CASES` table of `verify-boot.sh`, which is the port each image was
@@ -240,3 +271,344 @@ Budget: the pull is ~20 GiB, and this workspace measures 3.3 MB/s to the
 mirrors. Over an hour, on a link that never gets faster by being asked twice —
 which is the entire argument for paying it once, here, instead of once per
 deployment.
+
+## Monitoring — Zabbix + Grafana, pre-wired, also not an appliance
+
+`build-monitoring.sh` follows the OpenStack script's shape for the same
+reason: there is no vendor installer here either, just Ubuntu 24.04 with two
+pinned packages installed and wired to each other. It registers WITHOUT
+`--appliance`, for the same reason OpenStack does — it wants the NoCloud seed
+`vm create` builds, because that seed is how the target's hostname and SSH
+key get in.
+
+**"Pre-wired" is a small, precise claim, and it stops exactly where a golden
+image's authority should stop:**
+
+- The Zabbix frontend never shows its setup wizard — `zabbix.conf.php` is
+  written at build time, so a clone answers ready-to-use on `:80`.
+- Grafana already has Zabbix configured as a data source
+  (`/etc/grafana/provisioning/datasources/zabbix.yaml`) the moment it boots,
+  reachable on `:3000`.
+- **What it does NOT decide is which remote network to monitor.** That is a
+  per-deployment choice — SNMP/agent hosts added inside Zabbix, reachability
+  through whatever the VM is attached to (a delonix `--net`, a
+  `kind: NetworkRoute` between two networks, a VPN reached through
+  `kind: Gateway`/a WireGuard overlay). None of that is new mechanism: it is
+  the SDN and IaC primitives this repo already has, aimed at a VM that
+  happens to run Zabbix. A "tenant picks a network and it just works"
+  self-service flow is a real, separate thing to build — on top of this VM,
+  in a platform that has a concept of tenant to hang it off. This engine does
+  not (see `AGENTS.md`, "Identidade e fronteira do motor"), so it is not a
+  `kind:` this repository can own; baking one guess of "the network" into
+  every clone would also be wrong for every clone but one.
+
+**The database password is generated once per build, not shipped as a
+literal, and never printed** — `openssl rand` inside the guest, immediately
+before `CREATE USER`. Unlike the OpenStack image's Keystone/database
+passwords (a real externally-relevant secret the deploy role must generate
+per-target, so the build image never bakes one in), Postgres here listens
+only on `localhost` for a Zabbix server that is the only other thing on the
+machine: one password per build, shared by every clone of that build, has no
+external surface to leak from. What every clone gets instead is the
+`Admin`/`delonix-admin` and `admin`/`delonix-admin` logins in the credentials
+table above — the actual, human-facing secrets — reset from each vendor's
+factory default for the reason already given there.
+
+**Both Zabbix and Grafana packages are `apt-mark hold` at the end of the
+build.** An unattended `apt upgrade` moving the server past the schema
+already imported into Postgres — or Grafana past the plugin API the pinned
+`alexanderzobnin-zabbix-app` build was compiled against — is exactly the
+kind of drift a golden image exists to prevent; the same reasoning the golden
+Kubernetes image already applies to `kubeadm`/`kubelet`/`kubectl`.
+
+### What the monitoring image carries (revision 5: r4 plus a tenant VPN, `monitoring-vpn`)
+
+Revision 1 was Zabbix + Grafana. Revision 2 added the layer an operator needs to
+watch a whole estate — servers, network equipment and workstations — with the
+data sources already provisioned and a starter dashboard already loaded.
+
+| Component | Version | Listens on | Reachable from outside |
+|---|---|---|---|
+| Zabbix server + frontend (PostgreSQL) | 7.0.30-1 | `:80`, trapper `:10051` | yes |
+| Grafana | 13.2.2 | `:3000` | yes |
+| Alloy (syslog receiver + journal reader) | 1.19.2-1 | `:1514` tcp+udp | yes |
+| goflow2 (NetFlow v5/v9, IPFIX, sFlow collector) | 2.2.6 | `:2055` udp, `:6343` udp | yes |
+| Prometheus | 3.13.1 (LTS line) | `127.0.0.1:9090` | no — through Grafana |
+| Alertmanager | 0.34.1 | `127.0.0.1:9093` | no |
+| blackbox_exporter | 0.28.0 | `127.0.0.1:9115` | no |
+| node_exporter | 1.12.1 | `127.0.0.1:9100` | no |
+| Loki | 3.7.8 | `127.0.0.1:3100` | no |
+| WireGuard hub (`monitoring-vpn`) | wireguard-tools, `wg0` `10.99.0.1/24` | `:51820` udp | yes, once a host is added |
+
+#### Monitoring a tenant's external hosts over a VPN
+
+One appliance is one tenant, so there is one WireGuard VPN and one `/24`
+(`10.99.0.0/24`, hub at `.1`). Nothing about it is in the image: keys, peer list
+and the agent PSK are generated on the VM the first time they are needed.
+
+```bash
+sudo monitoring-vpn add web-01 --endpoint vpn.example.com   # prints the client kit
+sudo monitoring-vpn ls                                      # hosts + last handshake
+sudo monitoring-vpn rm web-01
+```
+
+The kit holds the host's `wg0.conf` and the Zabbix agent lines (PSK included).
+The host then appears in Zabbix by auto-registration — group `VPN hosts`,
+template `Linux by Zabbix agent active`, interface = its VPN address — with no
+console step. The tunnel reaches only the hub address: it does not route the
+host's other traffic and does not join hosts to each other. `--endpoint` is the
+address the *outside* uses to reach this VM; without it the VM's own address is
+used and the command says so.
+
+Proven on a running appliance: a host in a separate network namespace, given only
+the printed kit, completed the handshake, was created in Zabbix by itself with the
+template linked, and returned `agent.ping = 1`. Not proven: a real host on the
+public internet through NAT, agent packages other than Ubuntu's `zabbix-agent2`,
+and the `.qcow2` rebuilt as revision 5 (the helper was run on revision 4 with
+`wireguard-tools` installed by hand).
+
+Everything not in the "yes" rows is loopback-only on purpose: Grafana reaches it,
+so the extra services add no external surface. It wants **4 GiB** (2 was enough
+for revision 1); metrics are kept 30 days or 6 GB, logs 30 days. Loki's
+anonymous usage reporting is switched off.
+
+**Data sources, all provisioned, all proved by `verify-monitoring.sh`:**
+Zabbix (API **and** a direct PostgreSQL connection), Zabbix PostgreSQL,
+Prometheus (default), Loki, Alertmanager. The PostgreSQL role Grafana uses,
+`grafana_ro`, is granted `SELECT` on the tables dashboards need — and **not** on
+`users` or `config`, so anyone allowed to query that data source cannot read
+Zabbix's password hashes. That is a check, not a claim: the verifier tries the
+read and requires `permission denied`.
+
+**Watching something is dropping a file, not editing a config.** Prometheus
+re-reads `/etc/prometheus/targets/` without a restart:
+
+```yaml
+# /etc/prometheus/targets/icmp-office.yml  -- ping
+- targets: ['10.10.0.1', '10.10.0.2']
+  labels: {site: office}
+# http-*.yml  -> http_2xx probes      tcp-*.yml -> tcp_connect probes
+# node-*.yml  -> a node_exporter to scrape (host:9100)
+```
+
+The image ships with real self-probes (ICMP, HTTP, TCP against itself) so a
+fresh boot shows data instead of an empty dashboard. **Logs** arrive by pointing
+`rsyslog`, a switch or a firewall at `<this-vm>:1514` (RFC 5424, TCP or UDP);
+they land in Loki labelled `job=syslog` plus `host`, `app` and `severity` taken
+from the message header. The VM's own journal is read as `job=journal`. Which
+hosts to watch, and how they reach this VM (a `--net`, a `kind: NetworkRoute`, a
+tunnel), stays the operator's decision — see the section above.
+
+**Alertmanager is deliberately inert.** It receives alerts (a target down for two
+minutes, a failed probe, a disk predicted to fill within 24 h) and Grafana shows
+them, but it ships no receiver: a guessed webhook or e-mail address would either
+notify a stranger or drop pages silently. Add your own receiver in
+`/etc/alertmanager/alertmanager.yml`.
+
+**What `verify-monitoring.sh` measured that a green boot would not have:** the
+Alloy journal source overwrote the `job` label the README promised (a query
+written from this document matched nothing), and the first version of its own
+Loki check grepped for the word `values`, which is in the schema of an empty
+answer too — a check that could not fail. Both are fixed; the syslog check now
+sends a real message over each transport and requires it back with its labels.
+
+**NetFlow, IPFIX and sFlow (revision 3).** Point a router, switch or firewall's
+flow export at `<this-vm>:2055` (NetFlow v5/v9 **and** IPFIX) or `:6343` (sFlow).
+Records land in Loki as `job=netflow`; the dashboard ranks the top sources by
+bytes over five minutes. Two things worth knowing before you trust the numbers:
+
+- **IPFIX goes to 2055, not to its registered port 4739.** goflow2 panics at
+  start-up with two `netflow://` listeners (measured — each registers the same
+  HTTP handler), and one listener already decodes all three versions. Most
+  exporters let you choose the port.
+- **`goflow2_flow_traffic_bytes_total` is not traffic.** It counts the size of the
+  *export packets* (216 bytes for three v5 datagrams). It is the collector's
+  telemetry and feeds the "active exporters" panel; the volume of traffic is the
+  `bytes` field of each record, which is what the top-talkers panel sums.
+
+Only the exporter and the protocol become Loki labels — addresses stay inside the
+JSON and are read with `| json`, because a label per address would create a
+stream per host. That is also the honest limit of this design: **Loki is not a
+flow database.** It comfortably serves dozens of exporters; at thousands of flows
+per second the right tool is a columnar store such as Akvorado (AGPL, ClickHouse),
+which belongs in an image of its own. What was proved with real packets is NetFlow
+v5 only; v9, IPFIX and sFlow are decoded by the same collector upstream but were
+not exercised here.
+
+## Carbonio CE — the mail image, and why it is not Zimbra
+
+`build-carbonio.sh` builds the open-source mail and collaboration server that
+Zextras maintains as the successor of Zimbra OSE. It replaces the Zimbra image
+that was asked for, for three facts found while researching it: Zimbra OSE has no
+official binary for Ubuntu 24.04 (the only one is a third party's, behind a
+registration form, and beta on that release); the OSE line is described by Zextras
+as ended in 2023; and its binary EULA governs redistribution, which could not be
+confirmed as allowing a public registry. Carbonio CE is AGPL, has an official
+signed repository for Ubuntu 24.04, and its packages can be pinned.
+
+**It is deliberately PRE-bootstrap.** `carbonio-bootstrap` asks for the machine's
+FQDN, address, mail domain and admin password — none of which exist at build time.
+What is baked in is everything machine-independent: the 28 packages the vendor's
+manual-installation guide names, each **pinned to the exact version the repository
+served and held** so an unattended upgrade cannot move one past the schema its
+database bootstrap expects; PostgreSQL 16; and the repository, whose signing key
+is checked against the fingerprint the vendor documents rather than trusted
+because a keyserver returned it.
+
+**Two deliberate departures from the vendor's guide, both about PostgreSQL:**
+
+- The guide sets `listen_addresses='*'` and a `host all all 0.0.0.0/0 md5` line
+  for a **superuser** role. That is needed only when Carbonio is split across
+  servers; a single-server install talks to `127.0.0.1`, so here PostgreSQL stays
+  on loopback and `verify-carbonio.sh` fails if the world-open line appears.
+- The guide has you type a database password. `carbonio-prepare-db` generates one
+  per installation, keeps it in `/root/.carbonio-db-password` (mode 0600), and is
+  safe to run twice. It is never in the image.
+
+**To finish the installation on the target, one command:**
+
+```bash
+sudo carbonio-finish-install --fqdn mail.example.com      # [--ip A.B.C.D] [--admin-password P]
+```
+
+It sets the identity, prepares the database, runs `carbonio-bootstrap`
+unattended from a config file, sets up service-discover, creates the sidecar
+tokens, initialises the four service schemas, enables the video server, restarts
+the proxy on its final configuration, and **logs in as the admin over HTTPS before
+it says it is done**. Passwords you do not give are generated and saved 0600 under
+`/root` (`.carbonio-admin-password`, `.carbonio-cluster-password`); the admin
+account is `zextras@<domain>`. It takes about 8 minutes and is safe to run twice
+(the second run reports it is already finished; `--force` overrides).
+
+The order is not the vendor guide's order, and the difference is the reason the
+helper exists. Each of these was hit on a real VM before it was written down:
+
+- `carbonio-bootstrap` starts every service and **blocks waiting for
+  service-discover**, which cannot start until `service-discover setup` has run —
+  but that command **refuses until bootstrap has written the LDAP configuration**.
+  So the two run side by side: bootstrap in the background, the setup as soon as
+  LDAP is listening.
+- The four `carbonio-*-db-bootstrap` commands must run **after** the first
+  `pending-setups` pass. Before it there is no Consul token, and they print
+  "empty string is not a valid password, clearing password" and carry on — an
+  empty database password, with exit status 0.
+- The video server must be running before its pending-setup, which prints
+  `Error! No key exists` and then succeeds; that line is informational, not a
+  failure.
+- The proxy that started before the pending setups is up but **not listening on
+  443**; it needs a restart on the final configuration.
+
+The steps by hand, for reading or for a split install (the address is an example):
+
+```bash
+hostnamectl set-hostname mail.example.com
+echo -e "127.0.0.1 localhost\n172.16.0.10 mail.example.com mail" > /etc/hosts
+carbonio-prepare-db
+carbonio-bootstrap &                                  # blocks on services until:
+service-discover setup --first-instance --password P 172.16.0.10   # needs a tty
+SETUP_CONSUL_TOKEN=$(service-discover bootstrap-token --password P) pending-setups -a
+for s in files tasks ws-collaboration message-dispatcher; do
+  PGPASSWORD=$(cat /root/.carbonio-db-password) carbonio-$s-db-bootstrap carbonio_adm 127.0.0.1
+done
+systemctl enable --now carbonio-videoserver.service   # then set nat_1_1_mapping in /etc/janus/janus.jcfg
+SETUP_CONSUL_TOKEN=... pending-setups -a              # second pass
+systemctl restart carbonio-nginx
+```
+
+The vendor asks for **4 cores, 16 GiB of RAM and 50 GB of disk** as a minimum, and
+DNS records (A and MX) for the mail domain. Ports to open: 25, 80, 110, 143, 443,
+465, 587, 993, 995, 6071, 5222, and UDP 20000-40000 for the video server. About 22
+Carbonio services start at boot on the unbootstrapped image, which is normal for
+the vendor's own install and is why a 4 GiB test VM cannot carry them.
+
+**What `verify-carbonio.sh` proves, and what it cannot.** It boots the image and
+checks, from inside the guest: all 28 packages at their pinned versions and held;
+PostgreSQL on loopback only; the helper creating a working role with a 0600
+password file and changing nothing on a second run; and — read from the disk
+*before* boot, because cloud-init renames the guest by then — that the image does
+not carry the build VM's hostname. That last check exists because the first
+version of it could not fail: it passed against an image that still said
+`carbonio-build`. **It does not prove that `carbonio-bootstrap` completes, that
+mail flows, or that the web client and admin panel work.** Those need a real
+deployment with an FQDN and 16 GiB, and the verifier prints that instead of a
+bare "passed".
+
+## GLPI 11 + GLPI Agent — asset inventory and ITSM, also not an appliance
+
+`build-glpi.sh` → `verify-glpi.sh`, same shape as the monitoring image: a cloud
+image, one provisioning script run once inside QEMU, a guest-reported verdict.
+
+| Component | Version | Listens on |
+|---|---|---|
+| GLPI (release tarball, sha256 checked against GitHub's digest) | 11.0.9 | `:80` (nginx, document root `public/`) |
+| GLPI Agent (`.deb`, sha256 checked, on hold) | 1.19 | status page on `127.0.0.1:62354` only |
+| MariaDB, PHP-FPM 8.3, cron | Ubuntu 24.04 | MariaDB on loopback only |
+
+GLPI's scheduled tasks run from `/etc/cron.d/glpi`. The agent is pointed at the
+local GLPI and native inventory is switched on, so a fresh VM appears in
+*Assets → Computers* by itself. To inventory other machines, install the agent
+there with `server = http://<this-vm>/front/inventory.php`.
+
+Two things a deployer should know. The database password and GLPI's encryption
+key (`config/glpicrypt.key`) are generated at **build** time, so every clone of
+one image shares them — the database only listens on loopback, but if you store
+secrets in GLPI (LDAP or mail-collector passwords) rebuild the image or re-key
+it first. And the installer's four sample accounts use the vendor's well-known
+passwords; here `glpi` is `delonix-admin` and the other three are inactive.
+
+`verify-glpi.sh` (18 checks) boots the image and proves: the schema is 11.0.9;
+the login page answers; `config/config_db.php` is **not** served; the database is
+loopback-only; GLPI's own `system:check_requirements` passes; `glpi/delonix-admin`
+verifies and `glpi/glpi` does not; the agent is 1.19 and held; and — the point of
+shipping the agent — the machine inventoried itself into its own GLPI (1 computer).
+It also caught two defects in the first build that a green run would have hidden:
+the inventory switch was set under the wrong name (`enable_inventory`; the real
+one is `enabled_inventory`), which made GLPI answer the agent with 403, and the
+image still carried the build VM's hostname.
+
+**Not proven:** the web UI in a browser, LDAP or mail-collector integrations, a
+second machine reporting to this GLPI, and upgrades from a database created by
+another GLPI version.
+
+## Wazuh 4.14.7 — SIEM/XDR, também não é uma appliance
+
+`build-wazuh.sh` → `verify-wazuh.sh`. Manager, indexer, dashboard e filebeat
+numa só VM, todos em 4.14.7-1 (filebeat 7.10.2-2), fixados e em *hold*. A chave
+de assinatura do repositório tem de bater com a impressão digital documentada, e
+cada artefacto auxiliar do fabricante é verificado por sha256.
+
+**Esta imagem não leva nenhum segredo, e é a diferença que importa.** O
+instalador do Wazuh cria uma CA privada e logins por omissão; uma imagem que os
+trouxesse daria a todos os clones a mesma CA e a mesma password de admin — num
+produto de segurança, o pior default possível. O `wazuh-first-boot` (uma unit
+`oneshot`) gera na própria VM, no primeiro arranque: a CA e os certificados, o
+par TLS do `authd`, as passwords (ferramenta do fabricante; ficam em
+`/root/wazuh-passwords.txt`, modo 600) e a password de registo de agentes
+(`/root/wazuh-agent-enrolment-password`). Demora alguns minutos.
+
+| Porta | Serviço | Exposição |
+|---|---|---|
+| 443 | dashboard | rede |
+| 1514 | eventos dos agentes | rede |
+| 1515 | registo de agentes (com password) | rede |
+| 55000 | API do manager | rede |
+| 9200 | indexer | **só loopback** |
+
+Requisitos: 4 vCPU e 8 GiB (o *heap* do indexer está fixado a 2 GiB).
+
+`verify-wazuh.sh` (23 checks) prova, contra o disco ANTES de arrancar, que a
+imagem não traz certificados, passwords nem `authd.pass`; e, depois do primeiro
+arranque, que os quatro serviços estão activos, que o indexer só escuta em
+loopback, que `admin/admin` e `wazuh/wazuh` são recusados e as passwords geradas
+aceites, que o registo de um agente com password errada é recusado, e — o ponto
+de um SIEM — que um evento de autenticação falhada vira um alerta no indexer.
+Apanhou três defeitos da primeira versão: a ferramenta de passwords só aceita
+`-au/-ap` com `-A` (senão imprime o help e o 1.º arranque falha), o manager não
+arranca sem o par TLS do `authd`, e um check de loopback que não reconhecia
+`[::ffff:127.0.0.1]`.
+
+**Não provado:** um agente real a registar-se e a reportar, a interface no
+browser, os feeds de vulnerabilidades (precisam de internet) e o modo cluster.
+Os certificados são emitidos para `127.0.0.1`: para agentes noutras máquinas
+verificarem o dashboard ou o manager pelo nome, é preciso regenerá-los com o
+endereço real.

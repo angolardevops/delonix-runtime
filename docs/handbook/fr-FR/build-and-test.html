@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a class="on" aria-current="page" href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">15</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">16</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">17</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">18</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">19</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">20</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">21</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">22</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Préparer et compiler</p>
-<h1 id="clone-build-and-test">Cloner, compiler et tester</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/build-and-test.html">Lire la page en anglais</a></span></div><h1 id="cloner-compiler-et-tester">Cloner, compiler et tester</h1>
 <p><strong>Avant de lire :</strong> <a href="environment.html">Préparer votre environnement</a> : la toolchain épinglée, <code>protoc</code>, et un hôte qui passe ses vérifications.</p>
 <p>Cette page suppose l’hôte décrit dans <a href="environment.html">Préparer votre environnement</a> : la toolchain
 Rust épinglée et <code>protoc</code>. Après elle, vous saurez compiler et installer votre arborescence, exécuter
@@ -219,12 +219,12 @@ chaque gate de CI localement, et exécuter la batterie E2E et le harnais de chao
 répertoire de travail séparé avec sa propre branche, un par tâche, créé à partir de <code>origin/main</code>
 (la commande se trouve dans <a href="start-here.html#2-open-a-worktree-from-originmain">Commencer ici, étape 2</a> ;
 les règles se trouvent dans <a href="contributing-workflow.html#one-worktree-per-task">Flux de contribution</a>).</p>
-<h2 id="clone">Cloner<a class="hanchor" href="#clone" aria-label="#">#</a></h2>
+<h2 id="cloner">Cloner<a class="hanchor" href="#cloner" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">git clone https://github.com/angolardevops/delonix-runtime.git
 cd delonix-runtime
 git fetch --tags origin      # several gates compare against the release tags
 </code></pre></div>
-<h2 id="build">Compiler<a class="hanchor" href="#build" aria-label="#">#</a></h2>
+<h2 id="compiler">Compiler<a class="hanchor" href="#compiler" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo build --workspace                    # every crate and every binary
 cargo build -p delonix-runtime-bin         # just the `delonix` CLI
 cargo build --release -p delonix-runtime-bin   # what the docs generator and the CLI gates use
@@ -272,7 +272,7 @@ y atterrissent au lieu de <code>target/</code>.</p>
   les artefacts l’un de l’autre. Un répertoire target par worktree est plus lent la première fois et prévisible
   ensuite.</li>
 </ul>
-<h2 id="installing-your-build-locally">Installer votre build localement<a class="hanchor" href="#installing-your-build-locally" aria-label="#">#</a></h2>
+<h2 id="installer-votre-build-localement">Installer votre build localement<a class="hanchor" href="#installer-votre-build-localement" aria-label="#">#</a></h2>
 <p>La plupart des modifications n’ont jamais besoin d’un build installé : exécutez <code>./target/debug/delonix</code> depuis votre worktree. N’installez
 que lorsque vous avez besoin d’un chemin stable — une unité systemd, un script dans un autre shell, un kubelet qui parle à
 <code>delonix-cri</code>. Avant et après l’installation, vérifiez <strong>quel build</strong> vous exécutez :</p>
@@ -282,7 +282,7 @@ command -v delonix                  # which `delonix` your shell would run inste
 <p>La ligne <code>commit:</code> provient de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/build.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/build.rs</code></a> (<code>DELONIX_GIT_HASH</code>,
 <code>DELONIX_GIT_SINCE</code>). Entre deux releases, chaque build porte le même numéro de version ; le commit
 est donc le seul moyen de distinguer votre build de celui publié.</p>
-<h3 id="how-delonix-finds-its-server-binaries">Comment <code>delonix</code> trouve ses binaires serveur<a class="hanchor" href="#how-delonix-finds-its-server-binaries" aria-label="#">#</a></h3>
+<h3 id="comment-delonix-trouve-ses-binaires-serveur">Comment <code>delonix</code> trouve ses binaires serveur<a class="hanchor" href="#comment-delonix-trouve-ses-binaires-serveur" aria-label="#">#</a></h3>
 <p><code>delonix serve cri</code>, <code>delonix serve api</code> et <code>delonix mcp</code> ne contiennent pas les serveurs : ils font un <code>exec</code> de
 <code>delonix-cri</code>, <code>delonix-mgmt</code> et <code>delonix-mcp</code> (<code>exec_server</code> dans
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs</code></a>). La recherche est la suivante :</p>
@@ -303,7 +303,7 @@ checkout des sources, et seulement ensuite un téléchargement de l’asset publ
 <p>Compilez les quatre avant de les installer :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin -p delonix-cri -p delonix-mgmt-bin -p delonix-mcp-bin
 </code></pre></div>
-<h3 id="option-a-run-it-from-the-worktree-safest">Option A — l’exécuter depuis le worktree (le plus sûr)<a class="hanchor" href="#option-a-run-it-from-the-worktree-safest" aria-label="#">#</a></h3>
+<h3 id="option-a-lexecuter-depuis-le-worktree-le-plus-sur">Option A — l’exécuter depuis le worktree (le plus sûr)<a class="hanchor" href="#option-a-lexecuter-depuis-le-worktree-le-plus-sur" aria-label="#">#</a></h3>
 <p>Rien n’est copié ; rien en dehors de votre checkout ne peut donc le prendre par accident :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">alias delonix-dev=&quot;$PWD/target/release/delonix&quot;
 delonix-dev --version
@@ -311,7 +311,7 @@ delonix-dev --version
 <p>Les serveurs sont trouvés parce qu’ils se trouvent à côté de lui dans <code>target/release/</code>. Sur Ubuntu 23.10+, ce chemin
 a besoin de son propre profil AppArmor (voir
 <a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">AppArmor</a>).</p>
-<h3 id="option-b-install-for-your-user-in-localbin">Option B — installer pour votre utilisateur dans <code>~/.local/bin</code><a class="hanchor" href="#option-b-install-for-your-user-in-localbin" aria-label="#">#</a></h3>
+<h3 id="option-b-installer-pour-votre-utilisateur-dans-localbin">Option B — installer pour votre utilisateur dans <code>~/.local/bin</code><a class="hanchor" href="#option-b-installer-pour-votre-utilisateur-dans-localbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">install -d ~/.local/bin
 install -m 0755 target/release/delonix target/release/delonix-cri \
   target/release/delonix-mgmt target/release/delonix-mcp ~/.local/bin/
@@ -337,7 +337,7 @@ binaire. Pour votre propre build, générez-les à partir du binaire si vous les
 delonix completion shell bash &gt; ~/.local/share/bash-completion/completions/delonix
 delonix man --dir ~/.local/share/man
 </code></pre></div>
-<h3 id="option-c-system-install-in-usrlocalbin">Option C — installation système dans <code>/usr/local/bin</code><a class="hanchor" href="#option-c-system-install-in-usrlocalbin" aria-label="#">#</a></h3>
+<h3 id="option-c-installation-systeme-dans-usrlocalbin">Option C — installation système dans <code>/usr/local/bin</code><a class="hanchor" href="#option-c-installation-systeme-dans-usrlocalbin" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">sudo install -m 0755 target/release/delonix target/release/delonix-cri \
   target/release/delonix-mgmt target/release/delonix-mcp /usr/local/bin/
 </code></pre></div>
@@ -357,7 +357,7 @@ simple commande :</p>
 ls ~/.config/systemd/user/delonix-boot-* /etc/systemd/system/delonix-* 2&gt;/dev/null
 pgrep -a delonix
 </code></pre></div>
-<h3 id="preparing-the-host">Préparer l’hôte<a class="hanchor" href="#preparing-the-host" aria-label="#">#</a></h3>
+<h3 id="preparer-lhote">Préparer l’hôte<a class="hanchor" href="#preparer-lhote" aria-label="#">#</a></h3>
 <p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> fait deux travaux distincts. Seul le premier concerne le binaire :</p>
 <div class="tablewrap"><table>
 <thead>
@@ -433,12 +433,12 @@ machine dotée d’une installation publiée. Le script utilise <code>sudo</code
 delonix system info       # state root, rootless, cgroup delegation, network infra
 </code></pre></div>
 <p>Voir <a href="environment.html#diagnosing-the-host">Diagnostiquer l’hôte</a> pour la signification de chaque vérification.</p>
-<h3 id="use-an-isolated-state-root">Utiliser une racine d’état isolée<a class="hanchor" href="#use-an-isolated-state-root" aria-label="#">#</a></h3>
+<h3 id="utiliser-une-racine-detat-isolee">Utiliser une racine d’état isolée<a class="hanchor" href="#utiliser-une-racine-detat-isolee" aria-label="#">#</a></h3>
 <p>Un build installé utilise par défaut votre racine d’état <strong>réelle</strong> : les mêmes containers, réseaux et
 volumes que la release. Exportez d’abord <code>DELONIX_ROOT</code> et <code>DELONIX_NET_RUNTIME_DIR</code> (voir
 <a href="#isolating-the-engines-state">Isoler l’état du moteur</a>), et consultez
 <a href="environment-variables.html">Variables d’environnement</a> pour toutes les autres variables que lit votre build.</p>
-<h3 id="uninstall-and-roll-back">Désinstaller et revenir en arrière<a class="hanchor" href="#uninstall-and-roll-back" aria-label="#">#</a></h3>
+<h3 id="desinstaller-et-revenir-en-arriere">Désinstaller et revenir en arrière<a class="hanchor" href="#desinstaller-et-revenir-en-arriere" aria-label="#">#</a></h3>
 <p>Il n’existe pas de flag de désinstallation dans <code>install.sh</code>. Supprimez ce que vous avez copié :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">rm -f ~/.local/bin/delonix ~/.local/bin/delonix-cri ~/.local/bin/delonix-mgmt ~/.local/bin/delonix-mcp
 hash -r
@@ -451,7 +451,7 @@ curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/down
 </code></pre></div>
 <p>Les fichiers de complétion et les pages de manuel générés à la main ne sont supprimés par aucune de ces deux étapes. Terminez par
 <code>delonix --version</code> pour confirmer le commit sur lequel vous êtes revenu.</p>
-<h2 id="run-the-tests">Exécuter les tests<a class="hanchor" href="#run-the-tests" aria-label="#">#</a></h2>
+<h2 id="executer-les-tests">Exécuter les tests<a class="hanchor" href="#executer-les-tests" aria-label="#">#</a></h2>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">cargo test --workspace                       # the whole suite
 cargo test -p delonix-sdn                    # one crate
 cargo test -p delonix-stack -- reconcile       # tests whose path contains &quot;reconcile&quot;
@@ -466,7 +466,7 @@ que sur une machine qui vous appartient :</p>
 <p>Un <code>cargo test</code> vert prouve la logique pure. Il ne prouve <strong>pas</strong> qu’une modification des namespaces,
 des cgroups, du holder réseau ou du démarrage des VM fonctionne — cela exige une exécution réelle (voir
 <a href="#end-to-end-battery-scriptse2esh">Batterie de bout en bout</a> et <a href="#chaos-harness-scriptschaossh">Harnais de chaos</a>).</p>
-<h2 id="the-gates-ci-runs">Les gates exécutés par la CI<a class="hanchor" href="#the-gates-ci-runs" aria-label="#">#</a></h2>
+<h2 id="les-gates-executes-par-la-ci">Les gates exécutés par la CI<a class="hanchor" href="#les-gates-executes-par-la-ci" aria-label="#">#</a></h2>
 <!-- dev-docs:begin ci-gates -->
 <div class="tablewrap"><table>
 <thead>
@@ -609,7 +609,7 @@ pages de manuel (<code>delonix man --dir &lt;dir&gt; --index</code>) et les vér
 <p>Workflows séparés, non requis à chaque modification : <code>chaos.yml</code> exécute le harnais de chaos sur un
 runner propre (et signale <code>skipped</code> lorsque le runner bloque les user namespaces), <code>release.yml</code> publie un
 tag, et <code>vm-image.yml</code> / <code>vm-appliances.yml</code> construisent des images de VM.</p>
-<h2 id="isolating-the-engines-state">Isoler l’état du moteur<a class="hanchor" href="#isolating-the-engines-state" aria-label="#">#</a></h2>
+<h2 id="isoler-letat-du-moteur">Isoler l’état du moteur<a class="hanchor" href="#isoler-letat-du-moteur" aria-label="#">#</a></h2>
 <p>Tout ce qui va au-delà de <code>--help</code> touche l’état du moteur. Par défaut, c’est <strong>votre état réel</strong> : vos
 containers, réseaux, volumes et le holder réseau. Avant d’exécuter le moteur pour tester —
 à la main, via <code>e2e.sh</code>, ou via n’importe quel script — faites pointer <strong>les deux</strong> racines d’état vers un
@@ -635,7 +635,7 @@ le chemin du socket court et sous votre contrôle, et c’est ce que font <a cla
 <p>Lorsque vous avez terminé, démontez l’infrastructure réseau isolée avec les deux mêmes variables exportées :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">./target/debug/delonix net netns down
 </code></pre></div>
-<h2 id="end-to-end-battery-scriptse2esh">Batterie de bout en bout (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)<a class="hanchor" href="#end-to-end-battery-scriptse2esh" aria-label="#">#</a></h2>
+<h2 id="batterie-de-bout-en-bout-scriptse2esh">Batterie de bout en bout (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>)<a class="hanchor" href="#batterie-de-bout-en-bout-scriptse2esh" aria-label="#">#</a></h2>
 <p><code>e2e.sh</code> exécute la CLI contre le vrai noyau : le <code>--help</code> de chaque feuille, plus des exécutions réelles d’une
 grande partie de la surface, et affiche un rapport PASS/FAIL/SKIP/XFAIL (détail JSONL dans
 <code>$OUT/results.jsonl</code>, par défaut <code>OUT=/tmp/delonix-e2e</code>).</p>
@@ -654,7 +654,7 @@ grande partie de la surface, et affiche un rapport PASS/FAIL/SKIP/XFAIL (détail
 <li>Une exécution verte signifie que le <code>--help</code> de chaque feuille a été vérifié et que <em>certaines</em> feuilles ont été exécutées.
   Lisez l’en-tête du script pour savoir ce qui est exécuté et ce qui ne l’est pas.</li>
 </ul>
-<h2 id="chaos-harness-scriptschaossh">Harnais de chaos (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)<a class="hanchor" href="#chaos-harness-scriptschaossh" aria-label="#">#</a></h2>
+<h2 id="harnais-de-chaos-scriptschaossh">Harnais de chaos (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a>)<a class="hanchor" href="#harnais-de-chaos-scriptschaossh" aria-label="#">#</a></h2>
 <p>Le harnais de chaos casse volontairement un moteur en cours d’exécution — tuer le holder, remplir le disque,
 attaches concurrents, applies partiels — et indique s’il s’est dégradé de la manière qu’il promet.</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">scripts/chaos.sh                        # every scenario, ./target/debug/delonix
@@ -684,23 +684,23 @@ scripts/chaos.sh --clean                # tear the kept sandbox down
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#clone">Cloner</a></li>
-<li><a href="#build">Compiler</a></li>
-<li><a href="#installing-your-build-locally">Installer votre build localement</a><ul>
-<li><a href="#how-delonix-finds-its-server-binaries">Comment delonix trouve ses binaires serveur</a></li>
-<li><a href="#option-a-run-it-from-the-worktree-safest">Option A — l’exécuter depuis le worktree (le plus sûr)</a></li>
-<li><a href="#option-b-install-for-your-user-in-localbin">Option B — installer pour votre utilisateur dans ~/.local/bin</a></li>
-<li><a href="#option-c-system-install-in-usrlocalbin">Option C — installation système dans /usr/local/bin</a></li>
-<li><a href="#preparing-the-host">Préparer l’hôte</a></li>
-<li><a href="#use-an-isolated-state-root">Utiliser une racine d’état isolée</a></li>
-<li><a href="#uninstall-and-roll-back">Désinstaller et revenir en arrière</a></li>
+<li><a href="#cloner">Cloner</a></li>
+<li><a href="#compiler">Compiler</a></li>
+<li><a href="#installer-votre-build-localement">Installer votre build localement</a><ul>
+<li><a href="#comment-delonix-trouve-ses-binaires-serveur">Comment delonix trouve ses binaires serveur</a></li>
+<li><a href="#option-a-lexecuter-depuis-le-worktree-le-plus-sur">Option A — l’exécuter depuis le worktree (le plus sûr)</a></li>
+<li><a href="#option-b-installer-pour-votre-utilisateur-dans-localbin">Option B — installer pour votre utilisateur dans ~/.local/bin</a></li>
+<li><a href="#option-c-installation-systeme-dans-usrlocalbin">Option C — installation système dans /usr/local/bin</a></li>
+<li><a href="#preparer-lhote">Préparer l’hôte</a></li>
+<li><a href="#utiliser-une-racine-detat-isolee">Utiliser une racine d’état isolée</a></li>
+<li><a href="#desinstaller-et-revenir-en-arriere">Désinstaller et revenir en arrière</a></li>
 </ul>
 </li>
-<li><a href="#run-the-tests">Exécuter les tests</a></li>
-<li><a href="#the-gates-ci-runs">Les gates exécutés par la CI</a></li>
-<li><a href="#isolating-the-engines-state">Isoler l’état du moteur</a></li>
-<li><a href="#end-to-end-battery-scriptse2esh">Batterie de bout en bout (scripts/e2e.sh)</a></li>
-<li><a href="#chaos-harness-scriptschaossh">Harnais de chaos (scripts/chaos.sh)</a></li>
+<li><a href="#executer-les-tests">Exécuter les tests</a></li>
+<li><a href="#les-gates-executes-par-la-ci">Les gates exécutés par la CI</a></li>
+<li><a href="#isoler-letat-du-moteur">Isoler l’état du moteur</a></li>
+<li><a href="#batterie-de-bout-en-bout-scriptse2esh">Batterie de bout en bout (scripts/e2e.sh)</a></li>
+<li><a href="#harnais-de-chaos-scriptschaossh">Harnais de chaos (scripts/chaos.sh)</a></li>
 </ul>
 </div>
 </aside>

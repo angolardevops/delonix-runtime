@@ -134,6 +134,11 @@ pub(crate) struct VmSpec {
     /// Static IP (libvirt `nat` mode): DHCP reservation on the libvirt network.
     #[serde(default)]
     ip: Option<String>,
+    /// HTTP/S services listening inside the guest, published by name (ADR-0046).
+    /// Lowered at load into a synthetic `kind: HTTPRoute` named `<vm>-expose`; the
+    /// key never reaches the VM apply. See [`super::vm_expose`].
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    expose: Vec<super::vm_expose::VmExposeSpec>,
 
     // --- Advanced libvirt knobs (libvirt backend) — full XML parity ---------
     /// Machine type (default `q35`).
@@ -227,6 +232,7 @@ struct VmVolumeSpec {
 /// for the unknown-field warning. Kept aligned with `VmSpec` by the
 /// test `manifest::tests::examples_nao_tem_campos_desconhecidos`.
 pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
+    "expose",
     "disk",
     "build",
     "vcpus",
@@ -665,6 +671,8 @@ pub enum VmCmd {
         #[arg(long)]
         compress: bool,
     },
+    /// Build a VM image (qcow2) from a `vm.yaml`, a `VMfile`, or the golden recipe.
+    Build(super::vmimage::BuildArgs),
     /// Get or set the default VM backend.
     ///
     /// Used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND`
@@ -2337,6 +2345,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             let store = super::vmimage::VmImageStore::open(super::util::state_root())?;
             super::vmimage::cmd_convert(&store, &source, to, output, compress)
         }
+        VmCmd::Build(args) => super::vmimage::run(super::vmimage::VmImageCmd::Build(args)),
         VmCmd::DefaultBackend { set, clear } => {
             if clear {
                 delonix_vm::clear_default_backend(&base)?;
@@ -2399,6 +2408,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     })
                     .collect()
             };
+            let svc_index = super::svc::SvcIndex::load();
             if output == super::output::OutputFormat::Json {
                 let rows: Vec<VmLsRow> = filter(delonix_vm::list(&base)?)
                     .into_iter()
@@ -2417,6 +2427,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                         created_unix: vm.created_unix,
                         // The probe does live network I/O — only when --ports (like the column).
                         ports_open: ports.then(|| fmt_open_ports(vm.ip.as_deref())),
+                        services: svc_index.rows(&vm.name, &vm.namespace, vm.ip.as_deref()),
                     })
                     .collect();
                 return output::print_json(&rows);
@@ -2434,6 +2445,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 "MEMORY",
                 "STATUS",
                 "IP",
+                "SVC",
                 "AGE",
                 "UPTIME",
                 "NAMESPACE",
@@ -2455,6 +2467,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     vm.memory,
                     fmt_vm_status(&vm.status),
                     vm.ip.clone().unwrap_or_else(|| "<none>".into()),
+                    super::svc::cell(&svc_index.rows(&vm.name, &vm.namespace, vm.ip.as_deref())),
                     output::fmt_age(vm.created_unix),
                     fmt_vm_uptime(vm.started_unix),
                     // `default` is what every record that never asked for a
@@ -2791,6 +2804,9 @@ struct VmLsRow {
     created_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
     ports_open: Option<String>,
+    /// What a browser can open for this VM (ADR-0048); absent when nothing is.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    services: Vec<super::svc::SvcRow>,
 }
 
 /// IMAGE column: the base disk's file stem (`…/truenas-scale_25.10.qcow2` →
@@ -3990,6 +4006,10 @@ fn describe_one(vm: &delonix_compute::Vm) {
     // in" never needs a guess or a look at the JSON.
     d.sub("Namespace", &vm.namespace);
     d.sub("IP", vm.ip.as_deref().unwrap_or("<none>"));
+    let svc = super::svc::SvcIndex::load().rows(&vm.name, &vm.namespace, vm.ip.as_deref());
+    if !svc.is_empty() {
+        d.sub("Services", super::svc::cell(&svc));
+    }
     d.sub("TAP", if vm.tap.is_empty() { "<none>" } else { &vm.tap });
     d.sub("MAC", &vm.mac);
 

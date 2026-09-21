@@ -669,7 +669,7 @@ follow each factor. Some factors are simply not the engine's business, and the t
 <tr>
 <td>IV. Backing services</td>
 <td>attach a service by name, swappable without code change</td>
-<td>internal DNS <code>&lt;name&gt;.<wbr>&lt;namespace&gt;.<wbr>delonix.<wbr>internal</code> (<code>dns_resolve_for</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a>); a <code>Service</code> Kind resolving to several backends (ADR-0032, <strong>Accepted</strong>)</td>
+<td>internal DNS, standard name <code>&lt;name&gt;.<wbr>&lt;namespace&gt;.<wbr>svc.<wbr>delonix.<wbr>internal</code> with the older <code>&lt;name&gt;.<wbr>&lt;namespace&gt;.<wbr>delonix.<wbr>internal</code> still answering (<code>service_fqdn</code>, <code>parse_internal_name</code>, <code>dns_resolve_for</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a>); a <code>Service</code> Kind resolving to several backends (ADR-0032, <strong>Accepted</strong>)</td>
 </tr>
 <tr>
 <td>V. Build, release, run</td>

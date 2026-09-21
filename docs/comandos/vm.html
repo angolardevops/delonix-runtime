@@ -176,6 +176,7 @@ Commands:
   bridge           EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network
   reach            Which published ports a VM can actually reach, and how to fix the rest
   unbridge         Tear down a `vm bridge` (dry-run without `--apply`)
+  build            Build a VM image (qcow2) from a `vm.yaml`, a `VMfile`, or the golden recipe
   convert          Convert a VM disk to the format another ecosystem imports
   ls-remote        List the tags available in a remote OCI repository
   pull             Pull a golden VM image from an OCI registry
@@ -199,7 +200,7 @@ COMMAND MAP:
   Interact     console · ssh · vnc
   Configure    default-backend
   Networking   reach · bridge · unbridge
-  Storage      pull · ls-remote · push · convert
+  Storage      pull · ls-remote · push · convert · build
   Declarative  init · apply
   Maintenance  prune · snapshot
 
