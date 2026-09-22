@@ -375,6 +375,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Named volumes, bind mounts, network shares and per-tenant slices: create (including ``--type nfs|cifs|webdav`` and ``--parent``), ls, describe, inspect, snapshot, prune, rm.
    * - ``secret``
      - Encrypted-at-rest secret vault — the producer of ``run --secret``: create, set, unset, ls, inspect, rotate, rotate-key, apply.
+   * - ``policy``
+     - The node's admission ceiling (``kind: RuntimePolicy``): ``unset`` is the only verb — the ceiling is read via ``get runtimepolicies``/``describe runtimepolicy`` and raised/tightened via ``stack apply``, never lowered by ``destroy``/``--prune``.
    * - ``network``
      - User bridge/overlay networks: create, ls, inspect, describe, route, diagnose, vlan, node, apply.
    * - ``net``
