@@ -272,6 +272,7 @@ des cgroups, du holder réseau ou du démarrage des VM fonctionne — cela exige
 | `test-arm64` | test (arm64) |
 | `deny` | cargo-deny |
 | `fuzz` | fuzz (60s smoke, per target) |
+| `release-verify` | release verify |
 | `docs` | generated docs and valid examples |
 <!-- dev-docs:end ci-gates -->
 

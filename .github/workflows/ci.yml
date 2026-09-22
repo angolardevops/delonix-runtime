@@ -209,6 +209,28 @@ jobs:
       - name: parse_reference — the image reference parser with a real past bug
         run: cargo +nightly fuzz run parse_reference -- -max_total_time=60
 
+  # ---- M13: the maturity table cannot cite rotted evidence ----
+  #
+  # `delonix system features` promises a level per capability with CHECKABLE
+  # evidence (a script, a doc, a test file). Nothing ever verified that the
+  # evidence stayed true — a file it named could be renamed or deleted and
+  # the row would keep claiming `stable`/`production-ready` until someone
+  # followed the reference by hand. This job reads the SAME table the binary
+  # publishes (never a copy) and fails before a tag is cut, not after a
+  # reader notices.
+  release-verify:
+    name: release verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p delonix-runtime-bin
+      - run: python3 scripts/release_verify.py
+
   # ---- O site e os exemplos: gerados do binário, e por isso verificáveis ----
   #
   # Duas classes de falha que só se descobriam à mão, e ambas já aconteceram:
