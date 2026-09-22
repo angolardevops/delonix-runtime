@@ -123,6 +123,7 @@ The crate list, each crate's layer and who depends on whom are generated facts i
 | `bins/delonix-mcp-bin/` | The `delonix-mcp` binary: a thin `main.rs` over `delonix-mcp`. | Rarely; the logic lives in the interface crate. | `docs/adr/0025-mcp-local-ai-control-surface.md` |
 | `proto/` | The node contract `delonix.node.v1` (`proto/delonix/node/v1/*.proto`), marked draft; source of truth for gRPC and HTTP/JSON and of `docs/api/openapi.yaml`. Checked by `scripts/contract_gate.py` (format, lint, breaking changes, HTTP mappings, OpenAPI). | Contract changes, reviewed carefully — breaking changes against the last tag fail. | `proto/README.md`, ADR-0040 |
 | `tests/` | Out-of-tree compatibility checks, not cargo tests: `tests/compat/cri-conformance.sh` (the `critest` suite) and `tests/compat/docker_api_smoke.py`. Cargo integration tests live in each crate's own `tests/`. | Whoever works on CRI or Docker API compatibility. | `docs/cri-conformance.md`, [Clone, build and test](build-and-test.md) |
+| `fuzz/` | `cargo-fuzz` targets over hand-written parsers fed with untrusted input (a cloned repo's `Dockerfile`, an image reference string). Its own `[workspace]`, so the sanitizer build flags never touch the main one; the CI `fuzz` job runs each target for 60s per push/PR. | Whoever adds a hand-written parser for externally-controlled input. | M04 of `docs/roadmap/13-improvements-traceability.md` |
 
 ## Documentation (docs/…)
 

@@ -504,6 +504,12 @@ below, or when a table names a path that no longer exists.</p>
 <td>Whoever works on CRI or Docker API compatibility.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener"><code>docs/cri-conformance.md</code></a>, <a href="build-and-test.html">Clone, build and test</a></td>
 </tr>
+<tr>
+<td><code>fuzz/</code></td>
+<td><code>cargo-fuzz</code> targets over hand-written parsers fed with untrusted input (a cloned repo's <code>Dockerfile</code>, an image reference string). Its own <code>[workspace]</code>, so the sanitizer build flags never touch the main one; the CI <code>fuzz</code> job runs each target for 60s per push/PR.</td>
+<td>Whoever adds a hand-written parser for externally-controlled input.</td>
+<td>M04 of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/roadmap/13-improvements-traceability.md" target="_blank" rel="noopener"><code>docs/<wbr>roadmap/<wbr>13-improvements-traceability.<wbr>md</code></a></td>
+</tr>
 </tbody>
 </table></div>
 <h2 id="documentation-docs">Documentation (docs/…)<a class="hanchor" href="#documentation-docs" aria-label="#">#</a></h2>
