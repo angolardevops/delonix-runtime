@@ -161,6 +161,7 @@
 ~	pod exec
 =	pod logs
 ~	pod port-forward
+~	policy unset
 ~	secret apply
 =	secret create
 ~	secret inspect
