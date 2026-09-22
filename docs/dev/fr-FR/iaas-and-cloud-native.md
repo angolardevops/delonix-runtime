@@ -1,4 +1,4 @@
-<!-- translated-from: iaas-and-cloud-native.md sha256:23052b9c1c7d3e122386216c08314ec759d95390b79fca113b7004b3b87c4af7 -->
+<!-- translated-from: iaas-and-cloud-native.md sha256:85933d280626e83ee934bf13ac9d4537374084eccdf6fdaca15e9682eec0ad31 -->
 # IaaS et cloud native — où s’inscrit le moteur
 
 **Avant de lire :** [Commencer ici](start-here.md#what-delonix-is-5-minutes) (les quatre phrases sur ce qu’est Delonix). Aucune connaissance du noyau ni de Rust n’est encore nécessaire.
@@ -403,7 +403,7 @@ pas du moteur, et le tableau le dit.
 | I. Codebase | rien — un codebase par app est le choix du développeur | non applicable |
 | II. Dependencies | un moyen de livrer une app avec ses dépendances isolées | images OCI (`crates/adapters/delonix-oci`) ; les construire avec `delonix build` à partir d’un Dockerfile ou d’un Delonixfile ([Delonixfile et VMfile](delonixfile-and-vmfile.md)) |
 | III. Config | injecter configuration et secrets au démarrage, pas au build | `-e`, `--env-file`, `--secret` sur `delonix container run` ; fusion d’environnement dans `crates/contexts/delonix-compute/src/run.rs` ; `parse_env_file` dans `crates/foundation/delonix-model/src/secret.rs` ; secrets chiffrés au repos dans `delonix-state` |
-| IV. Backing services | attacher un service par son nom, remplaçable sans changer le code | DNS interne `<name>.<namespace>.delonix.internal` (`dns_resolve_for` dans `crates/adapters/delonix-sdn/src/infra.rs`) ; un Kind `Service` résolvant vers plusieurs backends (ADR-0032, **Accepted**) |
+| IV. Backing services | attacher un service par son nom, remplaçable sans changer le code | DNS interne, nom standard `<name>.<namespace>.svc.delonix.internal`, l’ancien `<name>.<namespace>.delonix.internal` répondant toujours (`service_fqdn`, `parse_internal_name`, `dns_resolve_for` dans `crates/adapters/delonix-sdn/src/infra.rs`) ; un Kind `Service` résolvant vers plusieurs backends (ADR-0032, **Accepted**) ; comment les noms atteignent le `/etc/hosts` de l’hôte : [service-names-and-hosts.md](service-names-and-hosts.md) |
 | V. Build, release, run | séparer les trois étapes, avec une release immuable | `delonix build` → une image identifiée par digest → `container run` / `stack apply` ; historique de révisions du stack (ADR-0019, **Accepted**) |
 | VI. Processes | des processus sans état, avec l’état dans un stockage attaché | racine `--read-only` ; volumes nommés et partages (`crates/adapters/delonix-volume`) |
 | VII. Port binding | exposer un port que l’app lie elle-même | `-p [hostIp:]hostPort:containerPort` (`parse_publish_addr`, `slirp_add_hostfwd` dans `crates/adapters/delonix-sdn/src/lib.rs`) |

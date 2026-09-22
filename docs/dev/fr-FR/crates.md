@@ -1,4 +1,4 @@
-<!-- translated-from: crates.md sha256:771c9f9a0fe394c7f71a74d3de4c92d613ff9dd43da2b274c47a51065b8a2943 -->
+<!-- translated-from: crates.md sha256:02a670fe76c5758e314a6b3e1fa863a1636de585aa08a088f253e5a021a85f05 -->
 # Les crates
 
 **Avant de lire :** [Architecture](architecture.md), surtout [Les couches et la direction autorisée](architecture.md#layers-and-the-allowed-direction).
@@ -1188,6 +1188,7 @@ son propre processus.
 | `cmd/serve.rs`, `cmd/mcp.rs` | `exec` vers les binaires serveur ; `serve docker-api` dans son propre processus |
 | `cmd/dockerapi.rs` | tranche de l’API Docker Engine ; `run_from_spec_file` pour `__apirun` |
 | `cmd/policy.rs` | politique de runtime du nœud via `delonix-security-runtime` |
+| `cmd/hosts.rs`, `cmd/hosts_file.rs` | `hosts sync` (groupe non stable) et le bloc géré, par racine d’état, du `/etc/hosts` de l’hôte, partagé avec `hosts: [host]` sur une `HTTPRoute` (ADR-0046, ADR-0048 phase 2) ; le recalcul est `desired_hosts`/`sync_hosts_now` dans `cmd/ingress_proxy.rs`, appelé depuis `rebuild()` |
 | `cmd/vmbackends.rs` | enregistre les backends de VM distants configurés |
 | `cmd/output.rs`, `cmd/po.rs` | sortie de tableaux/describe, catalogue de traduction |
 

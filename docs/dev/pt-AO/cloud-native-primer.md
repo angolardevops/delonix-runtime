@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-primer.md sha256:7602775b2555dad86ead05d60749c3df5e046638d2be5317f704242bb2a4693d -->
+<!-- translated-from: cloud-native-primer.md sha256:a9064f13ecba90c0cc4992eccd73ec17bf783621b44ed9ce4319b3b07ee11793 -->
 # Introdução ao cloud native
 
 **Antes de leres:** [Fundações de Linux](linux-foundations.md) (namespaces, cgroups v2, descritores de ficheiro) e [IaaS e cloud native](iaas-and-cloud-native.md) (do que é responsável o motor).
@@ -209,7 +209,9 @@ plugin (`bridge`, `host-local`, `portmap`, …) com comandos `ADD`/`DEL` e uma c
 - Firewall: `table ip dlxing` com as base chains `fwguard`, `fwdeny`, `fwcont` e o verdict map
   `fwmap` (`FWMAP`), gerado em `infra.rs` (`do_firewall`, `apply_firewall_all`, `ns_set_join`
   para os sets de isolamento de namespace).
-- DNS interno (`<name>.<namespace>.delonix.internal`): `dns_server_main`, `handle_dns`,
+- DNS interno (nome padrão `<name>.<namespace>.svc.delonix.internal`, o antigo
+  `<name>.<namespace>.delonix.internal` ainda responde; `service_fqdn`, `parse_internal_name`):
+  `dns_server_main`, `handle_dns`,
   `dns_resolve_for`, `dns_resolve_multi_for` em `infra.rs`.
 - Redes overlay: `set_vxlan` (`infra.rs`) e os helpers de WireGuard em
   `crates/adapters/delonix-sdn/src/wg.rs`, orquestrados por `realize_overlay` em

@@ -1,4 +1,4 @@
-<!-- translated-from: glossary.md sha256:071ac52aaf0edbe956d3e4e8e8c506b79751fb106caa6ecef29e4d9ce6505ac0 -->
+<!-- translated-from: glossary.md sha256:d7eafa64fdd49da297f0db08240898eafeb97292834d5c229bc98cd4d97d7053 -->
 # Glossário
 
 **Antes de leres:** nada — isto é uma referência. Mantém-na aberta ao lado de qualquer outra página.
@@ -138,7 +138,8 @@ imagem** (ver **Overlay / lowerdir**). Ver: [Camadas](architecture.md#layers-and
 
 **Lowering (sugar Kinds)** — Reescrever um Kind de conveniência no Kind que faz de facto o trabalho,
 enquanto o manifesto é carregado, para que o resto do motor nunca o veja. `Workload` baixa para
-`Container`/`Pod`/`VirtualMachine`, `Dependency` para `NetworkPolicy`. A coluna `FORM` de
+`Container`/`Pod`/`VirtualMachine`, `Dependency` para `NetworkPolicy`; o `spec.expose` de uma
+`VirtualMachine` baixa para um `HTTPRoute` chamado `<vm>-expose` (`cmd/vm_expose.rs`). A coluna `FORM` de
 `delonix api-resources` diz em que se torna cada Kind: `primary`, `sugar → X` (baixado),
 `compat → X` (um schema estrangeiro mantido mas compilado para X), `sunset → X` (ainda aplicado como
 ele próprio, com sucessor anunciado), `aggregate` (expande-se nos documentos que contém, como o

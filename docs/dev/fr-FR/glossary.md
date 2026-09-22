@@ -1,4 +1,4 @@
-<!-- translated-from: glossary.md sha256:071ac52aaf0edbe956d3e4e8e8c506b79751fb106caa6ecef29e4d9ce6505ac0 -->
+<!-- translated-from: glossary.md sha256:d7eafa64fdd49da297f0db08240898eafeb97292834d5c229bc98cd4d97d7053 -->
 # Glossaire
 
 **Avant de lire :** rien — c'est une référence. Gardez-la ouverte à côté de toute autre page.
@@ -131,7 +131,8 @@ adaptateurs, providers, interfaces, binaires. Les dépendances pointent vers l�
 
 **Lowering (sugar Kinds)** — La réécriture d’un Kind de commodité en le Kind qui fait réellement le travail
 pendant le chargement du manifeste, de sorte que le reste du moteur ne le voit jamais. `Workload` est abaissé en
-`Container`/`Pod`/`VirtualMachine`, `Dependency` en `NetworkPolicy`. La colonne `FORM` de
+`Container`/`Pod`/`VirtualMachine`, `Dependency` en `NetworkPolicy` ; le `spec.expose` d’une `VirtualMachine`
+est abaissé en une `HTTPRoute` nommée `<vm>-expose` (`cmd/vm_expose.rs`). La colonne `FORM` de
 `delonix api-resources` indique ce que devient chaque Kind : `primary`, `sugar → X` (abaissé), `compat → X`
 (un schéma étranger conservé mais compilé vers X), `sunset → X` (toujours appliqué en tant que lui-même, successeur
 annoncé), `aggregate` (se développe en les documents qu’il contient, comme `Stack`). Voir :

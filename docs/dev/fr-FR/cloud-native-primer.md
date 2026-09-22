@@ -1,4 +1,4 @@
-<!-- translated-from: cloud-native-primer.md sha256:7602775b2555dad86ead05d60749c3df5e046638d2be5317f704242bb2a4693d -->
+<!-- translated-from: cloud-native-primer.md sha256:a9064f13ecba90c0cc4992eccd73ec17bf783621b44ed9ce4319b3b07ee11793 -->
 # Initiation au cloud native
 
 **Avant de lire :** [Fondations Linux](linux-foundations.md) (namespaces, cgroups v2, descripteurs de fichier) et [IaaS et cloud native](iaas-and-cloud-native.md) (de quoi le moteur est responsable).
@@ -215,7 +215,9 @@ JSON depuis `/etc/cni/net.d`. Les runtimes Kubernetes l’utilisent pour le rés
 - Pare-feu : `table ip dlxing` avec les base chains `fwguard`, `fwdeny`, `fwcont` et la verdict map
   `fwmap` (`FWMAP`), générée dans `infra.rs` (`do_firewall`, `apply_firewall_all`, `ns_set_join`
   pour les sets d’isolement de namespace).
-- DNS interne (`<name>.<namespace>.delonix.internal`) : `dns_server_main`, `handle_dns`,
+- DNS interne (nom standard `<name>.<namespace>.svc.delonix.internal`, l’ancien
+  `<name>.<namespace>.delonix.internal` répond toujours ; `service_fqdn`, `parse_internal_name`) :
+  `dns_server_main`, `handle_dns`,
   `dns_resolve_for`, `dns_resolve_multi_for` dans `infra.rs`.
 - Réseaux overlay : `set_vxlan` (`infra.rs`) et les assistants WireGuard dans
   `crates/adapters/delonix-sdn/src/wg.rs`, orchestrés par `realize_overlay` dans

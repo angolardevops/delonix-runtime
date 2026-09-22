@@ -1,4 +1,4 @@
-<!-- translated-from: README.md sha256:00f29485ea8703f976a6524089e1241a6c2b3a7d939a6377f549fac688d27148 -->
+<!-- translated-from: README.md sha256:e9205b57d61260f2d44b7c78c60bc5ee9e79f9781fa0948ce1738e55a800ee77 -->
 # Delonix Runtime — Manuel du contributeur
 
 Ce manuel s’adresse aux personnes qui veulent **modifier le moteur** : vous avez cloné le dépôt
@@ -65,7 +65,7 @@ Le parcours est regroupé en huit parties :
 | **Préparer et compiler** | [Préparer votre environnement](environment.md) · [Cloner, compiler et tester](build-and-test.md) | Un hôte capable d’exécuter les chemins réels, et chaque gate de CI comme commande locale |
 | **Architecture** | [Structure du projet](project-structure.md) · [Architecture](architecture.md) · [Les crates](crates.md) · [System Design Interview](system-design-interview.md) | Où se trouvent les choses, pourquoi elles sont ainsi découpées, ce que possède chaque crate, et le raisonnement derrière la conception |
 | **Images et microVM** | [Delonixfile et VMfile](delonixfile-and-vmfile.md) · [Construire des microVM](microvm-setup.md) | Les deux grammaires de build, et les VM depuis les prérequis de l’hôte jusqu’au démarrage |
-| **Opérer et déboguer** | [Diagnostic des problèmes](troubleshooting.md) | Un index par symptôme : le texte littéral qu’un gate ou une exécution réelle affiche, et où lire le correctif |
+| **Opérer et déboguer** | [Diagnostic des problèmes](troubleshooting.md) · [Comment les noms atteignent `/etc/hosts`](service-names-and-hosts.md) | Un index par symptôme de ce qu’un gate ou une exécution réelle affiche, et le mécanisme qui publie les noms de service et les hôtes de route sur la machine de l’opérateur |
 | **Contribuer** | [Conventions de code](coding-conventions.md) · [Ajouter un Kind](adding-a-kind.md) · [Flux de contribution](contributing-workflow.md) · [Releases et stabilité](releases-and-stability.md) · [Publier la documentation](publishing-docs.md) | Comment le code doit être écrit, comment un Kind déclaratif s’ajoute, comment un changement est envoyé, ce qu’une release promet de ne pas casser, et comment la documentation suit |
 | **Référence** | [Standards cloud native](cloud-native-standards.md) · [Variables d’environnement](environment-variables.md) · [Glossaire](glossary.md) | Des pages où l’on cherche des informations : conformité par standard, chaque nom `DELONIX_*`, chaque terme |
 
@@ -112,6 +112,7 @@ puis [Variables d’environnement](environment-variables.md).
 | [Delonixfile et VMfile](delonixfile-and-vmfile.md) | Les grammaires des fichiers de build et en quoi elles diffèrent d’un Dockerfile |
 | [Construire des microVM](microvm-setup.md) | KVM, Cloud Hypervisor et firmware, libvirt, images de VM |
 | [Diagnostic des problèmes](troubleshooting.md) | Un index par symptôme : messages d’échec de gate, pièges de l’hôte et leurs correctifs, au même endroit |
+| [Comment les noms atteignent `/etc/hosts`](service-names-and-hosts.md) | Le bloc délimité unique, les deux façons dont un nom y entre (`hosts: [host]` et `delonix hosts sync`), ce qu’il refuse, et comment le tester sans root |
 | [Conventions de code](coding-conventions.md) | Comment le code de ce dépôt est écrit, et la liste de contrôle qu’appliquent les relecteurs |
 | [Ajouter un Kind](adding-a-kind.md) | La table, le schéma et le câblage du réconciliateur qu’exige un nouveau Kind déclaratif, illustré avec `Service` |
 | [Flux de contribution](contributing-workflow.md) | Worktrees, versions, règle de langue, règles d’architecture, ADR, commits et PR |

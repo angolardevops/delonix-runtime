@@ -1,4 +1,4 @@
-<!-- translated-from: build-and-test.md sha256:a2ec1ffc29baac1b5431b76324ed7af5894d0f18b6668a3bc52ddadf65accebe -->
+<!-- translated-from: build-and-test.md sha256:a509235c85941dead7c564eb0fe69325be76ad29f67752755461f3637af80128 -->
 # Cloner, compiler et tester
 
 **Avant de lire :** [Préparer votre environnement](environment.md) : la toolchain épinglée, `protoc`, et un hôte qui passe ses vérifications.
@@ -337,6 +337,17 @@ Lorsque vous avez terminé, démontez l’infrastructure réseau isolée avec le
 ```bash
 ./target/debug/delonix net netns down
 ```
+
+## Recettes d’images de VM (`scripts/verify-images.sh`)
+
+Les recettes de `images/` sont vérifiées de deux façons. Un test unitaire dans le crate de la CLI
+(`vmspec::every_shipped_recipe_is_valid_and_complete`) échoue si une recette cesse de se parser ou pointe vers un
+fichier ou un builder qui n’existe pas. `scripts/verify-images.sh` va plus loin : il construit hors ligne les quatre
+distributions à image cloud dans un `DELONIX_ROOT` isolé et relit le qcow2 obtenu face à ce que la recette déclarait ;
+`--self-test` prouve que les vérifications peuvent échouer sur une image que personne n’a construite. Il requiert
+`libguestfs-tools` (voir [Construire des microVMs](microvm-setup.md)) et ne fait pas partie des gates de la CI. Les
+phases `--packages`, `--profile`, `--boot` et `--appliance` existent mais n’avaient pas été exécutées à la sortie de
+la v4.2.0.
 
 ## Batterie de bout en bout (`scripts/e2e.sh`)
 

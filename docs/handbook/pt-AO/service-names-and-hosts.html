@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="pt-AO"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>How names reach /etc/hosts · Delonix Runtime — Manual do contribuidor</title>
+<title>Como os nomes chegam ao /etc/hosts · Delonix Runtime — Manual do contribuidor</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,83 +206,88 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a class="on" aria-current="page" href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
+<nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a class="on" aria-current="page" href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Operar e diagnosticar</p>
-<div class="notice" role="note">Esta página ainda não está traduzida para Português (Angola) — mostra-se a versão inglesa.</div><h1 id="how-names-reach-etchosts">How names reach <code>/etc/hosts</code></h1>
-<p><strong>Before you read:</strong> <a href="architecture.html#state-on-disk">Architecture</a> (state root, <code>httproute/</code>), <a href="environment-variables.html">Environment variables</a> (<code>DELONIX_ROOT</code>, <code>DELONIX_HOSTS_FILE</code>) and <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> (isolating the engine's state).</p>
-<p>A workload on the SDN is not reachable from the host by its IP; the way in is the L7 proxy, which the
-slirp forward publishes on loopback. So a browser on the operator's machine only opens
-<code>http://app.example.pt:8080/</code> once the name <code>app.example.pt</code> resolves to <code>127.0.0.1</code> (or to an
-address the route reserved). The engine can write that mapping for you. This page explains the one
-mechanism behind it, the two ways a name gets into it, and what each refuses to do. Everything
-below is read from the files named next to it; the decisions are ADR-0046 (<code>hosts: [host]</code>) and
-ADR-0048 (<code>hosts sync</code>), which you should read for the <em>why</em>.</p>
-<h2 id="one-block-per-state-root">One block per state root<a class="hanchor" href="#one-block-per-state-root" aria-label="#">#</a></h2>
-<p>All of it lives in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a>. The engine never rewrites the
-hosts file: it owns <strong>one delimited block</strong> and leaves every other byte alone.</p>
+<h1 id="how-names-reach-etchosts">Como os nomes chegam ao <code>/etc/hosts</code></h1>
+<p><strong>Antes de leres:</strong> <a href="architecture.html#state-on-disk">Arquitectura</a> (o state root, <code>httproute/</code>), <a href="environment-variables.html">Variáveis de ambiente</a> (<code>DELONIX_ROOT</code>, <code>DELONIX_HOSTS_FILE</code>) e <a href="build-and-test.html#the-gates-ci-runs">Clonar, compilar e testar</a> (isolar o estado do motor).</p>
+<p>Um workload na SDN não é alcançável a partir do host pelo seu IP; a entrada é o proxy L7, que o
+forward do slirp publica no loopback. Por isso um browser na máquina do operador só abre
+<code>http://app.example.pt:8080/</code> quando o nome <code>app.example.pt</code> resolve para <code>127.0.0.1</code> (ou para um
+endereço que a rota reservou). O motor consegue escrever esse mapeamento por ti. Esta página explica o
+único mecanismo por trás disso, as duas vias por onde um nome entra nele, e o que cada uma recusa
+fazer. Tudo o que se segue é lido dos ficheiros nomeados ao lado; as decisões são o ADR-0046
+(<code>hosts: [host]</code>) e o ADR-0048 (<code>hosts sync</code>), que deves ler para perceber o <em>porquê</em>.</p>
+<h2 id="one-block-per-state-root">Um bloco por state root<a class="hanchor" href="#one-block-per-state-root" aria-label="#">#</a></h2>
+<p>Tudo isto vive em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a>. O motor nunca reescreve o
+ficheiro de hosts: é dono de <strong>um bloco delimitado</strong> e deixa todos os outros bytes em paz.</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-text"># BEGIN delonix 3fa2c1d0 (managed — do not edit)
 127.0.0.1	app.example.pt
 127.0.0.1	web.default.svc.delonix.internal
 # END delonix 3fa2c1d0
 </code></pre></div>
 <ul>
-<li><strong>The id names the state root.</strong> <code>root_id()</code> is an FNV-1a hash of <code>state_root()</code>, truncated to 32
-  bits and printed as eight hex digits. It is a hand-rolled hash on purpose: <code>DefaultHasher</code> is not
-  promised stable, and a block orphaned by a hash change is a name that never goes away. Two roots
-  on one machine (an isolated root next to the real one; root and a rootless user) each own their
-  own block, so neither erases the other's names when it rebuilds.</li>
-<li><strong>The block is rewritten whole</strong> (<code>block</code>, <code>render</code>). Entries are lowercased, sorted and
-  deduplicated, and <code>render</code> is pure: it takes the existing text and the wanted entries and returns
-  the new text, so the cases that matter are unit tests. A name that no longer has a source simply
-  is not in the next rewrite; there is nothing to reap. An empty list removes the block.</li>
-<li><strong>The block is rewritten in place</strong>, where it was. Two roots' blocks do not swap places at every
-  sync. Lines keep their own endings (CRLF and a missing final newline are preserved).</li>
+<li><strong>O id nomeia o state root.</strong> <code>root_id()</code> é um hash FNV-1a de <code>state_root()</code>, truncado a 32 bits e
+  impresso como oito dígitos hexadecimais. É um hash escrito à mão de propósito: o <code>DefaultHasher</code> não
+  promete ser estável, e um bloco órfão por uma mudança de hash é um nome que nunca mais desaparece.
+  Duas raízes na mesma máquina (uma raiz isolada ao lado da real; root e um utilizador rootless)
+  são donas cada uma do seu bloco, por isso nenhuma apaga os nomes da outra quando o reconstrói.</li>
+<li><strong>O bloco é reescrito por inteiro</strong> (<code>block</code>, <code>render</code>). As entradas são passadas a minúsculas,
+  ordenadas e sem duplicados, e o <code>render</code> é puro: recebe o texto existente e as entradas pretendidas
+  e devolve o texto novo, por isso os casos que importam são testes unitários. Um nome que já não
+  tem fonte simplesmente não está na reescrita seguinte; não há nada a ceifar. Uma lista vazia remove
+  o bloco.</li>
+<li><strong>O bloco é reescrito no lugar</strong>, onde estava. Os blocos de duas raízes não trocam de posição a
+  cada sync. As linhas mantêm os seus próprios fins de linha (CRLF e a falta de newline final são
+  preservados).</li>
 </ul>
-<h3 id="what-render-refuses">What <code>render</code> refuses<a class="hanchor" href="#what-render-refuses" aria-label="#">#</a></h3>
-<p>Each of these is an <code>Error::Invalid</code> returned <em>before</em> any write, so the file is untouched:</p>
+<h3 id="what-render-refuses">O que o <code>render</code> recusa<a class="hanchor" href="#what-render-refuses" aria-label="#">#</a></h3>
+<p>Cada uma destas situações é um <code>Error::Invalid</code> devolvido <em>antes</em> de qualquer escrita, por isso o
+ficheiro fica intocado:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Situation</th>
-<th>Why it is refused</th>
+<th>Situação</th>
+<th>Porque é recusada</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>A wanted name already has an entry <strong>outside</strong> this root's block (a hand-written line, or another root's block)</td>
-<td>The operator, or another root, wrote that line. A second answer for the same name would silently change where it points. Comments that merely mention the name do not count.</td>
+<td>Um nome pretendido já tem uma entrada <strong>fora</strong> do bloco desta raiz (uma linha escrita à mão, ou o bloco de outra raiz)</td>
+<td>O operador, ou outra raiz, escreveu essa linha. Uma segunda resposta para o mesmo nome mudaria em silêncio para onde ele aponta. Comentários que apenas mencionam o nome não contam.</td>
 </tr>
 <tr>
-<td>One name with <strong>two different addresses</strong> in the same rewrite</td>
-<td>Two routes claiming it from different pools: the resolver would take whichever line it read first.</td>
+<td>Um nome com <strong>dois endereços diferentes</strong> na mesma reescrita</td>
+<td>Duas rotas a reclamá-lo a partir de pools diferentes: o resolvedor tomaria a linha que lesse primeiro.</td>
 </tr>
 <tr>
-<td>This root's block has a <code># BEGIN</code> line but <strong>no <code># END</code></strong></td>
-<td>Usually a hand edit. Treating "up to the end of the file" as the block would erase the hand-written lines and other roots' blocks that follow. The message tells you which line to restore.</td>
+<td>O bloco desta raiz tem uma linha <code># BEGIN</code> mas <strong>nenhum <code># END</code></strong></td>
+<td>Normalmente uma edição à mão. Tratar «até ao fim do ficheiro» como o bloco apagaria as linhas escritas à mão e os blocos de outras raízes que vêm a seguir. A mensagem diz-te que linha repor.</td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="how-it-writes-sync_at">How it writes (<code>sync_at</code>)<a class="hanchor" href="#how-it-writes-sync_at" aria-label="#">#</a></h3>
+<h3 id="how-it-writes-sync_at">Como escreve (<code>sync_at</code>)<a class="hanchor" href="#how-it-writes-sync_at" aria-label="#">#</a></h3>
 <ol>
-<li>Read the file; <code>render</code>; if the result equals what was read, <strong>return without writing</strong>. This is
-   why a manifest that does not use <code>hosts:</code> never needs root.</li>
-<li>Resolve symlinks (<code>canonicalize</code>), so a symlinked hosts file is edited through the link and the
-   link is not replaced by a regular file.</li>
-<li>Take an exclusive <code>flock</code> on <code>.hosts.delonix.lock</code> beside the target, re-read, and re-render if
-   the file changed meanwhile. Two writers must not interleave a read-modify-write.</li>
-<li>Write a temporary file <code>.hosts.delonix.&lt;pid&gt;.&lt;nanos&gt;</code> beside the target, opened with
-   <code>create_new</code> (<code>O_EXCL</code>): a name nobody can guess that cannot be pre-created as a symlink to
-   redirect the write. Copy the target's permissions, <code>sync_all</code> (a crash between the rename and the
-   data reaching disk must not leave an empty name→address map), then <code>rename</code> over the target.</li>
+<li>Lê o ficheiro; <code>render</code>; se o resultado for igual ao que foi lido, <strong>devolve sem escrever</strong>. É
+   por isso que um manifesto que não usa <code>hosts:</code> nunca precisa de root.</li>
+<li>Resolve os symlinks (<code>canonicalize</code>), para que um ficheiro de hosts que seja um symlink seja
+   editado através do link e o link não seja substituído por um ficheiro normal.</li>
+<li>Toma um <code>flock</code> exclusivo em <code>.hosts.delonix.lock</code> junto ao alvo, volta a ler, e volta a fazer
+   <code>render</code> se o ficheiro mudou entretanto. Dois escritores não podem intercalar um
+   ler-modificar-escrever.</li>
+<li>Escreve um ficheiro temporário <code>.hosts.delonix.&lt;pid&gt;.&lt;nanos&gt;</code> junto ao alvo, aberto com
+   <code>create_new</code> (<code>O_EXCL</code>): um nome que ninguém consegue adivinhar e que não pode ser pré-criado como
+   symlink para redireccionar a escrita. Copia as permissões do alvo, <code>sync_all</code> (um crash entre o
+   rename e os dados chegarem ao disco não pode deixar um mapa nome→endereço vazio), e depois <code>rename</code>
+   por cima do alvo.</li>
 </ol>
-<p>The engine does not test "am I root?". It tries the write and, on <code>PermissionDenied</code>, returns an
-error that prints the exact block to paste. An unprivileged run therefore stops with the block on
-the screen; it does not skip the name silently. (If the lock file cannot be created the lock is
-simply not held; the write then fails with the same message.)</p>
-<h2 id="where-the-names-come-from">Where the names come from<a class="hanchor" href="#where-the-names-come-from" aria-label="#">#</a></h2>
-<p>There are two inputs, and they end up in the same block through the same function
-(<code>sync</code> in <code>hosts_file.rs</code>), called from <code>rebuild</code> in <code>cmd/ingress_proxy.rs</code>.</p>
+<p>O motor não testa «sou root?». Tenta a escrita e, em <code>PermissionDenied</code>, devolve um erro que imprime o
+bloco exacto para colar. Uma corrida sem privilégio pára, portanto, com o bloco no ecrã; não salta o
+nome em silêncio. (Se o ficheiro de lock não puder ser criado, o lock simplesmente não é tomado; a
+escrita falha então com a mesma mensagem.)</p>
+<h2 id="where-the-names-come-from">De onde vêm os nomes<a class="hanchor" href="#where-the-names-come-from" aria-label="#">#</a></h2>
+<p>Há duas entradas, e acabam no mesmo bloco através da mesma função (<code>sync</code> em <code>hosts_file.rs</code>),
+chamada a partir de <code>rebuild</code> em <code>cmd/ingress_proxy.rs</code>.</p>
 <pre class="mermaid">graph LR
     A[&quot;HTTPRoute hosts: [host]&lt;br/&gt;VM expose[].hosts&quot;] --&gt; M[&quot;manual.json&lt;br/&gt;published_hosts&quot;]
     C[&quot;container run --expose&quot;] --&gt; U[&quot;auto.json&lt;br/&gt;AutoRoute list&quot;]
@@ -293,82 +298,82 @@ simply not held; the write then fails with the same message.)</p>
     N --&gt; R
     R --&gt; F[&quot;# BEGIN delonix … # END&quot;]
 </pre>
-<h3 id="path-a-hosts-host-on-a-route-adr-0046">Path A: <code>hosts: [host]</code> on a route (ADR-0046)<a class="hanchor" href="#path-a-hosts-host-on-a-route-adr-0046" aria-label="#">#</a></h3>
-<p><code>HttpRouteSpec.hosts</code> (<code>cmd/httproute.rs</code>) accepts one value today, <code>host</code> (<code>HOSTS_TARGETS</code>);
-anything else is refused at validation, and the message says <code>containers</code> needs ADR-0047 and <code>guest</code>
-is planned. When a route lists <code>host</code>, <code>apply</code> records one <code>PublishedHost { host, source, addr }</code> per
-rule host in the route's manual config (<code>published_hosts</code>, in <code>&lt;root&gt;/httproute/manual.json</code>, or
-<code>httproute-host/</code> for a route served by the host-netns proxy — see <code>Where</code> in <code>ingress_proxy.rs</code>).
-<code>source</code> is the document that asked, so the reconciler can tell whose name it is, and <code>remove_for_prune</code>
-can drop exactly that document's names.</p>
-<p>A <code>VirtualMachine</code> reaches the same path through <code>spec.expose[]</code> (<code>cmd/vm_expose.rs</code>): the sugar
-lowers at load into a synthetic <code>HTTPRoute</code> named <code>&lt;vm&gt;-expose</code>, and <code>expose[].hosts</code> is copied onto
-it. The route publishes one list for all its names, so every <code>expose</code> entry must carry the same
-<code>hosts</code>; a difference is an error, covered by
+<h3 id="path-a-hosts-host-on-a-route-adr-0046">Via A: <code>hosts: [host]</code> numa rota (ADR-0046)<a class="hanchor" href="#path-a-hosts-host-on-a-route-adr-0046" aria-label="#">#</a></h3>
+<p>O <code>HttpRouteSpec.hosts</code> (<code>cmd/httproute.rs</code>) aceita hoje um só valor, <code>host</code> (<code>HOSTS_TARGETS</code>); tudo o
+resto é recusado na validação, e a mensagem diz que <code>containers</code> precisa do ADR-0047 e que <code>guest</code> está
+planeado. Quando uma rota lista <code>host</code>, o <code>apply</code> regista um <code>PublishedHost { host, source, addr }</code> por
+cada host de regra na configuração manual da rota (<code>published_hosts</code>, em <code>&lt;root&gt;/httproute/manual.json</code>,
+ou <code>httproute-host/</code> para uma rota servida pelo proxy da netns do host — ver <code>Where</code> em
+<code>ingress_proxy.rs</code>). O <code>source</code> é o documento que o pediu, para o reconciliador saber de quem é o nome,
+e o <code>remove_for_prune</code> poder largar exactamente os nomes desse documento.</p>
+<p>Uma <code>VirtualMachine</code> chega à mesma via através de <code>spec.expose[]</code> (<code>cmd/vm_expose.rs</code>): o açúcar baixa,
+ao carregar, para um <code>HTTPRoute</code> sintético chamado <code>&lt;vm&gt;-expose</code>, e o <code>expose[].hosts</code> é copiado para
+ele. A rota publica uma só lista para todos os seus nomes, por isso todas as entradas de <code>expose</code> têm
+de levar os mesmos <code>hosts</code>; uma diferença é um erro, coberto por
 <code>hosts_are_carried_to_the_route_and_must_agree_across_entries</code>.</p>
-<p><strong>The address</strong> is <code>127.0.0.1</code> unless the route has <code>spec.pool</code>. Then <code>apply</code> reserves one address
-from that <code>kind: IPPool</code> (<code>cmd/ippool.rs</code>: <code>peek</code>, <code>claim_moving</code>, <code>address_present</code>) and the name
-points at it. Two conditions worth knowing: the address must already be on an interface of the host
-(the apply stops and suggests <code>ip addr add … dev lo</code>; the engine adding it, <code>announce: l2</code>, is not
-built), and the reservation is looked at <em>before</em> it is taken so a failed apply does not leave a
-lease held. <strong>The port is not in the hosts file</strong>: a hosts file cannot carry one, so the URL you
-open still has the route's entrypoint port.</p>
-<h3 id="path-b-delonix-hosts-sync-adr-0048-phase-2">Path B: <code>delonix hosts sync</code> (ADR-0048, phase 2)<a class="hanchor" href="#path-b-delonix-hosts-sync-adr-0048-phase-2" aria-label="#">#</a></h3>
-<p><code>cmd/hosts.rs</code>. The standard service name of a container registered with <code>container run --expose</code> is
-<code>&lt;name&gt;.&lt;ns&gt;.svc.delonix.internal</code> (<code>AutoRoute::fqdn</code>, which calls
-<code>delonix_sdn::infra::service_fqdn</code>). Those registrations are <code>AutoRoute { name, namespace, ip, port }</code>
-entries in <code>&lt;root&gt;/httproute/auto.json</code>. <code>hosts sync</code> is an explicit opt-in:</p>
+<p><strong>O endereço</strong> é <code>127.0.0.1</code>, a menos que a rota tenha <code>spec.pool</code>. Nesse caso o <code>apply</code> reserva um
+endereço desse <code>kind: IPPool</code> (<code>cmd/ippool.rs</code>: <code>peek</code>, <code>claim_moving</code>, <code>address_present</code>) e o nome
+aponta para ele. Duas condições que vale a pena conhecer: o endereço já tem de estar numa interface do
+host (o apply pára e sugere <code>ip addr add … dev lo</code>; o motor acrescentá-lo, <code>announce: l2</code>, não está
+construído), e a reserva é vista <em>antes</em> de ser tomada, para que um apply falhado não deixe um lease
+retido. <strong>A porta não está no ficheiro de hosts</strong>: um ficheiro de hosts não a pode levar, por isso o URL
+que abres continua a ter a porta do entrypoint da rota.</p>
+<h3 id="path-b-delonix-hosts-sync-adr-0048-phase-2">Via B: <code>delonix hosts sync</code> (ADR-0048, fase 2)<a class="hanchor" href="#path-b-delonix-hosts-sync-adr-0048-phase-2" aria-label="#">#</a></h3>
+<p><code>cmd/hosts.rs</code>. O nome de serviço padrão de um container registado com <code>container run --expose</code> é
+<code>&lt;name&gt;.&lt;ns&gt;.svc.delonix.internal</code> (<code>AutoRoute::fqdn</code>, que chama <code>delonix_sdn::infra::service_fqdn</code>).
+Esses registos são entradas <code>AutoRoute { name, namespace, ip, port }</code> em <code>&lt;root&gt;/httproute/auto.json</code>.
+O <code>hosts sync</code> é um opt-in explícito:</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Command</th>
-<th>What it does</th>
+<th>Comando</th>
+<th>O que faz</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>delonix hosts sync --print</code></td>
-<td>Prints the block that would be written (<code>hosts_block_now</code>) and touches nothing, so it needs no root.</td>
+<td>Imprime o bloco que seria escrito (<code>hosts_block_now</code>) e não toca em nada, por isso não precisa de root.</td>
 </tr>
 <tr>
 <td><code>delonix hosts sync</code></td>
-<td>Writes the marker <code>&lt;root&gt;/hosts-sync</code>, then rewrites the block (<code>sync_hosts_now</code>). If the write is refused the marker is removed again, so a failed first run does not leave later <code>--expose</code> runs warning about a block nobody accepted.</td>
+<td>Escreve o marcador <code>&lt;root&gt;/hosts-sync</code>, e depois reescreve o bloco (<code>sync_hosts_now</code>). Se a escrita for recusada o marcador é removido outra vez, para que uma primeira corrida falhada não deixe os <code>--expose</code> seguintes a avisar de um bloco que ninguém aceitou.</td>
 </tr>
 <tr>
 <td><code>delonix hosts sync --off</code></td>
-<td>Removes the marker and rewrites the block.</td>
+<td>Remove o marcador e reescreve o bloco.</td>
 </tr>
 </tbody>
 </table></div>
-<p>Once the marker exists, <code>desired_hosts</code> includes the auto-routes' names, and <code>container run --expose</code>
-(<code>auto_register</code>) and <code>container rm</code> (<code>auto_deregister</code>) rebuild the block on their own. Auto names
-always point at <code>127.0.0.1</code>; a container's <code>--expose</code> has no pool. The <code>hosts:</code> names of declared
-routes are <strong>not</strong> published by <code>hosts sync</code> (their own opt-in wins), and <code>--off</code> therefore removes
-only the auto names: names asked for by a route's <code>hosts: [host]</code> stay in the block. The command's
-own message ("service names removed") is about the former.</p>
-<h3 id="two-kinds-of-name-two-failure-policies">Two kinds of name, two failure policies<a class="hanchor" href="#two-kinds-of-name-two-failure-policies" aria-label="#">#</a></h3>
-<p><code>desired_hosts</code> returns a pair: names a <strong>document asked for</strong> (<code>strict</code>) and names <strong>published by
-<code>hosts sync</code></strong>. <code>rebuild</code> calls <code>hosts_file::sync</code> and, if it fails:</p>
+<p>Assim que o marcador existe, o <code>desired_hosts</code> inclui os nomes das auto-rotas, e o <code>container run
+--expose</code> (<code>auto_register</code>) e o <code>container rm</code> (<code>auto_deregister</code>) reconstroem o bloco por si. Os
+nomes automáticos apontam sempre para <code>127.0.0.1</code>; o <code>--expose</code> de um container não tem pool. Os nomes
+<code>hosts:</code> das rotas declaradas <strong>não</strong> são publicados pelo <code>hosts sync</code> (o opt-in próprio delas
+prevalece), e o <code>--off</code> remove portanto só os nomes automáticos: os nomes pedidos pelo <code>hosts: [host]</code>
+de uma rota ficam no bloco. A mensagem do próprio comando («service names removed») refere-se aos
+primeiros.</p>
+<h3 id="two-kinds-of-name-two-failure-policies">Dois tipos de nome, duas políticas de falha<a class="hanchor" href="#two-kinds-of-name-two-failure-policies" aria-label="#">#</a></h3>
+<p>O <code>desired_hosts</code> devolve um par: nomes que um <strong>documento pediu</strong> (<code>strict</code>) e nomes <strong>publicados pelo
+<code>hosts sync</code></strong>. O <code>rebuild</code> chama <code>hosts_file::sync</code> e, se falhar:</p>
 <ul>
-<li>with <strong>no</strong> strict names at all, it only prints <code>warning: …</code> (an unprivileged <code>container run
-  --expose</code> must not fail because <code>/etc/hosts</code> needs root);</li>
-<li>with <strong>any</strong> strict name present, it returns the error and the apply fails.</li>
+<li>sem <strong>nenhum</strong> nome strict, apenas imprime <code>warning: …</code> (um <code>container run --expose</code> sem privilégio
+  não deve falhar porque o <code>/etc/hosts</code> precisa de root);</li>
+<li>com <strong>algum</strong> nome strict presente, devolve o erro e o apply falha.</li>
 </ul>
-<p>Read that condition carefully: it looks at whether strict names exist in the block, not at which
-name caused the failure. So while a route with <code>hosts: [host]</code> is declared, a failing write caused
-only by an auto name also fails the operation that triggered the rebuild.</p>
-<h2 id="running-it-as-root-sudo">Running it as root: <code>sudo</code><a class="hanchor" href="#running-it-as-root-sudo" aria-label="#">#</a></h2>
-<p><code>delonix hosts sync</code> calls <code>cmd::vmbridge::adopt_invoking_user_root()</code> first. Under <code>sudo</code> the state
-root would be root's (<code>/var/lib/delonix</code>), which has no registrations, and the command would publish
-zero names instead of the invoking user's. The function reads <code>SUDO_USER</code>, looks its home up with
-<code>getent passwd</code>, and sets <code>DELONIX_ROOT</code> to <code>&lt;home&gt;/.local/share/delonix</code>. An explicit <code>DELONIX_ROOT</code>
-wins, and outside <code>sudo</code> nothing changes. The block's id is the hash of the resulting root, so
-<code>sudo delonix hosts sync</code> and the user's own <code>delonix container run --expose</code> agree on the same
-block.</p>
-<h2 id="testing-it-without-touching-etchosts">Testing it without touching <code>/etc/hosts</code><a class="hanchor" href="#testing-it-without-touching-etchosts" aria-label="#">#</a></h2>
-<p>Set <code>DELONIX_HOSTS_FILE</code> (read by <code>hosts_path()</code>) and isolate the state, as
-<a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> describes. Path B needs no proxy and no
-container to <em>write</em> the block, only the registration file, so you can fabricate it:</p>
+<p>Lê esta condição com cuidado: ela olha para se existem nomes strict no bloco, não para qual nome causou
+a falha. Assim, enquanto houver uma rota com <code>hosts: [host]</code> declarada, uma escrita que falha por
+causa apenas de um nome automático também faz falhar a operação que desencadeou o rebuild.</p>
+<h2 id="running-it-as-root-sudo">Corrê-lo como root: <code>sudo</code><a class="hanchor" href="#running-it-as-root-sudo" aria-label="#">#</a></h2>
+<p>O <code>delonix hosts sync</code> chama primeiro <code>cmd::vmbridge::adopt_invoking_user_root()</code>. Sob <code>sudo</code> o state
+root seria o do root (<code>/var/lib/delonix</code>), que não tem registos, e o comando publicaria zero nomes em
+vez dos do utilizador que o invocou. A função lê <code>SUDO_USER</code>, procura a sua home com <code>getent passwd</code>,
+e define <code>DELONIX_ROOT</code> como <code>&lt;home&gt;/.local/share/delonix</code>. Um <code>DELONIX_ROOT</code> explícito prevalece, e
+fora do <code>sudo</code> nada muda. O id do bloco é o hash da raiz resultante, por isso o <code>sudo delonix hosts
+sync</code> e o <code>delonix container run --expose</code> do próprio utilizador concordam no mesmo bloco.</p>
+<h2 id="testing-it-without-touching-etchosts">Testá-lo sem tocar em <code>/etc/hosts</code><a class="hanchor" href="#testing-it-without-touching-etchosts" aria-label="#">#</a></h2>
+<p>Define <code>DELONIX_HOSTS_FILE</code> (lido por <code>hosts_path()</code>) e isola o estado, como descreve
+<a href="build-and-test.html#the-gates-ci-runs">Clonar, compilar e testar</a>. A via B não precisa de proxy nem de
+container para <em>escrever</em> o bloco, só do ficheiro de registo, por isso podes fabricá-lo:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">S=$(mktemp -d)                                   # or your scratch directory
 export DELONIX_ROOT=$S/root DELONIX_NET_RUNTIME_DIR=$S/run DELONIX_HOSTS_FILE=$S/hosts
 mkdir -p &quot;$DELONIX_ROOT/httproute&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
@@ -380,61 +385,62 @@ delonix hosts sync --print      # the block, nothing written
 delonix hosts sync              # writes it into $DELONIX_HOSTS_FILE
 delonix hosts sync --off        # removes it; the rest of the file is as it was
 </code></pre></div>
-<p>Run this way, the engine printed the block for <code>--print</code> without creating <code>hosts-sync</code>; <code>hosts sync</code>
-wrote the block after the existing <code>localhost</code> line and created the marker; <code>--off</code> removed the marker
-and left the file as it was; a hand-written line for the same name made <code>hosts sync</code> fail with the
-offending line and write nothing; and a hosts file in a read-only directory made it fail with the block
-to paste and <strong>remove the marker again</strong>. (<code>--off</code> prints "removed from /etc/hosts" whatever
-<code>DELONIX_HOSTS_FILE</code> says; the message is fixed text.) Path A was checked only up to validation:
-<code>hosts: [guest]</code> is refused with the message above, and <code>stack apply --dry-run</code> keeps <code>hosts: [host]</code>
-in the rendered document. No proxy was started.</p>
-<p>The unit tests in <code>hosts_file.rs</code> exercise <code>render</code> and <code>sync_at</code> directly (<code>sync_at</code> takes the path
-so the tests never touch the process environment). Run <code>cargo test -p delonix-runtime-bin hosts_file</code>.</p>
-<h2 id="what-is-not-validated">What is not validated<a class="hanchor" href="#what-is-not-validated" aria-label="#">#</a></h2>
-<p>Say so in a review rather than assuming:</p>
+<p>Corrido assim, o motor imprimiu o bloco para o <code>--print</code> sem criar o <code>hosts-sync</code>; o <code>hosts sync</code>
+escreveu o bloco depois da linha <code>localhost</code> existente e criou o marcador; o <code>--off</code> removeu o marcador
+e deixou o ficheiro como estava; uma linha escrita à mão para o mesmo nome fez o <code>hosts sync</code> falhar
+com a linha ofensora e sem escrever nada; e um ficheiro de hosts num directório só de leitura fê-lo
+falhar com o bloco para colar e <strong>remover o marcador outra vez</strong>. (O <code>--off</code> imprime «removed from
+/etc/hosts» seja o que for que o <code>DELONIX_HOSTS_FILE</code> diga; a mensagem é texto fixo.) A via A só foi
+verificada até à validação: <code>hosts: [guest]</code> é recusado com a mensagem acima, e o <code>stack apply
+--dry-run</code> mantém <code>hosts: [host]</code> no documento renderizado. Não foi arrancado nenhum proxy.</p>
+<p>Os testes unitários em <code>hosts_file.rs</code> exercitam directamente o <code>render</code> e o <code>sync_at</code> (o <code>sync_at</code>
+recebe o caminho, para os testes nunca tocarem no ambiente do processo). Corre <code>cargo test -p
+delonix-runtime-bin hosts_file</code>.</p>
+<h2 id="what-is-not-validated">O que não está validado<a class="hanchor" href="#what-is-not-validated" aria-label="#">#</a></h2>
+<p>Di-lo numa revisão em vez de o assumires:</p>
 <ul>
-<li><strong>The real <code>/etc/hosts</code>.</strong> Every run above used a scratch file. Writing the real file, as root,
-  was not observed by this page.</li>
-<li><strong>A client resolving a name from the block and reaching the backend.</strong> ADR-0046 records that this
-  traffic step was not observed either (the block, the refusals and the removal were measured).
-  The <code>expose:</code> sugar with <code>hosts:</code> was covered by unit tests and <code>--dry-run</code>, not by traffic.</li>
-<li><strong><code>hosts: guest</code></strong> and <strong><code>announce: l2</code></strong> are not built: <code>guest</code> is refused by validation, and an
-  address that is not on the host is refused rather than added.</li>
-<li><strong>Automatic maintenance needs a process that can write the file.</strong> A rootless <code>container run
-  --expose</code> after <code>sudo delonix hosts sync</code> only warns when it cannot rewrite <code>/etc/hosts</code>; the block
-  then keeps the old names until something with permission rewrites it.</li>
-<li>The <strong>removal</strong> side of the failure policy above (a <code>rm</code> that cannot write the file) was read
-  in the code, not run without root.</li>
+<li><strong>O <code>/etc/hosts</code> verdadeiro.</strong> Todas as corridas acima usaram um ficheiro de rascunho. Esta página
+  não observou a escrita do ficheiro real, como root.</li>
+<li><strong>Um cliente a resolver um nome do bloco e a alcançar o backend.</strong> O ADR-0046 regista que este passo
+  de tráfego também não foi observado (o bloco, as recusas e a remoção foram medidos). O açúcar
+  <code>expose:</code> com <code>hosts:</code> foi coberto por testes unitários e <code>--dry-run</code>, não por tráfego.</li>
+<li><strong><code>hosts: guest</code></strong> e <strong><code>announce: l2</code></strong> não estão construídos: o <code>guest</code> é recusado pela validação,
+  e um endereço que não está no host é recusado em vez de acrescentado.</li>
+<li><strong>A manutenção automática precisa de um processo que consiga escrever o ficheiro.</strong> Um <code>container
+  run --expose</code> rootless depois de <code>sudo delonix hosts sync</code> apenas avisa quando não consegue reescrever
+  o <code>/etc/hosts</code>; o bloco mantém então os nomes antigos até algo com permissão o reescrever.</li>
+<li>O lado da <strong>remoção</strong> da política de falha acima (um <code>rm</code> que não consegue escrever o ficheiro) foi
+  lido no código, não corrido sem root.</li>
 </ul>
-<h2 id="where-to-read-next">Where to read next<a class="hanchor" href="#where-to-read-next" aria-label="#">#</a></h2>
+<h2 id="where-to-read-next">Onde ler a seguir<a class="hanchor" href="#where-to-read-next" aria-label="#">#</a></h2>
 <ul>
-<li><code>cmd/hosts_file.rs</code> for the mechanism, <code>cmd/ingress_proxy.rs</code> (<code>desired_hosts</code>, <code>rebuild</code>,
-  <code>hosts_block_now</code>, <code>sync_hosts_now</code>, <code>hosts_sync_flag</code>) for the two inputs.</li>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a> for
-  the decisions and what each says was measured.</li>
+<li><code>cmd/hosts_file.rs</code> para o mecanismo, <code>cmd/ingress_proxy.rs</code> (<code>desired_hosts</code>, <code>rebuild</code>,
+  <code>hosts_block_now</code>, <code>sync_hosts_now</code>, <code>hosts_sync_flag</code>) para as duas entradas.</li>
+<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a> para as
+  decisões e o que cada uma diz que foi medido.</li>
 </ul>
 <hr />
-<p><strong>Next:</strong> <a href="coding-conventions.html">Coding conventions</a> — how code in this repository must be written, each rule tagged with the gate or decision behind it.</p>
+<p><strong>A seguir:</strong> <a href="coding-conventions.html">Convenções de código</a> — como o código neste repositório tem de ser escrito, cada regra etiquetada com o gate ou a decisão que está por trás.</p>
 <nav class="pager"><a href="troubleshooting.html"><span>← Anterior</span>Diagnóstico de problemas</a><a class="next" href="coding-conventions.html"><span>Seguinte →</span>Convenções de código</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/service-names-and-hosts.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/service-names-and-hosts.md</code></footer>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/pt-AO/service-names-and-hosts.md" target="_blank" rel="noopener">Editar esta página</a><code>docs/dev/pt-AO/service-names-and-hosts.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>
-<li><a href="#one-block-per-state-root">One block per state root</a><ul>
-<li><a href="#what-render-refuses">What render refuses</a></li>
-<li><a href="#how-it-writes-sync_at">How it writes (sync_at)</a></li>
+<li><a href="#one-block-per-state-root">Um bloco por state root</a><ul>
+<li><a href="#what-render-refuses">O que o render recusa</a></li>
+<li><a href="#how-it-writes-sync_at">Como escreve (sync_at)</a></li>
 </ul>
 </li>
-<li><a href="#where-the-names-come-from">Where the names come from</a><ul>
-<li><a href="#path-a-hosts-host-on-a-route-adr-0046">Path A: hosts: [host] on a route (ADR-0046)</a></li>
-<li><a href="#path-b-delonix-hosts-sync-adr-0048-phase-2">Path B: delonix hosts sync (ADR-0048, phase 2)</a></li>
-<li><a href="#two-kinds-of-name-two-failure-policies">Two kinds of name, two failure policies</a></li>
+<li><a href="#where-the-names-come-from">De onde vêm os nomes</a><ul>
+<li><a href="#path-a-hosts-host-on-a-route-adr-0046">Via A: hosts: [host] numa rota (ADR-0046)</a></li>
+<li><a href="#path-b-delonix-hosts-sync-adr-0048-phase-2">Via B: delonix hosts sync (ADR-0048, fase 2)</a></li>
+<li><a href="#two-kinds-of-name-two-failure-policies">Dois tipos de nome, duas políticas de falha</a></li>
 </ul>
 </li>
-<li><a href="#running-it-as-root-sudo">Running it as root: sudo</a></li>
-<li><a href="#testing-it-without-touching-etchosts">Testing it without touching /etc/hosts</a></li>
-<li><a href="#what-is-not-validated">What is not validated</a></li>
-<li><a href="#where-to-read-next">Where to read next</a></li>
+<li><a href="#running-it-as-root-sudo">Corrê-lo como root: sudo</a></li>
+<li><a href="#testing-it-without-touching-etchosts">Testá-lo sem tocar em /etc/hosts</a></li>
+<li><a href="#what-is-not-validated">O que não está validado</a></li>
+<li><a href="#where-to-read-next">Onde ler a seguir</a></li>
 </ul>
 </div>
 </aside>

@@ -1,4 +1,4 @@
-<!-- translated-from: environment.md sha256:29a46c673dae7f412b2e88dbcf5a56a00385849cb1bff2804877d0ab9b85a677 -->
+<!-- translated-from: environment.md sha256:0505a35c5a1e921e51ecd51f7feb5352158dd1985176b27ff3e1a76b6adc1719 -->
 # Préparer votre environnement
 
 **Avant de lire :** [Commencer ici](start-here.md#day-0-in-30-minutes) (Jour 0) et [Fondations Linux](linux-foundations.md) — les pièges de l’hôte ci-dessous sont expliqués en termes de user namespaces et de délégation de cgroup.
@@ -77,8 +77,16 @@ La source de vérité est [`scripts/install.sh`](../../../scripts/install.sh), q
 l’installateur officiel (il est publié comme asset de release). Il détecte le gestionnaire de paquets via
 `/etc/os-release` et prend en charge **apt** (Debian, Ubuntu et dérivées), **dnf** (Fedora, RHEL,
 CentOS Stream, Rocky, AlmaLinux), **zypper** (openSUSE, SLES) et **pacman** (Arch et
-dérivées). Des binaires précompilés n’existent que pour **x86_64** ; sur les autres architectures, compilez depuis
-les sources.
+dérivées). L’installateur installe des binaires précompilés pour **x86_64** et **aarch64** (`arm64` est
+normalisé) : le nom de l’asset est composé à partir de `uname -m` sous la forme `<name>-<arch>-linux`, et toute autre
+architecture s’arrête avec « no prebuilt binary for <arch> yet » ; compilez alors depuis les sources. Trois choses
+diffèrent sur aarch64 : la variante `-v3` est un niveau de microarchitecture x86-64 et n’y existe pas ; le Cloud Hypervisor
+statique épinglé, l’EDK2 `CLOUDHV.fd` et `hypervisor-fw` sont des builds x86-64, donc ils ne sont pas téléchargés (un
+paquet `cloud-hypervisor` de la distribution est tout de même installé si le gestionnaire de paquets le propose) et le
+backend de VM est libvirt ; et la sonde QEMU demande `qemu-system-aarch64`. Les assets de release aarch64 existent depuis
+la v4.2.0 (la release v4.1.0 n’en a aucun).
+**Non validé :** une installation complète sur un vrai hôte aarch64, et les noms des paquets QEMU par distribution sur
+arm64 — ce qui a été vérifié, c’est la composition du nom d’asset face aux assets v4.2.0 publiés.
 
 Pour exécuter des containers, le moteur a besoin de :
 
@@ -109,7 +117,11 @@ bash scripts/install.sh --no-binary
 Lisez d’abord la liste des options en tête du script : certaines options modifient des réglages de sécurité à l’échelle de l’hôte
 (`--low-ports` permet à n’importe quel programme local de se lier aux ports à partir de 80, `--with-image-build` rend
 `/boot/vmlinuz-*` lisible par tous), et `--no-tune` saute les modules du noyau et les sysctls, y compris
-`br_netfilter`.
+`br_netfilter`. `--performance` / `--no-performance` contrôlent le mode performance du CPU, les hugepages
+transparentes avec `irqbalance`, et un timer utilisateur qui exécute `system prune --auto --threshold 75` ; sans
+aucune de ces options, l’installateur pose la question pour chacun et, sans terminal, répond non. La partie CPU est un
+service systemd qui mémorise les valeurs du démarrage et les remet lors du `stop`. Rien de cela n’est nécessaire pour
+développer.
 
 ### Mémoire et disque
 
