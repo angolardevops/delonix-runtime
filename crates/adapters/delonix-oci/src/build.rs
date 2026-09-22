@@ -8,7 +8,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 /// A `RUN --mount=type=secret,id=<name>[,target=<path>][,required=true|false]` —
-/// the only `--mount` type this build supports (see [`parse_run_flags`]).
+/// one of the two `--mount` types this build supports (see [`parse_run_flags`]).
 #[derive(Debug, Clone)]
 pub struct SecretMount {
     /// `id=<name>` — looked up in the build's `--secret id=<name>,src=<path>` map.
@@ -21,12 +21,30 @@ pub struct SecretMount {
     pub required: bool,
 }
 
-/// A `RUN` instruction: the shell command line plus any `--mount=type=secret`
-/// flags that preceded it on the same instruction.
+/// A `RUN --mount=type=cache,target=<path>[,id=<name>]` — a directory kept
+/// OUTSIDE the image, read-write for the duration of this one `RUN`, that
+/// PERSISTS across builds (a package manager cache is the canonical use: the
+/// download stays warm between builds without ever landing in a layer). Same
+/// `id` (or, if omitted, the same `target`) always resolves to the same
+/// directory on this host — the caller (`delonix build`) owns turning this
+/// `id` into an actual path, since where a cache mount's persistent state
+/// lives is a CLI/state-root concern, not something this crate knows about.
+#[derive(Debug, Clone)]
+pub struct CacheMount {
+    /// `id=<name>`, or `target` itself when `id` is omitted — Docker's own
+    /// default. Never empty by the time this struct exists.
+    pub id: String,
+    /// `target=<path>` — where the cache is bind-mounted inside the container.
+    pub target: String,
+}
+
+/// A `RUN` instruction: the shell command line plus any `--mount=type=secret`/
+/// `--mount=type=cache` flags that preceded it on the same instruction.
 #[derive(Debug, Clone, Default)]
 pub struct RunStep {
     pub cmdline: String,
     pub secret_mounts: Vec<SecretMount>,
+    pub cache_mounts: Vec<CacheMount>,
 }
 
 /// A build step, in order (order matters: `COPY` before the `RUN` that uses it).
@@ -291,10 +309,11 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
                 });
             }
             "RUN" => {
-                let (secret_mounts, cmdline) = parse_run_flags(rest)?;
+                let (secret_mounts, cache_mounts, cmdline) = parse_run_flags(rest)?;
                 stages.last_mut().unwrap().steps.push(Step::Run(RunStep {
                     cmdline,
                     secret_mounts,
+                    cache_mounts,
                 }));
             }
             "CMD" => df.cmd = parse_cmd(rest),
@@ -472,15 +491,17 @@ fn parse_env_pairs(rest: &str) -> Vec<(String, String)> {
     out
 }
 
-/// Parses the leading `--mount=type=secret,id=<name>[,target=<path>][,required=…]`
-/// flags off a `RUN` instruction's tail, returning the parsed mounts and the
-/// remaining shell command line. Any other `--mount=type=...` (`ssh`/`cache`/
-/// `bind`) or any other unrecognized leading `--xxx=...` token is a **hard
-/// error** naming exactly what's unsupported — never silently handed to the
-/// shell as a literal argument (which would just produce a confusing "command
-/// not found" instead of an actionable message).
-fn parse_run_flags(rest: &str) -> Result<(Vec<SecretMount>, String)> {
-    let mut mounts = Vec::new();
+/// Parses the leading `--mount=type=secret,...`/`--mount=type=cache,...`
+/// flags off a `RUN` instruction's tail, returning the parsed mounts (split
+/// by kind, since the two are stored and consumed differently) and the
+/// remaining shell command line. Any other `--mount=type=...` (`ssh`/`bind`)
+/// or any other unrecognized leading `--xxx=...` token is a **hard error**
+/// naming exactly what's unsupported — never silently handed to the shell
+/// as a literal argument (which would just produce a confusing "command not
+/// found" instead of an actionable message).
+fn parse_run_flags(rest: &str) -> Result<(Vec<SecretMount>, Vec<CacheMount>, String)> {
+    let mut secret_mounts = Vec::new();
+    let mut cache_mounts = Vec::new();
     let mut remaining = rest.trim_start();
     while let Some(flag) = remaining.strip_prefix("--") {
         let Some((name, value)) = flag.split_once('=') else {
@@ -491,43 +512,67 @@ fn parse_run_flags(rest: &str) -> Result<(Vec<SecretMount>, String)> {
             None => (value, ""),
         };
         if name == "mount" {
-            mounts.push(parse_secret_mount(value)?);
+            match parse_mount_flag(value)? {
+                MountFlag::Secret(m) => secret_mounts.push(m),
+                MountFlag::Cache(m) => cache_mounts.push(m),
+            }
             remaining = after;
         } else {
             return Err(Error::Dockerfile(format!(
-                "RUN --{name}: flag não suportada (só --mount=type=secret,id=<nome>\
-                 [,target=<caminho>][,required=true|false])"
+                "RUN --{name}: unsupported flag (only --mount=type=secret,id=<name>\
+                 [,target=<path>][,required=true|false] or --mount=type=cache,target=<path>\
+                 [,id=<name>] are supported)"
             )));
         }
     }
-    Ok((mounts, remaining.to_string()))
+    Ok((secret_mounts, cache_mounts, remaining.to_string()))
 }
 
-/// Parses one `--mount=type=secret,id=<name>[,target=<path>][,required=…]`
-/// flag's value (the part after `mount=`).
-fn parse_secret_mount(value: &str) -> Result<SecretMount> {
+/// One `--mount=...` flag, tagged by which of the two supported `type=`s it was.
+enum MountFlag {
+    Secret(SecretMount),
+    Cache(CacheMount),
+}
+
+/// Parses one `--mount=type=secret,...` or `--mount=type=cache,...` flag's
+/// value (the part after `mount=`), dispatching on `type=` before reading
+/// any of the other fields — a `ssh`/`bind` mount, or a missing `type=`
+/// entirely, refuses here rather than reading fields that don't apply to it.
+fn parse_mount_flag(value: &str) -> Result<MountFlag> {
     let mut kv = std::collections::HashMap::new();
     for pair in value.split(',') {
-        if let Some((k, v)) = pair.split_once('=') {
-            kv.insert(k, v);
+        // A bare flag (`ro`, no `=`) still has to be SEEN, or `sharing=`/`ro`
+        // rejection below could never fire for the form Docker itself
+        // documents (`ro` bare, not `ro=true`).
+        match pair.split_once('=') {
+            Some((k, v)) => {
+                kv.insert(k, v);
+            }
+            None if !pair.is_empty() => {
+                kv.insert(pair, "");
+            }
+            None => {}
         }
     }
     match kv.get("type") {
-        Some(&"secret") => {}
-        Some(other) => {
-            return Err(Error::Dockerfile(format!(
-                "RUN --mount=type={other}: só type=secret é suportado (ssh/cache/bind ainda não)"
-            )))
-        }
-        None => {
-            return Err(Error::Dockerfile(
-                "RUN --mount=...: falta 'type=' (só type=secret é suportado)".into(),
-            ))
-        }
+        Some(&"secret") => Ok(MountFlag::Secret(parse_secret_mount(&kv)?)),
+        Some(&"cache") => Ok(MountFlag::Cache(parse_cache_mount(&kv)?)),
+        Some(other) => Err(Error::Dockerfile(format!(
+            "RUN --mount=type={other}: only type=secret and type=cache are supported (ssh/bind not yet)"
+        ))),
+        None => Err(Error::Dockerfile(
+            "RUN --mount=...: missing 'type=' (type=secret or type=cache)".into(),
+        )),
     }
+}
+
+/// Reads the `id=<name>[,target=<path>][,required=…]` fields of a
+/// `type=secret` mount, the `type=` field itself already consumed by
+/// [`parse_mount_flag`].
+fn parse_secret_mount(kv: &std::collections::HashMap<&str, &str>) -> Result<SecretMount> {
     let id = kv
         .get("id")
-        .ok_or_else(|| Error::Dockerfile("RUN --mount=type=secret: falta 'id=<nome>'".into()))?
+        .ok_or_else(|| Error::Dockerfile("RUN --mount=type=secret: missing 'id=<name>'".into()))?
         .to_string();
     let target = kv.get("target").map(|s| s.to_string());
     let required = match kv.get("required") {
@@ -535,7 +580,7 @@ fn parse_secret_mount(value: &str) -> Result<SecretMount> {
         Some(&"false") | None => false,
         Some(other) => {
             return Err(Error::Dockerfile(format!(
-                "RUN --mount=...,required={other}: espera 'true' ou 'false'"
+                "RUN --mount=...,required={other}: expected 'true' or 'false'"
             )))
         }
     };
@@ -544,6 +589,39 @@ fn parse_secret_mount(value: &str) -> Result<SecretMount> {
         target,
         required,
     })
+}
+
+/// Reads the `target=<path>[,id=<name>]` fields of a `type=cache` mount, the
+/// `type=` field itself already consumed by [`parse_mount_flag`]. `target` is
+/// required (there is nothing sensible to default it to — unlike a secret, a
+/// cache mount has no `/run/secrets`-style convention); `id` defaults to
+/// `target` itself, Docker's own rule, so two `RUN`s that mount the same
+/// `target` without naming an `id` share the same persistent directory.
+///
+/// `sharing=`/`ro` (Docker's own extra fields) are refused rather than
+/// silently accepted-and-ignored: this build has no cross-process locking
+/// between concurrent `delonix build`s sharing a cache id yet, and a `ro`
+/// cache mount would need a real read-only bind rather than the always-
+/// writable one this first slice sets up — both are honest gaps, not
+/// silently-dropped flags.
+fn parse_cache_mount(kv: &std::collections::HashMap<&str, &str>) -> Result<CacheMount> {
+    let target = kv
+        .get("target")
+        .ok_or_else(|| Error::Dockerfile("RUN --mount=type=cache: missing 'target=<path>'".into()))?
+        .to_string();
+    for unsupported in ["sharing", "ro"] {
+        if kv.contains_key(unsupported) {
+            return Err(Error::Dockerfile(format!(
+                "RUN --mount=type=cache,{unsupported}=...: not supported yet (drop it — every \
+                 cache mount is read-write and shared, unlocked, across concurrent builds)"
+            )));
+        }
+    }
+    let id = kv
+        .get("id")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| target.clone());
+    Ok(CacheMount { id, target })
 }
 
 /// `CMD ["a","b"]` (JSON) or `CMD a b` (shell) → vector of arguments.
@@ -1035,18 +1113,57 @@ mod tests {
 
     #[test]
     fn run_mount_secret_sem_target_usa_default_e_aceita_required() {
-        let (mounts, cmdline) =
+        let (mounts, caches, cmdline) =
             parse_run_flags("--mount=type=secret,id=x,required=true cat /run/secrets/x").unwrap();
         assert_eq!(cmdline, "cat /run/secrets/x");
         assert_eq!(mounts.len(), 1);
         assert_eq!(mounts[0].id, "x");
         assert_eq!(mounts[0].target, None);
         assert!(mounts[0].required);
+        assert!(caches.is_empty());
     }
 
     #[test]
-    fn run_mount_tipo_nao_secret_e_erro_claro_nao_shell_literal() {
-        let err = parse_run_flags("--mount=type=cache,target=/root/.cache echo hi").unwrap_err();
+    fn run_mount_cache_e_reconhecido_id_default_e_o_target() {
+        let (secrets, caches, cmdline) =
+            parse_run_flags("--mount=type=cache,target=/root/.cache/pip pip install -r req.txt")
+                .unwrap();
+        assert_eq!(cmdline, "pip install -r req.txt");
+        assert!(secrets.is_empty());
+        assert_eq!(caches.len(), 1);
+        assert_eq!(caches[0].target, "/root/.cache/pip");
+        assert_eq!(caches[0].id, "/root/.cache/pip"); // id defaults to target
+    }
+
+    #[test]
+    fn run_mount_cache_com_id_explicito_nao_usa_o_default() {
+        let (_, caches, _) =
+            parse_run_flags("--mount=type=cache,id=pip-cache,target=/root/.cache/pip true")
+                .unwrap();
+        assert_eq!(caches[0].id, "pip-cache");
+        assert_eq!(caches[0].target, "/root/.cache/pip");
+    }
+
+    #[test]
+    fn run_mount_cache_sem_target_e_erro_claro() {
+        let err = parse_run_flags("--mount=type=cache,id=x echo hi").unwrap_err();
+        assert!(err.to_string().contains("target"));
+    }
+
+    #[test]
+    fn run_mount_cache_sharing_e_ro_sao_recusados_nao_engolidos() {
+        let err =
+            parse_run_flags("--mount=type=cache,target=/x,sharing=locked echo hi").unwrap_err();
+        assert!(err.to_string().contains("sharing"));
+        let err = parse_run_flags("--mount=type=cache,target=/x,ro echo hi").unwrap_err();
+        assert!(err.to_string().contains("ro"));
+    }
+
+    #[test]
+    fn run_mount_tipo_nao_suportado_e_erro_claro_nao_shell_literal() {
+        let err = parse_run_flags("--mount=type=ssh echo hi").unwrap_err();
+        assert!(err.to_string().contains("type=ssh"));
+        assert!(err.to_string().contains("type=secret"));
         assert!(err.to_string().contains("type=cache"));
     }
 

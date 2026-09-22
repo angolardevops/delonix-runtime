@@ -166,6 +166,7 @@ Commands:
   describe  Human-readable detail of one or more images, `kubectl describe`-style
   history   Layers of an image (digest + size), from base to top
   ls        List local images
+  sbom      The image&#x27;s SBOM as an SPDX 2.3 document, not the table `scan --sbom` prints
   scan      SBOM + CVE scan of an image
   verify    Verify the cosign signature of a local image against a public key
   login     Authenticate to an OCI registry
@@ -189,7 +190,7 @@ Options:
 
 COMMAND MAP:
   Lifecycle    pull · remove · push
-  Inspect      ls · describe · history · verify · scan
+  Inspect      ls · describe · history · verify · scan · sbom
   Configure    tag · sign · login · logout
   Storage      export · save · load
   Declarative  apply

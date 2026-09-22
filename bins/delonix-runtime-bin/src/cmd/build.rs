@@ -50,6 +50,23 @@
 //! space-efficient than Docker's real layers (mitigated by `--reflink=auto`
 //! copy-on-write where the filesystem supports it); no cache GC/TTL yet —
 //! `<root>/build-cache` only grows.
+//!
+//! **`RUN --mount=type=cache,target=<path>[,id=<name>]`** (M03 of the 13-
+//! improvements programme, next to `type=secret` above): a PERSISTENT,
+//! read-write directory (`<root>/build-cache/mounts/<sha256(id)>`, `id`
+//! defaults to `target` — Docker's own rule) bind-mounted for the duration
+//! of one `RUN` and kept across builds and across Dockerfiles — a package
+//! manager's download cache is the canonical use. Same mechanism as a
+//! secret mount (`runtime::mount_live`, invisible to the layer cache/final
+//! image because it only exists in the container's own mount namespace),
+//! but writable and never torn down between builds. A cache HIT on the
+//! instruction-hash chain skips the `RUN` entirely, so it never touches the
+//! cache mount's directory either — only a miss does. `sharing=`/`ro`
+//! (Docker's own extra fields) are refused rather than silently accepted-
+//! and-ignored: there is no cross-process locking between concurrent
+//! `delonix build`s sharing a cache id yet, and every cache mount is
+//! read-write. No GC/TTL here either, same honestly-stated gap as the
+//! layer cache above.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -542,17 +559,27 @@ fn build_one_stage(
                     let cmdline = &run_step.cmdline;
                     // Cache key includes each mount's id+target (what could
                     // change the RUN's observable behavior across builds) but
-                    // deliberately NOT the secret's value — same choice
-                    // upstream BuildKit makes: rotating a secret's content
+                    // deliberately NOT the secret's value or the cache
+                    // mount's current CONTENT — same choice upstream
+                    // BuildKit makes for secrets: rotating a secret's content
                     // shouldn't by itself invalidate the cache, and hashing
                     // secret material into a file under `<root>/build-cache`
-                    // would be its own small leak.
-                    let mount_key: String = run_step
+                    // would be its own small leak. A cache-mount HIT simply
+                    // never touches its persistent directory at all (the RUN
+                    // doesn't execute) — only a miss does.
+                    let secret_key: String = run_step
                         .secret_mounts
                         .iter()
                         .map(|m| format!("{}={}", m.id, m.target.as_deref().unwrap_or("")))
                         .collect::<Vec<_>>()
                         .join(",");
+                    let cache_key: String = run_step
+                        .cache_mounts
+                        .iter()
+                        .map(|m| format!("{}={}", m.id, m.target))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    let mount_key = format!("{secret_key}|{cache_key}");
                     let new_hash = hash_link(&chain_hash, &format!("RUN:{cmdline}:{mount_key}"));
                     if use_cache {
                         if let Some((cid, crootfs)) = try_clone_cached(images, &new_hash)? {
@@ -574,17 +601,24 @@ fn build_one_stage(
                         rootless,
                     )?;
                     let c = container.as_ref().unwrap();
-                    let mounted = mount_run_secrets(c, run_step, secrets)?;
+                    let mut mounted = mount_run_secrets(c, run_step, secrets)?;
+                    match mount_run_caches(c, run_step) {
+                        Ok(cache_mounted) => mounted.extend(cache_mounted),
+                        Err(e) => {
+                            unmount_run_mounts(c, &cur_rootfs, &mounted);
+                            return Err(e);
+                        }
+                    }
                     let exports: String = cur_env.iter().map(|kv| sh_export(kv)).collect();
                     let shell =
                         format!("mkdir -p {cur_workdir} && cd {cur_workdir}; {exports}{cmdline}");
                     let argv = vec!["/bin/sh".to_string(), "-c".to_string(), shell];
                     let exec_result = runtime::exec(c, &argv, false);
                     // Always unmount — success OR failure — same discipline as
-                    // `retire_container`: a secret bind-mount left attached
-                    // when a `RUN` fails would otherwise leak into whatever
-                    // touches this rootfs next.
-                    unmount_run_secrets(c, &cur_rootfs, &mounted);
+                    // `retire_container`: a secret or cache bind-mount left
+                    // attached when a `RUN` fails would otherwise leak into
+                    // whatever touches this rootfs next.
+                    unmount_run_mounts(c, &cur_rootfs, &mounted);
                     let code = exec_result?;
                     if code != 0 {
                         return Err(Error::Invalid(super::po::tf(
@@ -752,17 +786,71 @@ fn mount_run_secrets(
     Ok(mounted)
 }
 
-/// Undoes [`mount_run_secrets`]: unmounts each target, then removes the
-/// (now-empty) mountpoint placeholder `mount_live` created on the rootfs
-/// before mounting over it — without this, an empty `/run/secrets/<id>` file
-/// or directory would survive into the next cache snapshot/commit. `cur_rootfs`
-/// is the SAME confinement boundary `COPY`'s `confine_to`/`safe_join` already
+/// `<root>/build-cache/mounts/<sha256(id)>` — the persistent directory a
+/// `RUN --mount=type=cache,id=<id>` reuses across builds and across
+/// Dockerfiles. Hashed, never the raw `id` used as a path component
+/// directly: an omitted `id` defaults to `target=<path>` (see
+/// `delonix_oci::build::parse_cache_mount`), an arbitrary string an
+/// untrusted Dockerfile controls — the same class of traversal risk
+/// `COPY`'s `confine_to`/`safe_join` already guard against elsewhere in this
+/// file, sidestepped here for free by hashing rather than sanitizing.
+fn cache_mount_dir(id: &str) -> PathBuf {
+    let mut h = Sha256::new();
+    h.update(id.as_bytes());
+    build_cache_dir()
+        .join("mounts")
+        .join(format!("{:x}", h.finalize()))
+}
+
+/// Bind-mounts each `RUN --mount=type=cache` into the LIVE working
+/// container, same mechanism as [`mount_run_secrets`] — but read-write, and
+/// sourced from [`cache_mount_dir`] (created on first use, kept forever;
+/// there is no GC/TTL yet, same honestly-stated gap the layer cache already
+/// has). All-or-nothing, same discipline as `mount_run_secrets`.
+fn mount_run_caches(container: &Container, run_step: &RunStep) -> Result<Vec<String>> {
+    let mut mounted: Vec<String> = Vec::new();
+    for m in &run_step.cache_mounts {
+        let dir = cache_mount_dir(&m.id);
+        if let Err(e) = std::fs::create_dir_all(&dir) {
+            for t in &mounted {
+                let _ = runtime::unmount_live(container, t);
+            }
+            return Err(e.into());
+        }
+        if let Err(e) = runtime::mount_live(
+            container,
+            &delonix_compute::Mount {
+                source: dir.to_string_lossy().into_owned(),
+                target: m.target.clone(),
+                readonly: false,
+                propagation: None,
+                optional: false,
+            },
+        ) {
+            for t in &mounted {
+                let _ = runtime::unmount_live(container, t);
+            }
+            return Err(e.into());
+        }
+        mounted.push(m.target.clone());
+    }
+    Ok(mounted)
+}
+
+/// Undoes [`mount_run_secrets`]/[`mount_run_caches`]: unmounts each target,
+/// then removes the (now-empty) mountpoint placeholder `mount_live` created
+/// on the rootfs before mounting over it — without this, an empty
+/// `/run/secrets/<id>` file/directory (or a cache mount's empty target)
+/// would survive into the next cache snapshot/commit. `cur_rootfs` is the
+/// SAME confinement boundary `COPY`'s `confine_to`/`safe_join` already
 /// use — a mount `target` is always an absolute, `mount_target_safe`-checked
 /// path (validated inside `mount_live` itself), but resolving it against the
-/// rootfs still goes through `confine_to` here for defense in depth.
+/// rootfs still goes through `confine_to` here for defense in depth. Never
+/// touches the mount SOURCE — a cache mount's persistent directory (unlike a
+/// secret's ephemeral value) is meant to survive exactly this call.
 /// Best-effort throughout: called on both the success and failure path of a
 /// `RUN`, same discipline as `retire_container`.
-fn unmount_run_secrets(container: &Container, cur_rootfs: &str, targets: &[String]) {
+fn unmount_run_mounts(container: &Container, cur_rootfs: &str, targets: &[String]) {
     for target in targets {
         let _ = runtime::unmount_live(container, target);
         let Ok(canon_base) = canonical_base(Path::new(cur_rootfs)) else {
@@ -1555,8 +1643,8 @@ fn copy_dir_all(src: &Path, dst: &Path, canon_context: &Path, canon_rootfs: &Pat
 #[cfg(test)]
 mod tests {
     use super::{
-        confine_to, default_build_file, expand_env_value, parse_build_secrets, parse_platform,
-        safe_join, sh_export, valid_secret_id,
+        build_cache_dir, cache_mount_dir, confine_to, default_build_file, expand_env_value,
+        parse_build_secrets, parse_platform, safe_join, sh_export, valid_secret_id,
     };
 
     /// The work container's spawn specification, now built from a `Launch`, is the
@@ -1669,6 +1757,19 @@ mod tests {
         assert!(!valid_secret_id(""));
         assert!(!valid_secret_id("../etc/passwd"));
         assert!(!valid_secret_id("has space"));
+    }
+
+    #[test]
+    fn cache_mount_dir_is_deterministic_and_never_echoes_the_id_as_a_path_component() {
+        let a = cache_mount_dir("/root/.cache/pip");
+        let b = cache_mount_dir("/root/.cache/pip");
+        assert_eq!(a, b, "same id has to resolve to the same directory");
+        let c = cache_mount_dir("../../etc/passwd");
+        assert_ne!(a, c);
+        // The path-traversal id never survives as a literal path segment —
+        // it is hashed away, which is the whole point.
+        assert!(!c.to_string_lossy().contains(".."));
+        assert!(a.starts_with(build_cache_dir().join("mounts")));
     }
 
     #[test]

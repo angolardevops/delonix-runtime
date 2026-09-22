@@ -55,7 +55,7 @@ in `\` are joined; lines starting with `#` are comments. Instruction names are c
 |---|---|---|
 | `ARG NAME[=default]` | Declares a build variable; `${NAME}`/`$NAME` is substituted in every later line | Allowed before `FROM` (to parameterize it). `--build-arg NAME=VALUE` overrides only a declared `ARG`. Simplification: args live in **one** scope for the whole file, not per stage. No `${NAME:-default}` forms (`substitute_vars`). |
 | `FROM <image> [AS <name>]` | Opens a stage | A later stage may also say `FROM <earlier-stage>` (see multi-stage). |
-| `RUN <shell>` | Runs in a working container via `exec` | Only `--mount=type=secret,...` is accepted as a flag (below). |
+| `RUN <shell>` | Runs in a working container via `exec` | Only `--mount=type=secret,...`/`--mount=type=cache,...` are accepted as a flag (below). |
 | `COPY [--from=<stage>] <src> <dst>` | Writes into the stage's rootfs on disk | Confined to the context/rootfs (`safe_join`, `confine_to`): `..`, absolute escapes and symlinks that leave the base are refused. |
 | `ADD` | **Same as `COPY`** | No URL download, no automatic archive extraction. |
 | `ENV K=V [K2="v 2" …]` or `ENV K V` | Affects later `RUN`s; final stage's `ENV` goes into the image config | Values are expanded against earlier `ENV`s (`expand_env_value`). |
@@ -119,11 +119,31 @@ RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
 - In the file: `--mount=type=secret,id=<name>[,target=<path>][,required=true|false]`. `target`
   defaults to `/run/secrets/<id>`; `required` defaults to `false` (a missing optional secret is
   skipped, like Docker).
-- `type=ssh`, `type=cache` and `type=bind` are **refused** (`parse_secret_mount`).
 - The secret is bind-mounted live (`mount_run_secrets`) inside the working container's mount
   namespace only for that one `RUN`, then unmounted — the host-side view of the rootfs that the
   commit and the layer cache read never contains it. The secret material is also not hashed into
   the cache key.
+
+### Cache mounts (M03 of the 13-improvements programme)
+
+```dockerfile
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+```
+
+- `--mount=type=cache,target=<path>[,id=<name>]`. `target` is required; `id` defaults to `target`
+  itself (Docker's own rule), so two `RUN`s that mount the same `target` without naming an `id`
+  share the same persistent directory.
+- Unlike a secret, this directory is **read-write** and **persists across builds** (and across
+  different Dockerfiles): it lives at `<DELONIX_ROOT>/build-cache/mounts/<sha256(id)>` — hashed,
+  never the raw `id`/`target` string, since an omitted `id` defaults to an arbitrary
+  Dockerfile-controlled path (`cache_mount_dir`). No GC/TTL yet, same honestly-stated gap as the
+  layer cache below.
+- A layer-cache **hit** on the instruction skips the `RUN` entirely, so it never touches the cache
+  mount's directory either — only a miss does (`mount_run_caches`).
+- `sharing=`/`ro` (Docker's own extra fields) are **refused**, not silently accepted-and-ignored:
+  there is no cross-process locking between concurrent `delonix build`s sharing a cache id yet, and
+  every cache mount here is read-write.
+- `type=ssh` and `type=bind` are still **refused** (`parse_mount_flag`) — not yet implemented.
 
 ### `--platform` and binfmt
 
@@ -207,21 +227,22 @@ CMD ["/usr/local/bin/app"]
 ```text
 $ delonix build -t demo:dev --target nosuch .
 error invalid argument: no stage named 'nosuch' in this Dockerfile — known stages: builder
-$ delonix build -t d -f Dockerfile.cache .        # RUN --mount=type=cache,...
-error invalid argument: RUN --mount=type=cache: só type=secret é suportado (ssh/cache/bind ainda não)
+$ delonix build -t d -f Dockerfile.ssh .          # RUN --mount=type=ssh,...
+error invalid argument: RUN --mount=type=ssh: only type=secret and type=cache are supported (ssh/bind not yet)
 $ delonix build -t d --platform windows/amd64 .
 error invalid argument: --platform 'windows/amd64': only 'linux/<arch>' is supported (this engine does not run another OS)
 ```
-
-(Some parser errors are still in Portuguese; they count as LANG-01 debt — see
-[Contributing workflow](contributing-workflow.md).)
 
 ### The repository's own `Delonixfile` is not built by `delonix`
 
 The `Delonixfile` at the repository root packages the `delonix` CLI into a container image. It is
 built with **Docker or Podman** (`docker build -f Delonixfile …`, or `make image`), not with
-`delonix build`: it uses `# syntax=docker/dockerfile:1` and `RUN --mount=type=cache`, which
-`delonix build` refuses. Do not use it as an example of the Delonix grammar; use the templates.
+`delonix build`. It only uses `type=cache` mounts (now parsed) and the `# syntax=` directive (a
+comment to this parser, since any line starting with `#` is one) — but building it with
+`delonix build` has never been tried: it compiles this entire Rust workspace inside the working
+container, which is a different order of magnitude from the templates below and outside the scope
+this feature was validated against. Do not use it as an example of the Delonix grammar; use the
+templates.
 
 ---
 
@@ -433,7 +454,7 @@ A full build (`virt-customize`, downloads, compression) was **not executed in th
 | `COPY --from` | yes | yes (name or index) | yes (named, earlier stages only; `virt-copy-out`) |
 | `COPY` flags `--chown/--chmod` | yes | no | no |
 | `ADD` URL / archive extraction | yes | no (`ADD` = `COPY`) | no `ADD` |
-| `RUN --mount` | secret, ssh, cache, bind, tmpfs | `type=secret` only | none |
+| `RUN --mount` | secret, ssh, cache, bind, tmpfs | `type=secret`/`type=cache` only | none |
 | `--target` | yes | yes | no |
 | `--platform` | yes | `linux/<arch>`, host binfmt required | no (images stay amd64 — [ADR-0018](../adr/0018-vm-images-stay-amd64.md)) |
 | Layer cache | yes | rootless only, no GC | none |
