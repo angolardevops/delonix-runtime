@@ -356,6 +356,14 @@ diz quais são, em vez de os omitir.
   sessão, nunca um daemon); um transporte HTTP local, se vier a existir, seria
   loopback-only com um token local, como o `serve api` já é local-only e sem
   contrato publicado — não construas automação sobre ele ainda.
+* **`policy`** — `delonix policy unset` (M04, `docs/roadmap/
+  13-improvements-traceability.md`), o único verbo imperativo de
+  `kind: RuntimePolicy`. Superfície nova, sem promessa declarada — o
+  `policy.json` que ele apaga já existia e já era lido por `container run`/
+  `vm create`; o que é novo é a forma declarativa (`stack apply`) e este
+  comando de remoção. A leitura passa por `delonix get runtimepolicies`/
+  `delonix describe runtimepolicy <nome>`, os verbos genéricos, que herdam a
+  promessa (ou falta dela) desses verbos e não uma própria deste grupo.
 * **`backup`** — o grupo não estava declarado de nenhum dos lados, e essa
   omissão é ela própria um defeito: quem quisesse saber se podia depender de
   `delonix backup vm x` não tinha resposta. Fica NÃO estável enquanto os

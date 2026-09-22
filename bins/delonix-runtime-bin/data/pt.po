@@ -13270,3 +13270,68 @@ msgstr "o construtor {name} terminou mas não deixou nenhum .qcow2 em {out}"
 
 msgid "builder {name} left {n} disk images ({files}); expected exactly one"
 msgstr "o construtor {name} deixou {n} imagens de disco ({files}); esperava-se exatamente uma"
+
+# ---- kind: RuntimePolicy / delonix policy (M04) -----------------------------
+
+msgid "The node's admission ceiling (`kind: RuntimePolicy` / `<root>/policy.json`)"
+msgstr "O tecto de admissão do nó (`kind: RuntimePolicy` / `<root>/policy.json`)"
+
+msgid "The node's admission ceiling (`kind: RuntimePolicy` / `<root>/policy.json`).\n\n`stack apply` can raise or tighten it like any other converging Kind — see `get runtimepolicies`/`describe runtimepolicy`. Lowering it is never automatic (`stack destroy`/`--prune` never touch it): `policy unset` is the only way it comes down."
+msgstr "O tecto de admissão do nó (`kind: RuntimePolicy` / `<root>/policy.json`).\n\nO `stack apply` pode subir ou apertar o tecto como qualquer outro Kind convergente — ver `get runtimepolicies`/`describe runtimepolicy`. Baixá-lo nunca é automático (`stack destroy`/`--prune` nunca lhe tocam): `policy unset` é a única forma de o baixar."
+
+msgid "Remove the node's security ceiling (`<root>/policy.json`)"
+msgstr "Remove o tecto de segurança do nó (`<root>/policy.json`)"
+
+msgid "Remove the node's security ceiling (`<root>/policy.json`).\n\nThe ONLY way it comes down: `stack apply --prune`/`stack destroy` never touch it, even when the manifest stops declaring `kind: RuntimePolicy` — see the module doc. Asks for confirmation on a terminal; `--force` for scripts."
+msgstr "Remove o tecto de segurança do nó (`<root>/policy.json`).\n\nA ÚNICA forma de o baixar: `stack apply --prune`/`stack destroy` nunca lhe tocam, mesmo quando o manifesto deixa de declarar `kind: RuntimePolicy` — ver a doc do módulo. Pede confirmação num terminal; `--force` para scripts."
+
+msgid "RuntimePolicy: mode '{value}' is neither 'enforce' nor 'warn'"
+msgstr "RuntimePolicy: o modo '{value}' não é 'enforce' nem 'warn'"
+
+msgid "RuntimePolicy/{name}: node security policy updated ({path})"
+msgstr "RuntimePolicy/{name}: política de segurança do nó actualizada ({path})"
+
+msgid "no runtime policy is set — this node refuses nothing by policy"
+msgstr "não há política de runtime definida — este nó não recusa nada por política"
+
+msgid "no runtime policy is set — nothing to remove"
+msgstr "não há política de runtime definida — nada a remover"
+
+msgid "`policy unset` removes the node's security ceiling — pass --force to confirm when not on a terminal"
+msgstr "`policy unset` remove o tecto de segurança do nó — passa --force para confirmar quando não estás num terminal"
+
+msgid "This removes every rule the node currently enforces at admission. Continue? [y/N]"
+msgstr "Isto remove todas as regras que o nó impõe hoje na admissão. Continuar? [y/N]"
+
+msgid "could not remove {path}: {err}"
+msgstr "não consegui remover {path}: {err}"
+
+msgid "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}]"
+msgstr "mode={mode} denyPrivileged={priv} denyHostNetwork={net} denyLatestTag={tag} allowedRegistries=[{regs}] denyDevicePassthrough={pass} denyLatestVmImage={vmtag} allowedImageUrlHosts=[{hosts}]"
+
+msgid "about to remove {path} — {summary}"
+msgstr "prestes a remover {path} — {summary}"
+
+msgid "{path}: removed ({summary}) — this node no longer refuses anything by policy"
+msgstr "{path}: removido ({summary}) — este nó já não recusa nada por política"
+
+msgid "RuntimePolicy: {names} all apply to the same node ceiling ({path}) — the manifest can declare only one, or the last one applied wins in silence"
+msgstr "RuntimePolicy: {names} aplicam-se todos ao mesmo tecto do nó ({path}) — o manifesto só pode declarar um, ou o último aplicado ganha em silêncio"
+
+msgid "lowering the node's security ceiling is never automatic — `stack destroy`/`--prune` would silently reopen it the moment a manifest stops declaring it. Use `delonix policy unset` to remove it on purpose"
+msgstr "baixar o tecto de segurança do nó nunca é automático — `stack destroy`/`--prune` reabri-lo-iam em silêncio no instante em que um manifesto deixasse de o declarar. Usa `delonix policy unset` para o remover de propósito"
+
+msgid "what the node currently refuses, if anything"
+msgstr "o que o nó recusa hoje, se é que recusa alguma coisa"
+
+msgid "the full detail — mode, every rule, the file it lives in"
+msgstr "o detalhe completo — modo, cada regra, o ficheiro onde vive"
+
+msgid "raise or tighten it declaratively, like any other Kind"
+msgstr "sobe-o ou aperta-o declarativamente, como qualquer outro Kind"
+
+msgid "remove the ceiling on a terminal — asks for confirmation first"
+msgstr "remove o tecto num terminal — pede confirmação primeiro"
+
+msgid "in a script, where nobody can answer the prompt"
+msgstr "num script, onde ninguém pode responder ao pedido"

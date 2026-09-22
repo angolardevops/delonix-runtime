@@ -26,6 +26,7 @@ use delonix_model::{Error, Result};
 /// `get` and read the error text: it did real store I/O to answer a question
 /// about a table, and would have passed or failed on the state of the machine.
 pub(crate) const GET_ROUTES: &[&str] = &[
+    kinds::RUNTIME_POLICY,
     kinds::POD,
     kinds::NETWORK,
     kinds::VOLUME,
@@ -54,6 +55,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
 /// routes to [`super::kindmode::list`], which takes no format argument at all.
 const NO_JSON_YET: &[&str] = &[kinds::CLUSTER];
 pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
+    kinds::RUNTIME_POLICY,
     kinds::POD,
     kinds::NETWORK,
     kinds::VOLUME,
@@ -164,6 +166,11 @@ pub(crate) fn fallback_command(kind: &str, verb: Verb) -> &'static str {
             _ => "",
         },
         Verb::Delete => match kind {
+            // Not a short spelling of a generic delete — lowering the node's
+            // ceiling is a decision `policy unset` asks confirmation for, never
+            // a name-only removal. Same family as `vm`/`pod`/`cluster` below:
+            // "no rm leaf" is a property of the Kind, not a gap.
+            k if k == kinds::RUNTIME_POLICY => "policy unset",
             k if k == kinds::VOLUME => "volume rm",
             k if k == kinds::CONTAINER => "container rm",
             k if k == kinds::NETWORK => "network rm",
@@ -288,6 +295,7 @@ pub(crate) fn get(
         return Err(not_wired_yet("get", f.plural, f.kind, Verb::Get));
     }
     match f.kind {
+        k if k == kinds::RUNTIME_POLICY => super::policy::cmd_ls(output),
         k if k == kinds::POD => super::pod::ls(output, namespace.as_deref()),
         k if k == kinds::NETWORK => super::network::run(super::network::NetworkCmd::Ls { output }),
         k if k == kinds::VOLUME => super::volume::run(super::volume::VolumeCmd::Ls {
@@ -347,6 +355,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
     }
     let n = names.to_vec();
     match f.kind {
+        k if k == kinds::RUNTIME_POLICY => super::policy::cmd_describe(&n),
         k if k == kinds::POD => super::pod::describe(&n),
         k if k == kinds::NETWORK => {
             super::network::run(super::network::NetworkCmd::Describe { names: n })

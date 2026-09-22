@@ -1875,6 +1875,62 @@
       },
       "type": "object"
     },
+    "RuntimePolicySpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: RuntimePolicy` — a field-for-field mirror of\n[`SecurityPolicy`]; see the module doc for why it is a separate type.",
+      "properties": {
+        "allowedImageUrlHosts": {
+          "default": [],
+          "description": "Hosts a `vm create --url-img` qcow2 may be fetched from. Empty = no opinion.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "allowedRegistries": {
+          "default": [],
+          "description": "Only these registries may be pulled from. Empty = no opinion.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "denyDevicePassthrough": {
+          "default": false,
+          "description": "Refuse `vm create --device` (VFIO PCI passthrough).",
+          "type": "boolean"
+        },
+        "denyHostNetwork": {
+          "default": false,
+          "description": "Refuse `--net host`, this engine's default network mode.",
+          "type": "boolean"
+        },
+        "denyLatestTag": {
+          "default": false,
+          "description": "Refuse a container image reference with no tag or with `:latest`.",
+          "type": "boolean"
+        },
+        "denyLatestVmImage": {
+          "default": false,
+          "description": "Refuse a VM disk image reference with no tag or with `:latest`.",
+          "type": "boolean"
+        },
+        "denyPrivileged": {
+          "default": false,
+          "description": "Refuse `--privileged`.",
+          "type": "boolean"
+        },
+        "mode": {
+          "default": null,
+          "description": "`enforce` (refuse) or `warn` (allow and report). Omitted = `enforce`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "SecretSpec": {
       "additionalProperties": false,
       "description": "`spec` of `kind: Secret` — a bag of key/value pairs encrypted at-rest,\nconsumed by `Container.secret` (env/files) and `Storage.passwordSecret`\n(`password` key). Closes the \"no CLI\" gap: the secret is declared in YAML\ninstead of `delonix secret create`.",
@@ -2482,6 +2538,39 @@
               },
               "spec": {
                 "$ref": "#/$defs/PodSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "runtimePolicies": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/RuntimePolicySpec"
               }
             },
             "required": [
@@ -3434,6 +3523,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "RuntimePolicy"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "security.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/RuntimePolicySpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Container"
           }
         },
@@ -3948,6 +4062,7 @@
         "gateway.delonix.io/v1alpha1",
         "infrastructure.delonix.io/v1alpha1",
         "networking.delonix.io/v1alpha1",
+        "security.delonix.io/v1alpha1",
         "storage.delonix.io/v1alpha1"
       ]
     },
@@ -3970,6 +4085,7 @@
         "NetworkPolicy",
         "NetworkRoute",
         "Pod",
+        "RuntimePolicy",
         "Secret",
         "Service",
         "Stack",

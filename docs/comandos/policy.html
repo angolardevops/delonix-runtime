@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>delonix backup · Delonix Engine</title>
+<title>delonix policy · Delonix Engine</title>
 <script>(function(){try{
 var t=localStorage.getItem('delonix-docs-theme');
 if(t)document.documentElement.setAttribute('data-theme',t);
@@ -140,48 +140,37 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 </div></div>
 <h5><span class='lang-pt'>Começar</span><span class='lang-en'>Get started</span></h5><a href="../index.html"><span class='lang-pt'>Início</span><span class='lang-en'>Home</span></a><a href="../cheatsheet.html"><span class='lang-pt'>Cheatsheet</span><span class='lang-en'>Cheatsheet</span></a><a href="../tutorial-delonix-temp.html"><span class='lang-pt'>Projecto completo: Delonix Temp</span><span class='lang-en'>Full project: Delonix Temp</span></a><h5><span class='lang-pt'>Conceitos</span><span class='lang-en'>Concepts</span></h5><a href="../estrutura.html"><span class='lang-pt'>Estrutura de recursos</span><span class='lang-en'>Resource structure</span></a><a href="../kinds.html"><span class='lang-pt'>Kinds e templates</span><span class='lang-en'>Kinds &amp; templates</span></a><a href="../arquitectura.html"><span class='lang-pt'>Arquitectura</span><span class='lang-en'>Architecture</span></a><a href="../c4.html"><span class='lang-pt'>Modelo C4 e system design</span><span class='lang-en'>C4 model &amp; system design</span></a><a href="../cri.html"><span class='lang-pt'>CRI — kubelet sem containerd</span><span class='lang-en'>CRI — kubelet without containerd</span></a><h5><span class='lang-pt'>Guias</span><span class='lang-en'>Guides</span></h5><a href="../gitops.html"><span class='lang-pt'>GitOps e CI</span><span class='lang-en'>GitOps &amp; CI</span></a><a href="../cloud.html"><span class='lang-pt'>cloud-init, cloud-img e CH</span><span class='lang-en'>cloud-init, cloud-img &amp; CH</span></a><a href="../guia-vm.html"><span class='lang-pt'>Guia de VMs e lab de rede</span><span class='lang-en'>VM &amp; network lab guide</span></a><a href="../labs.html"><span class='lang-pt'>Laboratórios</span><span class='lang-en'>Labs</span></a><h5><span class='lang-pt'>Contribuir</span><span class='lang-en'>Contribute</span></h5><a href="../handbook/index.html"><span class='lang-pt'>Manual do contribuidor</span><span class='lang-en'>Contributor handbook</span></a><h5><span class='lang-pt'>Referência</span><span class='lang-en'>Reference</span></h5><a href="../estabilidade.html"><span class='lang-pt'>Promessa de estabilidade</span><span class='lang-en'>Stability promise</span></a><a href="../codigos.html"><span class='lang-pt'>Dicionário de códigos</span><span class='lang-en'>Code dictionary</span></a><a href="../comparacao.html"><span class='lang-pt'>Delonix vs Docker vs Podman</span><span class='lang-en'>Delonix vs Docker vs Podman</span></a>
 <h5><span class='lang-pt'>Referência CLI</span><span class='lang-en'>CLI reference</span></h5>
-<h6 class='cat'><span class='lang-pt'>Cargas de trabalho</span><span class='lang-en'>Workloads</span></h6><a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/workload.html">delonix workload</a><h6 class='cat'><span class='lang-pt'>Artefactos</span><span class='lang-en'>Artifacts</span></h6><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/secret.html">delonix secret</a><h6 class='cat'><span class='lang-pt'>Armazenamento</span><span class='lang-en'>Storage</span></h6><a href="../comandos/volume.html">delonix volume</a><h6 class='cat'><span class='lang-pt'>Rede</span><span class='lang-en'>Networking</span></h6><a href="../comandos/network.html">delonix network</a><a href="../comandos/net.html">delonix net</a><a href="../comandos/netns.html" class="sub">delonix net netns</a><a href="../comandos/flow.html" class="sub">delonix net flow</a><a href="../comandos/capture.html" class="sub">delonix net capture</a><a href="../comandos/l4guard.html" class="sub">delonix net l4guard</a><a href="../comandos/ingress.html" class="sub">delonix net ingress</a><a href="../comandos/egress.html" class="sub">delonix net egress</a><a href="../comandos/httproute.html" class="sub">delonix net httproute</a><a href="../comandos/tunnel.html" class="sub">delonix net tunnel</a><a href="../comandos/hosts.html">delonix hosts</a><h6 class='cat'><span class='lang-pt'>Clusters</span><span class='lang-en'>Clusters</span></h6><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/kube.html" class="sub">delonix cluster kube</a><h6 class='cat'><span class='lang-pt'>Declarativo</span><span class='lang-en'>Declarative</span></h6><a href="../comandos/explain.html">delonix explain</a><a href="../comandos/api-resources.html">delonix api-resources</a><a href="../comandos/apply.html">delonix apply</a><a href="../comandos/plan.html">delonix plan</a><a href="../comandos/wait.html">delonix wait</a><a href="../comandos/manifest.html">delonix manifest</a><a href="../comandos/diff.html">delonix diff</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><h6 class='cat'><span class='lang-pt'>Recursos</span><span class='lang-en'>Resources</span></h6><a href="../comandos/get.html">delonix get</a><a href="../comandos/describe.html">delonix describe</a><a href="../comandos/delete.html">delonix delete</a><h6 class='cat'><span class='lang-pt'>Servir</span><span class='lang-en'>Serve</span></h6><a href="../comandos/compatibility.html">delonix compatibility</a><a href="../comandos/serve.html">delonix serve</a><a href="../cri.html" class="sub">delonix serve cri</a><a href="../comandos/api.html" class="sub">delonix serve api</a><a href="../comandos/docker-api.html" class="sub">delonix serve docker-api</a><a href="../comandos/mcp.html">delonix mcp</a><h6 class='cat'><span class='lang-pt'>Motor</span><span class='lang-en'>Engine</span></h6><a href="../comandos/init.html">delonix init</a><a href="../comandos/version.html">delonix version</a><a href="../comandos/policy.html">delonix policy</a><a href="../comandos/config.html">delonix config</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/boot.html" class="sub">delonix system boot</a><a href="../comandos/namespace.html" class="sub">delonix system namespace</a><a href="../comandos/backup.html" class="on">delonix backup</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/man.html">delonix man</a>
+<h6 class='cat'><span class='lang-pt'>Cargas de trabalho</span><span class='lang-en'>Workloads</span></h6><a href="../comandos/container.html">delonix container</a><a href="../comandos/pod.html">delonix pod</a><a href="../comandos/vm.html">delonix vm</a><a href="../comandos/workload.html">delonix workload</a><h6 class='cat'><span class='lang-pt'>Artefactos</span><span class='lang-en'>Artifacts</span></h6><a href="../comandos/image.html">delonix image</a><a href="../comandos/build.html">delonix build</a><a href="../comandos/secret.html">delonix secret</a><h6 class='cat'><span class='lang-pt'>Armazenamento</span><span class='lang-en'>Storage</span></h6><a href="../comandos/volume.html">delonix volume</a><h6 class='cat'><span class='lang-pt'>Rede</span><span class='lang-en'>Networking</span></h6><a href="../comandos/network.html">delonix network</a><a href="../comandos/net.html">delonix net</a><a href="../comandos/netns.html" class="sub">delonix net netns</a><a href="../comandos/flow.html" class="sub">delonix net flow</a><a href="../comandos/capture.html" class="sub">delonix net capture</a><a href="../comandos/l4guard.html" class="sub">delonix net l4guard</a><a href="../comandos/ingress.html" class="sub">delonix net ingress</a><a href="../comandos/egress.html" class="sub">delonix net egress</a><a href="../comandos/httproute.html" class="sub">delonix net httproute</a><a href="../comandos/tunnel.html" class="sub">delonix net tunnel</a><a href="../comandos/hosts.html">delonix hosts</a><h6 class='cat'><span class='lang-pt'>Clusters</span><span class='lang-en'>Clusters</span></h6><a href="../comandos/cluster.html">delonix cluster</a><a href="../comandos/kube.html" class="sub">delonix cluster kube</a><h6 class='cat'><span class='lang-pt'>Declarativo</span><span class='lang-en'>Declarative</span></h6><a href="../comandos/explain.html">delonix explain</a><a href="../comandos/api-resources.html">delonix api-resources</a><a href="../comandos/apply.html">delonix apply</a><a href="../comandos/plan.html">delonix plan</a><a href="../comandos/wait.html">delonix wait</a><a href="../comandos/manifest.html">delonix manifest</a><a href="../comandos/diff.html">delonix diff</a><a href="../comandos/stack.html">delonix stack</a><a href="../comandos/compose.html">delonix compose</a><h6 class='cat'><span class='lang-pt'>Recursos</span><span class='lang-en'>Resources</span></h6><a href="../comandos/get.html">delonix get</a><a href="../comandos/describe.html">delonix describe</a><a href="../comandos/delete.html">delonix delete</a><h6 class='cat'><span class='lang-pt'>Servir</span><span class='lang-en'>Serve</span></h6><a href="../comandos/compatibility.html">delonix compatibility</a><a href="../comandos/serve.html">delonix serve</a><a href="../cri.html" class="sub">delonix serve cri</a><a href="../comandos/api.html" class="sub">delonix serve api</a><a href="../comandos/docker-api.html" class="sub">delonix serve docker-api</a><a href="../comandos/mcp.html">delonix mcp</a><h6 class='cat'><span class='lang-pt'>Motor</span><span class='lang-en'>Engine</span></h6><a href="../comandos/init.html">delonix init</a><a href="../comandos/version.html">delonix version</a><a href="../comandos/policy.html" class="on">delonix policy</a><a href="../comandos/config.html">delonix config</a><a href="../comandos/system.html">delonix system</a><a href="../comandos/boot.html" class="sub">delonix system boot</a><a href="../comandos/namespace.html" class="sub">delonix system namespace</a><a href="../comandos/backup.html">delonix backup</a><a href="../comandos/dash.html">delonix dashboard</a><a href="../comandos/completion.html">delonix completion</a><a href="../comandos/man.html">delonix man</a>
 <h5><span class='lang-pt'>Projecto</span><span class='lang-en'>Project</span></h5>
 <a href="https://github.com/angolardevops/delonix-runtime">GitHub</a>
 <a href="https://github.com/angolardevops/delonix-runtime/releases">Releases</a>
 </nav>
 <main>
-<h1>delonix backup</h1>
-<p class='tagline'>Backup de UM recurso — container, pod, vm ou stack — em tar.gz.</p>
-<p>Não confundir com o <code>system snapshot create</code>, que leva o NÓ inteiro. Aqui o arquivo leva o
-registo do recurso e os DADOS dos volumes que ele usa — não a imagem nem o rootfs, porque um rootfs
-medido são 435 MB contra 1,5 KB de registo, e a imagem é endereçada por conteúdo e volta a
-descarregar-se. A VM é a excepção: o overlay dela É o estado dela, por isso viaja (a base dourada
-não). <b>Nada tem de parar</b>: um container (ou todos os membros de um pod/stack, em conjunto) é
-mantido no <i>freezer</i> do cgroup v2 durante o snapshot — nenhum processo consegue escrever
-enquanto o <code>tar</code> lê, e o PID não muda; uma VM passa pelo snapshot externo do libvirt, a
-correr sobre um overlay temporário enquanto o disco real é copiado, e volta a assentar nele a
-seguir. A garantia é <b>consistência-de-falha</b>, exactamente o que uma falta de energia deixa —
-um sistema de ficheiros com jornal e qualquer base de dados com write-ahead log recuperam dela. O
-que NÃO é: a memória não é guardada, logo um processo não é retomado a meio (isso é CRIU) e uma
-aplicação que só tenha estado em RAM perde-o — <code>--stop</code> e <code>--quiesce</code> são as
-duas formas de pedir mais, e cada uma diz o que custa. O destino pode ser uma pasta ou um
-<code>volume:&lt;nome&gt;</code>, que é como o arquivo vai parar a um NAS. Sendo o motor daemonless, o <code>backup schedule</code> instala um <b>temporizador de
-utilizador do systemd</b>: o <code>--max-for-day N</code> espaça N corridas pelo dia, e o
-<code>--cron</code> traduz a expressão de crontab — recusando o que não conseguir exprimir em vez de
-aproximar. O <code>schedule</code> tira <b>também o primeiro arquivo, já</b>: um agendamento cuja
-primeira corrida é daqui a horas deixa quem o instalou sem backup e com a impressão de ter um.
-O <code>restore</code> desempacota para uma pasta de trabalho ANTES de tocar em seja o que for — um
-arquivo truncado custa então zero — e recusa-se enquanto o recurso estiver a correr
-(<code>--force</code> pára-o, repõe, e volta a arrancá-lo). O <code>&lt;kind&gt;</code> deixou de ser
-posicional: o arquivo já regista o que leva, e o <code>--kind</code> continua a existir para quem
-quiser que uma discordância seja recusada.</p>
-<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/rbackup.rs"><code>cmd/rbackup.rs</code></a></p>
-<div class='help'><pre><code>Usage: delonix backup [OPTIONS] &lt;COMMAND&gt;
+<h1>delonix policy</h1>
+<p class='tagline lang-pt'>O tecto de admissão do nó (`kind: RuntimePolicy` / `&lt;root&gt;/policy.json`).</p><p class='tagline lang-en'>The node&#x27;s admission ceiling (`kind: RuntimePolicy` / `&lt;root&gt;/policy.json`).</p>
+<p class='lang-pt'>O tecto que este nó impõe no ponto de admissão — antes de um
+<code>container run</code>/<code>vm create</code> sequer arrancar. Desde o M04 (ver
+<code>docs/roadmap/13-improvements-traceability.md</code>) tem forma declarativa: um
+<code>stack apply</code> pode subir ou apertá-lo como qualquer outro Kind convergente
+(<code>get runtimepolicies</code>/<code>describe runtimepolicy &lt;nome&gt;</code> mostram o que
+está em vigor). O que nunca é automático é BAIXÁ-LO — <code>stack destroy</code>/
+<code>apply --prune</code> nunca lhe tocam, mesmo quando o manifesto deixa de o declarar, porque
+isso reabriria o nó em silêncio. <code>policy unset</code> é o único verbo imperativo deste grupo, e
+é a única forma de o remover.</p><p class='lang-en'>The ceiling this node enforces at admission — before a
+<code>container run</code>/<code>vm create</code> even starts. Since M04 (see
+<code>docs/roadmap/13-improvements-traceability.md</code>) it has a declarative form: a
+<code>stack apply</code> can raise or tighten it like any other converging Kind
+(<code>get runtimepolicies</code>/<code>describe runtimepolicy &lt;name&gt;</code> show what is in
+effect). What is never automatic is LOWERING it — <code>stack destroy</code>/
+<code>apply --prune</code> never touch it, even when the manifest stops declaring it, because that
+would silently reopen the node. <code>policy unset</code> is the group's only imperative verb, and
+the only way to remove it.</p>
+<p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/policy.rs"><code>cmd/policy.rs</code></a></p>
+<div class='help'><pre><code>Usage: delonix policy [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
-  inspect   What an archive holds, without unpacking it
-  ls        The archives in a directory
-  create    Write an archive of one resource, now
-  remove    Delete an archive
-  restore   Put a resource back from an archive
-  schedule  Keep archiving this resource on a systemd user timer
-  help      Print this message or the help of the given subcommand(s)
+  unset  Remove the node&#x27;s security ceiling (`&lt;root&gt;/policy.json`)
+  help   Print this message or the help of the given subcommand(s)
 
 Options:
       --l18n &lt;en|pt&gt;
@@ -191,25 +180,49 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Inspect    ls · inspect
-  Configure  create · schedule · restore · remove
+  Lifecycle  unset
 
 EXAMPLES:
-  # archive one resource, now
-  delonix backup create container db
+  # what the node currently refuses, if anything
+  delonix get runtimepolicy
 
-  # what archives exist
-  delonix backup ls --from /srv/backups
+  # the full detail — mode, every rule, the file it lives in
+  delonix describe runtimepolicy node-ceiling
 
-  # put one back
-  delonix backup restore container-db-20260811-205312.tar.gz
+  # raise or tighten it declaratively, like any other Kind
+  delonix stack apply -f examples/full-runtimepolicy.yaml
 
 SEE ALSO:
-  delonix backup create · delonix backup ls · delonix backup restore · delonix
-  system snapshot
+  delonix policy unset · delonix get · delonix describe · delonix stack apply
 
-  delonix › backup</code></pre></div>
-<h2><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h2><div class="ex"><div class="cap">O registo e os dados dos volumes, aqui mesmo</div><pre><code>delonix backup create container db</code></pre></div><div class="ex"><div class="cap">Para um NAS, através de um volume nomeado</div><pre><code>delonix backup create container db --to volume:nas-backups</code></pre></div><div class="ex"><div class="cap">Uma stack inteira: cada membro e cada volume, o partilhado uma só vez</div><pre><code>delonix backup create stack loja --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Uma VM A CORRER — o convidado não pára e o PID não muda</div><pre><code>delonix backup create vm dev --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Consistência ao nível do filesystem do convidado (precisa do qemu-guest-agent lá dentro)</div><pre><code>delonix backup create vm dev --quiesce --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Parar mesmo, para uma aplicação que só tem estado em RAM</div><pre><code>delonix backup create container cache --stop --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ver o que entraria, sem escrever nada</div><pre><code>delonix backup create pod api --dry-run</code></pre></div><div class="ex"><div class="cap">Duas vezes por dia, guardando os dois mais recentes</div><pre><code>delonix backup schedule container db --max-for-day 2 --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Ou no horário que quiseres, em sintaxe de crontab</div><pre><code>delonix backup schedule stack loja --cron &quot;30 3 * * 1&quot; --to /srv/backups</code></pre></div><div class="ex"><div class="cap">Que arquivos existem, e o que cada um leva</div><pre><code>delonix backup ls --from /srv/backups</code></pre></div><div class="ex"><div class="cap">O que está dentro de um, sem o desempacotar</div><pre><code>delonix backup inspect container-db-20260811-205312.tar.gz --from /srv/backups</code></pre></div><div class="ex"><div class="cap">Repor os dados (recusa enquanto estiver a correr)</div><pre><code>delonix backup restore container-db-20260811-205312.tar.gz</code></pre></div><div class="ex"><div class="cap">Parar, repor e arrancar de novo</div><pre><code>delonix backup restore ./container-db-20260811-205312.tar.gz --force</code></pre></div><div class="ex"><div class="cap">Afirmar o kind, para que um arquivo trocado seja recusado</div><pre><code>delonix backup restore vm-dev-20260811-210109.tar.gz --kind vm</code></pre></div><div class="ex"><div class="cap">Apagar um arquivo (recusa o que não foi este comando a escrever)</div><pre><code>delonix backup remove container-db-20260811-205312.tar.gz --from /srv/backups</code></pre></div>
+  delonix › policy</code></pre></div>
+<h2 id='unset'><code>policy unset</code></h2>
+<p class='intro'>Remove the node&#x27;s security ceiling (<code>&lt;root&gt;/policy.json</code>).</p>
+<p class='intro'>The ONLY way it comes down: <code>stack apply --prune</code>/<code>stack destroy</code> never touch it, even when the manifest stops declaring <code>kind: RuntimePolicy</code> — see the module doc. Asks for confirmation on a terminal; <code>--force</code> for scripts.</p>
+<div class='help'><pre><code>Usage: delonix policy unset [OPTIONS]
+
+Options:
+  -f, --force
+          Skip the confirmation prompt (REQUIRED when stdin is not a terminal)
+
+      --l18n &lt;en|pt&gt;
+          Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+  -h, --help
+          Print help (see a summary with &#x27;-h&#x27;)
+
+EXAMPLES:
+  # remove the ceiling on a terminal — asks for confirmation first
+  delonix policy unset
+
+  # in a script, where nobody can answer the prompt
+  delonix policy unset --force
+
+SEE ALSO:
+  delonix policy · delonix get · delonix describe
+
+  delonix › policy › unset</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class="cap">Remover o tecto num terminal — pede confirmação primeiro</div><pre><code>delonix policy unset</code></pre></div><div class="ex"><div class="cap">Num script, onde ninguém responde ao pedido</div><pre><code>delonix policy unset --force</code></pre></div>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>

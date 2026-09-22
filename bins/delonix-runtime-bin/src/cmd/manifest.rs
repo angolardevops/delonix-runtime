@@ -79,6 +79,7 @@ pub fn render_with_defaults(docs: &[ManifestDoc]) -> Result<String> {
 fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
     use crate::cmd;
     match doc.kind.as_str() {
+        k::RUNTIME_POLICY => cmd::policy::spec_with_defaults(doc),
         k::NETWORK => cmd::network::spec_with_defaults(doc),
         k::NETWORK_ROUTE => cmd::netroute::spec_with_defaults(doc),
         k::SERVICE => cmd::service::spec_with_defaults(doc),
@@ -380,6 +381,7 @@ pub(crate) fn kind_honors_namespace(kind: &str) -> bool {
 /// `None` for a Kind with no flat list of its own (`Cluster` nests its specs).
 pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
     match kind {
+        k::RUNTIME_POLICY => Some(crate::cmd::policy::RUNTIME_POLICY_SPEC_FIELDS),
         k::CONTAINER => Some(crate::cmd::container::CONTAINER_SPEC_FIELDS),
         k::POD => Some(crate::cmd::container::POD_SPEC_FIELDS),
         k::VM => Some(crate::cmd::vm::VM_SPEC_FIELDS),
@@ -1440,6 +1442,7 @@ spec: { image: nginx }
     /// unreachable from inside one.
     fn stack_group_sample(group: &str) -> Option<(&'static str, &'static str)> {
         Some(match group {
+            "runtimePolicies" => ("{ denyPrivileged: true }", "RuntimePolicy"),
             "secrets" => ("{ stringData: { K: v } }", "Secret"),
             "networks" => ("{ driver: bridge }", "Network"),
             "networkRoutes" => ("{ from: a, to: b }", "NetworkRoute"),

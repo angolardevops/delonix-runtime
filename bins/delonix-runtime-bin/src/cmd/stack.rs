@@ -384,6 +384,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
     for kind in super::kinds::stack_kinds() {
         for doc in manifest::of_kind(docs, kind) {
             out.push(match kind {
+                k::RUNTIME_POLICY => super::policy::desired(doc)?,
                 k::CONTAINER => super::container::desired(doc)?,
                 k::VOLUME => super::volume::desired(doc)?,
                 k::NETWORK => super::network::desired(doc)?,
@@ -419,7 +420,8 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
 /// never be prune candidates, and pretending otherwise would risk deleting
 /// something nobody claimed.
 pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile::Actual>> {
-    let mut out = super::container::actual()?;
+    let mut out = super::policy::actual(docs)?;
+    out.extend(super::container::actual()?);
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
@@ -684,6 +686,10 @@ fn presence_label(p: super::kinds::Presence) -> &'static str {
 /// test that keeps it aligned with the `converges` column of `cmd::kinds`.
 pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static str])> {
     vec![
+        (
+            k::RUNTIME_POLICY,
+            super::policy::RECONCILED_RUNTIME_POLICY_FIELDS,
+        ),
         (k::CONTAINER, super::container::RECONCILED_CONTAINER_FIELDS),
         (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
@@ -1226,6 +1232,9 @@ fn presence(
     let root = super::util::state_root();
     let name = doc.metadata.name.as_str();
     match kind {
+        // A node-wide singleton — the document's name never selects among
+        // several, there is only ever `<root>/policy.json`.
+        k::RUNTIME_POLICY => super::policy::presence_of(),
         k::CONTAINER => match containers.iter().find(|c| c.name == name) {
             Some(c) => {
                 let mut c = c.clone();
@@ -1733,6 +1742,10 @@ fn run_layers(
     docs: &[manifest::ManifestDoc],
     base: &std::path::Path,
 ) -> Result<()> {
+    // The node's own admission ceiling, before ANYTHING else: a stricter
+    // policy declared in this very manifest already governs the Container/Vm/
+    // Pod layers further down, in the SAME apply — see `kinds.rs`'s row.
+    layers.run(k::RUNTIME_POLICY, "🛡", || super::policy::apply(docs))?;
     // Secrets first: `Storage.passwordSecret` and `Container.secret` reference
     // them. `base` = the manifest folder, so `fromEnvFile` resolves next to it.
     layers.run(k::SECRET, "🔑", || super::secret::apply(docs, base))?;
@@ -1795,6 +1808,15 @@ fn destroy_for_replace(changes: &[Change]) -> Result<()> {
 /// the `teardown` column of `cmd::kinds`.
 pub(crate) fn no_teardown_reason(kind: &str) -> Option<&'static str> {
     Some(match kind {
+        // Lowering the node's admission ceiling must never be a side effect of
+        // a manifest simply no longer mentioning it — `stack destroy`/
+        // `--prune` would silently reopen the node the moment somebody
+        // deletes a line. The only way down is `delonix policy unset`.
+        k::RUNTIME_POLICY => {
+            "lowering the node's security ceiling is never automatic — `stack destroy`/`--prune` \
+             would silently reopen it the moment a manifest stops declaring it. Use \
+             `delonix policy unset` to remove it on purpose"
+        }
         // It has no record of its own (it lives on the target's `ContainerFw`),
         // so when `target`/`direction` change the OLD target is written down
         // nowhere — the manifest holds the new one. Leaving stale rules on a
@@ -2045,6 +2067,21 @@ fn converge_and_stamp(
                 )
             );
             match c.kind.as_str() {
+                // Same shape as `FIREWALL_POLICY`/`IPPOOL` just below: applying
+                // already fully overwrites `policy.json`, so converging IS
+                // applying.
+                k::RUNTIME_POLICY => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "RuntimePolicy/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::policy::converge_doc(doc)?
+                }
                 k::CONTAINER => super::container::converge(&c.name, &c.diffs)?,
                 k::VOLUME => super::volume::converge(&c.name, &c.diffs)?,
                 k::NETWORK => super::network::converge(&c.name, &c.diffs)?,
@@ -2991,6 +3028,27 @@ fn validate_graph_with(
                 seen.insert(key, doc.metadata.name.clone());
             }
         }
+    }
+
+    // A `kind: RuntimePolicy` document is not identified by its `metadata.name`
+    // at all — `apply` always writes the SAME `<root>/policy.json`, whatever
+    // name the document carries. So the generic "declared more than once"
+    // check above (keyed on name) cannot catch two DIFFERENTLY-named
+    // RuntimePolicy documents — and unlike `FirewallPolicy`'s (target,
+    // direction) pair, there is no key to widen: every document collides with
+    // every other one, always. The second would silently overwrite the first's
+    // ceiling while both reported success.
+    let policies: Vec<&str> = docs
+        .iter()
+        .filter(|d| d.kind == k::RUNTIME_POLICY)
+        .map(|d| d.metadata.name.as_str())
+        .collect();
+    if policies.len() > 1 {
+        issues.push(super::po::tf(
+            "RuntimePolicy: {names} all apply to the same node ceiling ({path}) — the \
+             manifest can declare only one, or the last one applied wins in silence",
+            &[("names", &policies.join(", ")), ("path", "policy.json")],
+        ));
     }
 
     issues

@@ -46,6 +46,7 @@ use super::kinds as k;
 /// to abolish. So it stays untyped and [`no_typed_schema`] names the spelling to
 /// use instead.
 const TYPED_KINDS: &[&str] = &[
+    k::RUNTIME_POLICY,
     k::CONTAINER,
     k::POD,
     k::VOLUME,
@@ -148,6 +149,11 @@ fn typed_spec_parts(
     kind: &str,
 ) -> Option<(serde_json::Value, &'static str, &'static [&'static str])> {
     let (spec, def_name, accepted) = match kind {
+        k::RUNTIME_POLICY => (
+            generator.subschema_for::<super::policy::RuntimePolicySpec>(),
+            "RuntimePolicySpec",
+            super::policy::RUNTIME_POLICY_SPEC_FIELDS,
+        ),
         k::CONTAINER => (
             generator.subschema_for::<super::container::ContainerSpec>(),
             "ContainerSpec",

@@ -199,6 +199,7 @@ SOURCE_FILES = {
     "compose": "compose.rs",
     "cluster": "cluster.rs",
     "secret": "secret.rs",
+    "policy": "policy.rs",
     "ingress": "firewall.rs",
     "egress": "firewall.rs",
     "httproute": "httproute.rs",
@@ -991,6 +992,27 @@ NUNCA são impressos por omissão (redigidos; <code>--reveal</code> é opt-in). 
             "rotate-key": {"examples": [("Rodar a chave-mestra (re-cifra tudo)", "delonix secret rotate-key")]},
         },
     },
+    "policy": {
+        "title": "delonix policy",
+        "tagline": "O tecto de admissão do nó (`kind: RuntimePolicy` / `<root>/policy.json`).",
+        "intro": """O tecto que este nó impõe no ponto de admissão — antes de um
+<code>container run</code>/<code>vm create</code> sequer arrancar. Desde o M04 (ver
+<code>docs/roadmap/13-improvements-traceability.md</code>) tem forma declarativa: um
+<code>stack apply</code> pode subir ou apertá-lo como qualquer outro Kind convergente
+(<code>get runtimepolicies</code>/<code>describe runtimepolicy &lt;nome&gt;</code> mostram o que
+está em vigor). O que nunca é automático é BAIXÁ-LO — <code>stack destroy</code>/
+<code>apply --prune</code> nunca lhe tocam, mesmo quando o manifesto deixa de o declarar, porque
+isso reabriria o nó em silêncio. <code>policy unset</code> é o único verbo imperativo deste grupo, e
+é a única forma de o remover.""",
+        "subs": {
+            "unset": {"examples": [
+                ('Remover o tecto num terminal — pede confirmação primeiro',
+                 'delonix policy unset'),
+                ('Num script, onde ninguém responde ao pedido',
+                 'delonix policy unset --force'),
+            ]},
+        },
+    },
     "ingress": {
         "title": "delonix net ingress",
         "tagline": "Firewall de ENTRADA (regras L4 + publishes DNAT) de um container na SDN.",
@@ -1670,6 +1692,18 @@ idempotent <em>with no state file</em> (every step has a <code>check</code> and 
 <code>cluster kubeadm</code> goes further: it provisions the VMs from the golden VM image, waits
 for SSH, and runs the SAME bootstrap — one command, from zero to a cluster running
 <code>delonix-cri</code> as its runtime (no containerd).""",
+    },
+    "policy": {
+        "tagline": "The node's admission ceiling (`kind: RuntimePolicy` / `<root>/policy.json`).",
+        "intro": """The ceiling this node enforces at admission — before a
+<code>container run</code>/<code>vm create</code> even starts. Since M04 (see
+<code>docs/roadmap/13-improvements-traceability.md</code>) it has a declarative form: a
+<code>stack apply</code> can raise or tighten it like any other converging Kind
+(<code>get runtimepolicies</code>/<code>describe runtimepolicy &lt;name&gt;</code> show what is in
+effect). What is never automatic is LOWERING it — <code>stack destroy</code>/
+<code>apply --prune</code> never touch it, even when the manifest stops declaring it, because that
+would silently reopen the node. <code>policy unset</code> is the group's only imperative verb, and
+the only way to remove it.""",
     },
     "secret": {
         "tagline": "Encrypted-at-rest secret vault — the source behind `run --secret`.",
