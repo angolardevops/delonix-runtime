@@ -1,0 +1,49 @@
+# Complete reference for `kind: RuntimePolicy` (M04, `docs/roadmap/
+# 13-improvements-traceability.md`) — the node's own admission ceiling, given
+# a manifest form. `stack apply` writes/updates `<root>/policy.json`, the SAME
+# file `container run`/`vm create` already check before anything is created.
+#
+# A node-wide SINGLETON: whatever `metadata.name` says, `apply` always writes
+# the one `policy.json` — a manifest may declare at most one `RuntimePolicy`
+# document (a second one is refused by `stack validate`/`apply`, before either
+# is applied).
+#
+# Converges like any other Kind — a changed field is really applied, and
+# `delonix get runtimepolicies` / `delonix describe runtimepolicy <name>` show
+# what is in effect. What it does NOT do is come down on its own: removing this
+# document from the manifest and running `stack apply --prune` (or `stack
+# destroy`) leaves the ceiling exactly as it was — see the module doc of
+# `bins/delonix-runtime-bin/src/cmd/policy.rs`. The only way to lower it is
+# `delonix policy unset`, which asks for confirmation (or `--force`).
+#
+# spec fields — every field defaults to "no opinion", so a policy states only
+# what it wants to restrict:
+#   mode                     `enforce` (refuse, default) or `warn` (allow, and
+#                            report what would have been refused).
+#   denyPrivileged           refuse `container run --privileged`.
+#   denyHostNetwork          refuse `--net host`, this engine's DEFAULT network mode.
+#   denyLatestTag            refuse a container image reference with no tag or `:latest`.
+#   allowedRegistries        only these registries may be pulled from. Empty = no opinion.
+#   denyDevicePassthrough    refuse `vm create --device` (VFIO PCI passthrough) — the
+#                            VM equivalent of `--privileged`, and then some: it gives
+#                            the guest DMA to host hardware.
+#   denyLatestVmImage        refuse a VM disk image reference with no tag or `:latest`.
+#                            Separate from `denyLatestTag` on purpose: a `vm --vmfile`
+#                            build tags its output `<name>:latest` by default.
+#   allowedImageUrlHosts     hosts a `vm create --url-img` qcow2 may be fetched from.
+#                            Empty = no opinion (TLS alone, per the CLI's own `--help`).
+#
+# `delonix explain RuntimePolicy` prints this from the generated schema.
+---
+apiVersion: security.delonix.io/v1alpha1
+kind: RuntimePolicy
+metadata: { name: node-ceiling }
+spec:
+  mode: enforce
+  denyPrivileged: true
+  denyHostNetwork: true
+  denyLatestTag: true
+  allowedRegistries: [ghcr.io, docker.io]
+  denyDevicePassthrough: true
+  denyLatestVmImage: true
+  allowedImageUrlHosts: [cloud.debian.org]

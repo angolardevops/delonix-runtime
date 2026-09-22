@@ -164,6 +164,16 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::secret::SecretCmd,
     },
+    /// The node's admission ceiling (`kind: RuntimePolicy` / `<root>/policy.json`).
+    ///
+    /// `stack apply` can raise or tighten it like any other converging Kind —
+    /// see `get runtimepolicies`/`describe runtimepolicy`. Lowering it is
+    /// never automatic (`stack destroy`/`--prune` never touch it): `policy
+    /// unset` is the only way it comes down.
+    Policy {
+        #[command(subcommand)]
+        action: cmd::policy::PolicyCmd,
+    },
     /// Field reference for a Kind, `kubectl explain` style.
     ///
     /// From the SAME generated schema, so it cannot drift from the code.
@@ -519,6 +529,7 @@ fn run() -> Result<()> {
         Cmd::Volume { action } => cmd::volume::run(action),
         Cmd::Network { action } => cmd::network::run(action),
         Cmd::Secret { action } => cmd::secret::run(action),
+        Cmd::Policy { action } => cmd::policy::run(action),
         Cmd::Explain { path, json } => cmd::schema::explain(&path, json),
         Cmd::ApiResources { output } => cmd::resource::api_resources(output),
         Cmd::Apply {
@@ -1084,6 +1095,7 @@ mod cli_stability_classification_tests {
         "network",
         "plan",
         "pod",
+        "policy",
         "secret",
         "serve",
         "stack",

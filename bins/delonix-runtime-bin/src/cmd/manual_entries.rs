@@ -1688,6 +1688,25 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["pod exec", "container port"],
     },
     Entry {
+        path: "policy",
+        group: "Engine",
+        examples: &[
+            ("what the node currently refuses, if anything", "delonix get runtimepolicy"),
+            ("the full detail — mode, every rule, the file it lives in", "delonix describe runtimepolicy node-ceiling"),
+            ("raise or tighten it declaratively, like any other Kind", "delonix stack apply -f examples/full-runtimepolicy.yaml"),
+        ],
+        see_also: &["policy unset", "get", "describe", "stack apply"],
+    },
+    Entry {
+        path: "policy unset",
+        group: "Lifecycle",
+        examples: &[
+            ("remove the ceiling on a terminal — asks for confirmation first", "delonix policy unset"),
+            ("in a script, where nobody can answer the prompt", "delonix policy unset --force"),
+        ],
+        see_also: &["policy", "get", "describe"],
+    },
+    Entry {
         path: "secret",
         group: "Artifacts",
         examples: &[

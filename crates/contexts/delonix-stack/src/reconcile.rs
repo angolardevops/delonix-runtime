@@ -282,6 +282,19 @@ fn hot_fields(kind: &str) -> &'static [&'static str] {
         k::SERVICE => &["matchLabels", "port"],
         // `ippool::apply_one` overwrites the definition and keeps the leases.
         k::IPPOOL => &["addresses", "announce", "interface"],
+        // Every comparable field of `policy.json` converges hot: `apply_one`
+        // (in `cmd::policy`) rewrites the whole file, which needs no restart
+        // of anything — the ceiling just takes effect on the next admission.
+        k::RUNTIME_POLICY => &[
+            "mode",
+            "denyPrivileged",
+            "denyHostNetwork",
+            "denyLatestTag",
+            "allowedRegistries",
+            "denyDevicePassthrough",
+            "denyLatestVmImage",
+            "allowedImageUrlHosts",
+        ],
         _ => &[],
     }
 }

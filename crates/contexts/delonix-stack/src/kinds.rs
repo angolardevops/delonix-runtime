@@ -53,6 +53,13 @@
 /// One line here, one alias arm in `manifest::canonical_kind`, and one row in
 /// the test that keeps old spellings loading. Not a sweep.
 pub const SECRET: &str = "Secret";
+/// The node's own admission ceiling (`<root>/policy.json`), given a manifest
+/// form (M04 of `docs/roadmap/13-improvements-traceability.md`). Converges
+/// like any other Kind — `stack apply` can raise or tighten it — but its
+/// teardown is refused (see [`FACTS`]'s row and `no_teardown_reason` in
+/// `cmd/stack.rs`): the ONLY way it comes down is `delonix policy unset`,
+/// never a `stack destroy`/`--prune` that simply stopped declaring it.
+pub const RUNTIME_POLICY: &str = "RuntimePolicy";
 pub const NETWORK: &str = "Network";
 pub const NETWORK_ROUTE: &str = "NetworkRoute";
 pub const VOLUME: &str = "Volume";
@@ -102,6 +109,12 @@ pub enum Domain {
     Artifact,
     /// Composes or drives other Kinds; not a resource of its own.
     Composition,
+    /// The node's own ceiling on what may run, checked at admission — before
+    /// any of the domains above get a chance to act. Distinct from
+    /// `NetPolicy` (which governs traffic already flowing) and from
+    /// `Artifact` (which governs what is pulled): this one governs whether a
+    /// `container run`/`vm create` is allowed to happen at all.
+    Security,
 }
 
 impl Domain {
@@ -118,6 +131,7 @@ impl Domain {
             Domain::NetExposure => "net-exposure",
             Domain::Artifact => "artifact",
             Domain::Composition => "composition",
+            Domain::Security => "security",
         }
     }
 }
@@ -274,6 +288,27 @@ pub struct KindFacts {
 /// The table. Rows are in APPLY ORDER for everything with `in_stack: true` —
 /// see [`KindFacts::in_stack`] — and the rest follow.
 const FACTS: &[KindFacts] = &[
+    KindFacts {
+        // First in apply order, deliberately: `run_layers` (cmd/stack.rs) applies
+        // it before Container/VM/Pod, so a stricter ceiling declared in the SAME
+        // manifest already governs the workloads the rest of that same apply is
+        // about to create.
+        kind: RUNTIME_POLICY,
+        plural: "runtimepolicies",
+        short: &["policy"],
+        api_version: "security.delonix.io/v1alpha1",
+        domain: Domain::Security,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "runtimePolicies",
+        converges: true,
+        // `no_teardown_reason` in `cmd/stack.rs` names why: lowering the node's
+        // ceiling must never be a side effect of a manifest simply no longer
+        // mentioning it.
+        teardown: false,
+        namespaced: Namespaced::Never,
+        presence: Presence::Registry,
+    },
     KindFacts {
         kind: SECRET,
         plural: "secrets",

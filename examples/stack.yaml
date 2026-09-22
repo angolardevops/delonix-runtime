@@ -18,6 +18,7 @@
 # one item.
 #
 #   group               Kind               full reference
+#   runtimePolicies     RuntimePolicy      full-runtimepolicy.yaml
 #   secrets             Secret             full-secret.yaml
 #   networks            Network            full-network.yaml
 #   networkRoutes       NetworkRoute       full-networkroute.yaml
@@ -51,6 +52,16 @@ metadata:
   name: blog
   namespace: default
 spec:
+  # The node's admission ceiling, first of all: it applies before every other
+  # group below, in the SAME apply (see full-runtimepolicy.yaml). Lowering it
+  # is never automatic — removing this block and re-applying leaves
+  # policy.json untouched; `delonix policy unset` is the only way down.
+  runtimePolicies:
+    - name: node-ceiling
+      spec:
+        denyPrivileged: true
+        denyLatestTag: true
+
   # Secrets first: everything below may reference them.
   secrets:
     - name: db-credentials
