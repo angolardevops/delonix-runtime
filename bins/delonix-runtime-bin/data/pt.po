@@ -5804,6 +5804,12 @@ msgstr "os pacotes instalados (SBOM) em vez dos achados"
 msgid "a CI gate: exit 1 if anything high or worse is found"
 msgstr "um gate de CI: sai 1 se for encontrado algo alto ou pior"
 
+msgid "the SPDX document a `delonix build` already wrote for this image"
+msgstr "o documento SPDX que um `delonix build` já escreveu para esta imagem"
+
+msgid "for a pulled image that never went through this engine's build"
+msgstr "para uma imagem puxada que nunca passou pelo `build` deste motor"
+
 msgid "refresh the local feed first — a scan is only as fresh as the database behind it"
 msgstr "actualizar primeiro o feed local — um scan só é tão fresco quanto a base de dados que o sustenta"
 
@@ -8062,6 +8068,12 @@ msgstr "SBOM + scan de CVE de uma imagem."
 
 msgid "SBOM + CVE scan of an image.\n\nReads the layers from the CAS, without running anything. Pulls the image if missing. See `--sbom`, `--fail-on`, `--update`."
 msgstr "SBOM + scan de CVE de uma imagem.\n\nLê os layers do CAS, sem correr nada. Puxa a imagem se faltar. Ver `--sbom`, `--fail-on`, `--update`."
+
+msgid "The image's SBOM as an SPDX 2.3 document, not the table `scan --sbom` prints"
+msgstr "O SBOM da imagem como documento SPDX 2.3, não a tabela que `scan --sbom` imprime"
+
+msgid "The image's SBOM as an SPDX 2.3 document, not the table `scan --sbom` prints.\n\n`delonix build` writes this automatically for every image it commits that has a package database this scanner reads (`apk`/`dpkg`) — this just prints the cached file (instant). For a pulled or older image that never went through this engine's `build`, it computes and caches one on the spot."
+msgstr "O SBOM da imagem como documento SPDX 2.3, não a tabela que `scan --sbom` imprime.\n\n`delonix build` escreve-o automaticamente para toda a imagem que confirma e que tenha uma base de dados de pacotes que este scanner lê (`apk`/`dpkg`) — isto só imprime o ficheiro em cache (instantâneo). Para uma imagem puxada ou mais antiga que nunca passou pelo `build` deste motor, calcula-o e guarda-o em cache na hora."
 
 msgid "Save an image to a portable archive (`docker save`'s counterpart)."
 msgstr "Guarda uma imagem num arquivo portátil (o equivalente ao `docker save`)."

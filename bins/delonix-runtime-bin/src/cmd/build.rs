@@ -1107,6 +1107,24 @@ pub fn build_from_spec(
         p.ok();
     }
 
+    // SBOM (M03): every image THIS engine builds gets one automatically,
+    // without a separate command to remember to run. Best-effort by
+    // `write_sbom`'s own design (an image with no package database this
+    // scanner reads — `scratch` — has nothing to list, and that is not a
+    // build failure); an unexpected failure here is only WARNED, never
+    // turned into a build failure — the image already committed
+    // successfully, and refusing to hand it back over a metadata side-effect
+    // would be a worse outcome than a missing SBOM.
+    if let Ok(img) = &build_result {
+        match super::scan::write_sbom(&images, img) {
+            Ok(_) => {}
+            Err(e) => super::output::warn(&super::po::tf(
+                "could not write the SBOM for {img}: {err}",
+                &[("img", &img.short_id()), ("err", &e.to_string())],
+            )),
+        }
+    }
+
     // Best-effort cleanup of EVERY id allocated during the build (whether or
     // not it ever got a live container/Store record — see `build_one_stage`'s
     // doc comment on why a cache-hit-cloned id can have neither) — never

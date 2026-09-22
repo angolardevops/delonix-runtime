@@ -81,6 +81,7 @@
 =	image push
 ~	image remove
 ~	image save
+~	image sbom
 =	image scan
 ~	image sign
 =	image tag

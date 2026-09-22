@@ -9,12 +9,75 @@
 //! says so explicitly. Only a synced OSV feed (`scan --update`) gives a
 //! trustworthy answer.
 
+use std::path::{Path, PathBuf};
+
 use delonix_model::{Error, Result};
 use delonix_oci::{Image, ImageStore};
 use delonix_scanner::{AdvisoryDb, Severity};
 
 use super::output;
 use super::util::{open_stores, resolve_or_pull, state_root};
+
+/// `<root>/images/<id>.sbom.spdx.json` — the SBOM as a document, distinct
+/// from `<id>.json` (the image record `ImageStore` owns) so a store that
+/// only knows to read/write `*.json` records never trips over this file.
+fn sbom_path(root: &Path, image_id: &str) -> PathBuf {
+    root.join("images").join(format!(
+        "{}.sbom.spdx.json",
+        delonix_oci::cas::strip(image_id)
+    ))
+}
+
+/// Writes the SPDX SBOM for `image` to disk (`--build` calls this right
+/// after a successful commit; `image sbom` calls it lazily on read, so an
+/// image pulled/imported before this existed still gets one on first ask).
+///
+/// Best-effort ON PURPOSE for the caller that runs after every build:
+/// `Ok(None)` for an image with no package manager this scanner reads
+/// (`scratch`, a from-scratch static binary) is not a failure — see
+/// `delonix_scanner::Error::EmptySbom`'s own reason for existing. Any OTHER
+/// error (a corrupt layer, a write failure) still propagates: silently
+/// producing no SBOM for a reason nobody asked for is the exact failure mode
+/// this whole module exists to refuse.
+pub(crate) fn write_sbom(images: &ImageStore, image: &Image) -> Result<Option<PathBuf>> {
+    let pkgs = match delonix_scanner::extract_sbom(images, image) {
+        Ok(p) => p,
+        Err(delonix_scanner::Error::EmptySbom) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let doc = delonix_scanner::sbom_spdx(image, &pkgs);
+    let path = sbom_path(images.root(), &image.id);
+    let bytes =
+        serde_json::to_vec_pretty(&doc).map_err(|e| Error::Invalid(format!("sbom: {e}")))?;
+    std::fs::write(&path, bytes)?;
+    Ok(Some(path))
+}
+
+/// `delonix image sbom <ref>` — the SPDX document, not the table `image scan
+/// --sbom` prints. Reuses the cached file `--build` already wrote when there
+/// is one (so this is instant for anything built by THIS engine); computes
+/// and caches it on the spot otherwise (a pulled/imported image, or one
+/// built before this existed).
+pub(crate) fn cmd_sbom(image: &str) -> Result<()> {
+    let (images, _store) = open_stores()?;
+    let img = resolve_or_pull(&images, image)?;
+    let cached = sbom_path(images.root(), &img.id);
+    let path = if cached.is_file() {
+        cached
+    } else {
+        write_sbom(&images, &img)?.ok_or_else(|| {
+            Error::Invalid(super::po::tf(
+                "'{img}' has no package database this scanner reads (apk/dpkg) — nothing to \
+                 list. This is not an error for a `scratch`-based image; it means there is no \
+                 SBOM to generate, not that one failed to generate.",
+                &[("img", image)],
+            ))
+        })?
+    };
+    let text = std::fs::read_to_string(&path)?;
+    print!("{text}");
+    Ok(())
+}
 
 /// The embedded placeholder database — 5 entries, so the scan doesn't blow up without a
 /// synced feed. It is NEVER presented as definitive (see `Provenance`).

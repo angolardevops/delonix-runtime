@@ -784,6 +784,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["image describe", "image pull", "image verify"],
     },
     Entry {
+        path: "image sbom",
+        group: "Inspect",
+        examples: &[
+            ("the SPDX document a `delonix build` already wrote for this image", "delonix image sbom myapp:v1"),
+            ("for a pulled image that never went through this engine's build", "delonix image sbom postgres:16"),
+        ],
+        see_also: &["image scan", "build", "image sign"],
+    },
+    Entry {
         path: "image verify",
         group: "Inspect",
         examples: &[
