@@ -925,6 +925,7 @@ dependencies = [
 name = "delonix-runtime-bin"
 version = "4.3.0"
 dependencies = [
+ "base64",
  "bytes",
  "clap",
  "clap_complete",
@@ -962,6 +963,7 @@ dependencies = [
  "tar",
  "tokio",
  "tokio-rustls",
+ "tokio-stream",
 ]
 
 [[package]]

@@ -45,6 +45,12 @@ hyper = { workspace = true, features = ["server", "client", "http1"] }
 hyper-util = { workspace = true, features = ["tokio", "client-legacy", "http1"] }
 http-body-util = { workspace = true }
 bytes = { workspace = true }
+# `POST /images/create` (M02, ADR none needed — same domain, streams the
+# existing pull) — `tokio-stream` já está na árvore (workspace dependency de
+# outro crate); `base64` idem, via `delonix-oci`. Nenhuma das duas é
+# dependência nova, só passam a directas deste crate.
+tokio-stream = { workspace = true }
+base64 = { workspace = true }
 # TLS do proxy (Fase 3): tokio-rustls já está na árvore (via delonix-cri). O
 # provider é o `ring` (já presente) — não puxamos aws-lc-rs. `rustls-pemfile`
 # carrega cert/chave BYO (PEM do kind: Secret); `rcgen` gera o self-signed.
