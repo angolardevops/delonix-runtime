@@ -30,7 +30,7 @@
 | Testes no workspace | **1207** | `#[test]` + `#[tokio::test]` em `crates/` |
 | Checks da bateria E2E | **270** | `scripts/e2e.sh` |
 | Cenários de caos | **8** | `scripts/chaos.sh` |
-| Rotas na Docker Engine API | **14 servidas, 12 recusadas com razão** | `API_MATRIX` / `API_UNIMPLEMENTED` em `cmd/dockerapi.rs` |
+| Rotas na Docker Engine API | **15 servidas, 11 recusadas com razão** (actualizado 2026-09-22 — `POST /images/create` mudou de lista; o resto da baseline desta tabela continua de 2026-08-25) | `API_MATRIX` / `API_UNIMPLEMENTED` em `cmd/dockerapi.rs` |
 | Kinds no manifesto | **19** | tabela `cmd/kinds.rs` |
 | ADRs | **18** (13 Accepted, 2 Proposed, 1 Rejected, 2 sem estado parseável) | `docs/adr/` |
 | Jobs de CI | **7** (`fmt`, `lang`, `clippy`, `test`, `deny`, `docs` + caos à parte) | `.github/workflows/ci.yml` |
@@ -55,7 +55,7 @@ Estados: `NOT_STARTED`, `IN_PROGRESS`, `PARTIAL`, `BLOCKED`, `DONE`.
 | ID | Melhoria | Estado | Baseline medida | Entregáveis em falta | Testes | Dep. | Risco | PR | DoD |
 |---|---|---|---|---|---|---|---|---|---|
 | **M01** | Posicionamento e arquitectura | `IN_PROGRESS` | `ARCHITECTURE.md` tem C4 1–3 e mini-ADRs; **omitia 3 de 13 crates** e a contagem dizia 10. Nenhum gate arquitectural existia. | capability discovery; política de estabilidade por API (parcial em `cli-stability.md`); gate de dependência proibida (fronteira PaaS) | `tests/architecture.rs` — 3 gates, verdes; regressão verificada nos dois sentidos | — | baixo | — | 3 de 5 |
-| **M02** | Compatibilidade e migração | `IN_PROGRESS` | CRI **79/103** (`critest` v1.36.0, motor **v0.63.1**, remedido 2026-08-25). Docker API: **14 servidas, 12 recusadas com razão**, e agora um **terceiro estado** — 21 rotas que o `kind`/compose usam, das quais **8 recusadas** (`serve docker-api --matrix`). `compose` nativo; `compatibility`/`migrate assess` **não existem**. | comandos `compatibility {compose,oci}` e `migrate assess`; matriz do Compose; `migrate assess` | `tests/compat/` + 3 gates da matriz Docker | M01 | médio | #123, #124 | 2 de 4 |
+| **M02** | Compatibilidade e migração | `IN_PROGRESS` | CRI **79/103** (`critest` v1.36.0, motor **v0.63.1**, remedido 2026-08-25). Docker API: **15 servidas, 11 recusadas com razão** (2026-09-22: `POST /images/create` deixou de estar em falta — ver abaixo). `compose` nativo; `compatibility`/`migrate assess` **não existem**. | comandos `compatibility {compose,oci}` e `migrate assess`; matriz do Compose; `migrate assess` | `tests/compat/` + 3 gates da matriz Docker + 4 testes de `parse_registry_auth` | M01 | médio | #123, #124, #460 | 3 de 4 |
 | **M03** | Build de produção | `PARTIAL` | `build` tem `--secret`, `--platform`, `--no-cache`, `--build-arg`, cache por instrução (rootless), multi-stage. **Sem** `--ssh`, cache distribuída, SBOM/provenance no artefacto de build. | mounts `type=ssh`/`cache`; cache em registry; SBOM+provenance por imagem construída; comparação medida com BuildKit | `crates/adapters/delonix-image/benches` existe | M04 | médio | — | 1 de 4 |
 | **M04** | Segurança verificável | `IN_PROGRESS` | Releases assinadas (minisign) + proveniência SLSA + SBOM SPDX de 380 pacotes dentro da assinatura. `cargo-deny` no CI. **`policy.json` novo**: tecto do NÓ imposto no `cmd_run` — nega `--privileged`, `--net host`, `:latest` e registos fora da lista, fail-closed e com todas as razões de uma vez. **Sem** fuzzing no CI; o `kind: RuntimePolicy` declarativo fica por fazer (hoje é ficheiro). | Kind declarativo; job de fuzz; processo de advisory | 7 gates + 6 checks E2E | — | médio | #125, #126 | 3 de 4 |
 | **M05** | Desired State e GitOps | `IN_PROGRESS` | `stack` serve **11** verbos: `init apply destroy prune plan ls describe wait validate history rollback`. `plan` não muda estado e tem `--detailed-exitcode`; diff de 3 vias sem ficheiro de estado; **revisões persistidas** (ADR-0019). **Faltam `diff`, `drift`, `reconcile`** — `drift` e `diff` são hoje o `plan` com outro nome; o `reconcile` contínuo é o que resta a sério, e traz a pergunta do daemon. O `apply` continua fail-fast sem rollback, por desenho, e já não deixa órfãos invisíveis. | `drift`/`diff` como verbos próprios; reconciler opcional com rate-limit | caos `stack_converge` + `stack_partial_apply`; **19 checks E2E** de `history`+`rollback`, um a apagar `stacks/` e outro a exigir o ciclo completo | M01 | médio | #120, #121, #122 | 5 de 6 |
@@ -183,6 +183,36 @@ O que a tabela passou a mostrar, e antes não mostrava: das **21** rotas que
 ferramentas reais chamam, **8 estão recusadas** — incluindo o pull. Isso é o que
 separa «tem uma API Docker» de «o Testcontainers corre contra isto».
 
+## M02 — `POST /images/create` deixa de estar em falta (2026-09-22)
+
+A porta, fechada: `pull_from_registry_with_creds_full` já existia (callback de
+progresso por-layer, usado pela CLI); faltava o `serve docker-api` traduzir
+esse callback para o formato chunked-JSON que um cliente Docker sabe ler
+(`{"status":...,"progressDetail":{...},"id":...}` por linha) e devolver a
+resposta em STREAM em vez de esperar o pull inteiro terminar antes de escrever
+um byte. `handle` (`cmd/dockerapi.rs`) ganhou um segundo tipo de corpo de
+resposta (`BoxBody<Bytes, Infallible>`, ao lado do `Full<Bytes>` de sempre) só
+para esta rota — as restantes continuam a devolver um único chunk, sem
+regressão de forma.
+
+**Validado com o cliente REAL, não só com `curl` contra o stream cru**:
+`docker pull alpine:3.20` e `docker pull nginx:alpine` (8 layers, uma de
+26 MB) através de `DOCKER_HOST=unix://<socket>` apontado a este servidor,
+`docker version` 29.8.1 — os dois terminaram com sucesso e `docker images`
+mostrou as imagens a seguir. Um erro de referência inexistente é reportado
+DENTRO do stream com HTTP 200 (`{"error":...}`), o mesmo contrato do Docker
+real — o cliente decide falha pelo conteúdo da última linha, não pelo status
+code. `fromImage` em falta continua a devolver `400` antes de o stream
+começar (não há nada para streamar ainda).
+
+O `id` de cada linha de progresso é sintético (`layer-<posição>`, não o
+digest real da layer) — o callback do motor não carrega o digest, só a
+posição, e um cliente real (testado) só usa o campo para desenhar uma barra
+por linha, nunca para o comparar com nada. Credenciais de registo privado
+(`X-Registry-Auth`, JSON base64 `{username,password}`) são aceites; a forma
+`identitytoken`-only não tem para onde ir (o cofre deste motor só guarda
+pares utilizador/password) e cai para `None` (tenta anónimo/`delonix image login`).
+
 ## Ordem de execução
 
 A do programa, com uma alteração justificada: M01 entrega primeiro os **gates**
@@ -209,3 +239,4 @@ deixou 3 crates fora do C4 sem ninguém dar por isso.
 | 2026-08-25 | `stack rollback`: as revisões passam a ter caminho de volta. M05 fica com 11 verbos e o `reconcile` contínuo como único item a sério em falta. |
 | 2026-08-25 | Fase D (adiantada). `stack history` + ADR-0019: revisões persistidas, com a propriedade «apagar `stacks/` não parte nada» fixada por gate. M05 sobe para 5 de 6. |
 | 2026-08-25 | Fase B. M05 passa a `IN_PROGRESS`: fechada a fuga de recursos de um `apply` parcial (`salvage_ownership`), com o cenário de caos `stack_partial_apply` a fixá-la. O risco de M05 baixa de **alto** para médio — o que resta (`history`/`rollback`) é superfície em falta, não perda de dados. |
+| 2026-09-22 | M02: `POST /images/create` implementado (streaming chunked-JSON, delega no pull existente) e movido de `API_UNIMPLEMENTED` para `API_MATRIX`. Validado com um `docker` CLI real (29.8.1) — `docker pull` de duas imagens através do socket, incluindo uma de 8 layers/26 MB. M02 sobe para 3 de 4. |

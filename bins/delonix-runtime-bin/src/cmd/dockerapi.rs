@@ -24,6 +24,12 @@
 //! silent. Any route this layer doesn't implement returns 404 with a clear
 //! message rather than a confusing client-side parse error.
 //!
+//! **`POST /images/create` (M02)**: streamed, real `docker pull` verified
+//! against a REAL `docker` CLI (29.8.1) — `docker pull alpine:3.20` and
+//! `docker pull nginx:alpine` (8 layers, one 26 MB) both completed and the
+//! pulled images showed up in `docker images` afterwards, pulled through
+//! this socket end to end, not just a curl against the raw stream.
+//!
 //! Same security posture as `delonix-mgmt`: 0600 socket + `SO_PEERCRED`
 //! (own-uid only). A real `docker.sock` is usually group-readable (the
 //! `docker` group) — same-uid-only is the safer default and consistent with
@@ -34,22 +40,35 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use http_body_util::{BodyExt, Full};
-use hyper::body::Incoming;
+use http_body_util::combinators::BoxBody;
+use http_body_util::{BodyExt, Full, StreamBody};
+use hyper::body::{Frame, Incoming};
 use hyper::service::service_fn;
 use hyper::{Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
 use serde_json::json;
+use tokio_stream::wrappers::ReceiverStream;
 
 use delonix_compute::Container;
 use delonix_model::records::Status;
 use delonix_model::{Error, Result};
 use delonix_node::peer_cred::peer_uid;
+use delonix_oci::registry::pull_from_registry_with_creds_full;
 use delonix_oci::ImageStore;
 use delonix_state::Store;
 
 use super::container::RunOpts;
 use super::util::state_root;
+
+/// The response body type every handler ends up producing: either a single
+/// buffered chunk (`Full`, the common case) or a live stream (`StreamBody`,
+/// only `POST /images/create` today). Boxed so `handle`'s signature does not
+/// have to name both concrete types.
+type RespBody = BoxBody<Bytes, Infallible>;
+
+fn buffered(bytes: Vec<u8>) -> RespBody {
+    Full::new(Bytes::from(bytes)).boxed()
+}
 
 /// What we report via `Api-Version` (and accept the client negotiating down
 /// to) — matches the oldest widely-deployed Docker (17.03), comfortably
@@ -534,6 +553,11 @@ pub(crate) const API_MATRIX: &[(&str, &str, &str)] = &[
     ("POST", "/containers/{id}/rename", "container rename"),
     ("DELETE", "/containers/{id}", "container rm"),
     ("GET", "/containers/{id}/json", "container inspect"),
+    (
+        "POST",
+        "/images/create",
+        "the pull — image pull <ref>, streamed as Docker's chunked JSON",
+    ),
 ];
 
 /// Routes deliberately NOT implemented, each with the reason.
@@ -588,17 +612,6 @@ pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
         "/networks/{id}",
         "not written yet; `delonix network inspect` covers it",
     ),
-    // The one that hurts most, and saying so is the point of this row: it is
-    // the FIRST call most tools make, so its absence is not a missing feature
-    // at the edge — it is the door. Writing it means streaming the pull
-    // progress in Docker's own chunked JSON format, which is a slice of its
-    // own, not a line here.
-    (
-        "POST",
-        "/images/create",
-        "not written yet — this is the pull, and most tools call it first; \
-         `delonix image pull` covers it from the CLI",
-    ),
     (
         "GET",
         "/images/{name}/json",
@@ -631,6 +644,8 @@ pub(crate) const API_UNIMPLEMENTED: &[(&str, &str, &str)] = &[
 /// Measured 2026-08-25 against this file: `POST /images/create` (the pull every
 /// tool does FIRST) and `GET /containers/{id}/stats` appeared in neither list.
 /// Someone reading the published matrix would not learn they are absent.
+/// **`POST /images/create` moved to [`API_MATRIX`] once written** (M02, this
+/// commit) — see [`handle_images_create`].
 ///
 /// # Where these entries come from
 ///
@@ -821,18 +836,32 @@ pub(crate) fn print_matrix() {
 async fn handle(
     req: Request<Incoming>,
     state: Arc<AppState>,
-) -> std::result::Result<Response<Full<Bytes>>, Infallible> {
+) -> std::result::Result<Response<RespBody>, Infallible> {
     let method = req.method().as_str().to_string();
     let full_path = req.uri().path().to_string();
     let query = req.uri().query().unwrap_or("").to_string();
     let path = strip_version_prefix(&full_path).to_string();
     let params = parse_query(&query);
+    // Read before `into_body()` consumes the request.
+    let registry_auth = req
+        .headers()
+        .get("X-Registry-Auth")
+        .and_then(|v| v.to_str().ok())
+        .map(str::to_string);
     let body_bytes = req
         .into_body()
         .collect()
         .await
         .map(|c| c.to_bytes())
         .unwrap_or_default();
+
+    // The one route that answers with a live STREAM instead of a single
+    // buffered chunk — it bypasses the `(status, body)` shape the rest of
+    // this dispatcher uses, because the whole point is not to wait for the
+    // pull to finish before writing anything.
+    if method == "POST" && path == "/images/create" {
+        return Ok(handle_images_create(&state, &params, registry_auth.as_deref()).await);
+    }
 
     let (status, body): (StatusCode, Vec<u8>) = match (method.as_str(), path.as_str()) {
         ("GET" | "HEAD", "/_ping") => (StatusCode::OK, b"OK".to_vec()),
@@ -890,9 +919,140 @@ async fn handle(
         .header("Docker-Experimental", "false")
         .header("OSType", "linux")
         .header("Server", format!("delonix/{}", env!("CARGO_PKG_VERSION")))
-        .body(Full::new(Bytes::from(body)))
-        .unwrap_or_default();
+        .body(buffered(body))
+        .unwrap_or_else(|_| Response::new(buffered(Vec::new())));
     Ok(resp)
+}
+
+/// Decodes the `X-Registry-Auth` header (base64 JSON `AuthConfig`) into the
+/// `(username, password)` pair `pull_from_registry_with_creds_full` accepts.
+/// Docker also allows an `identitytoken`-only form (OAuth-style registries);
+/// unsupported here — this engine's own auth store only ever holds a
+/// username/password pair (`delonix login`), so there is nothing to fall
+/// back to for a token-only credential. A malformed or token-only header
+/// falls through to `None`, which makes the pull try anonymous / the node's
+/// own `delonix login` credentials for that host, same as no header at all.
+fn parse_registry_auth(header: &str) -> Option<(String, String)> {
+    use base64::Engine;
+    let decoded = base64::engine::general_purpose::STANDARD
+        .decode(header)
+        .or_else(|_| base64::engine::general_purpose::URL_SAFE.decode(header))
+        .ok()?;
+    let v: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
+    let user = v.get("username")?.as_str()?.to_string();
+    let pass = v.get("password").and_then(|p| p.as_str())?.to_string();
+    Some((user, pass))
+}
+
+/// `POST /images/create?fromImage=<repo>[&tag=<tag>]` — the pull almost every
+/// tool calls FIRST (`docker pull`, Testcontainers, `kind`, GitLab Runner).
+/// See [`API_UNIMPLEMENTED`]'s former entry for this route: writing it meant
+/// streaming progress in Docker's own chunked-JSON format instead of making
+/// the client wait one HTTP round-trip for however long a multi-hundred-MB
+/// pull takes.
+///
+/// Delegates to the SAME `pull_from_registry_with_creds_full` the CLI's
+/// `image pull` uses — zero duplicated pull/verification logic (digest
+/// checks, credential lookup, multi-arch resolution all come for free). Only
+/// the PRESENTATION differs: this handler turns the engine's
+/// `(layer_index, layer_total, bytes_done, bytes_total)` callback into one
+/// JSON object per call, Docker's `{"status":...,"progressDetail":{...},
+/// "id":...}` shape — real clients (the `docker` CLI, Testcontainers) read
+/// this to decide whether to keep waiting, not to render pixel-identical
+/// progress bars, so a synthetic per-layer `id` (this engine's callback does
+/// not carry the layer's digest, only its position) is enough.
+///
+/// The pull itself is blocking (synchronous HTTP under the hood), so it runs
+/// on `spawn_blocking`; the progress callback can be invoked from several of
+/// ITS OWN worker threads at once (layers pull in parallel — see
+/// `PullProgressCb`'s own doc comment), so it forwards to an mpsc channel
+/// with `blocking_send`, which is safe to call from any thread.
+async fn handle_images_create(
+    state: &Arc<AppState>,
+    params: &std::collections::HashMap<String, String>,
+    registry_auth: Option<&str>,
+) -> Response<RespBody> {
+    let Some(from_image) = params.get("fromImage").filter(|s| !s.is_empty()) else {
+        return json_error(
+            StatusCode::BAD_REQUEST,
+            "fromImage is required, e.g. POST /images/create?fromImage=nginx&tag=alpine",
+        );
+    };
+    let from_image = from_image.clone();
+    let tag = params.get("tag").filter(|t| !t.is_empty()).cloned();
+    let reference = match &tag {
+        Some(t) => format!("{from_image}:{t}"),
+        None => from_image.clone(),
+    };
+    let creds = registry_auth.and_then(parse_registry_auth);
+    let root = state.images.root().to_path_buf();
+
+    let (tx, rx) = tokio::sync::mpsc::channel::<std::result::Result<Frame<Bytes>, Infallible>>(64);
+
+    tokio::task::spawn_blocking(move || {
+        let emit = |v: serde_json::Value| {
+            let mut line = v.to_string().into_bytes();
+            line.push(b'\n');
+            let _ = tx.blocking_send(Ok(Frame::data(Bytes::from(line))));
+        };
+        emit(json!({
+            "status": format!("Pulling from {from_image}"),
+            "id": tag.clone().unwrap_or_else(|| "latest".to_string()),
+        }));
+
+        let images = match ImageStore::open(&root) {
+            Ok(s) => s,
+            Err(e) => {
+                emit(json!({"errorDetail": {"message": e.to_string()}, "error": e.to_string()}));
+                return;
+            }
+        };
+
+        let progress =
+            |layer_idx: usize, _layer_total: usize, bytes_done: u64, bytes_total: Option<u64>| {
+                let id = format!("layer-{layer_idx}");
+                let detail = match bytes_total {
+                    Some(total) => json!({"current": bytes_done, "total": total}),
+                    None => json!({"current": bytes_done}),
+                };
+                emit(json!({"status": "Downloading", "progressDetail": detail, "id": id}));
+            };
+
+        match pull_from_registry_with_creds_full(&images, &reference, creds, None, Some(&progress))
+        {
+            Ok(img) => {
+                emit(json!({"status": format!("Digest: {}", img.id)}));
+                emit(json!({"status": format!("Status: Downloaded newer image for {reference}")}));
+            }
+            Err(e) => {
+                emit(json!({"errorDetail": {"message": e.to_string()}, "error": e.to_string()}));
+            }
+        }
+    });
+
+    let body = StreamBody::new(ReceiverStream::new(rx)).boxed();
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("Content-Type", "application/json")
+        .header("Api-Version", API_VERSION)
+        .header("Docker-Experimental", "false")
+        .header("OSType", "linux")
+        .header("Server", format!("delonix/{}", env!("CARGO_PKG_VERSION")))
+        .body(body)
+        .unwrap_or_else(|_| Response::new(buffered(Vec::new())))
+}
+
+/// A single-chunk JSON error response — used by the handful of handlers (like
+/// [`handle_images_create`]'s missing-`fromImage` case) that need to answer
+/// BEFORE deciding whether the response is streamed.
+fn json_error(status: StatusCode, message: &str) -> Response<RespBody> {
+    let body = json!({ "message": message }).to_string().into_bytes();
+    Response::builder()
+        .status(status)
+        .header("Content-Type", "application/json")
+        .header("Api-Version", API_VERSION)
+        .body(buffered(body))
+        .unwrap_or_else(|_| Response::new(buffered(Vec::new())))
 }
 
 /// `POST /containers/create[?name=<name>]` — maps Docker's `ContainerConfig`
@@ -1784,6 +1944,54 @@ mod matrix_tests {
                 "{m} {path} appears as both implemented and not"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod images_create_tests {
+    use super::parse_registry_auth;
+    use base64::Engine;
+
+    fn encode(json: &str) -> String {
+        base64::engine::general_purpose::STANDARD.encode(json)
+    }
+
+    #[test]
+    fn decodes_username_and_password() {
+        let header =
+            encode(r#"{"username":"walter","password":"s3nha","serveraddress":"ghcr.io"}"#);
+        assert_eq!(
+            parse_registry_auth(&header),
+            Some(("walter".to_string(), "s3nha".to_string()))
+        );
+    }
+
+    #[test]
+    fn url_safe_base64_also_decodes() {
+        // Docker itself uses standard base64, but a client that base64-encodes
+        // the JSON with the URL-safe alphabet should not be silently rejected
+        // just because the JSON happens to contain a `+` or `/`.
+        let header =
+            base64::engine::general_purpose::URL_SAFE.encode(r#"{"username":"a","password":"b"}"#);
+        assert_eq!(
+            parse_registry_auth(&header),
+            Some(("a".to_string(), "b".to_string()))
+        );
+    }
+
+    #[test]
+    fn identity_token_only_falls_through_to_none() {
+        // No username/password to extract — this engine's auth store never
+        // holds a bare token, so there is nothing to translate it to.
+        let header = encode(r#"{"identitytoken":"opaque-oauth-token"}"#);
+        assert_eq!(parse_registry_auth(&header), None);
+    }
+
+    #[test]
+    fn malformed_header_is_none_not_a_panic() {
+        assert_eq!(parse_registry_auth("not-base64-at-all!!"), None);
+        assert_eq!(parse_registry_auth(&encode("not json")), None);
+        assert_eq!(parse_registry_auth(&encode("{}")), None);
     }
 }
 
