@@ -1,0 +1,32 @@
+[package]
+name = "delonix-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Own workspace, on purpose — cargo-fuzz's sanitizer build flags are not
+# something the main workspace's members should ever pick up.
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.delonix-oci]
+path = "../crates/adapters/delonix-oci"
+
+[[bin]]
+name = "parse_dockerfile"
+path = "fuzz_targets/parse_dockerfile.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "parse_reference"
+path = "fuzz_targets/parse_reference.rs"
+test = false
+doc = false
+bench = false

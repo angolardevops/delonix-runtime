@@ -279,6 +279,7 @@ holder de rede ou no arranque de VMs funciona — isso precisa de uma corrida ao
 | `test` | test |
 | `test-arm64` | test (arm64) |
 | `deny` | cargo-deny |
+| `fuzz` | fuzz (60s smoke, per target) |
 | `docs` | generated docs and valid examples |
 <!-- dev-docs:end ci-gates -->
 

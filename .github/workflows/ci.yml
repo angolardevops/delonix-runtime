@@ -183,6 +183,32 @@ jobs:
         with:
           command: check advisories licenses sources
 
+  # ---- Fuzz: hand-written parsers fed with attacker-influenceable input ----
+  #
+  # A short smoke run per PR/push, not a nightly deep campaign (that needs a
+  # scheduled workflow with its own corpus persistence, which this repo does
+  # not have yet — M04 of the 13-improvements program). What this job DOES
+  # catch: a change to a fuzzed parser that introduces an immediate panic,
+  # before it ever reaches a release. `fuzz/` is its own workspace (see its
+  # Cargo.toml) so the sanitizer build flags never touch the main workspace.
+  fuzz:
+    name: fuzz (60s smoke, per target)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install pinned toolchain + nightly (libFuzzer's sanitizer needs it)
+        run: |
+          rustup show
+          rustup toolchain install nightly --profile minimal
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz -> target
+      - run: cargo install cargo-fuzz --locked
+      - name: parse_dockerfile — untrusted content of a cloned Dockerfile/Delonixfile
+        run: cargo +nightly fuzz run parse_dockerfile -- -max_total_time=60
+      - name: parse_reference — the image reference parser with a real past bug
+        run: cargo +nightly fuzz run parse_reference -- -max_total_time=60
+
   # ---- O site e os exemplos: gerados do binário, e por isso verificáveis ----
   #
   # Duas classes de falha que só se descobriam à mão, e ambas já aconteceram:
