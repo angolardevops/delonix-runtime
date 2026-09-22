@@ -478,7 +478,7 @@ fn build_one_stage(
                     // PATH=/app/.venv/bin:$PATH` dropped `/usr/local/bin` from
                     // PATH entirely, and `RUN pip install` failed with "pip:
                     // not found" on an image where pip was sitting right there.
-                    let val = expand_env_value(&cur_env, val);
+                    let val = expand_env_value(&cur_env, val)?;
                     let prefix = format!("{key}=");
                     cur_env.retain(|kv| !kv.starts_with(&prefix));
                     cur_env.push(format!("{key}={val}"));
@@ -1229,13 +1229,13 @@ fn sh_export(kv: &str) -> String {
 /// unknown untouched). Has to happen HERE, in Rust, and not be left to the
 /// exec shell: `sh_export` single-quotes every value it emits, and `$VAR`
 /// inside single quotes never expands in `/bin/sh`.
-fn expand_env_value(cur_env: &[String], val: &str) -> String {
+fn expand_env_value(cur_env: &[String], val: &str) -> Result<String> {
     let known: HashMap<String, String> = cur_env
         .iter()
         .filter_map(|kv| kv.split_once('='))
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
-    substitute_vars(val, &known)
+    Ok(substitute_vars(val, &known)?)
 }
 
 /// `<root>/build-cache/<hash>/rootfs` — the layer cache root.
@@ -1595,7 +1595,7 @@ mod tests {
     fn expand_env_value_substitui_path_pelo_valor_da_imagem_base() {
         let base_env = vec!["PATH=/usr/local/bin:/usr/bin:/bin".to_string()];
         assert_eq!(
-            expand_env_value(&base_env, "/app/.venv/bin:$PATH"),
+            expand_env_value(&base_env, "/app/.venv/bin:$PATH").unwrap(),
             "/app/.venv/bin:/usr/local/bin:/usr/bin:/bin"
         );
     }
@@ -1607,7 +1607,7 @@ mod tests {
     fn expand_env_value_ve_um_env_anterior_no_mesmo_ficheiro() {
         let cur_env = vec!["APP_HOME=/app".to_string()];
         assert_eq!(
-            expand_env_value(&cur_env, "${APP_HOME}/.venv/bin"),
+            expand_env_value(&cur_env, "${APP_HOME}/.venv/bin").unwrap(),
             "/app/.venv/bin"
         );
     }
@@ -1616,7 +1616,33 @@ mod tests {
     /// "leave unknown alone" rule `substitute_vars` already has for `ARG`.
     #[test]
     fn expand_env_value_deixa_variavel_desconhecida_intocada() {
-        assert_eq!(expand_env_value(&[], "$UNKNOWN/bin"), "$UNKNOWN/bin");
+        assert_eq!(
+            expand_env_value(&[], "$UNKNOWN/bin").unwrap(),
+            "$UNKNOWN/bin"
+        );
+    }
+
+    /// Same ceiling as `ARG` (`delonix_oci::build::substitute_vars`), reached
+    /// through the OTHER caller — a chain of `ENV` lines in a Delonixfile
+    /// each doubling the previous one is refused instead of exhausting
+    /// memory during a real `delonix build`. Stops at the first `Err` rather
+    /// than at a fixed iteration count: exactly which doubling crosses the
+    /// 1 MiB ceiling is an implementation detail of the constant, not of
+    /// this test.
+    #[test]
+    fn expand_env_value_is_refused_past_the_substitution_ceiling() {
+        let mut cur_env = vec!["V0=x".to_string()];
+        for i in 1..40 {
+            let prev = i - 1;
+            match expand_env_value(&cur_env, &format!("${{V{prev}}}${{V{prev}}}")) {
+                Ok(val) => cur_env.push(format!("V{i}={val}")),
+                Err(e) => {
+                    assert!(e.to_string().contains("too large"), "{e}");
+                    return;
+                }
+            }
+        }
+        panic!("40 doublings never crossed the substitution ceiling");
     }
 
     #[test]

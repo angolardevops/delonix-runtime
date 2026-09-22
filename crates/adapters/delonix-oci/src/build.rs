@@ -133,6 +133,32 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
     parse_dockerfile_with_args(text, &[])
 }
 
+/// A ceiling on a single substituted line's length, checked as the buffer
+/// grows rather than after the fact.
+///
+/// Found by the fuzzer (`fuzz/fuzz_targets/parse_dockerfile.rs`), not by
+/// reasoning about it first: `known` accumulates across the whole file (an
+/// `ARG` declared earlier stays visible later, by design — see
+/// `parse_dockerfile_with_args`'s own doc comment), and each declaration's
+/// value is substituted and stored ALREADY EXPANDED. A chain of
+/// `ARG B=${A}${A}` lines each references the previous one TWICE, doubling
+/// the stored value every line — the textbook exponential-expansion ("billion
+/// laughs") shape, except the "entities" here are ordinary `ARG`/`ENV` lines
+/// in a Dockerfile anyone can put in a cloned repo `delonix build` reads
+/// before any container exists to sandbox it. ~30 such lines exhaust the
+/// host's memory; the fuzzer needed only 60 seconds to find a shorter one.
+/// 1 MiB is generous for any real Dockerfile line and small enough to abort
+/// long before the process itself is threatened.
+const MAX_SUBSTITUTED_LEN: usize = 1024 * 1024;
+
+fn substituted_too_large(line: &str) -> Error {
+    Error::Dockerfile(format!(
+        "value too large after ${{...}}/$VAR substitution (over {MAX_SUBSTITUTED_LEN} bytes) — \
+         refusing to keep expanding: {}...",
+        &line.chars().take(80).collect::<String>()
+    ))
+}
+
 /// Substitutes `${NAME}`/`$NAME` occurrences of an already-known variable in
 /// `line`. Deliberately simple — no `${NAME:-default}`/`${NAME:+alt}` shell
 /// parameter-expansion forms, just plain substitution — covers the common
@@ -143,7 +169,13 @@ pub fn parse_dockerfile(text: &str) -> Result<Dockerfile> {
 /// here) and the builder (`ENV`s, in `delonix-runtime-bin::cmd::build` —
 /// `pub` for exactly that reason). Same substitution either way; only which
 /// variables are "known" differs.
-pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> String {
+///
+/// Refuses (`Err`) rather than truncating once the expanded output crosses
+/// [`MAX_SUBSTITUTED_LEN`] — see that constant's doc comment for why this
+/// check exists at all. Truncating silently would still allocate the
+/// attacker's chosen amount of memory per call before the cut; refusing does
+/// not.
+pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> Result<String> {
     let mut out = String::with_capacity(line.len());
     let mut chars = line.char_indices().peekable();
     while let Some((i, ch)) = chars.next() {
@@ -156,6 +188,9 @@ pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> String {
                 let name = &line[i + 2..i + 2 + end];
                 if let Some(val) = known.get(name) {
                     out.push_str(val);
+                    if out.len() > MAX_SUBSTITUTED_LEN {
+                        return Err(substituted_too_large(line));
+                    }
                     // Skip past the consumed `{name}` (already advanced 1 char for `$`).
                     for _ in 0..(1 + name.len() + 1) {
                         chars.next();
@@ -181,6 +216,9 @@ pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> String {
             let name = &rest[..name_len];
             if let Some(val) = known.get(name) {
                 out.push_str(val);
+                if out.len() > MAX_SUBSTITUTED_LEN {
+                    return Err(substituted_too_large(line));
+                }
                 for _ in 0..name_len {
                     chars.next();
                 }
@@ -189,7 +227,7 @@ pub fn substitute_vars(line: &str, known: &HashMap<String, String>) -> String {
         }
         out.push(ch);
     }
-    out
+    Ok(out)
 }
 
 /// Parses a Dockerfile, substituting `ARG`-declared variables as it goes
@@ -210,7 +248,7 @@ pub fn parse_dockerfile_with_args(text: &str, cli_args: &[(String, String)]) -> 
             continue;
         }
         let (instr, rest) = line.split_once(char::is_whitespace).unwrap_or((line, ""));
-        let rest = substitute_vars(rest.trim(), &known_args);
+        let rest = substitute_vars(rest.trim(), &known_args)?;
         let rest = rest.as_str();
         let instr_up = instr.to_ascii_uppercase();
         // The steps go to the current STAGE (the last of `stages`); FROM opens a new one.
@@ -877,8 +915,8 @@ impl ImageStore {
 #[cfg(test)]
 mod tests {
     use super::{
-        join_continuations, parse_dockerfile_with_args, parse_env_pairs, parse_run_flags,
-        resolve_target_stage, substitute_vars, Step,
+        join_continuations, parse_dockerfile, parse_dockerfile_with_args, parse_env_pairs,
+        parse_run_flags, resolve_target_stage, substitute_vars, Step,
     };
     use std::collections::HashMap;
 
@@ -932,15 +970,53 @@ mod tests {
         let mut known = HashMap::new();
         known.insert("V".to_string(), "3.19".to_string());
         known.insert("PKG".to_string(), "curl".to_string());
-        assert_eq!(substitute_vars("alpine:${V}", &known), "alpine:3.19");
         assert_eq!(
-            substitute_vars("apt install $PKG now", &known),
+            substitute_vars("alpine:${V}", &known).unwrap(),
+            "alpine:3.19"
+        );
+        assert_eq!(
+            substitute_vars("apt install $PKG now", &known).unwrap(),
             "apt install curl now"
         );
         // Unknown name: left untouched, not replaced with empty.
-        assert_eq!(substitute_vars("echo $UNKNOWN", &known), "echo $UNKNOWN");
+        assert_eq!(
+            substitute_vars("echo $UNKNOWN", &known).unwrap(),
+            "echo $UNKNOWN"
+        );
         // `$` not followed by a valid name start: untouched.
-        assert_eq!(substitute_vars("price: $5", &known), "price: $5");
+        assert_eq!(substitute_vars("price: $5", &known).unwrap(), "price: $5");
+    }
+
+    /// The bug the fuzzer found (`fuzz/fuzz_targets/parse_dockerfile.rs`,
+    /// `oom-*` artifact): a chain of `ARG` lines each referencing the
+    /// previous one TWICE doubles the stored value every line. Without a
+    /// ceiling this exhausts memory long before reaching the 30 lines used
+    /// here — the assertion is on the ERROR, not on how far it got.
+    #[test]
+    fn a_doubling_arg_chain_is_refused_before_memory_is_exhausted() {
+        let mut df = String::from("ARG V0=x\n");
+        for i in 1..30 {
+            let prev = i - 1;
+            df.push_str(&format!("ARG V{i}=${{V{prev}}}${{V{prev}}}\n"));
+        }
+        df.push_str("FROM alpine:3.19\n");
+        let err = parse_dockerfile(&df).unwrap_err().to_string();
+        assert!(err.contains("too large"), "{err}");
+    }
+
+    /// The ceiling is on ONE substituted line, not the sum across a whole
+    /// file — an ordinary Dockerfile with many small, unrelated ARGs must
+    /// keep working. Regression guard for an off-by-scope version of the fix
+    /// that summed across calls instead of resetting per line.
+    #[test]
+    fn many_small_unrelated_args_are_unaffected_by_the_ceiling() {
+        let mut df = String::new();
+        for i in 0..50 {
+            df.push_str(&format!("ARG V{i}=short-value-{i}\n"));
+        }
+        df.push_str("FROM alpine:${V0}\n");
+        let parsed = parse_dockerfile(&df).unwrap();
+        assert_eq!(parsed.from, "alpine:short-value-0");
     }
 
     #[test]
