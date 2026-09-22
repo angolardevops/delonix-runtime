@@ -268,6 +268,18 @@ pub enum ImageCmd {
         #[arg(long = "feed", value_name = "URL|FICHEIRO")]
         feed: Option<String>,
     },
+    /// The image's SBOM as an SPDX 2.3 document, not the table `scan
+    /// --sbom` prints.
+    ///
+    /// `delonix build` writes this automatically for every image it commits
+    /// that has a package database this scanner reads (`apk`/`dpkg`) — this
+    /// just prints the cached file (instant). For a pulled or older image
+    /// that never went through this engine's `build`, it computes and
+    /// caches one on the spot.
+    Sbom {
+        #[arg(add = ArgValueCandidates::new(super::complete::images))]
+        image: String,
+    },
     /// Remove a local image.
     Remove {
         #[arg(add = ArgValueCandidates::new(super::complete::images))]
@@ -548,6 +560,7 @@ pub fn run(action: ImageCmd) -> Result<()> {
                 super::scan::cmd_scan(&image, sbom, fail_on.as_deref())
             }
         }
+        ImageCmd::Sbom { image } => super::scan::cmd_sbom(&image),
         ImageCmd::Remove { image, force } => cmd_rm(&images, &store, &image, force),
         ImageCmd::Prune { force, all } => cmd_prune(&images, &store, force, all),
         ImageCmd::Export { image, dir } => cmd_export(&images, &image, &dir),
