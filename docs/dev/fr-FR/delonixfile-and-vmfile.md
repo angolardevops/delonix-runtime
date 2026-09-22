@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:16ac2cc5b199b5914e1dadc9be3d70cd285c0991f4618a9e1db95713c841dc02 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:40e8ce16ae06683b26d6f4cd83f6266c6b58c55570381c2f91aee3bb1d09acc5 -->
 # Delonixfile et VMfile
 
 **Avant de lire :** [Cloner, construire et tester](build-and-test.md) (un binaire et une racine d'état isolée) et [Images OCI, stockage adressé par contenu et overlayfs](cloud-native-primer.md#44-oci-images-content-addressed-storage-and-overlayfs) dans le manuel de cloud native.
@@ -59,7 +59,7 @@ commentaires. Les noms d'instructions ne sont pas sensibles à la casse.
 |---|---|---|
 | `ARG NAME[=default]` | Déclare une variable de build ; `${NAME}`/`$NAME` est substitué dans toutes les lignes suivantes | Autorisé avant `FROM` (pour le paramétrer). `--build-arg NAME=VALUE` ne surcharge qu'un `ARG` déclaré. Simplification : les arguments vivent dans **une seule** portée pour tout le fichier, et non par étape. Pas de formes `${NAME:-default}` (`substitute_vars`). |
 | `FROM <image> [AS <name>]` | Ouvre une étape | Une étape ultérieure peut aussi écrire `FROM <earlier-stage>` (voir multi-étapes). |
-| `RUN <shell>` | S'exécute dans un container de travail via `exec` | Seul `--mount=type=secret,...` est accepté comme option (voir plus bas). |
+| `RUN <shell>` | S'exécute dans un container de travail via `exec` | Seuls `--mount=type=secret,...`/`--mount=type=cache,...` sont acceptés comme options (voir plus bas). |
 | `COPY [--from=<stage>] <src> <dst>` | Écrit dans le rootfs de l'étape sur disque | Confiné au contexte/rootfs (`safe_join`, `confine_to`) : `..`, les évasions absolues et les liens symboliques qui sortent de la base sont refusés. |
 | `ADD` | **Identique à `COPY`** | Pas de téléchargement d'URL, pas d'extraction automatique d'archive. |
 | `ENV K=V [K2="v 2" …]` ou `ENV K V` | Affecte les `RUN` suivants ; l'`ENV` de l'étape finale va dans la configuration de l'image | Les valeurs sont développées à partir des `ENV` précédents (`expand_env_value`). |
@@ -130,11 +130,32 @@ RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
 - Dans le fichier : `--mount=type=secret,id=<name>[,target=<path>][,required=true|false]`. `target`
   vaut par défaut `/run/secrets/<id>` ; `required` vaut par défaut `false` (un secret optionnel
   manquant est ignoré, comme dans Docker).
-- `type=ssh`, `type=cache` et `type=bind` sont **refusés** (`parse_secret_mount`).
 - Le secret est monté en bind à chaud (`mount_run_secrets`) dans le mount namespace du container de
   travail uniquement pour ce `RUN`, puis démonté — la vue côté hôte du rootfs que lisent le commit et
   le cache de couches ne le contient jamais. Le contenu du secret n'entre pas non plus dans le hash de
   la clé de cache.
+
+### Cache mounts (M03 du programme des 13 améliorations)
+
+```dockerfile
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+```
+
+- `--mount=type=cache,target=<path>[,id=<name>]`. `target` est obligatoire ; `id` vaut par défaut
+  `target` lui-même (la règle de Docker), donc deux `RUN` qui montent la même `target` sans nommer
+  `id` partagent le même répertoire persistant.
+- Contrairement à un secret, ce répertoire est en **lecture-écriture** et **persiste entre les
+  builds** (et entre différents Dockerfiles) : il vit dans
+  `<DELONIX_ROOT>/build-cache/mounts/<sha256(id)>` — haché, jamais la chaîne brute `id`/`target`,
+  puisqu'un `id` omis vaut par défaut un chemin arbitraire contrôlé par le Dockerfile
+  (`cache_mount_dir`). Toujours pas de GC/TTL, la même lacune assumée honnêtement que le cache de
+  couches ci-dessous.
+- Un **hit** du cache de couches sur cette instruction saute le `RUN` entièrement, donc il ne touche
+  jamais non plus le répertoire du cache mount — seul un *miss* le touche (`mount_run_caches`).
+- `sharing=`/`ro` (champs propres à Docker) sont **refusés**, jamais silencieusement acceptés et
+  ignorés : il n'y a pas encore de verrouillage inter-processus entre deux `delonix build`
+  concurrents partageant le même `id`, et chaque cache mount ici est en lecture-écriture.
+- `type=ssh` et `type=bind` restent **refusés** (`parse_mount_flag`) — pas encore implémentés.
 
 ### `--platform` et binfmt
 
@@ -221,21 +242,22 @@ CMD ["/usr/local/bin/app"]
 ```text
 $ delonix build -t demo:dev --target nosuch .
 error invalid argument: no stage named 'nosuch' in this Dockerfile — known stages: builder
-$ delonix build -t d -f Dockerfile.cache .        # RUN --mount=type=cache,...
-error invalid argument: RUN --mount=type=cache: só type=secret é suportado (ssh/cache/bind ainda não)
+$ delonix build -t d -f Dockerfile.ssh .          # RUN --mount=type=ssh,...
+error invalid argument: RUN --mount=type=ssh: only type=secret and type=cache are supported (ssh/bind not yet)
 $ delonix build -t d --platform windows/amd64 .
 error invalid argument: --platform 'windows/amd64': only 'linux/<arch>' is supported (this engine does not run another OS)
 ```
-
-(Certaines erreurs du parseur sont encore en portugais ; elles comptent comme dette LANG-01 — voir
-[Flux de contribution](contributing-workflow.md).)
 
 ### Le `Delonixfile` du dépôt lui-même n'est pas construit par `delonix`
 
 Le `Delonixfile` à la racine du dépôt empaquette la CLI `delonix` dans une image de container. Il est
 construit avec **Docker ou Podman** (`docker build -f Delonixfile …`, ou `make image`), et non avec
-`delonix build` : il utilise `# syntax=docker/dockerfile:1` et `RUN --mount=type=cache`, que
-`delonix build` refuse. Ne l'utilisez pas comme exemple de la grammaire Delonix ; utilisez les
+`delonix build` . Il n'utilise que des cache mounts `type=cache` (désormais acceptés) et la
+directive `# syntax=` (un commentaire pour ce parseur, puisque toute ligne commençant par `#` en
+est un) — mais le construire avec `delonix build` n'a jamais été essayé : cela compile tout le
+workspace Rust à l'intérieur du container de travail, un ordre de grandeur différent des modèles
+ci-dessous et hors du périmètre où cette fonctionnalité a été validée. Ne l'utilisez pas comme
+exemple de la grammaire Delonix ; utilisez les
 modèles.
 
 ---
@@ -455,7 +477,7 @@ relecture**.
 | `COPY --from` | oui | oui (nom ou index) | oui (étapes nommées et antérieures uniquement ; `virt-copy-out`) |
 | Options `--chown/--chmod` de `COPY` | oui | non | non |
 | `ADD` URL / extraction d'archive | oui | non (`ADD` = `COPY`) | pas d'`ADD` |
-| `RUN --mount` | secret, ssh, cache, bind, tmpfs | `type=secret` uniquement | aucun |
+| `RUN --mount` | secret, ssh, cache, bind, tmpfs | `type=secret`/`type=cache` uniquement | aucun |
 | `--target` | oui | oui | non |
 | `--platform` | oui | `linux/<arch>`, binfmt de l'hôte requis | non (les images restent amd64 — [ADR-0018](../../adr/0018-vm-images-stay-amd64.md)) |
 | Cache de couches | oui | rootless uniquement, sans GC | aucun |

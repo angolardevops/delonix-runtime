@@ -1,4 +1,4 @@
-<!-- translated-from: delonixfile-and-vmfile.md sha256:16ac2cc5b199b5914e1dadc9be3d70cd285c0991f4618a9e1db95713c841dc02 -->
+<!-- translated-from: delonixfile-and-vmfile.md sha256:40e8ce16ae06683b26d6f4cd83f6266c6b58c55570381c2f91aee3bb1d09acc5 -->
 # Delonixfile e VMfile
 
 **Antes de leres:** [Clonar, construir e testar](build-and-test.md) (um binário e um state root
@@ -61,7 +61,7 @@ instruções não distinguem maiúsculas de minúsculas.
 |---|---|---|
 | `ARG NAME[=default]` | Declara uma variável de build; `${NAME}`/`$NAME` é substituído em todas as linhas seguintes | Permitido antes de `FROM` (para o parametrizar). `--build-arg NAME=VALUE` só sobrepõe um `ARG` declarado. Simplificação: os args vivem num **único** âmbito para o ficheiro inteiro, não por estágio. Sem formas `${NAME:-default}` (`substitute_vars`). |
 | `FROM <image> [AS <name>]` | Abre um estágio | Um estágio posterior também pode dizer `FROM <earlier-stage>` (ver multi-stage). |
-| `RUN <shell>` | Corre num container de trabalho via `exec` | Só `--mount=type=secret,...` é aceite como flag (abaixo). |
+| `RUN <shell>` | Corre num container de trabalho via `exec` | Só `--mount=type=secret,...`/`--mount=type=cache,...` são aceites como flag (abaixo). |
 | `COPY [--from=<stage>] <src> <dst>` | Escreve no rootfs do estágio em disco | Confinado ao contexto/rootfs (`safe_join`, `confine_to`): `..`, fugas absolutas e symlinks que saem da base são recusados. |
 | `ADD` | **Igual a `COPY`** | Sem download de URL, sem extracção automática de arquivos. |
 | `ENV K=V [K2="v 2" …]` ou `ENV K V` | Afecta os `RUN`s seguintes; o `ENV` do estágio final vai para a config da imagem | Os valores são expandidos contra `ENV`s anteriores (`expand_env_value`). |
@@ -128,11 +128,32 @@ RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
 - No ficheiro: `--mount=type=secret,id=<name>[,target=<path>][,required=true|false]`. `target` é por
   omissão `/run/secrets/<id>`; `required` é por omissão `false` (um segredo opcional em falta é
   saltado, como no Docker).
-- `type=ssh`, `type=cache` e `type=bind` são **recusados** (`parse_secret_mount`).
 - O segredo é montado ao vivo por bind (`mount_run_secrets`) dentro do mount namespace do container
   de trabalho só durante esse único `RUN`, e depois desmontado — a vista do rootfs do lado do host
   que o commit e a cache de camadas lêem nunca o contém. O material do segredo também não entra no
   hash da chave da cache.
+
+### Cache mounts (M03 do programa das 13 melhorias)
+
+```dockerfile
+RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+```
+
+- `--mount=type=cache,target=<path>[,id=<name>]`. `target` é obrigatório; `id` é por omissão o
+  próprio `target` (a regra do próprio Docker), por isso dois `RUN`s que montam o mesmo `target`
+  sem nomear um `id` partilham o mesmo directório persistente.
+- Ao contrário de um segredo, este directório é **de leitura-escrita** e **sobrevive entre builds**
+  (e entre Dockerfiles diferentes): vive em
+  `<DELONIX_ROOT>/build-cache/mounts/<sha256(id)>` — em hash, nunca a string crua de `id`/`target`,
+  já que um `id` omitido é por omissão um caminho arbitrário controlado pelo Dockerfile
+  (`cache_mount_dir`). Ainda sem GC/TTL, a mesma lacuna já assumida abertamente para a cache de
+  camadas abaixo.
+- Um **hit** da cache de camadas nessa instrução salta o `RUN` por inteiro, logo nunca toca no
+  directório do cache mount também — só um *miss* toca (`mount_run_caches`).
+- `sharing=`/`ro` (campos extra do próprio Docker) são **recusados**, nunca aceites e ignorados em
+  silêncio: ainda não há bloqueio entre processos para dois `delonix build` concorrentes a
+  partilharem o mesmo `id`, e aqui todo o cache mount é de leitura-escrita.
+- `type=ssh` e `type=bind` continuam **recusados** (`parse_mount_flag`) — ainda por implementar.
 
 ### `--platform` e binfmt
 
@@ -219,21 +240,21 @@ CMD ["/usr/local/bin/app"]
 ```text
 $ delonix build -t demo:dev --target nosuch .
 error invalid argument: no stage named 'nosuch' in this Dockerfile — known stages: builder
-$ delonix build -t d -f Dockerfile.cache .        # RUN --mount=type=cache,...
-error invalid argument: RUN --mount=type=cache: só type=secret é suportado (ssh/cache/bind ainda não)
+$ delonix build -t d -f Dockerfile.ssh .          # RUN --mount=type=ssh,...
+error invalid argument: RUN --mount=type=ssh: only type=secret and type=cache are supported (ssh/bind not yet)
 $ delonix build -t d --platform windows/amd64 .
 error invalid argument: --platform 'windows/amd64': only 'linux/<arch>' is supported (this engine does not run another OS)
 ```
-
-(Alguns erros do parser ainda estão em português; contam como dívida LANG-01 — ver
-[Fluxo de contribuição](contributing-workflow.md).)
 
 ### O próprio `Delonixfile` do repositório não é construído pelo `delonix`
 
 O `Delonixfile` na raiz do repositório empacota a CLI `delonix` numa imagem de container. É
 construído com **Docker ou Podman** (`docker build -f Delonixfile …`, ou `make image`), não com
-`delonix build`: usa `# syntax=docker/dockerfile:1` e `RUN --mount=type=cache`, que o
-`delonix build` recusa. Não o uses como exemplo da gramática Delonix; usa os templates.
+`delonix build`. Usa só cache mounts `type=cache` (agora aceites) e a directiva `# syntax=` (um
+comentário para este parser, já que qualquer linha começada por `#` o é) — mas construí-lo com
+`delonix build` nunca foi tentado: compila o workspace Rust inteiro dentro do container de
+trabalho, uma ordem de grandeza diferente dos templates abaixo e fora do âmbito com que esta
+funcionalidade foi validada. Não o uses como exemplo da gramática Delonix; usa os templates.
 
 ---
 
@@ -450,7 +471,7 @@ Um build completo (`virt-customize`, downloads, compressão) **não foi executad
 | `COPY --from` | sim | sim (nome ou índice) | sim (só estágios anteriores com nome; `virt-copy-out`) |
 | Flags de `COPY` `--chown/--chmod` | sim | não | não |
 | `ADD` de URL / extracção de arquivos | sim | não (`ADD` = `COPY`) | sem `ADD` |
-| `RUN --mount` | secret, ssh, cache, bind, tmpfs | só `type=secret` | nenhum |
+| `RUN --mount` | secret, ssh, cache, bind, tmpfs | só `type=secret`/`type=cache` | nenhum |
 | `--target` | sim | sim | não |
 | `--platform` | sim | `linux/<arch>`, binfmt do host necessário | não (as imagens ficam amd64 — [ADR-0018](../../adr/0018-vm-images-stay-amd64.md)) |
 | Cache de camadas | sim | só rootless, sem GC | nenhuma |

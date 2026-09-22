@@ -300,7 +300,7 @@ commentaires. Les noms d'instructions ne sont pas sensibles à la casse.</p>
 <tr>
 <td><code>RUN &lt;shell&gt;</code></td>
 <td>S'exécute dans un container de travail via <code>exec</code></td>
-<td>Seul <code>--mount=type=secret,...</code> est accepté comme option (voir plus bas).</td>
+<td>Seuls <code>--mount=type=secret,...</code>/<code>--mount=type=cache,...</code> sont acceptés comme options (voir plus bas).</td>
 </tr>
 <tr>
 <td><code>COPY [--from=&lt;stage&gt;] &lt;src&gt; &lt;dst&gt;</code></td>
@@ -421,11 +421,30 @@ aucune de ces restrictions.</p>
 <li>Dans le fichier : <code>--mount=type=secret,id=&lt;name&gt;[,target=&lt;path&gt;][,required=true|false]</code>. <code>target</code>
   vaut par défaut <code>/run/secrets/&lt;id&gt;</code> ; <code>required</code> vaut par défaut <code>false</code> (un secret optionnel
   manquant est ignoré, comme dans Docker).</li>
-<li><code>type=ssh</code>, <code>type=cache</code> et <code>type=bind</code> sont <strong>refusés</strong> (<code>parse_secret_mount</code>).</li>
 <li>Le secret est monté en bind à chaud (<code>mount_run_secrets</code>) dans le mount namespace du container de
   travail uniquement pour ce <code>RUN</code>, puis démonté — la vue côté hôte du rootfs que lisent le commit et
   le cache de couches ne le contient jamais. Le contenu du secret n'entre pas non plus dans le hash de
   la clé de cache.</li>
+</ul>
+<h3 id="cache-mounts-m03-of-the-13-improvements-programme">Cache mounts (M03 du programme des 13 améliorations)<a class="hanchor" href="#cache-mounts-m03-of-the-13-improvements-programme" aria-label="#">#</a></h3>
+<div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-dockerfile">RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
+</code></pre></div>
+<ul>
+<li><code>--mount=type=cache,target=&lt;path&gt;[,id=&lt;name&gt;]</code>. <code>target</code> est obligatoire ; <code>id</code> vaut par défaut
+  <code>target</code> lui-même (la règle de Docker), donc deux <code>RUN</code> qui montent la même <code>target</code> sans nommer
+  <code>id</code> partagent le même répertoire persistant.</li>
+<li>Contrairement à un secret, ce répertoire est en <strong>lecture-écriture</strong> et <strong>persiste entre les
+  builds</strong> (et entre différents Dockerfiles) : il vit dans
+  <code>&lt;DELONIX_ROOT&gt;/build-cache/mounts/&lt;sha256(id)&gt;</code> — haché, jamais la chaîne brute <code>id</code>/<code>target</code>,
+  puisqu'un <code>id</code> omis vaut par défaut un chemin arbitraire contrôlé par le Dockerfile
+  (<code>cache_mount_dir</code>). Toujours pas de GC/TTL, la même lacune assumée honnêtement que le cache de
+  couches ci-dessous.</li>
+<li>Un <strong>hit</strong> du cache de couches sur cette instruction saute le <code>RUN</code> entièrement, donc il ne touche
+  jamais non plus le répertoire du cache mount — seul un <em>miss</em> le touche (<code>mount_run_caches</code>).</li>
+<li><code>sharing=</code>/<code>ro</code> (champs propres à Docker) sont <strong>refusés</strong>, jamais silencieusement acceptés et
+  ignorés : il n'y a pas encore de verrouillage inter-processus entre deux <code>delonix build</code>
+  concurrents partageant le même <code>id</code>, et chaque cache mount ici est en lecture-écriture.</li>
+<li><code>type=ssh</code> et <code>type=bind</code> restent <strong>refusés</strong> (<code>parse_mount_flag</code>) — pas encore implémentés.</li>
 </ul>
 <h3 id="-platform-and-binfmt"><code>--platform</code> et binfmt<a class="hanchor" href="#-platform-and-binfmt" aria-label="#">#</a></h3>
 <p><code>--platform linux/&lt;arch&gt;</code> (<code>parse_platform</code> : seul <code>linux/</code> est accepté) résout l'image de base pour
@@ -516,18 +535,20 @@ CMD [&quot;/usr/local/bin/app&quot;]
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-text">$ delonix build -t demo:dev --target nosuch .
 error invalid argument: no stage named &#x27;nosuch&#x27; in this Dockerfile — known stages: builder
-$ delonix build -t d -f Dockerfile.cache .        # RUN --mount=type=cache,...
-error invalid argument: RUN --mount=type=cache: só type=secret é suportado (ssh/cache/bind ainda não)
+$ delonix build -t d -f Dockerfile.ssh .          # RUN --mount=type=ssh,...
+error invalid argument: RUN --mount=type=ssh: only type=secret and type=cache are supported (ssh/bind not yet)
 $ delonix build -t d --platform windows/amd64 .
 error invalid argument: --platform &#x27;windows/amd64&#x27;: only &#x27;linux/&lt;arch&gt;&#x27; is supported (this engine does not run another OS)
 </code></pre></div>
-<p>(Certaines erreurs du parseur sont encore en portugais ; elles comptent comme dette LANG-01 — voir
-<a href="contributing-workflow.html">Flux de contribution</a>.)</p>
 <h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> du dépôt lui-même n'est pas construit par <code>delonix</code><a class="hanchor" href="#the-repositorys-own-delonixfile-is-not-built-by-delonix" aria-label="#">#</a></h3>
 <p>Le <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> à la racine du dépôt empaquette la CLI <code>delonix</code> dans une image de container. Il est
 construit avec <strong>Docker ou Podman</strong> (<code>docker build -f Delonixfile …</code>, ou <code>make image</code>), et non avec
-<code>delonix build</code> : il utilise <code># syntax=docker/dockerfile:1</code> et <code>RUN --mount=type=cache</code>, que
-<code>delonix build</code> refuse. Ne l'utilisez pas comme exemple de la grammaire Delonix ; utilisez les
+<code>delonix build</code> . Il n'utilise que des cache mounts <code>type=cache</code> (désormais acceptés) et la
+directive <code># syntax=</code> (un commentaire pour ce parseur, puisque toute ligne commençant par <code>#</code> en
+est un) — mais le construire avec <code>delonix build</code> n'a jamais été essayé : cela compile tout le
+workspace Rust à l'intérieur du container de travail, un ordre de grandeur différent des modèles
+ci-dessous et hors du périmètre où cette fonctionnalité a été validée. Ne l'utilisez pas comme
+exemple de la grammaire Delonix ; utilisez les
 modèles.</p>
 <hr />
 <h2 id="part-2-vmfile">Partie 2 — VMfile<a class="hanchor" href="#part-2-vmfile" aria-label="#">#</a></h2>
@@ -846,7 +867,7 @@ relecture</strong>.</p>
 <tr>
 <td><code>RUN --mount</code></td>
 <td>secret, ssh, cache, bind, tmpfs</td>
-<td><code>type=secret</code> uniquement</td>
+<td><code>type=secret</code>/<code>type=cache</code> uniquement</td>
 <td>aucun</td>
 </tr>
 <tr>
@@ -931,6 +952,7 @@ relecture</strong>.</p>
 <li><a href="#instructions-the-parser-accepts">Instructions acceptées par le parseur</a></li>
 <li><a href="#multi-stage-copy-from-and-target">Multi-étapes, COPY --from et --target</a></li>
 <li><a href="#build-secrets">Secrets de build</a></li>
+<li><a href="#cache-mounts-m03-of-the-13-improvements-programme">Cache mounts (M03 du programme des 13 améliorations)</a></li>
 <li><a href="#-platform-and-binfmt">--platform et binfmt</a></li>
 <li><a href="#rootless-vs-root-and-the-layer-cache">Rootless ou root, et le cache de couches</a></li>
 <li><a href="#worked-example-a-template">Exemple détaillé : un modèle</a></li>

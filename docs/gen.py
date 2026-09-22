@@ -3755,11 +3755,10 @@ de gaps com o histórico completo das rondas seguintes</a>.</p>
 <tr><td>Correr um <code>docker-compose.yml</code> já existente</td>
 <td><strong>Delonix</strong> — <code>delonix compose up</code>, suporte nativo (Compose Spec v2.x),
 sem Docker instalado</td></tr>
-<tr><td>Um pipeline de build com BuildKit completo (cache mounts, SSH forwarding, cross-compile
-paralelo)</td>
-<td>Docker ou Podman — o Delonix faz multi-stage, <code>--mount=type=secret</code> e cache de
-camadas (rootless), mas não <code>type=cache</code>/<code>type=ssh</code> nem paralelismo de
-estágios</td></tr>
+<tr><td>Um pipeline de build com BuildKit completo (SSH forwarding, cross-compile paralelo)</td>
+<td>Docker ou Podman — o Delonix faz multi-stage, <code>--mount=type=secret</code>/
+<code>type=cache</code> e cache de camadas (rootless), mas não <code>type=ssh</code> nem
+paralelismo de estágios</td></tr>
 <tr><td>Cargas GPU/CUDA</td>
 <td>Delonix via CDI funciona (mesma fonte que Docker/Podman) mas nunca foi validado num host GPU
 real — para produção GPU hoje, prefere Docker/Podman</td></tr>
@@ -3806,8 +3805,8 @@ crash (razão + snapshot do log, não só "Exited")</td></tr>
 <tr><td>Build de imagens (<code>Dockerfile</code>)</td>
 <td><span class="tag ok">forte — multi-stage, BuildKit, cache</span></td>
 <td><span class="tag ok">forte — via buildah</span></td>
-<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + <code>--mount=type=secret</code> +
-cache de camadas (rootless) já funcionam; sem <code>type=cache</code>/<code>type=ssh</code> nem
+<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + <code>--mount=type=secret</code>/
+<code>type=cache</code> + cache de camadas (rootless) já funcionam; sem <code>type=ssh</code> nem
 paralelismo de estágios do BuildKit real</span></td></tr>
 <tr><td><code>docker compose</code> / orquestração local</td>
 <td><span class="tag ok">nativo</span></td><td><span class="tag mid">podman-compose</span></td>
@@ -3878,8 +3877,8 @@ ordem declarada.</li>
 <ul>
 <li><strong>Build de imagens ainda não tem BuildKit real</strong> — multi-stage,
 <code>ARG</code>/<code>--build-arg</code>, <code>USER</code>/<code>ENTRYPOINT</code>,
-<code>--mount=type=secret</code> e cache de camadas (rootless) já funcionam, mas sem
-<code>type=cache</code>/<code>type=ssh</code> nem paralelismo de estágios.</li>
+<code>--mount=type=secret</code>/<code>type=cache</code> e cache de camadas (rootless) já
+funcionam, mas sem <code>type=ssh</code> nem paralelismo de estágios.</li>
 <li><strong>GPU nunca validado num host real</strong> — o caminho CDI existe e usa a mesma fonte
 que Docker/Podman consomem, mas sem um host com GPU não há confirmação ao vivo.</li>
 <li><strong><code>docker exec</code>/attach interactivo via a API</strong> —
@@ -3898,11 +3897,11 @@ aviso de segurança no topo desta página antes de decidir.</li>
 <tr><td>Programador(a) a experimentar em local/homelab, ou a fazer bootstrap de um cluster
 Kubernetes pequeno sem instalar Docker</td>
 <td>Experimenta o Delonix hoje — é exactamente o caso em que já está forte.</td></tr>
-<tr><td>Equipa com um pipeline de build maduro que precisa de <code>--mount=type=cache</code>/
-<code>type=ssh</code> ou paralelismo de estágios</td>
+<tr><td>Equipa com um pipeline de build maduro que precisa de <code>--mount=type=ssh</code> ou
+paralelismo de estágios</td>
 <td>Fica no Docker/Podman para esse build específico; podes correr as imagens resultantes no
 Delonix se quiseres testar a operação — <code>docker-compose.yml</code>, multi-stage e
-<code>--mount=type=secret</code> já funcionam (rootless).</td></tr>
+<code>--mount=type=secret</code>/<code>type=cache</code> já funcionam (rootless).</td></tr>
 <tr><td>Empresa a avaliar para produção multi-tenant ou com dados sensíveis</td>
 <td>Os achados de severidade CRÍTICA/ALTA já estão corrigidos e re-confirmados por uma auditoria
 independente (aviso acima); ainda faltam ~27 achados MÉDIO/BAIXO documentados (sem exploit
@@ -3950,10 +3949,9 @@ analysis with the full history of later rounds</a>.</p>
 <tr><td>To run an existing <code>docker-compose.yml</code></td>
 <td><strong>Delonix</strong> — <code>delonix compose up</code>, native support (Compose Spec v2.x),
 no Docker installed</td></tr>
-<tr><td>A build pipeline with full BuildKit (cache mounts, SSH forwarding, parallel
-cross-compile)</td>
-<td>Docker or Podman — Delonix does multi-stage, <code>--mount=type=secret</code> and layer
-caching (rootless), but not <code>type=cache</code>/<code>type=ssh</code> or stage
+<tr><td>A build pipeline with full BuildKit (SSH forwarding, parallel cross-compile)</td>
+<td>Docker or Podman — Delonix does multi-stage, <code>--mount=type=secret</code>/
+<code>type=cache</code> and layer caching (rootless), but not <code>type=ssh</code> or stage
 parallelism</td></tr>
 <tr><td>GPU/CUDA workloads</td>
 <td>Delonix works via CDI (the same source as Docker/Podman) but has never been validated on a
@@ -4005,9 +4003,9 @@ compatibility</td>
 <tr><td>Image builds (<code>Dockerfile</code>)</td>
 <td><span class="tag ok">strong — multi-stage, BuildKit, cache</span></td>
 <td><span class="tag ok">strong — via buildah</span></td>
-<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + <code>--mount=type=secret</code> +
-layer cache (rootless) already work; no real BuildKit
-<code>type=cache</code>/<code>type=ssh</code> or stage parallelism</span></td></tr>
+<td><span class="tag mid">multi-stage + ARG/USER/ENTRYPOINT + <code>--mount=type=secret</code>/
+<code>type=cache</code> + layer cache (rootless) already work; no real BuildKit
+<code>type=ssh</code> or stage parallelism</span></td></tr>
 <tr><td><code>docker compose</code> / local orchestration</td>
 <td><span class="tag ok">native</span></td><td><span class="tag mid">podman-compose</span></td>
 <td><span class="tag ok">native (<code>delonix compose</code>), no Docker — <code>depends_on</code>
@@ -4077,8 +4075,8 @@ declared order.</li>
 <ul>
 <li><strong>Image builds still have no real BuildKit</strong> — multi-stage,
 <code>ARG</code>/<code>--build-arg</code>, <code>USER</code>/<code>ENTRYPOINT</code>,
-<code>--mount=type=secret</code> and layer caching (rootless) already work, but no
-<code>type=cache</code>/<code>type=ssh</code> or stage parallelism.</li>
+<code>--mount=type=secret</code>/<code>type=cache</code> and layer caching (rootless) already
+work, but no <code>type=ssh</code> or stage parallelism.</li>
 <li><strong>GPU never validated on a real host</strong> — the CDI path exists and uses the same
 source Docker/Podman consume, but with no GPU host there's no live confirmation.</li>
 <li><strong>Interactive <code>docker exec</code>/attach via the API</strong> — deliberately out
@@ -4097,11 +4095,11 @@ the security notice at the top of this page before deciding.</li>
 <tr><td>Developer experimenting locally/homelab, or bootstrapping a small Kubernetes cluster with
 no Docker install</td>
 <td>Try Delonix today — it's exactly the case where it's already strong.</td></tr>
-<tr><td>Team with a mature build pipeline that needs <code>--mount=type=cache</code>/
-<code>type=ssh</code> or stage parallelism</td>
+<tr><td>Team with a mature build pipeline that needs <code>--mount=type=ssh</code> or stage
+parallelism</td>
 <td>Stay on Docker/Podman for that specific build; you can run the resulting images on Delonix if
 you want to test operations — <code>docker-compose.yml</code>, multi-stage and
-<code>--mount=type=secret</code> already work (rootless).</td></tr>
+<code>--mount=type=secret</code>/<code>type=cache</code> already work (rootless).</td></tr>
 <tr><td>Company evaluating for multi-tenant production or with sensitive data</td>
 <td>CRITICAL/HIGH severity findings are already fixed and re-confirmed by an independent audit
 (notice above); about 27 documented MEDIUM/LOW findings remain (no known exploit), plus the
