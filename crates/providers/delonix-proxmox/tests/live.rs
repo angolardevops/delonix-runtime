@@ -156,6 +156,23 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
         "a rollback to a snapshot the VM does not have must be refused"
     );
 
+    // Delete the snapshot — the fourth verb of the quadrant, and the one this
+    // backend did not have (`vm snapshot rm` fell through to "not supported"
+    // while the other three worked). The proof is the node's list, not the
+    // call's answer; and a name the VM does not have is refused before any
+    // request, as on libvirt.
+    b.delete_snapshot(vmdir, &vm, "live1")
+        .expect("delete snapshot");
+    let listed = b.snapshots(vmdir, &vm).expect("snapshots after delete");
+    assert!(
+        !listed.iter().any(|s| s == "live1"),
+        "the snapshot is still in the node's list after delete: {listed:?}"
+    );
+    assert!(
+        b.delete_snapshot(vmdir, &vm, "live1").is_err(),
+        "deleting a snapshot the VM no longer has must be refused"
+    );
+
     // Só parar: o `stop` PÁRA e não remove, desde que os dois verbos foram
     // separados (era o `vm stop` a apagar o disco). O domínio continua definido.
     b.stop(vmdir, &vm).expect("stop");
@@ -216,7 +233,14 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
         unsettled.is_empty(),
         "tasks left unsettled in the ledger: {unsettled:?}"
     );
-    for want in ["create", "start", "snapshot", "rollback", "stop"] {
+    for want in [
+        "create",
+        "start",
+        "snapshot",
+        "rollback",
+        "delete-snapshot",
+        "stop",
+    ] {
         let last = entries
             .iter()
             .rev()

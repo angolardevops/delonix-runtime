@@ -341,6 +341,11 @@ enum TaskKind {
     Snapshot,
     Rollback,
     Destroy,
+    /// `POST …/config` — the node's ASYNCHRONOUS config API. It answers a UPID
+    /// when it forks a worker and `null` when it applied the change inline, so
+    /// this is the one kind [`Client::task_or_done`] is for.
+    Configure,
+    DeleteSnapshot,
 }
 
 impl TaskKind {
@@ -353,6 +358,8 @@ impl TaskKind {
             TaskKind::Snapshot => "snapshot",
             TaskKind::Rollback => "rollback",
             TaskKind::Destroy => "destroy",
+            TaskKind::Configure => "configure",
+            TaskKind::DeleteSnapshot => "delete-snapshot",
         }
     }
 
@@ -370,6 +377,8 @@ impl TaskKind {
             TaskKind::Snapshot => "qmsnapshot",
             TaskKind::Rollback => "qmrollback",
             TaskKind::Destroy => "qmdestroy",
+            TaskKind::Configure => "qmconfig",
+            TaskKind::DeleteSnapshot => "qmdelsnapshot",
         }
     }
 }
@@ -710,7 +719,7 @@ impl Client {
     /// The agent channel is deliberately NOT forced here — that part of the
     /// original reasoning holds: a template built with the agent already has it,
     /// and overriding would contradict a choice somebody made about it.
-    pub fn configure_clone(&self, vmid: u32, cfg: &VmConfig) -> Result<()> {
+    pub fn configure_clone(&self, ledger: &Ledger, vmid: u32, cfg: &VmConfig) -> Result<()> {
         let mem = mem_mib(&cfg.memory).to_string();
         let cores = cfg.vcpus.max(1).to_string();
         let net0 = self.net0_arg(cfg);
@@ -729,17 +738,26 @@ impl Client {
         // just succeeded, leaving a VM on the node with the template's CPU,
         // memory and no key: the exact half-configured state this function
         // exists to prevent. Measured against a live PVE 9.2.
-        // A config change is applied synchronously and answers `data: null` —
-        // there is no UPID to wait on, unlike clone/start/stop. It takes the
-        // same config lock, though, so it goes through the same retry.
-        with_lock_retry("configure", || {
-            self.post_form(
-                &format!("/nodes/{}/qemu/{vmid}/config", self.node),
-                &form,
-                true,
-            )
-            .map(|_| ())
-        })
+        // `POST …/config` is the node's ASYNCHRONOUS config API (the schema
+        // says `returns: string`): it answers a UPID when it forks a worker —
+        // a disk change does — and `null` when it applied the change inline.
+        // The first version of this call read `null` as the only answer and
+        // never waited, which is the "HTTP 200 reported as done" the ADR-0049
+        // rules forbid; now a UPID is waited on like every other write, and
+        // only a `null` is taken as done. Same config lock, same retry.
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )
     }
 
     /// The `net0` property: model, bridge and optional VLAN tag.
@@ -906,6 +924,29 @@ impl Client {
         )
     }
 
+    /// Deletes a snapshot — the disk state and the RAM it may carry, on the
+    /// node. `DELETE …/snapshot/{snapname}` answers a UPID (`qmdelsnapshot`),
+    /// so it is a task like every other write; a name the VM does not have is
+    /// NOT FOUND (exit 4), as on libvirt.
+    pub fn delete_snapshot(&self, ledger: &Ledger, vmid: u32, name: &str) -> Result<()> {
+        if !self.snapshots(vmid)?.iter().any(|s| s == name) {
+            return Err(Error::SnapshotNotFound(format!(
+                "snapshot of Proxmox VM {vmid}: {name}"
+            )));
+        }
+        let snapname = name;
+        let path = format!("/nodes/{}/qemu/{vmid}/snapshot/{snapname}", self.node);
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::DeleteSnapshot,
+            || self.delete(&path),
+            // A lost answer whose effect is already there: the name is gone
+            // from the node's list, and that is what `delete` promised.
+            Some(&|| Ok(!self.snapshots(vmid)?.iter().any(|s| s == name))),
+        )
+    }
+
     /// The VM's snapshot names.
     ///
     /// **`current` is filtered out**, and it is not cosmetic: the API includes
@@ -980,10 +1021,40 @@ impl Client {
         issue: impl Fn() -> Result<String>,
         probe: Option<&dyn Fn() -> Result<bool>>,
     ) -> Result<()> {
+        self.task_inner(ledger, vmid, kind, issue, probe, false)
+    }
+
+    /// [`Self::task`] for a route the node may answer WITHOUT a task: a
+    /// `null` is taken as "applied inline", a UPID is waited on. Only
+    /// `POST …/config` behaves like that; every other write answers a UPID or
+    /// it is an unexpected answer.
+    fn task_or_done(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        kind: TaskKind,
+        issue: impl Fn() -> Result<String>,
+        probe: Option<&dyn Fn() -> Result<bool>>,
+    ) -> Result<()> {
+        self.task_inner(ledger, vmid, kind, issue, probe, true)
+    }
+
+    fn task_inner(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        kind: TaskKind,
+        issue: impl Fn() -> Result<String>,
+        probe: Option<&dyn Fn() -> Result<bool>>,
+        null_is_done: bool,
+    ) -> Result<()> {
         let what = kind.action();
         with_lock_retry(what, || {
             let upid = match issue() {
-                Ok(body) => upid_of(&body, what)?,
+                Ok(body) => match upid_or_done(&body, what, null_is_done)? {
+                    Some(upid) => upid,
+                    None => return Ok(()),
+                },
                 Err(Error::Request(why)) => match self.recover_lost_answer(vmid, kind, probe) {
                     Recovered::Task(upid) => upid,
                     Recovered::Done => return Ok(()),
@@ -1122,18 +1193,22 @@ impl Client {
 ///
 /// Every one of these endpoints answers with a task id and not a result —
 /// returning it as a result would report a VM created before anything exists.
-fn upid_of(body: &str, what: &str) -> Result<String> {
+/// The task id in a write's answer; `Ok(None)` for a `data: null` when the
+/// route is one that may apply inline (`null_is_done`). Any other shape —
+/// a string that is not a UPID, an object, a `null` where a task was the
+/// only honest answer — is an unexpected answer, never a success.
+fn upid_or_done(body: &str, what: &str, null_is_done: bool) -> Result<Option<String>> {
     let w: Wrapped<serde_json::Value> = parse(body, what)?;
-    w.data
-        .as_str()
-        .filter(|s| s.starts_with("UPID:"))
-        .map(str::to_string)
-        .ok_or_else(|| {
-            Error::UnexpectedAnswer(format!(
-                "proxmox: {what} did not answer with a task id: {}",
-                truncate_chars(body, 200)
-            ))
-        })
+    if let Some(s) = w.data.as_str().filter(|s| s.starts_with("UPID:")) {
+        return Ok(Some(s.to_string()));
+    }
+    if null_is_done && w.data.is_null() {
+        return Ok(None);
+    }
+    Err(Error::UnexpectedAnswer(format!(
+        "proxmox: {what} did not answer with a task id: {}",
+        truncate_chars(body, 200)
+    )))
 }
 
 fn state_of(verdict: &Result<()>) -> TaskState {
@@ -1554,6 +1629,14 @@ fn validate_snapshot_name(name: &str) -> Result<()> {
 /// `vcpus`, `memory`, `bridge`, `static_ip`, `namespace` (unused but harmless:
 /// `vm_namespace_supported` already refuses a non-default one upstream, where
 /// the reason can be explained properly).
+///
+/// `network` is refused when it NAMES a network: an engine SDN network lives
+/// on this host, inside the holder, and a VM on a remote node cannot join it —
+/// its NIC is `net0` on the node's bridge (`bridge`). The default value the
+/// CLI and the manifest fill in (`ingress`, the engine's default network) is
+/// accepted, because the caller did not ask for anything. Measured before
+/// this (`docs/discovery/58_…`): `--network lab-net` was accepted, the record
+/// said `Network: lab-net`, and the VM was on `vmbr0` — the ADR-0044 D1 gap.
 fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     let mut bad: Vec<&str> = Vec::new();
     let mut add = |present: bool, field: &'static str| {
@@ -1561,6 +1644,7 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
             bad.push(field);
         }
     };
+    add(names_an_engine_network(&cfg.network), "network");
     add(cfg.kernel.is_some(), "kernel");
     add(cfg.initrd.is_some(), "initrd");
     add(cfg.firmware.is_some(), "firmware");
@@ -1587,12 +1671,19 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     }
     Err(Error::UnsupportedField(format!(
         "the 'proxmox' backend cannot honour: {}. A VM on a remote node has no access to this \
-         host's kernel/initrd/seed/devices/9p paths, its QEMU tuning (hugepages, CPU pinning, \
-         machine type, TPM, video, boot order) is the node's own configuration, and there is no \
-         libvirt domain XML here at all. Remove the field, or use a local backend \
-         (`--backend libvirt`)",
+         host's kernel/initrd/seed/devices/9p paths or its SDN networks (the NIC is `net0` on the \
+         node's bridge — see `bridge`), its QEMU tuning (hugepages, CPU pinning, machine type, \
+         TPM, video, boot order) is the node's own configuration, and there is no libvirt domain \
+         XML here at all. Remove the field, or use a local backend (`--backend libvirt`)",
         bad.join(", ")
     )))
+}
+
+/// Whether `VmConfig.network` names an engine SDN network, as opposed to the
+/// values that mean "the default network" (the same set the Cloud Hypervisor
+/// backend treats as the ingress bridge). Pure.
+fn names_an_engine_network(network: &str) -> bool {
+    !matches!(network, "" | "ingress" | "bridge" | "default")
 }
 
 /// Translates the cloud-init INTENT of a `VmConfig` into the node's own
@@ -1850,7 +1941,9 @@ impl VmBackend for ProxmoxBackend {
                 // API's own shape (clone takes `newid`/`name`/`full` and nothing
                 // else), and skipping it was how a DKS node came up with the
                 // golden's defaults and no key on it.
-                self.client.configure_clone(vmid, cfg).map_err(undo)?;
+                self.client
+                    .configure_clone(&ledger, vmid, cfg)
+                    .map_err(undo)?;
             }
             DiskSpec::New { storage, gib } => self
                 .client
@@ -2005,6 +2098,24 @@ impl VmBackend for ProxmoxBackend {
     fn snapshots(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<Vec<String>> {
         Ok(self.client.snapshots(self.vmid_of(vm)?)?)
     }
+
+    fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        validate_snapshot_name(name)?;
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        Ok(self.client.delete_snapshot(&ledger, vmid, name)?)
+    }
+
+    /// The address is OBSERVED: it comes from the guest agent
+    /// (`agent/network-get-interfaces`), and a guest without one answers
+    /// `None`, never a computed address. Written out rather than inherited so
+    /// the trait's default is not this backend's answer by accident — the
+    /// prediction/observation distinction is what `vm create --wait` decides
+    /// by, and a backend that leaves it to a default has not decided.
+    fn ip_is_predicted(&self) -> bool {
+        false
+    }
 }
 
 /// Registers this backend under the name `proxmox`, against `target`.
@@ -2125,13 +2236,13 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         }
         C::VmNetworkNat => S::UnsupportedByProvider { reason: "the node has no NAT network of the engine's; `net0` is bridged" },
         C::VmNetworkBridge => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
-        C::VmNetworkSdn => S::UnsupportedByProvider { reason: "the engine's SDN is on this host; `network` is silently ignored today (ADR-0044 D1 gap, to be refused)" },
+        C::VmNetworkSdn => S::UnsupportedByProvider { reason: "the engine's SDN is on this host; a `network` that names one is refused by name (`refuse_unsupported`), the NIC is `net0` on the node's bridge" },
         C::VmStaticIp => S::NotImplemented,
         C::StoragePools => S::Partial { detail: "`disk: <storage>:<gib>` names a node storage for a fresh disk; pools are not listed (ADR-0049: `storage` missing, not excluded)" },
         C::VmSnapshotDisk => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmSnapshotMemory => S::Partial { detail: "`vmstate=1` on every snapshot of a running VM; the live case snapshots once, state not asserted" },
         C::VmSnapshotRestore => S::Partial { detail: "`…/snapshot/{name}/rollback`; no live case" },
-        C::VmSnapshotDelete => S::UnsupportedByProvider { reason: "`DELETE …/snapshot/{name}` is not called; refused by name" },
+        C::VmSnapshotDelete => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmSnapshotPersistent => S::Partial { detail: "snapshots live on the node and survive the engine; not asserted live" },
         C::VmBackupDisk => S::NotImplemented,
         C::VmBackupQuiesced => S::NotImplemented,
@@ -2724,6 +2835,147 @@ mod tests {
         );
     }
 
+    /// `--network lab-net` on a Proxmox create was accepted and dropped: the
+    /// record said `Network: lab-net` and the VM sat on `vmbr0` (measured,
+    /// `docs/discovery/58_…`). The default the CLI fills in has to stay
+    /// accepted, or every plain create is refused.
+    #[test]
+    fn a_named_engine_network_is_refused_and_the_default_is_not() {
+        for default in ["", "ingress", "bridge", "default"] {
+            assert!(
+                refuse_unsupported(&VmConfig {
+                    name: "v".into(),
+                    disk: "local-lvm:8".into(),
+                    memory: "1G".into(),
+                    network: default.into(),
+                    ..Default::default()
+                })
+                .is_ok(),
+                "the default network {default:?} must be accepted"
+            );
+        }
+        let e = refuse_unsupported(&VmConfig {
+            name: "v".into(),
+            disk: "local-lvm:8".into(),
+            memory: "1G".into(),
+            network: "lab-net".into(),
+            ..Default::default()
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("network"),
+            "the refusal must name the field: {e}"
+        );
+        assert!(
+            e.contains("bridge"),
+            "and point at what the node honours: {e}"
+        );
+    }
+
+    /// Every write this crate sends to the node goes through [`Client::task`]
+    /// (or [`Client::task_or_done`] for the one route that may apply inline).
+    /// ADR-0049 D5 rule 1 lived only as prose until this test read the
+    /// source: a new write added outside the task path passed CI, and a
+    /// `POST …/config` HAD been added that way. The login is the one write
+    /// that is not a node operation — it exchanges a credential for a
+    /// ticket and changes nothing on the node — and it is named here with
+    /// that reason, not skipped by pattern.
+    #[test]
+    fn every_write_to_the_node_goes_through_the_task_path() {
+        let src = include_str!("lib.rs");
+        let src = src.split("#[cfg(test)]").next().unwrap();
+        // Writes are what these helpers send; `fn post_form`/`fn delete`
+        // themselves are definitions, not call sites.
+        let write_calls = ["self.post_form(", "self.delete("];
+        let allowed_outside_task: &[(&str, &str)] = &[(
+            "login",
+            "exchanges the credential for a ticket; it writes nothing on the node",
+        )];
+        let mut checked = 0;
+        for needle in write_calls {
+            let mut from = 0;
+            while let Some(off) = src[from..].find(needle) {
+                let at = from + off;
+                from = at + needle.len();
+                checked += 1;
+                // The enclosing `fn`: the last `fn <name>(` before the call.
+                let head = &src[..at];
+                // The LATER of the two forms: an `rfind` of `fn ` alone would
+                // stop at a private fn defined before the enclosing `pub fn`.
+                let fn_at = [head.rfind("\n    fn "), head.rfind("\n    pub fn ")]
+                    .into_iter()
+                    .flatten()
+                    .max()
+                    .expect("a call site inside a fn");
+                let fn_name: String = head[fn_at..]
+                    .trim_start_matches('\n')
+                    .trim_start()
+                    .trim_start_matches("pub ")
+                    .trim_start_matches("fn ")
+                    .chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == '_')
+                    .collect();
+                if let Some((_, why)) = allowed_outside_task.iter().find(|(f, _)| *f == fn_name) {
+                    assert!(!why.is_empty());
+                    continue;
+                }
+                // Inside the task path: a `self.task(`/`self.task_or_done(`
+                // opened in this fn whose argument list is still open here.
+                let body = &head[fn_at..];
+                let opened = ["self.task(", "self.task_or_done("]
+                    .iter()
+                    .filter_map(|t| body.rfind(t).map(|i| i + t.len()))
+                    .max();
+                let inside = opened.is_some_and(|i| {
+                    let mut depth = 1i32;
+                    for c in body[i..].chars() {
+                        match c {
+                            '(' => depth += 1,
+                            ')' => depth -= 1,
+                            _ => {}
+                        }
+                        if depth == 0 {
+                            return false;
+                        }
+                    }
+                    true
+                });
+                assert!(
+                    inside,
+                    "`{needle}` in `fn {fn_name}` is a write outside the task path: route it through \
+                     `self.task(...)` so its UPID is waited on and recorded in the ledger, or name \
+                     it in `allowed_outside_task` with the reason"
+                );
+            }
+        }
+        assert!(
+            checked >= 10,
+            "the scan found only {checked} write sites — is the source split right?"
+        );
+    }
+
+    /// `POST …/config` answers a UPID or `null`; `null` is done ONLY there.
+    #[test]
+    fn a_null_answer_is_done_only_where_the_route_may_apply_inline() {
+        assert_eq!(
+            upid_or_done(r#"{"data":null}"#, "configure", true).unwrap(),
+            None
+        );
+        assert!(upid_or_done(r#"{"data":null}"#, "start", false).is_err());
+        assert_eq!(
+            upid_or_done(
+                r#"{"data":"UPID:pve:1:2:3:qmconfig:100:root@pam:"}"#,
+                "configure",
+                true
+            )
+            .unwrap()
+            .as_deref(),
+            Some("UPID:pve:1:2:3:qmconfig:100:root@pam:")
+        );
+        assert!(upid_or_done(r#"{"data":"done"}"#, "configure", true).is_err());
+    }
+
     #[test]
     fn a_bridge_e_a_vlan_entram_no_net0() {
         let cli = |bridge: Option<&str>, vlan| Client {
@@ -2903,24 +3155,26 @@ mod tests {
     #[test]
     fn a_task_answer_is_a_upid_or_it_is_not_an_answer() {
         assert_eq!(
-            upid_of(
+            upid_or_done(
                 r#"{"data":"UPID:pve:0000ABCD:00001234:5F3E:qmstart:100:root@pam:"}"#,
-                "start"
+                "start",
+                false
             )
-            .unwrap(),
-            "UPID:pve:0000ABCD:00001234:5F3E:qmstart:100:root@pam:"
+            .unwrap()
+            .as_deref(),
+            Some("UPID:pve:0000ABCD:00001234:5F3E:qmstart:100:root@pam:")
         );
         // A string that is not a task id, a number, and no `data` at all.
         assert!(matches!(
-            upid_of(r#"{"data":"ok"}"#, "start"),
+            upid_or_done(r#"{"data":"ok"}"#, "start", false),
             Err(Error::UnexpectedAnswer(_))
         ));
         assert!(matches!(
-            upid_of(r#"{"data":100}"#, "start"),
+            upid_or_done(r#"{"data":100}"#, "start", false),
             Err(Error::UnexpectedAnswer(_))
         ));
         assert!(matches!(
-            upid_of(r#"{"data":"#, "start"),
+            upid_or_done(r#"{"data":"#, "start", false),
             Err(Error::Decode(_))
         ));
     }

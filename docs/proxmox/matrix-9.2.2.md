@@ -20,23 +20,23 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
 - **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm`
-- **run**: `2026-09-23T16:21Z`
+- **run**: `2026-09-23T22:08Z`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `2 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); ledger 9 tasks, 2 qmstop resubmitted after the node's 10 s config-lock timeout`
+- **result**: `2 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the run now walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; qmstop and qmdelsnapshot resubmitted after the node's 10 s config-lock timeout, each recorded in the ledger`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `92`
+- **requests**: `143`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 17 (2.5 % of the schema) — 14 seen in a live trace, 3 not
+- **called**: 18 (2.7 % of the schema) — 15 seen in a live trace, 3 not
 - **unsupported by design**: 364 (each with a written reason)
-- **not yet implemented**: 294
+- **not yet implemented**: 293
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
 |---|---:|---:|---:|---:|---:|
-| qemu | 10 | 2 | 0 | 97 | 109 |
+| qemu | 11 | 2 | 0 | 96 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
 | sdn | 0 | 0 | 0 | 90 | 90 |
 | storage | 0 | 0 | 0 | 25 | 25 |
@@ -61,6 +61,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/qemu/{vmid}/config` | supported+tested | object | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/snapshot` | supported+tested | array | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/snapshot` | supported+tested | string | yes |  |
+| DELETE | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/status/current` | supported+tested | object | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/status/start` | supported+tested | string | yes |  |
@@ -639,7 +640,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/qemu/{vmid}/rrd` | not-yet-implemented | object | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/rrddata` | not-yet-implemented | array | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/sendkey` | not-yet-implemented | null | yes |  |
-| DELETE | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}` | not-yet-implemented | string | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config` | not-yet-implemented | object | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config` | not-yet-implemented | null | yes |  |

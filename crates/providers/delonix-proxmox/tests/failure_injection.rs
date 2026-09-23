@@ -20,6 +20,7 @@ use std::time::Duration;
 use delonix_proxmox::{
     Auth, Client, ClientOptions, Error, Ledger, Target, TaskState, MAX_RESPONSE_BYTES,
 };
+use delonix_vm::VmConfig;
 
 // ===========================================================================
 // The mock node
@@ -716,6 +717,90 @@ fn a_lost_answer_with_the_effect_already_there_is_accepted_without_a_task() {
         .start(&Ledger::at(dir.path()), 100)
         .expect("running already: done");
     assert_eq!(node.count("POST", "/nodes/pve/qemu/100/status/start"), 1);
+}
+
+/// `POST …/config` is the node's asynchronous config API: `null` means it
+/// applied the change inline, a UPID means a worker — and the first version
+/// of `configure_clone` read every answer as `null` and never waited. Both
+/// shapes here, and the UPID one has to reach the ledger like any task.
+#[test]
+fn a_config_change_is_done_on_null_and_waited_on_when_it_answers_a_task() {
+    let cfg_upid = "UPID:pve:0001A2B3:0000C4D5:66F0:qmconfig:100:root@pam:";
+    let status = format!("/nodes/pve/tasks/{cfg_upid}/status");
+    let node = MockNode::start(script(&[
+        ("POST", CONFIG, ok_data("null")),
+        ("POST", CONFIG, ok_data(&format!(r#""{cfg_upid}""#))),
+        (
+            "GET",
+            &status,
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let cfg = VmConfig {
+        name: "v".into(),
+        disk: "template:9000".into(),
+        vcpus: 2,
+        memory: "1G".into(),
+        ..Default::default()
+    };
+    client
+        .configure_clone(&ledger, 100, &cfg)
+        .expect("null: applied inline");
+    assert!(ledger.records().is_empty(), "no task, nothing to record");
+    client
+        .configure_clone(&ledger, 100, &cfg)
+        .expect("a UPID: waited on");
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 1, "the forked config task is in the ledger");
+    assert_eq!(recs[0].action, "configure");
+    assert_eq!(recs[0].state, TaskState::Ok);
+    assert_eq!(node.count("POST", CONFIG), 2, "nothing was resent");
+    assert_eq!(node.count("GET", &status), 1, "polled to its verdict");
+}
+
+/// `DELETE …/snapshot/{snapname}` is a task (`qmdelsnapshot`) like every
+/// other write; a name the VM does not have is refused before any request.
+#[test]
+fn a_snapshot_delete_is_a_task_and_a_missing_name_is_not_found() {
+    let del_upid = "UPID:pve:0001A2B3:0000C4D5:66F0:qmdelsnapshot:100:root@pam:";
+    let status = format!("/nodes/pve/tasks/{del_upid}/status");
+    let list = "/nodes/pve/qemu/100/snapshot";
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            list,
+            ok_data(r#"[{"name":"s1"},{"name":"current"}]"#),
+        ),
+        (
+            "DELETE",
+            "/nodes/pve/qemu/100/snapshot/s1",
+            ok_data(&format!(r#""{del_upid}""#)),
+        ),
+        (
+            "GET",
+            &status,
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+        ("GET", list, ok_data(r#"[{"name":"current"}]"#)),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    client.delete_snapshot(&ledger, 100, "s1").expect("deleted");
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(recs[0].action, "delete-snapshot");
+    assert_eq!(recs[0].state, TaskState::Ok);
+    let e = client.delete_snapshot(&ledger, 100, "s1").unwrap_err();
+    assert!(matches!(e, Error::SnapshotNotFound(_)), "{e}");
+    assert_eq!(
+        node.count("DELETE", "/nodes/pve/qemu/100/snapshot/s1"),
+        1,
+        "a missing name never reaches the node"
+    );
 }
 
 #[test]
