@@ -158,7 +158,9 @@ of most of the VM matrix today.
 - **cloud-hypervisor** (`cloud_hypervisor_report`, probe `{ binary, kvm, firmware }`): 12 / 17 / 28 /
   2 / 10. A host with the binary and no known firmware is *available* (selectable) and cannot boot —
   the two are different facts and the report says both.
-- **proxmox** (`delonix-proxmox::capability_report(configured)`): 9 / 12 / 28 / 4 / 16, **declared
+- **proxmox** (`delonix-proxmox::capability_report(configured)`): 9 / 12 / 28 / 4 / 16 at this
+  ADR's first commit — 10 / 12 / 27 / 4 / 16 since `vm.snapshot.delete` became a live-tested
+  `supported` and `vm.network.sdn` a refusal by name (2026-09-23, second pass), **declared
   and never probed** — building the report contacts nothing, its health is `Unknown`/`NotProbed`
   when configured and `Unavailable`/`NotConfigured` otherwise. The 9 `supported` cite the live tests
   of ADR-0039 (`tests/live.rs`). It is listed on every host, configured or not, so a reader
