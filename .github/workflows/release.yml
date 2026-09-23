@@ -25,9 +25,29 @@
 # Notas da release: docs/releases/<tag>.md se existir; senão, autogeradas.
 name: Release
 
+# TRIGGER (2026-09-23): only a manual request. It used to be `push: tags: ["v*"]`,
+# which meant the release built the moment a tag reached the remote — including a
+# tag pushed by accident (`git push --tags`, `push.followTags=true`), and with no
+# step between "the tag exists" and "the world has a binary". Now the tag and the
+# release are two decisions: tag when the version is cut, publish when you say so.
+#
+#     gh workflow run release.yml -f tag=v4.4.0
+#
+# Consequence, stated because it is the cost of the change: pushing a tag now
+# publishes NOTHING. A tag with no release is a normal intermediate state here.
 on:
-  push:
-    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to publish — must ALREADY exist on the remote (e.g. v4.4.0)"
+        required: true
+
+# Every job and step reads the tag from here, never from the ref this workflow was
+# dispatched on: the ref is whatever branch the operator happened to have selected,
+# and a release that builds one commit and labels it another is the worst kind of
+# wrong. `guard` below is what makes this variable trustworthy.
+env:
+  TAG: ${{ inputs.tag }}
 
 permissions:
   contents: write
@@ -42,6 +62,37 @@ permissions:
   attestations: write
 
 jobs:
+  # The input is free text, and everything downstream trusts it: it picks the commit
+  # to build, names the GitHub release, and is compared against the binary's own
+  # version. `tag: main` would have checked out a branch and published a release
+  # called "main". So it is validated BEFORE any runner spends ten minutes building:
+  # the shape must be `vX.Y.Z[-suffix]`, and the tag must already exist on the remote.
+  guard:
+    name: guard (the tag is real)
+    runs-on: ubuntu-latest
+    steps:
+      - name: The tag has the shape of a release tag
+        run: |
+          echo "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$' \
+            || { echo "::error::'$TAG' is not a release tag (expected vX.Y.Z)"; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: The tag exists, and the release does not
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git rev-parse -q --verify "refs/tags/$TAG^{commit}" >/dev/null \
+            || { echo "::error::tag $TAG does not exist — create and push it first"; exit 1; }
+          # Republishing over an existing release is how assets silently change
+          # underneath people who already downloaded them. `gh release create` would
+          # refuse anyway; failing here says WHY, before the build.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::release $TAG already exists — delete it first if you mean to republish"
+            exit 1
+          fi
+          echo "$TAG -> $(git rev-parse --short "refs/tags/$TAG^{commit}")"
+
   # Native arm64 build (issue #438). Built on a real aarch64 runner, not cross
   # compiled: a cross build would ship binaries whose `#[cfg(target_arch)]`
   # branches were never executed. ubuntu-22.04 on purpose, like the x86 job:
@@ -49,9 +100,12 @@ jobs:
   # runner's `strip` does not recognise aarch64 ELF.
   build-arm64:
     name: build (arm64)
+    needs: guard
     runs-on: ubuntu-22.04-arm
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - name: Install protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Install the pinned toolchain
@@ -72,7 +126,7 @@ jobs:
           file dist-arm64/delonix-aarch64-linux | grep -q 'ARM aarch64'
           V=$(dist-arm64/delonix-aarch64-linux --version)
           echo "$V"
-          echo "$V" | grep -q "${GITHUB_REF_NAME#v}" || { echo "::error::binary version ($V) != tag ($GITHUB_REF_NAME) — was the Cargo.toml bump forgotten?"; exit 1; }
+          echo "$V" | grep -q "${TAG#v}" || { echo "::error::binary version ($V) != tag ($TAG) — was the Cargo.toml bump forgotten?"; exit 1; }
       - uses: actions/upload-artifact@v4
         with:
           name: dist-arm64
@@ -85,6 +139,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
       - name: Instala protoc
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
       - name: Instala toolchain fixada
@@ -143,7 +199,7 @@ jobs:
           cd dist-release && sha256sum delonix-aarch64-linux delonix-cri-aarch64-linux delonix-mcp-aarch64-linux delonix-mgmt-aarch64-linux delonix-x86_64-linux delonix-x86_64-v3-linux delonix-cri-x86_64-linux delonix-cri-x86_64-v3-linux delonix-mcp-x86_64-linux delonix-mcp-x86_64-v3-linux delonix-mgmt-x86_64-linux delonix-mgmt-x86_64-v3-linux install.sh > SHA256SUMS
       - name: SBOM (SPDX 2.3, do Cargo.lock)
         run: |
-          python3 scripts/sbom.py --version "${GITHUB_REF_NAME#v}" > dist-release/delonix-sbom.spdx.json
+          python3 scripts/sbom.py --version "${TAG#v}" > dist-release/delonix-sbom.spdx.json
           # The SBOM goes into the SHA256SUMS that is signed below. Publishing
           # it outside the signature would give an inventory anyone can swap —
           # and a tampered SBOM is worse than none, because it is believed.
@@ -176,7 +232,7 @@ jobs:
         run: |
           V=$(dist-release/delonix-x86_64-linux --version)
           echo "$V"
-          echo "$V" | grep -q "${GITHUB_REF_NAME#v}" || { echo "::error::versão do binário ($V) != tag ($GITHUB_REF_NAME) — esqueceu-se o bump no Cargo.toml?"; exit 1; }
+          echo "$V" | grep -q "${TAG#v}" || { echo "::error::versão do binário ($V) != tag ($TAG) — esqueceu-se o bump no Cargo.toml?"; exit 1; }
       - name: Assina o SHA256SUMS (minisign)
         env:
           MINISIGN_SECRET_KEY: ${{ secrets.MINISIGN_SECRET_KEY }}
@@ -220,7 +276,7 @@ jobs:
           # com -W, sem password, ignora o pipe sem problema).
           printf '%s\n' "${MINISIGN_PASSWORD:-}" \
             | minisign -S -s /tmp/minisign.key -m SHA256SUMS \
-                -c "delonix-runtime $GITHUB_REF_NAME" -t "delonix-runtime $GITHUB_REF_NAME"
+                -c "delonix-runtime $TAG" -t "delonix-runtime $TAG"
           shred -u /tmp/minisign.key 2>/dev/null || rm -f /tmp/minisign.key
           # Confirma que a assinatura verifica com a pública que o install.sh
           # traz embutida — apanha uma troca de chave ANTES de publicar, não
@@ -256,13 +312,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          NOTES="docs/releases/${GITHUB_REF_NAME}.md"
+          NOTES="docs/releases/${TAG}.md"
           if [ -f "$NOTES" ]; then
             # Título = primeira linha (heading) das notas — convenção das releases anteriores.
             TITLE=$(head -1 "$NOTES" | sed 's/^#* *//')
-            gh release create "$GITHUB_REF_NAME" dist-release/* --title "$TITLE" --notes-file "$NOTES"
+            gh release create "$TAG" dist-release/* --title "$TITLE" --notes-file "$NOTES"
           else
-            gh release create "$GITHUB_REF_NAME" dist-release/* --title "$GITHUB_REF_NAME" --generate-notes
+            gh release create "$TAG" dist-release/* --title "$TAG" --generate-notes
           fi
       # Documentação DINÂMICA por release: o apêndice docs/RELEASES.md (features
       # por release) regenera-se das notas e é comitado no main — a doc nunca
@@ -287,7 +343,7 @@ jobs:
           # file, which `git diff --quiet` does not see.
           if [ -n "$(git status --porcelain -- docs/RELEASES.md docs/dev docs/handbook)" ]; then
             git add docs/RELEASES.md docs/dev docs/handbook
-            git commit -m "docs(releases): apêndice e factos do manual actualizados para ${GITHUB_REF_NAME} [skip ci]"
+            git commit -m "docs(releases): apêndice e factos do manual actualizados para ${TAG} [skip ci]"
             git push origin main
           else
             echo "docs/RELEASES.md e docs/dev já actualizados — nada a comitar"

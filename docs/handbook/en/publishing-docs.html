@@ -342,7 +342,8 @@ python3 scripts/dev_docs.py --check    # exit 1 when docs/dev is stale (CI job `
 <p>If your PR adds or moves a crate, changes a dependency between crates, adds a binary, bumps the
 toolchain or changes a CI job, run <code>python3 scripts/dev_docs.py</code> and commit the result with it.</p>
 <h2 id="what-happens-at-release-time">What happens at release time<a class="hanchor" href="#what-happens-at-release-time" aria-label="#">#</a></h2>
-<p>The release workflow (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a>) runs on a pushed <code>v*</code> tag. For documentation
+<p>The release workflow (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a>) runs when someone asks for it
+(<code>gh workflow run release.yml -f tag=v4.4.0</code>) — a pushed tag alone does nothing. For documentation
 it:</p>
 <ol>
 <li>regenerates the user site against the release build and <strong>fails</strong> if <code>docs/</code> differs;</li>

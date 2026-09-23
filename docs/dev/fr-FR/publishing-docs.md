@@ -1,7 +1,7 @@
 <!-- translated-from: publishing-docs.md sha256:45aa3ffa5c56ae32f97e6b5e14411d079130649b52c07c87bac2a7ad5ecab6f2 -->
 # Publier la documentation
 
-**Avant de lire :** [Flux de contribution](contributing-workflow.md), [Releases et stabilité](releases-and-stability.md) (ce que fait un tag poussé — la section *Ce qui se passe au moment de la release* de cette page en est la moitié documentation) et la [table généré vs écrit à la main](project-structure.md#generated-vs-hand-written) dans Structure du projet.
+**Avant de lire :** [Flux de contribution](contributing-workflow.md), [Releases et stabilité](releases-and-stability.md) (ce que fait la publication d'une release — la section *Ce qui se passe au moment de la release* de cette page en est la moitié documentation) et la [table généré vs écrit à la main](project-structure.md#generated-vs-hand-written) dans Structure du projet.
 
 La documentation de ce dépôt est soit **générée à partir du code** (puis vérifiée par un gate
 (contrôle CI)), soit **écrite à la main** (puis relue). Cette page explique ce qui relève de quoi,
@@ -120,7 +120,8 @@ résultat avec elle.
 
 ## Ce qui se passe au moment de la release
 
-Le workflow de release (`.github/workflows/release.yml`) s'exécute sur un tag `v*` poussé. Pour la
+Le workflow de release (`.github/workflows/release.yml`) s'exécute quand on le demande
+(`gh workflow run release.yml -f tag=v4.4.0`) — un tag poussé seul ne fait rien. Pour la
 documentation, il :
 
 1. régénère le site utilisateur contre le build de release et **échoue** si `docs/` diffère ;

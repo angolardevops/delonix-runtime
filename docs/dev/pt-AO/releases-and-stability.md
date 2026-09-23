@@ -4,7 +4,7 @@
 **Antes de leres:** [Fluxo de contribuição](contributing-workflow.md#version-alignment) (o gate de versão) e [Publicar a documentação](publishing-docs.md) (o que uma release regenera).
 
 Esta página é sobre a outra metade de uma release: o que o `version` no `Cargo.toml` promete, o
-que acontece quando uma tag `v*` é empurrada, e o que o motor garante que não parte sem uma versão
+que acontece quando se pede uma release, e o que o motor garante que não parte sem uma versão
 major. [Publicar a documentação](publishing-docs.md) já cobre o lado da documentação de uma
 release (o que regenera, o que a CI verifica); esta página cobre o próprio número de versão e o
 contrato de CLI/manifesto que ele suporta.
@@ -38,9 +38,22 @@ Não faças bump à versão num PR de funcionalidade, e não uses um sufixo `-de
 do gate já cobre o trabalho normal, e um sufixo `-dev` apontaria o download do CRI para uma
 release que não existe.
 
-## O que uma tag empurrada faz
+## O que publicar uma release faz
 
-`.github/workflows/release.yml` dispara em `push: tags: ["v*"]` e, num único job:
+Empurrar a tag publica **nada**. Desde 2026-09-23 o workflow de release é
+`workflow_dispatch` e mais nada: a tag e a release são duas decisões separadas, por isso uma tag
+que chegue ao remoto por acidente (`git push --tags`, `push.followTags=true`) já não põe um
+binário à frente do mundo. Uma tag sem release é aqui um estado intermédio normal.
+
+```bash
+git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # corta a versão
+gh workflow run release.yml -f tag=v4.4.0                 # publica-a
+```
+
+Um job `guard` corre primeiro e custa segundos: recusa um `tag` que não tenha a forma `vX.Y.Z`,
+um que não exista no remoto, e um que já tenha release — o input escolhe o commit a construir e dá
+o nome à release, por isso um `tag: main` não verificado teria publicado uma release chamada
+"main". Só depois, num único job:
 
 1. Constrói `delonix`, `delonix-cri`, `delonix-mcp` e `delonix-mgmt` duas vezes — uma genérica
    x86-64, outra com `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — especificamente em
@@ -49,7 +62,7 @@ release que não existe.
    automaticamente quando o CPU do host a suporta. Um job `build-arm64` separado constrói os mesmos
    quatro binários nativamente num runner aarch64 (um por componente, sem variante `-v3`), e são
    publicados como `<name>-aarch64-linux` sob o mesmo `SHA256SUMS`. O `install.sh` ainda não os
-   instala. O job só corre numa tag `v*`, por isso a sua primeira execução foi a própria release
+   instala. O job só corre no momento da release, por isso a sua primeira execução foi a própria release
    v4.2.0; a CI corre a suite de testes nativamente em arm64 no job `test (arm64)` em cada PR.
 2. **Regenera o site do utilizador contra esta build de release exacta e falha se `docs/`
    divergir.** Este gate existe porque uma vez não existia: um buraco no site saiu ao vivo na

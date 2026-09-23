@@ -612,7 +612,7 @@ par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/m
 </tr>
 <tr>
 <td><code>.github/</code></td>
-<td><code>workflows/ci.yml</code> (chaque gate au push et PR vers <code>main</code>), <code>chaos.yml</code> (harnais de chaos), <code>release.yml</code> (sur les tags <code>v*</code>), <code>vm-image.yml</code> et <code>vm-appliances.yml</code> (publication manuelle d’images), plus <code>CODEOWNERS</code>, des modèles d’issue et de PR et un fichier pointeur pour GitHub Copilot.</td>
+<td><code>workflows/ci.yml</code> (chaque gate au push et PR vers <code>main</code>), <code>chaos.yml</code> (harnais de chaos), <code>release.yml</code> (manuel, <code>gh workflow run release.<wbr>yml -f tag=vX.<wbr>Y.<wbr>Z</code>), <code>vm-image.yml</code> et <code>vm-appliances.yml</code> (publication manuelle d’images), plus <code>CODEOWNERS</code>, des modèles d’issue et de PR et un fichier pointeur pour GitHub Copilot.</td>
 <td>Les mainteneurs ; un nouveau gate est ajouté ici et documenté dans le manuel.</td>
 <td><a href="build-and-test.html">Cloner, compiler et tester</a>, <a href="publishing-docs.html">Publier la documentation</a></td>
 </tr>

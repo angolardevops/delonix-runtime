@@ -4,7 +4,7 @@
 **À lire avant :** [Flux de contribution](contributing-workflow.md#version-alignment) (le gate de version) et [Publier la documentation](publishing-docs.md) (ce qu'une release régénère).
 
 Cette page traite de l'autre moitié d'une release : ce que promet le `version` dans
-`Cargo.toml`, ce qui se passe quand un tag `v*` est poussé, et ce que le moteur garantit de ne pas
+`Cargo.toml`, ce qui se passe quand on demande une release, et ce que le moteur garantit de ne pas
 casser sans une version majeure. [Publier la documentation](publishing-docs.md) couvre déjà le
 côté documentation d'une release (ce qui est régénéré, ce que vérifie la CI) ; cette page
 couvre le numéro de version lui-même et le contrat CLI/manifeste qu'il soutient.
@@ -39,9 +39,22 @@ N'incrémentez pas la version dans une PR de fonctionnalité, et n'utilisez pas 
 — la première règle du gate couvre déjà le travail ordinaire, et un suffixe `-dev` enverrait le
 téléchargement du CRI vers une release qui n'existe pas.
 
-## Ce que fait un tag poussé
+## Ce que fait la publication d'une release
 
-`.github/workflows/release.yml` se déclenche sur `push: tags: ["v*"]` et, en un seul job :
+Pousser le tag ne publie **rien**. Depuis le 2026-09-23, le workflow de release est
+`workflow_dispatch` et rien d'autre : le tag et la release sont deux décisions distinctes, donc un
+tag qui arrive sur le remote par accident (`git push --tags`, `push.followTags=true`) ne met plus
+un binaire devant tout le monde. Ici, un tag sans release est un état intermédiaire normal.
+
+```bash
+git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # coupe la version
+gh workflow run release.yml -f tag=v4.4.0                 # la publie
+```
+
+Un job `guard` s'exécute d'abord et coûte quelques secondes : il refuse un `tag` qui n'a pas la
+forme `vX.Y.Z`, un qui n'existe pas sur le remote, et un qui a déjà une release — l'entrée
+choisit le commit à construire et donne son nom à la release, donc un `tag: main` non vérifié
+aurait publié une release appelée « main ». Ensuite seulement, en un seul job :
 
 1. Construit `delonix`, `delonix-cri`, `delonix-mcp` et `delonix-mgmt` deux fois — une fois
    générique x86-64, une fois avec `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — spécifiquement sur
@@ -50,7 +63,7 @@ téléchargement du CRI vers une release qui n'existe pas.
    quand le CPU de l'hôte le prend en charge.
    Un job `build-arm64` distinct construit nativement les quatre mêmes binaires sur un runner aarch64 (un par
    composant, sans variante `-v3`), et ils sont publiés sous le nom `<name>-aarch64-linux` avec le même
-   `SHA256SUMS`. `install.sh` ne les installe pas encore. Le job ne s'exécute que sur une tag `v*`, donc sa
+   `SHA256SUMS`. `install.sh` ne les installe pas encore. Le job ne s'exécute qu'au moment de la release, donc sa
    première exécution a été la release v4.2.0 elle-même ; la CI exécute la suite de tests nativement sur arm64
    dans le job `test (arm64)` à chaque PR.
 2. **Régénère le site utilisateur contre ce build de release exact et échoue si `docs/`
