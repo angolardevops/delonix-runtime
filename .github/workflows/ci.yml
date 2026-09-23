@@ -209,6 +209,108 @@ jobs:
       - name: parse_reference — the image reference parser with a real past bug
         run: cargo +nightly fuzz run parse_reference -- -max_total_time=60
 
+  # ---- The gate tooling's own tests were dead code ----
+  #
+  # `scripts/test_release_verify.py` shipped with 10 tests and NOTHING ran them:
+  # `ci.yml` invokes seven Python scripts as gates and invoked not one of their
+  # tests. A test nobody runs is the same class as a classifier nobody consults
+  # — it exists, it reads as coverage, and it guards nothing.
+  #
+  # Deliberately no toolchain and no protoc: these are stdlib-only and mock what
+  # they need. A job that takes seconds has no excuse not to run on every PR.
+  script-tests:
+    name: script tests (Python gates)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run every scripts/test_*.py
+        run: |
+          shopt -s nullglob
+          found=(scripts/test_*.py)
+          if [ ${#found[@]} -eq 0 ]; then
+            echo "::error::no scripts/test_*.py found — this job stopped guarding anything"
+            exit 1
+          fi
+          for f in "${found[@]}"; do
+            echo "== $f"
+            python3 "$f"
+          done
+
+  # ---- M11: performance regression, and the refusal that makes it trustworthy ----
+  #
+  # `scripts/bench.sh` measures; `scripts/bench_gate.py` compares against this
+  # MACHINE's baseline and fails a regression. The part that is not obvious is
+  # the third outcome: when the run is not publishable, when there is no
+  # baseline for this machine, or when docker/podman degraded as much as we
+  # did, the gate REFUSES to judge instead of blaming the engine. Confusing
+  # those two is what retired the 2026-08-10 battery — the story is in the module
+  # doc of `scripts/bench_gate.py`, with the numbers.
+  #
+  # The probe is its own JOB for the reason already measured in `chaos.yml`: a
+  # STEP-level `if` skips steps and the job still reports `success` — a green
+  # that measured nothing. As a JOB-level `if` the gate reports `skipped`, which
+  # GitHub renders apart from `success` and still does not block a merge.
+  #
+  # **MEASURED: today this is always `skipped` on a hosted runner**, because the
+  # engine is rootless and `ubuntu-latest` blocks unprivileged user namespaces —
+  # the same thing that already keeps the chaos harness out. The job is here
+  # anyway, and it is not decoration: it is what bites the day there is a
+  # self-hosted runner or a VM, and it mirrors exactly what is run by hand today
+  # (`scripts/bench.sh --json > run.json && scripts/bench_gate.py --run run.json`)
+  # on a quiet machine.
+  perf-probe:
+    name: perf probe (environment and bench)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ok: ${{ steps.probe.outputs.ok }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Can this machine MEASURE?
+        id: probe
+        run: |
+          why=""
+          unshare -r -n true 2>/dev/null || why="unprivileged user namespaces blocked (a rootless engine does not run)"
+          command -v docker >/dev/null || why="${why:-docker absent: with no anchor, a regression cannot be told from the bench}"
+          command -v podman >/dev/null || why="${why:-podman absent: with no anchor, a regression cannot be told from the bench}"
+          . scripts/bancada.sh
+          bancada_medir ""
+          [ "$BANCADA_OK" = 1 ] || why="${why:-load $BANCADA_LOAD1 over the $BANCADA_THRESHOLD threshold}"
+          if [ -z "$why" ]; then
+            echo "ok=yes" >> "$GITHUB_OUTPUT"
+            echo "the bench serves: load $BANCADA_LOAD1 < $BANCADA_THRESHOLD"
+          else
+            echo "ok=no" >> "$GITHUB_OUTPUT"
+            echo "::warning title=Performance gate DID NOT RUN::$why"
+            {
+              echo '## Performance gate — DID NOT RUN'
+              echo
+              echo "Reason: **$why**"
+              echo
+              echo 'Nothing was measured in this run. The `perf gate` job reports `skipped`'
+              echo 'and not `success`, precisely so it does not read as a green.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  perf:
+    name: perf gate (regression against the baseline)
+    needs: perf-probe
+    if: needs.perf-probe.outputs.ok == 'yes'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install protoc
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install the pinned toolchain
+        run: rustup show
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --locked -p delonix-runtime-bin
+      - name: Measure (human report to stderr, the object to the file)
+        run: scripts/bench.sh --json --runs 10 > run.json
+      - name: Judge against this machine's baseline
+        run: python3 scripts/bench_gate.py --run run.json
+
   # ---- M13: the maturity table cannot cite rotted evidence ----
   #
   # `delonix system features` promises a level per capability with CHECKABLE

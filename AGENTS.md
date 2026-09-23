@@ -174,6 +174,23 @@ Acrescentar uma palavra ao léxico **sobe** a contagem e faz o gate falhar. Est�
 certo: significa que se descobriu dívida que já lá estava. Baixa a linha de base
 no mesmo commit em que acrescentas a palavra.
 
+**Um comentário INGLÊS que cite um ficheiro de nome português conta como dívida**
+— e o caso que existe é o `docs/comparacao-medida.md`, cujo nome traz `medida`,
+que está no léxico. O `is_pt_text` aceita UMA palavra como prova, e não distingue
+prosa de caminho. Apanhado a 2026-09-23 a escrever o gate do M11, em duas linhas
+que eram inglês puro.
+
+**Não se mexeu no detector, e a medição é que decidiu** — a mesma disciplina do
+`num`: varridos os 3 344 comentários contados como PT, **2** deixam de o ser se
+os caminhos de ficheiro forem ignorados. Ruído. Um filtro de caminhos no
+`is_pt_text` é código novo num gate partilhado para corrigir 0,06% da contagem,
+e teria de vir com a baixa da linha de base no mesmo commit.
+
+O que se faz quando acontece: a referência ao caminho vai para uma **docstring**
+(o ratchet lê `#` em `.py` e `.yml`, não docstrings) ou para outro sítio que o
+gate não conta, e o comentário no local aponta para lá. Nunca se apaga a
+referência — é ela que torna a afirmação verificável.
+
 ## A direcção das dependências é um portão (ADR-0040, fase P0)
 
 `scripts/arch_fitness.py` impõe a estrutura que o ADR-0040 decidiu, e entrou
@@ -7070,3 +7087,79 @@ dentro do container a confirmar copy-up intacto; (3) o gate completo do
 workspace (fmt/lang_ratchet/clippy/test/deny).
 
 Ver ADR-0037 para o detalhe completo, incluindo a tabela de medição.
+
+## O portão de regressão de performance, e a terceira saída que o torna fiável (M11)
+
+O `scripts/bench.sh` já media os três motores na mesma máquina e já se RECUSAVA
+a correr numa bancada carregada. O que faltava era a outra metade: nada comparava
+o número de hoje com um gravado, por isso uma regressão só aparecia quando
+alguém voltasse a ler a tabela por acaso.
+
+**`--json` era aceite e IGNORADO.** `JSON=1` era atribuído e nunca lido — a flag
+imprimia a mesma tabela para humanos. É a classe que este ficheiro persegue em
+todo o lado (`--security-opt seccomp=`, `-v …:z`, `--network-alias`), desta vez
+no próprio harness que existe para não mentir. Agora emite um objecto em stdout e
+manda o relatório para stderr, o contrato do `-o json` do resto da CLI.
+
+**`scripts/bench_gate.py` LÊ uma medição e nunca a faz** — duas opiniões sobre o
+mesmo número é como elas começam a divergir. E tem TRÊS saídas, não duas:
+
+| saída | quando |
+|---|---|
+| **0** | dentro da tolerância (25% sobre a mediana gravada) |
+| **1** | regressão: o motor degradou e as âncoras não |
+| **3** | **recusa-se a julgar** |
+
+A terceira é a que o torna confiável, e vem directamente do incidente de
+2026-08-10 (`docs/comparacao-medida.md`): docker 1406, podman 1351, delonix 640,
+e a corrida seguinte 208 / 268 / 89. Um portão ingénuo teria lido isso como «o
+delonix regrediu 7×» e ido a vermelho por um problema da máquina. Por isso o
+docker e o podman são **âncoras**: se degradaram tanto como nós, o que mudou foi
+a bancada, e o gate di-lo em vez de acusar o motor. Sem âncora nenhuma não há
+como distinguir as duas coisas, e aí também recusa — adivinhar seria repetir o
+erro que o retirou daquela bateria.
+
+**A baseline é por MÁQUINA, e isso não é burocracia.** Uma mediana de 87 ms
+medida num desktop de 32 threads não diz nada sobre uma VM de 2 vCPU; comparar as
+duas fabricaria exactamente o ruído que o gate existe para filtrar. Por isso o
+`bench_baseline.json` é uma LISTA de entradas, cada uma carimbada com a máquina,
+e uma corrida numa máquina desconhecida é recusada com o comando que regista uma.
+
+**Uma medição pode passar o limiar de load e ser lixo à mesma** — e foi isto que
+obrigou a um segundo tecto. Medido a 2026-09-23 com **load 6.44**, bem abaixo do
+limite: uma linha de dez amostras do docker foi de **434 ms a 5 407 ms**. A
+mediana absorveu-o e o limiar de load não o vê, porque a contenção que dispersa
+I/O não aparece no load(1m). O `bench.sh` passou a publicar a **dispersão**
+(max/min) de cada linha, e o gate a julgá-la: acima de **3×** não julga. **Gravar
+é mais estrito — 1,5×** — e a assimetria é o ponto: uma corrida de juízo
+deita-se fora, uma baseline é reusada por todas as que vierem a seguir. O número
+que obrigou: uma corrida a load 8.27 deu ao delonix dispersão **2,69×** e mediana
+**165 ms**, que teria ficado gravada para um motor que fez **87 ms** minutos
+depois na mesma máquina.
+
+**`time_n` passou a olhar para o exit status.** Não olhava de todo: uma
+ferramenta instalada mas inutilizável — o caso comum é o `docker` com o daemon
+parado — falha em dezenas de milissegundos e entrava na tabela como a mais
+rápida das três. Agora uma amostra falhada descarta a LINHA, que sai `null` no
+JSON e «não medido» no relatório.
+
+**Baseline gravada nesta máquina (2026-09-23, `ceec7f8c`, delonix 4.3.0,
+load 3.23):** docker **224 ms**, podman **279 ms**, delonix **87 ms**, dispersões
+1,15× / 1,14× / 1,28×.
+
+**Validado ao vivo, os seis desfechos**: dentro da tolerância (×1.00); regressão
+com âncoras estáveis (×2.17 → **1**); âncoras igualmente degradadas (→ **3**, «a
+máquina mudou»); corrida não publicável; máquina sem baseline; e a gravação
+recusada por dispersão. Os dois primeiros e o terceiro contra a medição REAL
+desta máquina, não contra números inventados.
+
+**No CI, isto fica `skipped` hoje, e o comentário do job di-lo.** O runner
+alojado bloqueia user namespaces não privilegiados, logo o motor rootless não
+corre lá — o mesmo que já mantém o arnês de caos de fora. A sonda vive num JOB à
+parte pela razão medida no `chaos.yml`: um `if` de step salta passos e o job
+reporta `success` na mesma — um verde que não mediu nada.
+
+**De caminho, um gate morto**: os `scripts/test_*.py` nunca corriam em CI. O
+`ci.yml` invoca sete scripts Python como portões e não invocava um único dos seus
+testes — o `test_release_verify.py` nasceu ontem com dez testes que nada
+executava. O job `script-tests` corre-os todos, e falha se não encontrar nenhum.
