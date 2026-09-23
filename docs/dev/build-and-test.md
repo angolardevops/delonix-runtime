@@ -270,6 +270,9 @@ cgroups, the network holder or VM boot works — that needs a live run (see
 | `test-arm64` | test (arm64) |
 | `deny` | cargo-deny |
 | `fuzz` | fuzz (60s smoke, per target) |
+| `script-tests` | script tests (Python gates) |
+| `perf-probe` | perf probe (environment and bench) |
+| `perf` | perf gate (regression against the baseline) |
 | `release-verify` | release verify |
 | `docs` | generated docs and valid examples |
 <!-- dev-docs:end ci-gates -->
