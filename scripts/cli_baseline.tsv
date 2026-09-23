@@ -23,6 +23,7 @@
 =	cluster stop
 ~	cluster uncordon
 ~	cluster upgrade
+=	compatibility compose
 =	compatibility docker
 ~	completion editor
 ~	completion shell
@@ -102,6 +103,7 @@
 ~	manifest render
 ~	manifest schema
 ~	manifest validate
+~	migrate assess
 =	mcp capabilities
 =	mcp doctor
 =	mcp serve

@@ -412,6 +412,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - The generic form of the per-group ``ls``/``describe``/``rm``, addressed by Kind and plural: ``get volumes``, ``describe networks lab``, ``delete secrets db-pass``.
    * - ``apply`` · ``plan`` · ``diff`` · ``drift`` · ``wait``
      - The declarative verbs over a manifest, without naming a stack: converge it, see what would change, compare declared vs last-applied vs observed for one resource, report what the MACHINE changed since the last apply (``drift``, manifest optional), block until ready.
+   * - ``compatibility`` · ``migrate``
+     - What this engine covers of another tool's surface, and what an existing file would cost to move: ``compatibility docker``/``compose`` print the three-state matrix (served, refused with a reason, missing) and ``migrate assess -f docker-compose.yml`` scores a file you already have, key by key. Both read-only.
    * - ``explain`` · ``api-resources``
      - The field reference for a Kind (``kubectl explain`` style, read from the generated schema) and the catalogue of every Kind this engine serves.
 

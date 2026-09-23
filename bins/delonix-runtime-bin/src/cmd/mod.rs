@@ -39,6 +39,7 @@ pub(crate) mod manifestcmd;
 pub mod manual;
 pub mod mapped;
 pub mod mcp;
+pub mod migrate;
 pub use delonix_model::names;
 pub mod namespace;
 pub mod net;

@@ -343,6 +343,10 @@ diz quais são, em vez de os omitir.
   acima); os VERBOS e flags destes comandos em si (`--detailed-exitcode`,
   `--prune`, `--replace`, …) nunca tiveram revisão própria, e a Kind mais
   recente (`Service`) ainda está a ganhar wiring nalguns destes caminhos.
+* **`migrate`** — `migrate assess` lê um ficheiro compose que já tens e diz o
+  que este motor serve, recusa e não implementa. É um RELATÓRIO (não cria, não
+  puxa, não corre), e a tabela por trás dele é a do `compatibility compose` —
+  uma medição com data, que se move quando o motor ganha chaves.
 * **`compose`** — suporte nativo a `docker-compose.yml`, ainda a ganhar
   chaves do Compose Spec (`profiles`, `configs`/`secrets`, multi-ficheiro —
   ver o `AGENTS.md` para a lista completa do que falta).
