@@ -242,11 +242,6 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
         other_failures, 0,
         "a task failed for a reason other than the node's lock: {entries:?}"
     );
-    eprintln!(
-        "  ledger: {} tasks, {} resubmitted after the node's lock timeout",
-        entries.len(),
-        lock_failures
-    );
 
     // E agora destruir, provando que o nó deixou de a ter: uma VM deixada para
     // trás depois de um `delonix vm rm` é um órfão que ninguém procura.
