@@ -179,6 +179,8 @@ commands. Background: `docs/adr/0008-proxmox-vm-backend.md`.
 | `DELONIX_PROXMOX_INSECURE_TLS` | `cmd/vmbackends.rs:register_proxmox_with` | Skips TLS certificate verification for the node. | `1`, `true` or `yes` → skip; default verify. | **Another machine answering in the node's name receives the credential.** Opt-in only, never applied as a fallback after a TLS error. |
 | `DELONIX_PROXMOX_BRIDGE` | `cmd/vmbackends.rs:register_proxmox_with` | Default bridge for VM NICs on this node. | A bridge name; the backend's default is `vmbr0`. | A per-VM `bridge:` wins. |
 | `DELONIX_PROXMOX_VLAN` | `cmd/vmbackends.rs:parse_vlan` | Default VLAN tag for VM NICs on this node. | 1–4094. Out of range is an **error**, never dropped. | |
+| `DELONIX_PROXMOX_CA_FILE` | `cmd/vmbackends.rs:register_proxmox_with` | A CA certificate (PEM) to trust for the node, in addition to the system roots. | Path to a PEM file; unreadable is an **error**. | The way to verify a node whose certificate an internal CA signed, instead of `DELONIX_PROXMOX_INSECURE_TLS`. |
+| `DELONIX_PROXMOX_TRACE_ROUTES` | `cmd/vmbackends.rs:register_proxmox_with` (read once, handed to the client as `ClientOptions::trace_routes`; the constant `TRACE_ROUTES_ENV` in `crates/providers/delonix-proxmox/src/lib.rs` names it) | Appends `METHOD /path` of every request to this file — the numerator of the coverage matrix (ADR-0049). | Path to a file; empty = off. | Feed it to `scripts/proxmox_api_inventory.py --trace` to mark routes `supported+tested`. |
 
 ### TrueNAS
 

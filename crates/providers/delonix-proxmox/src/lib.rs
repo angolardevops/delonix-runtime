@@ -50,9 +50,20 @@ pub use error::{Error, Result};
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
 // 1 GiB here — silently, which is the failure this repo treats as its worst.
 use delonix_vm::{mem_mib, Boot, CreateStage, VmBackend, VmConfig};
-use serde::Deserialize;
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+/// The most of a response body this client reads into memory. Every answer it
+/// expects is a few KB (a config, a task status, a snapshot list); a body past
+/// this is not one of them, and reading it in full would let a node — or
+/// whatever answers in its name — decide how much memory this process takes.
+pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
+
+/// The environment variable the CLI reads into [`ClientOptions::trace_routes`]
+/// (`DELONIX_PROXMOX_TRACE_ROUTES=<file>`). The library itself never reads the
+/// environment; the composition root does, once.
+pub const TRACE_ROUTES_ENV: &str = "DELONIX_PROXMOX_TRACE_ROUTES";
 
 /// How long to wait for a Proxmox task before giving up. A create that
 /// allocates a disk on slow storage is real work; what this guards against is a
@@ -81,7 +92,11 @@ fn next_poll_wait(cur: Duration) -> Duration {
 }
 
 /// How the client authenticates against the node.
-#[derive(Debug, Clone)]
+///
+/// `Debug` is written by hand: the secret and the password are the two values
+/// that must never reach a log, a panic message or an error, and a derived
+/// `Debug` on this enum is exactly how they would.
+#[derive(Clone)]
 pub enum Auth {
     /// `PVEAPIToken=<user>!<tokenid>=<secret>` — the form to prefer. A token is
     /// revocable on the node without touching an account, and it is what a
@@ -90,6 +105,23 @@ pub enum Auth {
     /// Account credentials, exchanged for a ticket. Accepted because a freshly
     /// installed node has an account before it has any token.
     Password { username: String, password: String },
+}
+
+impl std::fmt::Debug for Auth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Auth::ApiToken { id, .. } => f
+                .debug_struct("ApiToken")
+                .field("id", id)
+                .field("secret", &"<redacted>")
+                .finish(),
+            Auth::Password { username, .. } => f
+                .debug_struct("Password")
+                .field("username", username)
+                .field("password", &"<redacted>")
+                .finish(),
+        }
+    }
 }
 
 /// Where the node is, and how to get in.
@@ -112,6 +144,37 @@ pub struct Target {
     /// VLAN tag for the NIC. Lives here and not in `VmConfig` because it
     /// describes how THIS node is cabled, not the VM.
     pub vlan: Option<u16>,
+    /// A CA certificate (PEM) to trust for this node IN ADDITION to the
+    /// system roots — the way to verify a node whose certificate an internal
+    /// CA signed, instead of switching verification off with `insecure_tls`.
+    pub ca_cert_pem: Option<Vec<u8>>,
+}
+
+/// Bounds the client applies to every call. `Default` is what production
+/// runs with; a test lowers them to make a hang observable in seconds.
+#[derive(Debug, Clone)]
+pub struct ClientOptions {
+    /// Per-request ceiling (connect + response). Task polling is many short
+    /// requests under this, never one long one.
+    pub request_timeout: Duration,
+    /// How long [`Client::wait_task`] waits for a task to reach a terminal
+    /// state before reporting [`Error::TaskTimeout`] — which is NOT proof the
+    /// task failed; the task may still be running on the node.
+    pub task_timeout: Duration,
+    /// A file every request appends `METHOD /path` to — the numerator of the
+    /// coverage matrix (`scripts/proxmox_api_inventory.py --trace`), read from
+    /// what a run actually sent and not from the source. `None` traces nothing.
+    pub trace_routes: Option<PathBuf>,
+}
+
+impl Default for ClientOptions {
+    fn default() -> Self {
+        Self {
+            request_timeout: Duration::from_secs(120),
+            task_timeout: TASK_TIMEOUT,
+            trace_routes: None,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -119,11 +182,207 @@ struct Wrapped<T> {
     data: T,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct Ticket {
     ticket: String,
     #[serde(rename = "CSRFPreventionToken")]
     csrf: String,
+}
+
+impl std::fmt::Debug for Ticket {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Ticket")
+            .field("ticket", &"<redacted>")
+            .field("csrf", &"<redacted>")
+            .finish()
+    }
+}
+
+/// One asynchronous task this client submitted, as the ledger keeps it.
+///
+/// Written BEFORE the wait starts: a process killed while waiting leaves the
+/// UPID on disk, and the next operation on the same VM settles it first
+/// ([`Client::settle_pending`]) instead of racing a task it never heard of.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskRecord {
+    pub upid: String,
+    pub node: String,
+    /// What was asked (`create`, `start`, …), in this client's own words.
+    pub action: String,
+    pub vmid: u32,
+    pub started_unix: u64,
+    pub state: TaskState,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "lowercase")]
+pub enum TaskState {
+    /// The node accepted it; the verdict is not in yet.
+    Submitted,
+    Ok,
+    Failed {
+        reason: String,
+    },
+    /// This client stopped waiting; the node may still be running it.
+    TimedOut,
+}
+
+/// Where a VM's task records live: `<vmdir>/proxmox-tasks.json`, or nowhere.
+///
+/// Durable state, not process memory (the daemonless rule): every entry is
+/// written through before the wait and settled after it. A ledger that cannot
+/// be written warns and lets the operation proceed — a `stop` refused because
+/// a bookkeeping file is unwritable would be the worse failure.
+#[derive(Debug, Clone)]
+pub struct Ledger {
+    path: Option<PathBuf>,
+}
+
+/// Records kept per VM; older ones are dropped, settled first.
+const LEDGER_KEEP: usize = 50;
+
+impl Ledger {
+    pub fn at(vmdir: &Path) -> Self {
+        Self {
+            path: Some(vmdir.join("proxmox-tasks.json")),
+        }
+    }
+
+    /// No persistence — for callers that own no VM directory.
+    pub fn none() -> Self {
+        Self { path: None }
+    }
+
+    pub fn records(&self) -> Vec<TaskRecord> {
+        let Some(path) = &self.path else {
+            return Vec::new();
+        };
+        match std::fs::read(path) {
+            Ok(bytes) => serde_json::from_slice(&bytes).unwrap_or_else(|e| {
+                tracing::warn!(path = %path.display(), error = %e, "proxmox: task ledger unreadable, starting a new one");
+                Vec::new()
+            }),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(e) => {
+                tracing::warn!(path = %path.display(), error = %e, "proxmox: task ledger unreadable, starting a new one");
+                Vec::new()
+            }
+        }
+    }
+
+    /// Records whose verdict is not in yet.
+    pub fn pending(&self) -> Vec<TaskRecord> {
+        self.records()
+            .into_iter()
+            .filter(|r| r.state == TaskState::Submitted)
+            .collect()
+    }
+
+    fn record(&self, rec: TaskRecord) {
+        self.update(|all| all.push(rec));
+    }
+
+    /// Settles the MOST RECENT record with this UPID. A node reuses nothing,
+    /// but a mock (or a replayed log) can hand the same id twice, and the
+    /// verdict belongs to the task that was just waited on, not to the first
+    /// one ever recorded under that id.
+    fn settle(&self, upid: &str, state: TaskState) {
+        self.update(|all| {
+            if let Some(r) = all.iter_mut().rev().find(|r| r.upid == upid) {
+                r.state = state;
+            }
+        });
+    }
+
+    fn update(&self, f: impl FnOnce(&mut Vec<TaskRecord>)) {
+        let Some(path) = &self.path else {
+            return;
+        };
+        let mut all = self.records();
+        f(&mut all);
+        if all.len() > LEDGER_KEEP {
+            // Drop settled records first, oldest first; a pending one is never
+            // dropped to make room.
+            let mut settled: Vec<usize> = all
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.state != TaskState::Submitted)
+                .map(|(i, _)| i)
+                .collect();
+            let excess = all.len() - LEDGER_KEEP;
+            settled.truncate(excess);
+            for i in settled.into_iter().rev() {
+                all.remove(i);
+            }
+        }
+        let write = || -> std::io::Result<()> {
+            if let Some(dir) = path.parent() {
+                std::fs::create_dir_all(dir)?;
+            }
+            let tmp = path.with_extension("json.tmp");
+            std::fs::write(&tmp, serde_json::to_vec_pretty(&all).unwrap_or_default())?;
+            std::fs::rename(&tmp, path)
+        };
+        if let Err(e) = write() {
+            tracing::warn!(path = %path.display(), error = %e, "proxmox: could not write the task ledger");
+        }
+    }
+}
+
+/// The kinds of task this client submits, each with the worker type the node
+/// lists it under (`GET /nodes/{node}/tasks`, field `type`) — how a task whose
+/// answer was lost is found again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskKind {
+    Create,
+    Clone,
+    Start,
+    Stop,
+    Snapshot,
+    Rollback,
+    Destroy,
+}
+
+impl TaskKind {
+    fn action(self) -> &'static str {
+        match self {
+            TaskKind::Create => "create",
+            TaskKind::Clone => "clone",
+            TaskKind::Start => "start",
+            TaskKind::Stop => "stop",
+            TaskKind::Snapshot => "snapshot",
+            TaskKind::Rollback => "rollback",
+            TaskKind::Destroy => "destroy",
+        }
+    }
+
+    /// The `type` of the worker Proxmox VE registers for this operation
+    /// (the `fork_worker` names of `PVE::API2::Qemu`). `qmcreate`, `qmstart`,
+    /// `qmstop`, `qmsnapshot` and `qmdestroy` are the names ADR-0008's spike
+    /// saw in a live node's task log; `qmclone` and `qmrollback` follow the
+    /// same naming and are exercised by the mock node, not yet by a real one.
+    fn worker_type(self) -> &'static str {
+        match self {
+            TaskKind::Create => "qmcreate",
+            TaskKind::Clone => "qmclone",
+            TaskKind::Start => "qmstart",
+            TaskKind::Stop => "qmstop",
+            TaskKind::Snapshot => "qmsnapshot",
+            TaskKind::Rollback => "qmrollback",
+            TaskKind::Destroy => "qmdestroy",
+        }
+    }
+}
+
+/// What [`Client::recover_lost_answer`] found on the node after a request
+/// whose answer never arrived.
+enum Recovered {
+    /// The task is running (or ran) on the node: wait on THIS one.
+    Task(String),
+    /// No task in flight, and the effect is already there.
+    Done,
+    /// Nothing on the node says the request was received.
+    Nothing,
 }
 
 #[derive(Debug, Deserialize)]
@@ -182,23 +441,41 @@ pub struct Client {
     ticket: std::sync::RwLock<Option<Ticket>>,
     bridge: String,
     vlan: Option<u16>,
+    task_timeout: Duration,
+    trace_routes: Option<PathBuf>,
 }
 
 impl Client {
     pub fn connect(target: &Target) -> Result<Self> {
+        Self::connect_with(target, ClientOptions::default())
+    }
+
+    pub fn connect_with(target: &Target, opts: ClientOptions) -> Result<Self> {
         validate_target_url(&target.base_url)?;
         validate_node_name(&target.node)?;
         if let Some(b) = &target.bridge {
             validate_bridge_name(b)?;
         }
-        let http = reqwest::blocking::Client::builder()
+        let mut builder = reqwest::blocking::Client::builder()
             .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(120))
-            .danger_accept_invalid_certs(target.insecure_tls)
-            .build()
-            .map_err(|e| {
-                Error::ClientBuild(format!("proxmox: could not build the HTTP client: {e}"))
+            .timeout(opts.request_timeout)
+            // One node, a handful of sequential calls: a pool this small is
+            // all it ever uses, and a bound on it is a bound on sockets held
+            // open against the node by a long-running process.
+            .pool_max_idle_per_host(4)
+            .danger_accept_invalid_certs(target.insecure_tls);
+        if let Some(pem) = &target.ca_cert_pem {
+            let cert = reqwest::Certificate::from_pem(pem).map_err(|e| {
+                Error::ClientBuild(format!(
+                    "proxmox: the CA certificate given for {} is not a PEM certificate: {e}",
+                    target.base_url
+                ))
             })?;
+            builder = builder.add_root_certificate(cert);
+        }
+        let http = builder.build().map_err(|e| {
+            Error::ClientBuild(format!("proxmox: could not build the HTTP client: {e}"))
+        })?;
         let me = Self {
             http,
             base: target.base_url.trim_end_matches('/').to_string(),
@@ -207,6 +484,8 @@ impl Client {
             ticket: std::sync::RwLock::new(None),
             bridge: target.bridge.clone().unwrap_or_else(|| "vmbr0".to_string()),
             vlan: target.vlan,
+            task_timeout: opts.task_timeout,
+            trace_routes: opts.trace_routes,
         };
         me.login()?;
         // Prove the credential AND the node name before anything is created:
@@ -264,21 +543,25 @@ impl Client {
         }
     }
 
-    fn send(&self, rb: reqwest::blocking::RequestBuilder, authed: bool) -> Result<String> {
+    fn send(
+        &self,
+        method: &str,
+        path: &str,
+        rb: reqwest::blocking::RequestBuilder,
+        authed: bool,
+    ) -> Result<String> {
         let rb = if authed { self.authed(rb) } else { rb };
+        trace_route(self.trace_routes.as_deref(), method, path);
         let resp = rb
             .send()
             .map_err(|e| Error::Request(format!("proxmox: request failed: {e}")))?;
         let status = resp.status();
-        let body = resp.text().unwrap_or_default();
+        // Read errors used to be swallowed into an empty body, which then
+        // failed to parse as "could not read the answer" — a truncated
+        // connection reported as a malformed node. They are transport now.
+        let body = read_bounded(resp, path)?;
         if !status.is_success() {
-            // The body carries the actionable part — a bare status code sends
-            // people hunting in the wrong subsystem.
-            return Err(Error::HttpStatus(format!(
-                "proxmox: {} returned HTTP {status}: {}",
-                self.base,
-                truncate_chars(body.trim(), 400)
-            )));
+            return Err(classify_status(status, &self.base, path, &body));
         }
         Ok(body)
     }
@@ -294,12 +577,17 @@ impl Client {
     /// revoked or is wrong, and retrying it forever against a node that keeps
     /// saying no is how a credential ends up locked out. `build` re-creates the
     /// request because a `RequestBuilder` is consumed by `send`.
-    fn send_authed(&self, build: impl Fn() -> reqwest::blocking::RequestBuilder) -> Result<String> {
-        match self.send(build(), true) {
+    fn send_authed(
+        &self,
+        method: &str,
+        path: &str,
+        build: impl Fn() -> reqwest::blocking::RequestBuilder,
+    ) -> Result<String> {
+        match self.send(method, path, build(), true) {
             Err(e) if matches!(self.auth, Auth::Password { .. }) && is_unauthorized(&e) => {
                 tracing::debug!("proxmox: ticket rejected, logging in again");
                 self.login()?;
-                self.send(build(), true)
+                self.send(method, path, build(), true)
             }
             other => other,
         }
@@ -307,15 +595,53 @@ impl Client {
 
     fn get(&self, path: &str) -> Result<String> {
         let url = self.url(path);
-        self.send_authed(|| self.http.get(&url))
+        self.send_authed("GET", path, || self.http.get(&url))
+    }
+
+    fn delete(&self, path: &str) -> Result<String> {
+        let url = self.url(path);
+        self.send_authed("DELETE", path, || self.http.delete(&url))
     }
 
     fn post_form(&self, path: &str, form: &[(&str, &str)], authed: bool) -> Result<String> {
         let url = self.url(path);
         if !authed {
-            return self.send(self.http.post(&url).form(form), false);
+            return self.send("POST", path, self.http.post(&url).form(form), false);
         }
-        self.send_authed(|| self.http.post(&url).form(form))
+        self.send_authed("POST", path, || self.http.post(&url).form(form))
+    }
+
+    /// The VM's `status` as the node reports it (`running`, `stopped`, …).
+    pub fn status_current(&self, vmid: u32) -> Result<String> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/status/current", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "status")?;
+        w.data
+            .get("status")
+            .and_then(|s| s.as_str())
+            .map(str::to_string)
+            .ok_or_else(|| {
+                Error::UnexpectedAnswer(format!(
+                    "proxmox: status/current of VM {vmid} carries no `status`: {}",
+                    truncate_chars(&body, 200)
+                ))
+            })
+    }
+
+    /// The tasks the node is running right now for this VM: `(upid, type)`.
+    pub fn active_tasks(&self, vmid: u32) -> Result<Vec<(String, String)>> {
+        let body = self.get(&format!(
+            "/nodes/{}/tasks?vmid={vmid}&source=active",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "tasks")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|t| {
+                let upid = t.get("upid")?.as_str()?;
+                let kind = t.get("type")?.as_str()?;
+                Some((upid.to_string(), kind.to_string()))
+            })
+            .collect())
     }
 
     /// The next free VM id on the CLUSTER.
@@ -344,6 +670,7 @@ impl Client {
     /// Creates a VM with a fresh disk on `storage`.
     pub fn create_vm(
         &self,
+        ledger: &Ledger,
         vmid: u32,
         name: &str,
         cfg: &VmConfig,
@@ -352,9 +679,23 @@ impl Client {
     ) -> Result<()> {
         let form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
         let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
-        self.task("create", || {
-            self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true)
-        })
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Create,
+            || self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true),
+            Some(&|| self.vm_exists(vmid)),
+        )
+    }
+
+    /// Does the node have a VM with this id? `NotFound` is the answer `false`,
+    /// not a failure.
+    pub fn vm_exists(&self, vmid: u32) -> Result<bool> {
+        match self.config(vmid) {
+            Ok(_) => Ok(true),
+            Err(Error::NodeNotFound(_)) => Ok(false),
+            Err(e) => Err(e),
+        }
     }
 
     /// Applies to an already-cloned VM the configuration the clone did not carry.
@@ -430,15 +771,27 @@ impl Client {
     /// inherits the template's configuration, and a template built with the
     /// agent already has it. Overriding would silently contradict a choice
     /// somebody made about that template.
-    pub fn clone_template(&self, template: u32, vmid: u32, name: &str) -> Result<()> {
+    pub fn clone_template(
+        &self,
+        ledger: &Ledger,
+        template: u32,
+        vmid: u32,
+        name: &str,
+    ) -> Result<()> {
         let newid = vmid.to_string();
-        self.task("clone", || {
-            self.post_form(
-                &format!("/nodes/{}/qemu/{template}/clone", self.node),
-                &[("newid", newid.as_str()), ("name", name), ("full", "1")],
-                true,
-            )
-        })
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Clone,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{template}/clone", self.node),
+                    &[("newid", newid.as_str()), ("name", name), ("full", "1")],
+                    true,
+                )
+            },
+            Some(&|| self.vm_exists(vmid)),
+        )
     }
 
     /// A VM's configuration, as the node has it.
@@ -456,24 +809,36 @@ impl Client {
         Ok(w.data)
     }
 
-    pub fn start(&self, vmid: u32) -> Result<()> {
-        self.task("start", || {
-            self.post_form(
-                &format!("/nodes/{}/qemu/{vmid}/status/start", self.node),
-                &[],
-                true,
-            )
-        })
+    pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Start,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/start", self.node),
+                    &[],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.status_current(vmid)? == "running")),
+        )
     }
 
-    pub fn stop(&self, vmid: u32) -> Result<()> {
-        self.task("stop", || {
-            self.post_form(
-                &format!("/nodes/{}/qemu/{vmid}/status/stop", self.node),
-                &[],
-                true,
-            )
-        })
+    pub fn stop(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Stop,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/stop", self.node),
+                    &[],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.status_current(vmid)? == "stopped")),
+        )
     }
 
     /// Takes a snapshot, refusing a name that is already taken as a CONFLICT.
@@ -484,23 +849,29 @@ impl Client {
     /// with exit 5. A script telling «pick another name» from «something broke»
     /// cannot parse the message. The node's own refusal is still mapped, for
     /// the window between the question and the create.
-    pub fn snapshot(&self, vmid: u32, name: &str) -> Result<()> {
+    pub fn snapshot(&self, ledger: &Ledger, vmid: u32, name: &str) -> Result<()> {
         if self.snapshots(vmid)?.iter().any(|s| s == name) {
             return Err(taken_snapshot(vmid, name));
         }
-        self.task("snapshot", || {
-            self.post_form(
-                &format!("/nodes/{}/qemu/{vmid}/snapshot", self.node),
-                // `vmstate=1`: include RAM, so a snapshot of a RUNNING VM is a
-                // system checkpoint and not just a disk image at an arbitrary
-                // instant. It is what the libvirt backend's `snapshot-create-as`
-                // gives here, and `restore` returning a guest to a half-written
-                // filesystem instead of to a running state would be the same
-                // verb meaning two things.
-                &[("snapname", name), ("vmstate", "1")],
-                true,
-            )
-        })
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Snapshot,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/snapshot", self.node),
+                    // `vmstate=1`: include RAM, so a snapshot of a RUNNING VM is a
+                    // system checkpoint and not just a disk image at an arbitrary
+                    // instant. It is what the libvirt backend's `snapshot-create-as`
+                    // gives here, and `restore` returning a guest to a half-written
+                    // filesystem instead of to a running state would be the same
+                    // verb meaning two things.
+                    &[("snapname", name), ("vmstate", "1")],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.snapshots(vmid)?.iter().any(|s| s == name))),
+        )
         .map_err(|e| {
             if e.to_string().contains("already used") {
                 taken_snapshot(vmid, name)
@@ -512,19 +883,27 @@ impl Client {
 
     /// Reverts to a snapshot; a name the VM does not have is NOT FOUND (exit 4),
     /// as on libvirt, and not whatever shape the node's refusal takes.
-    pub fn rollback(&self, vmid: u32, name: &str) -> Result<()> {
+    pub fn rollback(&self, ledger: &Ledger, vmid: u32, name: &str) -> Result<()> {
         if !self.snapshots(vmid)?.iter().any(|s| s == name) {
             return Err(Error::SnapshotNotFound(format!(
                 "snapshot of Proxmox VM {vmid}: {name}"
             )));
         }
-        self.task("rollback", || {
-            self.post_form(
-                &format!("/nodes/{}/qemu/{vmid}/snapshot/{name}/rollback", self.node),
-                &[],
-                true,
-            )
-        })
+        // No probe: a rollback leaves nothing a read can tell apart from
+        // "not rolled back". A lost answer with no task in flight is an error.
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Rollback,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/snapshot/{name}/rollback", self.node),
+                    &[],
+                    true,
+                )
+            },
+            None,
+        )
     }
 
     /// The VM's snapshot names.
@@ -544,16 +923,22 @@ impl Client {
             .collect())
     }
 
-    pub fn destroy(&self, vmid: u32) -> Result<()> {
+    pub fn destroy(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
         // `purge` drops the VM from backup jobs, replication and HA, and
         // `destroy-unreferenced-disks` removes disks the config no longer
         // names — without them a destroy freed the VM and left storage behind,
         // which is exactly what `vm destroy` exists to give back.
-        let url = self.url(&format!(
+        let path = format!(
             "/nodes/{}/qemu/{vmid}?purge=1&destroy-unreferenced-disks=1",
             self.node
-        ));
-        self.task("destroy", || self.send_authed(|| self.http.delete(&url)))
+        );
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Destroy,
+            || self.delete(&path),
+            Some(&|| Ok(!self.vm_exists(vmid)?)),
+        )
     }
 
     /// Issues a task-creating request and waits for the task — **again, while
@@ -579,26 +964,129 @@ impl Client {
     ///
     /// Retrying is safe for exactly this failure: the lock is taken before the
     /// task does anything, so a task that could not get it changed nothing.
-    fn task(&self, what: &str, issue: impl Fn() -> Result<String>) -> Result<()> {
+    ///
+    /// **A lost answer is not a lost request.** A `create` whose connection
+    /// dropped after the node accepted it is running on the node with nobody
+    /// waiting; sending it again would make a second VM. So a transport
+    /// failure on the submission is followed by a look at the node
+    /// ([`Client::recover_lost_answer`]): a task of this kind in flight for
+    /// this VM is waited on instead, an effect already there is accepted, and
+    /// only when the node shows neither does the transport error stand.
+    fn task(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        kind: TaskKind,
+        issue: impl Fn() -> Result<String>,
+        probe: Option<&dyn Fn() -> Result<bool>>,
+    ) -> Result<()> {
+        let what = kind.action();
         with_lock_retry(what, || {
-            let body = issue()?;
-            self.wait_upid(&body, what)
+            let upid = match issue() {
+                Ok(body) => upid_of(&body, what)?,
+                Err(Error::Request(why)) => match self.recover_lost_answer(vmid, kind, probe) {
+                    Recovered::Task(upid) => upid,
+                    Recovered::Done => return Ok(()),
+                    Recovered::Nothing => return Err(Error::Request(why)),
+                },
+                Err(e) => return Err(e),
+            };
+            ledger.record(TaskRecord {
+                upid: upid.clone(),
+                node: self.node.clone(),
+                action: what.to_string(),
+                vmid,
+                started_unix: now_unix(),
+                state: TaskState::Submitted,
+            });
+            let verdict = self.wait_task(&upid);
+            ledger.settle(&upid, state_of(&verdict));
+            verdict
         })
     }
 
-    /// Reads the UPID out of a response and waits for that task.
-    ///
-    /// Every one of these endpoints answers with a task id and not a result —
-    /// returning here would report a VM created before anything exists.
-    fn wait_upid(&self, body: &str, what: &str) -> Result<()> {
-        let w: Wrapped<serde_json::Value> = parse(body, what)?;
-        let upid = w.data.as_str().ok_or_else(|| {
-            Error::UnexpectedAnswer(format!(
-                "proxmox: {what} did not answer with a task id: {}",
-                truncate_chars(body, 200)
-            ))
-        })?;
-        self.wait_task(upid)
+    /// After a request whose answer never came: what does the node say?
+    fn recover_lost_answer(
+        &self,
+        vmid: u32,
+        kind: TaskKind,
+        probe: Option<&dyn Fn() -> Result<bool>>,
+    ) -> Recovered {
+        match self.active_tasks(vmid) {
+            Ok(tasks) => {
+                if let Some((upid, _)) = tasks.into_iter().find(|(_, t)| t == kind.worker_type()) {
+                    tracing::warn!(
+                        vmid,
+                        what = kind.action(),
+                        %upid,
+                        "proxmox: the answer to the request was lost but the node is running the task — waiting on it"
+                    );
+                    return Recovered::Task(upid);
+                }
+            }
+            Err(e) => {
+                tracing::debug!(vmid, error = %e, "proxmox: could not list the node's tasks after a lost answer");
+                return Recovered::Nothing;
+            }
+        }
+        match probe.map(|p| p()) {
+            Some(Ok(true)) => {
+                tracing::warn!(
+                    vmid,
+                    what = kind.action(),
+                    "proxmox: the answer to the request was lost, and the node already shows its effect — not resending"
+                );
+                Recovered::Done
+            }
+            _ => Recovered::Nothing,
+        }
+    }
+
+    /// One look at a task: `None` while it runs, else its verdict.
+    fn task_status(&self, upid: &str) -> Result<(String, Option<std::result::Result<(), String>>)> {
+        let body = self.get(&format!(
+            "/nodes/{}/tasks/{}/status",
+            self.node,
+            urlencode(upid)
+        ))?;
+        let t: Wrapped<TaskStatus> = parse(&body, "task status")?;
+        let verdict = task_verdict(&t.data.status, t.data.exitstatus.as_deref());
+        Ok((t.data.status, verdict))
+    }
+
+    /// Settles what the ledger still lists as submitted, WITHOUT waiting: one
+    /// status read per pending task. Returns the ones still running.
+    pub fn reconcile(&self, ledger: &Ledger) -> Result<Vec<TaskRecord>> {
+        let mut running = Vec::new();
+        for rec in ledger.pending() {
+            let (_, verdict) = self.task_status(&rec.upid)?;
+            match verdict {
+                Some(v) => ledger.settle(
+                    &rec.upid,
+                    state_of(
+                        &v.map_err(|why| Error::TaskFailed(format!("proxmox: task failed: {why}"))),
+                    ),
+                ),
+                None => running.push(rec),
+            }
+        }
+        Ok(running)
+    }
+
+    /// Before touching a VM: settle its ledger, and WAIT for any task of its
+    /// own still in flight — a `stop` issued on top of a running `start` is a
+    /// race the node decides, not this client.
+    pub fn settle_pending(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        for rec in self.reconcile(ledger)? {
+            if rec.vmid != vmid {
+                continue;
+            }
+            tracing::info!(vmid, action = %rec.action, upid = %rec.upid, "proxmox: a task from an earlier run is still in flight — waiting for it first");
+            let verdict = self.wait_task(&rec.upid);
+            ledger.settle(&rec.upid, state_of(&verdict));
+            verdict?;
+        }
+        Ok(())
     }
 
     /// Waits for a Proxmox task (`UPID:…`) to finish, and reports ITS verdict.
@@ -606,16 +1094,11 @@ impl Client {
     /// Returning when the POST succeeds would report a VM created before
     /// anything exists — every lifecycle call here answers with a task id.
     pub fn wait_task(&self, upid: &str) -> Result<()> {
-        let deadline = Instant::now() + TASK_TIMEOUT;
+        let deadline = Instant::now() + self.task_timeout;
         let mut wait = POLL_MIN;
         loop {
-            let body = self.get(&format!(
-                "/nodes/{}/tasks/{}/status",
-                self.node,
-                urlencode(upid)
-            ))?;
-            let t: Wrapped<TaskStatus> = parse(&body, "task status")?;
-            match task_verdict(&t.data.status, t.data.exitstatus.as_deref()) {
+            let (status, verdict) = self.task_status(upid)?;
+            match verdict {
                 Some(Ok(())) => return Ok(()),
                 Some(Err(why)) => {
                     return Err(Error::TaskFailed(format!("proxmox: task failed: {why}")))
@@ -624,15 +1107,117 @@ impl Client {
             }
             if Instant::now() >= deadline {
                 return Err(Error::TaskTimeout(format!(
-                    "proxmox: task {upid} was still '{}' after {}s — giving up. It may still be \
+                    "proxmox: task {upid} was still '{status}' after {}s — giving up. It may still be \
                      running on the node; nothing here was rolled back",
-                    t.data.status,
-                    TASK_TIMEOUT.as_secs()
+                    self.task_timeout.as_secs()
                 )));
             }
             std::thread::sleep(wait);
             wait = next_poll_wait(wait);
         }
+    }
+}
+
+/// Reads the UPID out of a task-producing answer.
+///
+/// Every one of these endpoints answers with a task id and not a result —
+/// returning it as a result would report a VM created before anything exists.
+fn upid_of(body: &str, what: &str) -> Result<String> {
+    let w: Wrapped<serde_json::Value> = parse(body, what)?;
+    w.data
+        .as_str()
+        .filter(|s| s.starts_with("UPID:"))
+        .map(str::to_string)
+        .ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: {what} did not answer with a task id: {}",
+                truncate_chars(body, 200)
+            ))
+        })
+}
+
+fn state_of(verdict: &Result<()>) -> TaskState {
+    match verdict {
+        Ok(()) => TaskState::Ok,
+        Err(Error::TaskTimeout(_)) => TaskState::TimedOut,
+        Err(e) => TaskState::Failed {
+            reason: e.to_string(),
+        },
+    }
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Reads at most [`MAX_RESPONSE_BYTES`]; one byte more is a refusal, never a
+/// silently cut body handed to a parser.
+fn read_bounded(resp: reqwest::blocking::Response, path: &str) -> Result<String> {
+    use std::io::Read;
+    let mut buf = Vec::new();
+    resp.take(MAX_RESPONSE_BYTES as u64 + 1)
+        .read_to_end(&mut buf)
+        .map_err(|e| {
+            Error::Request(format!(
+                "proxmox: reading the answer from {path} failed: {e}"
+            ))
+        })?;
+    if buf.len() > MAX_RESPONSE_BYTES {
+        return Err(Error::ResponseTooLarge(format!(
+            "proxmox: the answer from {path} exceeded {} MiB — refusing to read it",
+            MAX_RESPONSE_BYTES / (1024 * 1024)
+        )));
+    }
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// The typed failure for a non-2xx answer. The message keeps the shape the
+/// CLI always printed (`proxmox: <base> returned HTTP <status>: <body>`);
+/// what changes is the CLASS, which is what an exit code and a reconciler
+/// read.
+///
+/// Proxmox VE says most application errors with HTTP 500 — a missing VM
+/// ("Configuration file … does not exist") and a taken id ("already exists")
+/// included. Those two are read from the body, the way `is_lock_timeout`
+/// already reads the lock verdict; everything else under 500 stays generic.
+fn classify_status(status: reqwest::StatusCode, base: &str, path: &str, body: &str) -> Error {
+    let text = format!(
+        "proxmox: {base} returned HTTP {status}: {}",
+        truncate_chars(body.trim(), 400)
+    );
+    let path_only = path.split('?').next().unwrap_or(path);
+    match status.as_u16() {
+        401 => Error::Unauthorized(text),
+        403 => Error::Forbidden(text),
+        404 => Error::NodeNotFound(format!("Proxmox resource at {path_only}: {text}")),
+        409 => Error::NodeConflict(text),
+        400 | 422 => Error::BadRequest(text),
+        502..=504 => Error::NodeUnavailable(text),
+        500 if body.contains("does not exist") => {
+            Error::NodeNotFound(format!("Proxmox resource at {path_only}: {text}"))
+        }
+        500 if body.contains("already exists") => Error::NodeConflict(text),
+        _ => Error::HttpStatus(text),
+    }
+}
+
+/// Appends `METHOD /path` to the trace file, if one was given. The query is
+/// dropped: the matrix is keyed by route, not by arguments.
+fn trace_route(file: Option<&Path>, method: &str, path: &str) {
+    let Some(file) = file else {
+        return;
+    };
+    use std::io::Write;
+    let route = path.split('?').next().unwrap_or(path);
+    if let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(file)
+    {
+        let _ = writeln!(f, "{method} {route}");
     }
 }
 
@@ -792,7 +1377,7 @@ pub fn validate_target_url(url: &str) -> Result<()> {
 /// variant in the shared `Error` of `delonix-model` for one caller. `401` on its own would be
 /// too loose (a body can contain any number); the prefix `send` writes is not.
 fn is_unauthorized(e: &Error) -> bool {
-    e.to_string().contains("returned HTTP 401")
+    matches!(e, Error::Unauthorized(_))
 }
 
 /// A bridge name is interpolated into the `net0` property.
@@ -1222,7 +1807,7 @@ impl VmBackend for ProxmoxBackend {
     /// local path is the most likely mistake, and it has no meaning here.
     fn boot(
         &self,
-        _vmdir: &Path,
+        vmdir: &Path,
         cfg: &VmConfig,
         disk: &str,
         on: &dyn Fn(CreateStage),
@@ -1233,6 +1818,7 @@ impl VmBackend for ProxmoxBackend {
         // exactly what happened — a `-v /data:/data` or a `--hugepages` went
         // in, the command said it worked, and the VM did not have it.
         refuse_unsupported(cfg)?;
+        let ledger = Ledger::at(vmdir);
         let vmid = self.client.next_vmid()?;
         on(CreateStage::Define);
         // Everything after the VM EXISTS on the node has to undo it on failure.
@@ -1251,14 +1837,14 @@ impl VmBackend for ProxmoxBackend {
             // Best-effort by nature: if the node is unreachable this fails too,
             // and the ORIGINAL error is the one worth reporting — a cleanup
             // error on top would name the symptom instead of the cause.
-            if let Err(e2) = self.client.destroy(vmid) {
+            if let Err(e2) = self.client.destroy(&ledger, vmid) {
                 tracing::warn!(vmid, error = %e2, "proxmox: could not remove the VM left by a failed create");
             }
             e
         };
         match parse_disk_spec(disk)? {
             DiskSpec::Template(src) => {
-                self.client.clone_template(src, vmid, &cfg.name)?;
+                self.client.clone_template(&ledger, src, vmid, &cfg.name)?;
                 // A clone carries the TEMPLATE's CPU, memory, NIC and cloud-init
                 // — never the caller's. Applying them is a separate call by the
                 // API's own shape (clone takes `newid`/`name`/`full` and nothing
@@ -1266,12 +1852,12 @@ impl VmBackend for ProxmoxBackend {
                 // golden's defaults and no key on it.
                 self.client.configure_clone(vmid, cfg).map_err(undo)?;
             }
-            DiskSpec::New { storage, gib } => {
-                self.client.create_vm(vmid, &cfg.name, cfg, &storage, gib)?
-            }
+            DiskSpec::New { storage, gib } => self
+                .client
+                .create_vm(&ledger, vmid, &cfg.name, cfg, &storage, gib)?,
         }
         on(CreateStage::Start);
-        self.client.start(vmid).map_err(undo)?;
+        self.client.start(&ledger, vmid).map_err(undo)?;
         // The vmid is what every later call addresses, and the name is not: two
         // VMs on a node may share a name, and `qm` takes the id. It goes in
         // `api_socket`, the field a backend uses for its own handle — the
@@ -1290,20 +1876,9 @@ impl VmBackend for ProxmoxBackend {
         let Ok(vmid) = self.vmid_of(vm) else {
             return false;
         };
-        let Ok(body) = self.client.get(&format!(
-            "/nodes/{}/qemu/{vmid}/status/current",
-            self.client.node
-        )) else {
-            return false;
-        };
-        parse::<Wrapped<serde_json::Value>>(&body, "status")
-            .ok()
-            .and_then(|w| {
-                w.data
-                    .get("status")
-                    .and_then(|s| s.as_str())
-                    .map(|s| s == "running")
-            })
+        self.client
+            .status_current(vmid)
+            .map(|s| s == "running")
             .unwrap_or(false)
     }
 
@@ -1355,10 +1930,12 @@ impl VmBackend for ProxmoxBackend {
     /// the disk is the engine's file; here the node owns it, so destroying the
     /// VM destroyed the guest's data on a plain `vm stop`. Freeing everything
     /// is now [`Self::destroy`], which is what `vm rm` calls.
-    fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+    fn stop(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
         if self.is_running(vm) {
-            self.client.stop(vmid)?;
+            self.client.stop(&ledger, vmid)?;
         }
         Ok(())
     }
@@ -1371,7 +1948,7 @@ impl VmBackend for ProxmoxBackend {
     fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
         self.stop(vmdir, vm)?;
-        Ok(self.client.destroy(vmid)?)
+        Ok(self.client.destroy(&Ledger::at(vmdir), vmid)?)
     }
 
     /// Starts the VM this record already names, instead of creating another.
@@ -1384,15 +1961,17 @@ impl VmBackend for ProxmoxBackend {
     ///
     /// `Ok(None)` when the node no longer has that vmid — the VM was removed
     /// outside this engine, and creating one is then the honest answer.
-    fn resume(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<Option<Boot>> {
+    fn resume(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<Option<Boot>> {
         let Ok(vmid) = self.vmid_of(vm) else {
             // No handle: not created by this backend. Let the caller create.
             return Ok(None);
         };
-        if self.client.config(vmid).is_err() {
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        if !self.client.vm_exists(vmid)? {
             return Ok(None);
         }
-        self.client.start(vmid)?;
+        self.client.start(&ledger, vmid)?;
         Ok(Some(Boot {
             pid: None,
             tap: String::new(),
@@ -1403,16 +1982,20 @@ impl VmBackend for ProxmoxBackend {
         }))
     }
 
-    fn snapshot(&self, _vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
+    fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
-        Ok(self.client.snapshot(vmid, name)?)
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        Ok(self.client.snapshot(&ledger, vmid, name)?)
     }
 
-    fn restore(&self, _vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
+    fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
         let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
-        Ok(self.client.rollback(vmid, name)?)
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        Ok(self.client.rollback(&ledger, vmid, name)?)
     }
 
     // `_vmdir` porque o Proxmox não tem disco local nosso: os instantâneos
@@ -1440,6 +2023,12 @@ impl VmBackend for ProxmoxBackend {
 /// Never auto-selectable: auto-detection asks `available()`, and the only
 /// honest answer here costs a network round trip to a node nobody named.
 pub fn register(target: Target) -> delonix_model::Result<()> {
+    register_with(target, ClientOptions::default())
+}
+
+/// [`register`] with the client's bounds and trace chosen by the caller — the
+/// composition root, which is where the environment is read.
+pub fn register_with(target: Target, opts: ClientOptions) -> delonix_model::Result<()> {
     // Fail on a malformed target HERE, at registration, rather than at the
     // first `vm create`: the operator is looking at the configuration now.
     validate_target_url(&target.base_url)?;
@@ -1461,7 +2050,7 @@ pub fn register(target: Target) -> delonix_model::Result<()> {
                 // first VM was listed must not stay "down" for the rest of the
                 // process.
                 let c = std::sync::Arc::new(
-                    Client::connect(&target)
+                    Client::connect_with(&target, opts.clone())
                         .map_err(|e| delonix_vm::Error::Engine(delonix_model::Error::from(e)))?,
                 );
                 *slot = Some(c.clone());
@@ -1502,7 +2091,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::ProviderAvailability => S::Partial { detail: "`available()` is always true once configured; reachability is learned on the first call" },
         C::ResourceReadback => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::Events => S::NotImplemented,
-        C::AsyncOperations => S::Partial { detail: "every write waits on its UPID (`wait_task`, terminal `exitstatus`); the engine exposes no job handle yet" },
+        C::AsyncOperations => S::Partial { detail: "every write waits on its UPID and is written to a per-VM task ledger before the wait (ADR-0049 slice 1); the engine exposes no job handle yet" },
         C::VmCreate => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmStart => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmStop => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
@@ -1559,7 +2148,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::MetricsPerWorkloadNetwork => S::NotImplemented,
         C::HostHealth => S::NotImplemented,
         C::HostCapacity => S::NotImplemented,
-        C::TransportVerified => S::Partial { detail: "TLS verified by default (webpki roots); `insecure_tls` is an explicit opt-out on the target" },
+        C::TransportVerified => S::Partial { detail: "TLS verified by default (webpki roots, or `ca_cert_pem`/`DELONIX_PROXMOX_CA_FILE` for an internal CA); `insecure_tls` is an explicit opt-out; 16 MiB response bound; `Debug` redacts the credential (ADR-0049 slice 1)" },
         C::CredentialInVault => S::Partial { detail: "`DELONIX_PROXMOX_SECRET` names a `kind: Secret`; the env-var form keeps the token in the environment" },
         C::NetBridge | C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts | C::NetRoutesBetweenNetworks | C::NetNamespaceIsolation | C::NetTunnelEgress | C::NetRateLimit | C::NetPacketCapture | C::NetL7Proxy | C::NetIpv6 | C::VolumeLocal | C::VolumeBind | C::VolumeNfs | C::VolumeCifs | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot | C::VolumeProvisionNas | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph | C::FirewallPerWorkload | C::FirewallDefaultDeny | C::FirewallSourceFiltering | C::FirewallEgressPolicy => {
             S::UnsupportedByProvider { reason: "not a compute capability: answered by the network/storage provider" }
@@ -2148,6 +2737,8 @@ mod tests {
             ticket: std::sync::RwLock::new(None),
             bridge: bridge.unwrap_or("vmbr0").to_string(),
             vlan,
+            task_timeout: TASK_TIMEOUT,
+            trace_routes: None,
         };
         let cfg = VmConfig::default();
         assert_eq!(cli(None, None).net0_arg(&cfg), "virtio,bridge=vmbr0");
@@ -2207,17 +2798,205 @@ mod tests {
     /// credential ends up locked out.
     #[test]
     fn so_um_401_dispara_nova_autenticacao() {
-        let err = |s: &str| Error::HttpStatus(s.to_string());
-        assert!(is_unauthorized(&err(
-            "proxmox: https://pve returned HTTP 401 Unauthorized: bad ticket"
-        )));
-        assert!(!is_unauthorized(&err(
-            "proxmox: https://pve returned HTTP 500: QEMU guest agent is not running"
+        // Built the way `send` builds them, so the test reads the real path.
+        let st = |code: u16, body: &str| {
+            classify_status(
+                reqwest::StatusCode::from_u16(code).unwrap(),
+                "https://pve",
+                "/nodes/pve/qemu/100/config",
+                body,
+            )
+        };
+        assert!(is_unauthorized(&st(401, "bad ticket")));
+        assert!(!is_unauthorized(&st(
+            500,
+            "QEMU guest agent is not running"
         )));
         // A body that merely mentions the number is not a 401.
-        assert!(!is_unauthorized(&err(
-            "proxmox: https://pve returned HTTP 500: disk 401 is missing"
-        )));
+        assert!(!is_unauthorized(&st(500, "disk 401 is missing")));
+        assert!(!is_unauthorized(&st(403, "permission denied")));
+    }
+
+    /// The CLASS of a failure is what an exit code and a reconciler read; the
+    /// text keeps the shape the CLI always printed.
+    #[test]
+    fn every_http_status_lands_in_its_class() {
+        let st = |code: u16, body: &str| {
+            classify_status(
+                reqwest::StatusCode::from_u16(code).unwrap(),
+                "https://pve",
+                "/nodes/pve/qemu/100/config?x=1",
+                body,
+            )
+        };
+        assert!(matches!(st(401, ""), Error::Unauthorized(_)));
+        assert!(matches!(st(403, ""), Error::Forbidden(_)));
+        assert!(matches!(st(404, ""), Error::NodeNotFound(_)));
+        assert!(matches!(st(409, ""), Error::NodeConflict(_)));
+        assert!(matches!(st(400, ""), Error::BadRequest(_)));
+        assert!(matches!(st(422, ""), Error::BadRequest(_)));
+        assert!(matches!(st(502, ""), Error::NodeUnavailable(_)));
+        assert!(matches!(st(503, ""), Error::NodeUnavailable(_)));
+        assert!(matches!(st(504, ""), Error::NodeUnavailable(_)));
+        // Proxmox says these two with a 500; the body carries the verdict.
+        let missing = st(
+            500,
+            "Configuration file 'nodes/pve/qemu-server/100.conf' does not exist\n",
+        );
+        assert!(matches!(missing, Error::NodeNotFound(_)), "{missing}");
+        assert!(
+            missing.to_string().contains("/nodes/pve/qemu/100/config"),
+            "names the route"
+        );
+        assert!(!missing.to_string().contains("?x=1"), "without the query");
+        assert!(matches!(
+            st(500, "VM 100 already exists"),
+            Error::NodeConflict(_)
+        ));
+        let generic = st(500, "unable to open file");
+        assert!(matches!(generic, Error::HttpStatus(_)));
+        assert_eq!(
+            generic.to_string(),
+            "proxmox: https://pve returned HTTP 500 Internal Server Error: unable to open file"
+        );
+        // Through the shared class: exit 4 for a missing VM, 5 for a taken id.
+        assert!(delonix_model::Error::from(st(404, "")).is_not_found());
+        assert!(delonix_model::Error::from(st(409, "")).is_conflict());
+    }
+
+    #[test]
+    fn a_secret_never_reaches_debug_output() {
+        let t = Target {
+            base_url: "https://pve:8006".into(),
+            node: "pve".into(),
+            auth: Auth::ApiToken {
+                id: "root@pam!delonix".into(),
+                secret: "s3cr3t-token-value".into(),
+            },
+            insecure_tls: false,
+            bridge: None,
+            vlan: None,
+            ca_cert_pem: None,
+        };
+        let shown = format!("{t:?}");
+        assert!(!shown.contains("s3cr3t"), "{shown}");
+        assert!(
+            shown.contains("root@pam!delonix"),
+            "the id is not a secret: {shown}"
+        );
+        let p = Auth::Password {
+            username: "root@pam".into(),
+            password: "hunter2-pass".into(),
+        };
+        assert!(!format!("{p:?}").contains("hunter2"));
+        let ticket = Ticket {
+            ticket: "PVE:root@pam:ABC".into(),
+            csrf: "csrf-value".into(),
+        };
+        let shown = format!("{ticket:?}");
+        assert!(
+            !shown.contains("ABC") && !shown.contains("csrf-value"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn a_task_answer_is_a_upid_or_it_is_not_an_answer() {
+        assert_eq!(
+            upid_of(
+                r#"{"data":"UPID:pve:0000ABCD:00001234:5F3E:qmstart:100:root@pam:"}"#,
+                "start"
+            )
+            .unwrap(),
+            "UPID:pve:0000ABCD:00001234:5F3E:qmstart:100:root@pam:"
+        );
+        // A string that is not a task id, a number, and no `data` at all.
+        assert!(matches!(
+            upid_of(r#"{"data":"ok"}"#, "start"),
+            Err(Error::UnexpectedAnswer(_))
+        ));
+        assert!(matches!(
+            upid_of(r#"{"data":100}"#, "start"),
+            Err(Error::UnexpectedAnswer(_))
+        ));
+        assert!(matches!(
+            upid_of(r#"{"data":"#, "start"),
+            Err(Error::Decode(_))
+        ));
+    }
+
+    #[test]
+    fn the_ledger_is_written_before_the_wait_and_settled_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::at(dir.path());
+        assert!(ledger.records().is_empty());
+        let rec = |n: u32| TaskRecord {
+            upid: format!("UPID:pve:{n:08X}:00000001:0:qmstart:{n}:root@pam:"),
+            node: "pve".into(),
+            action: "start".into(),
+            vmid: n,
+            started_unix: 1,
+            state: TaskState::Submitted,
+        };
+        ledger.record(rec(100));
+        assert_eq!(ledger.pending().len(), 1, "written before any verdict");
+        ledger.settle(&rec(100).upid, TaskState::Ok);
+        assert!(ledger.pending().is_empty());
+        assert_eq!(ledger.records()[0].state, TaskState::Ok);
+        // A settle on an unknown UPID changes nothing and does not panic.
+        ledger.settle("UPID:nope", TaskState::Ok);
+        assert_eq!(ledger.records().len(), 1);
+        // No path: nothing persisted, nothing pending.
+        let none = Ledger::none();
+        none.record(rec(1));
+        assert!(none.records().is_empty());
+    }
+
+    #[test]
+    fn the_ledger_drops_settled_records_first_and_never_a_pending_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let ledger = Ledger::at(dir.path());
+        for n in 0..(LEDGER_KEEP as u32 + 10) {
+            let state = if n == 3 {
+                TaskState::Submitted
+            } else {
+                TaskState::Ok
+            };
+            ledger.record(TaskRecord {
+                upid: format!("UPID:pve:{n:08X}::qmstart:{n}:root@pam:"),
+                node: "pve".into(),
+                action: "start".into(),
+                vmid: n,
+                started_unix: n as u64,
+                state,
+            });
+        }
+        let all = ledger.records();
+        assert_eq!(all.len(), LEDGER_KEEP);
+        assert!(
+            all.iter()
+                .any(|r| r.vmid == 3 && r.state == TaskState::Submitted),
+            "the pending one survived"
+        );
+        assert!(
+            !all.iter().any(|r| r.vmid == 0),
+            "the oldest settled one went first"
+        );
+    }
+
+    #[test]
+    fn a_timeout_is_recorded_as_timed_out_not_as_failed() {
+        assert_eq!(state_of(&Ok(())), TaskState::Ok);
+        assert_eq!(
+            state_of(&Err(Error::TaskTimeout("x".into()))),
+            TaskState::TimedOut
+        );
+        assert_eq!(
+            state_of(&Err(Error::TaskFailed("proxmox: task failed: y".into()))),
+            TaskState::Failed {
+                reason: "proxmox: task failed: y".into()
+            }
+        );
     }
 
     #[test]

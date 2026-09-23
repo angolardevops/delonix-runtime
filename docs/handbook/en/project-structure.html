@@ -579,6 +579,12 @@ below, or when a table names a path that no longer exists.</p>
 <td><a href="publishing-docs.html">Publishing the documentation</a></td>
 </tr>
 <tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
+<td>The Proxmox VE API coverage matrix (ADR-0049): <code>api-&lt;ver&gt;.<wbr>routes.<wbr>json</code>, the schema of a named release extracted from a node's <code>apidoc.js</code> with its provenance (fetch date, sha256), and <code>matrix-&lt;ver&gt;.md</code>, <strong>generated</strong> from it and from the routes the provider crate calls. Never edit the matrix.</td>
+<td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code> after a route is added to <code>delonix-proxmox</code>; the schema only when a new release is measured.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.<wbr>md</code></a></td>
+</tr>
+<tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a></td>
 <td>Release notes, one <code>v&lt;version&gt;.md</code> per release. A release commit must add its own (<code>version_gate.py</code>). Historical — do not rewrite past notes.</td>
 <td>The release commit.</td>
@@ -719,6 +725,12 @@ expect CI to fail if you edit the output by hand.</p>
 <td>the <code>dev-docs</code> regions only</td>
 <td><code>python3 scripts/<wbr>dev_docs.<wbr>py</code></td>
 <td><code>arch fitness</code> job, step <code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code>; also refreshed by <code>release.yml</code></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
+<td><code>matrix-9.2.2.md</code></td>
+<td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code></td>
+<td><code>script tests</code> job, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/test_proxmox_api_inventory.py" target="_blank" rel="noopener"><code>scripts/<wbr>test_proxmox_api_inventory.<wbr>py</code></a> (<code>test_the_committed_matrix_is_up_to_date</code>)</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>

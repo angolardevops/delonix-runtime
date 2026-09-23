@@ -13450,6 +13450,71 @@ msgstr "{why} — `delonix {flag}`"
 msgid "not read by `compose`"
 msgstr "não é lida pelo `compose`"
 
+# Proxmox transport (ADR-0049 slice 1): the seven typed HTTP classes, DX-1526/4504/5504/6506/9515-9517
+
+msgid "Proxmox rejected the request"
+msgstr "o Proxmox rejeitou o pedido"
+
+msgid "The node answered HTTP 400/422: a parameter of the request is not acceptable to it; the message carries the node's own reason."
+msgstr "O nó respondeu HTTP 400/422: um parâmetro do pedido não é aceitável para ele; a mensagem traz a razão do próprio nó."
+
+msgid "Read the node's reason in the message and correct the field it names."
+msgstr "Lê a razão do nó na mensagem e corrige o campo que ela nomeia."
+
+msgid "no such resource on the Proxmox node"
+msgstr "não existe esse recurso no nó Proxmox"
+
+msgid "The node answered HTTP 404, or reported that the VM's configuration file does not exist (which it says with HTTP 500)."
+msgstr "O nó respondeu HTTP 404, ou disse que o ficheiro de configuração da VM não existe (o que diz com HTTP 500)."
+
+msgid "Check the VM id in the record against `qm list` on the node; a VM removed on the node side leaves a record with nothing behind it."
+msgstr "Confere o id da VM no registo com o `qm list` do nó; uma VM removida do lado do nó deixa um registo sem nada por trás."
+
+msgid "the Proxmox node reports a conflict"
+msgstr "o nó Proxmox reporta um conflito"
+
+msgid "The node answered HTTP 409, or reported that the resource already exists (which it says with HTTP 500)."
+msgstr "O nó respondeu HTTP 409, ou disse que o recurso já existe (o que diz com HTTP 500)."
+
+msgid "Pick another name or id, or remove what is already there."
+msgstr "Escolhe outro nome ou id, ou remove o que já lá está."
+
+msgid "Proxmox node unavailable"
+msgstr "nó Proxmox indisponível"
+
+msgid "The node answered HTTP 502/503/504: the API is up but cannot serve the request right now (pveproxy without a backend, node restarting)."
+msgstr "O nó respondeu HTTP 502/503/504: a API está de pé mas não consegue servir o pedido agora (pveproxy sem backend, nó a reiniciar)."
+
+msgid "Retry later; check the node's services (`pveproxy`, `pvedaemon`) and the cluster's quorum."
+msgstr "Tenta mais tarde; verifica os serviços do nó (`pveproxy`, `pvedaemon`) e o quórum do cluster."
+
+msgid "Proxmox refused the credential"
+msgstr "o Proxmox recusou a credencial"
+
+msgid "The node answered HTTP 401: the API token is wrong or revoked, or the ticket could not be renewed."
+msgstr "O nó respondeu HTTP 401: o token da API está errado ou revogado, ou o ticket não pôde ser renovado."
+
+msgid "Check the token id and secret (or the account), and that the token is not expired on the node."
+msgstr "Confere o id e o segredo do token (ou a conta), e que o token não expirou no nó."
+
+msgid "Proxmox denied the operation"
+msgstr "o Proxmox negou a operação"
+
+msgid "The node answered HTTP 403: the credential is valid but lacks the privilege this route needs (the message names the route)."
+msgstr "O nó respondeu HTTP 403: a credencial é válida mas não tem o privilégio que esta rota exige (a mensagem nomeia a rota)."
+
+msgid "Grant the role the route needs to the token or account on the node — least privilege, one role per use."
+msgstr "Dá ao token ou à conta, no nó, o papel que a rota exige — privilégio mínimo, um papel por uso."
+
+msgid "Proxmox response exceeded the size bound"
+msgstr "a resposta do Proxmox excedeu o limite de tamanho"
+
+msgid "The node's answer was larger than this client is willing to read into memory."
+msgstr "A resposta do nó foi maior do que este cliente está disposto a ler para memória."
+
+msgid "Check what the node is serving on that route; an answer this large is not one the engine expects."
+msgstr "Verifica o que o nó está a servir nessa rota; uma resposta deste tamanho não é uma que o motor espere."
+
 # --- provider ls / describe / matrix (ADR-0050) ---
 
 msgid "What each provider can do, measured on this host against the capability catalog (ADR-0050)"

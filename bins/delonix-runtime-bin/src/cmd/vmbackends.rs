@@ -81,15 +81,38 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
     let vlan = lookup("DELONIX_PROXMOX_VLAN")
         .map(|v| parse_vlan(&v))
         .transpose()?;
+    // A CA to verify the node with, instead of switching verification off:
+    // the honest answer for a node whose certificate an internal CA signed.
+    let ca_cert_pem = lookup("DELONIX_PROXMOX_CA_FILE")
+        .map(|path| {
+            std::fs::read(&path).map_err(|e| {
+                delonix_model::Error::Invalid(format!(
+                    "DELONIX_PROXMOX_CA_FILE: could not read '{path}': {e}"
+                ))
+            })
+        })
+        .transpose()?;
 
-    delonix_proxmox::register(delonix_proxmox::Target {
-        base_url: url,
-        node,
-        auth,
-        insecure_tls,
-        bridge,
-        vlan,
-    })
+    // The route trace for the coverage matrix (ADR-0049): read here, once,
+    // and handed to the client — the library never reads the environment.
+    let opts = delonix_proxmox::ClientOptions {
+        trace_routes: lookup(delonix_proxmox::TRACE_ROUTES_ENV)
+            .filter(|v| !v.is_empty())
+            .map(std::path::PathBuf::from),
+        ..Default::default()
+    };
+    delonix_proxmox::register_with(
+        delonix_proxmox::Target {
+            base_url: url,
+            node,
+            auth,
+            insecure_tls,
+            bridge,
+            vlan,
+            ca_cert_pem,
+        },
+        opts,
+    )
 }
 
 /// The credential, preferring an API token.

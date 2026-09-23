@@ -3,19 +3,30 @@
 
 The real schema is 4 MB of JavaScript fetched from a node; what these tests pin is
 the reading discipline: the JS wrapper is cut correctly, a verb is read from the
-call site on either side of the literal, a path with no verb is NOT counted, an
-excluded route stays in the denominator, and a called route the schema lacks
-fails the run.
+statement the literal sits in (never from the neighbouring function), a comment
+is not a call, a test-module literal is not a call, an excluded route stays in
+the denominator, a trace of a live run promotes a route to tested, and a called
+route the schema lacks fails the run.
+
+The last test is a GATE on the repository: the committed matrix for 9.2.2 must
+be byte for byte what the script regenerates from the committed schema and the
+crate's source — a route added to the crate without regenerating the matrix
+fails here.
 """
 
+import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import proxmox_api_inventory as inv  # noqa: E402
+
+REPO = Path(__file__).resolve().parent.parent
 
 SCHEMA = [
     {
@@ -32,6 +43,12 @@ SCHEMA = [
                             {
                                 "path": "/nodes/{node}/qemu/{vmid}",
                                 "info": {"DELETE": {"returns": {"type": "string"}}},
+                                "children": [
+                                    {
+                                        "path": "/nodes/{node}/qemu/{vmid}/config",
+                                        "info": {"GET": {"returns": {"type": "object"}}},
+                                    }
+                                ],
                             }
                         ],
                     },
@@ -64,6 +81,13 @@ fn c(&self) {
     let orphan = "/nodes/{}/lxc";
     let _ = orphan;
 }
+
+#[cfg(test)]
+mod tests {
+    fn t() {
+        let x = self.get("/nodes/pve/qemu/100/config");
+    }
+}
 '''
 
 
@@ -76,13 +100,25 @@ def write_apidoc(tmp: Path) -> Path:
 class Schema(unittest.TestCase):
     def test_one_row_per_method_and_path(self):
         with tempfile.TemporaryDirectory() as d:
-            rows = inv.load_schema(write_apidoc(Path(d)))
-        self.assertEqual(len(rows), 9)
+            rows = inv.extract_apidoc(write_apidoc(Path(d)))
+        self.assertEqual(len(rows), 10)
         self.assertIn(("POST", "/nodes/{node}/qemu"), {(r["method"], r["path"]) for r in rows})
+
+    def test_the_committed_form_carries_provenance_and_the_same_rows(self):
+        with tempfile.TemporaryDirectory() as d:
+            apidoc = write_apidoc(Path(d))
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                inv.main([str(apidoc), "--extract"])
+            committed = Path(d) / "api.routes.json"
+            committed.write_text(buf.getvalue())
+            prov, rows = inv.load_schema(committed)
+        self.assertEqual(len(rows), 10)
+        self.assertIn("source", prov)
 
 
 class ClientRoutes(unittest.TestCase):
-    def test_verb_is_read_on_either_side_of_the_literal(self):
+    def test_verb_is_read_from_the_statement_on_either_side_of_the_literal(self):
         called, unknown = inv.client_routes(SOURCE)
         self.assertEqual(
             called,
@@ -90,9 +126,11 @@ class ClientRoutes(unittest.TestCase):
         )
         self.assertEqual(unknown, ["/nodes/{node}/lxc"], "a literal with no verb nearby is not a call")
 
-    def test_a_comment_is_not_a_call(self):
+    def test_a_comment_and_a_test_module_literal_are_not_calls(self):
         called, unknown = inv.client_routes(SOURCE)
-        self.assertNotIn("/access/users", {p for _, p in called} | set(unknown))
+        paths = {p for _, p in called} | set(unknown)
+        self.assertNotIn("/access/users", paths)
+        self.assertNotIn("/nodes/pve/qemu/100/config", paths)
 
     def test_query_and_placeholders_are_normalised(self):
         self.assertEqual(
@@ -101,32 +139,90 @@ class ClientRoutes(unittest.TestCase):
         )
 
 
-class Classification(unittest.TestCase):
-    def rows(self):
+class Trace(unittest.TestCase):
+    def test_a_concrete_route_maps_to_the_longest_template(self):
         with tempfile.TemporaryDirectory() as d:
-            rows = inv.load_schema(write_apidoc(Path(d)))
-        called, _ = inv.client_routes(SOURCE)
-        return inv.classify(rows, called)
+            rows = inv.extract_apidoc(write_apidoc(Path(d)))
+        hit = inv.traced_routes(
+            "GET /nodes\nGET /nodes/pve/qemu/100/config\nDELETE /nodes/pve/qemu/100?purge=1\nPOST /nowhere\n",
+            rows,
+        )
+        self.assertEqual(
+            hit,
+            {("GET", "/nodes"), ("GET", "/nodes/{node}/qemu/{vmid}/config"), ("DELETE", "/nodes/{node}/qemu/{vmid}")},
+        )
 
-    def test_three_states_and_the_excluded_stay_in_the_denominator(self):
+
+class Classification(unittest.TestCase):
+    def rows(self, trace=None):
+        with tempfile.TemporaryDirectory() as d:
+            rows = inv.extract_apidoc(write_apidoc(Path(d)))
+        called, _ = inv.client_routes(SOURCE)
+        tested = inv.traced_routes(trace, rows) if trace else set()
+        return inv.classify(rows, called, tested)
+
+    def test_five_states_and_the_excluded_stay_in_the_denominator(self):
         rows = self.rows()
         s = inv.summary(rows)
-        self.assertEqual(s["total"], 9)
-        self.assertEqual(s["states"], {"called": 3, "excluded": 4, "missing": 2})
+        self.assertEqual(s["denominator"], 10)
+        self.assertEqual(
+            s["states"],
+            {inv.SUPPORTED_UNTESTED: 3, inv.UNSUPPORTED: 4, inv.NOT_YET: 3},
+        )
         by = {(r["method"], r["path"]): r for r in rows}
-        self.assertEqual(by[("POST", "/nodes/{node}/apt/update")]["state"], "excluded")
+        self.assertEqual(by[("POST", "/nodes/{node}/apt/update")]["state"], inv.UNSUPPORTED)
         self.assertTrue(by[("POST", "/nodes/{node}/apt/update")]["reason"])
-        self.assertEqual(by[("GET", "/nodes/{node}/lxc")]["state"], "excluded", "no verb read → not called")
-        self.assertEqual(by[("GET", "/nodes/{node}/qemu")]["state"], "missing")
-        self.assertEqual(by[("POST", "/access/ticket")]["state"], "missing", "login is only 'called' when the source calls it")
+        self.assertEqual(by[("GET", "/nodes/{node}/lxc")]["state"], inv.UNSUPPORTED, "no verb read → not called")
+        self.assertEqual(by[("GET", "/nodes/{node}/qemu")]["state"], inv.NOT_YET)
+        self.assertEqual(by[("POST", "/access/ticket")]["state"], inv.NOT_YET, "login is only called when the source calls it")
+
+    def test_a_trace_promotes_a_called_route_to_tested_and_nothing_else(self):
+        rows = self.rows(trace="GET /nodes\nGET /nodes/pve/qemu\n")
+        by = {(r["method"], r["path"]): r for r in rows}
+        self.assertEqual(by[("GET", "/nodes")]["state"], inv.SUPPORTED_TESTED)
+        # Traced but not called by the crate: a trace cannot invent a call.
+        self.assertEqual(by[("GET", "/nodes/{node}/qemu")]["state"], inv.NOT_YET)
+        self.assertEqual(by[("POST", "/nodes/{node}/qemu")]["state"], inv.SUPPORTED_UNTESTED)
 
     def test_a_called_route_absent_from_the_schema_fails_the_run(self):
         with tempfile.TemporaryDirectory() as d:
             apidoc = write_apidoc(Path(d))
             src = Path(d) / "lib.rs"
-            src.write_text(SOURCE + '\nfn z(&self) { self.get("/nodes/{}/qemu/{vmid}/nope") }\n')
-            rc = inv.main([str(apidoc), "--source", str(src), "--json"])
+            # Before the test module: a literal after `#[cfg(test)]` is not a call.
+            extra = 'fn z(&self) { self.get("/nodes/{}/qemu/{vmid}/nope") }\n'
+            src.write_text(SOURCE.replace("#[cfg(test)]", extra + "#[cfg(test)]"))
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = inv.main([str(apidoc), "--source", str(src), "--json"])
         self.assertEqual(rc, 1)
+        out = json.loads(buf.getvalue())
+        self.assertEqual(out["summary"]["states"].get(inv.NOT_IN_VERSION), 1)
+        self.assertEqual(out["summary"]["denominator"], 10, "a route the schema lacks is not in the denominator")
+
+
+class CommittedMatrix(unittest.TestCase):
+    """The gate: docs/proxmox/matrix-9.2.2.md is what the script regenerates."""
+
+    def test_the_committed_matrix_is_up_to_date(self):
+        schema = REPO / "docs/proxmox/api-9.2.2.routes.json"
+        matrix = REPO / "docs/proxmox/matrix-9.2.2.md"
+        if not schema.exists() or not matrix.exists():
+            self.skipTest("no committed 9.2.2 schema/matrix in this tree")
+        out = subprocess.run(
+            [sys.executable, str(REPO / "scripts/proxmox_api_inventory.py"), str(schema), "--markdown"],
+            cwd=REPO,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(out.returncode, 0, out.stdout + out.stderr)
+        self.assertEqual(
+            out.stdout,
+            matrix.read_text(encoding="utf-8"),
+            "docs/proxmox/matrix-9.2.2.md is stale — regenerate it: "
+            "python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --markdown "
+            "> docs/proxmox/matrix-9.2.2.md",
+        )
 
 
 if __name__ == "__main__":
