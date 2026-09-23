@@ -344,7 +344,8 @@ https://angolardevops.github.io/delonix-runtime/cheatsheet.html.
 Since v2.0.0 the surface has two halves that mean the same thing. The
 **imperative** groups below are the ones you type by hand (``container ps``,
 ``volume ls``); the **generic verbs** — ``get`` · ``describe`` · ``delete`` ·
-``apply`` · ``plan`` · ``diff`` · ``wait`` · ``explain`` · ``api-resources`` —
+``apply`` · ``plan`` · ``diff`` · ``drift`` · ``wait`` · ``explain`` ·
+``api-resources`` —
 address the same resources by Kind and plural (``get volumes``,
 ``describe networks lab``), which is what a script or a `kubectl`-shaped habit
 wants. ``delonix api-resources`` prints the whole catalogue: plural,
@@ -409,8 +410,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Dynamic autocompletion for bash/zsh/fish/elvish/powershell; roff manual pages generated from this binary; the version string.
    * - ``get`` · ``describe`` · ``delete``
      - The generic form of the per-group ``ls``/``describe``/``rm``, addressed by Kind and plural: ``get volumes``, ``describe networks lab``, ``delete secrets db-pass``.
-   * - ``apply`` · ``plan`` · ``diff`` · ``wait``
-     - The declarative verbs over a manifest, without naming a stack: converge it, see what would change, compare declared vs last-applied vs observed, block until ready.
+   * - ``apply`` · ``plan`` · ``diff`` · ``drift`` · ``wait``
+     - The declarative verbs over a manifest, without naming a stack: converge it, see what would change, compare declared vs last-applied vs observed for one resource, report what the MACHINE changed since the last apply (``drift``, manifest optional), block until ready.
    * - ``explain`` · ``api-resources``
      - The field reference for a Kind (``kubectl explain`` style, read from the generated schema) and the catalogue of every Kind this engine serves.
 

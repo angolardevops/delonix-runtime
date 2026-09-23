@@ -653,6 +653,16 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["stack plan", "describe", "get"],
     },
     Entry {
+        path: "drift",
+        group: "Declarative",
+        examples: &[
+            ("what the machine changed since the last apply, every stack", "delonix drift"),
+            ("one stack only", "delonix drift --stack shop"),
+            ("a CI gate: exit 2 means something moved outside the manifest", "delonix drift --detailed-exitcode"),
+        ],
+        see_also: &["diff", "stack plan", "stack apply"],
+    },
+    Entry {
         path: "config",
         group: "Engine",
         examples: &[

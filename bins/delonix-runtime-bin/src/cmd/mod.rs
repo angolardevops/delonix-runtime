@@ -14,6 +14,7 @@ pub mod dash;
 pub mod dependency;
 pub mod diff;
 pub mod dockerapi;
+pub mod drift;
 pub mod etcd;
 pub use delonix_model::exitcode;
 pub mod features;

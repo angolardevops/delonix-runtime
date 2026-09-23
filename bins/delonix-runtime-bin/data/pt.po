@@ -13335,3 +13335,36 @@ msgstr "remove o tecto num terminal — pede confirmação primeiro"
 
 msgid "in a script, where nobody can answer the prompt"
 msgstr "num script, onde ninguém pode responder ao pedido"
+
+msgid "What the MACHINE changed since the last apply — the whole stack, no target named"
+msgstr "O que a MÁQUINA mudou desde o último apply — a stack inteira, sem alvo nomeado"
+
+msgid "What the MACHINE changed since the last apply — the whole stack, no target named.\n\n`stack plan` answers \"what would an apply do\", which mixes the edits someone just made to the FILE with the edits someone made to the NODE. This drops the manifest from the comparison and keeps the two faces that belong to the node: the spec stamped on each resource when it was last applied, and what it looks like now. Whatever differs happened outside the declarative path.\n\nThe manifest is OPTIONAL: on a node without the repo this still answers, and says out loud which Kinds it could not enumerate without the file."
+msgstr "O que a MÁQUINA mudou desde o último apply — a stack inteira, sem alvo nomeado.\n\nO `stack plan` responde \"o que faria um apply\", e isso mistura as edições que alguém acabou de fazer ao FICHEIRO com as que alguém fez ao NÓ. Isto tira o manifesto da comparação e fica com as duas faces que pertencem ao nó: o spec carimbado em cada recurso quando foi aplicado pela última vez, e o que ele é agora. O que diferir aconteceu fora do caminho declarativo.\n\nO manifesto é OPCIONAL: num nó sem o repositório isto responde na mesma, e diz em voz alta que Kinds não conseguiu enumerar sem o ficheiro."
+
+msgid "Manifest to read (default: `./delonix-manifest.yaml` if present)"
+msgstr "Manifesto a ler (por omissão: `./delonix-manifest.yaml`, se existir)"
+
+msgid "Only this stack's resources (default: every stack on this node)"
+msgstr "Só os recursos desta stack (por omissão: todas as stacks deste nó)"
+
+msgid "Exit 2 when there IS drift (0 = none, 1 = error) — the `terraform plan -detailed-exitcode` contract, for a CI drift gate"
+msgstr "Sai com 2 quando HÁ deriva (0 = nenhuma, 1 = erro) — o contrato do `terraform plan -detailed-exitcode`, para um portão de deriva em CI"
+
+msgid "what the machine changed since the last apply, every stack"
+msgstr "o que a máquina mudou desde o último apply, em todas as stacks"
+
+msgid "one stack only"
+msgstr "só uma stack"
+
+msgid "a CI gate: exit 2 means something moved outside the manifest"
+msgstr "um portão de CI: sair com 2 quer dizer que algo mexeu fora do manifesto"
+
+msgid "no drift: every stamped field still matches the machine"
+msgstr "sem deriva: todo o campo carimbado continua igual ao da máquina"
+
+msgid "{count} resource(s) carry no last-applied stamp, so there is nothing to compare: {names}"
+msgstr "{count} recurso(s) não trazem carimbo de último-aplicado, por isso não há com que comparar: {names}"
+
+msgid "NOT CHECKED (no manifest found): {kinds} — their state is only enumerable from the document. Pass -f to include them."
+msgstr "NÃO VERIFICADO (sem manifesto): {kinds} — o estado deles só é enumerável a partir do documento. Passa -f para os incluir."

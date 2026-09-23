@@ -65,6 +65,7 @@
 ~	delete
 ~	describe
 ~	diff
+~	drift
 =	explain
 ~	get
 ~	hosts sync
