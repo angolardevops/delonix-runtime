@@ -6230,6 +6230,67 @@ nada. A correcção foi extrair `auto_detect(&[BackendRegistration])` e dar-lhe 
 candidato saltado é mesmo alcançado. Os três defeitos foram depois verificados pela regra do
 repo: revertidos um a um, cada teste falha.
 
+## O transporte Proxmox: erros com classe, um livro de tarefas, e a resposta perdida (ADR-0049, fatia 1, 2026-09-23)
+
+O ADR-0049 (fundido no #474) fixou o denominador — **16 de 675 rotas do schema PVE 9.2.2,
+2,4 %** — e deixou a fatia 1 por fazer: o transporte. O que estava, medido antes de mexer:
+TLS verificado por omissão e `insecure_tls` opt-in (bom), `wait_task` a ler o `exitstatus`
+(bom), e três coisas que não estavam — um único `HttpStatus(String)` para todo o não-2xx,
+`resp.text().unwrap_or_default()` a transformar uma ligação cortada num corpo vazio que
+depois falhava como «JSON malformado do nó», e um `#[derive(Debug)]` no `Auth` a pôr o
+segredo do token em qualquer `{:?}`.
+
+- **A CLASSE de um erro é o que um exit code e um reconciliador lêem.** 401 → `Unauthorized`,
+  403 → `Forbidden`, 404 → `NotFound` (exit 4), 409 → `Conflict` (5), 400/422 → `BadRequest`,
+  502–504 → `Unavailable` (69). O texto mantém a forma que a CLI sempre imprimiu. **O Proxmox
+  diz a maior parte dos erros de aplicação com HTTP 500** — «Configuration file … does not
+  exist» e «already exists» incluídos; esses dois lêem-se do corpo (a disciplina do
+  `is_lock_timeout`), o resto do 500 fica genérico. Códigos `DX-1526/4504/5504/6506/9515-9517`.
+- **Uma resposta perdida NÃO é um pedido perdido.** Um `create` cuja ligação caiu depois de o
+  nó o aceitar está a correr no nó sem ninguém à espera; reenviá-lo faz uma segunda VM. Uma
+  falha de transporte na submissão é seguida de `GET /nodes/{node}/tasks?vmid=…&source=active`
+  (a 17.ª rota): uma tarefa do tipo esperado em curso é ESPERADA em vez de reenviada; sem
+  tarefa, uma sonda de efeito (`config` existe, `status == running`, o snapshot está na lista)
+  aceita o que já lá está; só quando o nó não mostra nem uma coisa nem outra é que o erro de
+  transporte fica de pé — e o chamador decide. O `rollback` não tem sonda de propósito: não há
+  leitura que distinga «revertido» de «não revertido».
+- **O livro de tarefas é estado durável, não memória de processo** (`<vmdir>/proxmox-tasks.json`):
+  o UPID é escrito ANTES da espera e assentado DEPOIS (`ok`/`failed{reason}`/`timedout`). Um
+  processo morto a meio deixa `submitted` em disco e a operação seguinte na mesma VM
+  (`stop`/`destroy`/`resume`/`snapshot`/`restore`) **espera por ela primeiro** — um `stop` por
+  cima de um `start` em curso é uma corrida que o nó decide, não o cliente. `TaskTimeout` é
+  veredicto DESTE cliente, não prova de falha da tarefa, e o livro di-lo como `timedout`.
+  Um livro que não se consegue escrever avisa e deixa a operação seguir — um `stop` recusado
+  por um ficheiro de contabilidade seria a falha pior. **Bug apanhado pelo próprio teste**: o
+  `settle` assentava no PRIMEIRO registo com aquele UPID; passou ao mais recente.
+- **Corpo limitado a 16 MiB** (`MAX_RESPONSE_BYTES`, um byte a mais é `ResponseTooLarge`), erro
+  de leitura é `Request` e não `Decode`, pool de 4 ligações por nó, `ca_cert_pem`
+  (`DELONIX_PROXMOX_CA_FILE`) para verificar um nó com CA interna sem desligar a verificação,
+  e `Debug` à mão em `Auth`/`Ticket` com `<redacted>`.
+- **Os testes correm contra um nó TLS FALSO** (`tests/failure_injection.rs`): o cliente recusa
+  `http://`, por isso o mock é um `TcpListener` com certificado do `rcgen` servido pelo `rustls`
+  — dev-dependencies só, o `cargo tree -e normal` do crate não muda. Catorze cenários: TLS
+  recusado sem CA e aceite com a mesma CA, as sete classes de status, ticket renovado UMA vez
+  num 401 e token nunca, corpo truncado, JSON inesperado, resposta parada a bater no tecto de
+  pedido, corpo acima do limite, veredicto lido do `exitstatus`, tempo esgotado como
+  `timedout`, tarefa herdada esperada antes de operar, e os três desfechos da resposta perdida.
+  Cada asserção lê o LOG do mock (o que foi enviado, quantas vezes) e o livro em disco — nunca
+  só o `Ok` da chamada. **Armadilha do mock**: o cliente percent-codifica o UPID (`root@pam` →
+  `root%40pam`); sem descodificar, o script do mock não casava e a resposta caía no stock
+  «stopped/OK», que fazia dois testes passar pela razão errada e um terceiro falhar.
+- **O numerador da matriz passa a poder vir de uma corrida real**:
+  `DELONIX_PROXMOX_TRACE_ROUTES=<ficheiro>` faz o cliente acrescentar `METHOD /caminho` por
+  pedido, e `scripts/proxmox_api_inventory.py --trace` promove a rota a `supported+tested`.
+  Hoje a matriz commitada (`docs/proxmox/matrix-9.2.2.md`, gerada do
+  `docs/proxmox/api-9.2.2.routes.json` com proveniência) diz **17 chamadas, 0 testadas ao
+  vivo** — a prova ao vivo do ADR-0039 é anterior ao trace e não foi repetida. O
+  `test_proxmox_api_inventory.py` falha se a matriz commitada divergir da regenerada.
+
+**Não validado nesta fatia**: nada correu contra o cluster real — não há credencial nesta
+sessão, e o `tests/live.rs` continua a ser o caminho para a fazer (`DELONIX_PROXMOX_TEST_*`, com
+o trace ligado para a matriz ganhar a coluna «tested»); o nome dos workers `qmclone`/`qmrollback`
+segue o padrão dos cinco observados no spike do ADR-0008 e só o mock os exercitou.
+
 ## A imagem base não leva credenciais, e diz o que tem dentro (2026-08-18)
 
 Revisão da `delonix-vm-base` contra o que uma cloud exige de uma imagem base. Sete lacunas;

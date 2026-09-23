@@ -20,3 +20,11 @@ reqwest = { workspace = true, features = ["blocking", "rustls-tls-webpki-roots",
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# A TLS mock node: the client only speaks https, so every failure-injection
+# test (401/403/404/409/5xx, truncated body, task failed, timeout) needs a
+# listener with a certificate. `ring` is the provider already in the tree.
+rustls = { workspace = true, features = ["ring", "std", "tls12"] }
+rcgen = { workspace = true, features = ["ring", "pem"] }
+tempfile = { workspace = true }

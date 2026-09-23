@@ -1,0 +1,795 @@
+//! Failure injection against a TLS mock node.
+//!
+//! The client refuses `http://`, so the mock is a real listener with a
+//! certificate `rcgen` mints per test and `rustls` serves — which is also what
+//! makes the two TLS cases provable: a certificate the client cannot verify is
+//! refused, and the same certificate handed over as `ca_cert_pem` is accepted
+//! WITHOUT `insecure_tls`.
+//!
+//! What every scenario asserts is read from two places the client cannot
+//! fake: the request LOG the mock keeps (what was sent, in what order, how
+//! many times) and the task LEDGER on disk. "The call returned Ok" is never the
+//! whole assertion.
+
+use std::collections::VecDeque;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use delonix_proxmox::{
+    Auth, Client, ClientOptions, Error, Ledger, Target, TaskState, MAX_RESPONSE_BYTES,
+    TRACE_ROUTES_ENV,
+};
+
+// ===========================================================================
+// The mock node
+// ===========================================================================
+
+/// What the mock does with one request.
+#[derive(Clone)]
+enum Reply {
+    /// A JSON answer with this status.
+    Json(u16, String),
+    /// Announce `claimed` bytes, send only `body`, then close: a body cut by
+    /// the network, as the client sees it.
+    Truncated { claimed: usize, body: String },
+    /// Close the socket without answering: the request may or may not have
+    /// been acted on — the client cannot tell.
+    Drop,
+    /// Sleep this long, then answer 200 `{"data":null}` — past the client's
+    /// request timeout, an answer that never comes.
+    Stall(Duration),
+    /// A 200 with a body of exactly this many bytes of JSON.
+    Huge(usize),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Seen {
+    method: String,
+    path: String,
+}
+
+struct MockNode {
+    base_url: String,
+    cert_pem: String,
+    log: Arc<Mutex<Vec<Seen>>>,
+}
+
+/// A script: the reply for each (method, path), consumed in order when several
+/// are queued for the same route. A route with no script gets the node's
+/// stock answers (login, node list, an OK task) — the boring parts every
+/// scenario needs.
+type Script = Arc<Mutex<Vec<((String, String), VecDeque<Reply>)>>>;
+
+fn stock(method: &str, path: &str) -> Reply {
+    match (method, path) {
+        ("POST", "/access/ticket") => Reply::Json(
+            200,
+            r#"{"data":{"ticket":"PVE:root@pam:TICKET-1","CSRFPreventionToken":"CSRF-1"}}"#.into(),
+        ),
+        ("GET", "/nodes") => Reply::Json(200, r#"{"data":[{"node":"pve"}]}"#.into()),
+        (_, p) if p.contains("/tasks/") && p.ends_with("/status") => Reply::Json(
+            200,
+            r#"{"data":{"status":"stopped","exitstatus":"OK"}}"#.into(),
+        ),
+        _ => Reply::Json(
+            500,
+            r#"{"data":null,"message":"mock: no script for this route"}"#.into(),
+        ),
+    }
+}
+
+impl MockNode {
+    fn start(script: Script) -> Self {
+        let ck = rcgen::generate_simple_self_signed(vec!["localhost".to_string()]).unwrap();
+        let cert_pem = ck.cert.pem();
+        let cert_der = rustls::pki_types::CertificateDer::from(ck.cert.der().to_vec());
+        let key_der = rustls::pki_types::PrivateKeyDer::Pkcs8(
+            rustls::pki_types::PrivatePkcs8KeyDer::from(ck.key_pair.serialize_der()),
+        );
+        let cfg = rustls::ServerConfig::builder_with_provider(Arc::new(
+            rustls::crypto::ring::default_provider(),
+        ))
+        .with_safe_default_protocol_versions()
+        .unwrap()
+        .with_no_client_auth()
+        .with_single_cert(vec![cert_der], key_der)
+        .unwrap();
+        let cfg = Arc::new(cfg);
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let log: Arc<Mutex<Vec<Seen>>> = Arc::new(Mutex::new(Vec::new()));
+        let log2 = log.clone();
+        std::thread::spawn(move || {
+            for tcp in listener.incoming() {
+                let Ok(tcp) = tcp else { break };
+                let cfg = cfg.clone();
+                let script = script.clone();
+                let log = log2.clone();
+                std::thread::spawn(move || serve_one(tcp, cfg, script, log));
+            }
+        });
+        Self {
+            base_url: format!("https://localhost:{port}"),
+            cert_pem,
+            log,
+        }
+    }
+
+    fn log(&self) -> Vec<Seen> {
+        self.log.lock().unwrap().clone()
+    }
+
+    fn count(&self, method: &str, path: &str) -> usize {
+        self.log()
+            .iter()
+            .filter(|s| s.method == method && s.path == path)
+            .count()
+    }
+}
+
+fn serve_one(
+    mut tcp: std::net::TcpStream,
+    cfg: Arc<rustls::ServerConfig>,
+    script: Script,
+    log: Arc<Mutex<Vec<Seen>>>,
+) {
+    let mut conn = rustls::ServerConnection::new(cfg).unwrap();
+    let mut tls = rustls::Stream::new(&mut conn, &mut tcp);
+    // Head: up to the blank line.
+    let mut head = Vec::new();
+    let mut byte = [0u8; 1];
+    loop {
+        match tls.read(&mut byte) {
+            Ok(1) => {
+                head.push(byte[0]);
+                if head.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            _ => return,
+        }
+    }
+    let head = String::from_utf8_lossy(&head).into_owned();
+    let mut lines = head.lines();
+    let request_line = lines.next().unwrap_or_default();
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next().unwrap_or_default().to_string();
+    let target = parts.next().unwrap_or_default();
+    let content_length: usize = lines
+        .filter_map(|l| l.split_once(':'))
+        .find(|(k, _)| k.eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, v)| v.trim().parse().ok())
+        .unwrap_or(0);
+    let mut body = vec![0u8; content_length];
+    if content_length > 0 && tls.read_exact(&mut body).is_err() {
+        return;
+    }
+    // Strip the API prefix and the query, and undo the percent-encoding the
+    // client applies to a UPID (`root@pam` travels as `root%40pam`): the
+    // script is keyed by the route as a test writes it.
+    let path = percent_decode(
+        target
+            .strip_prefix("/api2/json")
+            .unwrap_or(target)
+            .split('?')
+            .next()
+            .unwrap_or_default(),
+    );
+    log.lock().unwrap().push(Seen {
+        method: method.clone(),
+        path: path.clone(),
+    });
+    let reply = {
+        let mut s = script.lock().unwrap();
+        let queued = s
+            .iter_mut()
+            .find(|(k, _)| k.0 == method && k.1 == path)
+            .and_then(|(_, q)| q.pop_front());
+        queued.unwrap_or_else(|| stock(&method, &path))
+    };
+    let write_json = |tls: &mut rustls::Stream<
+        '_,
+        rustls::ServerConnection,
+        std::net::TcpStream,
+    >,
+                      status: u16,
+                      body: &[u8]| {
+        let reason = match status {
+            200 => "OK",
+            400 => "Bad Request",
+            401 => "Unauthorized",
+            403 => "Forbidden",
+            404 => "Not Found",
+            409 => "Conflict",
+            422 => "Unprocessable Entity",
+            500 => "Internal Server Error",
+            503 => "Service Unavailable",
+            _ => "Status",
+        };
+        let _ = write!(
+            tls,
+            "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = tls.write_all(body);
+        let _ = tls.flush();
+    };
+    match reply {
+        Reply::Json(status, body) => write_json(&mut tls, status, body.as_bytes()),
+        Reply::Truncated { claimed, body } => {
+            let _ = write!(
+                tls,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {claimed}\r\nConnection: close\r\n\r\n"
+            );
+            let _ = tls.write_all(body.as_bytes());
+            let _ = tls.flush();
+        }
+        Reply::Drop => {}
+        Reply::Stall(d) => {
+            std::thread::sleep(d);
+            write_json(&mut tls, 200, br#"{"data":null}"#);
+        }
+        Reply::Huge(n) => {
+            // `{"data":"aaaa…"}` of exactly n bytes.
+            let filler = n.saturating_sub(11);
+            let mut body = Vec::with_capacity(n);
+            body.extend_from_slice(br#"{"data":""#);
+            body.resize(body.len() + filler, b'a');
+            body.extend_from_slice(br#""}"#);
+            write_json(&mut tls, 200, &body);
+        }
+    }
+    tls.conn.send_close_notify();
+    let _ = tls.flush();
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+// ===========================================================================
+// Scenario plumbing
+// ===========================================================================
+
+fn script(entries: &[(&str, &str, Reply)]) -> Script {
+    let mut v: Vec<((String, String), VecDeque<Reply>)> = Vec::new();
+    for (m, p, r) in entries {
+        let key = (m.to_string(), p.to_string());
+        match v.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, q)) => q.push_back(r.clone()),
+            None => v.push((key, VecDeque::from([r.clone()]))),
+        }
+    }
+    Arc::new(Mutex::new(v))
+}
+
+fn token_target(node: &MockNode) -> Target {
+    Target {
+        base_url: node.base_url.clone(),
+        node: "pve".into(),
+        auth: Auth::ApiToken {
+            id: "root@pam!delonix".into(),
+            secret: "the-token-secret-value".into(),
+        },
+        insecure_tls: true,
+        bridge: None,
+        vlan: None,
+        ca_cert_pem: None,
+    }
+}
+
+fn password_target(node: &MockNode) -> Target {
+    Target {
+        auth: Auth::Password {
+            username: "root@pam".into(),
+            password: "the-password-value".into(),
+        },
+        ..token_target(node)
+    }
+}
+
+fn fast() -> ClientOptions {
+    ClientOptions {
+        request_timeout: Duration::from_secs(3),
+        task_timeout: Duration::from_millis(600),
+    }
+}
+
+const UPID: &str = "UPID:pve:0001A2B3:0000C4D5:66F0:qmstart:100:root@pam:";
+const CONFIG: &str = "/nodes/pve/qemu/100/config";
+
+fn ok_data(v: &str) -> Reply {
+    Reply::Json(200, format!(r#"{{"data":{v}}}"#))
+}
+
+// ===========================================================================
+// TLS
+// ===========================================================================
+
+#[test]
+fn a_certificate_the_client_cannot_verify_is_refused_and_the_same_one_as_ca_is_accepted() {
+    let node = MockNode::start(script(&[]));
+    let strict = Target {
+        insecure_tls: false,
+        ..token_target(&node)
+    };
+    let err = Client::connect_with(&strict, fast())
+        .err()
+        .expect("no CA, no trust");
+    assert!(matches!(err, Error::Request(_)), "{err}");
+    assert_eq!(
+        node.log().len(),
+        0,
+        "nothing reached the node over a handshake that failed"
+    );
+
+    let with_ca = Target {
+        insecure_tls: false,
+        ca_cert_pem: Some(node.cert_pem.clone().into_bytes()),
+        ..token_target(&node)
+    };
+    Client::connect_with(&with_ca, fast()).expect("verified against the CA given");
+    assert_eq!(node.count("GET", "/nodes"), 1);
+}
+
+// ===========================================================================
+// Status classes
+// ===========================================================================
+
+#[test]
+fn every_status_class_arrives_typed_and_nothing_is_resent() {
+    let node = MockNode::start(script(&[
+        ("GET", CONFIG, Reply::Json(404, r#"{"data":null}"#.into())),
+        ("GET", CONFIG, Reply::Json(403, r#"{"data":null,"message":"Permission check failed (/vms/100, VM.Audit)"}"#.into())),
+        ("GET", CONFIG, Reply::Json(409, r#"{"data":null}"#.into())),
+        ("GET", CONFIG, Reply::Json(400, r#"{"data":null,"errors":{"memory":"invalid"}}"#.into())),
+        ("GET", CONFIG, Reply::Json(503, r#"{"data":null}"#.into())),
+        ("GET", CONFIG, Reply::Json(500, r#"{"data":null,"message":"Configuration file 'nodes/pve/qemu-server/100.conf' does not exist\n"}"#.into())),
+        ("GET", CONFIG, Reply::Json(500, r#"{"data":null,"message":"unable to open file"}"#.into())),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let e = client.config(100).unwrap_err();
+    assert!(matches!(e, Error::NotFound(_)), "{e}");
+    let e = client.config(100).unwrap_err();
+    assert!(matches!(e, Error::Forbidden(_)), "{e}");
+    assert!(
+        e.to_string().contains("VM.Audit"),
+        "the node's reason survives: {e}"
+    );
+    assert!(matches!(
+        client.config(100).unwrap_err(),
+        Error::Conflict(_)
+    ));
+    assert!(matches!(
+        client.config(100).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    assert!(matches!(
+        client.config(100).unwrap_err(),
+        Error::Unavailable(_)
+    ));
+    let e = client.config(100).unwrap_err();
+    assert!(
+        matches!(e, Error::NotFound(_)),
+        "a 500 'does not exist' is a missing VM: {e}"
+    );
+    assert!(matches!(
+        client.config(100).unwrap_err(),
+        Error::HttpStatus(_)
+    ));
+    assert_eq!(
+        node.count("GET", CONFIG),
+        7,
+        "one request per answer — no retry on a status"
+    );
+    assert!(client
+        .vm_exists(100)
+        .unwrap_err()
+        .to_string()
+        .contains("mock: no script"));
+}
+
+#[test]
+fn a_password_ticket_is_renewed_once_on_401_and_a_token_never_is() {
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(401, r#"{"data":null,"message":"invalid ticket"}"#.into()),
+        ),
+        ("GET", CONFIG, ok_data(r#"{"name":"vm100"}"#)),
+    ]));
+    let client = Client::connect_with(&password_target(&node), fast()).unwrap();
+    let cfg = client.config(100).expect("renewed and retried once");
+    assert_eq!(cfg["name"], "vm100");
+    let log = node.log();
+    let routes: Vec<(&str, &str)> = log
+        .iter()
+        .map(|s| (s.method.as_str(), s.path.as_str()))
+        .collect();
+    assert_eq!(
+        routes,
+        vec![
+            ("POST", "/access/ticket"),
+            ("GET", "/nodes"),
+            ("GET", CONFIG),
+            ("POST", "/access/ticket"),
+            ("GET", CONFIG),
+        ]
+    );
+
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(401, r#"{"data":null,"message":"invalid token"}"#.into()),
+        ),
+        ("GET", CONFIG, ok_data(r#"{"name":"vm100"}"#)),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let e = client.config(100).unwrap_err();
+    assert!(matches!(e, Error::Unauthorized(_)), "{e}");
+    assert_eq!(
+        node.count("POST", "/access/ticket"),
+        0,
+        "a token is never exchanged for a ticket"
+    );
+    assert_eq!(
+        node.count("GET", CONFIG),
+        1,
+        "a revoked token is not retried"
+    );
+}
+
+// ===========================================================================
+// Transport
+// ===========================================================================
+
+#[test]
+fn a_truncated_body_is_a_transport_failure_not_a_malformed_node() {
+    let node = MockNode::start(script(&[(
+        "GET",
+        CONFIG,
+        Reply::Truncated {
+            claimed: 4096,
+            body: r#"{"data":{"na"#.into(),
+        },
+    )]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let e = client.config(100).unwrap_err();
+    assert!(matches!(e, Error::Request(_)), "{e}");
+    assert!(e.to_string().contains("reading the answer"), "{e}");
+}
+
+#[test]
+fn unexpected_json_is_named_for_what_it_is() {
+    let node = MockNode::start(script(&[
+        ("GET", CONFIG, Reply::Json(200, r#"{"data":"#.into())),
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/start",
+            ok_data(r#""not a task id""#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    assert!(matches!(client.config(100).unwrap_err(), Error::Decode(_)));
+    let dir = tempfile::tempdir().unwrap();
+    let e = client.start(&Ledger::at(dir.path()), 100).unwrap_err();
+    assert!(matches!(e, Error::UnexpectedAnswer(_)), "{e}");
+    assert!(
+        Ledger::at(dir.path()).records().is_empty(),
+        "nothing to wait on, nothing recorded"
+    );
+}
+
+#[test]
+fn a_stalled_answer_hits_the_request_timeout() {
+    let node = MockNode::start(script(&[(
+        "GET",
+        CONFIG,
+        Reply::Stall(Duration::from_secs(6)),
+    )]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let started = std::time::Instant::now();
+    let e = client.config(100).unwrap_err();
+    assert!(matches!(e, Error::Request(_)), "{e}");
+    assert!(
+        started.elapsed() < Duration::from_secs(5),
+        "the 3 s request ceiling held"
+    );
+}
+
+#[test]
+fn a_body_past_the_bound_is_refused_not_read() {
+    let node = MockNode::start(script(&[(
+        "GET",
+        CONFIG,
+        Reply::Huge(MAX_RESPONSE_BYTES + 1),
+    )]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let e = client.config(100).unwrap_err();
+    assert!(matches!(e, Error::ResponseTooLarge(_)), "{e}");
+}
+
+// ===========================================================================
+// Tasks and the ledger
+// ===========================================================================
+
+#[test]
+fn a_task_verdict_is_read_from_exitstatus_and_the_ledger_records_it() {
+    let status = "/nodes/pve/tasks/UPID:pve:0001A2B3:0000C4D5:66F0:qmstart:100:root@pam:/status";
+    let node = MockNode::start(script(&[
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/start",
+            ok_data(&format!(r#""{UPID}""#)),
+        ),
+        ("GET", status, ok_data(r#"{"status":"running"}"#)),
+        (
+            "GET",
+            status,
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/stop",
+            ok_data(&format!(r#""{UPID}""#)),
+        ),
+        (
+            "GET",
+            status,
+            ok_data(r#"{"status":"stopped","exitstatus":"VM quit/powerdown failed"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    client.start(&ledger, 100).expect("stopped + OK is success");
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(recs[0].upid, UPID);
+    assert_eq!(recs[0].action, "start");
+    assert_eq!(recs[0].state, TaskState::Ok);
+    assert_eq!(
+        node.count("GET", status),
+        2,
+        "polled until terminal, no more"
+    );
+
+    let e = client.stop(&ledger, 100).unwrap_err();
+    assert!(matches!(e, Error::TaskFailed(_)), "{e}");
+    assert!(
+        e.to_string().contains("powerdown failed"),
+        "the node's reason: {e}"
+    );
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 2);
+    assert!(matches!(&recs[1].state, TaskState::Failed { reason } if reason.contains("powerdown")));
+}
+
+#[test]
+fn a_wait_that_gives_up_is_timed_out_in_the_ledger_and_not_failed() {
+    let status = "/nodes/pve/tasks/UPID:pve:0001A2B3:0000C4D5:66F0:qmstart:100:root@pam:/status";
+    let mut entries = vec![(
+        "POST",
+        "/nodes/pve/qemu/100/status/start",
+        ok_data(&format!(r#""{UPID}""#)),
+    )];
+    for _ in 0..40 {
+        entries.push(("GET", status, ok_data(r#"{"status":"running"}"#)));
+    }
+    let node = MockNode::start(script(&entries));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let e = client.start(&ledger, 100).unwrap_err();
+    assert!(matches!(e, Error::TaskTimeout(_)), "{e}");
+    assert!(e.to_string().contains("may still be running"), "{e}");
+    assert_eq!(ledger.records()[0].state, TaskState::TimedOut);
+    // And the record is still the thing to reconcile: a later status read
+    // settles it without resending anything.
+    assert_eq!(
+        ledger.pending().len(),
+        0,
+        "timed out is a verdict of THIS client, not pending"
+    );
+}
+
+#[test]
+fn a_leftover_task_in_the_ledger_is_waited_for_before_a_new_operation() {
+    let status = "/nodes/pve/tasks/UPID:pve:0001A2B3:0000C4D5:66F0:qmstart:100:root@pam:/status";
+    let node = MockNode::start(script(&[
+        ("GET", status, ok_data(r#"{"status":"running"}"#)),
+        (
+            "GET",
+            status,
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/status/current",
+            ok_data(r#"{"status":"stopped"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    // A record an earlier, killed process left behind.
+    std::fs::write(
+        dir.path().join("proxmox-tasks.json"),
+        format!(
+            r#"[{{"upid":"{UPID}","node":"pve","action":"start","vmid":100,"started_unix":1,"state":{{"state":"submitted"}}}}]"#
+        ),
+    )
+    .unwrap();
+    let ledger = Ledger::at(dir.path());
+    assert_eq!(ledger.pending().len(), 1);
+    client
+        .settle_pending(&ledger, 100)
+        .expect("waited for the leftover task");
+    assert_eq!(ledger.pending().len(), 0);
+    assert_eq!(ledger.records()[0].state, TaskState::Ok);
+    let log = node.log();
+    let routes: Vec<&str> = log.iter().map(|s| s.path.as_str()).collect();
+    // A token logs in with no ticket: the log is `GET /nodes` and then the two
+    // status reads — the reconcile's single look, and the wait's.
+    assert_eq!(
+        &routes[1..],
+        &[status, status],
+        "settled first, then nothing else was sent"
+    );
+}
+
+// ===========================================================================
+// A lost answer is not a lost request
+// ===========================================================================
+
+#[test]
+fn a_lost_answer_finds_the_running_task_instead_of_resending() {
+    let create_upid = "UPID:pve:0001A2B3:0000C4D5:66F0:qmcreate:100:root@pam:";
+    let status = format!("/nodes/pve/tasks/{create_upid}/status");
+    let node = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu", Reply::Drop),
+        (
+            "GET",
+            "/nodes/pve/tasks",
+            ok_data(&format!(
+                r#"[{{"upid":"{create_upid}","type":"qmcreate","status":"running"}}]"#
+            )),
+        ),
+        (
+            "GET",
+            &status,
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let cfg = delonix_vm::VmConfig {
+        name: "delonix-test-lost".into(),
+        ..Default::default()
+    };
+    client
+        .create_vm(&ledger, 100, "delonix-test-lost", &cfg, "local-lvm", 2)
+        .expect("the task the node was running finished OK");
+    assert_eq!(node.count("POST", "/nodes/pve/qemu"), 1, "NEVER resent");
+    assert_eq!(node.count("GET", "/nodes/pve/tasks"), 1);
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(
+        recs[0].upid, create_upid,
+        "the node's task, recorded as ours"
+    );
+    assert_eq!(recs[0].state, TaskState::Ok);
+}
+
+#[test]
+fn a_lost_answer_with_the_effect_already_there_is_accepted_without_a_task() {
+    let node = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/status/start", Reply::Drop),
+        ("GET", "/nodes/pve/tasks", ok_data("[]")),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/status/current",
+            ok_data(r#"{"status":"running"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    client
+        .start(&Ledger::at(dir.path()), 100)
+        .expect("running already: done");
+    assert_eq!(node.count("POST", "/nodes/pve/qemu/100/status/start"), 1);
+}
+
+#[test]
+fn a_lost_answer_with_nothing_on_the_node_stays_a_transport_error() {
+    let node = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu", Reply::Drop),
+        ("GET", "/nodes/pve/tasks", ok_data("[]")),
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(500, r#"{"data":null,"message":"Configuration file 'nodes/pve/qemu-server/100.conf' does not exist\n"}"#.into()),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = delonix_vm::VmConfig {
+        name: "delonix-test-lost".into(),
+        ..Default::default()
+    };
+    let e = client
+        .create_vm(
+            &Ledger::at(dir.path()),
+            100,
+            "delonix-test-lost",
+            &cfg,
+            "local-lvm",
+            2,
+        )
+        .unwrap_err();
+    assert!(matches!(e, Error::Request(_)), "{e}");
+    assert_eq!(
+        node.count("POST", "/nodes/pve/qemu"),
+        1,
+        "still never resent — the caller decides"
+    );
+    assert!(Ledger::at(dir.path()).records().is_empty());
+}
+
+// ===========================================================================
+// Secrets and the route trace
+// ===========================================================================
+
+#[test]
+fn the_secret_reaches_no_error_no_debug_output_and_no_trace_file() {
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(401, r#"{"data":null,"message":"invalid token"}"#.into()),
+        ),
+        (
+            "GET",
+            CONFIG,
+            Reply::Json(500, r#"{"data":null,"message":"boom"}"#.into()),
+        ),
+        ("GET", CONFIG, Reply::Drop),
+    ]));
+    let target = token_target(&node);
+    let trace = tempfile::NamedTempFile::new().unwrap();
+    std::env::set_var(TRACE_ROUTES_ENV, trace.path());
+    let client = Client::connect_with(&target, fast()).unwrap();
+    let mut texts = vec![format!("{target:?}")];
+    for _ in 0..3 {
+        let e = client.config(100).unwrap_err();
+        texts.push(e.to_string());
+        texts.push(format!("{e:?}"));
+        texts.push(delonix_model::Error::from(e).to_string());
+    }
+    std::env::remove_var(TRACE_ROUTES_ENV);
+    for t in &texts {
+        assert!(!t.contains("the-token-secret-value"), "leaked: {t}");
+    }
+    let traced = std::fs::read_to_string(trace.path()).unwrap();
+    assert!(!traced.contains("the-token-secret-value"));
+    assert!(traced.contains("GET /nodes\n"), "{traced}");
+    assert!(traced.contains(&format!("GET {CONFIG}\n")), "{traced}");
+}

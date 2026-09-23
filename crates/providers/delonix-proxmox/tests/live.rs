@@ -28,6 +28,7 @@ fn target() -> Option<Target> {
         insecure_tls: true,
         bridge: None,
         vlan: None,
+        ca_cert_pem: None,
     })
 }
 

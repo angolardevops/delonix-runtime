@@ -81,6 +81,17 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
     let vlan = lookup("DELONIX_PROXMOX_VLAN")
         .map(|v| parse_vlan(&v))
         .transpose()?;
+    // A CA to verify the node with, instead of switching verification off:
+    // the honest answer for a node whose certificate an internal CA signed.
+    let ca_cert_pem = lookup("DELONIX_PROXMOX_CA_FILE")
+        .map(|path| {
+            std::fs::read(&path).map_err(|e| {
+                delonix_model::Error::Invalid(format!(
+                    "DELONIX_PROXMOX_CA_FILE: could not read '{path}': {e}"
+                ))
+            })
+        })
+        .transpose()?;
 
     delonix_proxmox::register(delonix_proxmox::Target {
         base_url: url,
@@ -89,6 +100,7 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
         insecure_tls,
         bridge,
         vlan,
+        ca_cert_pem,
     })
 }
 
