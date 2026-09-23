@@ -308,6 +308,32 @@ enum Cmd {
         #[arg(long)]
         detailed_exitcode: bool,
     },
+    /// What the MACHINE changed since the last apply — the whole stack, no target named.
+    ///
+    /// `stack plan` answers "what would an apply do", which mixes the edits
+    /// someone just made to the FILE with the edits someone made to the NODE.
+    /// This drops the manifest from the comparison and keeps the two faces that
+    /// belong to the node: the spec stamped on each resource when it was last
+    /// applied, and what it looks like now. Whatever differs happened outside
+    /// the declarative path.
+    ///
+    /// The manifest is OPTIONAL: on a node without the repo this still answers,
+    /// and says out loud which Kinds it could not enumerate without the file.
+    Drift {
+        /// Manifest to read (default: `./delonix-manifest.yaml` if present).
+        #[arg(value_hint = clap::ValueHint::FilePath, short = 'f', long = "file")]
+        file: Option<std::path::PathBuf>,
+        /// Only this stack's resources (default: every stack on this node).
+        #[arg(long)]
+        stack: Option<String>,
+        /// Output format: `table` (default) or `json` (ADR-0005).
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: cmd::output::OutputFormat,
+        /// Exit 2 when there IS drift (0 = none, 1 = error) — the
+        /// `terraform plan -detailed-exitcode` contract, for a CI drift gate.
+        #[arg(long)]
+        detailed_exitcode: bool,
+    },
     /// A small, local preference — never a remote context.
     ///
     /// Only `output` (`table`|`json`) today. The specification's `endpoint`/
@@ -576,6 +602,12 @@ fn run() -> Result<()> {
             file,
             detailed_exitcode,
         } => cmd::diff::cmd_diff(&kind, &name, file, detailed_exitcode),
+        Cmd::Drift {
+            file,
+            stack,
+            output,
+            detailed_exitcode,
+        } => cmd::drift::cmd_drift(file, stack, output, detailed_exitcode),
         Cmd::Config { action } => cmd::config::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
@@ -1084,6 +1116,7 @@ mod cli_stability_classification_tests {
         "delete",
         "describe",
         "diff",
+        "drift",
         "explain",
         "get",
         "hosts",

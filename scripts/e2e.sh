@@ -1332,6 +1332,56 @@ check "stack apply --dry-run" ok "$BIN" stack apply -f "$WORK/delonix-manifest.y
 # O `--replace` só aceita `Kind/nome`; um valor sem barra tem de ser recusado.
 check "stack apply --replace mal formado recusa" fail \
   "$BIN" stack apply -f "$WORK/delonix-manifest.yaml" --replace lixo
+# ---- `delonix drift` (M05): o que a MÁQUINA mudou desde o último apply ----
+#
+# O CICLO é o que prova alguma coisa. Cada passo isolado devolve 0 mesmo com o
+# verbo partido: um `drift` que nunca reporte nada devolve 0 e imprime «sem
+# deriva», que é indistinguível de um nó limpo. Por isso: aplicar, confirmar
+# limpo, PROVOCAR deriva a quente, confirmar que aparece — e que o contrato de
+# exit code a acompanha (a única metade que um gate de CI consome).
+DRW="$WORK/drift"; mkdir -p "$DRW"
+cat >"$DRW/delonix-manifest.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: dr-$PFX
+spec:
+  image: $IMG
+  command: ["sleep", "600"]
+  memory: 64M
+  network: host
+YAML
+if "$BIN" stack apply -f "$DRW/delonix-manifest.yaml" >/dev/null 2>&1; then
+  check "drift: logo a seguir ao apply não há deriva" 0 \
+    "$BIN" drift -f "$DRW/delonix-manifest.yaml" --detailed-exitcode
+  "$BIN" container update "dr-$PFX" --memory 128M >/dev/null 2>&1
+  # A deriva TEM de nomear o campo e os dois valores. Um `--detailed-exitcode`
+  # sozinho diria «algo mexeu» sem dizer o quê, e foi por uma tabela que não
+  # nomeava o campo que esta bateria já passou uma vez.
+  check "drift: um update a quente aparece, com campo e valores" ok bash -c \
+    "'$BIN' drift -f '$DRW/delonix-manifest.yaml' | grep -q 'memory' && \
+     '$BIN' drift -f '$DRW/delonix-manifest.yaml' | grep -q '64M' && \
+     '$BIN' drift -f '$DRW/delonix-manifest.yaml' | grep -q '128M'"
+  check "drift: --detailed-exitcode devolve 2 quando há deriva" 2 \
+    "$BIN" drift -f "$DRW/delonix-manifest.yaml" --detailed-exitcode
+  # SEM manifesto — o caso que dá a este verbo a sua razão de ser: um nó onde o
+  # repositório não está. A deriva continua a aparecer, e os Kinds que só se
+  # enumeram a partir do documento são NOMEADOS em vez de omitidos em silêncio.
+  # Num directório SEM manifesto, e por isso `$DRW/vazio` e não `$DRW/..`: a
+  # pasta de cima é a da secção anterior e tem lá um `delonix-manifest.yaml`,
+  # que o `drift` encontra — o check passava a testar o caminho COM ficheiro
+  # com o nome do caminho sem. Apanhado na primeira corrida da bateria.
+  mkdir -p "$DRW/vazio"
+  check "drift: sem manifesto continua a ver, e diz o que não verificou" ok bash -c \
+    "cd '$DRW/vazio' && '$BIN' drift | grep -q 'memory' && '$BIN' drift | grep -q 'NOT CHECKED'"
+  check "drift: --stack de outra stack não vê esta deriva" 0 \
+    "$BIN" drift -f "$DRW/delonix-manifest.yaml" --stack naoexiste-$PFX --detailed-exitcode
+  "$BIN" stack destroy -f "$DRW/delonix-manifest.yaml" >/dev/null 2>&1
+  "$BIN" container rm -f "dr-$PFX" >/dev/null 2>&1
+else
+  skip "drift: o apply do container de teste não passou neste ambiente"
+fi
+
 check "stack destroy --dry-run" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml" --dry-run
 check "stack destroy" ok "$BIN" stack destroy -f "$WORK/delonix-manifest.yaml"
 # O destroy levou o que a stack possui — o `describe` a seguir tem de correr na

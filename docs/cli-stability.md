@@ -338,7 +338,7 @@ diz quais são, em vez de os omitir.
   acabou de absorver `storage`/`sharevolume` (#216) — está literalmente a
   meio de assentar, o pior momento possível para prometer nada sobre ele.
 * **`apply`, `plan`, `wait`, `stack`, `manifest`, `get`, `describe`,
-  `delete`, `diff`** — o ciclo de reconciliação nativo (IaC, v0.47.0+). O
+  `delete`, `diff`, `drift`** — o ciclo de reconciliação nativo (IaC, v0.47.0+). O
   SCHEMA dos manifestos que estes comandos consomem já é estável (secção
   acima); os VERBOS e flags destes comandos em si (`--detailed-exitcode`,
   `--prune`, `--replace`, …) nunca tiveram revisão própria, e a Kind mais

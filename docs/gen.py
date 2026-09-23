@@ -1510,6 +1510,17 @@ três VALORES subjacentes, para um recurso nomeado, lado a lado — a ferramenta
 veredicto por si só não explica a deriva.""",
         "subs": {},
     },
+    "drift": {
+        "title": "delonix drift",
+        "tagline": "O que a MÁQUINA mudou desde o último apply — a stack inteira.",
+        "intro": """O <code>stack plan</code> responde «o que faria um apply», e isso mistura as
+edições que alguém acabou de fazer ao FICHEIRO com as que alguém fez ao NÓ. Este comando tira o
+manifesto da comparação e fica com as duas faces que pertencem ao nó: o spec carimbado em cada
+recurso quando foi aplicado pela última vez, e o que ele é agora. O manifesto é OPCIONAL — num nó
+sem o repositório isto responde na mesma, e diz em voz alta que Kinds não conseguiu enumerar sem o
+ficheiro. Um recurso sem carimbo não é deriva: é um terceiro estado, nomeado e contado.""",
+        "subs": {},
+    },
     "wait": {
         "title": "delonix wait",
         "tagline": "Bloqueia até os recursos do manifesto estarem prontos.",
@@ -1966,6 +1977,15 @@ are differences) — the same contract as <code>terraform plan</code>, for a dri
 it only ever prints the VERDICT (Create/Update/Replace/NoOp). This prints the three underlying
 VALUES, for one named resource, side by side — the tool for when the verdict alone doesn't
 explain the drift.""",
+    },
+    "drift": {
+        "tagline": "What the MACHINE changed since the last apply — the whole stack.",
+        "intro": """<code>stack plan</code> answers «what would an apply do», which mixes the
+edits someone just made to the FILE with the edits someone made to the NODE. This drops the
+manifest from the comparison and keeps the two faces that belong to the node: the spec stamped on
+each resource when it was last applied, and what it looks like now. The manifest is OPTIONAL — on a
+node without the repo this still answers, and says out loud which Kinds it could not enumerate
+without the file. A resource with no stamp is not drift: it is a third state, named and counted.""",
     },
     "wait": {
         "tagline": "Block until the manifest's resources are ready.",

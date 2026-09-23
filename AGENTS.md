@@ -7163,3 +7163,58 @@ reporta `success` na mesma — um verde que não mediu nada.
 `ci.yml` invoca sete scripts Python como portões e não invocava um único dos seus
 testes — o `test_release_verify.py` nasceu ontem com dez testes que nada
 executava. O job `script-tests` corre-os todos, e falha se não encontrar nenhum.
+## `delonix drift` — o que a MÁQUINA mudou, sem o manifesto na comparação (M05)
+
+O `stack plan` responde «o que faria um apply». Essa resposta mistura duas
+coisas com origens diferentes: as edições que alguém acabou de fazer ao
+FICHEIRO e as edições que alguém fez ao NÓ. O próprio `--help` do `plan`
+admitia o limite — «with the manifest unchanged, whatever it prints IS drift» —
+e é essa condição que o torna inutilizável como portão: só é deriva enquanto
+ninguém tocar no ficheiro, e num PR o ficheiro mudou sempre.
+
+Este verbo tira o manifesto da comparação e fica com as duas faces que
+pertencem ao nó: o spec carimbado em cada recurso no último apply
+(`delonix.io/last-applied`) e o que ele é agora. O que diferir aconteceu FORA
+do caminho declarativo — um `container update`, um `nft` à mão, alguém a
+resolver um incidente às 3 da manhã.
+
+- **O manifesto é OPCIONAL, e é isso que lhe dá o caso de uso principal.** A
+  maioria dos `actual()` varre o seu próprio store (`container`, `volume`,
+  `network`, `netroute`, `service`, `ippool`, `pod`, `vm`,
+  `network_access_rule`) e não precisa de documento nenhum: num nó sem o
+  repositório o comando responde na mesma. Os que precisam — `RuntimePolicy`,
+  `Image`, `App`, `NetworkPolicy`, `HTTPRoute`, `Gateway` — são **NOMEADOS na
+  saída** em vez de omitidos; uma tabela mais curta lê-se como «nó limpo», que
+  é a desonestidade que este repo persegue em todo o lado.
+- **Um recurso sem carimbo é um TERCEIRO ESTADO, não deriva.** Criado à mão, ou
+  adoptado por uma versão anterior ao carimbo: não há intenção registada com
+  que comparar. Chamar-lhe deriva era inventar uma linha de base; escondê-lo
+  era pior. Conta-se e nomeia-se (`unstamped`).
+- **Só se comparam as chaves que o carimbo traz.** Um campo presente no
+  observado e ausente do carimbo é um default do motor que o apply nunca
+  definiu — reportá-lo enterrava a linha que interessa debaixo de um ecrã de
+  ruído. Há teste para os dois sentidos (o campo que mexeu, e o default que
+  não conta).
+- **`--detailed-exitcode` devolve 2 quando há deriva**, o mesmo contrato do
+  `plan` e do `diff`, que é o que um portão de CI consome.
+
+**O gate que a lista de Kinds dependentes-de-documento tem por trás, e o erro
+que apanhou na primeira corrida.** A constante `DOC_SCOPED` seria a sétima
+lista deste repositório que tem de concordar com outra e deixa de concordar em
+silêncio — por isso não é só uma constante: o teste
+`doc_scoped_matches_the_stack_wiring` lê o `stack.rs` e compara. À primeira
+passagem chumbou por uma razão que eu não tinha visto: o
+`network_access_rule::actual` é chamado com `docs` como os outros **e ignora-os**
+(`fn actual(_docs: …)`). Ler o call-site não bastava; o gate passou a ler
+também a ASSINATURA de cada candidato, e o `NetworkAccessRule` saiu da lista —
+avisar sobre um Kind que o comando consegue enumerar perfeitamente gasta o
+mesmo crédito que esquecer um que não consegue.
+
+**Validado ao vivo** (root isolado, binário da árvore): `stack apply` de um
+container com `memory: 64M` → `drift` limpo; `container update --memory 128M`
+(o mexer-à-mão) → a tabela mostra `memory  64M → 128M`; `--detailed-exitcode`
+devolve **2**; `-o json` traz as três secções; **de outro directório e sem
+manifesto** a deriva continua a aparecer, com os seis Kinds não verificados
+nomeados; e com o carimbo removido do registo à mão (o caso do recurso
+adoptado por uma versão antiga) a saída passa a `1 resource(s) carry no
+last-applied stamp`, sem uma linha de deriva.
