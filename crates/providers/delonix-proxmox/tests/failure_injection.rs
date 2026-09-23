@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use delonix_proxmox::{
     Auth, Client, ClientOptions, Error, Ledger, Target, TaskState, MAX_RESPONSE_BYTES,
-    TRACE_ROUTES_ENV,
 };
 
 // ===========================================================================
@@ -308,6 +307,7 @@ fn fast() -> ClientOptions {
     ClientOptions {
         request_timeout: Duration::from_secs(3),
         task_timeout: Duration::from_millis(600),
+        trace_routes: None,
     }
 }
 
@@ -365,7 +365,7 @@ fn every_status_class_arrives_typed_and_nothing_is_resent() {
     ]));
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let e = client.config(100).unwrap_err();
-    assert!(matches!(e, Error::NotFound(_)), "{e}");
+    assert!(matches!(e, Error::NodeNotFound(_)), "{e}");
     let e = client.config(100).unwrap_err();
     assert!(matches!(e, Error::Forbidden(_)), "{e}");
     assert!(
@@ -374,7 +374,7 @@ fn every_status_class_arrives_typed_and_nothing_is_resent() {
     );
     assert!(matches!(
         client.config(100).unwrap_err(),
-        Error::Conflict(_)
+        Error::NodeConflict(_)
     ));
     assert!(matches!(
         client.config(100).unwrap_err(),
@@ -382,11 +382,11 @@ fn every_status_class_arrives_typed_and_nothing_is_resent() {
     ));
     assert!(matches!(
         client.config(100).unwrap_err(),
-        Error::Unavailable(_)
+        Error::NodeUnavailable(_)
     ));
     let e = client.config(100).unwrap_err();
     assert!(
-        matches!(e, Error::NotFound(_)),
+        matches!(e, Error::NodeNotFound(_)),
         "a 500 'does not exist' is a missing VM: {e}"
     );
     assert!(matches!(
@@ -775,8 +775,11 @@ fn the_secret_reaches_no_error_no_debug_output_and_no_trace_file() {
     ]));
     let target = token_target(&node);
     let trace = tempfile::NamedTempFile::new().unwrap();
-    std::env::set_var(TRACE_ROUTES_ENV, trace.path());
-    let client = Client::connect_with(&target, fast()).unwrap();
+    let opts = ClientOptions {
+        trace_routes: Some(trace.path().to_path_buf()),
+        ..fast()
+    };
+    let client = Client::connect_with(&target, opts).unwrap();
     let mut texts = vec![format!("{target:?}")];
     for _ in 0..3 {
         let e = client.config(100).unwrap_err();
@@ -784,7 +787,6 @@ fn the_secret_reaches_no_error_no_debug_output_and_no_trace_file() {
         texts.push(format!("{e:?}"));
         texts.push(delonix_model::Error::from(e).to_string());
     }
-    std::env::remove_var(TRACE_ROUTES_ENV);
     for t in &texts {
         assert!(!t.contains("the-token-secret-value"), "leaked: {t}");
     }

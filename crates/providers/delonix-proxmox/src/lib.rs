@@ -60,9 +60,9 @@ use std::time::{Duration, Instant};
 /// whatever answers in its name — decide how much memory this process takes.
 pub const MAX_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 
-/// Set to a file path, every request appends `METHOD /path` to it — the
-/// numerator of the coverage matrix (`scripts/proxmox_api_inventory.py
-/// --trace`), read from what a run actually sent and not from the source.
+/// The environment variable the CLI reads into [`ClientOptions::trace_routes`]
+/// (`DELONIX_PROXMOX_TRACE_ROUTES=<file>`). The library itself never reads the
+/// environment; the composition root does, once.
 pub const TRACE_ROUTES_ENV: &str = "DELONIX_PROXMOX_TRACE_ROUTES";
 
 /// How long to wait for a Proxmox task before giving up. A create that
@@ -161,6 +161,10 @@ pub struct ClientOptions {
     /// state before reporting [`Error::TaskTimeout`] — which is NOT proof the
     /// task failed; the task may still be running on the node.
     pub task_timeout: Duration,
+    /// A file every request appends `METHOD /path` to — the numerator of the
+    /// coverage matrix (`scripts/proxmox_api_inventory.py --trace`), read from
+    /// what a run actually sent and not from the source. `None` traces nothing.
+    pub trace_routes: Option<PathBuf>,
 }
 
 impl Default for ClientOptions {
@@ -168,6 +172,7 @@ impl Default for ClientOptions {
         Self {
             request_timeout: Duration::from_secs(120),
             task_timeout: TASK_TIMEOUT,
+            trace_routes: None,
         }
     }
 }
@@ -437,6 +442,7 @@ pub struct Client {
     bridge: String,
     vlan: Option<u16>,
     task_timeout: Duration,
+    trace_routes: Option<PathBuf>,
 }
 
 impl Client {
@@ -479,6 +485,7 @@ impl Client {
             bridge: target.bridge.clone().unwrap_or_else(|| "vmbr0".to_string()),
             vlan: target.vlan,
             task_timeout: opts.task_timeout,
+            trace_routes: opts.trace_routes,
         };
         me.login()?;
         // Prove the credential AND the node name before anything is created:
@@ -544,7 +551,7 @@ impl Client {
         authed: bool,
     ) -> Result<String> {
         let rb = if authed { self.authed(rb) } else { rb };
-        trace_route(method, path);
+        trace_route(self.trace_routes.as_deref(), method, path);
         let resp = rb
             .send()
             .map_err(|e| Error::Request(format!("proxmox: request failed: {e}")))?;
@@ -686,7 +693,7 @@ impl Client {
     pub fn vm_exists(&self, vmid: u32) -> Result<bool> {
         match self.config(vmid) {
             Ok(_) => Ok(true),
-            Err(Error::NotFound(_)) => Ok(false),
+            Err(Error::NodeNotFound(_)) => Ok(false),
             Err(e) => Err(e),
         }
     }
@@ -1185,33 +1192,30 @@ fn classify_status(status: reqwest::StatusCode, base: &str, path: &str, body: &s
     match status.as_u16() {
         401 => Error::Unauthorized(text),
         403 => Error::Forbidden(text),
-        404 => Error::NotFound(format!("Proxmox resource at {path_only}: {text}")),
-        409 => Error::Conflict(text),
+        404 => Error::NodeNotFound(format!("Proxmox resource at {path_only}: {text}")),
+        409 => Error::NodeConflict(text),
         400 | 422 => Error::BadRequest(text),
-        502..=504 => Error::Unavailable(text),
+        502..=504 => Error::NodeUnavailable(text),
         500 if body.contains("does not exist") => {
-            Error::NotFound(format!("Proxmox resource at {path_only}: {text}"))
+            Error::NodeNotFound(format!("Proxmox resource at {path_only}: {text}"))
         }
-        500 if body.contains("already exists") => Error::Conflict(text),
+        500 if body.contains("already exists") => Error::NodeConflict(text),
         _ => Error::HttpStatus(text),
     }
 }
 
-/// Appends `METHOD /path` to the file named by [`TRACE_ROUTES_ENV`], if set.
-/// The query is dropped: the matrix is keyed by route, not by arguments.
-fn trace_route(method: &str, path: &str) {
-    let Ok(file) = std::env::var(TRACE_ROUTES_ENV) else {
+/// Appends `METHOD /path` to the trace file, if one was given. The query is
+/// dropped: the matrix is keyed by route, not by arguments.
+fn trace_route(file: Option<&Path>, method: &str, path: &str) {
+    let Some(file) = file else {
         return;
     };
-    if file.is_empty() {
-        return;
-    }
     use std::io::Write;
     let route = path.split('?').next().unwrap_or(path);
     if let Ok(mut f) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&file)
+        .open(file)
     {
         let _ = writeln!(f, "{method} {route}");
     }
@@ -2019,6 +2023,12 @@ impl VmBackend for ProxmoxBackend {
 /// Never auto-selectable: auto-detection asks `available()`, and the only
 /// honest answer here costs a network round trip to a node nobody named.
 pub fn register(target: Target) -> delonix_model::Result<()> {
+    register_with(target, ClientOptions::default())
+}
+
+/// [`register`] with the client's bounds and trace chosen by the caller — the
+/// composition root, which is where the environment is read.
+pub fn register_with(target: Target, opts: ClientOptions) -> delonix_model::Result<()> {
     // Fail on a malformed target HERE, at registration, rather than at the
     // first `vm create`: the operator is looking at the configuration now.
     validate_target_url(&target.base_url)?;
@@ -2039,7 +2049,7 @@ pub fn register(target: Target) -> delonix_model::Result<()> {
                 // first VM was listed must not stay "down" for the rest of the
                 // process.
                 let c = std::sync::Arc::new(
-                    Client::connect(&target)
+                    Client::connect_with(&target, opts.clone())
                         .map_err(|e| delonix_vm::Error::Engine(delonix_model::Error::from(e)))?,
                 );
                 *slot = Some(c.clone());
@@ -2630,6 +2640,7 @@ mod tests {
             bridge: bridge.unwrap_or("vmbr0").to_string(),
             vlan,
             task_timeout: TASK_TIMEOUT,
+            trace_routes: None,
         };
         let cfg = VmConfig::default();
         assert_eq!(cli(None, None).net0_arg(&cfg), "virtio,bridge=vmbr0");
@@ -2722,19 +2733,19 @@ mod tests {
         };
         assert!(matches!(st(401, ""), Error::Unauthorized(_)));
         assert!(matches!(st(403, ""), Error::Forbidden(_)));
-        assert!(matches!(st(404, ""), Error::NotFound(_)));
-        assert!(matches!(st(409, ""), Error::Conflict(_)));
+        assert!(matches!(st(404, ""), Error::NodeNotFound(_)));
+        assert!(matches!(st(409, ""), Error::NodeConflict(_)));
         assert!(matches!(st(400, ""), Error::BadRequest(_)));
         assert!(matches!(st(422, ""), Error::BadRequest(_)));
-        assert!(matches!(st(502, ""), Error::Unavailable(_)));
-        assert!(matches!(st(503, ""), Error::Unavailable(_)));
-        assert!(matches!(st(504, ""), Error::Unavailable(_)));
+        assert!(matches!(st(502, ""), Error::NodeUnavailable(_)));
+        assert!(matches!(st(503, ""), Error::NodeUnavailable(_)));
+        assert!(matches!(st(504, ""), Error::NodeUnavailable(_)));
         // Proxmox says these two with a 500; the body carries the verdict.
         let missing = st(
             500,
             "Configuration file 'nodes/pve/qemu-server/100.conf' does not exist\n",
         );
-        assert!(matches!(missing, Error::NotFound(_)), "{missing}");
+        assert!(matches!(missing, Error::NodeNotFound(_)), "{missing}");
         assert!(
             missing.to_string().contains("/nodes/pve/qemu/100/config"),
             "names the route"
@@ -2742,7 +2753,7 @@ mod tests {
         assert!(!missing.to_string().contains("?x=1"), "without the query");
         assert!(matches!(
             st(500, "VM 100 already exists"),
-            Error::Conflict(_)
+            Error::NodeConflict(_)
         ));
         let generic = st(500, "unable to open file");
         assert!(matches!(generic, Error::HttpStatus(_)));

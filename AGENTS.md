@@ -6241,8 +6241,11 @@ depois falhava como «JSON malformado do nó», e um `#[derive(Debug)]` no `Auth
 segredo do token em qualquer `{:?}`.
 
 - **A CLASSE de um erro é o que um exit code e um reconciliador lêem.** 401 → `Unauthorized`,
-  403 → `Forbidden`, 404 → `NotFound` (exit 4), 409 → `Conflict` (5), 400/422 → `BadRequest`,
-  502–504 → `Unavailable` (69). O texto mantém a forma que a CLI sempre imprimiu. **O Proxmox
+  403 → `Forbidden`, 404 → `NodeNotFound` (exit 4), 409 → `NodeConflict` (5), 400/422 →
+  `BadRequest`, 502–504 → `NodeUnavailable` (69). **Os três levam o prefixo `Node` por causa
+  do `arch_fitness.py`**: o contador `raw_error_variant_matches` (ADR-0043 D4) apanha qualquer
+  `Error::NotFound(_)` num `match`/`matches!` fora da fundação e não distingue o enum LOCAL do
+  partilhado — 12 sítios contados no CI do #475 com os nomes nus, 0 com o prefixo. O texto mantém a forma que a CLI sempre imprimiu. **O Proxmox
   diz a maior parte dos erros de aplicação com HTTP 500** — «Configuration file … does not
   exist» e «already exists» incluídos; esses dois lêem-se do corpo (a disciplina do
   `is_lock_timeout`), o resto do 500 fica genérico. Códigos `DX-1526/4504/5504/6506/9515-9517`.
@@ -6266,7 +6269,10 @@ segredo do token em qualquer `{:?}`.
 - **Corpo limitado a 16 MiB** (`MAX_RESPONSE_BYTES`, um byte a mais é `ResponseTooLarge`), erro
   de leitura é `Request` e não `Decode`, pool de 4 ligações por nó, `ca_cert_pem`
   (`DELONIX_PROXMOX_CA_FILE`) para verificar um nó com CA interna sem desligar a verificação,
-  e `Debug` à mão em `Auth`/`Ticket` com `<redacted>`.
+  e `Debug` à mão em `Auth`/`Ticket` com `<redacted>`. O trace de rotas é uma OPÇÃO do cliente
+  (`ClientOptions::trace_routes`), lida da variável `DELONIX_PROXMOX_TRACE_ROUTES` UMA vez no
+  `vmbackends.rs` — a biblioteca nunca lê o ambiente, e um `set_var` num teste conta como dívida
+  no `env_writes` do `arch_fitness.py` (25 contra 23 no CI do #475).
 - **Os testes correm contra um nó TLS FALSO** (`tests/failure_injection.rs`): o cliente recusa
   `http://`, por isso o mock é um `TcpListener` com certificado do `rcgen` servido pelo `rustls`
   — dev-dependencies só, o `cargo tree -e normal` do crate não muda. Catorze cenários: TLS

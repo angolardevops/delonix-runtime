@@ -93,15 +93,26 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
         })
         .transpose()?;
 
-    delonix_proxmox::register(delonix_proxmox::Target {
-        base_url: url,
-        node,
-        auth,
-        insecure_tls,
-        bridge,
-        vlan,
-        ca_cert_pem,
-    })
+    // The route trace for the coverage matrix (ADR-0049): read here, once,
+    // and handed to the client — the library never reads the environment.
+    let opts = delonix_proxmox::ClientOptions {
+        trace_routes: lookup(delonix_proxmox::TRACE_ROUTES_ENV)
+            .filter(|v| !v.is_empty())
+            .map(std::path::PathBuf::from),
+        ..Default::default()
+    };
+    delonix_proxmox::register_with(
+        delonix_proxmox::Target {
+            base_url: url,
+            node,
+            auth,
+            insecure_tls,
+            bridge,
+            vlan,
+            ca_cert_pem,
+        },
+        opts,
+    )
 }
 
 /// The credential, preferring an API token.
