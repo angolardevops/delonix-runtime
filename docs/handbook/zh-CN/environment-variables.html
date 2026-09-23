@@ -815,6 +815,20 @@ commands. Background: <a class="src" href="https://github.com/angolardevops/delo
 <td>1–4094. Out of range is an <strong>error</strong>, never dropped.</td>
 <td></td>
 </tr>
+<tr>
+<td><code>DELONIX_PROXMOX_CA_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>A CA certificate (PEM) to trust for the node, in addition to the system roots.</td>
+<td>Path to a PEM file; unreadable is an <strong>error</strong>.</td>
+<td>The way to verify a node whose certificate an internal CA signed, instead of <code>DELONIX_PROXMOX_INSECURE_TLS</code>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TRACE_ROUTES</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code> (read once, handed to the client as <code>ClientOptions::<wbr>trace_routes</code>; the constant <code>TRACE_ROUTES_ENV</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a> names it)</td>
+<td>Appends <code>METHOD /path</code> of every request to this file — the numerator of the coverage matrix (ADR-0049).</td>
+<td>Path to a file; empty = off.</td>
+<td>Feed it to <code>scripts/<wbr>proxmox_api_inventory.<wbr>py --trace</code> to mark routes <code>supported+tested</code>.</td>
+</tr>
 </tbody>
 </table></div>
 <h3 id="truenas">TrueNAS<a class="hanchor" href="#truenas" aria-label="#">#</a></h3>

@@ -25,9 +25,32 @@ pub enum Error {
     #[error("{0}")]
     Request(String),
 
-    /// The node answered with a non-2xx status.
+    /// The node answered with a non-2xx status none of the typed variants
+    /// below claims (Proxmox says most application errors with HTTP 500).
     #[error("{0}")]
     HttpStatus(String),
+    /// HTTP 401: the token is wrong or revoked, or the ticket could not be
+    /// renewed. Never retried against a token.
+    #[error("{0}")]
+    Unauthorized(String),
+    /// HTTP 403: a valid credential without the privilege the route needs.
+    #[error("{0}")]
+    Forbidden(String),
+    /// HTTP 404, or the node's own "does not exist" (said with HTTP 500).
+    #[error("{0}")]
+    NodeNotFound(String),
+    /// HTTP 409, or the node's own "already exists" (said with HTTP 500).
+    #[error("{0}")]
+    NodeConflict(String),
+    /// HTTP 400/422: a parameter the node does not accept.
+    #[error("{0}")]
+    BadRequest(String),
+    /// HTTP 502/503/504: the API is up, the backend behind it is not.
+    #[error("{0}")]
+    NodeUnavailable(String),
+    /// A body past the size this client reads into memory.
+    #[error("{0}")]
+    ResponseTooLarge(String),
 
     /// The node's response body did not parse as the JSON expected.
     #[error("{0}")]
@@ -116,6 +139,13 @@ impl Error {
             Error::InvalidSnapshotName(_) => 1523,
             Error::UnsupportedField(_) => 1524,
             Error::NoHandle(_) => 1525,
+            Error::BadRequest(_) => 1526,
+            Error::NodeNotFound(_) => 4504,
+            Error::NodeConflict(_) => 5504,
+            Error::NodeUnavailable(_) => 6506,
+            Error::Unauthorized(_) => 9515,
+            Error::Forbidden(_) => 9516,
+            Error::ResponseTooLarge(_) => 9517,
             Error::SnapshotNotFound(_) => 4503,
             Error::SnapshotTaken(_) => 5503,
             Error::ClientBuild(_) => 6505,
@@ -156,12 +186,16 @@ impl From<Error> for Dx {
     fn from(e: Error) -> Self {
         let number = e.number();
         let class = match e {
-            Error::SnapshotNotFound(text) => Dx::NotFound(text),
-            Error::SnapshotTaken(text) => Dx::Conflict(text),
-            Error::ClientBuild(text) => Dx::Unavailable(text),
+            Error::SnapshotNotFound(text) | Error::NodeNotFound(text) => Dx::NotFound(text),
+            Error::SnapshotTaken(text) | Error::NodeConflict(text) => Dx::Conflict(text),
+            Error::ClientBuild(text) | Error::NodeUnavailable(text) => Dx::Unavailable(text),
             Error::TaskTimeout(text) | Error::LockTimeout(text) => Dx::Timeout(text),
+            Error::BadRequest(text) => Dx::Invalid(text),
             Error::Request(text)
             | Error::HttpStatus(text)
+            | Error::Unauthorized(text)
+            | Error::Forbidden(text)
+            | Error::ResponseTooLarge(text)
             | Error::Decode(text)
             | Error::UnexpectedAnswer(text)
             | Error::TaskFailed(text) => Dx::Registry(text),
@@ -182,6 +216,13 @@ mod tests {
             Error::NoSuchNode("proxmox: no node named 'x' at u (it has: y)".into()),
             Error::Request("proxmox: request failed: x".into()),
             Error::HttpStatus("proxmox: u returned HTTP 500: x".into()),
+            Error::Unauthorized("proxmox: u returned HTTP 401: x".into()),
+            Error::Forbidden("proxmox: u returned HTTP 403: x".into()),
+            Error::NodeNotFound("Proxmox resource at /x: u returned HTTP 404: y".into()),
+            Error::NodeConflict("proxmox: u returned HTTP 409: x".into()),
+            Error::BadRequest("proxmox: u returned HTTP 400: x".into()),
+            Error::NodeUnavailable("proxmox: u returned HTTP 503: x".into()),
+            Error::ResponseTooLarge("proxmox: the answer from /x exceeded 16 MiB".into()),
             Error::Decode("proxmox: could not read the answer from x: y".into()),
             Error::UnexpectedAnswer("proxmox: could not read a VM id from /cluster/nextid: x".into()),
             Error::TaskFailed("proxmox: task failed: x".into()),
