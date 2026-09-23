@@ -182,6 +182,196 @@ const SUPPORTED_SERVICE: &[&str] = &[
 ];
 
 /// Keys of a top-level `networks:`/`volumes:` entry that are read.
+/// Every per-service key of the Compose Specification — **measured**, not
+/// recalled.
+///
+/// This repository's rule for talking about compatibility is that a number
+/// never travels without the date and the version beside it, and a list of
+/// spec keys typed from memory is exactly the unmeasured claim that rule
+/// exists to forbid. So each name below was fed to the client that implements
+/// the specification — one minimal compose file per key, `docker compose
+/// config` on each — and kept only if it was ACCEPTED.
+///
+/// Measured 2026-09-23 against **Docker Compose from docker v29.8.1**: 88 keys
+/// accepted plus `image` (which the probe's own base document already carried),
+/// 0 rejected. A name the client refuses is not a key of the specification, and
+/// carrying it here would inflate the denominator of every percentage this
+/// table produces.
+///
+/// The three states are DERIVED from this list and the two lists above, never
+/// written a fourth time: served = in `SUPPORTED_SERVICE`, refused = in
+/// `KNOWN_UNSUPPORTED_SERVICE`, missing = everything else. `spec_covers_every_
+/// supported_key` proves the first set is a subset of this one — a key we claim
+/// to serve and the specification does not have would mean one of the two is
+/// wrong, and silence would pick the wrong one.
+const SPEC_SERVICE_KEYS: &[&str] = &[
+    "annotations",
+    "attach",
+    "blkio_config",
+    "build",
+    "cap_add",
+    "cap_drop",
+    "cgroup",
+    "cgroup_parent",
+    "command",
+    "configs",
+    "container_name",
+    "cpu_count",
+    "cpu_percent",
+    "cpu_period",
+    "cpu_quota",
+    "cpu_rt_period",
+    "cpu_rt_runtime",
+    "cpu_shares",
+    "cpus",
+    "cpuset",
+    "credential_spec",
+    "depends_on",
+    "deploy",
+    "develop",
+    "device_cgroup_rules",
+    "devices",
+    "dns",
+    "dns_opt",
+    "dns_search",
+    "domainname",
+    "entrypoint",
+    "env_file",
+    "environment",
+    "expose",
+    "extends",
+    "external_links",
+    "extra_hosts",
+    "gpus",
+    "group_add",
+    "healthcheck",
+    "hostname",
+    "image",
+    "init",
+    "ipc",
+    "isolation",
+    "label_file",
+    "labels",
+    "links",
+    "logging",
+    "mac_address",
+    "mem_limit",
+    "mem_reservation",
+    "mem_swappiness",
+    "memswap_limit",
+    "network_mode",
+    "networks",
+    "oom_kill_disable",
+    "oom_score_adj",
+    "pid",
+    "pids_limit",
+    "platform",
+    "ports",
+    "post_start",
+    "pre_stop",
+    "privileged",
+    "profiles",
+    "provider",
+    "pull_policy",
+    "read_only",
+    "restart",
+    "runtime",
+    "scale",
+    "secrets",
+    "security_opt",
+    "shm_size",
+    "stdin_open",
+    "stop_grace_period",
+    "stop_signal",
+    "storage_opt",
+    "sysctls",
+    "tmpfs",
+    "tty",
+    "ulimits",
+    "user",
+    "userns_mode",
+    "uts",
+    "volumes",
+    "volumes_from",
+    "working_dir",
+];
+
+/// Every top-level key of the specification, same measurement, same day: all
+/// eight accepted by the client.
+const SPEC_TOP_KEYS: &[&str] = &[
+    "configs", "include", "name", "networks", "secrets", "services", "version", "volumes",
+];
+
+/// What this implementation does with one per-service key.
+///
+/// The three states are the three answers `check_unsupported_fields` already
+/// gives a real file — this enum only names them so they can be COUNTED. In
+/// particular `ENGINE_HAS_IT_SERVICE` lands in `Refused`, not in `Missing`:
+/// those keys are refused with a dedicated message today, and calling them
+/// "missing" here would make this table disagree with the error the same key
+/// produces one command away.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum KeyState {
+    /// Read and acted on.
+    Served,
+    /// Refused with a written reason (never ignored). `elsewhere` is the
+    /// engine's own command when the capability exists outside `compose` — the
+    /// single most useful column for someone deciding whether to migrate.
+    Refused {
+        why: &'static str,
+        elsewhere: Option<&'static str>,
+    },
+    /// Not in any list: refused by the allowlist with the generic message.
+    Missing,
+}
+
+pub(crate) fn service_key_state(key: &str) -> KeyState {
+    if SUPPORTED_SERVICE.contains(&key) {
+        return KeyState::Served;
+    }
+    if let Some((_, why)) = KNOWN_UNSUPPORTED_SERVICE.iter().find(|(k, _)| *k == key) {
+        return KeyState::Refused {
+            why,
+            elsewhere: None,
+        };
+    }
+    if let Some((_, flag)) = ENGINE_HAS_IT_SERVICE.iter().find(|(k, _)| *k == key) {
+        return KeyState::Refused {
+            why: "not read by `compose`",
+            elsewhere: Some(flag),
+        };
+    }
+    KeyState::Missing
+}
+
+pub(crate) fn top_key_state(key: &str) -> KeyState {
+    if SUPPORTED_TOP.contains(&key) {
+        return KeyState::Served;
+    }
+    if let Some((_, why)) = KNOWN_UNSUPPORTED_TOP.iter().find(|(k, _)| *k == key) {
+        return KeyState::Refused {
+            why,
+            elsewhere: None,
+        };
+    }
+    KeyState::Missing
+}
+
+/// The whole per-service matrix, in specification order.
+pub(crate) fn service_matrix() -> Vec<(&'static str, KeyState)> {
+    SPEC_SERVICE_KEYS
+        .iter()
+        .map(|k| (*k, service_key_state(k)))
+        .collect()
+}
+
+pub(crate) fn top_matrix() -> Vec<(&'static str, KeyState)> {
+    SPEC_TOP_KEYS
+        .iter()
+        .map(|k| (*k, top_key_state(k)))
+        .collect()
+}
+
 const SUPPORTED_NETWORK: &[&str] = &["external", "name"];
 const SUPPORTED_VOLUME: &[&str] = &["external", "name"];
 /// Keys of a top-level `secrets:`/`configs:` entry that are read — `configs:`
@@ -207,6 +397,15 @@ const ENGINE_HAS_IT_SERVICE: &[(&str, &str)] = &[
     ("network_mode", "container run --net"),
     ("pid", "container run --host-pid"),
     ("ipc", "container run --host-ipc"),
+    // Found while building `compatibility compose` (2026-09-23): the engine
+    // has these four too, and without a row here they fell through to the
+    // generic "not understood" error — which tells the reader to go away
+    // instead of where to go. Each flag was checked against the real `--help`,
+    // and `every_note_names_a_flag_that_exists` keeps checking.
+    ("sysctls", "container run --sysctl"),
+    ("ulimits", "container run --ulimit"),
+    ("gpus", "container run --gpus"),
+    ("userns_mode", "container run --userns"),
 ];
 
 #[derive(Subcommand)]
@@ -2921,6 +3120,115 @@ fn cmd_config(file: Vec<PathBuf>, project: Option<String>, profile: Vec<String>)
 
 #[cfg(test)]
 mod tests {
+    /// The specification list is the DENOMINATOR of every number
+    /// `compatibility compose` prints. A key we claim to serve and the
+    /// specification does not have would mean one of the two lists is wrong,
+    /// and a silent mismatch picks the wrong one: the percentage goes UP,
+    /// because the numerator grew and the denominator did not.
+    #[test]
+    fn spec_covers_every_supported_key() {
+        let outside: Vec<&str> = SUPPORTED_SERVICE
+            .iter()
+            .copied()
+            .filter(|k| !SPEC_SERVICE_KEYS.contains(k))
+            .collect();
+        assert!(
+            outside.is_empty(),
+            "key(s) served but absent from the measured specification list: {outside:?}"
+        );
+        let outside_top: Vec<&str> = SUPPORTED_TOP
+            .iter()
+            .copied()
+            .filter(|k| !SPEC_TOP_KEYS.contains(k))
+            .collect();
+        assert!(outside_top.is_empty(), "top-level: {outside_top:?}");
+    }
+
+    /// Same question from the other side: a refusal carries a reason, and a
+    /// reason for a key nobody can write is a reason nobody will ever read.
+    #[test]
+    fn every_refusal_names_a_key_of_the_specification() {
+        for (k, _) in KNOWN_UNSUPPORTED_SERVICE {
+            assert!(
+                SPEC_SERVICE_KEYS.contains(k),
+                "refused key not in the spec: {k}"
+            );
+        }
+        for (k, _) in KNOWN_UNSUPPORTED_TOP {
+            assert!(
+                SPEC_TOP_KEYS.contains(k),
+                "refused top-level key not in the spec: {k}"
+            );
+        }
+    }
+
+    /// A migration note points at a command someone is going to type. If the
+    /// flag it names does not exist, the note is worse than nothing — it costs
+    /// the reader a failed command and the credit of every other note here. So
+    /// walk the REAL clap tree instead of trusting the string.
+    #[test]
+    fn every_note_names_a_flag_that_exists() {
+        use clap::CommandFactory;
+        let root = crate::Cli::command();
+        for (key, note) in ENGINE_HAS_IT_SERVICE {
+            assert!(
+                SPEC_SERVICE_KEYS.contains(key),
+                "note for a key outside the spec: {key}"
+            );
+            assert!(
+                !SUPPORTED_SERVICE.contains(key),
+                "`{key}` is SERVED — a note pointing elsewhere reads as if it were not"
+            );
+            let mut parts = note.split_whitespace();
+            let mut cmd = &root;
+            let mut flag = None;
+            for part in parts.by_ref() {
+                if let Some(f) = part.strip_prefix("--") {
+                    flag = Some(f.to_string());
+                    break;
+                }
+                cmd = cmd
+                    .get_subcommands()
+                    .find(|c| c.get_name() == part)
+                    .unwrap_or_else(|| {
+                        panic!("note for `{key}` names a command that does not exist: {note}")
+                    });
+            }
+            let flag = flag.unwrap_or_else(|| panic!("note for `{key}` names no flag: {note}"));
+            assert!(
+                cmd.get_arguments()
+                    .any(|a| a.get_long() == Some(flag.as_str())),
+                "note for `{key}` names `--{flag}`, which `{}` does not have",
+                cmd.get_name()
+            );
+        }
+    }
+
+    /// The three states partition the list: every key is in exactly one.
+    #[test]
+    fn the_three_states_cover_the_specification_exactly_once() {
+        let rows = service_matrix();
+        assert_eq!(rows.len(), SPEC_SERVICE_KEYS.len());
+        let served = rows
+            .iter()
+            .filter(|(_, s)| matches!(s, KeyState::Served))
+            .count();
+        let refused = rows
+            .iter()
+            .filter(|(_, s)| matches!(s, KeyState::Refused { .. }))
+            .count();
+        let missing = rows
+            .iter()
+            .filter(|(_, s)| matches!(s, KeyState::Missing))
+            .count();
+        assert_eq!(served + refused + missing, SPEC_SERVICE_KEYS.len());
+        assert_eq!(
+            served,
+            SUPPORTED_SERVICE.len(),
+            "served must be exactly the allowlist"
+        );
+    }
+
     use super::*;
 
     #[test]
@@ -3768,14 +4076,13 @@ mod tests_unknown_keys {
     /// nothing reported it.
     #[test]
     fn a_service_key_outside_both_lists_is_refused() {
-        for key in [
-            "sysctls",
-            "ulimits",
-            "shm_size",
-            "mem_limit",
-            "expose",
-            "init",
-        ] {
+        // `sysctls` and `ulimits` were here and MOVED to the test below on
+        // 2026-09-23: the engine has `--sysctl`/`--ulimit`, so they joined
+        // `ENGINE_HAS_IT_SERVICE` and now get the message that names the flag
+        // instead of the generic one. Still refused either way — which is what
+        // this test is about — but asserting the generic wording for a key that
+        // has earned a specific one would pin the worse message in place.
+        for key in ["shm_size", "mem_limit", "expose", "init"] {
             let e = err_of(&format!(
                 "services:\n  web:\n    image: nginx\n    {key}: x\n"
             ));
@@ -3792,10 +4099,18 @@ mod tests_unknown_keys {
     /// the message names the flag that already does the job.
     #[test]
     fn a_key_the_engine_has_names_the_flag() {
-        let e = err_of("services:\n  web:\n    image: nginx\n    security_opt: [x]\n");
-        assert!(e.contains("--security-opt"), "must name the flag: {e}");
-        let e = err_of("services:\n  web:\n    image: nginx\n    network_mode: host\n");
-        assert!(e.contains("--net"), "must name the flag: {e}");
+        // Every row of `ENGINE_HAS_IT_SERVICE`, not a hand-picked two: the
+        // four added on 2026-09-23 (`sysctls`, `ulimits`, `gpus`,
+        // `userns_mode`) were falling through to the generic message, and a
+        // test over two rows is what let that sit unnoticed.
+        for (key, note) in ENGINE_HAS_IT_SERVICE {
+            let flag = note.split_whitespace().last().unwrap();
+            let e = err_of(&format!(
+                "services:\n  web:\n    image: nginx\n    {key}: x\n"
+            ));
+            assert!(e.contains(key), "must name the key: {e}");
+            assert!(e.contains(flag), "must name the flag `{flag}`: {e}");
+        }
     }
 
     /// The specific reasons still win over the generic message — a denied key

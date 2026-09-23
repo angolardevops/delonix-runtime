@@ -663,6 +663,24 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["diff", "stack plan", "stack apply"],
     },
     Entry {
+        path: "migrate",
+        group: "Declarative",
+        examples: &[
+            ("score a compose file you already have", "delonix migrate assess -f docker-compose.yml"),
+            ("a CI gate: exit 2 means something it uses is not served", "delonix migrate assess --detailed-exitcode"),
+        ],
+        see_also: &["compatibility docker", "compose up", "compose config"],
+    },
+    Entry {
+        path: "migrate assess",
+        group: "Declarative",
+        examples: &[
+            ("every key the file uses, and what happens to it", "delonix migrate assess -f docker-compose.yml"),
+            ("machine-readable, for a migration report", "delonix migrate assess -f docker-compose.yml -o json"),
+        ],
+        see_also: &["compatibility docker", "compose up"],
+    },
+    Entry {
         path: "config",
         group: "Engine",
         examples: &[
@@ -1906,6 +1924,15 @@ pub static ENTRIES: &[Entry] = &[
             ("what this engine serves, refuses (with a reason), and never considered", "delonix compatibility docker"),
         ],
         see_also: &["serve docker-api", "api-resources"],
+    },
+    Entry {
+        path: "compatibility compose",
+        group: "Advanced",
+        examples: &[
+            ("Compose Spec coverage, key by key, with the missing third state", "delonix compatibility compose"),
+            ("machine-readable", "delonix compatibility compose -o json"),
+        ],
+        see_also: &["migrate assess", "compose up", "compatibility docker"],
     },
     Entry {
         path: "compatibility docker",

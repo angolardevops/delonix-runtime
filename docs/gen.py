@@ -1468,8 +1468,25 @@ imprime o bloco a acrescentar à mão. <code>--print</code> mostra o bloco sem t
 <code>serve docker-api --matrix</code> já publicava (servido / recusado com razão / o que
 ferramentas reais como <code>kind</code>/<code>compose</code> chamam), agora como verbo de topo e
 com <code>-o json</code> para CI/scripts de terceiros. <strong>Não estável</strong> — ver
-<code>docs/cli-stability.md</code>. <code>compose</code>/<code>cri</code>/<code>oci</code> ficam de
-fora por agora: nenhum tem hoje uma superfície de três estados própria para reutilizar.""",
+<code>docs/cli-stability.md</code>.
+<code>compatibility compose</code> (2026-09-23) faz o mesmo para a Compose Specification, chave a
+chave: servida, recusada com razão escrita, ou em falta. O denominador é a lista de chaves da
+própria especificação, <strong>medida</strong> uma a uma contra o <code>docker compose config</code>
+(docker v29.8.1) em vez de escrita de memória. <code>cri</code>/<code>oci</code> continuam de fora,
+por razões diferentes: o número do CRI vive num documento mantido à mão (produzido por correr o
+<code>critest</code> num nó) e nada aqui o consegue derivar; o OCI não tem neste repositório
+trabalho de conformidade nenhum, logo a contagem honesta é zero.""",
+        "subs": {},
+    },
+    "migrate": {
+        "title": "delonix migrate",
+        "tagline": "Pontua o que já tens contra o que este motor serve.",
+        "intro": """<code>migrate assess -f docker-compose.yml</code> lê um ficheiro compose que
+tens hoje e reporta TODA a chave que ele usa — servida, recusada com razão escrita, ou não
+implementada — com o comando equivalente deste motor quando existe. Nada é criado, puxado ou
+corrido: a resposta custa uma leitura de ficheiro. Existe porque o <code>compose up</code> é
+<em>fail-closed</em> de propósito (pára na primeira chave que não entende, em vez de a ignorar), e
+isso está certo para CORRER e errado para DECIDIR: uma migração precisa da lista toda de uma vez.""",
         "subs": {},
     },
     "api-resources": {
@@ -1946,8 +1963,23 @@ the block to add by hand. <code>--print</code> shows the block and touches nothi
 <code>serve docker-api --matrix</code> already published (served / refused with a reason / what
 real tooling like <code>kind</code>/<code>compose</code> calls), now as a top-level verb and with
 <code>-o json</code> for CI/third-party scripts. <strong>Not stable</strong> — see
-<code>docs/cli-stability.md</code>. <code>compose</code>/<code>cri</code>/<code>oci</code> are left
-out for now: none has a three-state surface of its own to reuse today.""",
+<code>docs/cli-stability.md</code>.
+<code>compatibility compose</code> (2026-09-23) does the same for the Compose Specification, key by
+key: served, refused with a written reason, or missing. The denominator is the specification's own
+key list, <strong>measured</strong> one key at a time against <code>docker compose config</code>
+(docker v29.8.1) instead of typed from memory. <code>cri</code>/<code>oci</code> stay out for
+different reasons: the CRI number lives in a hand-maintained document (produced by running
+<code>critest</code> on a node) that nothing here can derive, and OCI has zero conformance work in
+this repository, so the honest row count is zero.""",
+    },
+    "migrate": {
+        "tagline": "Score what you already have against what this engine serves.",
+        "intro": """<code>migrate assess -f docker-compose.yml</code> reads a compose file you have
+today and reports EVERY key it uses — served, refused with a written reason, or not implemented —
+with this engine's equivalent command where there is one. Nothing is created, pulled or run: the
+answer costs one file read. It exists because <code>compose up</code> is deliberately fail-closed
+(it stops at the first key it does not understand rather than ignoring it), which is right for
+RUNNING and wrong for DECIDING: a migration needs the whole list at once.""",
     },
     "api-resources": {
         "tagline": "Every Kind this engine serves: plural, shortnames, apiVersion and form.",

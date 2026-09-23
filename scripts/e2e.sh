@@ -429,6 +429,76 @@ else
 fi
 
 ########################################
+section "compatibility compose / migrate assess (M02)"
+########################################
+# A TABELA e o COMPORTAMENTO são lidos a um comando de distância, e a tabela é
+# escrita à mão a partir de três listas. Se discordarem, é ela que mente —
+# alguém lê `served` e leva um erro, ou lê `missing` e nunca tenta. Por isso o
+# check não confere a tabela contra si própria: pega em cada chave que ela
+# classifica e pergunta ao `compose config` o que ele faz com um ficheiro que a
+# use. 88 perguntas, uma por chave.
+COMPW=$(mktemp -d "${TMPDIR:-/tmp}/e2e-compat-XXXXXX")
+check "compatibility compose imprime a matriz" ok bash -c \
+  "'$BIN' compatibility compose | grep -q 'Compose Specification coverage'"
+check "compatibility compose -o json parseia e traz as duas listas" ok bash -c \
+  "'$BIN' compatibility compose -o json | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['service_keys'] and d['top_level_keys']\""
+check "a tabela do compose descreve o que o compose faz, chave a chave" ok bash -c "
+  mkdir -p '$COMPW/cross'
+  '$BIN' compatibility compose -o json > '$COMPW/cross/m.json'
+  python3 - '$BIN' '$COMPW/cross' <<'PYX'
+import json, os, subprocess, sys
+b, w = sys.argv[1], sys.argv[2]
+m = json.load(open(f'{w}/m.json'))
+bad = []
+for row in m['service_keys']:
+    key, state = row['key'], row['state']
+    if key == 'image':
+        continue
+    open(f'{w}/compose.yaml', 'w').write(f'services:\n  web:\n    image: alpine\n    {key}: x\n')
+    r = subprocess.run([b, 'compose', 'config'], capture_output=True, text=True, cwd=w)
+    out = r.stderr + r.stdout
+    # Classifica pela MENSAGEM e nao pelo rc: o valor de sonda e sempre `x`, e
+    # uma chave SERVIDA que espera uma lista recusa por TIPO. Ler isso como
+    # "nao servida" acusava 17 chaves servidas de nao o serem - o check estaria
+    # a medir o meu valor de sonda, nao a tabela.
+    not_served = any(f in out for f in ('is not read by', 'not understood', 'is not supported'))
+    if (state == 'served') == not_served:
+        bad.append((key, state, out.strip()[:80]))
+if bad:
+    print('a tabela discorda do compose em', len(bad), 'chave(s):', bad[:5])
+    sys.exit(1)
+PYX
+"
+cat >"$COMPW/docker-compose.yml" <<'YAML'
+services:
+  db:
+    image: postgres:16
+    environment: {POSTGRES_PASSWORD: dev}
+    devices: ['/dev/null:/dev/null']
+  web:
+    image: nginx:alpine
+    ports: ['8080:80']
+YAML
+check "migrate assess lê o ficheiro e classifica cada chave" ok bash -c \
+  "cd '$COMPW' && '$BIN' migrate assess | grep -q 'devices' && '$BIN' migrate assess | grep -q 'container run --device'"
+# O contrato de exit code é a única metade que um portão de CI consome.
+check "migrate assess --detailed-exitcode devolve 2 com uma chave não servida" 2 \
+  bash -c "cd '$COMPW' && '$BIN' migrate assess --detailed-exitcode"
+cat >"$COMPW/limpo.yml" <<'YAML'
+services:
+  web:
+    image: nginx:alpine
+    ports: ['80']
+YAML
+check "migrate assess devolve 0 quando tudo é servido" 0 \
+  "$BIN" migrate assess -f "$COMPW/limpo.yml" --detailed-exitcode
+check "migrate assess -o json" ok bash -c \
+  "'$BIN' migrate assess -f '$COMPW/limpo.yml' -o json | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['served']>0 and d['missing']==0\""
+check "migrate assess de um ficheiro inexistente diz 4" 4 \
+  "$BIN" migrate assess -f "$COMPW/naoexiste.yml"
+rm -rf "$COMPW"
+
+########################################
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
 check "container describe de inexistente recusa" fail "$BIN" container describe naoexiste-$PFX

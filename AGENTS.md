@@ -7163,6 +7163,7 @@ reporta `success` na mesma — um verde que não mediu nada.
 `ci.yml` invoca sete scripts Python como portões e não invocava um único dos seus
 testes — o `test_release_verify.py` nasceu ontem com dez testes que nada
 executava. O job `script-tests` corre-os todos, e falha se não encontrar nenhum.
+
 ## `delonix drift` — o que a MÁQUINA mudou, sem o manifesto na comparação (M05)
 
 O `stack plan` responde «o que faria um apply». Essa resposta mistura duas
@@ -7218,3 +7219,63 @@ manifesto** a deriva continua a aparecer, com os seis Kinds não verificados
 nomeados; e com o carimbo removido do registo à mão (o caso do recurso
 adoptado por uma versão antiga) a saída passa a `1 resource(s) carry no
 last-applied stamp`, sem uma linha de deriva.
+
+## `compatibility compose` e `migrate assess` — o terceiro estado precisa de um denominador (M02)
+
+O `compatibility docker` publica três estados desde que existe: servido,
+recusado com razão, em falta. O `compose` não tinha o terceiro, e o próprio
+módulo dizia porquê — «tem uma allowlist mas nenhuma superfície de três estados
+própria para reutilizar». A razão estava certa e era o TRABALHO, não um motivo
+para ficar de fora: o estado «em falta» precisa de um DENOMINADOR, e o
+denominador é a lista de chaves da própria especificação.
+
+**A lista foi MEDIDA, não escrita de memória.** Um ficheiro compose mínimo por
+chave candidata, `docker compose config` em cada um, e ficou só o que o cliente
+ACEITOU: **89 chaves de serviço e 8 de topo**, contra o docker **v29.8.1**, a
+2026-09-23. Quatro candidatas foram recusadas à primeira e nenhuma por não
+existir — eram valores meus inválidos (`container_name: "x"` não passa o padrão,
+`cpu_rt_*` querem número, e a `image` já estava no documento base da sonda).
+Escrever a lista de cor teria inflacionado o denominador com nomes que a
+especificação não tem, e toda a percentagem por cima dele.
+
+**Hoje: 28 servidas, 12 recusadas com razão, 49 em falta, de 89.** No topo, 7
+servidas e 1 recusada, de 8.
+
+**A tabela DESCREVE o comportamento, e há um check que o exige.** As duas coisas
+são lidas a um comando de distância: alguém lê `served` e leva um erro, ou lê
+`missing` e nunca tenta. O check da bateria não confere a tabela contra si
+própria — pega em cada uma das 88 chaves que ela classifica, escreve um ficheiro
+que a usa, e pergunta ao `compose config` o que acontece. As 88 concordam.
+
+**Dois achados enquanto se construía isto:**
+
+1. **A tabela que eu ia escrever JÁ EXISTIA.** Comecei uma `MISSING_ELSEWHERE`
+   com as chaves cujo equivalente o motor tem noutro comando, e o `compose` já
+   tinha a `ENGINE_HAS_IT_SERVICE`, usada para RECUSAR com a mensagem que nomeia
+   a flag. Duas listas que têm de concordar são duas listas que vão divergir —
+   a minha foi apagada e a matriz passou a derivar da que já governava o
+   comportamento. Foi o teste cruzado acima que o expôs: a minha dizia `missing`
+   onde o motor diz `refused`.
+2. **A `ENGINE_HAS_IT_SERVICE` estava incompleta, e isso custava a mensagem
+   errada.** `sysctls`, `ulimits`, `gpus` e `userns_mode` têm todas flag no
+   `container run` (medido contra o `--help` real, não suposto) e caíam no erro
+   genérico «not understood», que manda o leitor embora em vez de lhe dizer para
+   onde ir. Entraram na tabela, e o teste que verificava duas linhas à mão passou
+   a percorrer as doze — foi um teste sobre duas linhas que deixou isto passar.
+
+**`migrate assess` é a outra metade, e a razão de ser é o fail-closed.** O
+`compose up` pára na primeira chave que não entende, e está certo para CORRER;
+para DECIDIR é inútil — uma migração precisa da lista toda de uma vez, não de um
+ciclo editar-e-repetir por obstáculo. O `assess` lê o YAML **cru** (o parser
+tipado recusaria no primeiro desconhecido, que é precisamente o conjunto a
+enumerar), não cria nem puxa nada, e conta USOS de chave e não chaves distintas:
+três serviços com `devices:` são três decisões. As `x-` extensões não contam —
+são a escapatória da própria especificação e ninguém as lê.
+
+**`cri` e `oci` continuam de fora, por razões diferentes uma da outra.** O número
+do CRI vive num documento mantido à mão (`docs/cri-conformance.md`, produzido por
+correr o `critest` num nó) e nada neste binário o consegue derivar: um
+`compatibility cri` seria uma segunda cópia de um número sem forma de dar pelo
+seu envelhecimento. O OCI não tem neste repositório trabalho de conformidade
+nenhum, logo a contagem honesta é zero, e um comando que imprime uma tabela
+vazia não ensina nada.

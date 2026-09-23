@@ -334,6 +334,16 @@ enum Cmd {
         #[arg(long)]
         detailed_exitcode: bool,
     },
+    /// Score what you already have against what this engine serves.
+    ///
+    /// `migrate assess -f docker-compose.yml` reads a compose file you have
+    /// today and reports EVERY key it uses — served, refused with a written
+    /// reason, or not implemented (with this engine's equivalent command where
+    /// there is one). Nothing is created, pulled or run.
+    Migrate {
+        #[command(subcommand)]
+        action: cmd::migrate::MigrateCmd,
+    },
     /// A small, local preference — never a remote context.
     ///
     /// Only `output` (`table`|`json`) today. The specification's `endpoint`/
@@ -608,6 +618,7 @@ fn run() -> Result<()> {
             output,
             detailed_exitcode,
         } => cmd::drift::cmd_drift(file, stack, output, detailed_exitcode),
+        Cmd::Migrate { action } => cmd::migrate::run(action),
         Cmd::Config { action } => cmd::config::run(action),
         Cmd::Stack { action } => cmd::stack::run(action),
         Cmd::Compose { action } => cmd::compose::run(action),
@@ -1123,6 +1134,7 @@ mod cli_stability_classification_tests {
         "init",
         "man",
         "manifest",
+        "migrate",
         "mcp",
         "net",
         "network",
