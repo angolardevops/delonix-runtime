@@ -6287,15 +6287,32 @@ segredo do token em qualquer `{:?}`.
 - **O numerador da matriz passa a poder vir de uma corrida real**:
   `DELONIX_PROXMOX_TRACE_ROUTES=<ficheiro>` faz o cliente acrescentar `METHOD /caminho` por
   pedido, e `scripts/proxmox_api_inventory.py --trace` promove a rota a `supported+tested`.
-  Hoje a matriz commitada (`docs/proxmox/matrix-9.2.2.md`, gerada do
-  `docs/proxmox/api-9.2.2.routes.json` com proveniência) diz **17 chamadas, 0 testadas ao
-  vivo** — a prova ao vivo do ADR-0039 é anterior ao trace e não foi repetida. O
-  `test_proxmox_api_inventory.py` falha se a matriz commitada divergir da regenerada.
+  A matriz commitada (`docs/proxmox/matrix-9.2.2.md`) diz hoje **17 chamadas, 14 testadas ao
+  vivo, 3 não** — e a coluna «tested» tem DATA e ALVO, porque o trace da corrida está commitado
+  ao lado (`docs/proxmox/trace-9.2.2.routes`, 2026-09-23, PVE 9.2.2): as linhas `# chave: valor`
+  do cabeçalho são a proveniência (nó, versão, comando, resultado) e o `render_markdown`
+  imprime-as; o `test_proxmox_api_inventory.py` regenera a matriz COM o trace e falha se a
+  commitada divergir. Uma matriz sem trace diz «None given» em vez de uma coluna que ninguém
+  sabe datar (ADR-0049 D2). As três rotas que ficaram por testar estão nomeadas no cabeçalho
+  com a razão: `clone`/`config` precisam de um template no nó, `GET /nodes/{node}/tasks` é o
+  caminho da resposta perdida e só a injecção de falhas lá chega.
+- **O `tests/live.rs` percorre o ciclo inteiro** (create → snapshot com RAM → rollback → stop →
+  resume → stop → destroy) e lê o LIVRO no fim, não só o `Ok` de cada chamada. Foi o livro que
+  deu o achado: **um `stop` submetido até ~30 s depois de um `start` ou de um rollback com RAM
+  falha no nó** com «can't lock file '/var/lock/qemu-server/lock-<vmid>.conf' - got timeout»
+  (o lock de 10 s do próprio nó); o retry de lock do cliente resubmete-o (2 stops lógicos, 4
+  tarefas `qmstop`, 2 falhadas no nó) e o livro guarda todas. A primeira asserção («todas as
+  entradas `ok`») estava ERRADA e foi ela que chumbou — o que tem de valer é a ÚLTIMA tarefa de
+  cada acção ter sucesso, nenhuma ficar `submitted`/`timedout`, e nenhuma falhar por outra razão
+  que não o lock. O `vmdir` do teste passou a ser um `tempdir`: o livro vive em
+  `<vmdir>/proxmox-tasks.json`, e com `/tmp` uma corrida herdava o livro da anterior. Os
+  workers `qmsnapshot`/`qmrollback` foram vistos no nó real, não só no mock.
 
-**Não validado nesta fatia**: nada correu contra o cluster real — não há credencial nesta
-sessão, e o `tests/live.rs` continua a ser o caminho para a fazer (`DELONIX_PROXMOX_TEST_*`, com
-o trace ligado para a matriz ganhar a coluna «tested»); o nome dos workers `qmclone`/`qmrollback`
-segue o padrão dos cinco observados no spike do ADR-0008 e só o mock os exercitou.
+**Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
+— a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; o
+`ip()` pelo agente continua a precisar de um convidado preparado
+(`DELONIX_PROXMOX_TEST_AGENT_VMID`); e o porquê de o lock ficar preso ~25 s depois de um
+`qmstart` num convidado sem SO não foi isolado — só medido.
 
 ## A imagem base não leva credenciais, e diz o que tem dentro (2026-08-18)
 

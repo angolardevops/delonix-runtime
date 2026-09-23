@@ -2,8 +2,11 @@
 
 - **Status:** Proposed — the endpoint matrix exists and is reproducible (D1, #474); slice 1
   (transport, typed errors, task ledger, lost-answer reconciliation, failure injection
-  against a TLS mock) is built and tested; the live conformance of slices 1–3 is not, and
-  the status does not change before it is
+  against a TLS mock) is built and tested (#475), and its lifecycle was run against a live
+  PVE 9.2.2 node with the route trace on (2026-09-23, `docs/proxmox/trace-9.2.2.routes`):
+  **14 of the 17 called routes are `supported+tested`**; the 3 left are named with the
+  reason in the trace header. Slices 2–3 have no live conformance, and the status does not
+  change before they do
 - **Date:** 2026-09-23
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0008 (the Proxmox backend as ONE node behind `VmBackend`, and what it
@@ -178,7 +181,7 @@ own, after a spike, or it stays excluded.
 | Slice | Deliverable | Exit criterion |
 |---|---|---|
 | 0 | Versioned endpoint inventory (this ADR, `scripts/proxmox_api_inventory.py`) | Schema source, release, method/path denominator, states with reasons, called routes read from the source; baseline reproduced by someone else with the docstring command — **done for 9.2.2**; the schema is committed with provenance (`docs/proxmox/api-9.2.2.routes.json`), the matrix is generated (`docs/proxmox/matrix-9.2.2.md`) and gated, and the five states of the brief (`supported+tested` from a route trace of a live run, `supported+untested`, `unsupported-by-design`, `not-yet-implemented`, `not-available-in-version`) replace the three |
-| 1 | Hardened transport and task handle | **Built**: 16 MiB response bound; `Auth`/`Ticket` `Debug` redacted and a test that greps every rendered error, `Debug` and the trace file for the secret; typed status errors (`Unauthorized`/`Forbidden`/`NodeNotFound`/`NodeConflict`/`BadRequest`/`NodeUnavailable`/`ResponseTooLarge`, DX-1526/4504/5504/6506/9515–9517 — the `Node` prefix keeps `arch_fitness.py`'s raw-variant counter from reading a local variant as a raw match on the shared class); a task LEDGER per VM written before the wait and settled after, reconciled before the next operation; a lost answer reconciled through `GET /nodes/{node}/tasks?vmid=…&source=active` and an effect probe, never resent; failure injection against a TLS mock node (14 scenarios: TLS refused/accepted-by-CA, 401 renew-once/token-never, 403/404/409/400/5xx, truncated body, unexpected JSON, stalled answer, oversized body, task failed, task timed out, leftover task, lost answer ×3). **Not done**: a live run of the same against a node |
+| 1 | Hardened transport and task handle | **Built**: 16 MiB response bound; `Auth`/`Ticket` `Debug` redacted and a test that greps every rendered error, `Debug` and the trace file for the secret; typed status errors (`Unauthorized`/`Forbidden`/`NodeNotFound`/`NodeConflict`/`BadRequest`/`NodeUnavailable`/`ResponseTooLarge`, DX-1526/4504/5504/6506/9515–9517 — the `Node` prefix keeps `arch_fitness.py`'s raw-variant counter from reading a local variant as a raw match on the shared class); a task LEDGER per VM written before the wait and settled after, reconciled before the next operation; a lost answer reconciled through `GET /nodes/{node}/tasks?vmid=…&source=active` and an effect probe, never resent; failure injection against a TLS mock node (14 scenarios: TLS refused/accepted-by-CA, 401 renew-once/token-never, 403/404/409/400/5xx, truncated body, unexpected JSON, stalled answer, oversized body, task failed, task timed out, leftover task, lost answer ×3). **Live run done (2026-09-23)**: `tests/live.rs` walks create → snapshot (RAM) → rollback → stop → resume → stop → destroy against a real PVE 9.2.2 node with the trace on; the committed trace promotes 14 of 17 called routes to `supported+tested` and the gate regenerates the matrix WITH it. Measured there and not assumed: a `stop` submitted within ~30 s of a `start` or a RAM rollback fails on the node's 10 s config lock, the client's lock retry resubmits it (2 logical stops, 4 `qmstop` tasks, 2 failed on the node), and the ledger keeps every one. Still untested live: `clone`/`config` (need a template on the node) and `GET /nodes/{node}/tasks` (lost-answer path, failure injection only) |
 | 2 | VM operations mapped to engine semantics | Resize (`…/resize`), disks and NICs beyond `config`, cloud-init through `config`, per-VM backup and restore (`…/vzdump`, `…/qemu` restore) — each behind a capability name from ADR-0044 D2; contract tests plus a `tests/live.rs` case per operation |
 | 3 | Cluster-dependent operations | Capability discovery for storage, migration, HA and SDN on the node's cluster; **no implicit node selection**; integration on the supported topology — the three-node `ngola-lda` cluster above is the named target |
 | 4 | Administration contract, if ever | Its own ADR, threat model, per-route permission, audit trail, deny by default — and it sits under ADR-0010: local socket, never remote |
@@ -273,3 +276,14 @@ schema; the live results this ADR counts as «tested» are ADR-0039's and
 `docs/discovery/58_…`'s, not re-run today; whether the credential can reach a log (slice 1
 measures it); the three-node topology as a slice-3 target (nothing about Ceph, SDN or
 migration has been called, ever — the matrix says 0).
+
+**Added 2026-09-23 (slice 1 live run):** `tests/live.rs` ran with `DELONIX_PROXMOX_TRACE_ROUTES`
+against a PVE 9.2.2 node booted from this repository's appliance image (a libvirt VM, not the
+`ngola-lda` cluster — the cluster is the slice-3 target, and nothing there was touched). The
+trace is committed (`docs/proxmox/trace-9.2.2.routes`, 92 requests, header = provenance) and
+the gate regenerates the matrix with it: **14 tested / 3 untested of 17 called**. The three
+untested are named in the trace header with the reason. The credential did not reach the
+trace file (the URL is the only thing written, and the test greps the mock's outputs for the
+secret; the live file was read and has neither the password nor a ticket). Not measured:
+the guest-agent `ip()` path (needs a prepared guest, `DELONIX_PROXMOX_TEST_AGENT_VMID`), and the
+per-route behaviour against the real three-node cluster.
