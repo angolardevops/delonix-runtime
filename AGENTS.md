@@ -6384,6 +6384,66 @@ check da janela continua verde. É isso que prova que cobrem metades diferentes,
 coisa duas vezes.
 
 
+## O catálogo de capacidades dos providers, e o `delonix provider ls` (ADR-0050, 2026-09-23)
+
+Pedido: gerir VMs e infra por uma interface própria, com paridade MEDIDA face ao
+ProxmoxProvider — suporte, degradação explícita ou recusa por provider. A primeira
+medição fixou o problema: o contrato de nó já tinha `Capability`/`ProviderInfo`
+(`common.proto`) e **nada em Rust produzia um**; o `VmBackend` dizia o que não sabe
+fazer por métodos default que recusam (`unsupported_pause`/`unsupported_snapshot`),
+ou seja só se descobria a tentar; e o `ListProviders` tinha forma e nenhum handler.
+
+- **O denominador é o catálogo do motor, em código** —
+  `delonix_compute::capability::Capability`, **100 entradas**, catálogo `1.0.0`, nomes
+  pontuados estáveis (`vm.snapshot.memory`, `net.namespace-isolation`), por domínio
+  e por tipo de porta. Um relatório constrói-se a percorrer `Capability::ALL` com um
+  `match` **sem braço curinga**: uma entrada nova não compila em nenhum provider até
+  ele responder. É a mesma propriedade da tabela de Kinds e do mapa de exit codes.
+- **Seis estados, e `supported` não se auto-certifica.** `Supported { evidence }` nomeia
+  um `check:`/`e2e:` da bateria, um `chaos:`, um `test:` ou um `live:`, e o teste
+  `every_supported_capability_cites_evidence_that_exists` faz grep a cada um. Uma
+  capacidade com código e sem prova é `partial`, e é o estado honesto da MAIOR parte
+  da matriz de VM hoje (a bateria exercita snapshot/pause/stop/start e quase mais
+  nada da superfície de VM). `unavailable-on-host` não se declara: é o que um sim
+  declarado vira quando a sonda do host falha (`on_host`), com a peça em falta
+  nomeada; um não declarado nunca vira um não de host.
+- **Quatro declarações, três com sonda**: libvirt (`virsh`, `qemu`, `/dev/kvm`,
+  `qemu:///system` — um host só-sessão perde as linhas que precisam de IP observado),
+  cloud-hypervisor (binário, kvm, firmware — «seleccionável» e «arranca» são factos
+  diferentes), proxmox (**declarado e nunca sondado**: `provider ls` não liga a
+  nada, a saúde diz `NotProbed`), e linux **três vezes** sob um id — compute
+  (`delonix-linux`), network (`delonix-sdn`, com o `br_netfilter` perguntado ao
+  HOLDER porque o sysctl é por-netns) e storage (`delonix-volume`).
+- **O relatório vai no `BackendRegistration.report`** (um `ReportFactory`, como o
+  `new`), nunca num método default do trait — «never a default method that quietly
+  does nothing» (ADR-0044 D3) — e nunca chamado no registo (ADR-0008: registar não faz
+  I/O). Quando o P4b mover a porta, `capabilities()` devolve isto tal e qual.
+- **`provider ls|describe|matrix`**: `ls` e `describe` medem neste host; `matrix`
+  imprime a vista DECLARADA de que `docs/providers/capability-matrix.md` é gerado, e
+  `the_published_matrix_is_the_generated_one` mantém o ficheiro igual ao output —
+  regenerar com `delonix provider matrix > docs/providers/capability-matrix.md`. O JSON
+  do `ls` tem os campos do `ProviderInfo` do contrato mais `catalog_version`.
+- **O `virsh` tem o seu próprio número, e é outra pergunta.**
+  `scripts/libvirt_virsh_inventory.py` lê o `virsh help` de uma versão nomeada
+  (denominador: 276 no libvirt 10.0.0) e as fontes que o invocam (numerador: **31**,
+  11,2 %), com excluídos com razão (o shell do próprio virsh, `iface-*`, a migração do
+  ADR-0031). Pools/volumes/nodedev/checkpoint/eventos estão **em falta, não excluídos**.
+  A primeira versão contava só argv de uma linha e falhou CINCO (`net-update`,
+  `nwfilter-define`, `snapshot-delete`/`-dumpxml`/`-create` são `vec![` multi-linha) —
+  apanhado a comparar com a lista à mão, corrigido a juntar o bloco à primeira linha.
+- **O que ficou fora, e porquê**: o readback pelo contrato de nó espera pelo
+  `delonix-node-api` (o `delonix-mgmt` está congelado pelo ADR-0041 D4 — uma rota
+  nova lá é uma rota a migrar amanhã); a recusa por nome no pedido
+  (`required_capabilities`/`--require`) é a fatia seguinte, e precisa do código `DX-`
+  certo primeiro (`vm.unsupported_by_backend` é DX-1501, classe *invalid*, e o contrato
+  diz `FAILED_PRECONDITION`); o XML cru do libvirt fica `partial` com o modelo de
+  confiança escrito e **não pode viajar** em `ProviderExtensions`.
+
+**Achado lateral no `pt.po`**: uma entrada `msgid` continha o output de um teste
+falhado colado a seguir ao texto (2 KB de `thread … panicked`), pré-existente na
+`main`. Removida nesta passagem; um `msgid` que ninguém procura não faz mal, mas é
+lixo no catálogo.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,

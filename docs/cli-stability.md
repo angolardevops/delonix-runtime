@@ -323,6 +323,13 @@ diz quais são, em vez de os omitir.
   `cri`/`oci` são superfícies futuras, cada uma com o seu próprio "três
   estados" por construir. Sem promessa de campos até `compose`/`cri`/`oci`
   entrarem — o formato pode mudar de forma para os acomodar.
+* **`provider`** — `ls`/`describe`/`matrix`: o que cada provider (libvirt,
+  cloud-hypervisor, proxmox, linux) declara contra o catálogo de capacidades
+  (ADR-0050), medido no host. Os NOMES das capacidades (`vm.snapshot.memory`,
+  `net.namespace-isolation`, …) e os seis estados são o que um script lê, e
+  seguem a versão do catálogo (`catalog_version` no JSON): uma entrada nova sobe
+  o minor, renomear ou remover sobe o major. As colunas da tabela e a forma do
+  JSON além desses campos podem ainda mudar.
 * **`cluster`, `vm`, `pod`, `workload`, `net`** —
   a superfície ainda está a assentar. (O *schema* de `kind: Pod` é estável, ver
   acima; o que não é estável é o grupo de comandos `delonix pod`.)

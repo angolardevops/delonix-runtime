@@ -13,6 +13,7 @@ use delonix_compute::Mount;
 use delonix_state::write_atomic;
 
 mod error;
+pub mod provider_report;
 pub use error::{Error, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;

@@ -414,6 +414,8 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - The declarative verbs over a manifest, without naming a stack: converge it, see what would change, compare declared vs last-applied vs observed for one resource, report what the MACHINE changed since the last apply (``drift``, manifest optional), block until ready.
    * - ``compatibility`` · ``migrate``
      - What this engine covers of another tool's surface, and what an existing file would cost to move: ``compatibility docker``/``compose`` print the three-state matrix (served, refused with a reason, missing) and ``migrate assess -f docker-compose.yml`` scores a file you already have, key by key. Both read-only.
+   * - ``provider``
+     - What each provider (``libvirt``, ``cloud-hypervisor``, ``proxmox``, ``linux``) can do, measured on THIS host against a versioned capability catalog (ADR-0050): ``ls`` counts capabilities per state (supported with evidence, partial, unsupported by the provider, needs an external component, not implemented, unavailable on this host), ``describe <id>`` gives the reason for each, ``matrix`` prints the declared matrix that ``docs/providers/capability-matrix.md`` is generated from.
    * - ``explain`` · ``api-resources``
      - The field reference for a Kind (``kubectl explain`` style, read from the generated schema) and the catalogue of every Kind this engine serves.
 

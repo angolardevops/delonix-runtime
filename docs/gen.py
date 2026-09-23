@@ -1478,6 +1478,27 @@ por razões diferentes: o número do CRI vive num documento mantido à mão (pro
 trabalho de conformidade nenhum, logo a contagem honesta é zero.""",
         "subs": {},
     },
+    "provider": {
+        "title": "delonix provider",
+        "tagline": "O que cada provider consegue fazer — medido neste host, contra um catálogo com versão.",
+        "intro": """<code>provider ls</code> lista todos os providers que esta build conhece —
+<code>libvirt</code>, <code>cloud-hypervisor</code>, <code>proxmox</code> e <code>linux</code> (que é
+ao mesmo tempo provider de computação, de rede e de storage) — e conta, para cada um, as capacidades
+do catálogo (ADR-0050) em cada um de seis estados: <em>supported</em> (implementada E exercitada —
+cada uma nomeia o check da bateria, o cenário de caos ou o teste que a prova), <em>partial</em>
+(com um limite escrito, ou sem prova ao vivo), <em>unsupported-by-provider</em>,
+<em>requires-external-component</em>, <em>not-implemented</em>, e <em>unavailable-on-host</em>
+— um sim declarado que ESTE host não consegue honrar (falta o binário, o <code>/dev/kvm</code>, o
+<code>qemu:///system</code>, um cgroup delegado, o <code>br_netfilter</code>), com a peça em falta
+nomeada. <code>describe &lt;id&gt;</code> mostra a razão de cada linha; <code>matrix</code> imprime a
+matriz DECLARADA (todo o host assumido completo) de que <code>docs/providers/capability-matrix.md</code>
+é gerado, e um teste mantém os dois iguais. Um provider remoto (Proxmox) declara e não liga: a saúde
+diz <code>NotProbed</code>, nunca adivinha. O JSON de <code>ls</code> tem a forma do
+<code>ProviderInfo</code> do contrato de nó. <strong>Não estável</strong> — ver
+<code>docs/cli-stability.md</code>; os nomes das capacidades e os estados seguem a versão do
+catálogo.""",
+        "subs": {},
+    },
     "migrate": {
         "title": "delonix migrate",
         "tagline": "Pontua o que já tens contra o que este motor serve.",
@@ -1971,6 +1992,26 @@ key list, <strong>measured</strong> one key at a time against <code>docker compo
 different reasons: the CRI number lives in a hand-maintained document (produced by running
 <code>critest</code> on a node) that nothing here can derive, and OCI has zero conformance work in
 this repository, so the honest row count is zero.""",
+    },
+    "provider": {
+        "title": "delonix provider",
+        "tagline": "What each provider can do — measured on this host, against a versioned catalog.",
+        "intro": """<code>provider ls</code> lists every provider this build knows —
+<code>libvirt</code>, <code>cloud-hypervisor</code>, <code>proxmox</code> and <code>linux</code> (a
+compute, a network and a storage provider at once) — and counts, for each, the catalog's capabilities
+(ADR-0050) in each of six states: <em>supported</em> (implemented AND exercised — each one names the
+battery check, chaos scenario or test that proves it), <em>partial</em> (with a written limit, or
+without live proof), <em>unsupported-by-provider</em>, <em>requires-external-component</em>,
+<em>not-implemented</em>, and <em>unavailable-on-host</em> — a declared yes THIS host cannot honour
+(the binary, <code>/dev/kvm</code>, <code>qemu:///system</code>, a delegated cgroup or
+<code>br_netfilter</code> is missing), with the missing piece named. <code>describe &lt;id&gt;</code>
+shows the reason behind every row; <code>matrix</code> prints the DECLARED matrix (every host assumed
+complete) that <code>docs/providers/capability-matrix.md</code> is generated from, and a test keeps
+the two equal. A remote provider (Proxmox) declares and does not connect: its health says
+<code>NotProbed</code>, never a guess. The JSON of <code>ls</code> has the shape of the node
+contract's <code>ProviderInfo</code>. <strong>Not stable</strong> — see
+<code>docs/cli-stability.md</code>; capability names and states follow the catalog version.""",
+        "subs": {},
     },
     "migrate": {
         "tagline": "Score what you already have against what this engine serves.",

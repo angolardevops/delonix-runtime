@@ -1451,6 +1451,7 @@ pub fn register(target: Target) -> delonix_model::Result<()> {
             id: "proxmox",
             aliases: &["pve"],
             auto_selectable: false,
+            report: Box::new(|| capability_report(true)),
             new: Box::new(move || {
                 let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
                 if let Some(c) = slot.as_ref() {
@@ -1468,6 +1469,103 @@ pub fn register(target: Target) -> delonix_model::Result<()> {
             }),
         },
     )?)
+}
+
+/// What the Proxmox backend says about the capability catalog (ADR-0050).
+///
+/// Declared, never probed: building this report contacts nothing — a remote
+/// provider authenticates on construction, and `provider ls` must cost zero
+/// round trips. The health therefore says so (`Unknown`/`NotProbed`) instead
+/// of guessing either way. `configured` is whether a target is registered
+/// in this process; without one nothing here is selectable.
+pub fn capability_report(configured: bool) -> delonix_compute::capability::ProviderReport {
+    use delonix_compute::capability::{
+        Capability as C, CapabilityState as S, HealthStatus, ProviderHealth, ProviderKind,
+        ProviderReport,
+    };
+    let health = if configured {
+        ProviderHealth {
+            status: HealthStatus::Unknown,
+            reason: "NotProbed",
+            message: "a remote provider is not contacted by `provider ls`; the first VM operation authenticates".to_string(),
+        }
+    } else {
+        ProviderHealth {
+            status: HealthStatus::Unavailable,
+            reason: "NotConfigured",
+            message: "set DELONIX_PROXMOX_URL/_NODE and a credential to register a target"
+                .to_string(),
+        }
+    };
+    ProviderReport::build("proxmox", ProviderKind::Compute, configured, health, |c| {
+        match c {
+        C::ProviderAvailability => S::Partial { detail: "`available()` is always true once configured; reachability is learned on the first call" },
+        C::ResourceReadback => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::Events => S::NotImplemented,
+        C::AsyncOperations => S::Partial { detail: "every write waits on its UPID (`wait_task`, terminal `exitstatus`); the engine exposes no job handle yet" },
+        C::VmCreate => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::VmStart => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::VmStop => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::VmDestroy => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::VmRestart => S::Partial { detail: "stop-then-start through the same two routes; no live case names it" },
+        C::VmPause => S::UnsupportedByProvider { reason: "`…/status/suspend` is not called; refused by name (`unsupported_pause`)" },
+        C::VmResume => S::UnsupportedByProvider { reason: "`…/status/resume` is not called; refused by name" },
+        C::VmResumeSameIdentity => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::VmClone => S::Partial { detail: "`disk: template:<vmid>` clones a template (`…/clone`); ADR-0039's table exercised it, no `tests/live.rs` case" },
+        C::VmTemplate => S::NotImplemented,
+        C::VmResizeCold => S::NotImplemented,
+        C::VmHotplug => S::NotImplemented,
+        C::VmExtraDisks => S::UnsupportedByProvider { reason: "refused by name (`refuse_unsupported`); ADR-0049 slice 2 maps disks beyond `config`" },
+        C::VmExtraNics => S::UnsupportedByProvider { reason: "refused by name; one `net0` on the target's bridge/VLAN" },
+        C::VmDiskResize => S::NotImplemented,
+        C::VmPciPassthrough => S::UnsupportedByProvider { reason: "`devices` refused by name: the guest is on another machine" },
+        C::VmTpm => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
+        C::VmCpuModel => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
+        C::VmCpuPinning => S::UnsupportedByProvider { reason: "refused by name" },
+        C::VmHugepages => S::UnsupportedByProvider { reason: "refused by name" },
+        C::VmCloudInit => S::Partial { detail: "hostname/user/ssh keys map to the node's cloud-init keys through `config`; a `seed` file is refused" },
+        C::VmRestartPolicyNative => S::UnsupportedByProvider { reason: "the engine's supervisor is not on the node; no policy is set there" },
+        C::VmNamespaceIsolation => S::UnsupportedByProvider { reason: "refused before any API call (`vm_namespace_supported`)" },
+        C::VmAntispoof => S::RequiresExternalComponent { component: "the node's firewall (`…/firewall`), excluded as administration (ADR-0049 D3)" },
+        C::VmRawDefinition => S::UnsupportedByProvider { reason: "no raw config passthrough (ADR-0049 D6)" },
+        C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
+        | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
+        | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
+        | C::ContainerImages | C::ContainerBackupRestore => {
+            S::UnsupportedByProvider { reason: "LXC needs its own boundary decision (ADR-0049 D4); containers are the Linux provider's" }
+        }
+        C::VmNetworkNat => S::UnsupportedByProvider { reason: "the node has no NAT network of the engine's; `net0` is bridged" },
+        C::VmNetworkBridge => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::VmNetworkSdn => S::UnsupportedByProvider { reason: "the engine's SDN is on this host; `network` is silently ignored today (ADR-0044 D1 gap, to be refused)" },
+        C::VmStaticIp => S::NotImplemented,
+        C::StoragePools => S::Partial { detail: "`disk: <storage>:<gib>` names a node storage for a fresh disk; pools are not listed (ADR-0049: `storage` missing, not excluded)" },
+        C::VmSnapshotDisk => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
+        C::VmSnapshotMemory => S::Partial { detail: "`vmstate=1` on every snapshot of a running VM; the live case snapshots once, state not asserted" },
+        C::VmSnapshotRestore => S::Partial { detail: "`…/snapshot/{name}/rollback`; no live case" },
+        C::VmSnapshotDelete => S::UnsupportedByProvider { reason: "`DELETE …/snapshot/{name}` is not called; refused by name" },
+        C::VmSnapshotPersistent => S::Partial { detail: "snapshots live on the node and survive the engine; not asserted live" },
+        C::VmBackupDisk => S::NotImplemented,
+        C::VmBackupQuiesced => S::NotImplemented,
+        C::VmBackupRestore => S::NotImplemented,
+        C::VmMigrationCold => S::NotImplemented,
+        C::VmMigrationLive => S::RequiresExternalComponent { component: "a Proxmox cluster with shared storage; the engine addresses ONE node (ADR-0008) and never picks the target" },
+        C::VmReplication => S::RequiresExternalComponent { component: "cluster replication jobs (ADR-0049 D3: excluded as administration)" },
+        C::VmHighAvailability => S::RequiresExternalComponent { component: "cluster HA policy (ADR-0049 D3: excluded as administration)" },
+        C::VmConsoleSerial => S::NotImplemented,
+        C::VmConsoleVnc => S::NotImplemented,
+        C::VmGuestAgent => S::Partial { detail: "`agent=1` is set and `agent/network-get-interfaces` read; a guest without the agent answers `None`" },
+        C::VmIpObserved => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::o_ip_vem_do_agente_de_um_convidado_a_serio" },
+        C::MetricsPrometheus => S::NotImplemented,
+        C::MetricsPerWorkloadNetwork => S::NotImplemented,
+        C::HostHealth => S::NotImplemented,
+        C::HostCapacity => S::NotImplemented,
+        C::TransportVerified => S::Partial { detail: "TLS verified by default (webpki roots); `insecure_tls` is an explicit opt-out on the target" },
+        C::CredentialInVault => S::Partial { detail: "`DELONIX_PROXMOX_SECRET` names a `kind: Secret`; the env-var form keeps the token in the environment" },
+        C::NetBridge | C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts | C::NetRoutesBetweenNetworks | C::NetNamespaceIsolation | C::NetTunnelEgress | C::NetRateLimit | C::NetPacketCapture | C::NetL7Proxy | C::NetIpv6 | C::VolumeLocal | C::VolumeBind | C::VolumeNfs | C::VolumeCifs | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot | C::VolumeProvisionNas | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph | C::FirewallPerWorkload | C::FirewallDefaultDeny | C::FirewallSourceFiltering | C::FirewallEgressPolicy => {
+            S::UnsupportedByProvider { reason: "not a compute capability: answered by the network/storage provider" }
+        }
+    }
+    })
 }
 
 #[cfg(test)]
