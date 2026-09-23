@@ -256,8 +256,18 @@ workflow (below) checks the built binary against before publishing anything.</p>
 <p>Do not bump the version in a feature PR, and do not use a <code>-dev</code> suffix — the gate's first rule
 already covers ordinary work, and a <code>-dev</code> suffix would point the CRI download at a release that
 does not exist.</p>
-<h2 id="what-a-pushed-tag-does">What a pushed tag does<a class="hanchor" href="#what-a-pushed-tag-does" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a> triggers on <code>push: tags: ["v*"]</code> and, in one job:</p>
+<h2 id="what-publishing-a-release-does">What publishing a release does<a class="hanchor" href="#what-publishing-a-release-does" aria-label="#">#</a></h2>
+<p>Pushing the tag publishes <strong>nothing</strong>. Since 2026-09-23 the release workflow is
+<code>workflow_dispatch</code>-only: the tag and the release are two separate decisions, so a tag that
+reaches the remote by accident (<code>git push --tags</code>, <code>push.followTags=true</code>) can no longer put a
+binary in front of the world. A tag with no release is a normal intermediate state here.</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git tag -a v4.4.0 -m &quot;v4.4.0&quot; &amp;&amp; git push origin v4.4.0   # cuts the version
+gh workflow run release.yml -f tag=v4.4.0                 # publishes it
+</code></pre></div>
+<p>A <code>guard</code> job runs first and costs seconds: it refuses a <code>tag</code> that is not shaped <code>vX.Y.Z</code>, one
+that does not exist on the remote, and one that already has a release — the input picks the commit
+to build and names the release, so an unchecked <code>tag: main</code> would have published a release called
+"main". Only then, in one job:</p>
 <ol>
 <li>Builds <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code> and <code>delonix-mgmt</code> twice — once generic
    x86-64, once with <code>-C target-cpu=x86-64-v3</code> (AVX2/BMI2/FMA) — on <code>ubuntu-22.04</code> specifically,
@@ -265,7 +275,7 @@ does not exist.</p>
    Ubuntu. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> picks the <code>-v3</code> build automatically when the host CPU supports it.
    A separate <code>build-arm64</code> job builds the same four binaries natively on an aarch64 runner (one
    per component, no <code>-v3</code> variant), and they are published as <code>&lt;name&gt;-aarch64-linux</code> under the same
-   <code>SHA256SUMS</code>. <code>install.sh</code> does not install them yet. The job only runs on a <code>v*</code> tag, so its
+   <code>SHA256SUMS</code>. <code>install.sh</code> does not install them yet. The job only runs at release time, so its
    first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
    <code>test (arm64)</code> job on every PR.</li>
 <li><strong>Regenerates the user site against this exact release build and fails if <code>docs/</code> differs.</strong>
@@ -350,7 +360,7 @@ backend or a new privilege boundary applies here too.</p>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
 <li><a href="#the-version-gate">The version gate</a></li>
-<li><a href="#what-a-pushed-tag-does">What a pushed tag does</a></li>
+<li><a href="#what-publishing-a-release-does">What publishing a release does</a></li>
 <li><a href="#what-is-stable-and-where-that-promise-lives">What is stable, and where that promise lives</a></li>
 <li><a href="#how-a-breaking-change-is-made-when-it-has-to-happen">How a breaking change is made, when it has to happen</a></li>
 </ul>

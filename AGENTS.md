@@ -104,6 +104,30 @@ pode ser uma de duas coisas, e o job `version` da CI recusa o resto:
    procuraria uma release que não existe.
 2. **Maior só no commit de release**, e com `docs/releases/v<versão>.md`.
 
+**Empurrar a tag NÃO publica nada** (2026-09-23). O `release.yml` disparava em
+`push: tags: ["v*"]`, ou seja a release construía-se no instante em que a tag
+chegava ao remoto — incluindo uma tag empurrada por acidente (`git push --tags`,
+`push.followTags=true`), e sem um passo entre «a tag existe» e «o mundo tem um
+binário». Passa a `workflow_dispatch` com a tag como INPUT:
+
+```bash
+git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # corta a versão
+gh workflow run release.yml -f tag=v4.4.0                 # publica-a
+```
+
+O input é texto livre e tudo a jusante confia nele — escolhe o commit a
+construir, dá o nome à release e é comparado com a versão do próprio binário —,
+por isso o job `guard` corre primeiro e custa segundos: recusa uma tag que não
+tenha a forma `vX.Y.Z`, uma que não exista no remoto, e uma que já tenha release
+(republicar por cima é como os assets mudam debaixo de quem já os descarregou).
+Sem essa guarda, um `tag: main` teria feito checkout de um ramo e publicado uma
+release chamada «main».
+
+**O custo, dito porque é o custo**: uma tag sem release passa a ser um estado
+intermédio normal, e o `version_gate` acima continua a olhar para a TAG e não
+para a release — portanto a `version` do `Cargo.toml` alinha-se no momento em que
+a tag é feita, não no momento em que alguém corre o workflow.
+
 Falha também **um ramo que não contém a tag mais recente**: começou antes dessa
 release e fundi-lo tal como está desfaz o que ela publicou. Faz merge da
 `origin/main` no ramo primeiro.

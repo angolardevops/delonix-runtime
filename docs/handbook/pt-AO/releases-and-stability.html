@@ -209,10 +209,10 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a class="on" aria-current="page" href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Contribuir</p>
-<h1 id="releases-and-stability">Releases e estabilidade</h1>
+<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/releases-and-stability.html">Ler a página em inglês</a></span></div><h1 id="releases-and-stability">Releases e estabilidade</h1>
 <p><strong>Antes de leres:</strong> <a href="contributing-workflow.html#version-alignment">Fluxo de contribuição</a> (o gate de versão) e <a href="publishing-docs.html">Publicar a documentação</a> (o que uma release regenera).</p>
 <p>Esta página é sobre a outra metade de uma release: o que o <code>version</code> no <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> promete, o
-que acontece quando uma tag <code>v*</code> é empurrada, e o que o motor garante que não parte sem uma versão
+que acontece quando se pede uma release, e o que o motor garante que não parte sem uma versão
 major. <a href="publishing-docs.html">Publicar a documentação</a> já cobre o lado da documentação de uma
 release (o que regenera, o que a CI verifica); esta página cobre o próprio número de versão e o
 contrato de CLI/manifesto que ele suporta.</p>
@@ -257,8 +257,18 @@ verifica contra o binário construído antes de publicar seja o que for.</p>
 <p>Não faças bump à versão num PR de funcionalidade, e não uses um sufixo <code>-dev</code> — a primeira regra
 do gate já cobre o trabalho normal, e um sufixo <code>-dev</code> apontaria o download do CRI para uma
 release que não existe.</p>
-<h2 id="what-a-pushed-tag-does">O que uma tag empurrada faz<a class="hanchor" href="#what-a-pushed-tag-does" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a> dispara em <code>push: tags: ["v*"]</code> e, num único job:</p>
+<h2 id="what-publishing-a-release-does">O que publicar uma release faz<a class="hanchor" href="#what-publishing-a-release-does" aria-label="#">#</a></h2>
+<p>Empurrar a tag publica <strong>nada</strong>. Desde 2026-09-23 o workflow de release é
+<code>workflow_dispatch</code> e mais nada: a tag e a release são duas decisões separadas, por isso uma tag
+que chegue ao remoto por acidente (<code>git push --tags</code>, <code>push.followTags=true</code>) já não põe um
+binário à frente do mundo. Uma tag sem release é aqui um estado intermédio normal.</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">git tag -a v4.4.0 -m &quot;v4.4.0&quot; &amp;&amp; git push origin v4.4.0   # corta a versão
+gh workflow run release.yml -f tag=v4.4.0                 # publica-a
+</code></pre></div>
+<p>Um job <code>guard</code> corre primeiro e custa segundos: recusa um <code>tag</code> que não tenha a forma <code>vX.Y.Z</code>,
+um que não exista no remoto, e um que já tenha release — o input escolhe o commit a construir e dá
+o nome à release, por isso um <code>tag: main</code> não verificado teria publicado uma release chamada
+"main". Só depois, num único job:</p>
 <ol>
 <li>Constrói <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code> e <code>delonix-mgmt</code> duas vezes — uma genérica
    x86-64, outra com <code>-C target-cpu=x86-64-v3</code> (AVX2/BMI2/FMA) — especificamente em
@@ -267,7 +277,7 @@ release que não existe.</p>
    automaticamente quando o CPU do host a suporta. Um job <code>build-arm64</code> separado constrói os mesmos
    quatro binários nativamente num runner aarch64 (um por componente, sem variante <code>-v3</code>), e são
    publicados como <code>&lt;name&gt;-aarch64-linux</code> sob o mesmo <code>SHA256SUMS</code>. O <code>install.sh</code> ainda não os
-   instala. O job só corre numa tag <code>v*</code>, por isso a sua primeira execução foi a própria release
+   instala. O job só corre no momento da release, por isso a sua primeira execução foi a própria release
    v4.2.0; a CI corre a suite de testes nativamente em arm64 no job <code>test (arm64)</code> em cada PR.</li>
 <li><strong>Regenera o site do utilizador contra esta build de release exacta e falha se <code>docs/</code>
    divergir.</strong> Este gate existe porque uma vez não existia: um buraco no site saiu ao vivo na
@@ -360,7 +370,7 @@ nova aplica-se também aqui.</p>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>
 <li><a href="#the-version-gate">O gate de versão</a></li>
-<li><a href="#what-a-pushed-tag-does">O que uma tag empurrada faz</a></li>
+<li><a href="#what-publishing-a-release-does">O que publicar uma release faz</a></li>
 <li><a href="#what-is-stable-and-where-that-promise-lives">O que é estável, e onde vive essa promessa</a></li>
 <li><a href="#how-a-breaking-change-is-made-when-it-has-to-happen">Como uma quebra é feita, quando tem de acontecer</a></li>
 </ul>

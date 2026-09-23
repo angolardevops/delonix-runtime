@@ -36,9 +36,22 @@ Do not bump the version in a feature PR, and do not use a `-dev` suffix — the 
 already covers ordinary work, and a `-dev` suffix would point the CRI download at a release that
 does not exist.
 
-## What a pushed tag does
+## What publishing a release does
 
-`.github/workflows/release.yml` triggers on `push: tags: ["v*"]` and, in one job:
+Pushing the tag publishes **nothing**. Since 2026-09-23 the release workflow is
+`workflow_dispatch`-only: the tag and the release are two separate decisions, so a tag that
+reaches the remote by accident (`git push --tags`, `push.followTags=true`) can no longer put a
+binary in front of the world. A tag with no release is a normal intermediate state here.
+
+```bash
+git tag -a v4.4.0 -m "v4.4.0" && git push origin v4.4.0   # cuts the version
+gh workflow run release.yml -f tag=v4.4.0                 # publishes it
+```
+
+A `guard` job runs first and costs seconds: it refuses a `tag` that is not shaped `vX.Y.Z`, one
+that does not exist on the remote, and one that already has a release — the input picks the commit
+to build and names the release, so an unchecked `tag: main` would have published a release called
+"main". Only then, in one job:
 
 1. Builds `delonix`, `delonix-cri`, `delonix-mcp` and `delonix-mgmt` twice — once generic
    x86-64, once with `-C target-cpu=x86-64-v3` (AVX2/BMI2/FMA) — on `ubuntu-22.04` specifically,
@@ -46,7 +59,7 @@ does not exist.
    Ubuntu. `scripts/install.sh` picks the `-v3` build automatically when the host CPU supports it.
    A separate `build-arm64` job builds the same four binaries natively on an aarch64 runner (one
    per component, no `-v3` variant), and they are published as `<name>-aarch64-linux` under the same
-   `SHA256SUMS`. `install.sh` does not install them yet. The job only runs on a `v*` tag, so its
+   `SHA256SUMS`. `install.sh` does not install them yet. The job only runs at release time, so its
    first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
    `test (arm64)` job on every PR.
 2. **Regenerates the user site against this exact release build and fails if `docs/` differs.**

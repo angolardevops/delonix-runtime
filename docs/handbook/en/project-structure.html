@@ -617,7 +617,7 @@ below, or when a table names a path that no longer exists.</p>
 </tr>
 <tr>
 <td><code>.github/</code></td>
-<td><code>workflows/ci.yml</code> (every gate on push and PR to <code>main</code>), <code>chaos.yml</code> (chaos harness), <code>release.yml</code> (on <code>v*</code> tags), <code>vm-image.yml</code> and <code>vm-appliances.yml</code> (manual image publishing), plus <code>CODEOWNERS</code>, issue and PR templates and a pointer file for GitHub Copilot.</td>
+<td><code>workflows/ci.yml</code> (every gate on push and PR to <code>main</code>), <code>chaos.yml</code> (chaos harness), <code>release.yml</code> (manual, <code>gh workflow run release.<wbr>yml -f tag=vX.<wbr>Y.<wbr>Z</code>), <code>vm-image.yml</code> and <code>vm-appliances.yml</code> (manual image publishing), plus <code>CODEOWNERS</code>, issue and PR templates and a pointer file for GitHub Copilot.</td>
 <td>Maintainers; a new gate is added here and documented in the handbook.</td>
 <td><a href="build-and-test.html">Clone, build and test</a>, <a href="publishing-docs.html">Publishing the documentation</a></td>
 </tr>

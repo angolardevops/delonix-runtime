@@ -112,7 +112,8 @@ toolchain or changes a CI job, run `python3 scripts/dev_docs.py` and commit the 
 
 ## What happens at release time
 
-The release workflow (`.github/workflows/release.yml`) runs on a pushed `v*` tag. For documentation
+The release workflow (`.github/workflows/release.yml`) runs when someone asks for it
+(`gh workflow run release.yml -f tag=v4.4.0`) — a pushed tag alone does nothing. For documentation
 it:
 
 1. regenerates the user site against the release build and **fails** if `docs/` differs;
