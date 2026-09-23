@@ -2047,8 +2047,15 @@ check "…e mostra o terceiro estado (o que as ferramentas usam)" ok \
   bash -c "'$BIN' serve docker-api --matrix | grep -q 'SEEN IN'"
 # A rota que decide se o Testcontainers arranca. Estar recusada é uma resposta;
 # não estar em lado nenhum não é.
+#
+# **O check exigia `refused|not written` e passou a FALHAR quando a rota foi
+# SERVIDA** (#460, 2026-09-22): ficou a pedir a prova de que ela continuava por
+# fazer. É a armadilha do «um teste pode codificar o bug», aqui virada do avesso
+# — codificou a ausência da funcionalidade. O que a linha quer dizer é que a
+# rota está CLASSIFICADA, e é isso que se exige agora: aparece na matriz, seja
+# em que estado for.
 check "…e o pull aparece classificado, não em silêncio" ok \
-  bash -c "'$BIN' serve docker-api --matrix | grep '/images/create' | grep -qE 'refused|not written'"
+  bash -c "'$BIN' serve docker-api --matrix | grep -q '/images/create'"
 
 # ---------------------------------------------------------------------------
 # `stack history` (ADR-0019) — e a propriedade que o desenho inteiro promete.
