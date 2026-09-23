@@ -56,6 +56,7 @@ pub use error::{Error, Result};
 /// friends keep resolving for every existing caller.
 pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 
+pub mod capabilities;
 pub mod cloudinit;
 pub mod provider_spike; // SPIKE (ADR-0044 D1-D4, branch docs/p4-adr-0044-substitution-spike) — not for merge as-is
 
@@ -1032,6 +1033,11 @@ fn unsupported_snapshot(backend: &str, op: &str) -> delonix_model::Error {
 /// authenticating) reports why, instead of a factory that must panic or lie.
 pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
 
+/// Builds the backend's capability report (ADR-0050). Called by `provider ls`,
+/// never at registration: like [`BackendFactory`] it may probe the host, and
+/// for a remote backend it must NOT connect — it declares, it does not verify.
+pub type ReportFactory = Box<dyn Fn() -> delonix_compute::capability::ProviderReport + Send + Sync>;
+
 /// One backend this build knows about: its canonical id (the value persisted in
 /// [`Vm::backend`]), the aliases accepted on input, and how to build one.
 pub struct BackendRegistration {
@@ -1049,6 +1055,10 @@ pub struct BackendRegistration {
     /// exists to prevent. [`register_backend`] checks the two agree.
     pub auto_selectable: bool,
     pub new: BackendFactory,
+    /// The backend's answer to every catalog entry (ADR-0050). Required: a
+    /// backend that cannot say what it supports is a backend nobody can
+    /// select by requirement.
+    pub report: ReportFactory,
 }
 
 impl std::fmt::Debug for BackendRegistration {
@@ -1068,12 +1078,16 @@ fn builtin_backends() -> Vec<BackendRegistration> {
             aliases: &["ch", "cloudhypervisor"],
             auto_selectable: true,
             new: Box::new(|| Ok(Box::new(CloudHypervisorBackend))),
+            report: Box::new(|| {
+                capabilities::cloud_hypervisor_report(&capabilities::CloudHypervisorHost::probe())
+            }),
         },
         BackendRegistration {
             id: "libvirt",
             aliases: &["kvm", "qemu"],
             auto_selectable: true,
             new: Box::new(|| Ok(Box::new(LibvirtBackend))),
+            report: Box::new(|| capabilities::libvirt_report(&capabilities::LibvirtHost::probe())),
         },
     ]
 }
@@ -1100,6 +1114,14 @@ fn backends() -> &'static std::sync::RwLock<Vec<BackendRegistration>> {
 fn with_backends<T>(f: impl FnOnce(&[BackendRegistration]) -> T) -> T {
     let guard = backends().read().unwrap_or_else(|e| e.into_inner());
     f(&guard)
+}
+
+/// Every registered backend's capability report (ADR-0050), in registry
+/// order, which is the order auto-detection prefers. Each report is built
+/// NOW, so a local backend probes this host and a remote one declares without
+/// connecting (its own `report` factory is responsible for that).
+pub fn provider_reports() -> Vec<delonix_compute::capability::ProviderReport> {
+    with_backends(|regs| regs.iter().map(|r| (r.report)()).collect())
 }
 
 /// Adds a backend to the registry. Idempotent by id: registering the same id
@@ -5804,6 +5826,7 @@ Format specific information:
             id: "pausavel",
             aliases: &[],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| Ok(Box::new(Pausable))),
         })
         .expect("registar");
@@ -7050,6 +7073,7 @@ Format specific information:
             id: "fakeremote",
             aliases: &["fr"],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(move || {
                 counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 Ok(Box::new(FakeBackend {
@@ -7094,6 +7118,7 @@ Format specific information:
             id: "fakeremote",
             aliases: &["fr"],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| {
                 Ok(Box::new(FakeBackend {
                     id: "fakeremote",
@@ -7122,6 +7147,7 @@ Format specific information:
             id: "impostor",
             aliases: &["kvm"],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| Ok(Box::new(LibvirtBackend))),
         })
         .unwrap_err()
@@ -7135,6 +7161,7 @@ Format specific information:
             id: "remoto",
             aliases: &[],
             auto_selectable: true,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| Ok(Box::new(LibvirtBackend))),
         })
         .unwrap_err()
@@ -7166,6 +7193,7 @@ Format specific information:
                 id: "remoto",
                 aliases: &[],
                 auto_selectable: false,
+                report: crate::capabilities::undeclared("fake"),
                 new: Box::new(move || {
                     counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     Ok(Box::new(FakeBackend {
@@ -7180,6 +7208,7 @@ Format specific information:
                 id: "local",
                 aliases: &[],
                 auto_selectable: true,
+                report: crate::capabilities::undeclared("fake"),
                 new: Box::new(|| {
                     Ok(Box::new(FakeBackend {
                         id: "local",
@@ -7263,6 +7292,7 @@ Format specific information:
             id: "falharemoto",
             aliases: &[],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| Ok(Box::new(FailingRemote))),
         })
         .expect("registar");
@@ -7343,6 +7373,7 @@ Format specific information:
             id: "nop-destroy",
             aliases: &[],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| Ok(Box::new(Nop))),
         })
         .expect("registar");
@@ -7466,6 +7497,7 @@ Format specific information:
             id: "contador",
             aliases: &[],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| Ok(Box::new(Counting))),
         })
         .expect("registar");
@@ -7617,6 +7649,7 @@ Format specific information:
             id: "retomavel",
             aliases: &[],
             auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
             new: Box::new(|| Ok(Box::new(Resumable))),
         })
         .expect("registar");

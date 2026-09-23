@@ -1926,6 +1926,14 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["serve docker-api", "api-resources"],
     },
     Entry {
+        path: "provider",
+        group: "Engine",
+        examples: &[
+            ("what each provider can do on this host, counted per state", "delonix provider ls"),
+        ],
+        see_also: &["provider describe", "system info", "compatibility docker"],
+    },
+    Entry {
         path: "compatibility compose",
         group: "Advanced",
         examples: &[
@@ -1933,6 +1941,35 @@ pub static ENTRIES: &[Entry] = &[
             ("machine-readable", "delonix compatibility compose -o json"),
         ],
         see_also: &["migrate assess", "compose up", "compatibility docker"],
+    },
+    Entry {
+        path: "provider ls",
+        group: "Advanced",
+        examples: &[
+            ("every provider this build knows, probed on this host", "delonix provider ls"),
+            ("only the network provider", "delonix provider ls --kind network"),
+            ("the contract's ProviderInfo shape, for a script", "delonix provider ls -o json"),
+        ],
+        see_also: &["provider describe", "provider matrix", "system info", "vm default-backend"],
+    },
+    Entry {
+        path: "provider describe",
+        group: "Advanced",
+        examples: &[
+            ("every capability of libvirt on this host, with the reason for each state", "delonix provider describe libvirt"),
+            ("the Linux provider is three providers: pick one kind", "delonix provider describe linux --kind network"),
+            ("machine-readable", "delonix provider describe cloud-hypervisor -o json"),
+        ],
+        see_also: &["provider ls", "provider matrix", "compatibility docker"],
+    },
+    Entry {
+        path: "provider matrix",
+        group: "Advanced",
+        examples: &[
+            ("the declared matrix, host-independent, as Markdown", "delonix provider matrix"),
+            ("regenerate the published file (a test keeps them equal)", "delonix provider matrix > docs/providers/capability-matrix.md"),
+        ],
+        see_also: &["provider ls", "provider describe"],
     },
     Entry {
         path: "compatibility docker",

@@ -3,6 +3,8 @@
 //! entry points translate into; the use cases that execute it follow in later P2
 //! slices.
 
+pub mod capability;
+pub mod capability_host;
 pub mod launch;
 pub mod network;
 mod notice;

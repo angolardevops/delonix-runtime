@@ -16,6 +16,7 @@ pub mod capabilities;
 pub mod cdi;
 mod error;
 pub mod launch_spec;
+pub mod provider_report;
 pub mod regulate;
 pub mod resource_advice;
 pub mod run_host;

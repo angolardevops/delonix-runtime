@@ -52,6 +52,7 @@ pub mod pki;
 pub mod po;
 pub mod pod;
 pub mod policy;
+pub mod provider;
 pub mod provision;
 pub mod prune;
 pub mod rbackup;

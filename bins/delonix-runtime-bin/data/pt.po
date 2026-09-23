@@ -13383,8 +13383,6 @@ msgstr "Pontua um `docker-compose.yml` contra o que este motor serve.\n\nLê o f
 msgid "Compose Specification coverage, key by key"
 msgstr "Cobertura da Compose Specification, chave a chave"
 
-msgid "Compose Specification coverage, key by key.\n\nServed, refused with a written reason, and MISSING — the third state, against the specification's own key list. A refusal for a key the engine has under another name says which command to use instead.\n\nthread 'help_i18n_tests::o_help_dos_argumentos_so_pode_encolher' (2040683) panicked at bins/delonix-runtime-bin/src/main.rs:1044:9:\nassertion `left == right` failed: help de argumento por traduzir: 2 (esperado 0). Se subiu, é uma flag nova sem entrada no pt.po; se desceu, baixa a constante no mesmo commit.\n  delonix migrate assess --file (help): Compose file (default: `./compose.yaml`, `./compose.yml`, `./docker-compose.yaml` or `./docker-compose.yml`, in that order)\n  delonix migrate assess --detailed_exitcode (help): Exit 2 when something this engine does not serve is used (0 = it all maps, 1 = error) — same contract as `stack plan --detailed-exitcode`, so a migration can be a CI gate instead of a reading exercise\n  left: 2\n right: 0\ntest help_i18n_tests::todo_o_help_de_comando_tem_traducao_pt ... FAILED\ntest help_i18n_tests::o_help_dos_argumentos_so_pode_encolher ... FAILED\n\nfailures:\n\nfailures:\n    help_i18n_tests::o_help_dos_argumentos_so_pode_encolher\n    help_i18n_tests::todo_o_comentario_de_exemplo_tem_traducao_pt\n    help_i18n_tests::todo_o_help_de_comando_tem_traducao_pt\n\ntest result: FAILED. 0 passed; 3 failed; 0 ignored; 0 measured; 948 filtered out; finished in 0.04s\n\nerror: test failed, to rerun pass `-p delonix-runtime-bin --bin delonix`"
-msgstr "Cobertura da Compose Specification, chave a chave.\n\nServida, recusada com razão escrita, e EM FALTA — o terceiro estado, contra a lista de chaves da própria especificação. Uma recusa de uma chave que o motor tem com outro nome diz qual o comando a usar."
 
 msgid "score a compose file you already have"
 msgstr "pontua um ficheiro compose que já tens"
@@ -13516,3 +13514,71 @@ msgstr "A resposta do nó foi maior do que este cliente está disposto a ler par
 
 msgid "Check what the node is serving on that route; an answer this large is not one the engine expects."
 msgstr "Verifica o que o nó está a servir nessa rota; uma resposta deste tamanho não é uma que o motor espere."
+
+# --- provider ls / describe / matrix (ADR-0050) ---
+
+msgid "What each provider can do, measured on this host against the capability catalog (ADR-0050)"
+msgstr "O que cada provider consegue fazer, medido neste host contra o catálogo de capacidades (ADR-0050)"
+
+msgid "What each provider can do, measured on this host against the capability catalog (ADR-0050).\n\nProviders: libvirt, cloud-hypervisor, proxmox, linux (compute, network and storage). Supported with evidence, partial with a written limit, unsupported by the provider, needs an external component, not implemented, or unavailable on THIS host. NOT stable: see `docs/cli-stability.md`."
+msgstr "O que cada provider consegue fazer, medido neste host contra o catálogo de capacidades (ADR-0050).\n\nProviders: libvirt, cloud-hypervisor, proxmox, linux (computação, rede e storage). Suportado com evidência, parcial com limite escrito, não suportado pelo provider, precisa de componente externo, não implementado, ou indisponível NESTE host. NÃO estável: ver `docs/cli-stability.md`."
+
+msgid "Every provider this build knows, probed on this host"
+msgstr "Todos os providers que esta build conhece, sondados neste host"
+
+msgid "Every provider this build knows, probed on this host.\n\nOne row per (provider, kind) with the count of capabilities in each state. A provider that is not configured (a remote one without a target) is listed as unavailable, not hidden."
+msgstr "Todos os providers que esta build conhece, sondados neste host.\n\nUma linha por (provider, tipo) com a contagem de capacidades em cada estado. Um provider não configurado (um remoto sem alvo) aparece como indisponível, não é escondido."
+
+msgid "Every capability of ONE provider, with its state and the reason"
+msgstr "Todas as capacidades de UM provider, com o estado e a razão"
+
+msgid "The declared matrix, host-independent, as Markdown"
+msgstr "A matriz declarada, independente do host, em Markdown"
+
+msgid "The declared matrix, host-independent, as Markdown.\n\nWhat `docs/providers/capability-matrix.md` is generated from. Nothing is probed: every host is assumed complete, so the states are the providers' own claims — and each `supported` names its evidence."
+msgstr "A matriz declarada, independente do host, em Markdown.\n\nÉ daqui que `docs/providers/capability-matrix.md` é gerado. Nada é sondado: todo o host é assumido completo, por isso os estados são as afirmações dos próprios providers — e cada `supported` nomeia a sua evidência."
+
+msgid "Only providers of this kind: compute, network, storage."
+msgstr "Só providers deste tipo: compute, network, storage."
+
+msgid "Machine-readable JSON (ADR-0005), one element per provider."
+msgstr "JSON legível por máquina (ADR-0005), um elemento por provider."
+
+msgid "Provider id: libvirt, cloud-hypervisor, proxmox, linux."
+msgstr "Id do provider: libvirt, cloud-hypervisor, proxmox, linux."
+
+msgid "Disambiguates `linux`, which is a compute, a network and a storage provider at once. Omitted: all of its kinds."
+msgstr "Desambigua `linux`, que é ao mesmo tempo provider de compute, de rede e de storage. Omitido: todos os seus tipos."
+
+msgid "provider '{id}' (known: {known})"
+msgstr "provider '{id}' (conhecidos: {known})"
+
+msgid "Providers of delonix {version}, catalog {catalog}, measured on this host ({total} capabilities in the catalog)."
+msgstr "Providers do delonix {version}, catálogo {catalog}, medidos neste host ({total} capacidades no catálogo)."
+
+msgid "`supported` names its evidence (a battery check, a scenario or a test); `partial` has a written limit; `unavailable-on-host` is a declared yes this host cannot honour. `delonix provider describe <id>` lists the reasons."
+msgstr "`supported` nomeia a sua evidência (um check da bateria, um cenário ou um teste); `partial` tem um limite escrito; `unavailable-on-host` é um sim declarado que este host não consegue honrar. `delonix provider describe <id>` lista as razões."
+
+msgid "every provider this build knows, probed on this host"
+msgstr "todos os providers que esta build conhece, sondados neste host"
+
+msgid "only the network provider"
+msgstr "só o provider de rede"
+
+msgid "the contract's ProviderInfo shape, for a script"
+msgstr "a forma ProviderInfo do contrato, para um script"
+
+msgid "every capability of libvirt on this host, with the reason for each state"
+msgstr "todas as capacidades do libvirt neste host, com a razão de cada estado"
+
+msgid "the Linux provider is three providers: pick one kind"
+msgstr "o provider Linux são três providers: escolhe um tipo"
+
+msgid "the declared matrix, host-independent, as Markdown"
+msgstr "a matriz declarada, independente do host, em Markdown"
+
+msgid "regenerate the published file (a test keeps them equal)"
+msgstr "regenerar o ficheiro publicado (um teste mantém-nos iguais)"
+
+msgid "what each provider can do on this host, counted per state"
+msgstr "o que cada provider consegue fazer neste host, contado por estado"

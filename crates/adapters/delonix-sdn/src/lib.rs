@@ -45,6 +45,7 @@ mod flock;
 pub mod infra;
 pub mod ipam;
 mod pin_userns;
+pub mod provider_report;
 pub mod run_network;
 pub mod vm_network;
 pub mod wg;

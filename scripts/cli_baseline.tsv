@@ -165,6 +165,9 @@
 =	pod logs
 ~	pod port-forward
 ~	policy unset
+~	provider describe
+~	provider ls
+~	provider matrix
 ~	secret apply
 =	secret create
 ~	secret inspect

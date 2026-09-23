@@ -404,6 +404,16 @@ enum Cmd {
         #[command(subcommand)]
         action: cmd::compatibility::CompatibilityCmd,
     },
+    /// What each provider can do, measured on this host against the capability catalog (ADR-0050).
+    ///
+    /// Providers: libvirt, cloud-hypervisor, proxmox, linux (compute, network and storage).
+    /// Supported with evidence, partial with a written limit, unsupported by
+    /// the provider, needs an external component, not implemented, or
+    /// unavailable on THIS host. NOT stable: see `docs/cli-stability.md`.
+    Provider {
+        #[command(subcommand)]
+        action: cmd::provider::ProviderCmd,
+    },
     /// Serve a protocol endpoint on a unix socket, grouped: cri/api/docker-api.
     Serve {
         #[command(subcommand)]
@@ -642,6 +652,7 @@ fn run() -> Result<()> {
         Cmd::Cluster { action } => cmd::cluster::run(action),
         Cmd::Net { action } => cmd::net::run(action),
         Cmd::Compatibility { action } => cmd::compatibility::run(action),
+        Cmd::Provider { action } => cmd::provider::run(action),
         Cmd::Serve { action } => cmd::serve::run(action),
         Cmd::Mcp { action } => cmd::mcp::run(action),
         Cmd::Hosts { action } => cmd::hosts::run(action),
@@ -1141,6 +1152,7 @@ mod cli_stability_classification_tests {
         "plan",
         "pod",
         "policy",
+        "provider",
         "secret",
         "serve",
         "stack",

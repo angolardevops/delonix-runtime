@@ -499,6 +499,35 @@ check "migrate assess de um ficheiro inexistente diz 4" 4 \
 rm -rf "$COMPW"
 
 ########################################
+section "provider ls / describe / matrix (ADR-0050): a matriz medida, não afirmada"
+# O que se prova aqui é a LIGAÇÃO: que o verbo lê as declarações reais, que o
+# JSON leva os campos que o contrato (`ProviderInfo`) leva, que um `supported`
+# nunca vem sem evidência, e que a matriz publicada é a gerada — o teste
+# unitário do bin compara o ficheiro, este check confirma-o contra o binário.
+check "provider ls" ok "$BIN" provider ls
+check "provider ls -o json é um array com os 6 providers" ok bash -c \
+  "'$BIN' provider ls -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert len(v)==6, len(v)'"
+check "provider ls -o json: cada capacidade leva name/supported/state/detail" ok bash -c \
+  "'$BIN' provider ls -o json | python3 -c '
+import json,sys
+for p in json.load(sys.stdin):
+    assert p[\"id\"] and p[\"kind\"] in (\"compute\",\"network\",\"storage\"), p
+    assert p[\"health\"][\"reason\"], p[\"id\"]
+    for c in p[\"capabilities\"]:
+        assert set(c) >= {\"name\",\"supported\",\"state\",\"detail\",\"domain\"}, c
+        assert c[\"state\"] != \"supported\" or c[\"detail\"], (p[\"id\"], c[\"name\"])
+'"
+check "provider ls --kind network só traz a rede" ok bash -c \
+  "'$BIN' provider ls --kind network -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert [p[\"kind\"] for p in v]==[\"network\"], v'"
+check "provider describe libvirt" ok "$BIN" provider describe libvirt
+check "provider describe linux --kind storage" ok "$BIN" provider describe linux --kind storage
+check "provider describe de um provider inexistente diz 4" 4 "$BIN" provider describe naoexiste
+check "provider ls --kind inválido recusa" fail "$BIN" provider ls --kind ceph
+check "provider matrix é a matriz publicada, byte a byte" ok bash -c \
+  "diff <('$BIN' provider matrix) '$(dirname "$0")/../docs/providers/capability-matrix.md' >/dev/null"
+check "provider ls --l18n=pt traduz o cabeçalho" ok bash -c \
+  "'$BIN' --l18n=pt provider ls | grep -q 'medidos neste host'"
+
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
 check "container describe de inexistente recusa" fail "$BIN" container describe naoexiste-$PFX
