@@ -26,6 +26,23 @@
 #
 # `--force` corre numa bancada recusada e marca o resultado como NÃO PUBLICÁVEL.
 # Serve para depurar o próprio script, não para produzir uma tabela.
+#
+# ## `--json`
+#
+# **Esta flag era aceite e IGNORADA** — `JSON=1` era atribuído e nunca lido, por
+# isso `--json` imprimia a mesma tabela para humanos que uma corrida normal.
+# Pertence à classe que este repositório persegue em todo o lado: uma opção que o
+# utilizador passou e o programa engoliu em silêncio (ver as três já corrigidas
+# no `AGENTS.md` — `--security-opt seccomp=`, `-v …:z`, `--network-alias`).
+#
+# Agora emite UM objecto JSON em **stdout** e manda todo o texto humano para
+# **stderr**, o mesmo contrato do `-o json` do resto da CLI: quem faz
+# `bench.sh --json > run.json` fica com um ficheiro que parseia, e continua a ver
+# o relatório no terminal. É o que o `scripts/bench_gate.py` consome — o gate LÊ
+# uma medição, nunca a faz, para nunca haver duas opiniões sobre o mesmo número.
+#
+# O objecto diz SEMPRE se é publicável (`bench.publishable`), e uma ferramenta
+# ausente sai `null` e nunca `0`: um zero lê-se como medição.
 
 set -uo pipefail
 
@@ -60,6 +77,16 @@ done
 # `densidade: 0` — os dois vindos de um binário inexistente, e os dois a ler-se
 # como medições. Um harness que mede o que não está lá é o relato desonesto que
 # ele próprio existe para impedir.
+# O stdout REAL fica no fd 3 e o resto do script escreve para stderr quando
+# `--json` está ligado. Uma linha de relatório no meio do objecto tornava a
+# saída impossível de parsear, e mandar o relatório para o limbo tornava a flag
+# inútil num terminal — assim as duas metades sobrevivem.
+if [[ "$JSON" == "1" ]]; then
+  exec 3>&1 1>&2
+else
+  exec 3>&1
+fi
+
 if [[ ! -x "$BIN" ]]; then
   echo "ERRO: binário do delonix não encontrado em $BIN" >&2
   echo "      constrói com \`cargo build --release -p delonix-runtime-bin\` ou passa --bin" >&2
@@ -90,14 +117,17 @@ echo "  memória:    $MEM"
 echo "  kernel:     $KERNEL"
 echo "  load(1m):   $LOAD1   (limiar: $THRESHOLD${MAXLOAD:+ — via --max-load})"
 echo "  densidade:  $DENSITY container(s) delonix a correr"
+declare -A TOOLVER=()
 for t in docker podman; do
   if command -v "$t" >/dev/null; then
-    echo "  $t: $("$t" --version 2>/dev/null | head -1)"
+    TOOLVER[$t]=$("$t" --version 2>/dev/null | head -1)
+    echo "  $t: ${TOOLVER[$t]}"
   else
     echo "  $t: AUSENTE — a coluna dele fica 'não medido', nunca inventada"
   fi
 done
-echo "  delonix:    $("$BIN" --version 2>/dev/null | head -1)"
+TOOLVER[delonix]=$("$BIN" --version 2>/dev/null | head -1)
+echo "  delonix:    ${TOOLVER[delonix]}"
 echo
 
 if [[ "$BANCADA_OK" != "1" ]]; then
@@ -119,33 +149,65 @@ stats() {
   sorted=$(printf '%s\n' "${v[@]}" | sort -n)
   local med
   med=$(printf '%s\n' "$sorted" | awk -v n="$n" '{a[NR]=$1} END{print (n%2)?a[(n+1)/2]:int((a[n/2]+a[n/2+1])/2)}')
-  local min max
+  local min max spread
   min=$(printf '%s\n' "$sorted" | head -1)
   max=$(printf '%s\n' "$sorted" | tail -1)
-  echo "$med|$min|$max|$(printf '%s ' "${v[@]}")"
+  # max/min. A mediana sozinha esconde metade da história — foi por isso que
+  # este script sempre publicou min e max —, mas ninguém JULGAVA esses dois
+  # números. Medido a 2026-09-23, com o load em 6.44 (bem abaixo do limiar): o
+  # docker deu 434 ms de mínimo e 5 407 de máximo na mesma corrida de dez, e a
+  # mediana engoliu-o. Uma baseline gravada assim fica envenenada, e o limiar de
+  # load não a apanha — a contenção que dispersa I/O não aparece no load(1m).
+  spread=$(awk -v a="$min" -v b="$max" 'BEGIN{printf "%.2f", (a>0)? b/a : 0}')
+  echo "$med|$min|$max|$(printf '%s ' "${v[@]}")|$spread"
 }
 
+# O exit status de cada corrida CONTA. Sem isto, uma ferramenta instalada mas
+# inutilizável — o caso mais comum é o `docker` presente com o daemon parado —
+# falha em dezenas de milissegundos e entra na tabela como a mais rápida das
+# três. É a mesma falha que o cabeçalho deste ficheiro já impede para um binário
+# do delonix ausente (`densidade: 0` lido como medição), só que a um comando de
+# distância: um harness que mede o que não aconteceu mente com um número à
+# frente. Uma falha em qualquer amostra descarta a LINHA inteira, porque a
+# mediana de um conjunto onde metade são erros não é a latência de nada.
 time_n() {
   local -a samples=()
   local s e
   for _ in $(seq "$RUNS"); do
     s=$(date +%s%N)
-    "$@" >/dev/null 2>&1
+    if ! "$@" >/dev/null 2>&1; then
+      return 1
+    fi
     e=$(date +%s%N)
     samples+=( $(( (e - s) / 1000000 )) )
   done
   stats "${samples[@]}"
 }
 
+# Uma linha medida vive aqui depois de impressa. O `row` antigo imprimia e
+# esquecia, e é por isso que `--json` não tinha o que emitir: o número existia
+# durante uma linha de terminal e mais nada.
+declare -A RESULTS=()
+
+# `$1` é a CHAVE (`docker`/`podman`/`delonix`) e `$2` a etiqueta legível. Uma
+# ferramenta ausente não escreve entrada nenhuma — no JSON sai `null`, que é
+# "não medido"; um `0` seria uma medição que ninguém fez.
 row() {
+  local key="$1"; shift
   local label="$1"; shift
   if ! command -v "$1" >/dev/null 2>&1 && [[ ! -x "$1" ]]; then
     printf '  %-28s %s\n' "$label" "não medido (ferramenta ausente)"
     return
   fi
-  local r; r=$(time_n "$@")
-  printf '  %-28s %6s ms   (min %s, max %s)\n' "$label" \
-    "$(cut -d'|' -f1 <<<"$r")" "$(cut -d'|' -f2 <<<"$r")" "$(cut -d'|' -f3 <<<"$r")"
+  local r
+  if ! r=$(time_n "$@"); then
+    printf '  %-28s %s\n' "$label" "não medido (o comando falhou — ferramenta presente mas inutilizável)"
+    return
+  fi
+  RESULTS[$key]="$r"
+  printf '  %-28s %6s ms   (min %s, max %s, dispersão %sx)\n' "$label" \
+    "$(cut -d'|' -f1 <<<"$r")" "$(cut -d'|' -f2 <<<"$r")" "$(cut -d'|' -f3 <<<"$r")" \
+    "$(cut -d'|' -f5 <<<"$r")"
   printf '  %-28s %s\n' "" "amostras: $(cut -d'|' -f4 <<<"$r")"
 }
 
@@ -175,10 +237,64 @@ podman run --rm alpine true >/dev/null 2>&1
 echo
 
 echo "== 4a: latência de \`run --rm\`, no DEFAULT de cada motor (n=$RUNS) =="
-row "docker (bridge)" docker run --rm alpine true
-row "podman (slirp)"  podman run --rm alpine true
-row "delonix (host)"  env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
+row docker  "docker (bridge)" docker run --rm alpine true
+row podman  "podman (slirp)"  podman run --rm alpine true
+row delonix "delonix (host)"  env DELONIX_ROOT="$SANDBOX/root" DELONIX_NET_RUNTIME_DIR="$SANDBOX/run" \
     "$BIN" container run --rm alpine true
 echo
 echo "Nota: os defaults NÃO são a mesma configuração. O do delonix é \`--net host\`;"
 echo "para a comparação com rede isolada ver o \`docs/comparacao-medida.md\`, linha 4b."
+
+# ---------------------------------------------------------------------------
+# A saída máquina-legível (`--json`), no fd 3 — ver a nota de `--json` no topo.
+#
+# `publishable` é a mesma decisão que o relatório humano imprime em maiúsculas,
+# não uma segunda opinião: sai do `BANCADA_OK` que o `bancada.sh` calculou. O
+# `bench_gate.py` RECUSA-SE a julgar uma corrida com `false` aqui, que é o ponto
+# — um número medido numa máquina carregada não acusa nem iliba ninguém.
+jstr() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+json_line() {
+  local key="$1" r="${RESULTS[$1]:-}"
+  if [[ -z "$r" ]]; then
+    printf '      "%s": null' "$key"
+    return
+  fi
+  printf '      "%s": {"median_ms": %s, "min_ms": %s, "max_ms": %s, "spread": %s, "samples_ms": [%s]}' \
+    "$key" "$(cut -d'|' -f1 <<<"$r")" "$(cut -d'|' -f2 <<<"$r")" "$(cut -d'|' -f3 <<<"$r")" \
+    "$(cut -d'|' -f5 <<<"$r")" \
+    "$(cut -d'|' -f4 <<<"$r" | tr -s ' ' | sed 's/ $//; s/ /, /g')"
+}
+
+json_tool() {
+  if [[ -n "${TOOLVER[$1]:-}" ]]; then printf '"%s"' "$(jstr "${TOOLVER[$1]}")"; else printf 'null'; fi
+}
+
+if [[ "$JSON" == "1" ]]; then
+  {
+    printf '{\n'
+    printf '  "schema": 1,\n'
+    printf '  "when": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '  "runs": %s,\n' "$RUNS"
+    printf '  "bench": {\n'
+    printf '    "cpu": "%s",\n' "$(jstr "$CPU")"
+    printf '    "threads": %s,\n' "$NCPU"
+    printf '    "mem": "%s",\n' "$(jstr "$MEM")"
+    printf '    "kernel": "%s",\n' "$(jstr "$KERNEL")"
+    printf '    "load1": %s,\n' "$LOAD1"
+    printf '    "threshold": %s,\n' "$THRESHOLD"
+    printf '    "density": %s,\n' "$DENSITY"
+    printf '    "publishable": %s\n' "$([[ "$BANCADA_OK" == 1 ]] && echo true || echo false)"
+    printf '  },\n'
+    printf '  "tools": {"docker": %s, "podman": %s, "delonix": %s},\n' \
+      "$(json_tool docker)" "$(json_tool podman)" "$(json_tool delonix)"
+    printf '  "lines": {\n'
+    printf '    "4a": {\n'
+    json_line docker;  printf ',\n'
+    json_line podman;  printf ',\n'
+    json_line delonix; printf '\n'
+    printf '    }\n'
+    printf '  }\n'
+    printf '}\n'
+  } >&3
+fi
