@@ -1,0 +1,102 @@
+# Route trace of ONE run of `crates/providers/delonix-proxmox/tests/live.rs` against a real node.
+# Written by the client with DELONIX_PROXMOX_TRACE_ROUTES (ADR-0049); the header is provenance, the rest is every request of the run.
+# Untested after this run, and why: POST .../clone and POST .../config need a template on the node (clone_template); GET /nodes/{node}/tasks is the lost-answer reconciliation, reached only through failure injection (tests/failure_injection.rs).
+# product: Proxmox VE
+# version: 9.2.2
+# node: pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm
+# run: 2026-09-23T16:21Z
+# command: DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1
+# result: 2 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); ledger 9 tasks, 2 qmstop resubmitted after the node's 10 s config-lock timeout
+# regenerate: python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md
+POST /access/ticket
+GET /nodes
+GET /cluster/nextid
+POST /nodes/pve/qemu
+GET /nodes/pve/tasks/UPID:pve:00002293:0003995C:6AB3FC94:qmcreate:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002293:0003995C:6AB3FC94:qmcreate:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002293:0003995C:6AB3FC94:qmcreate:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002293:0003995C:6AB3FC94:qmcreate:100:root%40pam:/status
+POST /nodes/pve/qemu/100/status/start
+GET /nodes/pve/tasks/UPID:pve:000022B5:000399A9:6AB3FC95:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022B5:000399A9:6AB3FC95:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022B5:000399A9:6AB3FC95:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022B5:000399A9:6AB3FC95:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022B5:000399A9:6AB3FC95:qmstart:100:root%40pam:/status
+GET /nodes/pve/qemu/100/status/current
+GET /nodes/pve/qemu/100/config
+GET /nodes/pve/qemu/100/agent/network-get-interfaces
+GET /nodes/pve/qemu/100/snapshot
+POST /nodes/pve/qemu/100/snapshot
+GET /nodes/pve/tasks/UPID:pve:000022ED:00039B58:6AB3FC99:qmsnapshot:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022ED:00039B58:6AB3FC99:qmsnapshot:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022ED:00039B58:6AB3FC99:qmsnapshot:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022ED:00039B58:6AB3FC99:qmsnapshot:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022ED:00039B58:6AB3FC99:qmsnapshot:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000022ED:00039B58:6AB3FC99:qmsnapshot:100:root%40pam:/status
+GET /nodes/pve/qemu/100/snapshot
+GET /nodes/pve/qemu/100/snapshot
+GET /nodes/pve/qemu/100/snapshot
+POST /nodes/pve/qemu/100/snapshot/live1/rollback
+GET /nodes/pve/tasks/UPID:pve:0000230E:00039C24:6AB3FC9B:qmrollback:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000230E:00039C24:6AB3FC9B:qmrollback:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000230E:00039C24:6AB3FC9B:qmrollback:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000230E:00039C24:6AB3FC9B:qmrollback:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000230E:00039C24:6AB3FC9B:qmrollback:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000230E:00039C24:6AB3FC9B:qmrollback:100:root%40pam:/status
+GET /nodes/pve/qemu/100/status/current
+GET /nodes/pve/qemu/100/snapshot
+GET /nodes/pve/qemu/100/status/current
+POST /nodes/pve/qemu/100/status/stop
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002361:00039CF2:6AB3FC9E:qmstop:100:root%40pam:/status
+POST /nodes/pve/qemu/100/status/stop
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002390:0003A1C1:6AB3FCAA:qmstop:100:root%40pam:/status
+POST /nodes/pve/qemu/100/status/stop
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023B0:0003A68F:6AB3FCB6:qmstop:100:root%40pam:/status
+GET /nodes/pve/qemu/100/status/current
+GET /nodes/pve/qemu/100/config
+GET /nodes/pve/qemu/100/config
+POST /nodes/pve/qemu/100/status/start
+GET /nodes/pve/tasks/UPID:pve:000023D8:0003A97C:6AB3FCBE:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023D8:0003A97C:6AB3FCBE:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023D8:0003A97C:6AB3FCBE:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023D8:0003A97C:6AB3FCBE:qmstart:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:000023D8:0003A97C:6AB3FCBE:qmstart:100:root%40pam:/status
+GET /nodes/pve/qemu/100/status/current
+GET /nodes/pve/qemu/100/status/current
+POST /nodes/pve/qemu/100/status/stop
+GET /nodes/pve/tasks/UPID:pve:00002410:0003A9FC:6AB3FCBF:qmstop:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:00002410:0003A9FC:6AB3FCBF:qmstop:100:root%40pam:/status
+GET /nodes/pve/qemu/100/status/current
+GET /nodes/pve/qemu/100/status/current
+DELETE /nodes/pve/qemu/100
+GET /nodes/pve/tasks/UPID:pve:0000241B:0003AA0F:6AB3FCBF:qmdestroy:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000241B:0003AA0F:6AB3FCBF:qmdestroy:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000241B:0003AA0F:6AB3FCBF:qmdestroy:100:root%40pam:/status
+GET /nodes/pve/tasks/UPID:pve:0000241B:0003AA0F:6AB3FCBF:qmdestroy:100:root%40pam:/status
+GET /nodes/pve/qemu/100/config

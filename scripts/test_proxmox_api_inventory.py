@@ -153,6 +153,28 @@ class Trace(unittest.TestCase):
         )
 
 
+    def test_header_lines_are_provenance_not_requests(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = inv.extract_apidoc(write_apidoc(Path(d)))
+        trace = "# node: pve\n# version: 9.2.2\n# run: 2026-09-23\n#\nGET /nodes\n# GET /nodes/pve/qemu\n"
+        hit = inv.traced_routes(trace, rows)
+        self.assertEqual(hit, {("GET", "/nodes")}, "a commented-out request is not a request")
+        self.assertEqual(inv.trace_provenance(trace), {"node": "pve", "version": "9.2.2", "run": "2026-09-23"})
+        self.assertEqual(inv.trace_requests(trace), 1)
+
+    def test_the_markdown_names_the_run_behind_the_tested_column(self):
+        with tempfile.TemporaryDirectory() as d:
+            rows = inv.extract_apidoc(write_apidoc(Path(d)))
+        called, _ = inv.client_routes(SOURCE)
+        classified = inv.classify(rows, called, {("GET", "/nodes")})
+        md = inv.render_markdown({"version": "9.2.2"}, classified, [], {"file": "t.routes", "run": "2026-09-23"})
+        self.assertIn("### Live trace", md)
+        self.assertIn("- **run**: `2026-09-23`", md)
+        # And without a trace the matrix says so, instead of a tested column nobody can date.
+        md2 = inv.render_markdown({"version": "9.2.2"}, classified, [], None)
+        self.assertIn("None given", md2)
+
+
 class Classification(unittest.TestCase):
     def rows(self, trace=None):
         with tempfile.TemporaryDirectory() as d:
@@ -206,10 +228,18 @@ class CommittedMatrix(unittest.TestCase):
     def test_the_committed_matrix_is_up_to_date(self):
         schema = REPO / "docs/proxmox/api-9.2.2.routes.json"
         matrix = REPO / "docs/proxmox/matrix-9.2.2.md"
+        trace = REPO / "docs/proxmox/trace-9.2.2.routes"
         if not schema.exists() or not matrix.exists():
             self.skipTest("no committed 9.2.2 schema/matrix in this tree")
+        # The committed trace is what puts routes in the `tested` column; the
+        # gate regenerates with it, exactly as the docstring command does.
+        argv = [sys.executable, str(REPO / "scripts/proxmox_api_inventory.py"), str(schema), "--markdown"]
+        if trace.exists():
+            # Relative on purpose: the path is rendered into the matrix's provenance,
+            # and the committed file says `docs/proxmox/trace-9.2.2.routes`.
+            argv += ["--trace", str(trace.relative_to(REPO))]
         out = subprocess.run(
-            [sys.executable, str(REPO / "scripts/proxmox_api_inventory.py"), str(schema), "--markdown"],
+            argv,
             cwd=REPO,
             capture_output=True,
             text=True,
@@ -220,8 +250,8 @@ class CommittedMatrix(unittest.TestCase):
             out.stdout,
             matrix.read_text(encoding="utf-8"),
             "docs/proxmox/matrix-9.2.2.md is stale — regenerate it: "
-            "python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --markdown "
-            "> docs/proxmox/matrix-9.2.2.md",
+            "python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json "
+            "--trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md",
         )
 
 

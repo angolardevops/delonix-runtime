@@ -21,7 +21,12 @@ Each (method, path) of the schema lands in exactly one of five states:
   * supported+tested    — called by the crate AND seen in a route trace of a
                           run against a real node (`--trace <file>`, written by
                           the client when `DELONIX_PROXMOX_TRACE_ROUTES` is
-                          set);
+                          set). The repository commits one such run next to the
+                          schema (`docs/proxmox/trace-<ver>.routes`): its `#`
+                          header lines carry the provenance of the run (node,
+                          version, date, command) and are rendered into the
+                          matrix, so a «tested» claim always says WHEN and
+                          against WHAT (ADR-0049 D2);
   * supported+untested  — called by the crate, no trace of a live run given;
   * unsupported-by-design — not called ON PURPOSE, reason written in EXCLUDED
                           below (cluster administration, identities, host);
@@ -103,6 +108,33 @@ AREAS: list[tuple[str, str]] = [
     ("nodes (host)", "/nodes"),
     ("version", "/version"),
 ]
+
+
+
+
+def trace_provenance(trace: str) -> dict[str, str]:
+    """The `# key: value` header of a committed trace — who ran it, against what.
+
+    A trace without a header still promotes routes; it just cannot say when or
+    against which node, and the matrix then prints only the request count. The
+    keys are free-form: the render prints whatever the run wrote down.
+    """
+    prov: dict[str, str] = {}
+    for line in trace.splitlines():
+        line = line.strip()
+        if not line.startswith("#"):
+            continue
+        body = line.lstrip("#").strip()
+        if ":" in body:
+            k, v = body.split(":", 1)
+            if k.strip() and v.strip():
+                prov[k.strip()] = v.strip()
+    return prov
+
+
+def trace_requests(trace: str) -> int:
+    """Request lines in a trace (every non-comment `METHOD /path`)."""
+    return sum(1 for ln in trace.splitlines() if ln.strip() and not ln.strip().startswith("#") and " " in ln.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -266,7 +298,7 @@ def traced_routes(trace: str, rows: list[dict]) -> set[tuple[str, str]]:
     hit: set[tuple[str, str]] = set()
     for line in trace.splitlines():
         line = line.strip()
-        if not line or " " not in line:
+        if not line or line.startswith("#") or " " not in line:
             continue
         method, concrete = line.split(" ", 1)
         concrete = concrete.split("?", 1)[0]
@@ -351,7 +383,12 @@ def summary(rows: list[dict]) -> dict:
 STATE_ORDER = [SUPPORTED_TESTED, SUPPORTED_UNTESTED, UNSUPPORTED, NOT_YET, NOT_IN_VERSION]
 
 
-def render_markdown(provenance: dict, rows: list[dict], unknown: list[str]) -> str:
+def render_markdown(
+    provenance: dict,
+    rows: list[dict],
+    unknown: list[str],
+    trace: dict[str, str] | None = None,
+) -> str:
     s = summary(rows)
     st = s["states"]
     called = st.get(SUPPORTED_TESTED, 0) + st.get(SUPPORTED_UNTESTED, 0)
@@ -364,6 +401,16 @@ def render_markdown(provenance: dict, rows: list[dict], unknown: list[str]) -> s
         if k in provenance:
             out.append(f"- **{k}**: `{provenance[k]}`")
     out.append("")
+    if trace is not None:
+        out.append("### Live trace\n")
+        out.append("The `tested` column comes from ONE run against a real node, recorded with "
+                   "`DELONIX_PROXMOX_TRACE_ROUTES` (the header of the trace file, verbatim):\n")
+        for k, v in trace.items():
+            out.append(f"- **{k}**: `{v}`")
+        out.append("")
+    else:
+        out.append("### Live trace\n")
+        out.append("None given — no route is `tested`; every called route is `untested`.\n")
     out.append("## Summary\n")
     out.append(f"- **denominator**: {d} routes (method, path)")
     out.append(f"- **called**: {called} ({100 * called / d:.1f} % of the schema) — "
@@ -417,20 +464,25 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     called, unknown = client_routes(args.source.read_text(encoding="utf-8"))
-    tested = traced_routes(args.trace.read_text(encoding="utf-8"), rows) if args.trace else set()
+    trace_text = args.trace.read_text(encoding="utf-8") if args.trace else None
+    tested = traced_routes(trace_text, rows) if trace_text is not None else set()
+    trace_prov = None
+    if trace_text is not None:
+        trace_prov = {"file": str(args.trace), **trace_provenance(trace_text)}
+        trace_prov["requests"] = str(trace_requests(trace_text))
     classified = classify(rows, called, tested)
     s = summary(classified)
     not_in_version = [(r["method"], r["path"]) for r in classified if r["state"] == NOT_IN_VERSION]
 
     if args.json:
         json.dump(
-            {"provenance": provenance, "summary": s, "unclassified_paths": unknown, "routes": classified},
+            {"provenance": provenance, "trace": trace_prov, "summary": s, "unclassified_paths": unknown, "routes": classified},
             sys.stdout,
             indent=1,
         )
         print()
     elif args.markdown:
-        sys.stdout.write(render_markdown(provenance, classified, unknown))
+        sys.stdout.write(render_markdown(provenance, classified, unknown, trace_prov))
     else:
         st = s["states"]
         called_n = st.get(SUPPORTED_TESTED, 0) + st.get(SUPPORTED_UNTESTED, 0)
