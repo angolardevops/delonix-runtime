@@ -1,11 +1,12 @@
-//! SPIKE (ADR-0044, substitution spike). Live proof against REAL backends on
+//! Live proof of the local VM providers on the compute port (ADR-0044,
+//! P4b slice 1; born as the substitution spike) against REAL backends on
 //! this host — `#[ignore]`, run explicitly:
 //!
 //! ```text
-//! cargo test -p delonix-vm --test provider_spike_live -- --ignored --nocapture
+//! cargo test -p delonix-vm --test provider_live -- --ignored --nocapture
 //! ```
 //!
-//! Drives the SAME `VmSpec` through `delonix_vm::provider_spike::registry`
+//! Drives the SAME `VmSpec` through `delonix_vm::provider::registry`
 //! for `"cloud-hypervisor"` and `"libvirt"`, create→observe→stop→observe→
 //! start→observe→destroy, with **zero** backend-name matching in this file
 //! outside the one `registry(id)` call per provider — the substitution
@@ -29,7 +30,7 @@
 //! that transcript. This file proves libvirt live, end to end, and lets CH
 //! fail with its real, first-hit reason.
 
-use delonix_vm::provider_spike::{registry, Extensions, VmSpec};
+use delonix_vm::provider::{registry, Extensions, VmSpec};
 use std::path::Path;
 use std::process::Command;
 

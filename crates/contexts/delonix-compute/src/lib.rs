@@ -14,6 +14,7 @@ pub mod preflight;
 mod record;
 pub mod run;
 mod run_opts;
+pub mod vm_provider;
 pub mod workload_net;
 
 pub use notice::Notice;

@@ -388,6 +388,31 @@ was written, neither of which changes its decision:
    `builtin_backends`/`registry(id)` naming its own entries, which is the composition-root
    dispatch rule 3 allows.
 
+**Addendum, 2026-09-24 — P4b slice 1 landed: the port is in the compute context.**
+`delonix_compute::vm_provider` now holds `VmSpec`, `Extensions` (`CloudHypervisorExt`,
+`LibvirtExt`), `ProviderId`, `Provider`, `IpConfidence`, `VmHandle`, `VmObservation` and
+`VmProvider`; `delonix-vm::provider` (the promoted substitution spike) implements it for
+the two local backends through `spec_to_config` → `VmConfig` → the existing
+`create_with`/`stop`/`start`/`status`/`remove`, with `registry(id)` as the one string
+match. The measured plan for the remaining three slices — and why the layer rule
+`PROVIDER → {FOUNDATION, CONTEXT}` forces `VmConfig`/`VmBackend`/the registry and then
+the orchestration out of the adapter BEFORE the two provider crates can exist — is
+`docs/discovery/61_P4B_PLANO_MEDIDO.md`. Three deviations from the sketch above, each
+measured rather than chosen:
+
+- **`capabilities()` returns ADR-0050's `ProviderReport` by value, and `health()` is
+  derived from it** — not a `&CapabilitySet` and a separate `Condition`. The report
+  already carries the health, the six states and the host probe; a second set type and a
+  second health type would be the drift the catalog exists to end. A local provider
+  probes when asked; a remote one declares. A test keeps the two from disagreeing.
+- **Every `VmProvider` method takes the state root** (`root: &Path`), as the spike had
+  to: the root is a per-call argument all the way down today, and a handle that carried
+  it would be a second place for it to be wrong. It leaves these signatures with slice 3,
+  when the use cases own a `StateRepository<Vm>` (D6).
+- **`bridge` moved from `LibvirtExt` to `VmSpec`.** D1's own table classifies it
+  universal (Proxmox reads it in `net0_arg`); the spike had it libvirt-only. `spec_to_config`
+  carries it from the spec now, and the mapping test asserts it.
+
 ### D4. The backend registry moves with the port, its four rules unchanged
 
 ADR-0008's registry (`BackendFactory`, `BackendRegistration`, `register_backend`,
