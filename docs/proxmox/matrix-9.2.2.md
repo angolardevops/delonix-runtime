@@ -20,11 +20,11 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
 - **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives (local-lvm does not accept backup content)`
-- **run**: `2026-09-24T17:32Z`
+- **run**: `2026-09-24T17:49Z`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `4 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the lifecycle case walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; the template case makes its own template (create → stop → POST …/template), grows it (PUT …/resize), refuses a shrink clone before any clone exists, clones it at two sizes, destroys the clones and the template; the backup case backs up a running VM twice (POST …/vzdump, mode=snapshot, remove=0 — the guest never stops), lists the archives back, deletes both, and confirms a delete of an unknown volid is refused; the node registers the workers as `qmcreate`/`qmstart`/`qmstop`/`qmsnapshot`/`qmrollback`/`qmdelsnapshot`/`qmdestroy`/`qmconfig`/`qmclone`/`qmtemplate`/`resize`/`vzdump`/`imgdel``
+- **result**: `5 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the lifecycle case walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; the template case makes its own template, grows it, refuses a shrink clone, clones it at two sizes, destroys the clones and the template; the backup case backs up a running VM twice, lists the archives, deletes both, and confirms an unknown volid is refused; the restore case backs up a VM, destroys it, restores the archive into the vacated vmid (POST …/qemu with archive=), confirms the restored boot disk matches the original size, confirms restoring over an occupied vmid is refused, then deletes the archive and the restored VM; the node registers the workers as `qmcreate`/`qmstart`/`qmstop`/`qmsnapshot`/`qmrollback`/`qmdelsnapshot`/`qmdestroy`/`qmconfig`/`qmclone`/`qmtemplate`/`resize`/`vzdump`/`imgdel`/`qmrestore``
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `261`
+- **requests**: `335`
 
 ## Summary
 
