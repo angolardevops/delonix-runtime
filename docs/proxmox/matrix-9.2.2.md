@@ -20,23 +20,23 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
 - **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to`
-- **run**: `2026-09-24T22:26Z (firewall+everything-else) and 2026-09-24T21:00Z (SDN), stitched: the two branches merged sequentially and each PR's own live run is appended after the other's.`
+- **run**: `earlier runs stitched (firewall+SDN+everything-else) and 2026-09-24T22:50Z (cloud-init GET/PUT): the four branches merged sequentially, each PR's own live run appended after the previous.`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TEST_MOVE_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `9 passed twice (o_ip_vem_do_agente_de_um_convidado_a_serio skipped both times: no DELONIX_PROXMOX_TEST_AGENT_VMID); the lifecycle case walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; the template case makes its own template, grows it, refuses a shrink clone, clones it at two sizes, destroys the clones and the template; the backup case backs up a running VM twice, lists the archives, deletes both, and confirms an unknown volid is refused; the restore case backs up a VM, destroys it, restores the archive into the vacated vmid, confirms the restored boot disk matches the original size, confirms restoring over an occupied vmid is refused; the agent case pings a guest with no agent (Ok(false), never an Err) and runs agent_exec_wait against a real guest command; the disk case dumps a fresh VM's rendered cloud-init user-data, refuses an unknown dump type, moves the boot disk to a second storage (dropping the source reference), confirms the size is unchanged, and unlinks the cloud-init drive; the firewall case turns the VM's own (node-native) firewall on, adds a rule, reads it back two ways, updates it, deletes it, every assertion against what the node reports; the SDN case stages a zone and a vnet inside it, applies the pending configuration, and tears both back down — every write up to apply_sdn only edits the STAGED config; the node registers the workers as `qmcreate`/`qmstart`/`qmstop`/`qmsnapshot`/`qmrollback`/`qmdelsnapshot`/`qmdestroy`/`qmconfig`/`qmclone`/`qmtemplate`/`resize`/`vzdump`/`imgdel`/`qmrestore`/`qmmove`/`reloadnetworkall` — `unlink`, `agent/ping`, all four firewall writes and the four zone/vnet writes fork no task at all (apply inline)`
+- **result**: `11 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the lifecycle case walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; the template case makes its own template, grows it, refuses a shrink clone, clones it at two sizes, destroys the clones and the template; the backup case backs up a running VM twice, lists the archives, deletes both, and confirms an unknown volid is refused; the restore case backs up a VM, destroys it, restores the archive into the vacated vmid, confirms the restored boot disk matches the original size, confirms restoring over an occupied vmid is refused; the agent case pings a guest with no agent (Ok(false), never an Err) and runs agent_exec_wait against a real guest command; the disk case dumps a fresh VM's rendered cloud-init user-data, refuses an unknown dump type, moves the boot disk to a second storage (dropping the source reference), confirms the size is unchanged, and unlinks the cloud-init drive; the firewall case turns the VM's own (node-native) firewall on, adds a rule, reads it back two ways, updates it, deletes it, every assertion against what the node reports; the SDN case stages a zone and a vnet inside it, applies the pending configuration, and tears both back down; the cloud-init case measured that `GET .../cloudinit` stays empty across a direct `ipconfig0` write (stopped and running) and across `regenerate`, while `cloudinit_dump` confirms the write DOES reach the rendered file — see `Client::cloudinit_pending`'s doc comment for the full finding; the node registers the workers as `qmcreate`/`qmstart`/`qmstop`/`qmsnapshot`/`qmrollback`/`qmdelsnapshot`/`qmdestroy`/`qmconfig`/`qmclone`/`qmtemplate`/`resize`/`vzdump`/`imgdel`/`qmrestore`/`qmmove`/`reloadnetworkall` — `unlink`, `agent/ping`, all four firewall writes, the four zone/vnet writes, and the cloud-init regenerate fork no task at all (apply inline)`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `865`
+- **requests**: `1357`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 43 (6.4 % of the schema) — 40 seen in a live trace, 3 not
+- **called**: 45 (6.7 % of the schema) — 42 seen in a live trace, 3 not
 - **unsupported by design**: 363 (each with a written reason)
-- **not yet implemented**: 269
+- **not yet implemented**: 267
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
 |---|---:|---:|---:|---:|---:|
-| qemu | 26 | 2 | 0 | 81 | 109 |
+| qemu | 28 | 2 | 0 | 79 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
 | sdn | 7 | 0 | 0 | 83 | 90 |
 | storage | 2 | 0 | 0 | 23 | 25 |
@@ -67,6 +67,8 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/qemu/{vmid}/agent/network-get-interfaces` | supported+tested | object | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/ping` | supported+tested | object | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/clone` | supported+tested | string | yes |  |
+| GET | `/nodes/{node}/qemu/{vmid}/cloudinit` | supported+tested | array | yes |  |
+| PUT | `/nodes/{node}/qemu/{vmid}/cloudinit` | supported+tested | null | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/cloudinit/dump` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/config` | supported+tested | object | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/config` | supported+tested | string | yes |  |
@@ -613,8 +615,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/nodes/{node}/qemu/{vmid}/agent/suspend-disk` | not-yet-implemented | object | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/suspend-hybrid` | not-yet-implemented | object | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/suspend-ram` | not-yet-implemented | object | yes |  |
-| GET | `/nodes/{node}/qemu/{vmid}/cloudinit` | not-yet-implemented | array | yes |  |
-| PUT | `/nodes/{node}/qemu/{vmid}/cloudinit` | not-yet-implemented | null | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/config` | not-yet-implemented | null | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/dbus-vmstate` | not-yet-implemented | null | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/feature` | not-yet-implemented | object | yes |  |

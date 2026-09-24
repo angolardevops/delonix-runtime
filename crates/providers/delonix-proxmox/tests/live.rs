@@ -1399,3 +1399,107 @@ fn sdn_zone_and_vnet_are_staged_applied_and_torn_down() {
         "the vnet is still listed after delete+apply: {vnets_after:?}"
     );
 }
+
+/// The other half of `cloudinit_dump`: what `GET …/cloudinit` reports for a
+/// key just after a config write, and what `PUT …/cloudinit` (regenerate)
+/// actually reaches. This case is what MEASURED
+/// [`delonix_proxmox::Client::cloudinit_pending`]'s doc comment — it
+/// originally asserted the same premise that comment now says is false
+/// (that an `ipconfig0` write shows up here as pending): a live PVE 9.2.2
+/// run of this exact test, VM stopped then again running, found the list
+/// empty before AND after the write, before AND after regenerate. That is
+/// not this test failing to prove something — it IS the measurement, and
+/// it is why the assertions below stop at what a real answer can confirm:
+/// the list is well-formed (an empty list is success, not a probe failure),
+/// `regenerate` does not error, and — the part that matters to a caller —
+/// the RENDERED file genuinely carries the write once `regenerate` has run.
+#[test]
+fn cloudinit_pending_answers_and_regenerate_reaches_the_rendered_file() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxci{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    b.stop(vmdir, &vm)
+        .expect("stop before touching the cloud-init config");
+    assert!(!b.is_running(&vm), "the VM must be stopped");
+
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let client = b.client();
+
+    // Baseline: a plain read, before anything is touched. The route
+    // answering at all — never an error — is the assertion; whether the
+    // list is empty or not is not something this crate claims to predict
+    // (see `cloudinit_pending`'s doc comment for what was measured).
+    client
+        .cloudinit_pending(vmid)
+        .expect("cloudinit pending: before");
+
+    // Stages a change: the same `POST …/config` path `configure_clone`
+    // already uses for every clone, now with a static address —
+    // `cloud_init_form` turns that into `ipconfig0=ip=<addr>`.
+    let restaged = VmConfig {
+        name: name.clone(),
+        disk: cfg.disk.clone(),
+        vcpus: 1,
+        memory: "512M".into(),
+        static_ip: Some("10.99.0.5/24".into()),
+        ..Default::default()
+    };
+    client
+        .configure_clone(&ledger, vmid, &restaged)
+        .expect("stage a new ipconfig0 via a config write");
+
+    // Still just a well-formed read — measured on a live node to stay empty
+    // right here, for this key, and that is not an error to assert against.
+    client
+        .cloudinit_pending(vmid)
+        .expect("cloudinit pending: after the config write");
+
+    client
+        .cloudinit_regenerate(&ledger, vmid)
+        .expect("regenerate the cloud-init drive");
+
+    client
+        .cloudinit_pending(vmid)
+        .expect("cloudinit pending: after regenerate");
+
+    // The rendered network file must now carry the applied address — the
+    // one effect of this whole sequence a live answer CAN confirm.
+    let network_dump = client
+        .cloudinit_dump(vmid, "network")
+        .expect("cloudinit dump: network, after regenerate");
+    assert!(
+        network_dump.contains("10.99.0.5"),
+        "the regenerated cloud-init network file does not carry the new address: \
+         {network_dump}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+}
