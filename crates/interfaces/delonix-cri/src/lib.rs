@@ -267,7 +267,15 @@ pub fn serve_blocking(
     ceiling: CapCeiling,
 ) -> Result<(), delonix_model::Error> {
     let path = addr.strip_prefix("unix://").unwrap_or(addr).to_string();
+    delonix_node::alloc_tuning::limit_malloc_arenas();
     let rt = tokio::runtime::Builder::new_multi_thread()
+        // Two, not one per core. This serves the kubelet over a unix socket:
+        // every request is I/O against the store and the network holder, and
+        // the default (one worker per core, 32 on the host this was measured
+        // on) buys no throughput while costing an 8 MiB stack and a malloc
+        // arena each. `current_thread` is deliberately NOT used — a slow
+        // request would then block the next one, and image pulls are slow.
+        .worker_threads(2)
         .enable_all()
         .build()
         .map_err(|e| delonix_model::Error::Runtime {

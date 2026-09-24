@@ -3,6 +3,7 @@
 //! contract between `delonix` and its sibling servers, and the host/process
 //! questions everything else asks.
 
+pub mod alloc_tuning;
 pub mod dispatch;
 pub mod events;
 mod host;

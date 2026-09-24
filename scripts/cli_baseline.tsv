@@ -136,6 +136,7 @@
 →	net netns down
 →	net netns exec
 →	net netns firewall
+→	net netns gc
 →	net netns publish
 →	net netns status
 →	net netns unpublish

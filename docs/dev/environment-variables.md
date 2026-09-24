@@ -194,6 +194,7 @@ are test settings — see [Test-only](#test-only).
 |---|---|---|---|---|
 | `DELONIX_OTLP_ENDPOINT` | `crates/adapters/delonix-telemetry/src/telemetry.rs:build_otlp_layer` | Exports tracing spans over OTLP/HTTP (protobuf). | A base URL such as `http://localhost:4318`; `/v1/traces` is appended if missing. Unset or blank → no exporter. | A failure to build the exporter warns and continues with logs only. The service name is `OTEL_SERVICE_NAME` or the executable name. |
 | `DELONIX_METRICS_ADDR` | `crates/interfaces/delonix-cri/src/lib.rs` (CRI server start-up) | Enables a Prometheus `/metrics` HTTP listener in `delonix-cri`. | `host:port`, e.g. `127.0.0.1:9100`. Unset → no listener. | A TCP listener: bind it to loopback unless the metrics should be reachable from the network. |
+| `DELONIX_WALK_THREADS` | `crates/adapters/delonix-volume/src/lib.rs:walk_threads` (the disk walk behind `system df`, volume usage and the rootless quota) | Sets how many workers the parallel directory walk uses. | A positive integer; `1` → the sequential walk. Unset → the number of CPUs, capped. | The parallel and sequential walks give the SAME total (tested with hardlinks seen by different workers); the variable exists to prove it on a given host, and as the escape hatch if a filesystem misbehaves under concurrent `readdir`. |
 
 ## Set by the engine itself / internal
 

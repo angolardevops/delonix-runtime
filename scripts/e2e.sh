@@ -406,6 +406,18 @@ check "system df" ok "$BIN" system df
 check "system df conta os discos de VM" ok bash -c "'$BIN' system df | grep -q '^VM disks '"
 check "system df conta a cache de build" ok bash -c "'$BIN' system df | grep -q '^build cache '"
 check "system df fecha a tabela com other e TOTAL" ok bash -c "'$BIN' system df | grep -q '^other ' && '$BIN' system df | grep -q '^TOTAL '"
+# A travessia paralela do disco TEM de dar o mesmo que a sequencial — é este
+# número que impõe a quota rootless. Compara-se a SAÍDA inteira, não só o rc.
+check "system df: paralelo e sequencial dão o mesmo" ok bash -c '
+  a=$('"'$BIN'"' system df 2>/dev/null)
+  b=$(DELONIX_WALK_THREADS=1 '"'$BIN'"' system df 2>/dev/null)
+  [ -n "$a" ] && [ "$a" = "$b" ]'
+# `net netns gc`: sem `--force` e sem terminal, RECUSA-SE — nunca termina nada
+# por engano; e o relatório existe mesmo sem nada para reclamar.
+check "net netns gc --help" ok "$BIN" net netns gc --help
+check "net netns gc sem --force nunca termina nada" ok bash -c '
+  out=$('"'$BIN'"' net netns gc </dev/null 2>&1); rc=$?
+  [ $rc -eq 0 ] || echo "$out" | grep -q -- "--force"'
 check "system events" ok "$BIN" system events
 check "completion shell bash" ok "$BIN" completion shell bash
 

@@ -1509,7 +1509,34 @@ fn cmd_destroy(
 
 fn cmd_prune(base: &std::path::Path, stopped: bool, force: bool) -> Result<()> {
     let mut lines = Vec::new();
-    let entries = super::prune::doomed_vm_entries(base)?;
+    // ONE scan answers both questions about `vms/`: what a prune would take,
+    // and what nothing accounts for but prune deliberately leaves alone.
+    let scan = super::prune::scan_vm_state(base)?;
+    let entries = scan.doomed();
+    // Reporting only, and printed BEFORE the confirmation so it shows even when
+    // there is nothing to prune: on the host this was written against, 53 GiB
+    // in `vms/hadata` and `vms/pbs` had no name anywhere. The rule that keeps
+    // them out of the sweep is right (a bare directory is somebody's data);
+    // what was missing was somebody saying they exist.
+    let unreferenced = scan.unreferenced();
+    if !unreferenced.is_empty() {
+        let vms_dir = base.join("vms");
+        let bytes: u64 = unreferenced
+            .iter()
+            .map(|e| delonix_volume::measure(&vms_dir.join(e)).bytes)
+            .sum();
+        println!(
+            "{}\n",
+            super::po::tf(
+                "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n`vm prune` will NOT take these — a bare directory is somebody's data, and that rule once stopped a sweep from destroying 53 GiB of live disks. They are named here because until now nothing named them at all; removing them is your call.",
+                &[
+                    ("n", &unreferenced.len().to_string()),
+                    ("size", &super::output::fmt_size(bytes)),
+                    ("list", &unreferenced.join(", ")),
+                ],
+            )
+        );
+    }
     if !entries.is_empty() {
         lines.push(super::po::tf(
             "This will remove {n} orphan entr(y/ies) from the VM state directory: {list}",
