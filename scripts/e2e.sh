@@ -2859,6 +2859,125 @@ else
 fi
 
 ########################################
+section "vm: o que o relatório libvirt declara supported, medido (ADR-0050)"
+########################################
+# Cada check daqui é a EVIDÊNCIA de uma linha `supported` do relatório libvirt
+# (`crates/adapters/delonix-vm/src/capabilities.rs`): o teste
+# `every_supported_capability_cites_evidence_that_exists` faz grep ao TÍTULO.
+# Renomear um check sem renomear a citação chumba esse teste — é o que impede
+# uma linha de ficar `supported` com a prova apagada por baixo.
+#
+# O convidado é um qcow2 VAZIO, de propósito: o que se prova é o que o LIBVIRT
+# faz com o que o motor lhe pede — o 2.º disco, a 2.ª NIC, o modelo e a
+# topologia de CPU, o pin, o TPM, o VNC, a reserva DHCP — lido do domínio VIVO
+# (`domblklist`/`domiflist`/`dumpxml`/`net-dumpxml`) e nunca do XML que o motor
+# escreveu. O que precisa de um SO dentro (cloud-init, IP observado, agente)
+# fica `partial` no relatório, com a razão escrita.
+#
+# `netMode: nat` e não o default: é o modo em que a reserva DHCP e o vcpupin
+# existem (qemu:///system); em `user` o motor descarta os dois em silêncio.
+SROOT=$("$BIN" system info 2>/dev/null | awk '/state root:/{print $3}')
+if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
+   && virsh -c qemu:///system list --all >/dev/null 2>&1; then
+  LVM="lvcap-$PFX"; LDISK="$OUT/$LVM.qcow2"; LDISK2="$OUT/$LVM-2.qcow2"
+  LWORK="$OUT/lvcap-$PFX"; rm -rf "$LWORK"; mkdir -p "$LWORK/bk"
+  qemu-img create -f qcow2 "$LDISK" 64M >/dev/null 2>&1
+  qemu-img create -f qcow2 "$LDISK2" 32M >/dev/null 2>&1
+  # Um endereço no fim do range da rede `default`, que o DHCP do libvirt só
+  # entrega a quem o reservar — e o check final exige que a reserva SAIA.
+  LIP=192.168.122.253
+  # SEM `tpm: true`, e é medido: neste host (Ubuntu 24.04, libvirt 10.0) o QEMU
+  # nasce e morre em «Failed to connect to /run/libvirt/qemu/swtpm/<id>-<vm>-
+  # swtpm.sock: Permission denied» — o socket do swtpm é criado com um dono que
+  # o processo do QEMU não alcança. É configuração do HOST, não do motor, e o
+  # `vm.tpm` do relatório libvirt fica `partial` a dizer exactamente isto.
+  cat > "$LWORK/vm.yaml" <<YAML
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata:
+  name: $LVM
+spec:
+  disk: $LDISK
+  backend: libvirt
+  vcpus: 2
+  memory: 256M
+  netMode: nat
+  ip: $LIP
+  vnc: true
+  cpuAffinity: "0"
+  cpuModel: host-model
+  cpuTopology: { sockets: 1, cores: 2, threads: 1 }
+  extraDisks:
+    - source: $LDISK2
+  extraNics:
+    - type: network
+      source: default
+YAML
+  lv_state() { virsh -c qemu:///system domstate "$LVM" 2>/dev/null; }
+  if "$BIN" stack apply -f "$LWORK/vm.yaml" >/dev/null 2>&1 && [ "$(lv_state)" = running ]; then
+    check "libvirt: extraDisks — o domínio vivo tem o 2.º disco" ok bash -c \
+      "virsh -c qemu:///system domblklist '$LVM' | grep -qF '$(basename "$LDISK2")'"
+    # A NIC primária já é `network default`; a extra é a SEGUNDA linha desse tipo.
+    check "libvirt: extraNics — o domínio vivo tem 2 interfaces de rede" ok bash -c \
+      "[ \$(virsh -c qemu:///system domiflist '$LVM' | awk '\$2==\"network\"' | wc -l) -eq 2 ]"
+    # `--inactive` para o MODO (o XML vivo expande host-model no modelo concreto
+    # do host, por desenho do libvirt); a topologia lê-se do domínio VIVO, onde
+    # o libvirt acrescenta `dies='1'` (e `clusters='1'` nas versões novas) que o
+    # motor nunca escreveu — medido, e é por isso que é uma regex.
+    check "libvirt: cpuModel/cpuTopology — host-model e 1x2x1 no domínio" ok bash -c \
+      "virsh -c qemu:///system dumpxml --inactive '$LVM' | grep -q \"<cpu mode='host-model'\" \
+       && virsh -c qemu:///system dumpxml '$LVM' | grep -qE \"<topology sockets='1'( dies='1')?( clusters='1')? cores='2' threads='1'/>\""
+    check "libvirt: cpuAffinity — o vcpupin está no domínio vivo" ok bash -c \
+      "virsh -c qemu:///system dumpxml '$LVM' | grep -q \"<vcpupin vcpu='0' cpuset='0'/>\""
+    check "vm vnc devolve um endereço 127.0.0.1:59NN" ok bash -c \
+      "'$BIN' vm vnc '$LVM' 2>/dev/null | head -1 | grep -qE '^127\.0\.0\.1:59[0-9]{2}\$'"
+    check "ip: a reserva DHCP MAC→IP existe na rede libvirt" ok bash -c \
+      "virsh -c qemu:///system net-dumpxml default | grep -q \"ip='$LIP'\""
+    # O restart é um reboot REAL: o id do domínio muda (o libvirt dá um novo a
+    # cada arranque), e no fim está a correr. Vem DEPOIS dos checks de
+    # dispositivos de propósito — `vm restart` reconstrói a VM do REGISTO, e o
+    # registo não guarda extraDisks/extraNics/cpuModel/tpm (limitação escrita
+    # no `--help` do próprio comando).
+    check "vm restart: o domínio volta com outro id e a correr" ok bash -c \
+      "B=\$(virsh -c qemu:///system domid '$LVM'); '$BIN' vm restart '$LVM' >/dev/null \
+       && A=\$(virsh -c qemu:///system domid '$LVM') && [ -n \"\$A\" ] && [ \"\$A\" != \"\$B\" ] \
+       && [ \"\$(virsh -c qemu:///system domstate '$LVM')\" = running ]"
+    # Backup COM a VM a correr: snapshot externo + block-commit. O que prova é
+    # o estado DEPOIS — o domínio continua a correr sobre o overlay original,
+    # sem o ficheiro `.delonix-backup-*` do snapshot deixado para trás, e o
+    # arquivo leva o disco.
+    check "backup create vm com a VM a correr (snapshot externo + block-commit)" ok \
+      "$BIN" backup create vm "$LVM" --to "$LWORK/bk"
+    check "…e o domínio continua sobre o overlay original, sem snapshot para trás" ok bash -c \
+      "[ \"\$(virsh -c qemu:///system domstate '$LVM')\" = running ] \
+       && virsh -c qemu:///system domblklist '$LVM' | grep -qF '$SROOT/vms/$LVM.qcow2' \
+       && ! ls '$SROOT/vms/$LVM.qcow2.delonix-backup-'* >/dev/null 2>&1"
+    check "…e o arquivo leva o overlay" ok bash -c \
+      "tar -tzf \"\$(ls '$LWORK/bk'/vm-$LVM-*.tar.gz)\" | grep -q '^disk/overlay.qcow2\$'"
+    # Restore: o overlay é APAGADO antes, senão um restore que não escreve nada
+    # passava — o `vm start` a seguir só arranca se o disco voltou.
+    check "vm stop antes do restore" ok "$BIN" vm stop "$LVM"
+    rm -f "$SROOT/vms/$LVM.qcow2"
+    check "backup restore vm repõe o overlay apagado" ok bash -c \
+      "'$BIN' backup restore \"\$(ls '$LWORK/bk'/vm-$LVM-*.tar.gz)\" && [ -f '$SROOT/vms/$LVM.qcow2' ]"
+    check "…e a VM restaurada volta a arrancar" ok bash -c \
+      "'$BIN' vm start '$LVM' && [ \"\$(virsh -c qemu:///system domstate '$LVM')\" = running ]"
+    # `vm rm` (sem -f): o caminho que só apaga o registo DEPOIS de o backend
+    # ter desfeito o domínio — e a reserva DHCP e o overlay vão com ele.
+    check "vm rm desfaz o domínio, a reserva DHCP e o overlay" ok bash -c \
+      "'$BIN' vm rm '$LVM' && ! virsh -c qemu:///system domstate '$LVM' >/dev/null 2>&1 \
+       && ! virsh -c qemu:///system net-dumpxml default | grep -q \"ip='$LIP'\" \
+       && [ ! -e '$SROOT/vms/$LVM.qcow2' ]"
+  else
+    skip "vm: o relatório libvirt medido" "o stack apply da VM falhou neste host"
+  fi
+  "$BIN" delete vm "$LVM" -f >/dev/null 2>&1
+  rm -f "$LDISK" "$LDISK2"; rm -rf "$LWORK"
+else
+  skip "vm: o relatório libvirt medido" "sem virsh/qemu-img, ou sem ligação libvirt de sistema"
+fi
+
+########################################
 section "vm: os mesmos snapshots no backend cloud-hypervisor"
 ########################################
 # Aqui os snapshots são do disco (`qemu-img snapshot`) e SÓ com a VM parada: o
@@ -2989,6 +3108,62 @@ elif command -v cloud-hypervisor >/dev/null; then
     check "CH: rm com a VM parada" ok "$BIN" vm snapshot rm "$CVM" s1
     check "CH: e saiu do disco" ok bash -c \
       "! qemu-img snapshot -l '$SROOT/vms/$CVM.qcow2' 2>/dev/null | grep -qw s1"
+    # ADR-0050: as linhas `supported` do relatório cloud-hypervisor citam os
+    # checks abaixo pelo TÍTULO (mesmo gate da secção libvirt). Pausa e resume
+    # são lidos ao VMM pelo seu api-socket — a testemunha que não é o motor —
+    # e ao registo; o restart pelo PID do VMM; o antispoof pela regra nft
+    # DENTRO do holder, pelo tap e pelo IP desta VM.
+    ch_pid() { pgrep -f -- "^(\S*/)?cloud-hypervisor .*--api-socket $SROOT/vms/$CVM.sock( |\$)"; }
+    ch_api_state() { curl -s --unix-socket "$SROOT/vms/$CVM.sock" http://localhost/api/v1/vm.info | grep -o '"state":"[A-Za-z]*"'; }
+    ch_status_is() {
+      "$BIN" vm ls -A -o json | python3 -c "import json,sys; sys.exit(0 if any(v['name']==sys.argv[1] and v['status']==sys.argv[2] for v in json.load(sys.stdin)) else 1)" "$1" "$2"
+    }
+    check "CH: vm start (2.ª vez)" ok "$BIN" vm start "$CVM"
+    check "CH: vm pause — o VMM diz Paused" ok bash -c \
+      "'$BIN' vm pause '$CVM' && [ \"\$(curl -s --unix-socket '$SROOT/vms/$CVM.sock' http://localhost/api/v1/vm.info | grep -o '\"state\":\"[A-Za-z]*\"')\" = '\"state\":\"Paused\"' ]"
+    check "CH: e o vm ls diz Paused" ok ch_status_is "$CVM" Paused
+    check "CH: vm unpause — o VMM volta a Running" ok bash -c \
+      "'$BIN' vm unpause '$CVM' && [ \"\$(curl -s --unix-socket '$SROOT/vms/$CVM.sock' http://localhost/api/v1/vm.info | grep -o '\"state\":\"[A-Za-z]*\"')\" = '\"state\":\"Running\"' ]"
+    check "CH: e o vm ls volta a dizer Running" ok ch_status_is "$CVM" Running
+    CPIN=$("$BIN" net netns status 2>/dev/null | grep -oE 'pin [0-9]+' | grep -oE '[0-9]+')
+    CTAP=$("$BIN" describe vm "$CVM" 2>/dev/null | grep -oP '^\s*TAP:\s*\K\S+')
+    CIP=$("$BIN" vm ls -A -o json | python3 -c "import json,sys; print(next(v.get('ip','') for v in json.load(sys.stdin) if v['name']==sys.argv[1]))" "$CVM")
+    # BUG REAL, medido 2026-09-24 pela primeira versão deste check: uma VM na
+    # namespace `default` NÃO tinha regra nenhuma — a linha `vmtap` ia sem IP, o
+    # holder não instalava o anti-spoof nem punha o endereço em `@dlxall`, e um
+    # container `default` recebe as duas coisas. A auditoria #3 tinha fechado o
+    # anti-spoof «do tap» só para as VMs com namespace. Os dois checks lêem o
+    # ruleset DENTRO do holder, pelo tap e pelo IP desta VM.
+    check "CH: antispoof — a regra do tap está no holder" ok bash -c \
+      "nsenter -t '$CPIN' -U -n --preserve-credentials nft list chain ip dlxing fwdeny \
+       | grep -F 'iifname \"$CTAP\"' | grep -q 'ip saddr != $CIP drop'"
+    check "CH: o IP da VM entra em @dlxall, como o de um container" ok bash -c \
+      "nsenter -t '$CPIN' -U -n --preserve-credentials nft list set ip dlxing dlxall | grep -qw '$CIP'"
+    check "CH: vm restart — o VMM volta com outro pid" ok bash -c \
+      "B=\$(pgrep -f -- '^(\S*/)?cloud-hypervisor .*--api-socket $SROOT/vms/$CVM.sock( |\$)'); \
+       '$BIN' vm restart '$CVM' >/dev/null \
+       && A=\$(pgrep -f -- '^(\S*/)?cloud-hypervisor .*--api-socket $SROOT/vms/$CVM.sock( |\$)') \
+       && [ -n \"\$A\" ] && [ \"\$A\" != \"\$B\" ]"
+    check "CH: vm stop (3.ª vez)" ok "$BIN" vm stop "$CVM"
+    for _ in $(seq 50); do
+      qemu-img snapshot -l "$SROOT/vms/$CVM.qcow2" >/dev/null 2>&1 && break
+      sleep 0.2
+    done
+    # Backup de uma VM CH PARADA (a correr, o VMM segura o qcow2 em exclusivo e
+    # o motor recusa): o arquivo leva o overlay; o restore repõe-o depois de
+    # APAGADO, e é o `vm start` a seguir que prova que voltou um disco válido.
+    CBK="$OUT/chcap-$PFX"; rm -rf "$CBK"; mkdir -p "$CBK"
+    check "CH: backup create vm com a VM parada leva o overlay" ok bash -c \
+      "'$BIN' backup create vm '$CVM' --to '$CBK' && tar -tzf \"\$(ls '$CBK'/vm-$CVM-*.tar.gz)\" | grep -q '^disk/overlay.qcow2\$'"
+    rm -f "$SROOT/vms/$CVM.qcow2"
+    check "CH: backup restore vm repõe o overlay apagado e a VM arranca" ok bash -c \
+      "'$BIN' backup restore \"\$(ls '$CBK'/vm-$CVM-*.tar.gz)\" && [ -f '$SROOT/vms/$CVM.qcow2' ] && '$BIN' vm start '$CVM'"
+    # O SIGTERM do stop é assíncrono (ACH-014): espera-se pela CONDIÇÃO — o
+    # VMM desapareceu — com tecto, e só depois se afirma.
+    check "CH: vm rm mata o VMM e apaga o overlay" ok bash -c \
+      "'$BIN' vm rm '$CVM' && for _ in \$(seq 50); do pgrep -f -- '^(\S*/)?cloud-hypervisor .*--api-socket $SROOT/vms/$CVM.sock( |\$)' >/dev/null || break; sleep 0.2; done; \
+       ! pgrep -f -- '^(\S*/)?cloud-hypervisor .*--api-socket $SROOT/vms/$CVM.sock( |\$)' >/dev/null && [ ! -e '$SROOT/vms/$CVM.qcow2' ]"
+    rm -rf "$CBK"
     "$BIN" delete vm "$CVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshots no cloud-hypervisor" "o vm create CH falhou neste host (infra de rede?)"

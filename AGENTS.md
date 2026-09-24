@@ -6528,6 +6528,53 @@ falhado colado a seguir ao texto (2 KB de `thread … panicked`), pré-existente
 `main`. Removida nesta passagem; um `msgid` que ninguém procura não faz mal, mas é
 lixo no catálogo.
 
+### As linhas `partial` do libvirt e do CH passaram a `supported` com checks reais (2026-09-24)
+
+O ADR-0050 dizia que a matriz de VM tinha mais `partial` do que `supported`
+porque a bateria só exercitava snapshots, pause e stop/start. Esta passagem
+escreveu os checks que faltavam — libvirt passa de 15 para **25** `supported`
+(14 `partial`), o Cloud Hypervisor de 12 para **19** (10 `partial`) — e cada
+linha promovida cita pelo TÍTULO um check de `scripts/e2e.sh` que o gate de
+evidência confirma existir. Duas secções: «vm: o que o relatório libvirt declara
+supported, medido (ADR-0050)» arranca uma VM por manifesto (`kind:
+VirtualMachine` com `extraDisks`/`extraNics`/`cpuModel`/`cpuTopology`/
+`cpuAffinity`/`vnc`/`ip`) e lê o domínio VIVO — `domblklist`, `domiflist`,
+`dumpxml`, `net-dumpxml` — nunca o XML que o motor escreveu; a secção CH ganhou
+pause/resume lidos ao api-socket do VMM, restart pelo PID, backup/restore com a
+VM parada, `vm rm`, e o anti-spoof lido no ruleset DENTRO do holder. O convidado
+é um qcow2 vazio de propósito: o que precisa de um SO dentro (cloud-init, IP
+observado, agente) continua `partial` com a razão escrita. 78/78 ao vivo com
+root isolado (`OUT=/tmp/dlxpe`, curto — o root da scratchpad tinha 145 bytes e
+o CH recusa um socket UNIX acima de 107).
+
+**Três defeitos reais, e nenhum era visível a ler o código — os três só a
+bateria os mostrou, na primeira corrida:**
+
+1. **Uma VM CH na namespace `default` não tinha anti-spoof nem estava em
+   `@dlxall`.** A linha `vmtap` ia na forma curta (sem IP) para `default`, «para
+   um holder antigo continuar a servi-la», e a auditoria #3 — que fechou o
+   anti-spoof «do tap» — só cobria as VMs COM namespace. Medido no holder:
+   zero regras `saddr !=` para o tap, e o IP fora do set que toda a regra de
+   corte cross-namespace consulta; um container `default` recebe as duas coisas
+   do `do_attach`. Corrigido em `vmtap_line`: a forma longa vai sempre que há
+   lease, `default` incluído (o holder aceita seis tokens desde a v0.40.0). **O
+   teste `vmtap_line_mantem_a_forma_curta_sem_namespace` codificava o bug** —
+   afirmava a forma curta para `default` com lease — e foi reescrito.
+2. **`backup create vm` de uma VM libvirt a correr falhava com um segundo
+   disco**: `--disk-only` faz snapshot de TODOS os discos a não ser que cada um
+   seja nomeado, por isso o libvirt pedia um overlay pré-criado para o `vdb`
+   («missing existing file for disk vdb») — e deixava o overlay do `vda` que
+   nós pré-criámos para trás. `backup_disk_live` passa a mandar `snapshot=no`
+   por cada outro disco e apaga o ficheiro encenado se o snapshot falhar.
+3. **`vm vnc` imprimia `127.0.0.1:0`** quando o `virsh vncdisplay` respondia na
+   forma `host:N` — só a forma `:N` era normalizada para `5900+N`. Duas grafias
+   do mesmo facto davam dois endereços; `vnc_addr` (pura, testada) lê as duas.
+
+**Um `partial` que ficou por razão medida**: `vm.tpm` no libvirt — neste host
+(Ubuntu 24.04, libvirt 10.0) o QEMU morre em `swtpm.sock: Permission denied`.
+É a posse do socket do swtpm no HOST, não o motor; a linha di-lo em vez de
+fingir uma sonda.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
