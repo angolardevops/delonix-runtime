@@ -1501,22 +1501,27 @@ impl Client {
     /// would actually read (`GET …/qemu/{vmid}/cloudinit`).
     ///
     /// A plain read, like [`Client::cloudinit_dump`]: the schema's `returns:
-    /// array` here is a list, never a UPID — nothing forks for a GET. The
-    /// common case is an empty list: nothing staged, nothing for
-    /// [`Client::cloudinit_regenerate`] to catch up on.
+    /// array` here is a list, never a UPID — nothing forks for a GET.
     ///
-    /// **Item shape not yet confirmed against a live node for THIS route.**
-    /// The schema extracted into `docs/proxmox/api-9.2.2.routes.json` only
-    /// records `method`/`path`/`perm`/`protected`/`proxyto`/`returns` — no
-    /// item schema, for any route in that file. [`CloudInitPendingKey`]'s
-    /// shape instead follows Proxmox's own published description of this
-    /// route ("Get the cloudinit configuration with both current and pending
-    /// values") together with the well-documented, widely-used shape of the
-    /// general `GET …/qemu/{vmid}/pending` (VM config pending-changes) route,
-    /// which reads as the same convention: `{key, value?, pending?, delete?}`
-    /// per config key. If a real node's answer ever disagrees, this is what
-    /// to correct — the same discipline [`TaskKind::worker_type`]'s doc
-    /// comment already applies to guessed worker names.
+    /// **Measured against a live PVE 9.2.2 node, and the result is not what
+    /// the route's name suggests.** A direct `ipconfig0` write through
+    /// [`Client::config`] — VM stopped, then again with it running — never
+    /// makes this list non-empty, before OR after [`Client::cloudinit_regenerate`]
+    /// runs: [`Client::cloudinit_dump`] confirms the new address DOES reach
+    /// the rendered file, so the write and the regenerate both work, but
+    /// this route reports nothing about either step for that key. The
+    /// general `GET …/qemu/{vmid}/pending` route shows the same picture —
+    /// `ipconfig0` there carries only `value`, never a separate `pending`
+    /// field, because a network config change applies immediately and
+    /// never enters PVE's pending-vs-current split at all. Whatever this
+    /// route DOES populate for — a `cicustom`-sourced snippet's own drift is
+    /// the most likely candidate, going by the route's docs, but that is a
+    /// guess, not a measurement — remains unconfirmed. [`CloudInitPendingKey`]'s
+    /// shape is UNCHANGED from a guess (this crate's schema extract has no
+    /// item shape for any route to confirm it against), so a live answer
+    /// that is genuinely non-empty may still not deserialize as expected;
+    /// what IS confirmed is that the common case — right after an
+    /// `ipconfig0` write — is an empty list, not an error.
     pub fn cloudinit_pending(&self, vmid: u32) -> Result<Vec<CloudInitPendingKey>> {
         let body = self.get(&format!("/nodes/{}/qemu/{vmid}/cloudinit", self.node))?;
         let w: Wrapped<Vec<CloudInitPendingKey>> = parse(&body, "cloudinit pending")?;
@@ -1535,21 +1540,22 @@ impl Client {
     /// route confirmed it applies inline and forks no task at all. This goes
     /// through [`Client::task_or_done`] on the same expectation, not yet
     /// measured for this specific route — see [`TaskKind::worker_type`] for
-    /// the guessed name, marked there as unconfirmed. The effect probe reads
-    /// [`Client::cloudinit_pending`] back and asks that nothing on it still
-    /// needs regenerating, rather than trusting the call's own `Ok(())`.
+    /// the guessed name, marked there as unconfirmed.
+    ///
+    /// No probe: measured against a live node, [`Client::cloudinit_pending`]
+    /// stays empty whether or not a regenerate ever ran (see that function's
+    /// doc comment) — reading it back would ALWAYS say "nothing pending",
+    /// telling a lost-answer recovery the effect already happened even when
+    /// it never did. A lost answer with no task in flight is a plain
+    /// transport error here, the same choice [`Client::rollback`] makes for
+    /// the same reason.
     pub fn cloudinit_regenerate(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
         self.task_or_done(
             ledger,
             vmid,
             TaskKind::RegenerateCloudInit,
             || self.put_form(&format!("/nodes/{}/qemu/{vmid}/cloudinit", self.node), &[]),
-            Some(&|| {
-                Ok(self
-                    .cloudinit_pending(vmid)?
-                    .iter()
-                    .all(|k| !k.is_pending()))
-            }),
+            None,
         )
     }
 

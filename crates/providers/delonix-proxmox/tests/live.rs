@@ -1402,15 +1402,19 @@ fn sdn_zone_and_vnet_are_staged_applied_and_torn_down() {
 
 /// The other half of `cloudinit_dump`: what `GET …/cloudinit` reports for a
 /// key just after a config write, and what `PUT …/cloudinit` (regenerate)
-/// does to that report. Neither route's shape had been reached by a live run
-/// before this — see [`delonix_proxmox::Client::cloudinit_pending`]'s doc
-/// comment for exactly what was, and was not, already confirmed.
-///
-/// `ipconfig0` is the key under test: `cloud_init_form` always sets it (a
-/// freshly created VM gets `ip=dhcp`), so there is a key to restage without
-/// needing to invent one the node might not recognise.
+/// actually reaches. This case is what MEASURED
+/// [`delonix_proxmox::Client::cloudinit_pending`]'s doc comment — it
+/// originally asserted the same premise that comment now says is false
+/// (that an `ipconfig0` write shows up here as pending): a live PVE 9.2.2
+/// run of this exact test, VM stopped then again running, found the list
+/// empty before AND after the write, before AND after regenerate. That is
+/// not this test failing to prove something — it IS the measurement, and
+/// it is why the assertions below stop at what a real answer can confirm:
+/// the list is well-formed (an empty list is success, not a probe failure),
+/// `regenerate` does not error, and — the part that matters to a caller —
+/// the RENDERED file genuinely carries the write once `regenerate` has run.
 #[test]
-fn cloudinit_pending_stages_a_config_write_and_regenerate_clears_it() {
+fn cloudinit_pending_answers_and_regenerate_reaches_the_rendered_file() {
     let Some(t) = target() else {
         return;
     };
@@ -1449,19 +1453,13 @@ fn cloudinit_pending_stages_a_config_write_and_regenerate_clears_it() {
     let ledger = delonix_proxmox::Ledger::at(vmdir);
     let client = b.client();
 
-    // Baseline: `ipconfig0` was set at create time (`ip=dhcp`) and never
-    // touched since, so the node must not be carrying anything staged for it.
-    let before = client
+    // Baseline: a plain read, before anything is touched. The route
+    // answering at all — never an error — is the assertion; whether the
+    // list is empty or not is not something this crate claims to predict
+    // (see `cloudinit_pending`'s doc comment for what was measured).
+    client
         .cloudinit_pending(vmid)
         .expect("cloudinit pending: before");
-    let ipconfig0_before = before
-        .iter()
-        .find(|k| k.key == "ipconfig0")
-        .expect("ipconfig0 is a cloud-init key on every VM this backend creates");
-    assert!(
-        !ipconfig0_before.is_pending(),
-        "a freshly created VM has nothing staged for ipconfig0: {ipconfig0_before:?}"
-    );
 
     // Stages a change: the same `POST …/config` path `configure_clone`
     // already uses for every clone, now with a static address —
@@ -1478,34 +1476,22 @@ fn cloudinit_pending_stages_a_config_write_and_regenerate_clears_it() {
         .configure_clone(&ledger, vmid, &restaged)
         .expect("stage a new ipconfig0 via a config write");
 
-    let staged = client
+    // Still just a well-formed read — measured on a live node to stay empty
+    // right here, for this key, and that is not an error to assert against.
+    client
         .cloudinit_pending(vmid)
-        .expect("cloudinit pending: staged");
-    let ipconfig0_staged = staged
-        .iter()
-        .find(|k| k.key == "ipconfig0")
-        .expect("ipconfig0 is still a cloud-init key after the config write");
-    assert!(
-        ipconfig0_staged.is_pending(),
-        "the node did not stage the ipconfig0 write as pending: {ipconfig0_staged:?}"
-    );
+        .expect("cloudinit pending: after the config write");
 
-    // Regenerate: the node is expected to bake the staged value into the
-    // cloud-init drive, and `cloudinit_pending` must stop reporting it.
     client
         .cloudinit_regenerate(&ledger, vmid)
         .expect("regenerate the cloud-init drive");
 
-    let after = client
+    client
         .cloudinit_pending(vmid)
-        .expect("cloudinit pending: after");
-    assert!(
-        after.iter().all(|k| !k.is_pending()),
-        "something is still pending after regenerate: {after:?}"
-    );
+        .expect("cloudinit pending: after regenerate");
 
-    // The rendered network file must now carry the applied address —
-    // confirms the regenerate reached the disk, not only the diff view.
+    // The rendered network file must now carry the applied address — the
+    // one effect of this whole sequence a live answer CAN confirm.
     let network_dump = client
         .cloudinit_dump(vmid, "network")
         .expect("cloudinit dump: network, after regenerate");
