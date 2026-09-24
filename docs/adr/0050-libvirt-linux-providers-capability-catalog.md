@@ -1,9 +1,10 @@
 # ADR-0050: The libvirt and Linux providers are measured against ONE versioned capability catalog — never against a count of `virsh` commands or kernel features
 
-- **Status:** Proposed — the catalog, the four declarations, `delonix provider ls|describe|matrix`,
-  the evidence gate and the `virsh` inventory exist and are measured (D1–D4); the node-contract
-  readback (D5) and the request-time refusal (D6) do not, and the status does not change before a
-  live run of D6 exists
+- **Status:** Accepted (2026-09-24) — the catalog, the four declarations, `delonix provider
+  ls|describe|matrix`, the evidence gate and the `virsh` inventory exist and are measured (D1–D4);
+  the request-time refusal (D6) is built and was run live against the three VM providers on
+  2026-09-24 (see the addendum at the end). The node-contract readback (D5) stays where D5 puts
+  it: it is one handler when `delonix-node-api` exists, and this ADR does not wait for it
 - **Date:** 2026-09-23
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0049 (the Proxmox matrix this is the local counterpart of: a named denominator,
@@ -201,18 +202,36 @@ a route added there today would be a route to migrate tomorrow. The CLI and its 
 readback until then; a local client that needs the list runs `delonix provider ls -o json`, which is
 the same shape the RPC will return.
 
-### D6. Request-time refusal by name — the next slice, not this one
+### D6. Request-time refusal by name
 
 The contract says a request needing a capability the selected provider lacks is
-`FAILED_PRECONDITION` with `CapabilityNotSupported`. With D1 in place this is now a comparison, not
-a design: `required_capabilities` (proto) / a `--require <capability>` on `vm create` (CLI) resolve
-each name with `Capability::from_name` (unknown name → refused, never guessed), and a provider whose
-report does not mark it usable is refused before anything is created — including in auto-selection,
-where the requirement filters the candidates. It is not built here because it needs the `DX-` code
-for the refusal (today `vm.unsupported_by_backend` is DX-1501, an *invalid argument* class, where the
-contract's `FAILED_PRECONDITION` maps to `Unavailable`/DX-6xxx — a classification to decide in
-ADR-0043's dictionary, not to slip in), and a live run against every provider. The status of this
-ADR moves to Accepted when D6 has that run.
+`FAILED_PRECONDITION` with `CapabilityNotSupported`. With D1 in place this is a comparison, not a
+design, and it is built (2026-09-24):
+
+- **The names travel as `VmConfig::required_capabilities`** — filled by `vm create --require
+  <capability>` (repeatable, with tab completion of the catalog) and by `spec.requiredCapabilities`
+  of `kind: VirtualMachine`; the proto's `VirtualMachineSpec.required_capabilities` maps onto the same
+  field when a handler exists.
+- **Resolved BEFORE any backend is touched** (`resolve_required_capabilities`, the first thing
+  `create_with` does after the name check): an unknown name is `DX-1527 vm.unknown_capability`, an
+  *invalid argument* — read as "unsupported" it would send the caller shopping for a provider
+  instead of fixing the typo.
+- **Checked against the provider's report on THIS host** (`require_capabilities`, the same
+  `ReportFactory` `provider ls` runs, so a declared yes the host cannot honour is a no here too),
+  before the disk is prepared, the seed written or the admission check run. An unmet entry is
+  `DX-6507 vm.capability_not_supported`, in the **`Unavailable` class** (exit 69) — the
+  classification the previous text left open: the remedy is another provider or this host, never the
+  argument, which is what `FAILED_PRECONDITION` means and what DX-1501's *invalid argument* did not.
+  The message lists every unmet entry as `name: state — detail`, the words `provider describe`
+  prints.
+- **Auto-selection filters by the requirement** (`auto_detect(entries, required)`): a candidate
+  whose report lacks an entry is skipped and the next is tried; when every available candidate is
+  skipped, the refusal names what each one lacked — never "no backend available", which would send
+  the caller to install a hypervisor it has. A standing choice (`DELONIX_VM_BACKEND`, the persisted
+  default) is an explicit backend and is refused like one.
+- **A restart is gated too**: a record's backend that cannot do what the caller now requires is the
+  same refusal, not a VM that came back without it. The requirement is not persisted in the record —
+  it was decided against the backend the record names.
 
 ### D7. What stays out, and the boundaries this ADR does not move
 

@@ -2724,6 +2724,16 @@ check "vm ls" ok "$BIN" vm ls
 # argument», nunca por a imagem não existir. Um teste que passa pela razão errada
 # é pior que um teste em falta: dá cobertura por adquirida.
 check "vm create com disco inexistente recusa" fail "$BIN" vm create "vm-$PFX" --disk /nao/existe.qcow2
+# ADR-0050 D6: a requirement by capability name. An unknown name is an invalid
+# argument (1) BEFORE any backend is asked; a backend whose report does not
+# mark the entry usable is refused in the UNAVAILABLE class (69) before the disk
+# is touched — which is why a disk that does not exist is fine here: the
+# refusal has to come first, or it is not "before anything is created".
+check "vm create --require com nome desconhecido recusa (1)" 1 "$BIN" vm create "vm-$PFX-req" --disk /nao/existe.qcow2 --require vm.snapshot.memry
+check "vm create --require de capacidade que o CH não tem recusa (69)" 69 "$BIN" vm create "vm-$PFX-req" --disk /nao/existe.qcow2 --backend cloud-hypervisor --require vm.snapshot.memory
+check "vm create --require de capacidade que o libvirt não tem recusa (69)" 69 "$BIN" vm create "vm-$PFX-req" --disk /nao/existe.qcow2 --backend libvirt --require vm.namespace-isolation
+check "vm create --require: a recusa nomeia a capacidade e o estado" ok bash -c "\"$BIN\" vm create vm-$PFX-req --disk /nao/existe.qcow2 --backend libvirt --require vm.namespace-isolation 2>&1 | grep -q 'vm.namespace-isolation: unsupported-by-provider'"
+check "vm create --require: nenhum registo de VM ficou para trás" fail "$BIN" vm inspect "vm-$PFX-req"
 
 ########################################
 section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
@@ -2746,7 +2756,10 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
    && virsh -c qemu:///system list --all >/dev/null 2>&1; then
   SVM="snap-$PFX"; SDISK="$OUT/$SVM.qcow2"
   qemu-img create -f qcow2 "$SDISK" 64M >/dev/null 2>&1
-  if "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M >/dev/null 2>&1; then
+  # `--require vm.snapshot.memory`: the accepted half of ADR-0050 D6 — libvirt
+  # marks it usable on a host with qemu:///system, so the requirement passes and
+  # the create goes ahead exactly as before (the refusals are in the vm section).
+  if "$BIN" vm create "$SVM" --disk "$SDISK" --backend libvirt --memory 256M --require vm.snapshot.memory >/dev/null 2>&1; then
     check "vm snapshot create" ok "$BIN" vm snapshot create "$SVM" s1
     check "vm snapshot ls nomeia-o com a VM a correr" ok bash -c \
       "'$BIN' vm snapshot ls '$SVM' | grep -qx s1"

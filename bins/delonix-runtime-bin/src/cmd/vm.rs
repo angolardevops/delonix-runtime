@@ -121,6 +121,17 @@ pub(crate) struct VmSpec {
     #[serde(default)]
     devices: Vec<String>,
     backend: Option<String>,
+    /// Capabilities the backend must support on this host, by catalog name
+    /// (`vm.snapshot.memory`, `vm.namespace-isolation`, … — `delonix provider
+    /// ls` lists them; CLI `--require`). An unknown name is refused as invalid;
+    /// a backend that lacks one is refused before anything is created, and
+    /// auto-detection only picks a backend that has them all (ADR-0050 D6).
+    #[serde(
+        default,
+        rename = "requiredCapabilities",
+        alias = "required_capabilities"
+    )]
+    required_capabilities: Vec<String>,
     /// Canonical `netMode`; `net_mode` stays accepted (back-compat).
     #[serde(rename = "netMode", alias = "net_mode")]
     net_mode: Option<String>,
@@ -255,6 +266,8 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "cpu_affinity",
     "devices",
     "backend",
+    "requiredCapabilities",
+    "required_capabilities",
     "netMode",
     "net_mode",
     "bridge",
@@ -585,6 +598,9 @@ pub enum VmCmd {
         /// default-backend`/auto-detection, in that order).
         #[arg(long)]
         backend: Option<String>,
+        /// Capability the backend must support on this host (a catalog name such as `vm.snapshot.memory`; repeatable; `delonix provider ls` lists them). Refused before anything is created, and auto-detection only picks a backend that has them all
+        #[arg(long = "require", value_name = "CAPABILITY", add = ArgValueCandidates::new(super::complete::capabilities))]
+        require: Vec<String>,
         /// libvirt only: `user`|`nat`|`bridge`.
         #[arg(long)]
         net_mode: Option<String>,
@@ -1880,6 +1896,7 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             cpu_affinity: spec.cpu_affinity,
             devices: spec.devices,
             backend,
+            required_capabilities: spec.required_capabilities,
             net_mode: spec.net_mode,
             bridge: spec.bridge,
             volumes: vm_volumes,
@@ -2013,6 +2030,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             cpu_affinity,
             devices,
             backend,
+            require,
             net_mode,
             bridge,
             ip,
@@ -2200,6 +2218,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 cpu_affinity,
                 devices,
                 backend,
+                required_capabilities: require,
                 net_mode,
                 bridge,
                 volumes: vec![],

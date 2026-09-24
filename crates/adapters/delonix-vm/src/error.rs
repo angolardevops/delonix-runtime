@@ -101,6 +101,11 @@ pub enum Error {
     /// running:" — the wording that class's `Display` uses everywhere else.
     #[error("{0}")]
     NotRunningForOp(String),
+    /// A `required_capabilities` name the catalog does not have — a typo, or a
+    /// name from another catalog version. An INVALID ARGUMENT on purpose: read
+    /// as "unsupported" it would send the caller shopping for a provider.
+    #[error("{0}")]
+    UnknownCapability(String),
 
     // ---- not found ----------------------------------------------------
     /// There is no VM with the given name. Converts directly into the shared
@@ -135,6 +140,13 @@ pub enum Error {
     /// No `kernel`/`firmware` given and no bundled `rust-hypervisor-fw` found.
     #[error("{0}")]
     NoFirmware(String),
+    /// The selected (or every auto-selectable) backend does not mark a
+    /// required capability usable on this host — the contract's
+    /// `FAILED_PRECONDITION` / `CapabilityNotSupported` (ADR-0050 D6), in the
+    /// UNAVAILABLE class: the remedy is another provider or this host, never
+    /// the argument.
+    #[error("{0}")]
+    CapabilityNotSupported(String),
 
     // ---- system failure -----------------------------------------------
     /// An external tool this crate shells out to (`virsh`, `qemu-img`, the
@@ -228,6 +240,7 @@ impl Error {
             Error::StaticIpReservationFailed(_) => 1513,
             Error::LiveBackupNeedsLibvirt(_) => 1514,
             Error::NotRunningForOp(_) => 1515,
+            Error::UnknownCapability(_) => 1527,
             Error::VmNotFound(_) => 4501,
             Error::SnapshotNotFound(_) => 4502,
             Error::RecordConflict(_) => 5501,
@@ -235,6 +248,7 @@ impl Error {
             Error::BackendNotConfigured(_) => 6501,
             Error::NoBackendAvailable(_) => 6502,
             Error::NoFirmware(_) => 6503,
+            Error::CapabilityNotSupported(_) => 6507,
             Error::Command { .. } => 9501,
             Error::CloudHypervisorApi(_) => 9502,
             Error::DiskCorrupted(_) => 9503,
@@ -277,7 +291,8 @@ impl From<Error> for Dx {
             Error::RecordConflict(text) | Error::SnapshotTaken(text) => Dx::Conflict(text),
             Error::BackendNotConfigured(text)
             | Error::NoBackendAvailable(text)
-            | Error::NoFirmware(text) => Dx::Unavailable(text),
+            | Error::NoFirmware(text)
+            | Error::CapabilityNotSupported(text) => Dx::Unavailable(text),
             Error::Command { context, message } => Dx::Runtime { context, message },
             Error::CloudHypervisorApi(text)
             | Error::DiskCorrupted(text)
@@ -327,6 +342,10 @@ mod tests {
             ),
             Error::LiveBackupNeedsLibvirt(
                 "live disk backup needs the libvirt backend (this VM runs on x)".into(),
+            ),
+            Error::UnknownCapability("unknown capability 'vm.nope'".into()),
+            Error::CapabilityNotSupported(
+                "the 'libvirt' backend does not support what this VM requires".into(),
             ),
             Error::NotRunningForOp(
                 "VM 'x' is not running (status: Stopped) — nothing to pause".into(),

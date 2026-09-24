@@ -16,6 +16,7 @@
 //! (SLIRP/passt: egress without a `tap`); integration with the ingress bridge (inbound
 //! via the SDN) is a follow-up.
 
+use delonix_compute::capability::Capability;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -189,6 +190,14 @@ pub struct VmConfig {
     /// reservation (`<host mac=… ip=…/>`) on the libvirt network, so the guest
     /// needs NO cloud-init network config. Must belong to the network's subnet.
     pub static_ip: Option<String>,
+    /// Catalog capabilities the backend MUST mark usable on this host, by name
+    /// (`vm.snapshot.memory`, `vm.namespace-isolation`, … — `delonix provider
+    /// ls` lists them). Resolved with [`Capability::from_name`] before any
+    /// backend is touched (a typo is an invalid argument, never "unsupported"),
+    /// and checked against the backend's report on THIS host before anything
+    /// is created; auto-detection only picks a backend that has them all.
+    /// The contract's `required_capabilities` (ADR-0050 D6).
+    pub required_capabilities: Vec<String>,
 
     // --- Advanced libvirt knobs (libvirt backend only) ------------------------
     // Declarative `kind: Vm` parity with hand-written libvirt XML: typed fields
@@ -1266,12 +1275,115 @@ fn canonical_backend_name(s: &str) -> Option<&'static str> {
 /// registered entry that is actually installed — today cloud-hypervisor, then
 /// libvirt).
 pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
+    select_backend_requiring(want, &[])
+}
+
+/// [`select_backend`] with the caller's requirements (ADR-0050 D6): a named
+/// backend is refused unless its report on this host marks every entry of
+/// `required` usable, and auto-detection skips a candidate that does not.
+/// With `required` empty this is exactly [`select_backend`].
+pub fn select_backend_requiring(
+    want: Option<&str>,
+    required: &[Capability],
+) -> Result<Box<dyn VmBackend>> {
     match want.map(str::trim) {
         Some(other) if !other.is_empty() => {
-            make_backend(other).unwrap_or_else(|| Err(unknown_backend(other)))
+            let b = make_backend(other).unwrap_or_else(|| Err(unknown_backend(other)))?;
+            require_capabilities(b.id(), required)?;
+            Ok(b)
         }
-        _ => with_backends(auto_detect),
+        _ => with_backends(|regs| auto_detect(regs, required)),
     }
+}
+
+/// The names in `VmConfig::required_capabilities`, resolved against the
+/// catalog. **Before any backend is touched**: an unknown name is an invalid
+/// argument, and reading it as "no provider supports it" would send the
+/// caller looking for a provider instead of for the typo.
+pub fn resolve_required_capabilities(names: &[String]) -> Result<Vec<Capability>> {
+    let mut out = Vec::with_capacity(names.len());
+    for n in names {
+        let n = n.trim();
+        match Capability::from_name(n) {
+            Some(c) => {
+                if !out.contains(&c) {
+                    out.push(c);
+                }
+            }
+            None => {
+                return Err(Error::UnknownCapability(format!(
+                    "unknown capability '{n}': the catalog (version {}) has no entry by that \
+                     name — `delonix provider ls` lists the names",
+                    delonix_compute::capability::CATALOG_VERSION
+                )))
+            }
+        }
+    }
+    Ok(out)
+}
+
+/// Refuses `backend_id` unless its report on THIS host marks every entry of
+/// `required` usable (the contract's `Capability.supported`: `supported` or
+/// `partial`). The refusal names each unmet entry with the provider's own
+/// state and reason — the same words `provider describe` prints — so the
+/// caller knows whether to pick another provider, install something on this
+/// host, or drop the requirement.
+pub fn require_capabilities(backend_id: &str, required: &[Capability]) -> Result<()> {
+    if required.is_empty() {
+        return Ok(());
+    }
+    let report = with_backends(|regs| report_of(regs, backend_id));
+    let Some(report) = report else {
+        return Err(unknown_backend(backend_id));
+    };
+    let missing = unmet(&report, required);
+    if missing.is_empty() {
+        return Ok(());
+    }
+    Err(capability_not_supported(&report.id, &missing))
+}
+
+fn report_of(
+    regs: &[BackendRegistration],
+    id: &str,
+) -> Option<delonix_compute::capability::ProviderReport> {
+    regs.iter()
+        .find(|r| r.id == id || r.aliases.contains(&id))
+        .map(|r| (r.report)())
+}
+
+/// `name: state — detail` for every required entry the report does not mark
+/// usable. An entry the report lacks (a kind mismatch) is "not in this
+/// provider's report", which is a "no" too.
+fn unmet(
+    report: &delonix_compute::capability::ProviderReport,
+    required: &[Capability],
+) -> Vec<String> {
+    required
+        .iter()
+        .filter_map(
+            |c| match report.capabilities.iter().find(|r| r.capability == *c) {
+                Some(r) if r.state.is_usable() => None,
+                Some(r) => {
+                    let detail = r.state.detail();
+                    Some(if detail.is_empty() {
+                        format!("{}: {}", c.name(), r.state.label())
+                    } else {
+                        format!("{}: {} — {}", c.name(), r.state.label(), detail)
+                    })
+                }
+                None => Some(format!("{}: not in this provider's report", c.name())),
+            },
+        )
+        .collect()
+}
+
+fn capability_not_supported(id: &str, missing: &[String]) -> Error {
+    Error::CapabilityNotSupported(format!(
+        "the '{id}' backend does not support what this VM requires on this host:\n  {}\nPick a \
+         backend that does (`delonix provider ls`), or drop the requirement",
+        missing.join("\n  ")
+    ))
 }
 
 /// Auto-detection: the first registered entry that is auto-selectable AND
@@ -1290,19 +1402,44 @@ pub fn select_backend(want: Option<&str>) -> Result<Box<dyn VmBackend>> {
 /// registry it never is: this host has a local backend installed, the walk
 /// stops at the first one, and a test written that way passes whether the order
 /// is right or wrong.
-fn auto_detect(entries: &[BackendRegistration]) -> Result<Box<dyn VmBackend>> {
+///
+/// With `required` non-empty (ADR-0050 D6) the walk also asks each candidate's
+/// REPORT — built here, which for a local backend probes this host and for a
+/// remote one declares without connecting — and skips one that does not mark
+/// every required entry usable. When every available candidate is skipped that
+/// way, the refusal names what each one lacks: "no backend" would send the
+/// caller to install a hypervisor it already has.
+fn auto_detect(
+    entries: &[BackendRegistration],
+    required: &[Capability],
+) -> Result<Box<dyn VmBackend>> {
+    let mut skipped: Vec<String> = Vec::new();
     for e in entries.iter().filter(|b| b.auto_selectable) {
         // A built-in constructor is infallible; a registered one that fails is
         // not a reason to abort a walk whose next candidate may serve fine.
         if let Ok(b) = (e.new)() {
             if b.available() {
-                return Ok(b);
+                if required.is_empty() {
+                    return Ok(b);
+                }
+                let missing = unmet(&(e.report)(), required);
+                if missing.is_empty() {
+                    return Ok(b);
+                }
+                skipped.push(format!("{}:\n  {}", e.id, missing.join("\n  ")));
             }
         }
     }
-    Err(Error::NoBackendAvailable(
-        "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
-    ))
+    if skipped.is_empty() {
+        return Err(Error::NoBackendAvailable(
+            "no VM backend available: install 'cloud-hypervisor' or 'libvirt'+'qemu'".into(),
+        ));
+    }
+    Err(Error::CapabilityNotSupported(format!(
+        "no available VM backend supports what this VM requires on this host:\n{}\nInstall or \
+         configure one that does (`delonix provider ls`), or drop the requirement",
+        skipped.join("\n")
+    )))
 }
 
 /// Does the backend that would run this VM own its own storage?
@@ -4152,6 +4289,9 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
             cfg.name
         )));
     }
+    // Requirements are NAMES until here; an unknown one is refused before
+    // any store is opened or any backend asked (ADR-0050 D6).
+    let required = resolve_required_capabilities(&cfg.required_capabilities)?;
     let vmdir = vms_dir(base);
     std::fs::create_dir_all(&vmdir)?;
     let st = store(base)?;
@@ -4173,6 +4313,10 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
             // Resolved ONCE. It used to be built twice, which is free for a
             // local backend and a second authentication for a remote one.
             let b = backend_for(ex)?;
+            // A requirement holds on a restart too: the backend is the record's,
+            // and if it cannot do what the caller now requires the answer is
+            // the same refusal, not a VM that came back without it.
+            require_capabilities(b.id(), &required)?;
             if b.is_running(ex) {
                 return Ok(ex.clone()); // already running — idempotent
             }
@@ -4220,7 +4364,7 @@ libvirt+qemu"
                 }
                 None => None,
             };
-            select_backend(want.as_deref())?
+            select_backend_requiring(want.as_deref(), &required)?
         }
     };
 
@@ -4992,6 +5136,11 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         // reaplicar no arranque (e `prepare_local_overlay` salta um overlay que
         // já existe). Por isso não entra no `VmBootSpec`.
         disk_size_gib: _,
+        // A request-time gate (ADR-0050 D6), consumed in `create_with` BEFORE
+        // the backend is chosen: once the record names a backend that passed
+        // it, there is nothing to reapply on `vm start`, and the record does
+        // not keep it.
+        required_capabilities: _,
         // Everything below used to exist only for the duration of `vm create`.
         kernel,
         initrd,
@@ -5069,6 +5218,9 @@ fn config_from(vm: &Vm) -> VmConfig {
         restart_policy: vm.restart_policy.clone(),
         devices: vm.devices.clone(),
         backend: Some(vm.backend.clone()),
+        // Not persisted: the requirement was checked against the backend the
+        // record names when the VM was created (see `boot_spec_of`).
+        required_capabilities: Vec::new(),
         // For libvirt, `Vm.tap` is not a real tap: `LibvirtBackend::boot` stores
         // the net mode string there. For Cloud Hypervisor it IS a device name
         // and must not be misread as one.
@@ -7221,7 +7373,7 @@ Format specific information:
         ];
 
         assert_eq!(
-            auto_detect(&tabela).unwrap().id(),
+            auto_detect(&tabela, &[]).unwrap().id(),
             "local",
             "a auto-deteccao tem de escolher o local"
         );
@@ -7231,6 +7383,135 @@ Format specific information:
             "a auto-deteccao construiu um backend que o filtro ia descartar — \
              num backend remoto isso e uma ligacao HTTP a um no que ninguem pediu"
         );
+    }
+
+    /// A report factory that marks `yes` usable and everything else a "no" —
+    /// the table a requirement is compared against, without a host probe.
+    fn reporting(id: &'static str, yes: &'static [Capability]) -> ReportFactory {
+        use delonix_compute::capability::{
+            CapabilityState as S, HealthStatus, ProviderHealth, ProviderKind, ProviderReport,
+        };
+        Box::new(move || {
+            ProviderReport::build(
+                id,
+                ProviderKind::Compute,
+                true,
+                ProviderHealth {
+                    status: HealthStatus::Healthy,
+                    reason: "Ok",
+                    message: String::new(),
+                },
+                |c| {
+                    if yes.contains(&c) {
+                        S::Partial {
+                            detail: "declared for the test",
+                        }
+                    } else {
+                        S::UnsupportedByProvider {
+                            reason: "the test says no",
+                        }
+                    }
+                },
+            )
+        })
+    }
+
+    fn fake(id: &'static str, auto: bool, yes: &'static [Capability]) -> BackendRegistration {
+        BackendRegistration {
+            id,
+            aliases: &[],
+            auto_selectable: auto,
+            report: reporting(id, yes),
+            new: Box::new(move || {
+                Ok(Box::new(FakeBackend {
+                    id,
+                    available: true,
+                    own_storage: false,
+                    auto,
+                }))
+            }),
+        }
+    }
+
+    /// ADR-0050 D6: a requirement FILTERS auto-detection — the first candidate
+    /// is skipped when its report lacks the entry, the next that has it is
+    /// chosen, and when none has it the refusal names what each lacked, never
+    /// "no backend available" (there is one; it cannot do this).
+    #[test]
+    fn a_requirement_filters_auto_detection_and_the_refusal_names_what_each_lacked() {
+        let mem = Capability::VmSnapshotMemory;
+        let table = vec![
+            fake("first", true, &[Capability::VmCreate]),
+            fake(
+                "second",
+                true,
+                &[Capability::VmCreate, Capability::VmSnapshotMemory],
+            ),
+        ];
+        assert_eq!(auto_detect(&table, &[]).unwrap().id(), "first");
+        assert_eq!(
+            auto_detect(&table, &[mem]).unwrap().id(),
+            "second",
+            "the first candidate lacks the requirement and must be skipped"
+        );
+        // `Box<dyn VmBackend>` has no `Debug`, so `unwrap_err` cannot be used here.
+        let e = match auto_detect(&table, &[mem, Capability::VmPause]) {
+            Ok(b) => panic!("expected a refusal, got backend {}", b.id()),
+            Err(e) => e,
+        };
+        assert!(
+            matches!(e, Error::CapabilityNotSupported(_)),
+            "not NoBackendAvailable: {e}"
+        );
+        let text = e.to_string();
+        assert!(
+            text.contains("first:") && text.contains("second:"),
+            "{text}"
+        );
+        assert!(
+            text.contains("vm.pause: unsupported-by-provider — the test says no"),
+            "the provider's own state and reason: {text}"
+        );
+        assert_eq!(
+            delonix_model::Error::from(e).number(),
+            6507,
+            "the contract's FAILED_PRECONDITION lands in the unavailable class"
+        );
+    }
+
+    /// The name is resolved BEFORE any backend is asked: a typo is an invalid
+    /// argument, never "no provider supports it".
+    #[test]
+    fn an_unknown_capability_name_is_an_invalid_argument_not_an_unsupported_one() {
+        let e = resolve_required_capabilities(&["vm.snapshot.memry".into()]).unwrap_err();
+        assert!(matches!(e, Error::UnknownCapability(_)), "{e}");
+        assert!(e.to_string().contains("vm.snapshot.memry"), "{e}");
+        assert_eq!(delonix_model::Error::from(e).number(), 1527);
+        // Trimmed, deduplicated, in the caller's order.
+        let ok = resolve_required_capabilities(&[
+            " vm.create ".into(),
+            "vm.pause".into(),
+            "vm.create".into(),
+        ])
+        .unwrap();
+        assert_eq!(ok, vec![Capability::VmCreate, Capability::VmPause]);
+        assert!(resolve_required_capabilities(&[]).unwrap().is_empty());
+    }
+
+    /// `unmet` reads the report the way `provider describe` prints it; an
+    /// entry the report does not carry is a "no" too, never a silent pass.
+    #[test]
+    fn unmet_lists_only_what_the_report_does_not_mark_usable() {
+        let report = (reporting("x", &[Capability::VmCreate]))();
+        assert!(unmet(&report, &[Capability::VmCreate]).is_empty());
+        let m = unmet(&report, &[Capability::VmCreate, Capability::VmStop]);
+        assert_eq!(
+            m,
+            vec!["vm.stop: unsupported-by-provider — the test says no"]
+        );
+        // A network entry is not in a compute report at all.
+        let m = unmet(&report, &[Capability::NetBridge]);
+        assert_eq!(m, vec!["net.bridge: not in this provider's report"]);
     }
 
     // A test that used to live here (`a_auto_deteccao_salta_um_backend_nao_

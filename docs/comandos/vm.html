@@ -832,6 +832,9 @@ Options:
       --backend &lt;BACKEND&gt;
           `cloud-hypervisor`|`libvirt` (omit: the image&#x27;s `HYPERVISOR` if `--disk` names a local one, else `DELONIX_VM_BACKEND`/`vm default-backend`/auto-detection, in that order)
 
+      --require &lt;CAPABILITY&gt;
+          Capability the backend must support on this host (a catalog name such as `vm.snapshot.memory`; repeatable; `delonix provider ls` lists them). Refused before anything is created, and auto-detection only picks a backend that has them all
+
       --net-mode &lt;NET_MODE&gt;
           libvirt only: `user`|`nat`|`bridge`
 

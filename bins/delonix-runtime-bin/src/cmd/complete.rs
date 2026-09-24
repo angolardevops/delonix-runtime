@@ -82,6 +82,16 @@ pub fn networks() -> Vec<CompletionCandidate> {
     cands(store.list().unwrap_or_default().into_iter().map(|n| n.name))
 }
 
+/// The capability catalog's names (`vm create --require`), in catalog order.
+/// Static: the catalog is code, no store is opened.
+pub fn capabilities() -> Vec<CompletionCandidate> {
+    cands(
+        delonix_compute::capability::Capability::ALL
+            .iter()
+            .map(|c| c.name().to_string()),
+    )
+}
+
 pub fn vms() -> Vec<CompletionCandidate> {
     cands(
         delonix_vm::list(&state_root())
