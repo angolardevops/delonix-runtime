@@ -152,12 +152,16 @@ of most of the VM matrix today.
 ### D3. Four declarations, three of them with a host probe
 
 - **libvirt** (`delonix-vm::capabilities::libvirt_report`, probe `LibvirtHost { virsh, qemu, kvm,
-  system_uri }`): 15 supported, 24 partial, 17 unsupported, 2 external, 11 not implemented (declared,
+  system_uri }`): 15 supported, 24 partial, 17 unsupported, 2 external, 11 not implemented at this
+  ADR's first commit — **25 / 14 / 17 / 2 / 11 since 2026-09-24**, when the E2E battery gained the
+  checks the `partial` rows lacked (extra disks and NICs, CPU model/topology/pinning, VNC, static
+  IP, restart, live backup and restore, destroy — each read from the LIVE domain) (declared,
   assumed-complete host). A session-only host (no `libvirt` group) keeps the lifecycle and loses
   every row that needs an observed address (`vm.network.nat`, `vm.antispoof`, `vm.ip.observed`,
   `vm.network.static-ip`) — the probe names the group to join.
 - **cloud-hypervisor** (`cloud_hypervisor_report`, probe `{ binary, kvm, firmware }`): 12 / 17 / 28 /
-  2 / 10. A host with the binary and no known firmware is *available* (selectable) and cannot boot —
+  2 / 10 at first commit — **19 / 10 / 28 / 2 / 10 since 2026-09-24** (pause/resume read on the
+  VMM's api-socket, restart by PID, anti-spoof read inside the holder, backup/restore, destroy). A host with the binary and no known firmware is *available* (selectable) and cannot boot —
   the two are different facts and the report says both.
 - **proxmox** (`delonix-proxmox::capability_report(configured)`): 9 / 12 / 28 / 4 / 16 at this
   ADR's first commit — 10 / 12 / 27 / 4 / 16 since `vm.snapshot.delete` became a live-tested
@@ -174,11 +178,17 @@ of most of the VM matrix today.
   holder's is the one that filters; the host's value otherwise), `delonix-volume::provider_report`
   (probe `{ can_mount, mount.nfs, mount.cifs, mount.davfs }`).
 
-Each declaration is the honest reading of the code and the batteries as of this commit, and the
-matrix has more `partial` than `supported` in the VM rows for a reason worth stating: the E2E
-battery exercises the snapshot cycle, pause/unpause and stop/start on libvirt and Cloud Hypervisor,
-and almost nothing else of the VM surface (console, VNC, cloud-init login, extra disks, PCI, TPM,
-static IP, backup of a VM). Those rows are implemented and unproven, and `partial` says exactly that.
+Each declaration is the honest reading of the code and the batteries as of its commit. At this
+ADR's first commit the matrix had more `partial` than `supported` in the VM rows, because the E2E
+battery exercised the snapshot cycle, pause/unpause and stop/start and almost nothing else of the
+VM surface. The 2026-09-24 pass wrote those checks (sections «vm: o que o relatório libvirt declara
+supported, medido» and the CH additions) and promoted what they proved; what still needs a guest
+OS inside (cloud-init login, observed IP, guest agent, quiesced backup, serial console) stays
+`partial` with the reason written. Writing the checks found three defects the code reading had
+missed — a `default`-namespace CH VM had NO anti-spoof rule and was absent from `@dlxall` (the
+short `vmtap` line carried no address), a live libvirt backup failed on any VM with a second disk,
+and `vm vnc` printed a display index as a port — which is the argument for `supported` requiring
+evidence in the first place.
 
 ### D4. One verb, one document, one script — all generated from the same declarations
 

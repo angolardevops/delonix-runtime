@@ -4983,21 +4983,36 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
         quiet("virsh", &["-c", uri, "domblklist", "--details", "--", name]).map_err(|e| {
             Error::LiveBackupFailed(format!("live backup: cannot list the disks of {name}: {e}"))
         })?;
-    let target = blklist
+    // type device target source — every file-backed entry, in libvirt's order.
+    let file_disks: Vec<(String, String, String)> = blklist
         .lines()
         .filter_map(|l| {
             let f: Vec<&str> = l.split_whitespace().collect();
-            // type device target source
-            (f.len() >= 4 && f[0] == "file" && f[1] == "disk")
-                .then(|| (f[2].to_string(), f[3].to_string()))
+            (f.len() >= 4 && f[0] == "file")
+                .then(|| (f[1].to_string(), f[2].to_string(), f[3].to_string()))
         })
-        .next()
+        .collect();
+    let target = file_disks
+        .iter()
+        .find(|(device, _, _)| device == "disk")
+        .map(|(_, dev, source)| (dev.clone(), source.clone()))
         .ok_or_else(|| {
             Error::LiveBackupFailed(format!(
                 "live backup: {name} has no file-backed disk to copy"
             ))
         })?;
     let (dev, source) = target;
+    // Every OTHER disk is told `snapshot=no`. `--disk-only` snapshots ALL disks
+    // unless each is named, so a VM with `extraDisks` failed with «missing
+    // existing file for disk vdb: <extra>.delonix-backup-<pid>» — libvirt wanted
+    // a pre-created overlay for a disk this backup never copies. Measured
+    // 2026-09-24 in the E2E battery, on the first VM with a second disk that
+    // ever reached this path.
+    let other_specs: Vec<String> = file_disks
+        .iter()
+        .filter(|(_, d, _)| d != &dev)
+        .map(|(_, d, _)| format!("{d},snapshot=no"))
+        .collect();
 
     let tmp = PathBuf::from(format!("{source}.delonix-backup-{}", std::process::id()));
     let tmp_s = tmp.to_string_lossy().to_string();
@@ -5047,10 +5062,18 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
         "--diskspec",
         &diskspec,
     ];
+    for spec in &other_specs {
+        args.push("--diskspec");
+        args.push(spec);
+    }
     if quiesce {
         args.push("--quiesce");
     }
     quiet("virsh", &args).map_err(|e| {
+        // The staged overlay was ours to create, so it is ours to remove: a
+        // failed snapshot left it beside the VM's disk (measured: one
+        // `.delonix-backup-<pid>` per failed attempt).
+        let _ = std::fs::remove_file(&tmp);
         Error::LiveBackupFailed(format!(
             "live backup: could not snapshot {name}: {e}{}",
             if quiesce {
