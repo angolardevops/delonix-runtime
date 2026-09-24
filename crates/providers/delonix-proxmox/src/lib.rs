@@ -369,6 +369,14 @@ enum TaskKind {
     /// Proxmox's `qmrestore`, the same route [`Client::create_vm`] calls,
     /// asked a different question.
     Restore,
+    /// `POST …/move_disk` — moves one disk to a different storage, or
+    /// re-formats it in place.
+    MoveDisk,
+    /// `PUT …/unlink` — detaches (and by default destroys) one or more disks.
+    /// The schema declares `returns: null`, so [`Client::unlink`] goes
+    /// through [`Client::task_or_done`] and this worker type may never
+    /// actually be seen.
+    Unlink,
 }
 
 impl TaskKind {
@@ -388,6 +396,8 @@ impl TaskKind {
             TaskKind::Backup => "backup",
             TaskKind::DeleteBackup => "delete-backup",
             TaskKind::Restore => "restore",
+            TaskKind::MoveDisk => "move-disk",
+            TaskKind::Unlink => "unlink",
         }
     }
 
@@ -422,6 +432,16 @@ impl TaskKind {
             // `qmrestore` (read from a live PVE 9.2.2 task log,
             // `docs/proxmox/trace-9.2.2.routes`, not assumed).
             TaskKind::Restore => "qmrestore",
+            // GUESSED by analogy with `qmclone`/`qmtemplate`'s naming; NOT yet
+            // confirmed against a live trace — will be corrected by whoever
+            // runs the live suite next.
+            TaskKind::MoveDisk => "qmmove",
+            // GUESSED by analogy with `qmdestroy`/`qmdelsnapshot`; NOT yet
+            // confirmed against a live trace — will be corrected by whoever
+            // runs the live suite next. The schema suggests this route usually
+            // applies inline (`returns: null`), so this worker type may never
+            // actually be exercised at all.
+            TaskKind::Unlink => "qmdelete",
         }
     }
 }
@@ -1242,6 +1262,117 @@ impl Client {
         )
     }
 
+    /// Moves `disk` (a drive key, `scsi0`) to `storage`, or re-formats it in
+    /// place when `storage` is `None` (`POST …/move_disk`).
+    ///
+    /// `delete_source` drops the SOURCE disk reference once the move is done —
+    /// without it the disk survives on the OLD storage as an unreferenced one,
+    /// which is the node's own default and not what "move" means to a caller
+    /// asking for a clean move with nothing left behind.
+    ///
+    /// A UPID, like every write here: the effect probe reads the moved disk's
+    /// `storage=` back from [`Client::config`], never from what the call said.
+    /// With `storage: None` there is nothing this side can tell apart from "not
+    /// moved yet" (the format changed but the storage did not), so there is no
+    /// probe in that case — a lost answer with no task in flight then surfaces
+    /// as the transport error it is, same as [`Client::rollback`].
+    pub fn move_disk(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        disk: &str,
+        storage: Option<&str>,
+        delete_source: bool,
+        format: Option<&str>,
+    ) -> Result<()> {
+        let delete_val = if delete_source { "1" } else { "0" };
+        let mut form: Vec<(&str, &str)> = vec![("disk", disk), ("delete", delete_val)];
+        if let Some(s) = storage {
+            form.push(("storage", s));
+        }
+        if let Some(f) = format {
+            form.push(("format", f));
+        }
+        // The probe only exists when a target storage was asked for: with
+        // `storage: None` (a format-only reformat) nothing this side can read
+        // back distinguishes "moved" from "not yet" — the storage name does
+        // not change — so a lost answer with no matching task in flight then
+        // surfaces as the transport error it is, the same as `rollback`.
+        let want_storage: Option<Box<dyn Fn() -> Result<bool>>> = storage.map(|s| {
+            let want = s.to_string();
+            let disk = disk.to_string();
+            Box::new(move || {
+                Ok(disk_storage_of(&self.config(vmid)?, &disk).as_deref() == Some(want.as_str()))
+            }) as Box<dyn Fn() -> Result<bool>>
+        });
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::MoveDisk,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/move_disk", self.node),
+                    &form,
+                    true,
+                )
+            },
+            want_storage.as_deref(),
+        )
+    }
+
+    /// Detaches one or more disks from a VM (`PUT …/unlink`), and by default
+    /// destroys them — `force` removes a disk even if something else still
+    /// references it (a boot order entry, another device slot).
+    ///
+    /// The schema declares this route's `returns: null` rather than `string`,
+    /// which is the shape [`Client::task_or_done`] exists for: most calls
+    /// apply inline, and a UPID — should the node ever fork one — is still
+    /// waited on rather than assumed absent. The effect probe is the disk
+    /// keys no longer present in [`Client::config`].
+    pub fn unlink(&self, ledger: &Ledger, vmid: u32, idlist: &[&str], force: bool) -> Result<()> {
+        let ids = idlist.join(",");
+        let force_val = if force { "1" } else { "0" };
+        let form: Vec<(&str, &str)> = vec![("idlist", ids.as_str()), ("force", force_val)];
+        let keys: Vec<String> = idlist.iter().map(|s| s.to_string()).collect();
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Unlink,
+            || self.put_form(&format!("/nodes/{}/qemu/{vmid}/unlink", self.node), &form),
+            Some(&|| {
+                let cfg = self.config(vmid)?;
+                Ok(keys.iter().all(|k| cfg.get(k).is_none()))
+            }),
+        )
+    }
+
+    /// The RENDERED cloud-init file the node would inject at the guest's next
+    /// boot (`GET …/cloudinit/dump?type=<user|network|meta>`).
+    ///
+    /// Genuinely different from [`Client::config`]/[`Client::configure_clone`],
+    /// which only read or write the cloud-init INPUTS (`ipconfig0`, `sshkeys`,
+    /// …) — nothing else in this crate reads the OUTPUT cloud-init would
+    /// actually write into the guest. Not a task: the schema's `returns:
+    /// string` here is the rendered file itself, read like any other plain
+    /// GET (`status_current`, `config`).
+    ///
+    /// `kind` is refused by name when it is not one of the three the route
+    /// accepts — never sent to the node as-is, which would just be a 400 with
+    /// no more information than refusing it here already gives.
+    pub fn cloudinit_dump(&self, vmid: u32, kind: &str) -> Result<String> {
+        if !matches!(kind, "user" | "network" | "meta") {
+            return Err(Error::InvalidCloudInitKind(format!(
+                "proxmox: cloud-init dump type '{kind}' is not one of 'user', 'network', 'meta'"
+            )));
+        }
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/cloudinit/dump?type={kind}",
+            self.node
+        ))?;
+        let w: Wrapped<String> = parse(&body, "cloudinit dump")?;
+        Ok(w.data)
+    }
+
     pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
         self.task(
             ledger,
@@ -2057,6 +2188,19 @@ fn boot_disk_of(cfg: &serde_json::Value) -> Option<(String, u64)> {
 /// not a sized disk (CD-ROM, cloud-init drive) or has no readable `size=`.
 fn disk_size_of(cfg: &serde_json::Value, key: &str) -> Option<u64> {
     drive_size_bytes(cfg.get(key)?.as_str()?)
+}
+
+/// The `<storage>` component of drive `key` in a config
+/// (`local-lvm:vm-100-disk-0,size=1G` → `local-lvm`) — what
+/// [`Client::move_disk`]'s effect probe reads back, because the storage name
+/// is the one thing a move is asked to change that a caller can confirm from
+/// outside. `None` when the key is absent or carries no `:` at all (`none`,
+/// the value an empty CD-ROM slot has).
+fn disk_storage_of(cfg: &serde_json::Value, key: &str) -> Option<String> {
+    cfg.get(key)?
+        .as_str()?
+        .split_once(':')
+        .map(|(storage, _)| storage.to_string())
 }
 
 /// `size=` of a drive property value (`local-lvm:vm-100-disk-0,size=32G`), in
@@ -3250,6 +3394,56 @@ mod tests {
             parse_size("99999999999999999999G"),
             None,
             "overflow is not a size"
+        );
+    }
+
+    /// What [`Client::move_disk`]'s effect probe reads back: the storage NAME
+    /// only, up to the first `:` — never the size, which a move is not asked
+    /// to change and `disk_size_of`/`drive_size_bytes` already own.
+    #[test]
+    fn the_storage_of_a_drive_reads_up_to_the_first_colon() {
+        let cfg = serde_json::json!({
+            "scsi0": "local-lvm:vm-100-disk-0,size=1G",
+            "ide2": "local:iso/x.iso,media=cdrom,size=700M",
+            "sata0": "none,media=cdrom",
+        });
+        assert_eq!(disk_storage_of(&cfg, "scsi0").as_deref(), Some("local-lvm"));
+        assert_eq!(disk_storage_of(&cfg, "ide2").as_deref(), Some("local"));
+        assert_eq!(
+            disk_storage_of(&cfg, "sata0"),
+            None,
+            "an empty CD-ROM slot ('none,media=cdrom') has no colon at all, so it is `None` \
+             here just like a missing key — a caller comparing it against a real storage name \
+             never sees a false match"
+        );
+        assert_eq!(disk_storage_of(&cfg, "missing"), None);
+    }
+
+    /// The check runs BEFORE any request: an unknown `type` never reaches the
+    /// node, unlike a `disk`/`storage`/`idlist` typo, which the node itself
+    /// would refuse with a 400 this crate maps into [`Error::BadRequest`].
+    #[test]
+    fn cloudinit_dump_refuses_an_unknown_type_before_any_request() {
+        let cli = Client {
+            http: reqwest::blocking::Client::new(),
+            base: "https://x".into(),
+            node: "pve".into(),
+            auth: Auth::ApiToken {
+                id: "a!b".into(),
+                secret: "c".into(),
+            },
+            ticket: std::sync::RwLock::new(None),
+            bridge: "vmbr0".into(),
+            vlan: None,
+            task_timeout: TASK_TIMEOUT,
+            trace_routes: None,
+        };
+        let e = cli.cloudinit_dump(100, "bogus").unwrap_err();
+        assert!(e.is_invalid_argument(), "{e}");
+        assert!(e.to_string().contains("bogus"), "{e}");
+        assert!(
+            matches!(e, Error::InvalidCloudInitKind(_)),
+            "must be the typed refusal, not a request failure: {e}"
         );
     }
 

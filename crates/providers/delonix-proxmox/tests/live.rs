@@ -945,3 +945,132 @@ fn a_template_clone_gets_the_disk_size_asked_for() {
         );
     }
 }
+
+/// `move_disk`/`unlink`/`cloudinit_dump` — the client-level primitives this
+/// backend exposes BEYOND what `boot`/`config` already cover: moving a disk
+/// to another storage (or re-formatting it in place), detaching one from a
+/// VM, and reading back the RENDERED cloud-init file the node would inject —
+/// as opposed to `config`/`configure_clone`, which only read or write the
+/// cloud-init INPUTS.
+///
+/// The VM is stopped before any of the three. Neither `move_disk` nor
+/// `unlink` needs it running, and testing them against a stopped VM keeps
+/// this case independent of the node's config-lock contention window
+/// (`Client::task`'s doc comment) that a `start` opens for about 30 s.
+///
+/// **`move_disk` here moves to the SAME storage** (`DELONIX_PROXMOX_TEST_STORAGE`,
+/// the only one this suite is given), with the source reference dropped —
+/// exercising the request/response/ledger/probe cycle end to end even though
+/// "new" and "old" name the same pool. Proxmox's own GUI offers exactly this
+/// ("move disk" to the same storage, to defragment a thin volume), so it is
+/// expected to succeed; this specific combination has NOT been run against a
+/// real node yet, unlike the create/snapshot/clone paths above, and is the
+/// first thing to check if this case fails on its first live run.
+#[test]
+fn move_disk_unlink_and_cloudinit_dump() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxdisk{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    b.stop(vmdir, &vm)
+        .expect("stop before the disk operations below");
+    assert!(!b.is_running(&vm), "the VM must be stopped");
+
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+
+    // cloudinit_dump: the RENDERED file, not the inputs `config` reads. Every
+    // VM this backend creates gets a cloud-init drive unless `cloud_init:
+    // false` was asked for (`create_form`'s `has_ci`, always true for the
+    // plain `VmConfig` above), so a fresh `boot` like this one always has
+    // something to dump — an empty answer here would be this backend's own
+    // bug, not the node declining to render one.
+    let user_dump = b
+        .client()
+        .cloudinit_dump(vmid, "user")
+        .expect("cloudinit dump: user");
+    assert!(
+        !user_dump.is_empty(),
+        "a VM with a cloud-init drive rendered an empty user-data file"
+    );
+    // An unknown `type` is refused before any request — proven here against a
+    // REAL node, not only against the client's own validation (see the `lib.rs`
+    // unit test for that half).
+    assert!(
+        b.client().cloudinit_dump(vmid, "bogus").is_err(),
+        "an unknown cloud-init dump type must be refused"
+    );
+
+    // move_disk: the boot disk, moved to `storage` (the same one it is
+    // already on) with the source reference dropped. The effect probe is read
+    // back from `config`, never taken from the call's answer, and the SIZE is
+    // asserted unchanged — a move alone must not also resize.
+    let (key, size_before) = b.client().boot_disk(vmid).expect("boot disk before move");
+    b.client()
+        .move_disk(&ledger, vmid, &key, Some(&storage), true, None)
+        .expect("move_disk to the same storage, dropping the source reference");
+    let cfg_after_move = b.client().config(vmid).expect("config after move_disk");
+    let disk_val = cfg_after_move
+        .get(&key)
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    assert!(
+        disk_val.starts_with(&format!("{storage}:")),
+        "the disk is not on '{storage}' after the move: {disk_val}"
+    );
+    let (_, size_after) = b.client().boot_disk(vmid).expect("boot disk after move");
+    assert_eq!(
+        size_after, size_before,
+        "a move alone must not resize the disk"
+    );
+
+    // unlink: the same `ide2` cloud-init drive `cloudinit_dump` just read —
+    // a real disk to detach without needing to attach one first, which this
+    // crate has no verb for on an existing VM.
+    assert!(
+        cfg_after_move.get("ide2").is_some(),
+        "the VM has no cloud-init drive to unlink: {cfg_after_move}"
+    );
+    b.client()
+        .unlink(&ledger, vmid, &["ide2"], true)
+        .expect("unlink the cloud-init drive");
+    let cfg_after_unlink = b.client().config(vmid).expect("config after unlink");
+    assert!(
+        cfg_after_unlink.get("ide2").is_none(),
+        "ide2 is still in the config after unlink: {cfg_after_unlink}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        b.client().config(vmid).is_err(),
+        "the VM is still defined on the node after destroy"
+    );
+}
