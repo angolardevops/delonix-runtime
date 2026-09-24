@@ -358,10 +358,6 @@ enum TaskKind {
     /// `DELETE …/storage/{storage}/content/{volume}` — removes one backup
     /// archive.
     DeleteBackup,
-    /// `POST …/qemu` with `archive=<volid>` instead of the disk parameters —
-    /// Proxmox's `qmrestore`, the same route [`Client::create_vm`] calls,
-    /// asked a different question.
-    Restore,
 }
 
 impl TaskKind {
@@ -380,7 +376,6 @@ impl TaskKind {
             TaskKind::Template => "template",
             TaskKind::Backup => "backup",
             TaskKind::DeleteBackup => "delete-backup",
-            TaskKind::Restore => "restore",
         }
     }
 
@@ -411,10 +406,6 @@ impl TaskKind {
             // not assumed).
             TaskKind::Backup => "vzdump",
             TaskKind::DeleteBackup => "imgdel",
-            // `PVE::API2::Qemu`'s restore branch of `POST …/qemu` forks
-            // `qmrestore` (read from a live PVE 9.2.2 task log,
-            // `docs/proxmox/trace-9.2.2.routes`, not assumed).
-            TaskKind::Restore => "qmrestore",
         }
     }
 }
@@ -734,51 +725,6 @@ impl Client {
             vmid,
             TaskKind::Create,
             || self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true),
-            Some(&|| self.vm_exists(vmid)),
-        )
-    }
-
-    /// Restores a backup archive into a fresh VM — Proxmox's `qmrestore`,
-    /// the same route [`Client::create_vm`] calls (`POST …/qemu`), asked a
-    /// different question: `archive=<volid>` in place of the disk
-    /// parameters. The node reads ostype, disks and every other setting
-    /// back out of the archive's own saved config — nothing about the
-    /// original VM is passed here beyond the archive itself.
-    ///
-    /// `vmid` MUST be free — this call never sets `force`. A restore that
-    /// silently overwrote a live VM would be the worst possible way to
-    /// lose one; replacing an existing vmid is the operator's decision to
-    /// make explicitly, never this primitive's to assume on their behalf.
-    ///
-    /// `storage`: the target storage for the restored disk(s), which may
-    /// differ from wherever the original VM's disk lived.
-    ///
-    /// The effect probe is [`Self::vm_exists`] — the same one `create_vm`
-    /// uses, because a restore that lands is indistinguishable from a
-    /// create that lands: both answer with a VM the node now has.
-    pub fn restore_vm(
-        &self,
-        ledger: &Ledger,
-        vmid: u32,
-        archive: &str,
-        storage: &str,
-    ) -> Result<()> {
-        let vmid_s = vmid.to_string();
-        self.task(
-            ledger,
-            vmid,
-            TaskKind::Restore,
-            || {
-                self.post_form(
-                    &format!("/nodes/{}/qemu", self.node),
-                    &[
-                        ("vmid", vmid_s.as_str()),
-                        ("archive", archive),
-                        ("storage", storage),
-                    ],
-                    true,
-                )
-            },
             Some(&|| self.vm_exists(vmid)),
         )
     }
@@ -2648,7 +2594,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmSnapshotPersistent => S::Partial { detail: "snapshots live on the node; the live case lists `live1` back from the node right after taking it, but deletes it BEFORE the stop, so nothing asserts a snapshot is still there after a stop/start" },
         C::VmBackupDisk => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_backup_lands_on_the_storage_and_comes_off_it" },
         C::VmBackupQuiesced => S::NotImplemented,
-        C::VmBackupRestore => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_deleted_vm_comes_back_from_its_own_backup" },
+        C::VmBackupRestore => S::NotImplemented,
         C::VmMigrationCold => S::NotImplemented,
         C::VmMigrationLive => S::RequiresExternalComponent { component: "a Proxmox cluster with shared storage; the engine addresses ONE node (ADR-0008) and never picks the target" },
         C::VmReplication => S::RequiresExternalComponent { component: "cluster replication jobs (ADR-0049 D3: excluded as administration)" },
