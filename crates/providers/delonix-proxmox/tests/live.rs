@@ -629,6 +629,58 @@ fn o_ip_vem_do_agente_de_um_convidado_a_serio() {
     assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "não é IPv4: {ip}");
 }
 
+/// `agent_ping` against a guest that has none — the ordinary case, and the
+/// one every throwaway VM in this suite already is (no OS, so no agent can
+/// possibly answer). Proven against a REAL node and not only the TLS mock:
+/// `Ok(false)`, never an `Err`, matching the same "no agent is not a
+/// failure" rule `ip()` already established for this backend.
+#[test]
+fn agent_ping_answers_false_without_an_agent() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let name = format!("dlxping{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b
+        .boot(vmdir, &cfg, &cfg.disk, &|_: CreateStage| {})
+        .expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name,
+        cfg.disk.clone(),
+        cfg.disk,
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+
+    assert!(
+        !b.client()
+            .agent_ping(vmid)
+            .expect("agent_ping must not error"),
+        "a guest with no agent must yield Ok(false), never an Err"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+}
+
 /// `agent_ping`/`agent_exec`/`agent_exec_status` against the SAME prepared
 /// guest the sibling case just above needs (`DELONIX_PROXMOX_TEST_AGENT_VMID`)
 /// — the one VM in this suite already known to run a real `qemu-guest-agent`.
