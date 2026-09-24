@@ -377,6 +377,19 @@ enum TaskKind {
     /// through [`Client::task_or_done`] and this worker type may never
     /// actually be seen.
     Unlink,
+    /// `PUT …/firewall/options` — turns the VM's own (node-side) firewall on
+    /// or off. Not this crate's own SDN firewall (`delonix-sdn`, `net
+    /// ingress`/`net egress`) — this is Proxmox's NATIVE per-VM firewall,
+    /// enforced by the node's `pve-firewall` daemon from rules it stores in
+    /// `/etc/pve/firewall/<vmid>.fw`. See [`Client::set_firewall_enabled`].
+    FirewallOptions,
+    /// `POST …/firewall/rules` — appends a rule to the node's own firewall.
+    AddFirewallRule,
+    /// `PUT …/firewall/rules/{pos}` — changes one field or more of an
+    /// existing rule, addressed by its position.
+    UpdateFirewallRule,
+    /// `DELETE …/firewall/rules/{pos}`.
+    DeleteFirewallRule,
 }
 
 impl TaskKind {
@@ -398,6 +411,10 @@ impl TaskKind {
             TaskKind::Restore => "restore",
             TaskKind::MoveDisk => "move-disk",
             TaskKind::Unlink => "unlink",
+            TaskKind::FirewallOptions => "firewall-options",
+            TaskKind::AddFirewallRule => "firewall-add-rule",
+            TaskKind::UpdateFirewallRule => "firewall-update-rule",
+            TaskKind::DeleteFirewallRule => "firewall-delete-rule",
         }
     }
 
@@ -406,6 +423,22 @@ impl TaskKind {
     /// `qmstop`, `qmsnapshot` and `qmdestroy` are the names ADR-0008's spike
     /// saw in a live node's task log; `qmclone` and `qmrollback` follow the
     /// same naming and are exercised by the mock node, not yet by a real one.
+    ///
+    /// **The four firewall names below are an UNCONFIRMED GUESS, likely never
+    /// even exercised.** Nothing in this crate has been run against a real
+    /// node since they were added — no live suite has reached them yet. Every
+    /// firewall write here goes through [`Client::task_or_done`] on the
+    /// EXPECTATION, not a measurement, that `pve-firewall` applies a
+    /// rule/option change inline (a `null` answer) rather than forking a
+    /// worker — it picks up `/etc/pve/firewall/<vmid>.fw` on its own
+    /// schedule, which is a different shape from `PVE::API2::Qemu`'s other
+    /// config writes. `recover_lost_answer` only ever consults this name
+    /// after a transport failure on a firewall write, so a wrong guess here
+    /// costs a lost-answer recovery that falls through to its probe instead
+    /// of finding a real task — never a wrong answer on the ordinary path.
+    /// Correct the name from what `GET /nodes/{node}/tasks` actually shows,
+    /// the first time a real node is measured forking a worker for one of
+    /// these.
     fn worker_type(self) -> &'static str {
         match self {
             TaskKind::Create => "qmcreate",
@@ -440,6 +473,14 @@ impl TaskKind {
             // `returns: null` was right) — `qmdelete` is a guess that may be
             // permanently dead code, kept only so the match stays exhaustive.
             TaskKind::Unlink => "qmdelete",
+            // NEVER OBSERVED on a live node, and that is the confirmed fact: a live
+            // run of all four against PVE 9.2.2 forked no task for any of them
+            // (every firewall write applied inline) — `pvefw` is a guess that may
+            // be permanently dead code, kept only so the match stays exhaustive.
+            TaskKind::FirewallOptions
+            | TaskKind::AddFirewallRule
+            | TaskKind::UpdateFirewallRule
+            | TaskKind::DeleteFirewallRule => "pvefw",
         }
     }
 }
@@ -1526,6 +1567,222 @@ impl Client {
         )
     }
 
+    // =======================================================================
+    // The node's own (native) per-VM firewall — NOT this crate's SDN firewall
+    // =======================================================================
+    //
+    // This engine already has its own firewall, for its OWN containers and
+    // VMs: `delonix-sdn`, nftables-based, `net ingress`/`net egress`. What
+    // follows is a DIFFERENT thing entirely — Proxmox VE's own, NATIVE
+    // per-VM firewall, enforced by the node's own `pve-firewall` daemon from
+    // rules the node stores in `/etc/pve/firewall/<vmid>.fw`. It only applies
+    // to a VM running ON a Proxmox node, through this backend, and has no
+    // relationship whatsoever to this engine's SDN firewall — the two never
+    // see each other's rules, and turning one on or off does nothing to the
+    // other. Every doc comment below says "the node's own firewall" for
+    // exactly this reason: plain "firewall" in this crate is ambiguous.
+
+    /// The VM's own-firewall OPTION set, as the node has it — an object whose
+    /// most important field is `enable` (`0`/`1`, or absent).
+    ///
+    /// **The node's own firewall does NOTHING at all unless `enable` is `1`
+    /// here — even with rules already added.** This is the single most likely
+    /// way this API surface confuses somebody: rules go in with
+    /// [`Self::add_firewall_rule`], nothing about the VM changes, and the
+    /// reason is always the same — the firewall itself was never turned on.
+    /// See [`Self::set_firewall_enabled`].
+    ///
+    /// A raw value and not a typed struct: the option set is a handful of
+    /// scalars (`enable`, `dhcp`, `ndp`, `radv`, `ipfilter`, `log_level_in`,
+    /// …) that nothing here composes into a decision — [`Self::config`] and
+    /// [`Self::boot_disk`] draw the same line for the same reason.
+    pub fn firewall_options(&self, vmid: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/options",
+            self.node
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "firewall options")?;
+        Ok(w.data)
+    }
+
+    /// Turns the VM's own firewall on or off (`PUT …/firewall/options`,
+    /// `enable=0|1`) — the switch [`Self::firewall_options`]'s doc comment
+    /// warns about. Rules survive being turned off; they simply stop being
+    /// enforced until this is `true` again.
+    pub fn set_firewall_enabled(&self, ledger: &Ledger, vmid: u32, enabled: bool) -> Result<()> {
+        let value = if enabled { "1" } else { "0" };
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::FirewallOptions,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/options", self.node),
+                    &[("enable", value)],
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .firewall_options(vmid)?
+                    .get("enable")
+                    .and_then(|v| v.as_u64())
+                    == Some(u64::from(enabled)))
+            }),
+        )
+    }
+
+    /// The VM's own-firewall rules, in the node's own order (`pos` is the
+    /// rule's position, and the only handle [`Self::firewall_rule`],
+    /// [`Self::update_firewall_rule`] and [`Self::delete_firewall_rule`]
+    /// address one by — never a name).
+    pub fn firewall_rules(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/firewall/rules", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall rules")?;
+        Ok(w.data)
+    }
+
+    /// One rule of the VM's own firewall, at position `pos`.
+    pub fn firewall_rule(&self, vmid: u32, pos: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/rules/{pos}",
+            self.node
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "firewall rule")?;
+        Ok(w.data)
+    }
+
+    /// Appends a rule to the VM's own firewall (`POST …/firewall/rules`).
+    ///
+    /// `rule_type` (`in`/`out`) and `action` are required by the node and
+    /// validated BEFORE anything reaches the wire — `action` accepts only the
+    /// three plain verdicts (`ACCEPT`/`DROP`/`REJECT`); a firewall GROUP's
+    /// name (`+groupname`) is a different kind of value this backend has no
+    /// validation for and does not accept.
+    ///
+    /// **`enable` is always sent explicitly, defaulting to `true`** — never
+    /// left to the node's own default. A rule created accidentally disabled
+    /// would still show up in [`Self::firewall_rules`] looking present while
+    /// doing nothing, which is exactly the silently-half-honoured shape this
+    /// crate's doctrine treats as its worst failure (see `refuse_unsupported`
+    /// for the same posture applied to `VmConfig`).
+    ///
+    /// No probe: a rule appended by position has nothing a read can reliably
+    /// tell apart from "not appended" without racing whatever else is adding
+    /// rules to the same VM at the same time — the same reasoning
+    /// [`Self::rollback`] gives for having none. A lost answer with no
+    /// firewall task in flight on the node is therefore an error, not a
+    /// second guess.
+    pub fn add_firewall_rule(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        rule_type: &str,
+        action: &str,
+        opts: &FirewallRuleOpts,
+    ) -> Result<()> {
+        validate_firewall_direction(rule_type)?;
+        validate_firewall_action(action)?;
+        let enable = if opts.enable.unwrap_or(true) {
+            "1"
+        } else {
+            "0"
+        };
+        let mut form: Vec<(&str, String)> = vec![
+            ("type", rule_type.to_string()),
+            ("action", action.to_string()),
+            ("enable", enable.to_string()),
+        ];
+        form.extend(firewall_rule_common_fields(opts));
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::AddFirewallRule,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/rules", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Changes one field or more of a rule already at position `pos`
+    /// (`PUT …/firewall/rules/{pos}`) — only the fields given in `opts` are
+    /// sent, and `None` means "leave it as the node already has it", not
+    /// "clear it". Unlike [`Self::add_firewall_rule`], `type`/`action` are
+    /// optional here too (`opts.rule_type`/`opts.action`): an update may
+    /// change either, neither, or both.
+    ///
+    /// **No `digest` (optimistic-concurrency) parameter is sent.** The node
+    /// accepts a config's current digest to refuse an update that raced
+    /// another writer; this client does not read or carry one, so two
+    /// concurrent updates to the same rule can still overwrite each other.
+    /// Not implemented, not silently worked around.
+    ///
+    /// No probe, for the same reason [`Self::add_firewall_rule`] has none: an
+    /// arbitrary set of changed fields has no single read this could compare
+    /// against without assuming which ones were asked for.
+    pub fn update_firewall_rule(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        pos: u32,
+        opts: &FirewallRuleOpts,
+    ) -> Result<()> {
+        if let Some(t) = opts.rule_type {
+            validate_firewall_direction(t)?;
+        }
+        if let Some(a) = opts.action {
+            validate_firewall_action(a)?;
+        }
+        let mut form = firewall_rule_common_fields(opts);
+        if let Some(t) = opts.rule_type {
+            form.push(("type", t.to_string()));
+        }
+        if let Some(a) = opts.action {
+            form.push(("action", a.to_string()));
+        }
+        if let Some(enabled) = opts.enable {
+            form.push(("enable", if enabled { "1" } else { "0" }.to_string()));
+        }
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::UpdateFirewallRule,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/rules/{pos}", self.node),
+                    &form,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Removes a rule of the VM's own firewall at position `pos`
+    /// (`DELETE …/firewall/rules/{pos}`). The probe is the node's own list, as
+    /// on [`Self::delete_snapshot`]: no entry left at that position, never
+    /// taken from what the call said.
+    pub fn delete_firewall_rule(&self, ledger: &Ledger, vmid: u32, pos: u32) -> Result<()> {
+        let path = format!("/nodes/{}/qemu/{vmid}/firewall/rules/{pos}", self.node);
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::DeleteFirewallRule,
+            || self.delete(&path),
+            Some(&|| {
+                Ok(!self
+                    .firewall_rules(vmid)?
+                    .iter()
+                    .any(|r| r.get("pos").and_then(|p| p.as_u64()) == Some(u64::from(pos))))
+            }),
+        )
+    }
+
     /// Issues a task-creating request and waits for the task — **again, while
     /// the node answers that the VM's config lock is busy**.
     ///
@@ -1569,9 +1826,14 @@ impl Client {
     }
 
     /// [`Self::task`] for a route the node may answer WITHOUT a task: a
-    /// `null` is taken as "applied inline", a UPID is waited on. Only
-    /// `POST …/config` behaves like that; every other write answers a UPID or
-    /// it is an unexpected answer.
+    /// `null` is taken as "applied inline", a UPID is waited on. `POST
+    /// …/config` is measured behaving like that; every node's-own-firewall
+    /// write (`set_firewall_enabled`/`add_firewall_rule`/
+    /// `update_firewall_rule`/`delete_firewall_rule`) goes through this same
+    /// path too, on the expectation — NOT yet measured against a real node,
+    /// see [`TaskKind::worker_type`]'s doc comment — that `pve-firewall`
+    /// applies a rule/option change inline rather than forking a worker.
+    /// Every other write answers a UPID or it is an unexpected answer.
     fn task_or_done(
         &self,
         ledger: &Ledger,
@@ -2304,6 +2566,96 @@ fn validate_snapshot_name(name: &str) -> Result<()> {
         Err(Error::InvalidSnapshotName(format!(
             "invalid Proxmox snapshot name '{name}': expected letters, digits, '-' and '_' \
              (and not 'current', which the API uses for the live state)"
+        )))
+    }
+}
+
+/// The optional fields of a rule of the VM's own (node-side) firewall —
+/// [`Client::add_firewall_rule`] and [`Client::update_firewall_rule`] — as the
+/// node names them on the wire.
+///
+/// **`enable` behaves differently in the two callers, and each names it where
+/// it is used**: `add_firewall_rule` sends it explicitly, defaulting to
+/// enabled when `None`, because a rule that LOOKS present in
+/// [`Client::firewall_rules`] but was silently created disabled is exactly
+/// the trap this crate's doctrine warns against; `update_firewall_rule` sends
+/// it only when `Some`, because there `None` means "leave it as the node
+/// already has it", not "disable it".
+///
+/// **`rule_type`/`action` are read by `update_firewall_rule` only.**
+/// `add_firewall_rule` takes the direction and the verdict as its own
+/// required parameters instead (the node requires both on create, and
+/// refusing an unsupported `action` needs to happen before anything reaches
+/// the wire); on an update, unlike a create, either may be left unchanged, so
+/// they belong here as optional fields like everything else.
+#[derive(Debug, Clone, Default)]
+pub struct FirewallRuleOpts<'a> {
+    pub enable: Option<bool>,
+    pub comment: Option<&'a str>,
+    pub source: Option<&'a str>,
+    pub dest: Option<&'a str>,
+    pub proto: Option<&'a str>,
+    pub dport: Option<&'a str>,
+    pub sport: Option<&'a str>,
+    pub iface: Option<&'a str>,
+    /// A named service macro (`ssh`, `http`, …) — the node's `macro`
+    /// property. Renamed here because `macro` is a Rust keyword.
+    pub macro_name: Option<&'a str>,
+    /// Only read by [`Client::update_firewall_rule`] — see the struct's doc
+    /// comment for why `add_firewall_rule` does not read it from here.
+    pub rule_type: Option<&'a str>,
+    /// Only read by [`Client::update_firewall_rule`], for the same reason.
+    pub action: Option<&'a str>,
+}
+
+/// The fields of [`FirewallRuleOpts`] that both `add_firewall_rule` and
+/// `update_firewall_rule` forward verbatim — everything except `enable`,
+/// `rule_type` and `action`, which each caller handles on its own (see the
+/// struct's doc comment). Pure, so "each key at most once" is a test.
+fn firewall_rule_common_fields(opts: &FirewallRuleOpts) -> Vec<(&'static str, String)> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let mut push = |key: &'static str, val: Option<&str>| {
+        if let Some(v) = val {
+            out.push((key, v.to_string()));
+        }
+    };
+    push("comment", opts.comment);
+    push("source", opts.source);
+    push("dest", opts.dest);
+    push("proto", opts.proto);
+    push("dport", opts.dport);
+    push("sport", opts.sport);
+    push("iface", opts.iface);
+    push("macro", opts.macro_name);
+    out
+}
+
+/// The only three plain verdicts a rule of the node's own firewall can carry
+/// through this client — never a firewall GROUP's name (`+groupname`), which
+/// chains to a set of rules kept elsewhere on the node and would need
+/// validation of its own this backend does not have. Refused by value,
+/// before anything reaches the wire, the same posture every other input this
+/// crate cannot follow through blindly is held to (`refuse_unsupported`,
+/// `validate_snapshot_name`, `parse_disk_spec`).
+fn validate_firewall_action(action: &str) -> Result<()> {
+    if matches!(action, "ACCEPT" | "DROP" | "REJECT") {
+        Ok(())
+    } else {
+        Err(Error::InvalidFirewallRule(format!(
+            "invalid Proxmox firewall rule action '{action}': expected ACCEPT, DROP or REJECT \
+             (a firewall group's name is not accepted here)"
+        )))
+    }
+}
+
+/// `in`/`out` are the only two directions a rule of the node's own firewall
+/// can take.
+fn validate_firewall_direction(rule_type: &str) -> Result<()> {
+    if matches!(rule_type, "in" | "out") {
+        Ok(())
+    } else {
+        Err(Error::InvalidFirewallRule(format!(
+            "invalid Proxmox firewall rule type '{rule_type}': expected 'in' or 'out'"
         )))
     }
 }
@@ -3991,6 +4343,89 @@ mod tests {
             assert!(validate_snapshot_name(bad).is_err(), "{bad:?}");
         }
         assert!(validate_snapshot_name("antes-do-upgrade_1").is_ok());
+    }
+
+    /// Only the three plain verdicts go through — never a firewall group's
+    /// name, which this client has no validation for at all.
+    #[test]
+    fn only_the_three_plain_verdicts_are_accepted_as_action() {
+        for ok in ["ACCEPT", "DROP", "REJECT"] {
+            assert!(validate_firewall_action(ok).is_ok(), "{ok:?}");
+        }
+        for bad in ["accept", "Drop", "+mygroup", "", "ALLOW"] {
+            let e = validate_firewall_action(bad).unwrap_err().to_string();
+            assert!(e.contains(bad), "the refusal must name the value: {e}");
+        }
+    }
+
+    #[test]
+    fn only_in_and_out_are_accepted_as_type() {
+        for ok in ["in", "out"] {
+            assert!(validate_firewall_direction(ok).is_ok(), "{ok:?}");
+        }
+        for bad in ["IN", "both", "", "forward"] {
+            let e = validate_firewall_direction(bad).unwrap_err().to_string();
+            assert!(e.contains(bad), "the refusal must name the value: {e}");
+        }
+    }
+
+    /// Each optional field lands under the node's own name exactly once, and
+    /// an all-`None` set sends nothing at all — the shape `create_form`'s own
+    /// sibling test already holds `cloud_init_form` to.
+    #[test]
+    fn each_optional_field_of_the_rule_lands_once_under_the_nodes_own_name() {
+        assert_eq!(
+            firewall_rule_common_fields(&FirewallRuleOpts::default()),
+            []
+        );
+
+        let opts = FirewallRuleOpts {
+            comment: Some("web"),
+            source: Some("10.0.0.0/8"),
+            dest: Some("192.168.1.5"),
+            proto: Some("tcp"),
+            dport: Some("443"),
+            sport: Some("1024:65535"),
+            iface: Some("net0"),
+            macro_name: Some("ssh"),
+            // Read only by `update_firewall_rule`, never by this helper.
+            enable: Some(true),
+            rule_type: Some("in"),
+            action: Some("ACCEPT"),
+        };
+        let fields = firewall_rule_common_fields(&opts);
+        for (key, want) in [
+            ("comment", "web"),
+            ("source", "10.0.0.0/8"),
+            ("dest", "192.168.1.5"),
+            ("proto", "tcp"),
+            ("dport", "443"),
+            ("sport", "1024:65535"),
+            ("iface", "net0"),
+            ("macro", "ssh"),
+        ] {
+            assert_eq!(
+                fields.iter().filter(|(k, _)| *k == key).count(),
+                1,
+                "{key} must appear exactly once: {fields:?}"
+            );
+            assert_eq!(
+                fields
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| v.as_str()),
+                Some(want)
+            );
+        }
+        // `enable`/`type`/`action` are NOT emitted by this helper — each
+        // caller of `add_firewall_rule`/`update_firewall_rule` handles them
+        // on its own, per the struct's doc comment.
+        for absent in ["enable", "type", "action"] {
+            assert!(
+                !fields.iter().any(|(k, _)| *k == absent),
+                "{absent} must not come from this helper: {fields:?}"
+            );
+        }
     }
 
     /// A 401 has to be told apart from every other failure, because only that

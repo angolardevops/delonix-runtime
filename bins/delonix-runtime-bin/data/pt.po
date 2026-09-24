@@ -13617,6 +13617,16 @@ msgstr "Uma entrada de `required_capabilities` (`vm create --require`, `spec.req
 msgid "Use a name from `delonix provider ls` (the catalog version is in its header)."
 msgstr "Usa um nome de `delonix provider ls` (a versão do catálogo está no cabeçalho)."
 
+# DX-1528 — the node's own (NOT this engine's SDN) per-VM firewall
+msgid "invalid Proxmox firewall rule"
+msgstr "regra de firewall do Proxmox inválida"
+
+msgid "A rule of the node's OWN firewall (not this engine's SDN firewall) named a `type` other than 'in'/'out', or an `action` other than ACCEPT/DROP/REJECT — a firewall group's name is a different kind of value this client does not validate and does not accept."
+msgstr "Uma regra da firewall PRÓPRIA do nó (não a firewall SDN deste motor) nomeou um `type` diferente de 'in'/'out', ou uma `action` diferente de ACCEPT/DROP/REJECT — o nome de um grupo de firewall é outro tipo de valor que este cliente não valida nem aceita."
+
+msgid "Use 'in' or 'out' for the type, and ACCEPT, DROP or REJECT for the action."
+msgstr "Usa 'in' ou 'out' para o type, e ACCEPT, DROP ou REJECT para a action."
+
 # DX-1529
 msgid "invalid Proxmox cloud-init dump type"
 msgstr "tipo de dump de cloud-init Proxmox inválido"
