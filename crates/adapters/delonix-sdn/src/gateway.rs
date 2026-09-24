@@ -30,31 +30,99 @@
 //! `delonix-opnsense` is built (Phase 2), and moves wherever `VmBackend`
 //! eventually moves, in the same commit shape — see ADR-0051.
 //!
-//! # What is deliberately NOT here yet
+//! # Phase 1 → Phase 2
 //!
-//! This is Phase 1 of ADR-0051: the trait and the registry, with **zero
-//! behavior change** — the only registered provider is [`NATIVE_ID`], and it
-//! does nothing beyond answer [`GatewayProvider::available`]. The
-//! masquerade/forward rules every network already gets are unconditional
-//! today, not something a provider switches on.
-//!
-//! There is no `ensure_rule`/`apply` method yet, and that absence is
-//! deliberate rather than an oversight: designing OPNsense's operational
+//! Phase 1 shipped the trait and the registry with **zero behavior
+//! change** — [`NATIVE_ID`] was the only registered provider, and it did
+//! nothing beyond answer [`GatewayProvider::available`]. It deliberately
+//! had no `ensure_rule`/`apply` method: designing OPNsense's operational
 //! shape before the live spike against a real appliance (ADR-0051, Phase 0)
-//! risks exactly the trap `delonix-proxmox`'s own module doc names for
-//! Proxmox tasks — treating a guess as a measurement. Phase 2 extends this
-//! trait once that spike answers what an "ensure this policy" call actually
-//! needs to carry.
+//! would have risked exactly the trap `delonix-proxmox`'s own module doc
+//! names for Proxmox tasks — treating a guess as a measurement.
+//!
+//! Phase 0 happened (2026-09-24, against a real OPNsense 26.1.2 appliance)
+//! and measured the write path, `apply()`'s semantics and the error shapes.
+//! This is Phase 2: [`GatewayProvider`] grows the operations Phase 0 makes
+//! safe to design — [`ensure_alias`](GatewayProvider::ensure_alias),
+//! [`ensure_rule`](GatewayProvider::ensure_rule) and
+//! [`commit`](GatewayProvider::commit) — with default implementations that
+//! REFUSE (never silently ignore, per this repo's own no-silent-failure
+//! rule). [`NativeGatewayProvider`] overrides none of them: it has no alias
+//! or rule concept to offer, and its masquerade/forward dataplane is
+//! unconditional, so [`GatewayProvider::commit`]'s default (a no-op `Ok`)
+//! is honest for it, while the other four default to a clear "not
+//! supported by this provider" instead of pretending to do nothing useful.
+//! `crates/providers/delonix-opnsense` (also Phase 2) is the first provider
+//! that overrides all five for real, against what Phase 0 measured.
 
 use crate::error::{Error, Result};
 
 /// The canonical id of the always-registered native provider.
 pub const NATIVE_ID: &str = "native";
 
+/// What kind of value [`GatewayAlias::content`] holds. Only the two shapes
+/// a v1 client needs (ADR-0051 Phase 0 measured `add_item`'s flat form for
+/// `type: "host"`; `network` follows the same shape by the same source —
+/// `port`/`url`/`geoip`/… are real OPNsense alias types this v1 does not
+/// need and is not claiming to support).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AliasKind {
+    /// One or more IPs/hostnames.
+    Host,
+    /// One or more CIDRs.
+    Network,
+}
+
+/// An address alias to ensure exists on a gateway provider, identified by
+/// NAME — the appliance's own identity for one (ADR-0051 Phase 0: `alias/
+/// get`/`get_item` key every alias by `name` at the top level).
+#[derive(Debug, Clone)]
+pub struct GatewayAlias {
+    pub name: String,
+    pub kind: AliasKind,
+    /// One entry per host/network in `content` (OPNsense accepts them
+    /// newline-joined; this type keeps them separate so a caller never has
+    /// to know that).
+    pub content: Vec<String>,
+    pub description: String,
+}
+
+/// A perimeter filter rule to ensure exists, identified by its
+/// DESCRIPTION — the appliance has no other stable name for a rule, and
+/// this is the identity the OPNsense docs' own worked example uses to
+/// find-or-create one (`search_rule` by `description`, then `add_rule` if
+/// absent).
+#[derive(Debug, Clone)]
+pub struct GatewayRule {
+    pub description: String,
+    /// An alias name, a bare CIDR, or `"any"` — resolved by the appliance,
+    /// not this type (ADR-0051 Phase 0: `search_rule` denormalizes an
+    /// alias's current content into `alias_meta_source_net` on read, so a
+    /// caller reading state back never needs a second lookup either).
+    pub source: String,
+    pub destination: String,
+    /// `None` = any protocol. `Some("TCP")`/`Some("UDP")`/… otherwise —
+    /// measured live as the exact string the docs' worked example sends,
+    /// never validated client-side against the full protocol list.
+    pub protocol: Option<String>,
+}
+
+/// Whether an `ensure_*` call created something or found it already there.
+/// Never "updated": Phase 2 does not implement update-in-place (`set_item`/
+/// `set_rule`'s exact request shape — the verbose form `get` returns, or
+/// the flat form `add_item` accepts — was not part of the ADR-0051 Phase 0
+/// spike, and guessing it risks the same trap the rest of this module
+/// exists to avoid). An `ensure_*` call against a name/description that
+/// already exists with DIFFERENT content returns `AlreadyPresent` without
+/// touching it — a caller that needs to change an existing alias/rule
+/// removes and re-creates it today.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnsureOutcome {
+    Created,
+    AlreadyPresent,
+}
+
 /// A backend that can enforce node-egress / perimeter gateway policy.
-///
-/// Intentionally minimal for Phase 1 (ADR-0051) — see the module doc for why
-/// the operational methods are not here yet.
 pub trait GatewayProvider {
     /// Stable identifier, persisted wherever a policy would eventually name
     /// its provider. Must equal the `id` the registration that built this
@@ -65,9 +133,66 @@ pub trait GatewayProvider {
     ///
     /// Never a network round trip — the same contract
     /// [`delonix_vm::VmBackend::available`] documents for the same reason:
-    /// a remote backend (OPNsense, Phase 2) answers this from what its
-    /// registration already knows, not by connecting to the appliance.
+    /// a remote backend (OPNsense) answers this from what its registration
+    /// already knows, not by connecting to the appliance.
     fn available(&self) -> bool;
+
+    /// Ensures an address alias exists, by name. Default: refuses — a
+    /// provider with no alias concept (the native one) has nothing honest
+    /// to do here.
+    fn ensure_alias(&self, alias: &GatewayAlias) -> delonix_model::Result<EnsureOutcome> {
+        let _ = alias;
+        Err(unsupported(self.id(), "ensure_alias"))
+    }
+
+    /// Removes an alias by name. Default: refuses, same reasoning as
+    /// [`ensure_alias`](Self::ensure_alias).
+    fn remove_alias(&self, name: &str) -> delonix_model::Result<()> {
+        let _ = name;
+        Err(unsupported(self.id(), "remove_alias"))
+    }
+
+    /// Ensures a perimeter filter rule exists, by description. Default:
+    /// refuses, same reasoning as [`ensure_alias`](Self::ensure_alias).
+    fn ensure_rule(&self, rule: &GatewayRule) -> delonix_model::Result<EnsureOutcome> {
+        let _ = rule;
+        Err(unsupported(self.id(), "ensure_rule"))
+    }
+
+    /// Removes a rule by description. Default: refuses, same reasoning as
+    /// [`ensure_alias`](Self::ensure_alias).
+    fn remove_rule(&self, description: &str) -> delonix_model::Result<()> {
+        let _ = description;
+        Err(unsupported(self.id(), "remove_rule"))
+    }
+
+    /// Activates whatever [`ensure_alias`](Self::ensure_alias)/
+    /// [`ensure_rule`](Self::ensure_rule)/removal staged.
+    ///
+    /// Default: `Ok(())` — a provider with no alias/rule concept has
+    /// nothing staged, ever, so there is nothing dishonest about this one
+    /// default being a no-op instead of a refusal (unlike the other four).
+    /// OPNsense's own `commit` is synchronous (ADR-0051 Phase 0, measured:
+    /// `firewall/filter/apply` returns in under a second with the reload's
+    /// own stdout, never a task id to poll) — a provider that DOES have
+    /// something to stage is expected to make this call itself, in this
+    /// method, not return early and leave the caller polling.
+    fn commit(&self) -> delonix_model::Result<()> {
+        Ok(())
+    }
+}
+
+/// Fail-closed error for a provider that does not implement an operation —
+/// every default method above returns this. Mirrors
+/// `delonix_vm::unsupported_pause`/`unsupported_snapshot` exactly, down to
+/// returning the SHARED type directly rather than this crate's own
+/// `Result`: the trait's methods live on `delonix_model::Result`, the same
+/// reason `VmBackend`'s do.
+fn unsupported(provider: &str, op: &str) -> delonix_model::Error {
+    Error::UnsupportedByGatewayProvider(format!(
+        "{op} is not supported by the '{provider}' gateway provider"
+    ))
+    .into()
 }
 
 /// The native provider: the masquerade/forward dataplane every network
@@ -256,5 +381,51 @@ mod tests {
     #[test]
     fn gateway_provider_for_returns_none_for_an_unknown_name() {
         assert!(gateway_provider_for("this-does-not-exist-at-all").is_none());
+    }
+
+    fn sample_alias() -> GatewayAlias {
+        GatewayAlias {
+            name: "example".into(),
+            kind: AliasKind::Host,
+            content: vec!["10.0.0.1".into()],
+            description: "test".into(),
+        }
+    }
+
+    fn sample_rule() -> GatewayRule {
+        GatewayRule {
+            description: "test".into(),
+            source: "example".into(),
+            destination: "10.0.0.0/24".into(),
+            protocol: Some("TCP".into()),
+        }
+    }
+
+    #[test]
+    fn native_refuses_alias_and_rule_operations() {
+        let native = gateway_provider_for(NATIVE_ID)
+            .expect("native must resolve")
+            .expect("native never fails to build");
+        let err = native.ensure_alias(&sample_alias()).unwrap_err();
+        assert!(err.to_string().contains("ensure_alias"));
+        assert!(err.to_string().contains(NATIVE_ID));
+        assert!(native.remove_alias("example").is_err());
+        assert!(native.ensure_rule(&sample_rule()).is_err());
+        assert!(native.remove_rule("test").is_err());
+    }
+
+    #[test]
+    fn native_commit_is_a_no_op_not_a_refusal() {
+        let native = gateway_provider_for(NATIVE_ID)
+            .expect("native must resolve")
+            .expect("native never fails to build");
+        native.commit().expect("nothing staged is not an error");
+    }
+
+    #[test]
+    fn unsupported_names_the_provider_and_the_operation() {
+        let e = super::unsupported("acme", "ensure_rule").to_string();
+        assert!(e.contains("ensure_rule"));
+        assert!(e.contains("acme"));
     }
 }
