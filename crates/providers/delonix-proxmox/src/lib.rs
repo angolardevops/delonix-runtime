@@ -42,6 +42,7 @@
 //!   make HTTP requests.
 
 mod error;
+mod sdn;
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
@@ -90,6 +91,13 @@ const POLL_MAX: Duration = Duration::from_secs(4);
 fn next_poll_wait(cur: Duration) -> Duration {
     std::cmp::min(cur.mul_f32(1.5), POLL_MAX)
 }
+
+/// Poll interval for [`Client::agent_exec_wait`]. Fixed and short, unlike
+/// [`POLL_MIN`]/[`POLL_MAX`]'s backoff: a guest-agent exec is not a node
+/// task that can run for minutes, it is a process inside the guest that is
+/// typically done in well under a second, and this reads no shared ledger —
+/// there is nothing here for a backoff to protect against.
+const AGENT_EXEC_POLL: Duration = Duration::from_millis(200);
 
 /// How the client authenticates against the node.
 ///
@@ -358,6 +366,48 @@ enum TaskKind {
     /// `DELETE …/storage/{storage}/content/{volume}` — removes one backup
     /// archive.
     DeleteBackup,
+    /// `POST …/qemu` with `archive=<volid>` instead of the disk parameters —
+    /// Proxmox's `qmrestore`, the same route [`Client::create_vm`] calls,
+    /// asked a different question.
+    Restore,
+    /// `POST …/move_disk` — moves one disk to a different storage, or
+    /// re-formats it in place.
+    MoveDisk,
+    /// `PUT …/unlink` — detaches (and by default destroys) one or more disks.
+    /// The schema declares `returns: null`, so [`Client::unlink`] goes
+    /// through [`Client::task_or_done`] and this worker type may never
+    /// actually be seen.
+    Unlink,
+    /// `PUT …/firewall/options` — turns the VM's own (node-side) firewall on
+    /// or off. Not this crate's own SDN firewall (`delonix-sdn`, `net
+    /// ingress`/`net egress`) — this is Proxmox's NATIVE per-VM firewall,
+    /// enforced by the node's `pve-firewall` daemon from rules it stores in
+    /// `/etc/pve/firewall/<vmid>.fw`. See [`Client::set_firewall_enabled`].
+    FirewallOptions,
+    /// `POST …/firewall/rules` — appends a rule to the node's own firewall.
+    AddFirewallRule,
+    /// `PUT …/firewall/rules/{pos}` — changes one field or more of an
+    /// existing rule, addressed by its position.
+    UpdateFirewallRule,
+    /// `DELETE …/firewall/rules/{pos}`.
+    DeleteFirewallRule,
+    /// `POST /cluster/sdn/zones` — stages a new SDN zone. Cluster-scoped, not
+    /// VM-scoped (see [`sdn::SDN_VMID`]). Writes to the PENDING configuration
+    /// only; nothing on any node changes until [`Client::apply_sdn`].
+    CreateSdnZone,
+    /// `DELETE /cluster/sdn/zones/{zone}` — same PENDING-only caveat.
+    DeleteSdnZone,
+    /// `POST /cluster/sdn/vnets` — stages a new SDN vnet inside a zone. Same
+    /// PENDING-only caveat.
+    CreateSdnVnet,
+    /// `DELETE /cluster/sdn/vnets/{vnet}` — same PENDING-only caveat.
+    DeleteSdnVnet,
+    /// `PUT /cluster/sdn` (no body) — reloads the PENDING SDN configuration
+    /// onto every node in the cluster. The one SDN call that genuinely forks
+    /// a cluster-wide task; every other SDN write above is very likely
+    /// synchronous (`null`), which is why they all go through
+    /// [`Client::task_or_done`] rather than [`Client::task`] — safe either way.
+    ApplySdn,
 }
 
 impl TaskKind {
@@ -376,6 +426,18 @@ impl TaskKind {
             TaskKind::Template => "template",
             TaskKind::Backup => "backup",
             TaskKind::DeleteBackup => "delete-backup",
+            TaskKind::Restore => "restore",
+            TaskKind::MoveDisk => "move-disk",
+            TaskKind::Unlink => "unlink",
+            TaskKind::FirewallOptions => "firewall-options",
+            TaskKind::AddFirewallRule => "firewall-add-rule",
+            TaskKind::UpdateFirewallRule => "firewall-update-rule",
+            TaskKind::DeleteFirewallRule => "firewall-delete-rule",
+            TaskKind::CreateSdnZone => "create-sdn-zone",
+            TaskKind::DeleteSdnZone => "delete-sdn-zone",
+            TaskKind::CreateSdnVnet => "create-sdn-vnet",
+            TaskKind::DeleteSdnVnet => "delete-sdn-vnet",
+            TaskKind::ApplySdn => "apply-sdn",
         }
     }
 
@@ -384,6 +446,22 @@ impl TaskKind {
     /// `qmstop`, `qmsnapshot` and `qmdestroy` are the names ADR-0008's spike
     /// saw in a live node's task log; `qmclone` and `qmrollback` follow the
     /// same naming and are exercised by the mock node, not yet by a real one.
+    ///
+    /// **The four firewall names below are an UNCONFIRMED GUESS, likely never
+    /// even exercised.** Nothing in this crate has been run against a real
+    /// node since they were added — no live suite has reached them yet. Every
+    /// firewall write here goes through [`Client::task_or_done`] on the
+    /// EXPECTATION, not a measurement, that `pve-firewall` applies a
+    /// rule/option change inline (a `null` answer) rather than forking a
+    /// worker — it picks up `/etc/pve/firewall/<vmid>.fw` on its own
+    /// schedule, which is a different shape from `PVE::API2::Qemu`'s other
+    /// config writes. `recover_lost_answer` only ever consults this name
+    /// after a transport failure on a firewall write, so a wrong guess here
+    /// costs a lost-answer recovery that falls through to its probe instead
+    /// of finding a real task — never a wrong answer on the ordinary path.
+    /// Correct the name from what `GET /nodes/{node}/tasks` actually shows,
+    /// the first time a real node is measured forking a worker for one of
+    /// these.
     fn worker_type(self) -> &'static str {
         match self {
             TaskKind::Create => "qmcreate",
@@ -406,6 +484,39 @@ impl TaskKind {
             // not assumed).
             TaskKind::Backup => "vzdump",
             TaskKind::DeleteBackup => "imgdel",
+            // `PVE::API2::Qemu`'s restore branch of `POST …/qemu` forks
+            // `qmrestore` (read from a live PVE 9.2.2 task log,
+            // `docs/proxmox/trace-9.2.2.routes`, not assumed).
+            TaskKind::Restore => "qmrestore",
+            // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
+            // not assumed — confirms the original `qmclone`/`qmtemplate`-analogy guess.
+            TaskKind::MoveDisk => "qmmove",
+            // NEVER OBSERVED on a live node, and that is the confirmed fact: a live
+            // run of `unlink` against PVE 9.2.2 forked no task at all (the schema's
+            // `returns: null` was right) — `qmdelete` is a guess that may be
+            // permanently dead code, kept only so the match stays exhaustive.
+            TaskKind::Unlink => "qmdelete",
+            // NEVER OBSERVED on a live node, and that is the confirmed fact: a live
+            // run of all four against PVE 9.2.2 forked no task for any of them
+            // (every firewall write applied inline) — `pvefw` is a guess that may
+            // be permanently dead code, kept only so the match stays exhaustive.
+            TaskKind::FirewallOptions
+            | TaskKind::AddFirewallRule
+            | TaskKind::UpdateFirewallRule
+            | TaskKind::DeleteFirewallRule => "pvefw",
+            // NEVER OBSERVED on a live node, and that is the confirmed fact: a
+            // live run against PVE 9.2.2 forked no task for any of the four
+            // (zone/vnet create/delete all apply inline) — these are guesses
+            // that may be permanently dead code, kept only so the match stays
+            // exhaustive.
+            TaskKind::CreateSdnZone => "sdnzonecreate",
+            TaskKind::DeleteSdnZone => "sdnzonedelete",
+            TaskKind::CreateSdnVnet => "sdnvnetcreate",
+            TaskKind::DeleteSdnVnet => "sdnvnetdelete",
+            // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
+            // not assumed: `PUT /cluster/sdn` forks `reloadnetworkall`, not the
+            // `srvreload` this guess was originally written as.
+            TaskKind::ApplySdn => "reloadnetworkall",
         }
     }
 }
@@ -447,6 +558,64 @@ fn task_verdict(status: &str, exitstatus: Option<&str>) -> Option<std::result::R
         // Finished with no exit status recorded: unknown, and unknown is not
         // success. Reporting OK here would be inventing a result.
         None => Some(Err("finished without an exit status".into())),
+    }
+}
+
+/// The outcome of a guest command [`Client::agent_exec`] started, as
+/// [`Client::agent_exec_status`] reads it.
+///
+/// Distinct from [`TaskState`] on purpose: a guest exec is not a node task
+/// (see the doc comment on [`Client::agent_exec`]) and has no ledger entry,
+/// so it does not belong in that enum's `Submitted`/`Ok`/`Failed`/`TimedOut`
+/// vocabulary, which a reader would reasonably take as "this went through
+/// the ledger".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentExecStatus {
+    /// The guest has not reported completion yet.
+    Running,
+    /// The guest process is over.
+    Finished {
+        exit_code: i64,
+        stdout: String,
+        stderr: String,
+        /// Set when a signal killed the process instead of it exiting on
+        /// its own — `exit_code` is then not meaningful.
+        signal: Option<i64>,
+    },
+}
+
+/// The raw shape of `GET …/agent/exec-status`.
+///
+/// `exitcode`/`out-data`/`err-data` are absent, not zero/empty, while the
+/// guest process is still running (`exited == 0`) — `Option`, not a default
+/// that would read as "finished with nothing to say".
+#[derive(Debug, Deserialize)]
+struct AgentExecStatusBody {
+    exited: i64,
+    #[serde(default, rename = "exitcode")]
+    exit_code: Option<i64>,
+    #[serde(default, rename = "out-data")]
+    out_data: Option<String>,
+    #[serde(default, rename = "err-data")]
+    err_data: Option<String>,
+    #[serde(default)]
+    signal: Option<i64>,
+}
+
+/// Turns the raw exec-status shape into the outcome [`Client::agent_exec_status`]
+/// reports. Pure, so the running/finished boundary — `exited == 0` means
+/// running, anything else means the fields below are meaningful — is a fact
+/// a test can check directly, the same discipline [`task_verdict`] applies
+/// to a node task's `status`/`exitstatus`.
+fn agent_exec_status_of(body: AgentExecStatusBody) -> AgentExecStatus {
+    if body.exited == 0 {
+        return AgentExecStatus::Running;
+    }
+    AgentExecStatus::Finished {
+        exit_code: body.exit_code.unwrap_or(0),
+        stdout: body.out_data.unwrap_or_default(),
+        stderr: body.err_data.unwrap_or_default(),
+        signal: body.signal,
     }
 }
 
@@ -685,6 +854,110 @@ impl Client {
             .collect())
     }
 
+    /// Whether the QEMU guest agent answers, for VM `vmid`.
+    ///
+    /// `Ok(false)` — never an [`Err`] — for the node's own "QEMU guest agent
+    /// is not running": that is the ordinary state of any guest that has not
+    /// booted an agent yet (a plain cloud image, or one still coming up), the
+    /// same case [`ProxmoxBackend::ip`]'s doc comment already treats as a
+    /// first-class, non-failure answer — `vm ls` cannot afford a scary line
+    /// for every guest without one. Any OTHER failure (the node unreachable,
+    /// the credential revoked) still propagates: those are "could not ask",
+    /// not "no agent".
+    ///
+    /// **Not a node task** (see `allowed_outside_task` in the test module):
+    /// the agent answers inline, there is no UPID to wait on.
+    pub fn agent_ping(&self, vmid: u32) -> Result<bool> {
+        match self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/agent/ping", self.node),
+            &[],
+            true,
+        ) {
+            Ok(_) => Ok(true),
+            Err(e) if is_agent_not_running(&e) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Runs `argv[0] argv[1] …` inside the guest through the QEMU agent, and
+    /// returns the pid [`Client::agent_exec_status`] polls for the outcome.
+    ///
+    /// **Not a node task.** The work runs inside the GUEST — the agent
+    /// answers with a pid inline, and there is nothing on the node for a
+    /// worker to do (see `allowed_outside_task` in the test module).
+    ///
+    /// `command` is a REPEATED form field, one per argv element: the agent
+    /// takes an argv array, never a shell string, so `["ls", "-la", "/tmp"]`
+    /// sends three separate `command=` pairs. Joining them into one
+    /// `"ls -la /tmp"` string would hand the agent a single argument that
+    /// happens to contain spaces, not three arguments.
+    pub fn agent_exec(&self, vmid: u32, argv: &[&str]) -> Result<u32> {
+        let form: Vec<(&str, &str)> = argv.iter().map(|a| ("command", *a)).collect();
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/agent/exec", self.node),
+            &form,
+            true,
+        )?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "agent exec")?;
+        w.data
+            .get("pid")
+            .and_then(|p| p.as_u64())
+            .map(|p| p as u32)
+            .ok_or_else(|| {
+                Error::UnexpectedAnswer(format!(
+                    "proxmox: agent exec on VM {vmid} did not answer with a pid: {}",
+                    truncate_chars(&body, 200)
+                ))
+            })
+    }
+
+    /// Reads the outcome of a pid [`Client::agent_exec`] started.
+    ///
+    /// `exited` is `0` while the guest process is still running —
+    /// `exitcode`/`out-data`/`err-data` are meaningless (and often absent)
+    /// until it is `1`. Reading them regardless would report a stale or
+    /// zero exit code as the real one.
+    pub fn agent_exec_status(&self, vmid: u32, pid: u32) -> Result<AgentExecStatus> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/agent/exec-status?pid={pid}",
+            self.node
+        ))?;
+        let w: Wrapped<AgentExecStatusBody> = parse(&body, "agent exec-status")?;
+        Ok(agent_exec_status_of(w.data))
+    }
+
+    /// Runs `argv` in the guest and polls until it finishes or `timeout`
+    /// elapses.
+    ///
+    /// Shaped like [`Client::wait_task`] — issue once, poll on a short
+    /// interval, give up at a hard ceiling — but it is not the same loop: a
+    /// guest exec is not a node task, has no ledger entry, and nothing here
+    /// is ever retried or recorded. A caller that wants those guarantees is
+    /// asking the wrong primitive.
+    pub fn agent_exec_wait(
+        &self,
+        vmid: u32,
+        argv: &[&str],
+        timeout: Duration,
+    ) -> Result<AgentExecStatus> {
+        let pid = self.agent_exec(vmid, argv)?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.agent_exec_status(vmid, pid)? {
+                AgentExecStatus::Running => {}
+                done => return Ok(done),
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::TaskTimeout(format!(
+                    "proxmox: guest command (pid {pid}) on VM {vmid} was still running after {}s \
+                     — giving up. It may still be running in the guest; nothing here was rolled back",
+                    timeout.as_secs()
+                )));
+            }
+            std::thread::sleep(AGENT_EXEC_POLL);
+        }
+    }
+
     /// The next free VM id on the CLUSTER.
     ///
     /// `/cluster/nextid` is the node's own answer, and asking is the only
@@ -725,6 +998,51 @@ impl Client {
             vmid,
             TaskKind::Create,
             || self.post_form(&format!("/nodes/{}/qemu", self.node), &form, true),
+            Some(&|| self.vm_exists(vmid)),
+        )
+    }
+
+    /// Restores a backup archive into a fresh VM — Proxmox's `qmrestore`,
+    /// the same route [`Client::create_vm`] calls (`POST …/qemu`), asked a
+    /// different question: `archive=<volid>` in place of the disk
+    /// parameters. The node reads ostype, disks and every other setting
+    /// back out of the archive's own saved config — nothing about the
+    /// original VM is passed here beyond the archive itself.
+    ///
+    /// `vmid` MUST be free — this call never sets `force`. A restore that
+    /// silently overwrote a live VM would be the worst possible way to
+    /// lose one; replacing an existing vmid is the operator's decision to
+    /// make explicitly, never this primitive's to assume on their behalf.
+    ///
+    /// `storage`: the target storage for the restored disk(s), which may
+    /// differ from wherever the original VM's disk lived.
+    ///
+    /// The effect probe is [`Self::vm_exists`] — the same one `create_vm`
+    /// uses, because a restore that lands is indistinguishable from a
+    /// create that lands: both answer with a VM the node now has.
+    pub fn restore_vm(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        archive: &str,
+        storage: &str,
+    ) -> Result<()> {
+        let vmid_s = vmid.to_string();
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Restore,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu", self.node),
+                    &[
+                        ("vmid", vmid_s.as_str()),
+                        ("archive", archive),
+                        ("storage", storage),
+                    ],
+                    true,
+                )
+            },
             Some(&|| self.vm_exists(vmid)),
         )
     }
@@ -1019,6 +1337,117 @@ impl Client {
         )
     }
 
+    /// Moves `disk` (a drive key, `scsi0`) to `storage`, or re-formats it in
+    /// place when `storage` is `None` (`POST …/move_disk`).
+    ///
+    /// `delete_source` drops the SOURCE disk reference once the move is done —
+    /// without it the disk survives on the OLD storage as an unreferenced one,
+    /// which is the node's own default and not what "move" means to a caller
+    /// asking for a clean move with nothing left behind.
+    ///
+    /// A UPID, like every write here: the effect probe reads the moved disk's
+    /// `storage=` back from [`Client::config`], never from what the call said.
+    /// With `storage: None` there is nothing this side can tell apart from "not
+    /// moved yet" (the format changed but the storage did not), so there is no
+    /// probe in that case — a lost answer with no task in flight then surfaces
+    /// as the transport error it is, same as [`Client::rollback`].
+    pub fn move_disk(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        disk: &str,
+        storage: Option<&str>,
+        delete_source: bool,
+        format: Option<&str>,
+    ) -> Result<()> {
+        let delete_val = if delete_source { "1" } else { "0" };
+        let mut form: Vec<(&str, &str)> = vec![("disk", disk), ("delete", delete_val)];
+        if let Some(s) = storage {
+            form.push(("storage", s));
+        }
+        if let Some(f) = format {
+            form.push(("format", f));
+        }
+        // The probe only exists when a target storage was asked for: with
+        // `storage: None` (a format-only reformat) nothing this side can read
+        // back distinguishes "moved" from "not yet" — the storage name does
+        // not change — so a lost answer with no matching task in flight then
+        // surfaces as the transport error it is, the same as `rollback`.
+        let want_storage: Option<Box<dyn Fn() -> Result<bool>>> = storage.map(|s| {
+            let want = s.to_string();
+            let disk = disk.to_string();
+            Box::new(move || {
+                Ok(disk_storage_of(&self.config(vmid)?, &disk).as_deref() == Some(want.as_str()))
+            }) as Box<dyn Fn() -> Result<bool>>
+        });
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::MoveDisk,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/move_disk", self.node),
+                    &form,
+                    true,
+                )
+            },
+            want_storage.as_deref(),
+        )
+    }
+
+    /// Detaches one or more disks from a VM (`PUT …/unlink`), and by default
+    /// destroys them — `force` removes a disk even if something else still
+    /// references it (a boot order entry, another device slot).
+    ///
+    /// The schema declares this route's `returns: null` rather than `string`,
+    /// which is the shape [`Client::task_or_done`] exists for: most calls
+    /// apply inline, and a UPID — should the node ever fork one — is still
+    /// waited on rather than assumed absent. The effect probe is the disk
+    /// keys no longer present in [`Client::config`].
+    pub fn unlink(&self, ledger: &Ledger, vmid: u32, idlist: &[&str], force: bool) -> Result<()> {
+        let ids = idlist.join(",");
+        let force_val = if force { "1" } else { "0" };
+        let form: Vec<(&str, &str)> = vec![("idlist", ids.as_str()), ("force", force_val)];
+        let keys: Vec<String> = idlist.iter().map(|s| s.to_string()).collect();
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Unlink,
+            || self.put_form(&format!("/nodes/{}/qemu/{vmid}/unlink", self.node), &form),
+            Some(&|| {
+                let cfg = self.config(vmid)?;
+                Ok(keys.iter().all(|k| cfg.get(k).is_none()))
+            }),
+        )
+    }
+
+    /// The RENDERED cloud-init file the node would inject at the guest's next
+    /// boot (`GET …/cloudinit/dump?type=<user|network|meta>`).
+    ///
+    /// Genuinely different from [`Client::config`]/[`Client::configure_clone`],
+    /// which only read or write the cloud-init INPUTS (`ipconfig0`, `sshkeys`,
+    /// …) — nothing else in this crate reads the OUTPUT cloud-init would
+    /// actually write into the guest. Not a task: the schema's `returns:
+    /// string` here is the rendered file itself, read like any other plain
+    /// GET (`status_current`, `config`).
+    ///
+    /// `kind` is refused by name when it is not one of the three the route
+    /// accepts — never sent to the node as-is, which would just be a 400 with
+    /// no more information than refusing it here already gives.
+    pub fn cloudinit_dump(&self, vmid: u32, kind: &str) -> Result<String> {
+        if !matches!(kind, "user" | "network" | "meta") {
+            return Err(Error::InvalidCloudInitKind(format!(
+                "proxmox: cloud-init dump type '{kind}' is not one of 'user', 'network', 'meta'"
+            )));
+        }
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/cloudinit/dump?type={kind}",
+            self.node
+        ))?;
+        let w: Wrapped<String> = parse(&body, "cloudinit dump")?;
+        Ok(w.data)
+    }
+
     pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
         self.task(
             ledger,
@@ -1174,6 +1603,222 @@ impl Client {
         )
     }
 
+    // =======================================================================
+    // The node's own (native) per-VM firewall — NOT this crate's SDN firewall
+    // =======================================================================
+    //
+    // This engine already has its own firewall, for its OWN containers and
+    // VMs: `delonix-sdn`, nftables-based, `net ingress`/`net egress`. What
+    // follows is a DIFFERENT thing entirely — Proxmox VE's own, NATIVE
+    // per-VM firewall, enforced by the node's own `pve-firewall` daemon from
+    // rules the node stores in `/etc/pve/firewall/<vmid>.fw`. It only applies
+    // to a VM running ON a Proxmox node, through this backend, and has no
+    // relationship whatsoever to this engine's SDN firewall — the two never
+    // see each other's rules, and turning one on or off does nothing to the
+    // other. Every doc comment below says "the node's own firewall" for
+    // exactly this reason: plain "firewall" in this crate is ambiguous.
+
+    /// The VM's own-firewall OPTION set, as the node has it — an object whose
+    /// most important field is `enable` (`0`/`1`, or absent).
+    ///
+    /// **The node's own firewall does NOTHING at all unless `enable` is `1`
+    /// here — even with rules already added.** This is the single most likely
+    /// way this API surface confuses somebody: rules go in with
+    /// [`Self::add_firewall_rule`], nothing about the VM changes, and the
+    /// reason is always the same — the firewall itself was never turned on.
+    /// See [`Self::set_firewall_enabled`].
+    ///
+    /// A raw value and not a typed struct: the option set is a handful of
+    /// scalars (`enable`, `dhcp`, `ndp`, `radv`, `ipfilter`, `log_level_in`,
+    /// …) that nothing here composes into a decision — [`Self::config`] and
+    /// [`Self::boot_disk`] draw the same line for the same reason.
+    pub fn firewall_options(&self, vmid: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/options",
+            self.node
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "firewall options")?;
+        Ok(w.data)
+    }
+
+    /// Turns the VM's own firewall on or off (`PUT …/firewall/options`,
+    /// `enable=0|1`) — the switch [`Self::firewall_options`]'s doc comment
+    /// warns about. Rules survive being turned off; they simply stop being
+    /// enforced until this is `true` again.
+    pub fn set_firewall_enabled(&self, ledger: &Ledger, vmid: u32, enabled: bool) -> Result<()> {
+        let value = if enabled { "1" } else { "0" };
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::FirewallOptions,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/options", self.node),
+                    &[("enable", value)],
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .firewall_options(vmid)?
+                    .get("enable")
+                    .and_then(|v| v.as_u64())
+                    == Some(u64::from(enabled)))
+            }),
+        )
+    }
+
+    /// The VM's own-firewall rules, in the node's own order (`pos` is the
+    /// rule's position, and the only handle [`Self::firewall_rule`],
+    /// [`Self::update_firewall_rule`] and [`Self::delete_firewall_rule`]
+    /// address one by — never a name).
+    pub fn firewall_rules(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/firewall/rules", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall rules")?;
+        Ok(w.data)
+    }
+
+    /// One rule of the VM's own firewall, at position `pos`.
+    pub fn firewall_rule(&self, vmid: u32, pos: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/rules/{pos}",
+            self.node
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "firewall rule")?;
+        Ok(w.data)
+    }
+
+    /// Appends a rule to the VM's own firewall (`POST …/firewall/rules`).
+    ///
+    /// `rule_type` (`in`/`out`) and `action` are required by the node and
+    /// validated BEFORE anything reaches the wire — `action` accepts only the
+    /// three plain verdicts (`ACCEPT`/`DROP`/`REJECT`); a firewall GROUP's
+    /// name (`+groupname`) is a different kind of value this backend has no
+    /// validation for and does not accept.
+    ///
+    /// **`enable` is always sent explicitly, defaulting to `true`** — never
+    /// left to the node's own default. A rule created accidentally disabled
+    /// would still show up in [`Self::firewall_rules`] looking present while
+    /// doing nothing, which is exactly the silently-half-honoured shape this
+    /// crate's doctrine treats as its worst failure (see `refuse_unsupported`
+    /// for the same posture applied to `VmConfig`).
+    ///
+    /// No probe: a rule appended by position has nothing a read can reliably
+    /// tell apart from "not appended" without racing whatever else is adding
+    /// rules to the same VM at the same time — the same reasoning
+    /// [`Self::rollback`] gives for having none. A lost answer with no
+    /// firewall task in flight on the node is therefore an error, not a
+    /// second guess.
+    pub fn add_firewall_rule(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        rule_type: &str,
+        action: &str,
+        opts: &FirewallRuleOpts,
+    ) -> Result<()> {
+        validate_firewall_direction(rule_type)?;
+        validate_firewall_action(action)?;
+        let enable = if opts.enable.unwrap_or(true) {
+            "1"
+        } else {
+            "0"
+        };
+        let mut form: Vec<(&str, String)> = vec![
+            ("type", rule_type.to_string()),
+            ("action", action.to_string()),
+            ("enable", enable.to_string()),
+        ];
+        form.extend(firewall_rule_common_fields(opts));
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::AddFirewallRule,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/rules", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Changes one field or more of a rule already at position `pos`
+    /// (`PUT …/firewall/rules/{pos}`) — only the fields given in `opts` are
+    /// sent, and `None` means "leave it as the node already has it", not
+    /// "clear it". Unlike [`Self::add_firewall_rule`], `type`/`action` are
+    /// optional here too (`opts.rule_type`/`opts.action`): an update may
+    /// change either, neither, or both.
+    ///
+    /// **No `digest` (optimistic-concurrency) parameter is sent.** The node
+    /// accepts a config's current digest to refuse an update that raced
+    /// another writer; this client does not read or carry one, so two
+    /// concurrent updates to the same rule can still overwrite each other.
+    /// Not implemented, not silently worked around.
+    ///
+    /// No probe, for the same reason [`Self::add_firewall_rule`] has none: an
+    /// arbitrary set of changed fields has no single read this could compare
+    /// against without assuming which ones were asked for.
+    pub fn update_firewall_rule(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        pos: u32,
+        opts: &FirewallRuleOpts,
+    ) -> Result<()> {
+        if let Some(t) = opts.rule_type {
+            validate_firewall_direction(t)?;
+        }
+        if let Some(a) = opts.action {
+            validate_firewall_action(a)?;
+        }
+        let mut form = firewall_rule_common_fields(opts);
+        if let Some(t) = opts.rule_type {
+            form.push(("type", t.to_string()));
+        }
+        if let Some(a) = opts.action {
+            form.push(("action", a.to_string()));
+        }
+        if let Some(enabled) = opts.enable {
+            form.push(("enable", if enabled { "1" } else { "0" }.to_string()));
+        }
+        let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::UpdateFirewallRule,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/rules/{pos}", self.node),
+                    &form,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Removes a rule of the VM's own firewall at position `pos`
+    /// (`DELETE …/firewall/rules/{pos}`). The probe is the node's own list, as
+    /// on [`Self::delete_snapshot`]: no entry left at that position, never
+    /// taken from what the call said.
+    pub fn delete_firewall_rule(&self, ledger: &Ledger, vmid: u32, pos: u32) -> Result<()> {
+        let path = format!("/nodes/{}/qemu/{vmid}/firewall/rules/{pos}", self.node);
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::DeleteFirewallRule,
+            || self.delete(&path),
+            Some(&|| {
+                Ok(!self
+                    .firewall_rules(vmid)?
+                    .iter()
+                    .any(|r| r.get("pos").and_then(|p| p.as_u64()) == Some(u64::from(pos))))
+            }),
+        )
+    }
+
     /// Issues a task-creating request and waits for the task — **again, while
     /// the node answers that the VM's config lock is busy**.
     ///
@@ -1217,9 +1862,14 @@ impl Client {
     }
 
     /// [`Self::task`] for a route the node may answer WITHOUT a task: a
-    /// `null` is taken as "applied inline", a UPID is waited on. Only
-    /// `POST …/config` behaves like that; every other write answers a UPID or
-    /// it is an unexpected answer.
+    /// `null` is taken as "applied inline", a UPID is waited on. `POST
+    /// …/config` is measured behaving like that; every node's-own-firewall
+    /// write (`set_firewall_enabled`/`add_firewall_rule`/
+    /// `update_firewall_rule`/`delete_firewall_rule`) goes through this same
+    /// path too, on the expectation — NOT yet measured against a real node,
+    /// see [`TaskKind::worker_type`]'s doc comment — that `pve-firewall`
+    /// applies a rule/option change inline rather than forking a worker.
+    /// Every other write answers a UPID or it is an unexpected answer.
     fn task_or_done(
         &self,
         ledger: &Ledger,
@@ -1647,6 +2297,21 @@ fn is_unauthorized(e: &Error) -> bool {
     matches!(e, Error::Unauthorized(_))
 }
 
+/// Does this failure say the node's ANSWER, not the request, was "no
+/// agent"?
+///
+/// Matched on the message, the same way [`is_unauthorized`]/[`is_lock_timeout`]
+/// are: Proxmox reports this specific condition as an HTTP 500 whose body is
+/// the literal string `"QEMU guest agent is not running"` — [`classify_status`]
+/// has no dedicated variant for it, so it falls through to [`Error::HttpStatus`]
+/// like any other 500 the node has no typed reason for. Matching the status
+/// code alone would also catch every OTHER 500 (a bad guest command, storage
+/// full), and those are real failures that must propagate, not read as "no
+/// agent".
+fn is_agent_not_running(e: &Error) -> bool {
+    matches!(e, Error::HttpStatus(m) if m.contains("QEMU guest agent is not running"))
+}
+
 /// A bridge name is interpolated into the `net0` property.
 pub fn validate_bridge_name(bridge: &str) -> Result<()> {
     let ok = !bridge.is_empty()
@@ -1821,6 +2486,19 @@ fn disk_size_of(cfg: &serde_json::Value, key: &str) -> Option<u64> {
     drive_size_bytes(cfg.get(key)?.as_str()?)
 }
 
+/// The `<storage>` component of drive `key` in a config
+/// (`local-lvm:vm-100-disk-0,size=1G` → `local-lvm`) — what
+/// [`Client::move_disk`]'s effect probe reads back, because the storage name
+/// is the one thing a move is asked to change that a caller can confirm from
+/// outside. `None` when the key is absent or carries no `:` at all (`none`,
+/// the value an empty CD-ROM slot has).
+fn disk_storage_of(cfg: &serde_json::Value, key: &str) -> Option<String> {
+    cfg.get(key)?
+        .as_str()?
+        .split_once(':')
+        .map(|(storage, _)| storage.to_string())
+}
+
 /// `size=` of a drive property value (`local-lvm:vm-100-disk-0,size=32G`), in
 /// bytes. The node writes `<n>[KMGT]` in binary units, or bare bytes.
 fn drive_size_bytes(value: &str) -> Option<u64> {
@@ -1924,6 +2602,96 @@ fn validate_snapshot_name(name: &str) -> Result<()> {
         Err(Error::InvalidSnapshotName(format!(
             "invalid Proxmox snapshot name '{name}': expected letters, digits, '-' and '_' \
              (and not 'current', which the API uses for the live state)"
+        )))
+    }
+}
+
+/// The optional fields of a rule of the VM's own (node-side) firewall —
+/// [`Client::add_firewall_rule`] and [`Client::update_firewall_rule`] — as the
+/// node names them on the wire.
+///
+/// **`enable` behaves differently in the two callers, and each names it where
+/// it is used**: `add_firewall_rule` sends it explicitly, defaulting to
+/// enabled when `None`, because a rule that LOOKS present in
+/// [`Client::firewall_rules`] but was silently created disabled is exactly
+/// the trap this crate's doctrine warns against; `update_firewall_rule` sends
+/// it only when `Some`, because there `None` means "leave it as the node
+/// already has it", not "disable it".
+///
+/// **`rule_type`/`action` are read by `update_firewall_rule` only.**
+/// `add_firewall_rule` takes the direction and the verdict as its own
+/// required parameters instead (the node requires both on create, and
+/// refusing an unsupported `action` needs to happen before anything reaches
+/// the wire); on an update, unlike a create, either may be left unchanged, so
+/// they belong here as optional fields like everything else.
+#[derive(Debug, Clone, Default)]
+pub struct FirewallRuleOpts<'a> {
+    pub enable: Option<bool>,
+    pub comment: Option<&'a str>,
+    pub source: Option<&'a str>,
+    pub dest: Option<&'a str>,
+    pub proto: Option<&'a str>,
+    pub dport: Option<&'a str>,
+    pub sport: Option<&'a str>,
+    pub iface: Option<&'a str>,
+    /// A named service macro (`ssh`, `http`, …) — the node's `macro`
+    /// property. Renamed here because `macro` is a Rust keyword.
+    pub macro_name: Option<&'a str>,
+    /// Only read by [`Client::update_firewall_rule`] — see the struct's doc
+    /// comment for why `add_firewall_rule` does not read it from here.
+    pub rule_type: Option<&'a str>,
+    /// Only read by [`Client::update_firewall_rule`], for the same reason.
+    pub action: Option<&'a str>,
+}
+
+/// The fields of [`FirewallRuleOpts`] that both `add_firewall_rule` and
+/// `update_firewall_rule` forward verbatim — everything except `enable`,
+/// `rule_type` and `action`, which each caller handles on its own (see the
+/// struct's doc comment). Pure, so "each key at most once" is a test.
+fn firewall_rule_common_fields(opts: &FirewallRuleOpts) -> Vec<(&'static str, String)> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let mut push = |key: &'static str, val: Option<&str>| {
+        if let Some(v) = val {
+            out.push((key, v.to_string()));
+        }
+    };
+    push("comment", opts.comment);
+    push("source", opts.source);
+    push("dest", opts.dest);
+    push("proto", opts.proto);
+    push("dport", opts.dport);
+    push("sport", opts.sport);
+    push("iface", opts.iface);
+    push("macro", opts.macro_name);
+    out
+}
+
+/// The only three plain verdicts a rule of the node's own firewall can carry
+/// through this client — never a firewall GROUP's name (`+groupname`), which
+/// chains to a set of rules kept elsewhere on the node and would need
+/// validation of its own this backend does not have. Refused by value,
+/// before anything reaches the wire, the same posture every other input this
+/// crate cannot follow through blindly is held to (`refuse_unsupported`,
+/// `validate_snapshot_name`, `parse_disk_spec`).
+fn validate_firewall_action(action: &str) -> Result<()> {
+    if matches!(action, "ACCEPT" | "DROP" | "REJECT") {
+        Ok(())
+    } else {
+        Err(Error::InvalidFirewallRule(format!(
+            "invalid Proxmox firewall rule action '{action}': expected ACCEPT, DROP or REJECT \
+             (a firewall group's name is not accepted here)"
+        )))
+    }
+}
+
+/// `in`/`out` are the only two directions a rule of the node's own firewall
+/// can take.
+fn validate_firewall_direction(rule_type: &str) -> Result<()> {
+    if matches!(rule_type, "in" | "out") {
+        Ok(())
+    } else {
+        Err(Error::InvalidFirewallRule(format!(
+            "invalid Proxmox firewall rule type '{rule_type}': expected 'in' or 'out'"
         )))
     }
 }
@@ -2594,7 +3362,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmSnapshotPersistent => S::Partial { detail: "snapshots live on the node; the live case lists `live1` back from the node right after taking it, but deletes it BEFORE the stop, so nothing asserts a snapshot is still there after a stop/start" },
         C::VmBackupDisk => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_backup_lands_on_the_storage_and_comes_off_it" },
         C::VmBackupQuiesced => S::NotImplemented,
-        C::VmBackupRestore => S::NotImplemented,
+        C::VmBackupRestore => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_deleted_vm_comes_back_from_its_own_backup" },
         C::VmMigrationCold => S::NotImplemented,
         C::VmMigrationLive => S::RequiresExternalComponent { component: "a Proxmox cluster with shared storage; the engine addresses ONE node (ADR-0008) and never picks the target" },
         C::VmReplication => S::RequiresExternalComponent { component: "cluster replication jobs (ADR-0049 D3: excluded as administration)" },
@@ -3015,6 +3783,56 @@ mod tests {
         );
     }
 
+    /// What [`Client::move_disk`]'s effect probe reads back: the storage NAME
+    /// only, up to the first `:` — never the size, which a move is not asked
+    /// to change and `disk_size_of`/`drive_size_bytes` already own.
+    #[test]
+    fn the_storage_of_a_drive_reads_up_to_the_first_colon() {
+        let cfg = serde_json::json!({
+            "scsi0": "local-lvm:vm-100-disk-0,size=1G",
+            "ide2": "local:iso/x.iso,media=cdrom,size=700M",
+            "sata0": "none,media=cdrom",
+        });
+        assert_eq!(disk_storage_of(&cfg, "scsi0").as_deref(), Some("local-lvm"));
+        assert_eq!(disk_storage_of(&cfg, "ide2").as_deref(), Some("local"));
+        assert_eq!(
+            disk_storage_of(&cfg, "sata0"),
+            None,
+            "an empty CD-ROM slot ('none,media=cdrom') has no colon at all, so it is `None` \
+             here just like a missing key — a caller comparing it against a real storage name \
+             never sees a false match"
+        );
+        assert_eq!(disk_storage_of(&cfg, "missing"), None);
+    }
+
+    /// The check runs BEFORE any request: an unknown `type` never reaches the
+    /// node, unlike a `disk`/`storage`/`idlist` typo, which the node itself
+    /// would refuse with a 400 this crate maps into [`Error::BadRequest`].
+    #[test]
+    fn cloudinit_dump_refuses_an_unknown_type_before_any_request() {
+        let cli = Client {
+            http: reqwest::blocking::Client::new(),
+            base: "https://x".into(),
+            node: "pve".into(),
+            auth: Auth::ApiToken {
+                id: "a!b".into(),
+                secret: "c".into(),
+            },
+            ticket: std::sync::RwLock::new(None),
+            bridge: "vmbr0".into(),
+            vlan: None,
+            task_timeout: TASK_TIMEOUT,
+            trace_routes: None,
+        };
+        let e = cli.cloudinit_dump(100, "bogus").unwrap_err();
+        assert!(e.is_invalid_argument(), "{e}");
+        assert!(e.to_string().contains("bogus"), "{e}");
+        assert!(
+            matches!(e, Error::InvalidCloudInitKind(_)),
+            "must be the typed refusal, not a request failure: {e}"
+        );
+    }
+
     #[test]
     fn o_disco_de_um_no_remoto_nao_e_um_caminho_local() {
         assert_eq!(
@@ -3185,6 +4003,54 @@ mod tests {
         assert_eq!(parse_agent_ip(&j(r#"{"data":{"result":[1,2,"x"]}}"#)), None);
     }
 
+    /// `exited == 0` is the WHOLE boundary — not the presence of the other
+    /// fields, which the node also omits while the guest is still running.
+    /// Getting this backwards would report a stale or absent exit code as a
+    /// real result while the command is still going.
+    #[test]
+    fn agent_exec_status_of_reads_exited_as_the_only_boundary() {
+        let body = |s: &str| serde_json::from_str::<AgentExecStatusBody>(s).unwrap();
+        assert_eq!(
+            agent_exec_status_of(body(r#"{"exited":0}"#)),
+            AgentExecStatus::Running
+        );
+        // The measured shape of a finished, successful command.
+        assert_eq!(
+            agent_exec_status_of(body(
+                r#"{"exited":1,"exitcode":0,"out-data":"hi\n","err-data":""}"#
+            )),
+            AgentExecStatus::Finished {
+                exit_code: 0,
+                stdout: "hi\n".into(),
+                stderr: String::new(),
+                signal: None,
+            }
+        );
+        // A non-zero exit and a killed-by-signal case, exercised together
+        // because the two fields are meaningless together (a real node
+        // answers one or the other), and the type has to carry both.
+        assert_eq!(
+            agent_exec_status_of(body(
+                r#"{"exited":1,"exitcode":137,"out-data":"","err-data":"boom"}"#
+            )),
+            AgentExecStatus::Finished {
+                exit_code: 137,
+                stdout: String::new(),
+                stderr: "boom".into(),
+                signal: None,
+            }
+        );
+        assert_eq!(
+            agent_exec_status_of(body(r#"{"exited":1,"signal":9}"#)),
+            AgentExecStatus::Finished {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+                signal: Some(9),
+            }
+        );
+    }
+
     /// The ADR calls accepting-and-dropping "the failure mode this repo treats
     /// as its worst", and until this pass it was exactly what happened: a
     /// `-v /data:/data` on a `--backend proxmox` create reported success and
@@ -3340,72 +4206,92 @@ mod tests {
     /// that is not a node operation — it exchanges a credential for a
     /// ticket and changes nothing on the node — and it is named here with
     /// that reason, not skipped by pattern.
+    ///
+    /// Reads `sdn.rs` too, not just this file: `impl Client` is split across
+    /// the two (the SDN zone/vnet/apply calls live in `sdn.rs`), and a gate
+    /// that only reads `lib.rs` would wave through a write added there —
+    /// exactly the blind spot this test exists to close.
     #[test]
     fn every_write_to_the_node_goes_through_the_task_path() {
-        let src = include_str!("lib.rs");
-        let src = src.split("#[cfg(test)]").next().unwrap();
+        let sources = [include_str!("lib.rs"), include_str!("sdn.rs")];
         // Writes are what these helpers send; `fn post_form`/`fn delete`
         // themselves are definitions, not call sites.
         let write_calls = ["self.post_form(", "self.put_form(", "self.delete("];
-        let allowed_outside_task: &[(&str, &str)] = &[(
-            "login",
-            "exchanges the credential for a ticket; it writes nothing on the node",
-        )];
+        let allowed_outside_task: &[(&str, &str)] = &[
+            (
+                "login",
+                "exchanges the credential for a ticket; it writes nothing on the node",
+            ),
+            (
+                "agent_ping",
+                "a guest-agent command answers inline (the agent itself, not a node worker) \
+                 — there is no UPID to wait on",
+            ),
+            (
+                "agent_exec",
+                "starts a process inside the guest and answers its pid inline; the pid is \
+                 polled by agent_exec_status, which is a plain read and not a write at all",
+            ),
+        ];
         let mut checked = 0;
-        for needle in write_calls {
-            let mut from = 0;
-            while let Some(off) = src[from..].find(needle) {
-                let at = from + off;
-                from = at + needle.len();
-                checked += 1;
-                // The enclosing `fn`: the last `fn <name>(` before the call.
-                let head = &src[..at];
-                // The LATER of the two forms: an `rfind` of `fn ` alone would
-                // stop at a private fn defined before the enclosing `pub fn`.
-                let fn_at = [head.rfind("\n    fn "), head.rfind("\n    pub fn ")]
-                    .into_iter()
-                    .flatten()
-                    .max()
-                    .expect("a call site inside a fn");
-                let fn_name: String = head[fn_at..]
-                    .trim_start_matches('\n')
-                    .trim_start()
-                    .trim_start_matches("pub ")
-                    .trim_start_matches("fn ")
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-                if let Some((_, why)) = allowed_outside_task.iter().find(|(f, _)| *f == fn_name) {
-                    assert!(!why.is_empty());
-                    continue;
-                }
-                // Inside the task path: a `self.task(`/`self.task_or_done(`
-                // opened in this fn whose argument list is still open here.
-                let body = &head[fn_at..];
-                let opened = ["self.task(", "self.task_or_done("]
-                    .iter()
-                    .filter_map(|t| body.rfind(t).map(|i| i + t.len()))
-                    .max();
-                let inside = opened.is_some_and(|i| {
-                    let mut depth = 1i32;
-                    for c in body[i..].chars() {
-                        match c {
-                            '(' => depth += 1,
-                            ')' => depth -= 1,
-                            _ => {}
-                        }
-                        if depth == 0 {
-                            return false;
-                        }
+        for src in sources {
+            let src = src.split("#[cfg(test)]").next().unwrap();
+            for needle in write_calls {
+                let mut from = 0;
+                while let Some(off) = src[from..].find(needle) {
+                    let at = from + off;
+                    from = at + needle.len();
+                    checked += 1;
+                    // The enclosing `fn`: the last `fn <name>(` before the call.
+                    let head = &src[..at];
+                    // The LATER of the two forms: an `rfind` of `fn ` alone would
+                    // stop at a private fn defined before the enclosing `pub fn`.
+                    let fn_at = [head.rfind("\n    fn "), head.rfind("\n    pub fn ")]
+                        .into_iter()
+                        .flatten()
+                        .max()
+                        .expect("a call site inside a fn");
+                    let fn_name: String = head[fn_at..]
+                        .trim_start_matches('\n')
+                        .trim_start()
+                        .trim_start_matches("pub ")
+                        .trim_start_matches("fn ")
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    if let Some((_, why)) = allowed_outside_task.iter().find(|(f, _)| *f == fn_name)
+                    {
+                        assert!(!why.is_empty());
+                        continue;
                     }
-                    true
-                });
-                assert!(
+                    // Inside the task path: a `self.task(`/`self.task_or_done(`
+                    // opened in this fn whose argument list is still open here.
+                    let body = &head[fn_at..];
+                    let opened = ["self.task(", "self.task_or_done("]
+                        .iter()
+                        .filter_map(|t| body.rfind(t).map(|i| i + t.len()))
+                        .max();
+                    let inside = opened.is_some_and(|i| {
+                        let mut depth = 1i32;
+                        for c in body[i..].chars() {
+                            match c {
+                                '(' => depth += 1,
+                                ')' => depth -= 1,
+                                _ => {}
+                            }
+                            if depth == 0 {
+                                return false;
+                            }
+                        }
+                        true
+                    });
+                    assert!(
                     inside,
                     "`{needle}` in `fn {fn_name}` is a write outside the task path: route it through \
                      `self.task(...)` so its UPID is waited on and recorded in the ledger, or name \
                      it in `allowed_outside_task` with the reason"
                 );
+                }
             }
         }
         assert!(
@@ -3503,6 +4389,89 @@ mod tests {
         assert!(validate_snapshot_name("antes-do-upgrade_1").is_ok());
     }
 
+    /// Only the three plain verdicts go through — never a firewall group's
+    /// name, which this client has no validation for at all.
+    #[test]
+    fn only_the_three_plain_verdicts_are_accepted_as_action() {
+        for ok in ["ACCEPT", "DROP", "REJECT"] {
+            assert!(validate_firewall_action(ok).is_ok(), "{ok:?}");
+        }
+        for bad in ["accept", "Drop", "+mygroup", "", "ALLOW"] {
+            let e = validate_firewall_action(bad).unwrap_err().to_string();
+            assert!(e.contains(bad), "the refusal must name the value: {e}");
+        }
+    }
+
+    #[test]
+    fn only_in_and_out_are_accepted_as_type() {
+        for ok in ["in", "out"] {
+            assert!(validate_firewall_direction(ok).is_ok(), "{ok:?}");
+        }
+        for bad in ["IN", "both", "", "forward"] {
+            let e = validate_firewall_direction(bad).unwrap_err().to_string();
+            assert!(e.contains(bad), "the refusal must name the value: {e}");
+        }
+    }
+
+    /// Each optional field lands under the node's own name exactly once, and
+    /// an all-`None` set sends nothing at all — the shape `create_form`'s own
+    /// sibling test already holds `cloud_init_form` to.
+    #[test]
+    fn each_optional_field_of_the_rule_lands_once_under_the_nodes_own_name() {
+        assert_eq!(
+            firewall_rule_common_fields(&FirewallRuleOpts::default()),
+            []
+        );
+
+        let opts = FirewallRuleOpts {
+            comment: Some("web"),
+            source: Some("10.0.0.0/8"),
+            dest: Some("192.168.1.5"),
+            proto: Some("tcp"),
+            dport: Some("443"),
+            sport: Some("1024:65535"),
+            iface: Some("net0"),
+            macro_name: Some("ssh"),
+            // Read only by `update_firewall_rule`, never by this helper.
+            enable: Some(true),
+            rule_type: Some("in"),
+            action: Some("ACCEPT"),
+        };
+        let fields = firewall_rule_common_fields(&opts);
+        for (key, want) in [
+            ("comment", "web"),
+            ("source", "10.0.0.0/8"),
+            ("dest", "192.168.1.5"),
+            ("proto", "tcp"),
+            ("dport", "443"),
+            ("sport", "1024:65535"),
+            ("iface", "net0"),
+            ("macro", "ssh"),
+        ] {
+            assert_eq!(
+                fields.iter().filter(|(k, _)| *k == key).count(),
+                1,
+                "{key} must appear exactly once: {fields:?}"
+            );
+            assert_eq!(
+                fields
+                    .iter()
+                    .find(|(k, _)| *k == key)
+                    .map(|(_, v)| v.as_str()),
+                Some(want)
+            );
+        }
+        // `enable`/`type`/`action` are NOT emitted by this helper — each
+        // caller of `add_firewall_rule`/`update_firewall_rule` handles them
+        // on its own, per the struct's doc comment.
+        for absent in ["enable", "type", "action"] {
+            assert!(
+                !fields.iter().any(|(k, _)| *k == absent),
+                "{absent} must not come from this helper: {fields:?}"
+            );
+        }
+    }
+
     /// A 401 has to be told apart from every other failure, because only that
     /// one is worth logging in again for — and only for password auth. An API
     /// token that gets a 401 was revoked, and retrying it forever is how a
@@ -3526,6 +4495,32 @@ mod tests {
         // A body that merely mentions the number is not a 401.
         assert!(!is_unauthorized(&st(500, "disk 401 is missing")));
         assert!(!is_unauthorized(&st(403, "permission denied")));
+    }
+
+    /// [`Client::agent_ping`]'s whole reason to exist: this ONE 500 has to
+    /// read as "no agent, not a failure" while every other 500 — and every
+    /// other status — reads as a real error that `?` must propagate.
+    #[test]
+    fn is_agent_not_running_so_matches_the_nodes_own_wording() {
+        let st = |code: u16, body: &str| {
+            classify_status(
+                reqwest::StatusCode::from_u16(code).unwrap(),
+                "https://pve",
+                "/nodes/pve/qemu/100/agent/ping",
+                body,
+            )
+        };
+        assert!(is_agent_not_running(&st(
+            500,
+            "QEMU guest agent is not running\n"
+        )));
+        // Same status, different reason: a real failure, not "no agent".
+        assert!(!is_agent_not_running(&st(500, "unable to open file")));
+        assert!(!is_agent_not_running(&st(401, "bad ticket")));
+        assert!(!is_agent_not_running(&st(403, "permission denied")));
+        assert!(!is_agent_not_running(&Error::Request(
+            "proxmox: request failed: connection refused".into()
+        )));
     }
 
     /// The CLASS of a failure is what an exit code and a reconciler read; the
