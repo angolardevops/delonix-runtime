@@ -399,6 +399,13 @@ rm -f "$DELONIX_ROOT/clusters/ck1-$PFX-kubeconfig.yaml" "$DELONIX_ROOT/clusters/
 
 check "system info" ok "$BIN" system info
 check "system df" ok "$BIN" system df
+# O `df` conta a raiz INTEIRA. Medido a 2026-09-09 num nó real: um estado de
+# 190 GiB reportava 105 — `vms/`, `build-cache/` e `images-build/` não estavam
+# na lista, e nada o dizia. Um `ok` não apanha isto (o comando sempre devolveu
+# 0 a omitir metade do disco); o que fixa é a PRESENÇA das linhas e do total.
+check "system df conta os discos de VM" ok bash -c "'$BIN' system df | grep -q '^VM disks '"
+check "system df conta a cache de build" ok bash -c "'$BIN' system df | grep -q '^build cache '"
+check "system df fecha a tabela com other e TOTAL" ok bash -c "'$BIN' system df | grep -q '^other ' && '$BIN' system df | grep -q '^TOTAL '"
 check "system events" ok "$BIN" system events
 check "completion shell bash" ok "$BIN" completion shell bash
 
