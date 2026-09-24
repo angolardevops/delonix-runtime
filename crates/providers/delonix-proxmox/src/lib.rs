@@ -425,6 +425,44 @@ enum TaskKind {
     UpdateFirewallRule,
     /// `DELETE …/firewall/rules/{pos}`.
     DeleteFirewallRule,
+    /// `POST …/firewall/aliases` — names a CIDR or address inside the VM's
+    /// own firewall namespace, so a rule can say `+myalias` instead of the
+    /// raw value. Scoped to this ONE VM — not `/cluster/firewall/aliases`,
+    /// which is cluster-wide and out of scope here (see
+    /// `docs/proxmox/matrix-9.2.2.md`, marked `unsupported-by-design`).
+    AddFirewallAlias,
+    /// `PUT …/firewall/aliases/{name}` — changes the `cidr`/`comment` of an
+    /// alias already named. `None` means "leave it as the node already has
+    /// it", the same convention [`Self::update_firewall_rule`] uses.
+    UpdateFirewallAlias,
+    /// `DELETE …/firewall/aliases/{name}`.
+    DeleteFirewallAlias,
+    /// `POST …/firewall/ipset` — creates a new, empty named IP set inside
+    /// the VM's own firewall namespace. Entries are added to it one at a
+    /// time afterwards (see [`AddFirewallIpsetCidr`]).
+    ///
+    /// [`AddFirewallIpsetCidr`]: TaskKind::AddFirewallIpsetCidr
+    CreateFirewallIpset,
+    /// `DELETE …/firewall/ipset/{name}` — removes the whole set. The node's
+    /// own business logic decides whether a set still referenced by a rule
+    /// may be removed; not pre-empted here.
+    DeleteFirewallIpset,
+    /// `POST …/firewall/ipset/{name}` — adds one CIDR/address entry to a set
+    /// already created. Note this is the SAME path as
+    /// [`CreateFirewallIpset`]'s `GET`/`DELETE` — the set is addressed by
+    /// `{name}` in the path, the entry is addressed by `cidr` in the form
+    /// body, and only the HTTP method tells the two POSTs (create-the-set vs
+    /// add-an-entry) apart from each other by their SHAPE, not their path.
+    ///
+    /// [`CreateFirewallIpset`]: TaskKind::CreateFirewallIpset
+    AddFirewallIpsetCidr,
+    /// `PUT …/firewall/ipset/{name}/{cidr}` — changes the `comment`/`nomatch`
+    /// of an entry already in the set. The entry's `cidr` itself is the URL
+    /// path's own identifier and cannot be renamed in place through this
+    /// route; removing and re-adding is the node's own way to do that.
+    UpdateFirewallIpsetCidr,
+    /// `DELETE …/firewall/ipset/{name}/{cidr}`.
+    DeleteFirewallIpsetCidr,
     /// `POST /cluster/sdn/zones` — stages a new SDN zone. Cluster-scoped, not
     /// VM-scoped (see [`sdn::SDN_VMID`]). Writes to the PENDING configuration
     /// only; nothing on any node changes until [`Client::apply_sdn`].
@@ -468,6 +506,14 @@ impl TaskKind {
             TaskKind::AddFirewallRule => "firewall-add-rule",
             TaskKind::UpdateFirewallRule => "firewall-update-rule",
             TaskKind::DeleteFirewallRule => "firewall-delete-rule",
+            TaskKind::AddFirewallAlias => "firewall-add-alias",
+            TaskKind::UpdateFirewallAlias => "firewall-update-alias",
+            TaskKind::DeleteFirewallAlias => "firewall-delete-alias",
+            TaskKind::CreateFirewallIpset => "firewall-create-ipset",
+            TaskKind::DeleteFirewallIpset => "firewall-delete-ipset",
+            TaskKind::AddFirewallIpsetCidr => "firewall-add-ipset-cidr",
+            TaskKind::UpdateFirewallIpsetCidr => "firewall-update-ipset-cidr",
+            TaskKind::DeleteFirewallIpsetCidr => "firewall-delete-ipset-cidr",
             TaskKind::CreateSdnZone => "create-sdn-zone",
             TaskKind::DeleteSdnZone => "delete-sdn-zone",
             TaskKind::CreateSdnVnet => "create-sdn-vnet",
@@ -551,6 +597,29 @@ impl TaskKind {
             | TaskKind::AddFirewallRule
             | TaskKind::UpdateFirewallRule
             | TaskKind::DeleteFirewallRule => "pvefw",
+            // NEVER OBSERVED on a live node — and unlike the four siblings just
+            // above, that is an ASSUMPTION, not yet a confirmed fact: no live
+            // suite has reached the VM firewall's aliases/ipset routes. Assumed
+            // by analogy with `FirewallOptions`/`AddFirewallRule`/
+            // `UpdateFirewallRule`/`DeleteFirewallRule` (all four measured
+            // applying inline against a real PVE 9.2.2 node, see the comment
+            // just above) to apply inline too — `pve-firewall` rewrites the
+            // whole of `/etc/pve/firewall/<vmid>.fw` on its own schedule for
+            // every one of these routes, not per-route, so there is no reason
+            // for aliases/ipset to behave differently from rules/options here.
+            // Every write below goes through `Client::task_or_done` on that
+            // assumption; a wrong guess costs a lost-answer recovery falling
+            // through to its probe, never a wrong answer on the ordinary path.
+            // `pvefw` (not a distinct name per route) is the same guess the
+            // four siblings above use, kept only so the match stays exhaustive.
+            TaskKind::AddFirewallAlias
+            | TaskKind::UpdateFirewallAlias
+            | TaskKind::DeleteFirewallAlias
+            | TaskKind::CreateFirewallIpset
+            | TaskKind::DeleteFirewallIpset
+            | TaskKind::AddFirewallIpsetCidr
+            | TaskKind::UpdateFirewallIpsetCidr
+            | TaskKind::DeleteFirewallIpsetCidr => "pvefw",
             // NEVER OBSERVED on a live node, and that is the confirmed fact: a
             // live run against PVE 9.2.2 forked no task for any of the four
             // (zone/vnet create/delete all apply inline) — these are guesses
@@ -1930,6 +1999,397 @@ impl Client {
         )
     }
 
+    /// The VM's own firewall as a directory of its sub-resources
+    /// (`GET …/firewall`, `returns: array`).
+    ///
+    /// **Believed to be a plain directory index, not implemented as
+    /// anything more than a raw pass-through — this is an INFERENCE, not a
+    /// measurement.** This repo's own extracted route inventory
+    /// (`docs/proxmox/api-9.2.2.routes.json`) carries no field-level schema
+    /// (method/path/perm/returns only), so the exact shape of each entry is
+    /// not known from it. What IS known: every sibling route below this one
+    /// (`rules`, `aliases`, `ipset`, `options`, `log`, `refs`) is its own,
+    /// separately useful call, and Proxmox's API is built throughout on a
+    /// parent path answering a directory listing of its children when GET'd
+    /// with nothing more specific asked for — the same shape
+    /// `GET /cluster/sdn` and `GET /nodes/{node}/qemu/{vmid}` themselves
+    /// take. On that basis this is not given a second, composed meaning: it
+    /// is not "independently useful" the way the routes below it are, since
+    /// everything it could tell a caller is already answered, in more
+    /// specific form, by calling one of them directly. Kept as a raw
+    /// pass-through — like [`Self::firewall_options`] and
+    /// [`Self::sdn_zones`] before it — for the one case it IS useful: a
+    /// caller that only wants to confirm the sub-path exists at all before
+    /// touching anything under it.
+    pub fn firewall_index(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/firewall", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall index")?;
+        Ok(w.data)
+    }
+
+    /// Every alias of the VM's own firewall (`GET …/firewall/aliases`) — a
+    /// name for a CIDR or address, usable in a rule's `source`/`dest` as
+    /// `+name` instead of the raw value.
+    ///
+    /// Scoped to this ONE VM. `/cluster/firewall/aliases` is cluster-wide
+    /// administration, out of scope here (`docs/proxmox/matrix-9.2.2.md`
+    /// marks it `unsupported-by-design`), and so is
+    /// `/nodes/{node}/lxc/{vmid}/firewall/aliases` — see the same file, ADR-0049 D4.
+    pub fn firewall_aliases(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/aliases",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall aliases")?;
+        Ok(w.data)
+    }
+
+    /// One alias of the VM's own firewall, by name
+    /// (`GET …/firewall/aliases/{name}`).
+    pub fn firewall_alias(&self, vmid: u32, name: &str) -> Result<serde_json::Value> {
+        validate_firewall_object_name(name)?;
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/aliases/{name}",
+            self.node
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "firewall alias")?;
+        Ok(w.data)
+    }
+
+    /// Names a CIDR or address in the VM's own firewall namespace
+    /// (`POST …/firewall/aliases`).
+    ///
+    /// `name` and `cidr` are both checked before anything reaches the wire
+    /// — see [`validate_firewall_object_name`] and
+    /// [`validate_firewall_cidr`], the same posture every other input this
+    /// crate cannot follow through blindly is held to.
+    pub fn add_firewall_alias(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        cidr: &str,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        validate_firewall_cidr(cidr)?;
+        let mut form: Vec<(&str, &str)> = vec![("name", name), ("cidr", cidr)];
+        if let Some(c) = comment {
+            form.push(("comment", c));
+        }
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::AddFirewallAlias,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/aliases", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .firewall_aliases(vmid)?
+                    .iter()
+                    .any(|a| a.get("name").and_then(|v| v.as_str()) == Some(name)))
+            }),
+        )
+    }
+
+    /// Changes the `cidr`/`comment` of an alias already named
+    /// (`PUT …/firewall/aliases/{name}`). `None` means "leave it as the node
+    /// already has it", not "clear it" — the same convention
+    /// [`Self::update_firewall_rule`] uses, and for the same reason there is
+    /// no probe here: an arbitrary set of changed fields has no single read
+    /// this could compare against without assuming which ones were asked for.
+    pub fn update_firewall_alias(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        cidr: Option<&str>,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        if let Some(c) = cidr {
+            validate_firewall_cidr(c)?;
+        }
+        let mut form: Vec<(&str, &str)> = Vec::new();
+        if let Some(c) = cidr {
+            form.push(("cidr", c));
+        }
+        if let Some(c) = comment {
+            form.push(("comment", c));
+        }
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::UpdateFirewallAlias,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/aliases/{name}", self.node),
+                    &form,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Removes an alias (`DELETE …/firewall/aliases/{name}`). The probe is
+    /// the node's own list, as on [`Self::delete_firewall_rule`]: no entry
+    /// left under that name, never taken from what the call said.
+    pub fn delete_firewall_alias(&self, ledger: &Ledger, vmid: u32, name: &str) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        let path = format!("/nodes/{}/qemu/{vmid}/firewall/aliases/{name}", self.node);
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::DeleteFirewallAlias,
+            || self.delete(&path),
+            Some(&|| {
+                Ok(!self
+                    .firewall_aliases(vmid)?
+                    .iter()
+                    .any(|a| a.get("name").and_then(|v| v.as_str()) == Some(name)))
+            }),
+        )
+    }
+
+    /// Every named IP set of the VM's own firewall (`GET …/firewall/ipset`)
+    /// — the SET names themselves, not the CIDR entries inside any one of
+    /// them (see [`Self::firewall_ipset_entries`] for that).
+    pub fn firewall_ipsets(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/firewall/ipset", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall ipsets")?;
+        Ok(w.data)
+    }
+
+    /// Creates a new, empty named IP set (`POST …/firewall/ipset`). Entries
+    /// are added to it one at a time afterwards, with
+    /// [`Self::add_firewall_ipset_cidr`].
+    pub fn create_firewall_ipset(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        comment: Option<&str>,
+    ) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        let mut form: Vec<(&str, &str)> = vec![("name", name)];
+        if let Some(c) = comment {
+            form.push(("comment", c));
+        }
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::CreateFirewallIpset,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/ipset", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .firewall_ipsets(vmid)?
+                    .iter()
+                    .any(|s| s.get("name").and_then(|v| v.as_str()) == Some(name)))
+            }),
+        )
+    }
+
+    /// Removes a whole named IP set (`DELETE …/firewall/ipset/{name}`). The
+    /// node refuses this while a rule still references the set — its own
+    /// business logic, surfaced as an ordinary node error and not pre-empted
+    /// here, the same posture [`Self::delete_sdn_zone`] takes for a zone
+    /// still referenced by a vnet. [`Self::firewall_refs`] is how a caller
+    /// checks that BEFORE trying.
+    pub fn delete_firewall_ipset(&self, ledger: &Ledger, vmid: u32, name: &str) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        let path = format!("/nodes/{}/qemu/{vmid}/firewall/ipset/{name}", self.node);
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::DeleteFirewallIpset,
+            || self.delete(&path),
+            Some(&|| {
+                Ok(!self
+                    .firewall_ipsets(vmid)?
+                    .iter()
+                    .any(|s| s.get("name").and_then(|v| v.as_str()) == Some(name)))
+            }),
+        )
+    }
+
+    /// Every CIDR/address entry of one named IP set
+    /// (`GET …/firewall/ipset/{name}`) — NOT the set names themselves (see
+    /// [`Self::firewall_ipsets`] for that).
+    pub fn firewall_ipset_entries(&self, vmid: u32, name: &str) -> Result<Vec<serde_json::Value>> {
+        validate_firewall_object_name(name)?;
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/ipset/{name}",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall ipset entries")?;
+        Ok(w.data)
+    }
+
+    /// Adds one CIDR/address entry to a set already created
+    /// (`POST …/firewall/ipset/{name}`).
+    ///
+    /// **Same path as [`Self::firewall_ipset_entries`]'s `GET` and
+    /// [`Self::delete_firewall_ipset`]'s `DELETE`** — the set is addressed by
+    /// `{name}` in the URL, and this is a DIFFERENT operation from
+    /// [`Self::create_firewall_ipset`] (which is also a `POST`, to
+    /// `…/firewall/ipset` with no `{name}` in the path — creating the set
+    /// itself, not an entry inside one). Reading the two `TaskKind` doc
+    /// comments side by side is the fastest way to tell them apart.
+    pub fn add_firewall_ipset_cidr(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        cidr: &str,
+        opts: &IpsetCidrOpts,
+    ) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        validate_firewall_cidr(cidr)?;
+        let extra = ipset_cidr_fields(opts);
+        let mut form: Vec<(&str, &str)> = vec![("cidr", cidr)];
+        form.extend(extra.iter().map(|(k, v)| (*k, v.as_str())));
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::AddFirewallIpsetCidr,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/ipset/{name}", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .firewall_ipset_entries(vmid, name)?
+                    .iter()
+                    .any(|e| e.get("cidr").and_then(|v| v.as_str()) == Some(cidr)))
+            }),
+        )
+    }
+
+    /// One CIDR/address entry of a set, by its own value
+    /// (`GET …/firewall/ipset/{name}/{cidr}`).
+    ///
+    /// `cidr` is percent-encoded before it goes into the URL — it is a
+    /// second path segment (`{cidr}`) that itself contains a `/`
+    /// (`10.0.0.0/8`), the same trap [`Self::delete_backup`]'s doc comment
+    /// warns about for a volume id.
+    pub fn firewall_ipset_cidr(
+        &self,
+        vmid: u32,
+        name: &str,
+        cidr: &str,
+    ) -> Result<serde_json::Value> {
+        validate_firewall_object_name(name)?;
+        validate_firewall_cidr(cidr)?;
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/firewall/ipset/{name}/{}",
+            self.node,
+            urlencode(cidr)
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "firewall ipset entry")?;
+        Ok(w.data)
+    }
+
+    /// Changes the `comment`/`nomatch` of an entry already in the set
+    /// (`PUT …/firewall/ipset/{name}/{cidr}`). The entry's `cidr` itself is
+    /// the URL path's own identifier and is not one of the fields this sends
+    /// — removing and re-adding is the node's own way to change it. No
+    /// probe, for the same reason [`Self::update_firewall_alias`] has none.
+    pub fn update_firewall_ipset_cidr(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        cidr: &str,
+        opts: &IpsetCidrOpts,
+    ) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        validate_firewall_cidr(cidr)?;
+        let extra = ipset_cidr_fields(opts);
+        let form: Vec<(&str, &str)> = extra.iter().map(|(k, v)| (*k, v.as_str())).collect();
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::UpdateFirewallIpsetCidr,
+            || {
+                self.put_form(
+                    &format!(
+                        "/nodes/{}/qemu/{vmid}/firewall/ipset/{name}/{}",
+                        self.node,
+                        urlencode(cidr)
+                    ),
+                    &form,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Removes one CIDR/address entry from a set
+    /// (`DELETE …/firewall/ipset/{name}/{cidr}`). The probe is the set's own
+    /// remaining entries, as on [`Self::delete_firewall_alias`].
+    pub fn delete_firewall_ipset_cidr(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        cidr: &str,
+    ) -> Result<()> {
+        validate_firewall_object_name(name)?;
+        validate_firewall_cidr(cidr)?;
+        let path = format!(
+            "/nodes/{}/qemu/{vmid}/firewall/ipset/{name}/{}",
+            self.node,
+            urlencode(cidr)
+        );
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::DeleteFirewallIpsetCidr,
+            || self.delete(&path),
+            Some(&|| {
+                Ok(!self
+                    .firewall_ipset_entries(vmid, name)?
+                    .iter()
+                    .any(|e| e.get("cidr").and_then(|v| v.as_str()) == Some(cidr)))
+            }),
+        )
+    }
+
+    /// The tail of the VM's own firewall log (`GET …/firewall/log`) — what
+    /// `pve-firewall` itself has logged for this VM, raw. No `start`/`limit`
+    /// paging parameter is sent; only the node's own default page is asked
+    /// for, the same "no complexity beyond what is proven" restraint
+    /// [`Self::firewall_options`]'s raw-`Value` return already applies.
+    pub fn firewall_log(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/firewall/log", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall log")?;
+        Ok(w.data)
+    }
+
+    /// What refers to this VM's own aliases/ipsets (`GET …/firewall/refs`)
+    /// — read BEFORE deleting an alias or a set, to avoid breaking a rule
+    /// that names it. [`Self::delete_firewall_ipset`]'s doc comment points
+    /// here for exactly that reason.
+    pub fn firewall_refs(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/firewall/refs", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "firewall refs")?;
+        Ok(w.data)
+    }
+
     /// Issues a task-creating request and waits for the task — **again, while
     /// the node answers that the VM's config lock is busy**.
     ///
@@ -2805,6 +3265,113 @@ fn validate_firewall_direction(rule_type: &str) -> Result<()> {
             "invalid Proxmox firewall rule type '{rule_type}': expected 'in' or 'out'"
         )))
     }
+}
+
+/// The optional fields of one entry of a named IP set —
+/// [`Client::add_firewall_ipset_cidr`] and
+/// [`Client::update_firewall_ipset_cidr`], as the node names them on the
+/// wire. `cidr` itself is not here: [`Client::add_firewall_ipset_cidr`]
+/// takes it as its own required parameter (an entry cannot be created
+/// without one), and [`Client::update_firewall_ipset_cidr`] addresses it
+/// through the URL path, where it is the identifier being updated rather
+/// than a field being changed.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct IpsetCidrOpts<'a> {
+    pub comment: Option<&'a str>,
+    /// The node's own `nomatch` — an entry marked this way EXCLUDES its
+    /// `cidr` from the set instead of including it (a "deny within an
+    /// allow" carve-out). `None` here is sent as nothing at all, which the
+    /// node defaults to `false`/included — unlike
+    /// [`FirewallRuleOpts::enable`], there is no equivalent "created but
+    /// silently doing the opposite of what it looks like" trap for this
+    /// field to guard against: an entry with no `nomatch` sent behaves
+    /// exactly as an entry with `nomatch=0` sent, on the node's own default.
+    pub nomatch: Option<bool>,
+}
+
+/// The fields of [`IpsetCidrOpts`] that both
+/// [`Client::add_firewall_ipset_cidr`] and
+/// [`Client::update_firewall_ipset_cidr`] forward verbatim — the whole
+/// struct, since unlike [`FirewallRuleOpts`] neither caller here has a field
+/// it handles specially itself. Pure, so "each key at most once, nothing for
+/// an all-`None` set" is a test, the same as
+/// [`firewall_rule_common_fields`]'s own sibling test already holds it to.
+fn ipset_cidr_fields(opts: &IpsetCidrOpts) -> Vec<(&'static str, String)> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    if let Some(c) = opts.comment {
+        out.push(("comment", c.to_string()));
+    }
+    if let Some(nm) = opts.nomatch {
+        out.push(("nomatch", if nm { "1" } else { "0" }.to_string()));
+    }
+    out
+}
+
+/// A firewall alias or IP-set name — Proxmox's own `pve-fw-alias-name`/
+/// `pve-fw-ipset-name` formats, which this repo's extracted route inventory
+/// (`docs/proxmox/api-9.2.2.routes.json`) does not carry a copy of (it has
+/// method/path/perm/returns only, never a field's regex) — so, like
+/// [`crate::sdn::validate_sdn_id`]'s comment says of the SDN id format, this
+/// is INFERRED from Proxmox's own published `PVE::JSONSchema`/
+/// `PVE::Firewall` format registration, not extracted from a live response.
+/// Both formats share the exact same shape in the upstream schema: a letter,
+/// then one or more letters/digits/`-`/`_` (minimum length 2). Refused
+/// before it reaches a URL path or the node's own namespace, the same
+/// discipline [`crate::sdn::validate_sdn_id`] and
+/// [`crate::validate_bridge_name`] already apply to what goes into a path —
+/// worth confirming against a live node's actual 400 message the first time
+/// one is available, the same note [`TaskKind::worker_type`] carries for its
+/// own guesses.
+fn validate_firewall_object_name(name: &str) -> Result<()> {
+    let mut chars = name.chars();
+    let first_ok = matches!(chars.next(), Some(c) if c.is_ascii_alphabetic());
+    let rest_ok = chars.clone().count() >= 1
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
+    if first_ok && rest_ok {
+        Ok(())
+    } else {
+        Err(Error::InvalidFirewallObjectName(format!(
+            "invalid Proxmox firewall alias/ipset name '{name}': expected a letter, then one \
+             or more letters, digits, '-' or '_' (at least 2 characters total)"
+        )))
+    }
+}
+
+/// A CIDR or bare address for an alias's `cidr` field, or one entry of a
+/// named IP set — checked for BASIC shape before it goes into a URL path
+/// segment (`ipset/{name}/{cidr}`, percent-encoded by [`urlencode`]) and
+/// into the node's own address parser.
+///
+/// Deliberately shallow: an address (`std::net::IpAddr`, so both IPv4 and
+/// IPv6 — Proxmox's own alias/ipset entries accept either) with an optional
+/// `/<prefix>` whose value fits the address family's own bit width. This is
+/// NOT a full re-implementation of the node's own `pve-fw-addr-spec`
+/// grammar (which also accepts DNS-style ranges the node resolves itself);
+/// it exists only to keep a value with the wrong general SHAPE — a
+/// hostname, a stray path separator, empty text — from ever reaching the
+/// wire, the same "refuse what is clearly wrong, let the node be the
+/// authority on the rest" restraint [`validate_firewall_action`] applies to
+/// a rule's verdict.
+fn validate_firewall_cidr(value: &str) -> Result<()> {
+    let bad = || {
+        Error::InvalidFirewallAddress(format!(
+            "invalid Proxmox firewall address '{value}': expected an IPv4/IPv6 address, \
+             optionally with a '/<prefix>'"
+        ))
+    };
+    let (addr, prefix) = match value.split_once('/') {
+        Some((a, p)) => (a, Some(p)),
+        None => (value, None),
+    };
+    let ip: std::net::IpAddr = addr.parse().map_err(|_| bad())?;
+    if let Some(p) = prefix {
+        let max = if ip.is_ipv4() { 32 } else { 128 };
+        let n: u32 = p.parse().map_err(|_| bad())?;
+        if n > max {
+            return Err(bad());
+        }
+    }
+    Ok(())
 }
 
 /// Everything in [`VmConfig`] that this backend cannot honour, refused by NAME.
@@ -4637,6 +5204,97 @@ mod tests {
                 "{absent} must not come from this helper: {fields:?}"
             );
         }
+    }
+
+    /// The shape Proxmox's own `pve-fw-alias-name`/`pve-fw-ipset-name`
+    /// formats accept: a letter, then one or more letters/digits/`-`/`_`.
+    #[test]
+    fn firewall_object_names_need_a_leading_letter_and_a_second_character() {
+        for ok in ["a1", "Web", "my-set_1", "z9"] {
+            assert!(validate_firewall_object_name(ok).is_ok(), "{ok:?}");
+        }
+        for bad in ["", "a", "1abc", "-abc", "_abc", "a b", "a/b", "a."] {
+            let e = validate_firewall_object_name(bad).unwrap_err().to_string();
+            assert!(e.contains(bad), "the refusal must name the value: {e}");
+        }
+    }
+
+    /// An address with a `/<prefix>` past the address family's own bit width
+    /// is refused, and so is anything that does not parse as an address at
+    /// all — but the shallow validator does not try to be the node's own
+    /// `pve-fw-addr-spec` grammar (DNS-style ranges included).
+    #[test]
+    fn firewall_addresses_are_checked_by_shape_not_reimplemented() {
+        for ok in [
+            "10.0.0.0/8",
+            "192.168.1.5",
+            "::1",
+            "2001:db8::/32",
+            "0.0.0.0/0",
+        ] {
+            assert!(validate_firewall_cidr(ok).is_ok(), "{ok:?}");
+        }
+        for bad in [
+            "",
+            "not-an-address",
+            "10.0.0.0/33",
+            "::1/129",
+            "10.0.0.0/",
+            "10.0.0.0/-1",
+        ] {
+            let e = validate_firewall_cidr(bad).unwrap_err().to_string();
+            assert!(e.contains(bad), "the refusal must name the value: {e}");
+        }
+    }
+
+    /// `comment` and `nomatch` each land under the node's own name exactly
+    /// once, and an all-`None` set sends nothing — the same shape
+    /// `firewall_rule_common_fields`'s own sibling test already holds its
+    /// counterpart to.
+    #[test]
+    fn ipset_cidr_fields_default_sends_nothing_and_each_key_lands_once() {
+        assert_eq!(ipset_cidr_fields(&IpsetCidrOpts::default()), []);
+
+        let fields = ipset_cidr_fields(&IpsetCidrOpts {
+            comment: Some("web"),
+            nomatch: Some(true),
+        });
+        assert_eq!(
+            fields.iter().filter(|(k, _)| *k == "comment").count(),
+            1,
+            "{fields:?}"
+        );
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(k, _)| *k == "comment")
+                .map(|(_, v)| v.as_str()),
+            Some("web")
+        );
+        assert_eq!(
+            fields.iter().filter(|(k, _)| *k == "nomatch").count(),
+            1,
+            "{fields:?}"
+        );
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(k, _)| *k == "nomatch")
+                .map(|(_, v)| v.as_str()),
+            Some("1")
+        );
+
+        let fields = ipset_cidr_fields(&IpsetCidrOpts {
+            comment: None,
+            nomatch: Some(false),
+        });
+        assert_eq!(
+            fields
+                .iter()
+                .find(|(k, _)| *k == "nomatch")
+                .map(|(_, v)| v.as_str()),
+            Some("0")
+        );
     }
 
     /// A 401 has to be told apart from every other failure, because only that

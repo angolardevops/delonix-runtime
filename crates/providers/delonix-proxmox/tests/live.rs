@@ -1503,3 +1503,233 @@ fn cloudinit_pending_answers_and_regenerate_reaches_the_rendered_file() {
 
     b.destroy(vmdir, &vm).expect("destroy");
 }
+
+/// The VM's own firewall's aliases, IP sets, log and refs — the rest of the
+/// per-VM firewall surface [`the_vms_own_firewall_rule_round_trips_through_the_node`]
+/// (above) does not cover (that one exercises `options`/`rules` only).
+///
+/// Round-trips an alias and an IP-set entry through the node, reading each
+/// back TWO ways (the list, and the single-item route) the same way the
+/// rule test does, never trusting what the write call itself claimed —
+/// and confirms a field an update did not name survives it, the same
+/// property the rule test's update case proves for a rule.
+#[test]
+fn the_vms_own_firewall_aliases_ipsets_log_and_refs_round_trip_through_the_node() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxfwa{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let client = b.client();
+
+    // A caller confirming the sub-path exists before touching anything
+    // under it — see `Client::firewall_index`'s own doc comment for why
+    // this test asserts nothing about the SHAPE of what comes back, only
+    // that the route answers at all.
+    client.firewall_index(vmid).expect("firewall index");
+
+    // Proxmox's own alias/ipset name format (a letter then one or more
+    // letters/digits/`-`/`_`) is checked client-side by
+    // `validate_firewall_object_name`; the suffix keeps this run from
+    // colliding with another one on the shared lab node.
+    let suffix = std::process::id() % 1_000_000;
+    let alias = format!("a{suffix}");
+    let ipset = format!("s{suffix}");
+
+    // Alias: add, read back TWO ways, update one field and confirm the
+    // other survives untouched, delete.
+    client
+        .add_firewall_alias(&ledger, vmid, &alias, "10.10.0.0/16", Some("delonix-live"))
+        .expect("add an alias");
+    let aliases = client.firewall_aliases(vmid).expect("list aliases");
+    let added = aliases
+        .iter()
+        .find(|a| a.get("name").and_then(|v| v.as_str()) == Some(alias.as_str()))
+        .unwrap_or_else(|| panic!("the added alias is not in the node's list: {aliases:?}"));
+    assert_eq!(
+        added.get("cidr").and_then(|v| v.as_str()),
+        Some("10.10.0.0/16")
+    );
+    let single = client
+        .firewall_alias(vmid, &alias)
+        .expect("read the alias by name");
+    assert_eq!(
+        single.get("comment").and_then(|c| c.as_str()),
+        Some("delonix-live"),
+        "firewall_alias(name) disagrees with the node's own list: {single}"
+    );
+
+    client
+        .update_firewall_alias(&ledger, vmid, &alias, Some("10.11.0.0/16"), None)
+        .expect("update the alias");
+    let updated = client
+        .firewall_alias(vmid, &alias)
+        .expect("read the alias back after the update");
+    assert_eq!(
+        updated.get("cidr").and_then(|v| v.as_str()),
+        Some("10.11.0.0/16"),
+        "the update did not stick: {updated}"
+    );
+    assert_eq!(
+        updated.get("comment").and_then(|c| c.as_str()),
+        Some("delonix-live"),
+        "a field the update did not name must survive it: {updated}"
+    );
+
+    client
+        .delete_firewall_alias(&ledger, vmid, &alias)
+        .expect("delete the alias");
+    let aliases_after = client
+        .firewall_aliases(vmid)
+        .expect("list aliases after delete");
+    assert!(
+        !aliases_after
+            .iter()
+            .any(|a| a.get("name").and_then(|v| v.as_str()) == Some(alias.as_str())),
+        "the alias is still on the node after delete: {aliases_after:?}"
+    );
+
+    // IP set: create the (empty) set, add one CIDR entry, read it back TWO
+    // ways, update its `nomatch` and confirm `comment` — a field that
+    // update did not name — survives untouched, remove the entry, remove
+    // the set.
+    client
+        .create_firewall_ipset(&ledger, vmid, &ipset, Some("delonix-live-set"))
+        .expect("create an ipset");
+    let ipsets = client.firewall_ipsets(vmid).expect("list ipsets");
+    assert!(
+        ipsets
+            .iter()
+            .any(|s| s.get("name").and_then(|v| v.as_str()) == Some(ipset.as_str())),
+        "the created ipset is not in the node's list: {ipsets:?}"
+    );
+
+    let entry_cidr = "10.30.0.0/24";
+    client
+        .add_firewall_ipset_cidr(
+            &ledger,
+            vmid,
+            &ipset,
+            entry_cidr,
+            &delonix_proxmox::IpsetCidrOpts {
+                comment: Some("entry"),
+                nomatch: None,
+            },
+        )
+        .expect("add an ipset entry");
+    let entries = client
+        .firewall_ipset_entries(vmid, &ipset)
+        .expect("list ipset entries");
+    let added_entry = entries
+        .iter()
+        .find(|e| e.get("cidr").and_then(|v| v.as_str()) == Some(entry_cidr))
+        .unwrap_or_else(|| panic!("the added entry is not in the set: {entries:?}"));
+    assert_eq!(
+        added_entry.get("comment").and_then(|c| c.as_str()),
+        Some("entry")
+    );
+    let single_entry = client
+        .firewall_ipset_cidr(vmid, &ipset, entry_cidr)
+        .expect("read the entry by cidr — proves the '/' in the path segment round-trips");
+    assert_eq!(
+        single_entry.get("comment").and_then(|c| c.as_str()),
+        Some("entry"),
+        "firewall_ipset_cidr(name, cidr) disagrees with the node's own list: {single_entry}"
+    );
+
+    client
+        .update_firewall_ipset_cidr(
+            &ledger,
+            vmid,
+            &ipset,
+            entry_cidr,
+            &delonix_proxmox::IpsetCidrOpts {
+                comment: None,
+                nomatch: Some(true),
+            },
+        )
+        .expect("update the ipset entry");
+    let updated_entry = client
+        .firewall_ipset_cidr(vmid, &ipset, entry_cidr)
+        .expect("read the entry back after the update");
+    assert_eq!(
+        updated_entry.get("nomatch").and_then(|v| v.as_u64()),
+        Some(1),
+        "the update did not stick: {updated_entry}"
+    );
+    assert_eq!(
+        updated_entry.get("comment").and_then(|c| c.as_str()),
+        Some("entry"),
+        "a field the update did not name must survive it: {updated_entry}"
+    );
+
+    // What refers to the alias/ipset just built — read while they still
+    // exist, the point at which a real caller would consult this before
+    // deciding whether a delete is safe.
+    client.firewall_refs(vmid).expect("firewall refs");
+
+    // The tail of the firewall's own log — never enabled or exercised by
+    // this test, so this only proves the route answers, not that it is
+    // non-empty.
+    client.firewall_log(vmid).expect("firewall log");
+
+    client
+        .delete_firewall_ipset_cidr(&ledger, vmid, &ipset, entry_cidr)
+        .expect("delete the ipset entry");
+    let entries_after = client
+        .firewall_ipset_entries(vmid, &ipset)
+        .expect("list ipset entries after delete");
+    assert!(
+        entries_after.is_empty(),
+        "the entry is still in the set after delete: {entries_after:?}"
+    );
+
+    client
+        .delete_firewall_ipset(&ledger, vmid, &ipset)
+        .expect("delete the ipset");
+    let ipsets_after = client
+        .firewall_ipsets(vmid)
+        .expect("list ipsets after delete");
+    assert!(
+        !ipsets_after
+            .iter()
+            .any(|s| s.get("name").and_then(|v| v.as_str()) == Some(ipset.as_str())),
+        "the ipset is still on the node after delete: {ipsets_after:?}"
+    );
+
+    let vm = delonix_compute::Vm::new(
+        name,
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    b.stop(vmdir, &vm).expect("stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
