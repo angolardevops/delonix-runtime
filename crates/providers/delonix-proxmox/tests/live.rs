@@ -1081,3 +1081,167 @@ fn move_disk_unlink_and_cloudinit_dump() {
         "the VM is still defined on the node after destroy"
     );
 }
+
+/// which lives entirely in `delonix-sdn` and has no relationship to any of
+/// this. Proves the trap [`delonix_proxmox::Client::firewall_options`]'s doc
+/// comment names — a rule means nothing until the firewall itself is turned
+/// on — and the full loop of a rule (add, read back two ways, update,
+/// delete), every assertion against what the node reports, never against
+/// what a call merely claimed.
+#[test]
+fn the_vms_own_firewall_rule_round_trips_through_the_node() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxfw{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let client = b.client();
+
+    // Turned on explicitly, and read back: nothing below would have any
+    // effect on the node without this, which is the whole reason
+    // `firewall_options`'s doc comment calls it out.
+    client
+        .set_firewall_enabled(&ledger, vmid, true)
+        .expect("enable the VM's own firewall");
+    let opts_on = client.firewall_options(vmid).expect("firewall options");
+    assert_eq!(
+        opts_on.get("enable").and_then(|v| v.as_u64()),
+        Some(1),
+        "the node does not report the firewall as enabled: {opts_on}"
+    );
+
+    // Add one rule, and read it back TWO ways — the list, and the
+    // single-rule route — never trusting what `add_firewall_rule` claimed.
+    let comment = "delonix-live-test";
+    client
+        .add_firewall_rule(
+            &ledger,
+            vmid,
+            "in",
+            "DROP",
+            &delonix_proxmox::FirewallRuleOpts {
+                dest: Some("10.0.0.0/8"),
+                dport: Some("12345"),
+                proto: Some("tcp"),
+                comment: Some(comment),
+                ..Default::default()
+            },
+        )
+        .expect("add a rule");
+    let rules = client.firewall_rules(vmid).expect("list the rules");
+    let added = rules
+        .iter()
+        .find(|r| r.get("comment").and_then(|c| c.as_str()) == Some(comment))
+        .unwrap_or_else(|| panic!("the added rule is not in the node's list: {rules:?}"));
+    assert_eq!(added.get("type").and_then(|v| v.as_str()), Some("in"));
+    assert_eq!(added.get("action").and_then(|v| v.as_str()), Some("DROP"));
+    assert_eq!(
+        added.get("dest").and_then(|v| v.as_str()),
+        Some("10.0.0.0/8")
+    );
+    assert_eq!(added.get("dport").and_then(|v| v.as_str()), Some("12345"));
+    assert_eq!(
+        added.get("enable").and_then(|v| v.as_u64()),
+        Some(1),
+        "`add_firewall_rule` must send `enable` explicitly rather than trust \
+         the node's own default: {added}"
+    );
+    let pos = added
+        .get("pos")
+        .and_then(|p| p.as_u64())
+        .expect("the node's own rule carries no `pos`") as u32;
+    let single = client
+        .firewall_rule(vmid, pos)
+        .expect("read the rule by position");
+    assert_eq!(
+        single.get("comment").and_then(|c| c.as_str()),
+        Some(comment),
+        "firewall_rule(pos) disagrees with the node's own list: {single}"
+    );
+
+    // Update it — flip the verdict, and confirm a field the update did NOT
+    // name (`dest`) survives it untouched.
+    client
+        .update_firewall_rule(
+            &ledger,
+            vmid,
+            pos,
+            &delonix_proxmox::FirewallRuleOpts {
+                action: Some("ACCEPT"),
+                ..Default::default()
+            },
+        )
+        .expect("update the rule");
+    let updated = client
+        .firewall_rule(vmid, pos)
+        .expect("read the rule back after the update");
+    assert_eq!(
+        updated.get("action").and_then(|v| v.as_str()),
+        Some("ACCEPT"),
+        "the update did not stick: {updated}"
+    );
+    assert_eq!(
+        updated.get("dest").and_then(|v| v.as_str()),
+        Some("10.0.0.0/8"),
+        "a field the update did not name must survive it: {updated}"
+    );
+
+    // Delete it — the proof is the node's own list, empty again.
+    client
+        .delete_firewall_rule(&ledger, vmid, pos)
+        .expect("delete the rule");
+    let after_delete = client
+        .firewall_rules(vmid)
+        .expect("list rules after delete");
+    assert!(
+        after_delete.is_empty(),
+        "the rule is still on the node after delete: {after_delete:?}"
+    );
+
+    // Turn the firewall back off, and confirm it on the node before cleanup.
+    client
+        .set_firewall_enabled(&ledger, vmid, false)
+        .expect("disable the VM's own firewall");
+    let opts_off = client.firewall_options(vmid).expect("firewall options");
+    assert_eq!(
+        opts_off.get("enable").and_then(|v| v.as_u64()),
+        Some(0),
+        "the node still reports the firewall as enabled: {opts_off}"
+    );
+
+    let vm = delonix_compute::Vm::new(
+        name,
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    b.stop(vmdir, &vm).expect("stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
