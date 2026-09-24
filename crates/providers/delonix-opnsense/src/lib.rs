@@ -60,9 +60,7 @@ mod error;
 
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
 
-use delonix_sdn::gateway::{
-    EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule,
-};
+use delonix_sdn::gateway::{EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -208,12 +206,7 @@ impl Client {
         Ok(me)
     }
 
-    fn request(
-        &self,
-        method: reqwest::Method,
-        path: &str,
-        body: Option<&Value>,
-    ) -> Result<Value> {
+    fn request(&self, method: reqwest::Method, path: &str, body: Option<&Value>) -> Result<Value> {
         let url = format!("{}/api/{}", self.base, path.trim_start_matches('/'));
         let mut req = self
             .http
@@ -276,7 +269,11 @@ impl Client {
         Ok(json)
     }
 
-    fn find_uuid_by(&self, search_path: &str, rows_key_match: impl Fn(&Value) -> bool) -> Result<Option<String>> {
+    fn find_uuid_by(
+        &self,
+        search_path: &str,
+        rows_key_match: impl Fn(&Value) -> bool,
+    ) -> Result<Option<String>> {
         let body = self.request(
             reqwest::Method::POST,
             search_path,
@@ -434,9 +431,7 @@ fn validation_failure(body: &Value) -> Option<Error> {
         Some(validations) if !validations.is_empty() => {
             let mut msgs: Vec<String> = validations
                 .iter()
-                .map(|(field, reason)| {
-                    format!("{field}: {}", reason.as_str().unwrap_or_default())
-                })
+                .map(|(field, reason)| format!("{field}: {}", reason.as_str().unwrap_or_default()))
                 .collect();
             msgs.sort();
             Some(Error::Validation(msgs.join("; ")))
@@ -481,22 +476,25 @@ pub const ID: &str = "opnsense";
 /// "down" for the rest of the process.
 pub fn register_with(target: Target) -> delonix_model::Result<()> {
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    delonix_sdn::gateway::register_gateway_provider(delonix_sdn::gateway::GatewayProviderRegistration {
-        id: ID,
-        aliases: &[],
-        new: Box::new(move || {
-            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-            if let Some(c) = slot.as_ref() {
-                return Ok(Box::new(OpnsenseGatewayProvider::sharing(c.clone()))
-                    as Box<dyn GatewayProvider>);
-            }
-            let c = std::sync::Arc::new(
-                Client::connect(&target).map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
-            );
-            *slot = Some(c.clone());
-            Ok(Box::new(OpnsenseGatewayProvider::sharing(c)) as Box<dyn GatewayProvider>)
-        }),
-    })?;
+    delonix_sdn::gateway::register_gateway_provider(
+        delonix_sdn::gateway::GatewayProviderRegistration {
+            id: ID,
+            aliases: &[],
+            new: Box::new(move || {
+                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+                if let Some(c) = slot.as_ref() {
+                    return Ok(Box::new(OpnsenseGatewayProvider::sharing(c.clone()))
+                        as Box<dyn GatewayProvider>);
+                }
+                let c = std::sync::Arc::new(
+                    Client::connect(&target)
+                        .map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
+                );
+                *slot = Some(c.clone());
+                Ok(Box::new(OpnsenseGatewayProvider::sharing(c)) as Box<dyn GatewayProvider>)
+            }),
+        },
+    )?;
     Ok(())
 }
 
@@ -531,7 +529,9 @@ impl GatewayProvider for OpnsenseGatewayProvider {
     }
 
     fn commit(&self) -> delonix_model::Result<()> {
-        self.client.reconfigure_aliases().map_err(Error::into_root)?;
+        self.client
+            .reconfigure_aliases()
+            .map_err(Error::into_root)?;
         self.client.apply_filter().map_err(Error::into_root)
     }
 }

@@ -78,7 +78,9 @@ fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
         "ensure_rule must be idempotent"
     );
 
-    provider.commit().expect("reconfigure aliases and apply the filter");
+    provider
+        .commit()
+        .expect("reconfigure aliases and apply the filter");
 
     // Remove the RULE first, alias second — the appliance validates a
     // rule's source against the alias table on write (measured here: doing
@@ -92,7 +94,9 @@ fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
     provider
         .remove_alias(&alias.name)
         .expect("remove the alias");
-    provider.commit().expect("reconfigure and apply the removal");
+    provider
+        .commit()
+        .expect("reconfigure and apply the removal");
 
     // Prove the rule was actually removed, not just unlisted: a plain-CIDR
     // rule (no alias dependency) that ensure_rule would report

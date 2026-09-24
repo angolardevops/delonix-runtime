@@ -54,12 +54,14 @@ type Script = Arc<Mutex<Vec<((String, String), VecDeque<Reply>)>>>;
 
 fn stock(method: &str, path: &str) -> Reply {
     match (method, path) {
-        ("GET", "core/firmware/status") => {
-            Reply::Json(200, r#"{"CORE_ABI":"26.1","CORE_NICKNAME":"Witty Woodpecker"}"#.into())
-        }
-        ("POST", p) if p.ends_with("search_item") || p.ends_with("search_rule") => {
-            Reply::Json(200, r#"{"total":0,"rowCount":0,"current":1,"rows":[]}"#.into())
-        }
+        ("GET", "core/firmware/status") => Reply::Json(
+            200,
+            r#"{"CORE_ABI":"26.1","CORE_NICKNAME":"Witty Woodpecker"}"#.into(),
+        ),
+        ("POST", p) if p.ends_with("search_item") || p.ends_with("search_rule") => Reply::Json(
+            200,
+            r#"{"total":0,"rowCount":0,"current":1,"rows":[]}"#.into(),
+        ),
         ("POST", p) if p.ends_with("add_item") || p.ends_with("add_rule") => Reply::Json(
             200,
             r#"{"result":"saved","uuid":"00000000-0000-0000-0000-000000000000"}"#.into(),
@@ -195,11 +197,7 @@ fn serve_one(
             500 => "Internal Server Error",
             _ => "Status",
         };
-        let location = if status == 302 {
-            "Location: /\r\n"
-        } else {
-            ""
-        };
+        let location = if status == 302 { "Location: /\r\n" } else { "" };
         let _ = write!(
             tls,
             "HTTP/1.1 {status} {reason}\r\n{location}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -287,11 +285,8 @@ fn a_certificate_the_client_cannot_verify_is_refused_and_the_same_one_as_ca_is_a
 
 #[test]
 fn a_302_with_no_body_is_unauthorized_and_never_followed() {
-    let appliance = MockAppliance::start(script(&[(
-        "GET",
-        "core/firmware/status",
-        Reply::Redirect,
-    )]));
+    let appliance =
+        MockAppliance::start(script(&[("GET", "core/firmware/status", Reply::Redirect)]));
     let err = Client::connect(&target(&appliance)).unwrap_err();
     assert!(matches!(err, Error::Unauthorized(_)), "{err}");
     assert_eq!(
@@ -306,7 +301,10 @@ fn a_401_is_unauthorized() {
     let appliance = MockAppliance::start(script(&[(
         "GET",
         "core/firmware/status",
-        Reply::Json(401, r#"{"status":401,"message":"Authentication Failed"}"#.into()),
+        Reply::Json(
+            401,
+            r#"{"status":401,"message":"Authentication Failed"}"#.into(),
+        ),
     )]));
     let err = Client::connect(&target(&appliance)).unwrap_err();
     assert!(matches!(err, Error::Unauthorized(_)), "{err}");
@@ -393,8 +391,7 @@ fn a_truncated_body_is_a_transport_failure_not_a_decode_error() {
 
 #[test]
 fn a_connection_dropped_outright_is_a_request_failure() {
-    let appliance =
-        MockAppliance::start(script(&[("GET", "core/firmware/status", Reply::Drop)]));
+    let appliance = MockAppliance::start(script(&[("GET", "core/firmware/status", Reply::Drop)]));
     let err = Client::connect(&target(&appliance)).unwrap_err();
     assert!(matches!(err, Error::Request(_)), "{err}");
 }
@@ -435,7 +432,9 @@ fn ensure_alias_creates_when_absent_and_reports_already_present_when_found() {
         content: vec!["10.99.99.99".into()],
         description: "test".into(),
     };
-    let outcome = client.ensure_alias(&alias).expect("stock add_item succeeds");
+    let outcome = client
+        .ensure_alias(&alias)
+        .expect("stock add_item succeeds");
     assert_eq!(outcome, EnsureOutcome::Created);
     assert_eq!(appliance.count("POST", "firewall/alias/add_item"), 1);
 }

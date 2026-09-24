@@ -53,8 +53,11 @@ fn register_opnsense_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()>
         .unwrap_or(false);
     let ca_cert_pem = lookup("DELONIX_OPNSENSE_CA_FILE")
         .map(|path| {
-            std::fs::read(&path)
-                .map_err(|e| Error::Invalid(format!("DELONIX_OPNSENSE_CA_FILE: could not read '{path}': {e}")))
+            std::fs::read(&path).map_err(|e| {
+                Error::Invalid(format!(
+                    "DELONIX_OPNSENSE_CA_FILE: could not read '{path}': {e}"
+                ))
+            })
         })
         .transpose()?;
     delonix_opnsense::register_with(delonix_opnsense::Target {

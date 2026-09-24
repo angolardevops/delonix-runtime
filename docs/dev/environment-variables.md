@@ -182,6 +182,20 @@ commands. Background: `docs/adr/0008-proxmox-vm-backend.md`.
 | `DELONIX_PROXMOX_CA_FILE` | `cmd/vmbackends.rs:register_proxmox_with` | A CA certificate (PEM) to trust for the node, in addition to the system roots. | Path to a PEM file; unreadable is an **error**. | The way to verify a node whose certificate an internal CA signed, instead of `DELONIX_PROXMOX_INSECURE_TLS`. |
 | `DELONIX_PROXMOX_TRACE_ROUTES` | `cmd/vmbackends.rs:register_proxmox_with` (read once, handed to the client as `ClientOptions::trace_routes`; the constant `TRACE_ROUTES_ENV` in `crates/providers/delonix-proxmox/src/lib.rs` names it) and `crates/providers/delonix-proxmox/tests/live.rs:backend` (the live suite, whose run is committed as `docs/proxmox/trace-9.2.2.routes`) | Appends `METHOD /path` of every request to this file — the numerator of the coverage matrix (ADR-0049). | Path to a file; empty = off. | Feed it to `scripts/proxmox_api_inventory.py --trace` to mark routes `supported+tested`. |
 
+### OPNsense
+
+The `GatewayProvider` for a real OPNsense appliance (`kind: NetworkGateway`, ADR-0051), registered
+the same way as the Proxmox backend above and read by `cmd::gatewayproviders`.
+
+| Variable | Read by | Purpose | Values / default | Notes |
+|---|---|---|---|---|
+| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:register_opnsense_with` | API endpoint of the appliance. Setting it is what enables the provider. | `https://<host>`. | Requires a credential. |
+| `DELONIX_OPNSENSE_CREDENTIAL` | `cmd/gatewayproviders.rs:opnsense_auth` | Name of a `kind: Secret` holding the credential. | Secret with `key`+`secret` fields — a generated API key/secret pair, never a GUI account's username/password (ADR-0051 Phase 0: those are refused by the API). | Checked **first**. |
+| `DELONIX_OPNSENSE_KEY` | `cmd/gatewayproviders.rs:opnsense_auth` | API key. | | Used with `DELONIX_OPNSENSE_SECRET`; checked after the `kind: Secret`. |
+| `DELONIX_OPNSENSE_SECRET` | `cmd/gatewayproviders.rs:opnsense_auth` (via `credential_value`) | API secret. | Prefer `DELONIX_OPNSENSE_SECRET_FILE` (a `chmod 600` path). | |
+| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:register_opnsense_with` | Skips TLS certificate verification for the appliance. | `1`, `true` or `yes` → skip; default verify. | A stock OPNsense serves a self-signed certificate (measured live, ADR-0051 Phase 0). **Another machine answering in the appliance's name receives the credential.** Opt-in only. |
+| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:register_opnsense_with` | A CA certificate (PEM) to trust for the appliance, in addition to the system roots. | Path to a PEM file; unreadable is an **error**. | Instead of `DELONIX_OPNSENSE_INSECURE_TLS`. |
+
 ### TrueNAS
 
 The TrueNAS provisioner (`kind: Volume` with `spec.provision.truenas`) takes its target from the
@@ -244,6 +258,9 @@ These are read only by tests. Without them the live tests **skip** and print `SK
 | `DELONIX_TRUENAS_TEST_KEY` | `crates/providers/delonix-truenas/tests/live.rs:target` | API key. | | Used instead of user and password when set. |
 | `DELONIX_TRUENAS_TEST_USER` | `crates/providers/delonix-truenas/tests/live.rs:target` | Account for password authentication. | Required without a key. | TLS verification is disabled in these tests. |
 | `DELONIX_TRUENAS_TEST_PASS` | `crates/providers/delonix-truenas/tests/live.rs:target` | Its password. | Required without a key. | |
+| `DELONIX_OPNSENSE_TEST_URL` | `crates/providers/delonix-opnsense/tests/live.rs:target` | OPNsense appliance to run the live client tests against. | `https://<host>`. | Enables the tests. They create and remove one alias and one rule, then confirm the appliance is left clean. |
+| `DELONIX_OPNSENSE_TEST_KEY` | `crates/providers/delonix-opnsense/tests/live.rs:target` | API key. | Required. | |
+| `DELONIX_OPNSENSE_TEST_SECRET` | `crates/providers/delonix-opnsense/tests/live.rs:target` | API secret. | Required. | TLS verification is disabled in these tests. |
 | `DELONIX_UPDATE_FIXTURES` | `crates/adapters/delonix-linux/tests/advisor_fixtures.rs:goldens_match_the_rules_as_they_are_today` | Rewrites the advisor golden fixtures in `crates/adapters/delonix-linux/tests/fixtures/advisor/` instead of comparing against them. | Set (any value) → rewrite. | Regenerate in the **same commit** as the rule change. |
 
 Run the live tests (replace the placeholders; never commit real credentials):
