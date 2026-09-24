@@ -334,3 +334,21 @@ not pick between them yet; Phase 1/2 do not require the answer.
 - Phase 3 (declarative wiring) is explicitly left open. Closing it before
   Phase 0/1/2 exist would be designing a manifest field for an appliance
   behavior nobody has measured yet.
+- **Phase 2 is done (2026-09-24).** `crates/providers/delonix-opnsense`
+  implements `GatewayProvider` for real: `ensure_alias`/`ensure_rule`/
+  `remove_alias`/`remove_rule`/`commit`, built exactly to what Phase 0
+  measured — the flat write shape, `redirect::Policy::none()` so a 302
+  is classified rather than followed, and the `{"result":"failed",
+  "validations":{...}}`-at-200 shape read on every 2xx body. One thing
+  Phase 0's manual `curl` spike had not exercised and only the Rust
+  client caught: `reqwest` does not send `Content-Length: 0` on a
+  bodyless POST the way `curl -X POST` (no `-d`) does, and the
+  appliance's web server answers `411 Length Required` without it —
+  `del_item`/`del_rule`/`apply`/`reconfigure` all needed an explicit
+  empty body attached. 16 failure-injection tests against a TLS mock,
+  and a `tests/live.rs` run end-to-end against `opnsense-adr0051-spike`
+  (create, idempotency-check, commit, remove, commit, and a
+  removal-was-real proof), appliance confirmed clean afterward.
+  `cmd::gatewayproviders` registers it from the environment, mirroring
+  `cmd::vmbackends` exactly. What is NOT built: Phase 3's declarative
+  wiring — nothing in a manifest can select this provider yet.
