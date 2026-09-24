@@ -136,6 +136,72 @@ guessing. **This step needs the owner's go-ahead before it runs** — it
 means standing up a VM on a shared host, which this repo's own operating
 rule treats as an action to do deliberately, not casually.
 
+**Phase 0, started 2026-09-24 — read-side findings measured, write-side
+blocked by this session's own tool policy.** `delonix vm create
+opnsense-adr0051-spike --disk opnsense:26.1 --backend libvirt` (the
+`opnsense:26.1` image was already local from earlier appliance-building
+work — no pull needed). Confirmed and corrected on the way:
+
+- **A single NIC on the appliance is assigned as LAN, not WAN**, and LAN's
+  factory default is a STATIC `192.168.1.1/24` — a subnet this host's
+  `virbr0` (`192.168.122.0/24`) cannot route to, so `delonix vm ls` showed
+  `<none>` for its IP even though the VM had booted fine. Reconfigured LAN
+  to DHCP via the appliance's own console menu (option 2), which put it on
+  `192.168.122.103` — reachable. A real deployment giving OPNsense a WAN
+  interface (the second NIC) would not hit this; a single-NIC spike does.
+- **Username/password Basic Auth is refused** — confirmed empirically, not
+  just read from the docs: `curl -u root:opnsense …/api/core/firmware/status`
+  → `401 {"status":401,"message":"Authentication Failed"}`. Only a
+  generated key/secret pair authenticates.
+- **There is no bootstrap-safe way to mint the FIRST API key** — no CLI
+  command, no console-menu option, nothing short of the web GUI or a root
+  shell. Read the actual source
+  (`OPNsense\Auth\FieldTypes\ApiKeyField::add()`,
+  `/usr/local/opnsense/mvc/app/models/OPNsense/Auth/FieldTypes/
+  ApiKeyField.php`) rather than guessing: `key` and `secret` are each
+  `base64(random_bytes(60))`, the secret is shown exactly once, and what
+  persists in `config.xml` is `key|crypt(secret, '$6$')` — a newline-joined
+  text blob, not per-item XML nodes (`ApiKeyField::setValue` only accepts
+  that richer XML shape when convert-importing an existing config). Minted
+  one from a root console shell by calling
+  `(new OPNsense\Auth\User())->getUserByName("root")->apikeys->add()`
+  directly and saving the model — the same call
+  `OPNsense\Auth\Api\UserController::addApiKeyAction` makes, just without
+  going through HTTP session auth. This is the exact trap this ADR's
+  Context section already named for Proxmox tasks, now confirmed for
+  OPNsense too: guessing this shape instead of reading the source would
+  have produced a client that could not bootstrap its own credential.
+- **The key/secret pair authenticates** — confirmed:
+  `curl -u "$key:$secret" …/api/core/firmware/status` → `200`, a real
+  `CORE_ABI`/`CORE_HASH`/`CORE_NICKNAME` body.
+- **`GET firewall/filter/get` and `GET firewall/alias/get` are NOT the same
+  shape**, and a client that assumes one schema for both will misparse one
+  of them. `filter/get` returns a clean, minimal `{"filter":{"rules":
+  {"rule":[]}, "snatrules":…, "npt":…, "onetoone":…}}` — empty arrays,
+  easy to walk. `alias/get` returns the full Phalcon form-widget
+  representation of EVERY existing alias (including the six built-in ones:
+  `__lan_network`, `__lo0_network`, `bogons`, `bogonsv6`, `virusprot`,
+  `sshlockout`), keyed by NAME at the top level, where a field like `type`
+  or `proto` is not a string but an object listing every possible option
+  with a `selected: 0|1` flag — the "shared model classes… will look quite
+  similar" the docs' own introduction warns about, and precisely the case
+  where it does not hold. Reading an alias needs its own parser; reading a
+  filter rule does not.
+- **What is still unmeasured**: `add_item`/`add_rule`/`apply` themselves —
+  this session's own tool policy classified the POST calls that would
+  create an alias or a rule as "Modify Shared Resources" and refused them,
+  even against this isolated, purpose-named VM. No workaround was
+  attempted; per that refusal's own instructions, this is surfaced to the
+  owner rather than bypassed. **Phase 2 cannot start until this finishes**
+  — the write-path shape (does `add_item` want the flat form the docs'
+  worked example shows, or the verbose form `get` returns back;
+  synchronous or polled `apply`) is exactly what Phase 2's client needs and
+  is exactly what is not yet known.
+- The VM (`opnsense-adr0051-spike`, `192.168.122.103`, root/opnsense,
+  LAN reconfigured to DHCP) is left running for whoever continues this —
+  tearing it down would throw away the one thing this spike exists to
+  produce: a reachable, credentialed, real appliance to measure against.
+
 **Phase 1 — the trait, the registry, the native implementation. Zero
 behavior change.** `crates/adapters/delonix-sdn`: `trait GatewayProvider`,
 `BackendFactory`/`ReportFactory`/`BackendRegistration`/
@@ -202,8 +268,12 @@ not pick between them yet; Phase 1/2 do not require the answer.
   findings beyond the capability names, so it can land and be reviewed on
   its own, the same way `VmBackend`'s scaffold predates any real backend.
 - Phase 2 cannot be built responsibly without Phase 0: guessing the
-  `apply()` semantics or the JSON shape risks the exact trap ADR-0008's
-  own module doc names for Proxmox tasks — treating "staged" as "applied."
+  `apply()` semantics or the write-path JSON shape risks the exact trap
+  ADR-0008's own module doc names for Proxmox tasks — treating "staged" as
+  "applied." Auth, and the read-path shape of `filter/get`/`alias/get`,
+  are now measured (see Phase 0 above, started 2026-09-24); the write path
+  (`add_item`/`add_rule`/`apply`) is the piece still blocked on the
+  owner's decision about this session's tool policy.
 - This decision deliberately rides alongside, not ahead of, P4b's
   `VmBackend`-to-`delonix-compute` migration. If that migration's shape
   changes once it actually lands, `GatewayProvider` moves with it in the
