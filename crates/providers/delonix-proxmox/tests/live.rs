@@ -1733,3 +1733,230 @@ fn the_vms_own_firewall_aliases_ipsets_log_and_refs_round_trip_through_the_node(
         "the VM is still defined on the node after destroy — an orphan"
     );
 }
+
+/// Stages a subnet inside a zone/vnet pair, exercises the single-item
+/// zone/vnet read/edit routes and the subnet's own read/edit/delete, applies
+/// the PENDING configuration, confirms via the NODE's own directory-index
+/// routes that the zone/vnet answer at all (see `delonix_proxmox::sdn`'s
+/// module doc comment, "The two node-side routes here answer a directory
+/// index, not 'is this real'" — those two calls do NOT prove the subnet's
+/// dataplane is live; they prove the route exists against a real node and
+/// that the id reached the URL path unmangled), and tears everything back
+/// down.
+///
+/// Sibling of [`sdn_zone_and_vnet_are_staged_applied_and_torn_down`] — same
+/// zone/vnet, same cleanup order, same "read the ledger, not just `Ok(())`"
+/// discipline — extended with the one thing that test does not cover: a
+/// subnet, and the single-item `GET`/`PUT` for a zone and a vnet.
+#[test]
+fn sdn_subnet_and_the_single_item_zone_vnet_routes_are_staged_applied_and_torn_down() {
+    let Some(t) = target() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+
+    // Same naming convention as the sibling test, and a distinct letter
+    // prefix so the two tests never collide on the same lab node even if
+    // run in the same second.
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("s{suffix}");
+    let vnet = format!("t{suffix}");
+    let cidr = "10.77.0.0/24";
+
+    // --- Zone: create, then the single-item GET and the PUT this slice adds ---
+    client
+        .create_sdn_zone(&ledger, &zone)
+        .expect("create the zone");
+    let zone_obj = client.sdn_zone(&zone).expect("read the zone back");
+    assert_eq!(
+        zone_obj.get("zone").and_then(|v| v.as_str()),
+        Some(zone.as_str()),
+        "GET /cluster/sdn/zones/{{zone}} did not echo the zone it was asked for: {zone_obj}"
+    );
+    client
+        .update_sdn_zone(&ledger, &zone, Some(1400))
+        .expect("stage the mtu change");
+    let zone_obj = client
+        .sdn_zone(&zone)
+        .expect("read the zone after the mtu update");
+    assert_eq!(
+        zone_obj.get("mtu").and_then(serde_json::Value::as_u64),
+        Some(1400),
+        "the mtu did not reach the node: {zone_obj}"
+    );
+
+    // --- Vnet: create with an alias, then the single-item GET and PUT ---
+    client
+        .create_sdn_vnet(&ledger, &vnet, &zone, Some("live subnet test"))
+        .expect("create the vnet");
+    let vnet_obj = client.sdn_vnet(&vnet).expect("read the vnet back");
+    assert_eq!(
+        vnet_obj.get("alias").and_then(|v| v.as_str()),
+        Some("live subnet test"),
+        "GET /cluster/sdn/vnets/{{vnet}} did not echo the alias it was created with: {vnet_obj}"
+    );
+    client
+        .update_sdn_vnet(&ledger, &vnet, Some("renamed by the live test"))
+        .expect("stage the alias change");
+    let vnet_obj = client
+        .sdn_vnet(&vnet)
+        .expect("read the vnet after the alias update");
+    assert_eq!(
+        vnet_obj.get("alias").and_then(|v| v.as_str()),
+        Some("renamed by the live test"),
+        "the renamed alias did not reach the node: {vnet_obj}"
+    );
+
+    // --- Subnet: create (the id comes back — POST answers null, see the
+    // module doc comment's "A subnet's id is not something a caller ever
+    // writes"), read, and edit its gateway ---
+    let subnet_id = client
+        .create_sdn_subnet(&ledger, &vnet, &zone, cidr, Some("10.77.0.1"))
+        .expect("create the subnet");
+    assert_eq!(
+        subnet_id,
+        format!("{zone}-10.77.0.0-24"),
+        "the computed subnet id does not match Proxmox's own <zone>-<network>-<mask> \
+         construction"
+    );
+    let subnets = client
+        .sdn_vnet_subnets(&vnet)
+        .expect("list the vnet's subnets");
+    assert!(
+        subnets
+            .iter()
+            .any(|s| s.get("subnet").and_then(|v| v.as_str()) == Some(subnet_id.as_str())),
+        "the subnet is not in the pending list: {subnets:?}"
+    );
+    let subnet_obj = client
+        .sdn_vnet_subnet(&vnet, &zone, cidr)
+        .expect("read the subnet back by (vnet, zone, cidr)");
+    assert_eq!(
+        subnet_obj.get("gateway").and_then(|v| v.as_str()),
+        Some("10.77.0.1"),
+        "the gateway did not reach the node: {subnet_obj}"
+    );
+    client
+        .update_sdn_subnet(&ledger, &vnet, &zone, cidr, Some("10.77.0.254"))
+        .expect("stage the gateway change");
+    let subnet_obj = client
+        .sdn_vnet_subnet(&vnet, &zone, cidr)
+        .expect("read the subnet after the gateway update");
+    assert_eq!(
+        subnet_obj.get("gateway").and_then(|v| v.as_str()),
+        Some("10.77.0.254"),
+        "the changed gateway did not reach the node: {subnet_obj}"
+    );
+
+    // --- Apply: the one call in this cycle that genuinely forks a task and
+    // makes all three staged objects real on every node ---
+    client.apply_sdn(&ledger).expect("apply the pending config");
+    let read_ledger = || -> serde_json::Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("proxmox-tasks.json"))
+                .expect("the ledger was written"),
+        )
+        .expect("the ledger is JSON")
+    };
+    let last_task = |entries: &[serde_json::Value], action: &str| -> serde_json::Value {
+        entries
+            .iter()
+            .rev()
+            .find(|e| e.get("action").and_then(|a| a.as_str()) == Some(action))
+            .unwrap_or_else(|| panic!("no `{action}` task in the ledger: {entries:?}"))
+            .clone()
+    };
+    let ledger_json = read_ledger();
+    let entries = ledger_json.as_array().expect("the ledger is a list");
+    let applied = last_task(entries, "apply-sdn");
+    assert_eq!(
+        applied.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "the apply did not succeed: {applied}"
+    );
+
+    // --- The node's own directory index for the zone/vnet — proof the route
+    // answers against a real node, NOT proof of dataplane realization (see
+    // the module doc comment; a diridx answers the same fixed list whether
+    // or not `apply_sdn` was ever called, so this is deliberately checked
+    // AFTER the apply above rather than instead of it). ---
+    let zone_index = client
+        .sdn_zone_node_index(&zone)
+        .expect("the node answers its own directory index for the zone");
+    assert!(
+        zone_index
+            .iter()
+            .any(|e| e.get("subdir").and_then(|v| v.as_str()) == Some("content")),
+        "GET /nodes/{{node}}/sdn/zones/{{zone}} did not list its 'content' subdir: {zone_index:?}"
+    );
+    let vnet_index = client
+        .sdn_vnet_node_index(&vnet)
+        .expect("the node answers its own directory index for the vnet");
+    assert!(
+        vnet_index
+            .iter()
+            .any(|e| e.get("subdir").and_then(|v| v.as_str()) == Some("mac-vrf")),
+        "GET /nodes/{{node}}/sdn/vnets/{{vnet}} did not list its 'mac-vrf' subdir: {vnet_index:?}"
+    );
+
+    // --- Cleanup: subnet before vnet before zone (the node refuses to
+    // remove a vnet that still has a subnet, and a zone a vnet still
+    // references — its own business logic, not pre-empted here). The
+    // subnet's own absence is checked right here, from the PENDING list —
+    // the same "a GET reads the same pending state a POST/DELETE just
+    // wrote" the module doc comment already relies on — and NOT after the
+    // vnet itself is gone: `GET .../vnets/{vnet}/subnets` needs the vnet to
+    // still exist to answer at all.
+    client
+        .delete_sdn_subnet(&ledger, &vnet, &zone, cidr)
+        .expect("delete the subnet");
+    let subnets_after_delete = client
+        .sdn_vnet_subnets(&vnet)
+        .expect("list the vnet's subnets after deleting the subnet");
+    assert!(
+        !subnets_after_delete
+            .iter()
+            .any(|s| s.get("subnet").and_then(|v| v.as_str()) == Some(subnet_id.as_str())),
+        "the subnet is still in the pending list right after its own delete: \
+         {subnets_after_delete:?}"
+    );
+
+    // Then the vnet and the zone, and apply AGAIN so nothing is left
+    // half-applied.
+    client
+        .delete_sdn_vnet(&ledger, &vnet)
+        .expect("delete the vnet");
+    client
+        .delete_sdn_zone(&ledger, &zone)
+        .expect("delete the zone");
+    client
+        .apply_sdn(&ledger)
+        .expect("apply the pending deletion");
+
+    let ledger_json = read_ledger();
+    let entries = ledger_json.as_array().expect("the ledger is a list");
+    let last_apply = last_task(entries, "apply-sdn");
+    assert_eq!(
+        last_apply.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "the final apply (the deletion) did not succeed: {last_apply}"
+    );
+
+    let vnets_after = client.sdn_vnets().expect("list vnets after cleanup");
+    assert!(
+        !vnets_after
+            .iter()
+            .any(|v| v.get("vnet").and_then(|s| s.as_str()) == Some(vnet.as_str())),
+        "the vnet is still listed after delete+apply: {vnets_after:?}"
+    );
+    let zones_after = client.sdn_zones().expect("list zones after cleanup");
+    assert!(
+        !zones_after
+            .iter()
+            .any(|z| z.get("zone").and_then(|v| v.as_str()) == Some(zone.as_str())),
+        "the zone is still listed after delete+apply: {zones_after:?}"
+    );
+}

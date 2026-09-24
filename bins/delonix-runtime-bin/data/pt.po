@@ -12180,6 +12180,15 @@ msgstr "Um id de zona ou vnet entra num caminho de URL e no próprio espaço de 
 msgid "Pick an id of at most 8 characters, starting with a lowercase letter, the rest lowercase letters or digits."
 msgstr "Escolhe um id de até 8 caracteres, começado por uma letra minúscula, o resto letras minúsculas ou dígitos."
 
+msgid "invalid Proxmox SDN subnet CIDR"
+msgstr "CIDR de subnet SDN do Proxmox inválido"
+
+msgid "An SDN subnet is named by a CIDR network (an IPv4 or IPv6 address with a prefix length), refused here before it goes into a request body or, with its `/` swapped for `-`, into a URL path."
+msgstr "Uma subnet SDN é nomeada por uma rede CIDR (um endereço IPv4 ou IPv6 com um comprimento de prefixo), recusada aqui antes de entrar no corpo de um pedido ou, com o `/` trocado por `-`, num caminho de URL."
+
+msgid "Give a CIDR like '10.0.0.0/24' or 'fd00::/64', with a prefix length valid for the address family."
+msgstr "Dá um CIDR como '10.0.0.0/24' ou 'fd00::/64', com um comprimento de prefixo válido para a família de endereços."
+
 msgid "The VM has no snapshot with that name on the Proxmox node."
 msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
 
