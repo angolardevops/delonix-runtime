@@ -1,10 +1,11 @@
 # ADR-0044: P4 — the `VmSpec`/`Extensions` port, provider crates, and `delonix-launcher`
 
-- **Status:** Proposed — all five required spikes done as of 2026-09-19 (`docs/discovery/
-  56_..md` through `60_..md`); ready for the owner's Accept/reject decision, not
-  self-promoted here. **Text re-measured against `origin/main` on 2026-09-24** (`25f8b55a`):
-  three things this ADR still described as open had closed in the five days since —
-  see the dated addenda to D3, D8 and D9. The decision itself is unchanged
+- **Status:** Accepted (2026-09-24, by the owner, on the text as re-measured that day) —
+  all five required spikes done as of 2026-09-19 (`docs/discovery/56_..md` through
+  `60_..md`); the text was re-measured against `origin/main` `25f8b55a` before the
+  decision and three things it still described as open had closed meanwhile (dated
+  addenda to D3, D8 and D9, #482). From here the ADR is not rewritten: what P4b–P4e find
+  goes into dated addenda with evidence, and a change of decision is a new ADR
 - **Date:** 2026-09-18
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0040 (the restructuring this closes phase P4 of — D2.2, D2.3, D2.4,
