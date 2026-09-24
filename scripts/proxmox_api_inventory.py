@@ -13,8 +13,9 @@ The extracted form (one row per method and path, with the privilege, the
 return type and the provenance of the fetch) is what the repository commits —
 the 4 MB of generated JavaScript is not — and it is what the matrix is
 regenerated from. The numerator is what the provider crate actually CALLS,
-read from its source (`crates/providers/delonix-proxmox/src/lib.rs`), never
-from a list kept next to it.
+read from its source (`crates/providers/delonix-proxmox/src/{lib,sdn}.rs` — an
+`impl Client` block spans both files, and `--source` scans every file given),
+never from a list kept next to it.
 
 Each (method, path) of the schema lands in exactly one of five states:
 
@@ -54,7 +55,10 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-CRATE_SOURCE = Path("crates/providers/delonix-proxmox/src/lib.rs")
+CRATE_SOURCE = [
+    Path("crates/providers/delonix-proxmox/src/lib.rs"),
+    Path("crates/providers/delonix-proxmox/src/sdn.rs"),
+]
 
 SUPPORTED_TESTED = "supported+tested"
 SUPPORTED_UNTESTED = "supported+untested"
@@ -453,7 +457,13 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("schema", type=Path, help="docs/proxmox/api-<ver>.routes.json, or a raw apidoc.js")
     ap.add_argument("--extract", action="store_true", help="print the routes JSON of an apidoc.js and exit")
-    ap.add_argument("--source", type=Path, default=CRATE_SOURCE, help="provider crate source to scan")
+    ap.add_argument(
+        "--source",
+        type=Path,
+        nargs="+",
+        default=CRATE_SOURCE,
+        help="provider crate source file(s) to scan — impl Client spans more than one file",
+    )
     ap.add_argument("--trace", type=Path, help="route trace of a live run (DELONIX_PROXMOX_TRACE_ROUTES)")
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument("--markdown", action="store_true", help="the matrix as Markdown (docs/proxmox/matrix-<ver>.md)")
@@ -465,7 +475,15 @@ def main(argv: list[str] | None = None) -> int:
         print()
         return 0
 
-    called, unknown = client_routes(args.source.read_text(encoding="utf-8"))
+    # Each file's own `#[cfg(test)]` module is stripped BEFORE joining, not
+    # after: `client_routes` truncates at the first `#[cfg(test)]` it finds
+    # (the unit-test module is not the crate), and a naive join would let
+    # `lib.rs`'s own test module — near its end — truncate away every file
+    # joined after it, discarding a whole module's routes in silence.
+    source_text = "\n".join(
+        p.read_text(encoding="utf-8").split("#[cfg(test)]", 1)[0] for p in args.source
+    )
+    called, unknown = client_routes(source_text)
     trace_text = args.trace.read_text(encoding="utf-8") if args.trace else None
     tested = traced_routes(trace_text, rows) if trace_text is not None else set()
     trace_prov = None

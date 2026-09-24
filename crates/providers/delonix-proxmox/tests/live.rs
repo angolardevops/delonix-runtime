@@ -1362,21 +1362,18 @@ fn sdn_zone_and_vnet_are_staged_applied_and_torn_down() {
         .apply_sdn(&ledger)
         .expect("apply the pending deletion");
 
+    // Measured against a live node, not assumed: `create_sdn_zone`/
+    // `create_sdn_vnet`/`delete_sdn_vnet`/`delete_sdn_zone` fork NO task at
+    // all — they apply inline, the same as `unlink` and every per-VM
+    // firewall write. `task_or_done`'s own `task_inner` returns `Ok(())`
+    // BEFORE ever calling `ledger.record(...)` on that path (see its doc
+    // comment), so there is no ledger entry to assert on for any of the
+    // four — asserting one here would be checking for something the
+    // machinery structurally cannot produce. Only `apply_sdn` genuinely
+    // forks a task, and it is the only write this cycle can hold the
+    // ledger accountable for.
     let ledger_json = read_ledger();
     let entries = ledger_json.as_array().expect("the ledger is a list");
-    for action in [
-        "create-sdn-zone",
-        "create-sdn-vnet",
-        "delete-sdn-vnet",
-        "delete-sdn-zone",
-    ] {
-        let last = last_task(entries, action);
-        assert_eq!(
-            last.pointer("/state/state").and_then(|s| s.as_str()),
-            Some("ok"),
-            "the last `{action}` task did not succeed: {last}"
-        );
-    }
     // Two `apply-sdn` tasks by now (the create and the delete); the LAST one
     // is what has to have succeeded — the same "last task of each action"
     // rule the ledger assertions above this test already use.
