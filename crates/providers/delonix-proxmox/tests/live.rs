@@ -18,7 +18,7 @@
 //! promotes every route it records to `supported+tested` (ADR-0049 D2), and the
 //! committed `docs/proxmox/trace-<ver>.routes` is one such run.
 
-use delonix_proxmox::{Auth, ProxmoxBackend, Target};
+use delonix_proxmox::{AgentExecStatus, Auth, ProxmoxBackend, Target};
 use delonix_vm::{CreateStage, VmBackend, VmConfig};
 
 /// The backend over a client that honours the route trace: with
@@ -627,6 +627,55 @@ fn o_ip_vem_do_agente_de_um_convidado_a_serio() {
         "link-local (DHCP falhado): {ip}"
     );
     assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "não é IPv4: {ip}");
+}
+
+/// `agent_ping`/`agent_exec`/`agent_exec_status` against the SAME prepared
+/// guest the sibling case just above needs (`DELONIX_PROXMOX_TEST_AGENT_VMID`)
+/// — the one VM in this suite already known to run a real `qemu-guest-agent`.
+/// That case proves the agent answers a QUERY; this one proves it runs a
+/// COMMAND and reports back a real exit code and stdout, through
+/// `agent_exec_wait`'s poll loop and not just the pure translation the unit
+/// tests already cover.
+#[test]
+fn agent_exec_wait_runs_a_real_command_in_the_guest() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling case already says it.
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(vmid) = std::env::var("DELONIX_PROXMOX_TEST_AGENT_VMID") else {
+        return;
+    };
+    let vmid: u32 = vmid
+        .parse()
+        .expect("DELONIX_PROXMOX_TEST_AGENT_VMID is not a number");
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+
+    assert!(
+        client.agent_ping(vmid).expect("agent ping"),
+        "the prepared guest must have a real agent running"
+    );
+
+    let outcome = client
+        .agent_exec_wait(
+            vmid,
+            &["/bin/cat", "/etc/hostname"],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("agent exec");
+    let AgentExecStatus::Finished {
+        exit_code,
+        stdout,
+        stderr,
+        signal,
+    } = outcome
+    else {
+        panic!("agent_exec_wait reported Running past its own deadline");
+    };
+    assert_eq!(exit_code, 0, "stderr: {stderr}");
+    assert!(signal.is_none(), "killed by a signal: {signal:?}");
+    assert!(!stdout.trim().is_empty(), "/etc/hostname read back empty");
 }
 
 /// A clone of a template comes up with the DISK SIZE asked for, not the
