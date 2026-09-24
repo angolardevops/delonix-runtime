@@ -276,15 +276,24 @@ establish, an `Error` enum mapped into the ADR-0043 dictionary, and a
 `delonix-model`/`delonix-compute` for the rest — the same dependency
 footprint `delonix-proxmox` has today.
 
-**Phase 3 — declarative wiring.** How a manifest names "use OPNsense for
-this" is deliberately undecided until Phase 0/1 exist: candidates are an
-*optional* `spec.provision.opnsense` block on `kind: NetworkPolicy` (the
-TrueNAS shape, cheapest, no reconciler change) or a `desired()`/
-`converge()` provider selector the stack reconciler dispatches through
-(the full `VmBackend` shape, which reopens the ownership/identity problem
-`NetworkAccessRule`/`NetworkRoute` already solved for themselves — an
-OPNsense alias/rule carries none of this engine's labels). This ADR does
-not pick between them yet; Phase 1/2 do not require the answer.
+**Phase 3 — declarative wiring, decided and built.** Neither of the two
+candidates above, exactly. A new `kind: NetworkGateway` (`spec.provider`
+names a registered `GatewayProvider` by id, `spec.aliases`/`spec.rules`
+are the trait's own `GatewayAlias`/`GatewayRule`) rather than a block
+bolted onto `NetworkPolicy` — a `NetworkPolicy` already means "the
+native nftables answer for this workload," and folding an unrelated
+appliance's config into it would be the exact `Domain::Firewall` shape
+mismatch this ADR rejects below. And rather than the full `VmBackend`
+reconciler-selector shape either: the ownership problem it named —
+"an OPNsense alias/rule carries none of this engine's labels" — turned
+out to have the same answer `kind: Service` already gave it
+(ADR-0032): a Kind with no natural object to stamp gets its **own**
+registry (`Presence::Registry`, a `delonix_state::JsonStore` under
+`<root>/network-gateways`) instead of trying to carry `delonix.io/stack`
+on something external. `stack apply` still dispatches by Kind through
+the same `desired()`/`actual()`/`converge_and_stamp` machinery every
+other converging Kind uses — just backed by its own store rather than a
+target container's labels.
 
 ## Alternatives considered
 
@@ -331,9 +340,17 @@ not pick between them yet; Phase 1/2 do not require the answer.
   changes once it actually lands, `GatewayProvider` moves with it in the
   same commit shape — a second, smaller instance of the same mechanical
   move, not a redesign.
-- Phase 3 (declarative wiring) is explicitly left open. Closing it before
-  Phase 0/1/2 exist would be designing a manifest field for an appliance
-  behavior nobody has measured yet.
+- **Phase 3 is done (2026-09-25).** `kind: NetworkGateway` exists and
+  goes through `stack apply`/`plan`/`destroy` like any other converging
+  Kind — see the Phase 3 note above for the shape. Applying ensures
+  every alias before any rule; removing (on `--prune` or `destroy`) goes
+  rules-first, aliases-last — the order Phase 2's live test proved is
+  required, because the appliance validates a rule's `source` against
+  its alias table on write, so a rule outliving the alias it names
+  fails removal with "not a valid source IP address or alias." A spec
+  change has no update-in-place: it is a full remove-then-reapply, the
+  same honest "no live update path" `converge_and_stamp` already gives
+  several other Kinds rather than pretending to reconcile in place.
 - **Phase 2 is done (2026-09-24).** `crates/providers/delonix-opnsense`
   implements `GatewayProvider` for real: `ensure_alias`/`ensure_rule`/
   `remove_alias`/`remove_rule`/`commit`, built exactly to what Phase 0
@@ -350,5 +367,4 @@ not pick between them yet; Phase 1/2 do not require the answer.
   (create, idempotency-check, commit, remove, commit, and a
   removal-was-real proof), appliance confirmed clean afterward.
   `cmd::gatewayproviders` registers it from the environment, mirroring
-  `cmd::vmbackends` exactly. What is NOT built: Phase 3's declarative
-  wiring — nothing in a manifest can select this provider yet.
+  `cmd::vmbackends` exactly.
