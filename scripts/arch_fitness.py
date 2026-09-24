@@ -68,6 +68,7 @@ LAYERS = {
     "delonix-vm": ADAPTER,  # splits into the VmProvider port (context) + provider crates (P4)
     "delonix-proxmox": PROVIDER,  # → delonix-provider-proxmox (P4)
     "delonix-truenas": PROVIDER,  # → delonix-provider-truenas (P4)
+    "delonix-opnsense": PROVIDER,  # ADR-0051: GatewayProvider, same P4 shape as delonix-proxmox
     "delonix-cri": INTERFACE,
     "delonix-mgmt": INTERFACE,  # replaced by delonix-node-api (P5)
     "delonix-mcp": INTERFACE,
@@ -139,6 +140,13 @@ EXCEPTIONS = {
         "the VmBackend port lives in the same crate as the Cloud Hypervisor and "
         "libvirt adapters; P4 moves the port into the compute context and each "
         "backend into its own provider crate",
+    ),
+    ("dep", "delonix-opnsense", "delonix-sdn"): (
+        "P4",
+        "the GatewayProvider port lives in the same crate as the native nftables "
+        "dataplane, by the same reasoning and the same exception as "
+        "delonix-proxmox -> delonix-vm above (ADR-0051): P4 moves it into a "
+        "context crate alongside VmBackend's own move, not before",
     ),
     ("dep", "delonix-scanner", "delonix-oci"): (
         "P4",

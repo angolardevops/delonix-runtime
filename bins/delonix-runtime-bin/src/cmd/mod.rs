@@ -20,6 +20,7 @@ pub use delonix_model::exitcode;
 pub mod features;
 pub mod firewall;
 pub mod flow;
+pub mod gatewayproviders;
 pub mod hosts;
 pub mod hosts_file;
 pub mod httproute;
