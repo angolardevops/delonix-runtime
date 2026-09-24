@@ -127,7 +127,7 @@ guest.
 
 ```bash
 delonix image vm import opnsense-26.1.2.qcow2 -t opnsense:26.1 --appliance \
-    --distro opnsense --release 26.1.2 --default-vcpus 2 --default-memory 2G
+    --distro opnsense --release 26.1.2 --default-vcpus 2 --default-memory 3G
 
 delonix image vm push opnsense:26.1 ghcr.io/angolardevops/delonix-vm-appliances:opnsense-26.1
 ```
@@ -195,6 +195,16 @@ changing them for your own builds is an edit to `answer-*.toml` or the
 - **The OPNsense `vga`/`serial`/`dvd` images are NOT installed systems.** They
   boot live off the installation media. Only `nano` is pre-installed. This cost
   a build to discover.
+- **OPNsense's own docs say 2 GiB is not enough.** `docs.opnsense.org/manual/virtuals.html`
+  states "Minimum required RAM is 3 GB" in *General tips*, and repeats it under
+  *Common Issues*: "This issue is most likely caused by a low memory setting.
+  Make sure your virtual OPNsense installation has a minimum of 3 GB of RAM."
+  The registered default was `2G` (below that) until 2026-09-24; it is `3G` now,
+  in `images/opnsense/vm.yaml`, this file, `build-opnsense.sh`'s printed command
+  and the publish workflow. Not re-validated live with the new value — the
+  vendor's own troubleshooting note was reason enough to stop shipping a default
+  it explicitly warns against. **Already-published images on ghcr.io still carry
+  the old `2G` metadata** until the next `vm-appliances.yml` run for `opnsense`.
 - **The Proxmox ISO cannot be edited in place.** `xorriso -boot_image any
   replay` dies on its hybrid GPT, and `keep` yields an image SeaBIOS will not
   boot past `Booting from DVD/CD...`. `mkiso.sh` extracts the tree and authors

@@ -172,7 +172,7 @@ jobs:
           D=./target/release/delonix
           N='${{ steps.vars.outputs.name }}'
           case '${{ inputs.product }}' in
-            opnsense) STEM=opnsense; VCPUS=2; MEM=2G ;;
+            opnsense) STEM=opnsense; VCPUS=2; MEM=3G ;;
             pve)      STEM=pve;      VCPUS=4; MEM=4G ;;
             pbs)      STEM=pbs;      VCPUS=2; MEM=2G ;;
             pmg)      STEM=pmg;      VCPUS=2; MEM=2G ;;
@@ -239,7 +239,7 @@ jobs:
           $D image vm ls
           echo "${GHCR_TOKEN:-$GITHUB_TOKEN}" | $D image login ghcr.io \
             -u "${{ github.actor }}" --password-stdin
-          $D image --vm push "$N:$TAG" "${{ inputs.dest_repo }}:$N-$TAG"
+          $D image vm push "$N:$TAG" "${{ inputs.dest_repo }}:$N-$TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
       - name: Sumário

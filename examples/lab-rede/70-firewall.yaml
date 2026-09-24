@@ -23,7 +23,7 @@ metadata:
 spec:
   disk: opnsense:26.1
   vcpus: 2
-  memory: 2G
+  memory: 3G
   backend: libvirt
   netMode: nat
   bridge: labnet          # a placa primária vai para a LAN do lab

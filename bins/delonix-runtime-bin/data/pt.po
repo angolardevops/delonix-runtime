@@ -12171,6 +12171,15 @@ msgstr "O registo da VM não leva handle do Proxmox, por isso não foi criada po
 msgid "Manage this VM with the backend that created it."
 msgstr "Gere esta VM com o backend que a criou."
 
+msgid "invalid Proxmox SDN zone or vnet id"
+msgstr "id de zona ou vnet SDN do Proxmox inválido"
+
+msgid "A zone or vnet id goes into a URL path and into the node's own SDN namespace, which Proxmox limits to a lowercase letter followed by up to 7 more lowercase letters or digits (8 characters total)."
+msgstr "Um id de zona ou vnet entra num caminho de URL e no próprio espaço de nomes SDN do nó, que o Proxmox limita a uma letra minúscula seguida de até 7 letras minúsculas ou dígitos (8 caracteres no total)."
+
+msgid "Pick an id of at most 8 characters, starting with a lowercase letter, the rest lowercase letters or digits."
+msgstr "Escolhe um id de até 8 caracteres, começado por uma letra minúscula, o resto letras minúsculas ou dígitos."
+
 msgid "The VM has no snapshot with that name on the Proxmox node."
 msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
 
@@ -13712,6 +13721,45 @@ msgstr "Uma entrada de `required_capabilities` (`vm create --require`, `spec.req
 
 msgid "Use a name from `delonix provider ls` (the catalog version is in its header)."
 msgstr "Usa um nome de `delonix provider ls` (a versão do catálogo está no cabeçalho)."
+
+# DX-1528 — the node's own (NOT this engine's SDN) per-VM firewall
+msgid "invalid Proxmox firewall rule"
+msgstr "regra de firewall do Proxmox inválida"
+
+msgid "A rule of the node's OWN firewall (not this engine's SDN firewall) named a `type` other than 'in'/'out', or an `action` other than ACCEPT/DROP/REJECT — a firewall group's name is a different kind of value this client does not validate and does not accept."
+msgstr "Uma regra da firewall PRÓPRIA do nó (não a firewall SDN deste motor) nomeou um `type` diferente de 'in'/'out', ou uma `action` diferente de ACCEPT/DROP/REJECT — o nome de um grupo de firewall é outro tipo de valor que este cliente não valida nem aceita."
+
+msgid "Use 'in' or 'out' for the type, and ACCEPT, DROP or REJECT for the action."
+msgstr "Usa 'in' ou 'out' para o type, e ACCEPT, DROP ou REJECT para a action."
+
+# DX-1529
+msgid "invalid Proxmox cloud-init dump type"
+msgstr "tipo de dump de cloud-init Proxmox inválido"
+
+msgid "cloudinit_dump's `type` has to be one of the three the node's cloud-init route accepts, and is refused here before any request goes to the node."
+msgstr "o `type` de cloudinit_dump tem de ser um dos três que a rota de cloud-init do nó aceita, e é recusado aqui antes de qualquer pedido chegar ao nó."
+
+msgid "Ask for 'user', 'network' or 'meta'."
+msgstr "Pede 'user', 'network' ou 'meta'."
+
+# DX-1531/1532 — the VM's own firewall's aliases and IP sets (ADR-0049 slice 2)
+msgid "invalid Proxmox firewall alias or ipset name"
+msgstr "nome de alias/ipset da firewall do Proxmox inválido"
+
+msgid "An alias or IP-set name of the VM's OWN firewall (not this engine's SDN firewall) goes into a URL path and into the node's own namespace, which Proxmox limits to a letter followed by one or more letters, digits, '-' or '_' (at least 2 characters total)."
+msgstr "Um nome de alias ou de IP-set da firewall PRÓPRIA da VM (não a firewall SDN deste motor) vai para um caminho de URL e para o namespace do próprio nó, que o Proxmox limita a uma letra seguida de uma ou mais letras, dígitos, '-' ou '_' (pelo menos 2 caracteres no total)."
+
+msgid "Pick a name that starts with a letter and has at least one more letter, digit, '-' or '_' after it."
+msgstr "Escolhe um nome que comece por uma letra e tenha pelo menos mais uma letra, dígito, '-' ou '_' a seguir."
+
+msgid "invalid Proxmox firewall address"
+msgstr "endereço de firewall do Proxmox inválido"
+
+msgid "A CIDR/address given to a firewall alias or to one entry of a named IP set is not an IPv4/IPv6 address, optionally with a '/<prefix>' — the node's own alias/ipset routes reject it before anything else would."
+msgstr "Um CIDR/endereço dado a um alias de firewall ou a uma entrada de um IP-set nomeado não é um endereço IPv4/IPv6, opcionalmente com um '/<prefixo>' — as rotas de alias/ipset do próprio nó rejeitam-no antes de mais nada."
+
+msgid "Give an IPv4 or IPv6 address, or a CIDR range such as '10.0.0.0/8'."
+msgstr "Dá um endereço IPv4 ou IPv6, ou um intervalo CIDR como '10.0.0.0/8'."
 
 msgid "capability not supported by the backend"
 msgstr "capacidade não suportada pelo backend"
