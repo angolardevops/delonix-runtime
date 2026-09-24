@@ -20,25 +20,25 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
 - **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to`
-- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs): each PR's own live run appended after the previous.`
+- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497): each PR's own live run appended after the previous.`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TEST_MOVE_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `12 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the lifecycle case walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; the template case makes its own template, grows it, refuses a shrink clone, clones it at two sizes, destroys the clones and the template; the backup case backs up a running VM twice, lists the archives, deletes both, and confirms an unknown volid is refused; the restore case backs up a VM, destroys it, restores the archive into the vacated vmid, confirms the restored boot disk matches the original size, confirms restoring over an occupied vmid is refused; the agent case pings a guest with no agent (Ok(false), never an Err) and runs agent_exec_wait against a real guest command; the disk case dumps a fresh VM's rendered cloud-init user-data, refuses an unknown dump type, moves the boot disk to a second storage (dropping the source reference), confirms the size is unchanged, and unlinks the cloud-init drive; the firewall rule case turns the VM's own (node-native) firewall on, adds a rule, reads it back two ways, updates it, deletes it; the firewall aliases/ipsets case round-trips an alias and an ipset CIDR entry through the node, and CAUGHT A REAL BUG: PVE replaces the whole alias/entry on update rather than patching named fields, so update_firewall_alias/update_firewall_ipset_cidr now read the current entry first and carry forward whatever the caller leaves unspecified — see their doc comments; the SDN case stages a zone and a vnet inside it, applies the pending configuration, and tears both back down; the cloud-init case measured that GET .../cloudinit stays empty across a direct ipconfig0 write and across regenerate, while cloudinit_dump confirms the write DOES reach the rendered file; the node registers the workers as `qmcreate`/`qmstart`/`qmstop`/`qmsnapshot`/`qmrollback`/`qmdelsnapshot`/`qmdestroy`/`qmconfig`/`qmclone`/`qmtemplate`/`resize`/`vzdump`/`imgdel`/`qmrestore`/`qmmove`/`reloadnetworkall` — `unlink`, `agent/ping`, all firewall writes (rule and alias/ipset alike), the SDN zone/vnet writes, and the cloud-init regenerate fork no task at all (apply inline)`
+- **result**: `13 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the SDN subnet case stages a zone, a vnet and a subnet, reads each back by the single-item routes (cluster and node views), applies, and tears all three down; earlier runs as before.`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `1897`
+- **requests**: `2495`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 61 (9.0 % of the schema) — 58 seen in a live trace, 3 not
+- **called**: 72 (10.7 % of the schema) — 69 seen in a live trace, 3 not
 - **unsupported by design**: 363 (each with a written reason)
-- **not yet implemented**: 251
+- **not yet implemented**: 240
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
 |---|---:|---:|---:|---:|---:|
 | qemu | 44 | 2 | 0 | 63 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
-| sdn | 7 | 0 | 0 | 83 | 90 |
+| sdn | 18 | 0 | 0 | 72 | 90 |
 | storage | 2 | 0 | 0 | 23 | 25 |
 | access | 1 | 0 | 42 | 2 | 45 |
 | pools | 0 | 0 | 0 | 7 | 7 |
@@ -58,9 +58,18 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/cluster/sdn/vnets` | supported+tested | array | yes |  |
 | POST | `/cluster/sdn/vnets` | supported+tested | null | yes |  |
 | DELETE | `/cluster/sdn/vnets/{vnet}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/vnets/{vnet}` | supported+tested |  | yes |  |
+| PUT | `/cluster/sdn/vnets/{vnet}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/vnets/{vnet}/subnets` | supported+tested | array | yes |  |
+| POST | `/cluster/sdn/vnets/{vnet}/subnets` | supported+tested | null | yes |  |
+| DELETE | `/cluster/sdn/vnets/{vnet}/subnets/{subnet}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/vnets/{vnet}/subnets/{subnet}` | supported+tested | object | yes |  |
+| PUT | `/cluster/sdn/vnets/{vnet}/subnets/{subnet}` | supported+tested | null | yes |  |
 | GET | `/cluster/sdn/zones` | supported+tested | array | yes |  |
 | POST | `/cluster/sdn/zones` | supported+tested | null | yes |  |
 | DELETE | `/cluster/sdn/zones/{zone}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/zones/{zone}` | supported+tested |  | yes |  |
+| PUT | `/cluster/sdn/zones/{zone}` | supported+tested | null | yes |  |
 | GET | `/nodes` | supported+tested | array | yes |  |
 | POST | `/nodes/{node}/qemu` | supported+tested | string | yes |  |
 | DELETE | `/nodes/{node}/qemu/{vmid}` | supported+tested | string | yes |  |
@@ -106,6 +115,8 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/nodes/{node}/qemu/{vmid}/status/stop` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/template` | supported+tested | string | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/unlink` | supported+tested | null | yes |  |
+| GET | `/nodes/{node}/sdn/vnets/{vnet}` | supported+tested | array | yes |  |
+| GET | `/nodes/{node}/sdn/zones/{zone}` | supported+tested | array | yes |  |
 | GET | `/nodes/{node}/storage/{storage}/content` | supported+tested | array | yes |  |
 | DELETE | `/nodes/{node}/storage/{storage}/content/{volume}` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/tasks/{upid}/status` | supported+tested | object | yes |  |
@@ -545,8 +556,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/sdn/route-maps/entries/{route-map-id}/entry/{order}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/sdn/route-maps/entries/{route-map-id}/entry/{order}` | not-yet-implemented | object | yes |  |
 | PUT | `/cluster/sdn/route-maps/entries/{route-map-id}/entry/{order}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/vnets/{vnet}` | not-yet-implemented |  | yes |  |
-| PUT | `/cluster/sdn/vnets/{vnet}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall` | not-yet-implemented | array | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall/options` | not-yet-implemented | object | yes |  |
 | PUT | `/cluster/sdn/vnets/{vnet}/firewall/options` | not-yet-implemented | null | yes |  |
@@ -558,13 +567,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/sdn/vnets/{vnet}/ips` | not-yet-implemented | null | yes |  |
 | POST | `/cluster/sdn/vnets/{vnet}/ips` | not-yet-implemented | null | yes |  |
 | PUT | `/cluster/sdn/vnets/{vnet}/ips` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/vnets/{vnet}/subnets` | not-yet-implemented | array | yes |  |
-| POST | `/cluster/sdn/vnets/{vnet}/subnets` | not-yet-implemented | null | yes |  |
-| DELETE | `/cluster/sdn/vnets/{vnet}/subnets/{subnet}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/vnets/{vnet}/subnets/{subnet}` | not-yet-implemented | object | yes |  |
-| PUT | `/cluster/sdn/vnets/{vnet}/subnets/{subnet}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/zones/{zone}` | not-yet-implemented |  | yes |  |
-| PUT | `/cluster/sdn/zones/{zone}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/status` | not-yet-implemented | array | yes |  |
 | GET | `/cluster/tasks` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}` | not-yet-implemented | array | yes |  |
@@ -675,10 +677,8 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/sdn/fabrics/{fabric}/interfaces` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/fabrics/{fabric}/neighbors` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/fabrics/{fabric}/routes` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/sdn/vnets/{vnet}` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/vnets/{vnet}/mac-vrf` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/sdn/zones/{zone}` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones/{zone}/bridges` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones/{zone}/content` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones/{zone}/ip-vrf` | not-yet-implemented | array | yes |  |

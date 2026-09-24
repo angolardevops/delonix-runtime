@@ -423,8 +423,8 @@ impl Client {
         validate_sdn_id(vnet)?;
         validate_sdn_id(zone)?;
         validate_cidr(cidr)?;
-        let id = sdn_subnet_id(zone, cidr);
-        let path = format!("/cluster/sdn/vnets/{vnet}/subnets/{id}");
+        let subnet = sdn_subnet_id(zone, cidr);
+        let path = format!("/cluster/sdn/vnets/{vnet}/subnets/{subnet}");
         let body = self.get(&path)?;
         let w: Wrapped<serde_json::Value> =
             parse(&body, "GET /cluster/sdn/vnets/{vnet}/subnets/{subnet}")?;
@@ -438,7 +438,7 @@ impl Client {
     /// to the node (the subnet object's schema,
     /// `PVE::Network::SDN::SubnetPlugin::properties`, has no `zone` field
     /// of its own — the node derives it server-side from `vnet`), only
-    /// used here to compute the id this call returns, the same
+    /// used here to compute the subnet this call returns, the same
     /// construction Proxmox itself uses (see the module doc comment).
     ///
     /// Changes nothing on any node until [`Self::apply_sdn`] — the module's
@@ -447,7 +447,7 @@ impl Client {
     /// `snat`, `dnszoneprefix`, `dhcp-range` and `dhcp-dns-server` are real
     /// Proxmox subnet fields this call does not send.
     ///
-    /// Returns the id the node will file this subnet under — the ONLY way
+    /// Returns the subnet the node will file this subnet under — the ONLY way
     /// to learn it, since `POST` answers `null`.
     pub fn create_sdn_subnet(
         &self,
@@ -460,7 +460,7 @@ impl Client {
         validate_sdn_id(vnet)?;
         validate_sdn_id(zone)?;
         validate_cidr(cidr)?;
-        let id = sdn_subnet_id(zone, cidr);
+        let subnet = sdn_subnet_id(zone, cidr);
         let mut form: Vec<(&str, &str)> = vec![("subnet", cidr), ("type", "subnet")];
         if let Some(g) = gateway {
             form.push(("gateway", g));
@@ -475,10 +475,10 @@ impl Client {
                 Ok(self
                     .sdn_vnet_subnets(vnet)?
                     .iter()
-                    .any(|s| s.get("subnet").and_then(|v| v.as_str()) == Some(id.as_str())))
+                    .any(|s| s.get("subnet").and_then(|v| v.as_str()) == Some(subnet.as_str())))
             }),
         )?;
-        Ok(id)
+        Ok(subnet)
     }
 
     /// Stages a change to an existing subnet's `gateway`
@@ -497,12 +497,12 @@ impl Client {
         validate_sdn_id(vnet)?;
         validate_sdn_id(zone)?;
         validate_cidr(cidr)?;
-        let id = sdn_subnet_id(zone, cidr);
+        let subnet = sdn_subnet_id(zone, cidr);
         let mut form: Vec<(&str, &str)> = Vec::new();
         if let Some(g) = gateway {
             form.push(("gateway", g));
         }
-        let path = format!("/cluster/sdn/vnets/{vnet}/subnets/{id}");
+        let path = format!("/cluster/sdn/vnets/{vnet}/subnets/{subnet}");
         self.task_or_done(
             ledger,
             SDN_VMID,
@@ -533,8 +533,8 @@ impl Client {
         validate_sdn_id(vnet)?;
         validate_sdn_id(zone)?;
         validate_cidr(cidr)?;
-        let id = sdn_subnet_id(zone, cidr);
-        let path = format!("/cluster/sdn/vnets/{vnet}/subnets/{id}");
+        let subnet = sdn_subnet_id(zone, cidr);
+        let path = format!("/cluster/sdn/vnets/{vnet}/subnets/{subnet}");
         self.task_or_done(
             ledger,
             SDN_VMID,
@@ -544,7 +544,7 @@ impl Client {
                 Ok(!self
                     .sdn_vnet_subnets(vnet)?
                     .iter()
-                    .any(|s| s.get("subnet").and_then(|v| v.as_str()) == Some(id.as_str())))
+                    .any(|s| s.get("subnet").and_then(|v| v.as_str()) == Some(subnet.as_str())))
             }),
         )
     }
