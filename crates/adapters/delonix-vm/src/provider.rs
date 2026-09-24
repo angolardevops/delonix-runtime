@@ -1,108 +1,29 @@
-//! SPIKE (ADR-0044 D1-D4) — `VmSpec`/`Extensions`/`VmProvider`, the
-//! substitution spike required before that ADR can be marked Accepted:
-//! "Hand the *same* `VmSpec` to `delonix-provider-cloud-hypervisor` and
-//! `delonix-provider-libvirt` and converge both — `delonix vm create`,
-//! `stop`, `start` on each, from one manifest, with **zero**
-//! `#[cfg]`/name-branching outside the composition root."
+//! The two local VM providers on the compute port (ADR-0044 D1–D4, P4b slice
+//! 1): `VmSpec` + `Extensions` from `delonix_compute::vm_provider` resolved
+//! into the ONE `VmConfig` shape `create_with`/`VmBackend` consume, and a
+//! `VmProvider` per local backend whose id is fixed at construction and
+//! never compared against a literal inside a lifecycle method.
 //!
-//! Not for merge as-is — see the spike report
-//! (`docs/discovery/59_P4_D1_D3_SUBSTITUTION_SPIKE.md`) for what diverges
-//! from the ADR's sketch and why, measured against the real
-//! `boot_ch`/`libvirt_domain_xml` code, not guessed from the ADR's own D1
-//! table.
+//! Promoted from the substitution spike
+//! (`docs/discovery/59_P4_D1_D3_SUBSTITUTION_SPIKE.md`) with the port itself
+//! moved to the compute context; what stays here is what knows `VmConfig`.
 //!
 //! **Deliberately reuses [`crate::create_with`]/[`crate::stop`]/
-//! [`crate::start`]/[`crate::status`]/[`crate::remove`] verbatim.** This
-//! spike's contract is the SHAPE — `VmSpec`+`Extensions` in, one call per
-//! lifecycle op, zero backend-name matching outside the registry — not a
-//! second orchestration engine sitting next to the one this crate already
-//! has, tested, and trusts.
+//! [`crate::start`]/[`crate::status`]/[`crate::remove`] verbatim.** The
+//! contract is the SHAPE — one call per lifecycle op, zero backend-name
+//! matching outside [`registry`] — not a second orchestration engine next to
+//! the one this crate already has, tested, and trusts. Slice 2 of P4b moves
+//! each backend into its own provider crate; this module is what they will
+//! implement, and the orchestration is what the compute use cases absorb.
 
-use crate::{
-    create_with, remove, start, status, stop, CpuTopology, ExtraDisk, ExtraNic, Result, VmConfig,
-    VmVolume,
+use crate::{create_with, remove, start, status, stop, VmConfig};
+use delonix_compute::capability::ProviderReport;
+pub use delonix_compute::vm_provider::{
+    CloudHypervisorExt, Extensions, IpConfidence, LibvirtExt, Provider, ProviderId, VmHandle,
+    VmObservation, VmProvider, VmSpec,
 };
 use delonix_model::records::Status as VmStatus;
 use std::path::Path;
-
-/// D1. Universal fields — every current provider (CH, libvirt; and, on the
-/// read side, Proxmox) is expected to make sense of these, even if one
-/// refuses a field it cannot yet honour (`namespace` on Proxmox today).
-#[derive(Debug, Clone, Default)]
-pub struct VmSpec {
-    pub name: String,
-    pub disk: String,
-    pub vcpus: u32,
-    pub memory_mib: u32,
-    pub disk_size_gib: Option<u32>,
-    pub network: String,
-    pub namespace: String,
-    pub hostname: Option<String>,
-    pub ci_user: Option<String>,
-    pub ssh_keys: Vec<String>,
-    pub cloud_init: Option<bool>,
-    pub restart_policy: Option<String>,
-    /// **Correction to the ADR-0044 D1 sketch, measured 2026-09-18**
-    /// (spike report, "serial_capture is universal"): `boot_ch` (line 1980+)
-    /// and `libvirt_domain_xml` (line 2578) both read `cfg.serial_capture`
-    /// identically — "capture the console to a file instead of exposing it
-    /// interactively" is not a CH-only or libvirt-only notion, it is a
-    /// property of any VMM this engine drives. The D1 table did not list it
-    /// at all; this spike puts it here rather than silently dropping it.
-    pub serial_capture: bool,
-}
-
-/// D2. Per-provider knobs, namespaced and closed against drift: an unknown
-/// key is a refusal, never a silently ignored map entry (see the ADR's D2
-/// for the full reasoning against `HashMap<String, Value>`).
-#[derive(Debug, Clone, Default)]
-pub struct Extensions {
-    pub cloud_hypervisor: Option<CloudHypervisorExt>,
-    pub libvirt: Option<LibvirtExt>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct CloudHypervisorExt {
-    pub kernel: Option<String>,
-    pub initrd: Option<String>,
-    pub firmware: Option<String>,
-    pub cmdline: Option<String>,
-    pub seed: Option<String>,
-    pub hugepages: bool,
-    pub cpu_affinity: Option<String>,
-    /// **Correction to the ADR-0044 D1 table, measured 2026-09-18**: `devices`
-    /// (VFIO passthrough) is read IDENTICALLY by `boot_ch` (`--device
-    /// path=…`, line 1968) and `libvirt_domain_xml` (`<hostdev>`, line 2922)
-    /// — not the "libvirt-only in practice" field the ADR's table named. It
-    /// stays duplicated across `*Ext` rather than promoted to `VmSpec`
-    /// because it is NOT universal across every provider either: Proxmox
-    /// refuses it outright today (`refuse_unsupported`). A `LocalExt` tier
-    /// shared by CH+libvirt only (absent for remote providers) is the honest
-    /// fix and is named, not built, in the spike report — out of this
-    /// spike's scope, which is CH+libvirt convergence only (P4b, per D9;
-    /// Proxmox is P4c).
-    pub devices: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct LibvirtExt {
-    pub net_mode: Option<String>,
-    pub bridge: Option<String>,
-    pub static_ip: Option<String>,
-    pub machine: Option<String>,
-    pub cpu_model: Option<String>,
-    pub cpu_topology: Option<CpuTopology>,
-    pub tpm: bool,
-    pub video: Option<String>,
-    pub vnc: bool,
-    pub boot_order: Vec<String>,
-    pub extra_disks: Vec<ExtraDisk>,
-    pub extra_nics: Vec<ExtraNic>,
-    pub volumes: Vec<VmVolume>,
-    pub libvirt_xml_overlay: Vec<String>,
-    pub libvirt_xml: Option<String>,
-    pub devices: Vec<String>,
-}
 
 /// The port's actual contract: `VmSpec` + `Extensions`, keyed by the
 /// provider that is about to receive it, resolved into the ONE `VmConfig`
@@ -128,6 +49,7 @@ pub fn spec_to_config(spec: &VmSpec, ext: &Extensions, provider_id: &str) -> VmC
         cloud_init: spec.cloud_init,
         restart_policy: spec.restart_policy.clone(),
         serial_capture: spec.serial_capture,
+        bridge: spec.bridge.clone(),
         backend: Some(provider_id.to_string()),
         ..Default::default()
     };
@@ -143,7 +65,6 @@ pub fn spec_to_config(spec: &VmSpec, ext: &Extensions, provider_id: &str) -> VmC
     }
     if let Some(lv) = &ext.libvirt {
         cfg.net_mode = lv.net_mode.clone();
-        cfg.bridge = lv.bridge.clone();
         cfg.static_ip = lv.static_ip.clone();
         cfg.machine = lv.machine.clone();
         cfg.cpu_model = lv.cpu_model.clone();
@@ -162,50 +83,6 @@ pub fn spec_to_config(spec: &VmSpec, ext: &Extensions, provider_id: &str) -> VmC
         }
     }
     cfg
-}
-
-/// D3. `Provider`'s skeleton (identity — `capabilities`/`health` are out of
-/// this spike's scope, which is only the substitution question) plus the VM
-/// lifecycle `VmBackend` already has.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct ProviderId(pub &'static str);
-
-pub trait Provider: Send + Sync {
-    fn id(&self) -> ProviderId;
-}
-
-/// Was `VmBackend::ip_is_predicted() -> bool`; renamed to a 3-state enum
-/// here because the substitution spike's own harness needs to tell "not
-/// running yet" apart from "running, address unknown" — a `bool` collapses
-/// both into `false` and a caller re-derives the difference from `running`
-/// anyway, which is exactly the kind of derived state ADR-0008 built
-/// `ip_is_predicted` to avoid in the first place.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum IpConfidence {
-    /// A real lease/agent answer — evidence the guest asked for it.
-    Observed,
-    /// Computed from the MAC before the guest ran at all (Cloud Hypervisor).
-    Predicted,
-    /// Not running, or running with nothing to report yet.
-    Unknown,
-}
-
-pub struct VmHandle {
-    pub name: String,
-}
-
-pub struct VmObservation {
-    pub running: bool,
-    pub ip: Option<String>,
-    pub ip_confidence: IpConfidence,
-}
-
-pub trait VmProvider: Provider {
-    fn create(&self, root: &Path, spec: &VmSpec, ext: &Extensions) -> Result<VmHandle>;
-    fn start(&self, root: &Path, h: &VmHandle) -> Result<()>;
-    fn stop(&self, root: &Path, h: &VmHandle) -> Result<()>;
-    fn destroy(&self, root: &Path, h: &VmHandle) -> Result<()>;
-    fn observe(&self, root: &Path, h: &VmHandle) -> Result<VmObservation>;
 }
 
 /// D3/D4: the id is fixed ONCE, at construction (see [`registry`], the one
@@ -234,10 +111,31 @@ impl Provider for LocalVmProvider {
     fn id(&self) -> ProviderId {
         ProviderId(self.id)
     }
+
+    /// The same report the registration's factory builds (ADR-0050): the
+    /// catalog answered by THIS backend, narrowed by what this host has.
+    /// Looked up by id in the registry, so a report and a backend can never
+    /// come from two different declarations.
+    fn capabilities(&self) -> ProviderReport {
+        crate::provider_reports()
+            .into_iter()
+            .find(|r| r.id == self.id)
+            .unwrap_or_else(|| {
+                unreachable!(
+                    "'{}' is constructed only by `registry`, which names registered backends",
+                    self.id
+                )
+            })
+    }
 }
 
 impl VmProvider for LocalVmProvider {
-    fn create(&self, root: &Path, spec: &VmSpec, ext: &Extensions) -> Result<VmHandle> {
+    fn create(
+        &self,
+        root: &Path,
+        spec: &VmSpec,
+        ext: &Extensions,
+    ) -> delonix_model::Result<VmHandle> {
         let cfg = spec_to_config(spec, ext, self.id);
         create_with(root, &cfg, &|_stage| {})?;
         Ok(VmHandle {
@@ -245,19 +143,19 @@ impl VmProvider for LocalVmProvider {
         })
     }
 
-    fn start(&self, root: &Path, h: &VmHandle) -> Result<()> {
-        start(root, &h.name).map(|_| ())
+    fn start(&self, root: &Path, h: &VmHandle) -> delonix_model::Result<()> {
+        start(root, &h.name).map(|_| ()).map_err(Into::into)
     }
 
-    fn stop(&self, root: &Path, h: &VmHandle) -> Result<()> {
-        stop(root, &h.name)
+    fn stop(&self, root: &Path, h: &VmHandle) -> delonix_model::Result<()> {
+        stop(root, &h.name).map_err(Into::into)
     }
 
-    fn destroy(&self, root: &Path, h: &VmHandle) -> Result<()> {
-        remove(root, &h.name)
+    fn destroy(&self, root: &Path, h: &VmHandle) -> delonix_model::Result<()> {
+        remove(root, &h.name).map_err(Into::into)
     }
 
-    fn observe(&self, root: &Path, h: &VmHandle) -> Result<VmObservation> {
+    fn observe(&self, root: &Path, h: &VmHandle) -> delonix_model::Result<VmObservation> {
         let vm = status(root, &h.name)?;
         let running = matches!(vm.status, VmStatus::Running);
         let ip_confidence = if !running || vm.ip.is_none() {
@@ -276,7 +174,7 @@ impl VmProvider for LocalVmProvider {
 }
 
 /// D4: the ONE place a provider id, as a string, gets matched — the
-/// composition root this spike's own gate names. Everything past this
+/// composition root of this module. Everything past this
 /// function only ever holds a `Box<dyn VmProvider>` and calls its methods.
 pub fn registry(id: &str) -> Option<Box<dyn VmProvider>> {
     match id {
@@ -317,6 +215,7 @@ mod tests {
         s.ssh_keys = vec!["ssh-ed25519 AAAA x".into()];
         s.restart_policy = Some("always".into());
         s.serial_capture = true;
+        s.bridge = Some("vmbr1".into());
         let cfg = spec_to_config(&s, &Extensions::default(), "cloud-hypervisor");
         assert_eq!(cfg.name, "v1");
         assert_eq!(cfg.vcpus, 2);
@@ -329,6 +228,7 @@ mod tests {
         assert_eq!(cfg.ssh_keys, vec!["ssh-ed25519 AAAA x".to_string()]);
         assert_eq!(cfg.restart_policy.as_deref(), Some("always"));
         assert!(cfg.serial_capture);
+        assert_eq!(cfg.bridge.as_deref(), Some("vmbr1"));
         assert_eq!(cfg.backend.as_deref(), Some("cloud-hypervisor"));
     }
 
@@ -385,14 +285,12 @@ mod tests {
         let ext = Extensions {
             cloud_hypervisor: None,
             libvirt: Some(LibvirtExt {
-                bridge: Some("vmbr1".into()),
                 tpm: true,
                 devices: vec!["/sys/bus/pci/devices/0000:65:00.1".into()],
                 ..Default::default()
             }),
         };
         let cfg = spec_to_config(&s, &ext, "libvirt");
-        assert_eq!(cfg.bridge.as_deref(), Some("vmbr1"));
         assert!(cfg.tpm);
         assert_eq!(
             cfg.devices,
@@ -406,7 +304,7 @@ mod tests {
     fn the_registry_is_the_only_string_match_in_this_module() {
         assert!(registry("cloud-hypervisor").is_some());
         assert!(registry("libvirt").is_some());
-        assert!(registry("proxmox").is_none(), "P4c, not this spike");
+        assert!(registry("proxmox").is_none(), "P4c, not this slice");
         assert!(registry("typo").is_none());
     }
 }

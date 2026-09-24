@@ -59,7 +59,7 @@ pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 
 pub mod capabilities;
 pub mod cloudinit;
-pub mod provider_spike; // SPIKE (ADR-0044 D1-D4, branch docs/p4-adr-0044-substitution-spike) — not for merge as-is
+pub mod provider;
 
 /// Configuration to boot a microVM (flat fields, independent of the
 /// `orchestrator` — the CLI translates the `VmSpec` into this).
