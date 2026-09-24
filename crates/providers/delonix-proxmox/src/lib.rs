@@ -190,6 +190,36 @@ struct Wrapped<T> {
     data: T,
 }
 
+/// One cloud-init config key's pending state, as [`Client::cloudinit_pending`]
+/// reports it. See that function's doc comment for where this shape comes
+/// from and its confirmation status.
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+pub struct CloudInitPendingKey {
+    /// The config key this entry is about (`ipconfig0`, `sshkeys`, `citype`,
+    /// `ciuser`, `nameserver`, `searchdomain`, …).
+    pub key: String,
+    /// The value the node currently has applied — absent if the key has
+    /// never been set.
+    #[serde(default)]
+    pub value: Option<String>,
+    /// A new value staged but not yet regenerated into the disk image.
+    #[serde(default)]
+    pub pending: Option<String>,
+    /// Set (to `1`) when the key is staged for deletion rather than a new
+    /// value.
+    #[serde(default)]
+    pub delete: Option<i64>,
+}
+
+impl CloudInitPendingKey {
+    /// Whether [`Client::cloudinit_regenerate`] still has work to do for this
+    /// key: a staged value or a staged deletion, neither yet baked into the
+    /// disk image.
+    pub fn is_pending(&self) -> bool {
+        self.pending.is_some() || self.delete.is_some()
+    }
+}
+
 #[derive(Deserialize)]
 struct Ticket {
     ticket: String,
@@ -378,6 +408,10 @@ enum TaskKind {
     /// through [`Client::task_or_done`] and this worker type may never
     /// actually be seen.
     Unlink,
+    /// `PUT …/cloudinit` — regenerates the cloud-init disk image from
+    /// whatever is currently staged. Same `returns: null`/`protected: 1`
+    /// shape as [`TaskKind::Unlink`]; see [`Client::cloudinit_regenerate`].
+    RegenerateCloudInit,
     /// `PUT …/firewall/options` — turns the VM's own (node-side) firewall on
     /// or off. Not this crate's own SDN firewall (`delonix-sdn`, `net
     /// ingress`/`net egress`) — this is Proxmox's NATIVE per-VM firewall,
@@ -429,6 +463,7 @@ impl TaskKind {
             TaskKind::Restore => "restore",
             TaskKind::MoveDisk => "move-disk",
             TaskKind::Unlink => "unlink",
+            TaskKind::RegenerateCloudInit => "regenerate-cloudinit",
             TaskKind::FirewallOptions => "firewall-options",
             TaskKind::AddFirewallRule => "firewall-add-rule",
             TaskKind::UpdateFirewallRule => "firewall-update-rule",
@@ -496,6 +531,18 @@ impl TaskKind {
             // `returns: null` was right) — `qmdelete` is a guess that may be
             // permanently dead code, kept only so the match stays exhaustive.
             TaskKind::Unlink => "qmdelete",
+            // UNCONFIRMED GUESS — no live run has reached this route yet. The
+            // schema shares `unlink`'s exact `returns: null`/`protected: 1`
+            // shape, and reading the operation's own name (`PVE::API2::Qemu`'s
+            // cloud-init regenerate handler locks the VM config and rewrites
+            // the drive inline, the same pattern as a plain `POST …/config`)
+            // makes an inline `null` answer, forking no task, the likely
+            // outcome here too — `qmcloudinit` follows the `qm<verb>` naming
+            // every OBSERVED name above uses (`qmcreate`, `qmconfig`,
+            // `qmdelsnapshot`, …), kept only so the match stays exhaustive.
+            // Correct it from `GET /nodes/{node}/tasks` the first time a real
+            // node is measured forking a worker for this route.
+            TaskKind::RegenerateCloudInit => "qmcloudinit",
             // NEVER OBSERVED on a live node, and that is the confirmed fact: a live
             // run of all four against PVE 9.2.2 forked no task for any of them
             // (every firewall write applied inline) — `pvefw` is a guess that may
@@ -1446,6 +1493,64 @@ impl Client {
         ))?;
         let w: Wrapped<String> = parse(&body, "cloudinit dump")?;
         Ok(w.data)
+    }
+
+    /// The cloud-init keys the node still has PENDING — staged by
+    /// [`Client::config`]/[`Client::configure_clone`] (`ipconfig0`, `sshkeys`,
+    /// `citype`, …) but not yet baked into the disk image a booting guest
+    /// would actually read (`GET …/qemu/{vmid}/cloudinit`).
+    ///
+    /// A plain read, like [`Client::cloudinit_dump`]: the schema's `returns:
+    /// array` here is a list, never a UPID — nothing forks for a GET. The
+    /// common case is an empty list: nothing staged, nothing for
+    /// [`Client::cloudinit_regenerate`] to catch up on.
+    ///
+    /// **Item shape not yet confirmed against a live node for THIS route.**
+    /// The schema extracted into `docs/proxmox/api-9.2.2.routes.json` only
+    /// records `method`/`path`/`perm`/`protected`/`proxyto`/`returns` — no
+    /// item schema, for any route in that file. [`CloudInitPendingKey`]'s
+    /// shape instead follows Proxmox's own published description of this
+    /// route ("Get the cloudinit configuration with both current and pending
+    /// values") together with the well-documented, widely-used shape of the
+    /// general `GET …/qemu/{vmid}/pending` (VM config pending-changes) route,
+    /// which reads as the same convention: `{key, value?, pending?, delete?}`
+    /// per config key. If a real node's answer ever disagrees, this is what
+    /// to correct — the same discipline [`TaskKind::worker_type`]'s doc
+    /// comment already applies to guessed worker names.
+    pub fn cloudinit_pending(&self, vmid: u32) -> Result<Vec<CloudInitPendingKey>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/cloudinit", self.node))?;
+        let w: Wrapped<Vec<CloudInitPendingKey>> = parse(&body, "cloudinit pending")?;
+        Ok(w.data)
+    }
+
+    /// Regenerates the cloud-init disk image from whatever is currently
+    /// staged (`PUT …/qemu/{vmid}/cloudinit`) — the step that makes a
+    /// [`Client::config`] cloud-init write ([`Client::cloudinit_pending`]'s
+    /// `pending`/`delete` fields) actually reach the guest, at its next boot.
+    /// Takes no body: the node re-derives the drive from the VM's own config,
+    /// so there is nothing for a caller to pass beyond which VM.
+    ///
+    /// The schema declares `returns: null` and `protected: 1` — the exact
+    /// combination [`Client::unlink`] has, and a live PVE 9.2.2 run of THAT
+    /// route confirmed it applies inline and forks no task at all. This goes
+    /// through [`Client::task_or_done`] on the same expectation, not yet
+    /// measured for this specific route — see [`TaskKind::worker_type`] for
+    /// the guessed name, marked there as unconfirmed. The effect probe reads
+    /// [`Client::cloudinit_pending`] back and asks that nothing on it still
+    /// needs regenerating, rather than trusting the call's own `Ok(())`.
+    pub fn cloudinit_regenerate(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::RegenerateCloudInit,
+            || self.put_form(&format!("/nodes/{}/qemu/{vmid}/cloudinit", self.node), &[]),
+            Some(&|| {
+                Ok(self
+                    .cloudinit_pending(vmid)?
+                    .iter()
+                    .all(|k| !k.is_pending()))
+            }),
+        )
     }
 
     pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
@@ -3831,6 +3936,62 @@ mod tests {
             matches!(e, Error::InvalidCloudInitKind(_)),
             "must be the typed refusal, not a request failure: {e}"
         );
+    }
+
+    /// [`CloudInitPendingKey`] deserializes the shape its doc comment
+    /// describes — a key with only a current `value`, one with a staged
+    /// `pending` value not yet baked in, one staged for deletion, and one
+    /// present with neither current nor pending (a key the node lists but
+    /// nothing has ever set).
+    #[test]
+    fn cloudinit_pending_key_reads_value_pending_and_delete_independently() {
+        let key = |s: &str| serde_json::from_str::<CloudInitPendingKey>(s).unwrap();
+
+        let applied = key(r#"{"key":"citype","value":"nocloud"}"#);
+        assert_eq!(applied.value.as_deref(), Some("nocloud"));
+        assert_eq!(applied.pending, None);
+        assert!(
+            !applied.is_pending(),
+            "a plain applied value is not pending"
+        );
+
+        let staged = key(r#"{"key":"ipconfig0","value":"ip=dhcp","pending":"ip=192.168.1.50/24"}"#);
+        assert_eq!(staged.value.as_deref(), Some("ip=dhcp"));
+        assert_eq!(staged.pending.as_deref(), Some("ip=192.168.1.50/24"));
+        assert!(
+            staged.is_pending(),
+            "a staged value still needs a regenerate"
+        );
+
+        let deleted = key(r#"{"key":"sshkeys","value":"ssh-ed25519 x","delete":1}"#);
+        assert_eq!(deleted.pending, None);
+        assert_eq!(deleted.delete, Some(1));
+        assert!(
+            deleted.is_pending(),
+            "a staged deletion still needs a regenerate"
+        );
+
+        let untouched = key(r#"{"key":"searchdomain"}"#);
+        assert_eq!(untouched.value, None);
+        assert!(!untouched.is_pending());
+    }
+
+    /// [`Client::cloudinit_pending`] unwraps the `{"data": [...]}` envelope
+    /// every other GET in this crate goes through ([`Wrapped`]), and the
+    /// common case — nothing staged — is an empty list, not an error.
+    #[test]
+    fn cloudinit_pending_unwraps_the_data_envelope_and_an_empty_list_is_not_an_error() {
+        let w: Wrapped<Vec<CloudInitPendingKey>> = parse(
+            r#"{"data":[{"key":"citype","value":"nocloud"},{"key":"ipconfig0","pending":"ip=dhcp"}]}"#,
+            "cloudinit pending",
+        )
+        .unwrap();
+        assert_eq!(w.data.len(), 2);
+        assert!(w.data[1].is_pending());
+
+        let empty: Wrapped<Vec<CloudInitPendingKey>> =
+            parse(r#"{"data":[]}"#, "cloudinit pending").unwrap();
+        assert!(empty.data.is_empty());
     }
 
     #[test]

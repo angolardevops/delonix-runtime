@@ -1399,3 +1399,121 @@ fn sdn_zone_and_vnet_are_staged_applied_and_torn_down() {
         "the vnet is still listed after delete+apply: {vnets_after:?}"
     );
 }
+
+/// The other half of `cloudinit_dump`: what `GET …/cloudinit` reports for a
+/// key just after a config write, and what `PUT …/cloudinit` (regenerate)
+/// does to that report. Neither route's shape had been reached by a live run
+/// before this — see [`delonix_proxmox::Client::cloudinit_pending`]'s doc
+/// comment for exactly what was, and was not, already confirmed.
+///
+/// `ipconfig0` is the key under test: `cloud_init_form` always sets it (a
+/// freshly created VM gets `ip=dhcp`), so there is a key to restage without
+/// needing to invent one the node might not recognise.
+#[test]
+fn cloudinit_pending_stages_a_config_write_and_regenerate_clears_it() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxci{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    b.stop(vmdir, &vm)
+        .expect("stop before touching the cloud-init config");
+    assert!(!b.is_running(&vm), "the VM must be stopped");
+
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let client = b.client();
+
+    // Baseline: `ipconfig0` was set at create time (`ip=dhcp`) and never
+    // touched since, so the node must not be carrying anything staged for it.
+    let before = client
+        .cloudinit_pending(vmid)
+        .expect("cloudinit pending: before");
+    let ipconfig0_before = before
+        .iter()
+        .find(|k| k.key == "ipconfig0")
+        .expect("ipconfig0 is a cloud-init key on every VM this backend creates");
+    assert!(
+        !ipconfig0_before.is_pending(),
+        "a freshly created VM has nothing staged for ipconfig0: {ipconfig0_before:?}"
+    );
+
+    // Stages a change: the same `POST …/config` path `configure_clone`
+    // already uses for every clone, now with a static address —
+    // `cloud_init_form` turns that into `ipconfig0=ip=<addr>`.
+    let restaged = VmConfig {
+        name: name.clone(),
+        disk: cfg.disk.clone(),
+        vcpus: 1,
+        memory: "512M".into(),
+        static_ip: Some("10.99.0.5/24".into()),
+        ..Default::default()
+    };
+    client
+        .configure_clone(&ledger, vmid, &restaged)
+        .expect("stage a new ipconfig0 via a config write");
+
+    let staged = client
+        .cloudinit_pending(vmid)
+        .expect("cloudinit pending: staged");
+    let ipconfig0_staged = staged
+        .iter()
+        .find(|k| k.key == "ipconfig0")
+        .expect("ipconfig0 is still a cloud-init key after the config write");
+    assert!(
+        ipconfig0_staged.is_pending(),
+        "the node did not stage the ipconfig0 write as pending: {ipconfig0_staged:?}"
+    );
+
+    // Regenerate: the node is expected to bake the staged value into the
+    // cloud-init drive, and `cloudinit_pending` must stop reporting it.
+    client
+        .cloudinit_regenerate(&ledger, vmid)
+        .expect("regenerate the cloud-init drive");
+
+    let after = client
+        .cloudinit_pending(vmid)
+        .expect("cloudinit pending: after");
+    assert!(
+        after.iter().all(|k| !k.is_pending()),
+        "something is still pending after regenerate: {after:?}"
+    );
+
+    // The rendered network file must now carry the applied address —
+    // confirms the regenerate reached the disk, not only the diff view.
+    let network_dump = client
+        .cloudinit_dump(vmid, "network")
+        .expect("cloudinit dump: network, after regenerate");
+    assert!(
+        network_dump.contains("10.99.0.5"),
+        "the regenerated cloud-init network file does not carry the new address: \
+         {network_dump}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+}
