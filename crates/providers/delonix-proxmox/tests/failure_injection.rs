@@ -18,7 +18,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use delonix_proxmox::{
-    Auth, Client, ClientOptions, Error, Ledger, Target, TaskState, MAX_RESPONSE_BYTES,
+    AgentExecStatus, Auth, Client, ClientOptions, Error, Ledger, Target, TaskState,
+    MAX_RESPONSE_BYTES,
 };
 use delonix_vm::VmConfig;
 
@@ -48,6 +49,9 @@ enum Reply {
 struct Seen {
     method: String,
     path: String,
+    /// The decoded request body, form-encoded requests included — captured
+    /// so a scenario can check WHAT was sent, not just that something was.
+    body: String,
 }
 
 struct MockNode {
@@ -180,6 +184,7 @@ fn serve_one(
     log.lock().unwrap().push(Seen {
         method: method.clone(),
         path: path.clone(),
+        body: percent_decode(&String::from_utf8_lossy(&body)),
     });
     let reply = {
         let mut s = script.lock().unwrap();
@@ -837,6 +842,172 @@ fn a_lost_answer_with_nothing_on_the_node_stays_a_transport_error() {
         "still never resent — the caller decides"
     );
     assert!(Ledger::at(dir.path()).records().is_empty());
+}
+
+// ===========================================================================
+// The guest agent: ping, exec, exec-status
+// ===========================================================================
+
+const AGENT_NOT_RUNNING: &str = r#"{"data":null,"message":"QEMU guest agent is not running\n"}"#;
+
+/// `agent_ping` is the one call in this file where a failure is not the
+/// whole story: the node's OWN "no agent" answer has to read as `Ok(false)`,
+/// never as an [`Error`], while a real failure on the exact same route still
+/// propagates. And none of it is a node task — no UPID, no ledger entry.
+#[test]
+fn agent_ping_tells_no_agent_apart_from_a_real_failure() {
+    let ping = "/nodes/pve/qemu/100/agent/ping";
+    let node = MockNode::start(script(&[
+        ("POST", ping, ok_data("{}")),
+        ("POST", ping, Reply::Json(500, AGENT_NOT_RUNNING.into())),
+        (
+            "POST",
+            ping,
+            Reply::Json(
+                500,
+                r#"{"data":null,"message":"unable to open file"}"#.into(),
+            ),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    assert!(
+        matches!(client.agent_ping(100), Ok(true)),
+        "the agent answered"
+    );
+    assert!(
+        matches!(client.agent_ping(100), Ok(false)),
+        "no agent is not a failure"
+    );
+    let e = client.agent_ping(100).unwrap_err();
+    assert!(matches!(e, Error::HttpStatus(_)), "{e}");
+    assert_eq!(
+        node.count("POST", ping),
+        3,
+        "each ping sent once, never resent"
+    );
+}
+
+/// `command` is a REPEATED form field, one per argv element — the agent
+/// takes an argv array, and joining `["ls", "-la", "/tmp"]` into one string
+/// would hand it a single argument that happens to contain spaces.
+#[test]
+fn agent_exec_sends_argv_as_repeated_command_fields() {
+    let exec = "/nodes/pve/qemu/100/agent/exec";
+    let node = MockNode::start(script(&[("POST", exec, ok_data(r#"{"pid":4711}"#))]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let pid = client.agent_exec(100, &["ls", "-la", "/tmp"]).unwrap();
+    assert_eq!(pid, 4711);
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == exec)
+        .expect("the exec request reached the node")
+        .body;
+    // `Seen.body` is already percent-DECODED (`serve_one` does that for every
+    // captured request, the same as it does for the path), so a literal `/`
+    // reads back as `/` here even though the wire form encoded it `%2F`.
+    assert_eq!(sent, "command=ls&command=-la&command=/tmp");
+}
+
+/// `exited == 0` while the guest process is still running — `exitcode`/
+/// `out-data`/`err-data` are absent then, not zero/empty, and reading them
+/// anyway would report a stale result while the command is still going.
+#[test]
+fn agent_exec_status_distinguishes_running_from_finished() {
+    // No `?pid=…`: `serve_one` strips the query before matching a script
+    // entry (the matrix is keyed by route, not by arguments — the same
+    // reason `trace_route` drops it), so the key here has to be the bare path.
+    let status = "/nodes/pve/qemu/100/agent/exec-status";
+    let node = MockNode::start(script(&[
+        ("GET", status, ok_data(r#"{"exited":0}"#)),
+        (
+            "GET",
+            status,
+            ok_data(r#"{"exited":1,"exitcode":0,"out-data":"hi\n","err-data":""}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    assert_eq!(
+        client.agent_exec_status(100, 4711).unwrap(),
+        AgentExecStatus::Running
+    );
+    assert_eq!(
+        client.agent_exec_status(100, 4711).unwrap(),
+        AgentExecStatus::Finished {
+            exit_code: 0,
+            stdout: "hi\n".into(),
+            stderr: String::new(),
+            signal: None,
+        }
+    );
+}
+
+/// `agent_exec_wait` issues ONE `exec` and polls `exec-status` until it
+/// reports finished — proving the poll loop drives real HTTP responses, not
+/// just the pure translation [`agent_exec_status_of`] already covers.
+#[test]
+fn agent_exec_wait_polls_until_finished_and_issues_exec_once() {
+    let exec = "/nodes/pve/qemu/100/agent/exec";
+    // No `?pid=…`: `serve_one` strips the query before matching a script
+    // entry, so the key has to be the bare path — the single pid the mock
+    // ever hands back (99) makes that unambiguous here.
+    let status = "/nodes/pve/qemu/100/agent/exec-status";
+    let node = MockNode::start(script(&[
+        ("POST", exec, ok_data(r#"{"pid":99}"#)),
+        ("GET", status, ok_data(r#"{"exited":0}"#)),
+        ("GET", status, ok_data(r#"{"exited":0}"#)),
+        (
+            "GET",
+            status,
+            ok_data(r#"{"exited":1,"exitcode":3,"out-data":"","err-data":"nope"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let outcome = client
+        .agent_exec_wait(100, &["false"], Duration::from_secs(5))
+        .unwrap();
+    assert_eq!(
+        outcome,
+        AgentExecStatus::Finished {
+            exit_code: 3,
+            stdout: String::new(),
+            stderr: "nope".into(),
+            signal: None,
+        }
+    );
+    assert_eq!(node.count("POST", exec), 1, "issued exactly once");
+    assert_eq!(node.count("GET", status), 3, "polled until finished");
+}
+
+/// A command still running when `timeout` elapses is a [`Error::TaskTimeout`]
+/// — not proof the guest command failed; it may still be running there.
+#[test]
+fn agent_exec_wait_gives_up_at_its_timeout() {
+    let exec = "/nodes/pve/qemu/100/agent/exec";
+    // No `?pid=…`: `serve_one` strips the query before matching a script
+    // entry, so the key has to be the bare path.
+    let status = "/nodes/pve/qemu/100/agent/exec-status";
+    // A generous supply of "still running" — enough to outlast the 500ms
+    // window at the fixed 200ms poll interval with room for scheduling
+    // jitter. A script that ran dry would fall back to the mock's stock 500
+    // ("no script for this route"), which would fail the wait for the wrong
+    // reason before the timeout ever had a chance to fire.
+    let mut entries = vec![("POST", exec, ok_data(r#"{"pid":7}"#))];
+    for _ in 0..20 {
+        entries.push(("GET", status, ok_data(r#"{"exited":0}"#)));
+    }
+    let node = MockNode::start(script(&entries));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let e = client
+        .agent_exec_wait(100, &["sleep", "999"], Duration::from_millis(500))
+        .unwrap_err();
+    assert!(matches!(e, Error::TaskTimeout(_)), "{e}");
+    assert!(e.to_string().contains("pid 7"), "{e}");
+    assert_eq!(
+        node.count("POST", exec),
+        1,
+        "the guest process is never re-started"
+    );
 }
 
 // ===========================================================================

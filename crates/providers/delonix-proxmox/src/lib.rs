@@ -91,6 +91,13 @@ fn next_poll_wait(cur: Duration) -> Duration {
     std::cmp::min(cur.mul_f32(1.5), POLL_MAX)
 }
 
+/// Poll interval for [`Client::agent_exec_wait`]. Fixed and short, unlike
+/// [`POLL_MIN`]/[`POLL_MAX`]'s backoff: a guest-agent exec is not a node
+/// task that can run for minutes, it is a process inside the guest that is
+/// typically done in well under a second, and this reads no shared ledger —
+/// there is nothing here for a backoff to protect against.
+const AGENT_EXEC_POLL: Duration = Duration::from_millis(200);
+
 /// How the client authenticates against the node.
 ///
 /// `Debug` is written by hand: the secret and the password are the two values
@@ -459,6 +466,64 @@ fn task_verdict(status: &str, exitstatus: Option<&str>) -> Option<std::result::R
     }
 }
 
+/// The outcome of a guest command [`Client::agent_exec`] started, as
+/// [`Client::agent_exec_status`] reads it.
+///
+/// Distinct from [`TaskState`] on purpose: a guest exec is not a node task
+/// (see the doc comment on [`Client::agent_exec`]) and has no ledger entry,
+/// so it does not belong in that enum's `Submitted`/`Ok`/`Failed`/`TimedOut`
+/// vocabulary, which a reader would reasonably take as "this went through
+/// the ledger".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AgentExecStatus {
+    /// The guest has not reported completion yet.
+    Running,
+    /// The guest process is over.
+    Finished {
+        exit_code: i64,
+        stdout: String,
+        stderr: String,
+        /// Set when a signal killed the process instead of it exiting on
+        /// its own — `exit_code` is then not meaningful.
+        signal: Option<i64>,
+    },
+}
+
+/// The raw shape of `GET …/agent/exec-status`.
+///
+/// `exitcode`/`out-data`/`err-data` are absent, not zero/empty, while the
+/// guest process is still running (`exited == 0`) — `Option`, not a default
+/// that would read as "finished with nothing to say".
+#[derive(Debug, Deserialize)]
+struct AgentExecStatusBody {
+    exited: i64,
+    #[serde(default, rename = "exitcode")]
+    exit_code: Option<i64>,
+    #[serde(default, rename = "out-data")]
+    out_data: Option<String>,
+    #[serde(default, rename = "err-data")]
+    err_data: Option<String>,
+    #[serde(default)]
+    signal: Option<i64>,
+}
+
+/// Turns the raw exec-status shape into the outcome [`Client::agent_exec_status`]
+/// reports. Pure, so the running/finished boundary — `exited == 0` means
+/// running, anything else means the fields below are meaningful — is a fact
+/// a test can check directly, the same discipline [`task_verdict`] applies
+/// to a node task's `status`/`exitstatus`.
+fn agent_exec_status_of(body: AgentExecStatusBody) -> AgentExecStatus {
+    if body.exited == 0 {
+        return AgentExecStatus::Running;
+    }
+    AgentExecStatus::Finished {
+        exit_code: body.exit_code.unwrap_or(0),
+        stdout: body.out_data.unwrap_or_default(),
+        stderr: body.err_data.unwrap_or_default(),
+        signal: body.signal,
+    }
+}
+
 /// The backend is a thin handle over a SHARED client.
 ///
 /// `Arc` and not an owned `Client` because the engine builds a backend per
@@ -692,6 +757,110 @@ impl Client {
                 Some((upid.to_string(), kind.to_string()))
             })
             .collect())
+    }
+
+    /// Whether the QEMU guest agent answers, for VM `vmid`.
+    ///
+    /// `Ok(false)` — never an [`Err`] — for the node's own "QEMU guest agent
+    /// is not running": that is the ordinary state of any guest that has not
+    /// booted an agent yet (a plain cloud image, or one still coming up), the
+    /// same case [`ProxmoxBackend::ip`]'s doc comment already treats as a
+    /// first-class, non-failure answer — `vm ls` cannot afford a scary line
+    /// for every guest without one. Any OTHER failure (the node unreachable,
+    /// the credential revoked) still propagates: those are "could not ask",
+    /// not "no agent".
+    ///
+    /// **Not a node task** (see `allowed_outside_task` in the test module):
+    /// the agent answers inline, there is no UPID to wait on.
+    pub fn agent_ping(&self, vmid: u32) -> Result<bool> {
+        match self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/agent/ping", self.node),
+            &[],
+            true,
+        ) {
+            Ok(_) => Ok(true),
+            Err(e) if is_agent_not_running(&e) => Ok(false),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Runs `argv[0] argv[1] …` inside the guest through the QEMU agent, and
+    /// returns the pid [`Client::agent_exec_status`] polls for the outcome.
+    ///
+    /// **Not a node task.** The work runs inside the GUEST — the agent
+    /// answers with a pid inline, and there is nothing on the node for a
+    /// worker to do (see `allowed_outside_task` in the test module).
+    ///
+    /// `command` is a REPEATED form field, one per argv element: the agent
+    /// takes an argv array, never a shell string, so `["ls", "-la", "/tmp"]`
+    /// sends three separate `command=` pairs. Joining them into one
+    /// `"ls -la /tmp"` string would hand the agent a single argument that
+    /// happens to contain spaces, not three arguments.
+    pub fn agent_exec(&self, vmid: u32, argv: &[&str]) -> Result<u32> {
+        let form: Vec<(&str, &str)> = argv.iter().map(|a| ("command", *a)).collect();
+        let body = self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/agent/exec", self.node),
+            &form,
+            true,
+        )?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "agent exec")?;
+        w.data
+            .get("pid")
+            .and_then(|p| p.as_u64())
+            .map(|p| p as u32)
+            .ok_or_else(|| {
+                Error::UnexpectedAnswer(format!(
+                    "proxmox: agent exec on VM {vmid} did not answer with a pid: {}",
+                    truncate_chars(&body, 200)
+                ))
+            })
+    }
+
+    /// Reads the outcome of a pid [`Client::agent_exec`] started.
+    ///
+    /// `exited` is `0` while the guest process is still running —
+    /// `exitcode`/`out-data`/`err-data` are meaningless (and often absent)
+    /// until it is `1`. Reading them regardless would report a stale or
+    /// zero exit code as the real one.
+    pub fn agent_exec_status(&self, vmid: u32, pid: u32) -> Result<AgentExecStatus> {
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/agent/exec-status?pid={pid}",
+            self.node
+        ))?;
+        let w: Wrapped<AgentExecStatusBody> = parse(&body, "agent exec-status")?;
+        Ok(agent_exec_status_of(w.data))
+    }
+
+    /// Runs `argv` in the guest and polls until it finishes or `timeout`
+    /// elapses.
+    ///
+    /// Shaped like [`Client::wait_task`] — issue once, poll on a short
+    /// interval, give up at a hard ceiling — but it is not the same loop: a
+    /// guest exec is not a node task, has no ledger entry, and nothing here
+    /// is ever retried or recorded. A caller that wants those guarantees is
+    /// asking the wrong primitive.
+    pub fn agent_exec_wait(
+        &self,
+        vmid: u32,
+        argv: &[&str],
+        timeout: Duration,
+    ) -> Result<AgentExecStatus> {
+        let pid = self.agent_exec(vmid, argv)?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match self.agent_exec_status(vmid, pid)? {
+                AgentExecStatus::Running => {}
+                done => return Ok(done),
+            }
+            if Instant::now() >= deadline {
+                return Err(Error::TaskTimeout(format!(
+                    "proxmox: guest command (pid {pid}) on VM {vmid} was still running after {}s \
+                     — giving up. It may still be running in the guest; nothing here was rolled back",
+                    timeout.as_secs()
+                )));
+            }
+            std::thread::sleep(AGENT_EXEC_POLL);
+        }
     }
 
     /// The next free VM id on the CLUSTER.
@@ -1699,6 +1868,21 @@ pub fn validate_target_url(url: &str) -> Result<()> {
 /// too loose (a body can contain any number); the prefix `send` writes is not.
 fn is_unauthorized(e: &Error) -> bool {
     matches!(e, Error::Unauthorized(_))
+}
+
+/// Does this failure say the node's ANSWER, not the request, was "no
+/// agent"?
+///
+/// Matched on the message, the same way [`is_unauthorized`]/[`is_lock_timeout`]
+/// are: Proxmox reports this specific condition as an HTTP 500 whose body is
+/// the literal string `"QEMU guest agent is not running"` — [`classify_status`]
+/// has no dedicated variant for it, so it falls through to [`Error::HttpStatus`]
+/// like any other 500 the node has no typed reason for. Matching the status
+/// code alone would also catch every OTHER 500 (a bad guest command, storage
+/// full), and those are real failures that must propagate, not read as "no
+/// agent".
+fn is_agent_not_running(e: &Error) -> bool {
+    matches!(e, Error::HttpStatus(m) if m.contains("QEMU guest agent is not running"))
 }
 
 /// A bridge name is interpolated into the `net0` property.
@@ -3239,6 +3423,54 @@ mod tests {
         assert_eq!(parse_agent_ip(&j(r#"{"data":{"result":[1,2,"x"]}}"#)), None);
     }
 
+    /// `exited == 0` is the WHOLE boundary — not the presence of the other
+    /// fields, which the node also omits while the guest is still running.
+    /// Getting this backwards would report a stale or absent exit code as a
+    /// real result while the command is still going.
+    #[test]
+    fn agent_exec_status_of_reads_exited_as_the_only_boundary() {
+        let body = |s: &str| serde_json::from_str::<AgentExecStatusBody>(s).unwrap();
+        assert_eq!(
+            agent_exec_status_of(body(r#"{"exited":0}"#)),
+            AgentExecStatus::Running
+        );
+        // The measured shape of a finished, successful command.
+        assert_eq!(
+            agent_exec_status_of(body(
+                r#"{"exited":1,"exitcode":0,"out-data":"hi\n","err-data":""}"#
+            )),
+            AgentExecStatus::Finished {
+                exit_code: 0,
+                stdout: "hi\n".into(),
+                stderr: String::new(),
+                signal: None,
+            }
+        );
+        // A non-zero exit and a killed-by-signal case, exercised together
+        // because the two fields are meaningless together (a real node
+        // answers one or the other), and the type has to carry both.
+        assert_eq!(
+            agent_exec_status_of(body(
+                r#"{"exited":1,"exitcode":137,"out-data":"","err-data":"boom"}"#
+            )),
+            AgentExecStatus::Finished {
+                exit_code: 137,
+                stdout: String::new(),
+                stderr: "boom".into(),
+                signal: None,
+            }
+        );
+        assert_eq!(
+            agent_exec_status_of(body(r#"{"exited":1,"signal":9}"#)),
+            AgentExecStatus::Finished {
+                exit_code: 0,
+                stdout: String::new(),
+                stderr: String::new(),
+                signal: Some(9),
+            }
+        );
+    }
+
     /// The ADR calls accepting-and-dropping "the failure mode this repo treats
     /// as its worst", and until this pass it was exactly what happened: a
     /// `-v /data:/data` on a `--backend proxmox` create reported success and
@@ -3401,10 +3633,22 @@ mod tests {
         // Writes are what these helpers send; `fn post_form`/`fn delete`
         // themselves are definitions, not call sites.
         let write_calls = ["self.post_form(", "self.put_form(", "self.delete("];
-        let allowed_outside_task: &[(&str, &str)] = &[(
-            "login",
-            "exchanges the credential for a ticket; it writes nothing on the node",
-        )];
+        let allowed_outside_task: &[(&str, &str)] = &[
+            (
+                "login",
+                "exchanges the credential for a ticket; it writes nothing on the node",
+            ),
+            (
+                "agent_ping",
+                "a guest-agent command answers inline (the agent itself, not a node worker) \
+                 — there is no UPID to wait on",
+            ),
+            (
+                "agent_exec",
+                "starts a process inside the guest and answers its pid inline; the pid is \
+                 polled by agent_exec_status, which is a plain read and not a write at all",
+            ),
+        ];
         let mut checked = 0;
         for needle in write_calls {
             let mut from = 0;
@@ -3580,6 +3824,32 @@ mod tests {
         // A body that merely mentions the number is not a 401.
         assert!(!is_unauthorized(&st(500, "disk 401 is missing")));
         assert!(!is_unauthorized(&st(403, "permission denied")));
+    }
+
+    /// [`Client::agent_ping`]'s whole reason to exist: this ONE 500 has to
+    /// read as "no agent, not a failure" while every other 500 — and every
+    /// other status — reads as a real error that `?` must propagate.
+    #[test]
+    fn is_agent_not_running_so_matches_the_nodes_own_wording() {
+        let st = |code: u16, body: &str| {
+            classify_status(
+                reqwest::StatusCode::from_u16(code).unwrap(),
+                "https://pve",
+                "/nodes/pve/qemu/100/agent/ping",
+                body,
+            )
+        };
+        assert!(is_agent_not_running(&st(
+            500,
+            "QEMU guest agent is not running\n"
+        )));
+        // Same status, different reason: a real failure, not "no agent".
+        assert!(!is_agent_not_running(&st(500, "unable to open file")));
+        assert!(!is_agent_not_running(&st(401, "bad ticket")));
+        assert!(!is_agent_not_running(&st(403, "permission denied")));
+        assert!(!is_agent_not_running(&Error::Request(
+            "proxmox: request failed: connection refused".into()
+        )));
     }
 
     /// The CLASS of a failure is what an exit code and a reconciler read; the
