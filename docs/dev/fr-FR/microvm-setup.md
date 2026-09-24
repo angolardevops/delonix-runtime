@@ -290,7 +290,7 @@ builds d'images sont uniquement amd64 ([ADR-0018](../../adr/0018-vm-images-stay-
 
 ```bash
 delonix vm convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
-delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 2G
+delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
 ```
 
 `vm convert` aplatit (aucune chaîne de backing) ; `--compress` n'est accepté que pour `qcow2` et

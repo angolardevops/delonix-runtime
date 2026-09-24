@@ -273,7 +273,7 @@ the built images and the appliance builders have **not been validated yet** (v4.
 
 ```bash
 delonix vm convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
-delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 2G
+delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
 ```
 
 `vm convert` flattens (no backing chain); `--compress` is accepted only for `qcow2` and `vmdk`.
