@@ -226,6 +226,7 @@ def normalise(raw: str) -> str:
     p = p.replace("/qemu/{template}/", "/qemu/{vmid}/")
     p = p.replace("/snapshot/{name}/", "/snapshot/{snapname}/")
     p = p.replace("/content/{}", "/content/{volume}")
+    p = p.replace("/firewall/ipset/{name}/{}", "/firewall/ipset/{name}/{cidr}")
     return p
 
 

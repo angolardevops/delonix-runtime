@@ -114,6 +114,16 @@ pub enum Error {
     #[error("{0}")]
     InvalidFirewallRule(String),
 
+    /// An alias or IP-set name of the VM's own firewall that Proxmox's own
+    /// namespace cannot hold.
+    #[error("{0}")]
+    InvalidFirewallObjectName(String),
+
+    /// A CIDR/address given to a firewall alias or an IP-set entry that does
+    /// not have the shape of an IPv4/IPv6 address, optionally with a prefix.
+    #[error("{0}")]
+    InvalidFirewallAddress(String),
+
     /// An SDN zone or vnet id Proxmox's own namespace cannot hold.
     #[error("{0}")]
     InvalidSdnId(String),
@@ -153,6 +163,8 @@ impl Error {
             Error::InvalidSdnId(_) => 1530,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
+            Error::InvalidFirewallObjectName(_) => 1531,
+            Error::InvalidFirewallAddress(_) => 1532,
             Error::NoHandle(_) => 1525,
             Error::BadRequest(_) => 1526,
             Error::InvalidCloudInitKind(_) => 1529,
@@ -254,6 +266,8 @@ mod tests {
             Error::InvalidSnapshotName("invalid Proxmox snapshot name 'x': expected letters, digits, '-' and '_'".into()),
             Error::InvalidCloudInitKind("proxmox: cloud-init dump type 'x' is not one of 'user', 'network', 'meta'".into()),
             Error::InvalidFirewallRule("invalid Proxmox firewall rule action 'x': expected ACCEPT, DROP or REJECT (a firewall group's name is not accepted here)".into()),
+            Error::InvalidFirewallObjectName("invalid Proxmox firewall alias/ipset name 'x': expected a letter, then one or more letters, digits, '-' or '_' (at least 2 characters total)".into()),
+            Error::InvalidFirewallAddress("invalid Proxmox firewall address 'x': expected an IPv4/IPv6 address, optionally with a '/<prefix>'".into()),
             Error::InvalidSdnId("invalid Proxmox SDN id 'x': expected a lowercase letter then up to 7 lowercase letters or digits".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),

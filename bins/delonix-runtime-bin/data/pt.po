@@ -13646,6 +13646,25 @@ msgstr "o `type` de cloudinit_dump tem de ser um dos três que a rota de cloud-i
 msgid "Ask for 'user', 'network' or 'meta'."
 msgstr "Pede 'user', 'network' ou 'meta'."
 
+# DX-1531/1532 — the VM's own firewall's aliases and IP sets (ADR-0049 slice 2)
+msgid "invalid Proxmox firewall alias or ipset name"
+msgstr "nome de alias/ipset da firewall do Proxmox inválido"
+
+msgid "An alias or IP-set name of the VM's OWN firewall (not this engine's SDN firewall) goes into a URL path and into the node's own namespace, which Proxmox limits to a letter followed by one or more letters, digits, '-' or '_' (at least 2 characters total)."
+msgstr "Um nome de alias ou de IP-set da firewall PRÓPRIA da VM (não a firewall SDN deste motor) vai para um caminho de URL e para o namespace do próprio nó, que o Proxmox limita a uma letra seguida de uma ou mais letras, dígitos, '-' ou '_' (pelo menos 2 caracteres no total)."
+
+msgid "Pick a name that starts with a letter and has at least one more letter, digit, '-' or '_' after it."
+msgstr "Escolhe um nome que comece por uma letra e tenha pelo menos mais uma letra, dígito, '-' ou '_' a seguir."
+
+msgid "invalid Proxmox firewall address"
+msgstr "endereço de firewall do Proxmox inválido"
+
+msgid "A CIDR/address given to a firewall alias or to one entry of a named IP set is not an IPv4/IPv6 address, optionally with a '/<prefix>' — the node's own alias/ipset routes reject it before anything else would."
+msgstr "Um CIDR/endereço dado a um alias de firewall ou a uma entrada de um IP-set nomeado não é um endereço IPv4/IPv6, opcionalmente com um '/<prefixo>' — as rotas de alias/ipset do próprio nó rejeitam-no antes de mais nada."
+
+msgid "Give an IPv4 or IPv6 address, or a CIDR range such as '10.0.0.0/8'."
+msgstr "Dá um endereço IPv4 ou IPv6, ou um intervalo CIDR como '10.0.0.0/8'."
+
 msgid "capability not supported by the backend"
 msgstr "capacidade não suportada pelo backend"
 
