@@ -187,20 +187,71 @@ work — no pull needed). Confirmed and corrected on the way:
   similar" the docs' own introduction warns about, and precisely the case
   where it does not hold. Reading an alias needs its own parser; reading a
   filter rule does not.
-- **What is still unmeasured**: `add_item`/`add_rule`/`apply` themselves —
-  this session's own tool policy classified the POST calls that would
-  create an alias or a rule as "Modify Shared Resources" and refused them,
-  even against this isolated, purpose-named VM. No workaround was
-  attempted; per that refusal's own instructions, this is surfaced to the
-  owner rather than bypassed. **Phase 2 cannot start until this finishes**
-  — the write-path shape (does `add_item` want the flat form the docs'
-  worked example shows, or the verbose form `get` returns back;
-  synchronous or polled `apply`) is exactly what Phase 2's client needs and
-  is exactly what is not yet known.
+- **Write path, completed after the owner cleared this session's tool
+  policy.** `add_item`/`add_rule` both want the FLAT shape the docs'
+  worked example shows — `{"alias": {"name":…, "type":…, "content":…}}`,
+  `{"rule": {"description":…, "source_net":…, "protocol":…,
+  "destination_net":…}}` — never the verbose form `get`/`get_item` return
+  back; the two are asymmetric by design (write a few fields, read
+  everything). Both answer `{"result":"saved","uuid":"<uuid>"}` on
+  success — the SAME envelope for an alias and a rule, one shared
+  convention across `ApiMutableModelControllerBase` resources.
+- **`apply()` is SYNCHRONOUS, confirmed by wall-clock timing, not
+  assumed.** `POST firewall/filter/apply` returned in ~0.85s with
+  `{"status":"OK\n\n"}` — literally the captured stdout of the underlying
+  reload, not a task id. There is no Proxmox-style UPID/polling loop to
+  build for OPNsense; a `GatewayProvider::commit()` for this backend can
+  just make the call and read the body. `firewall/alias/reconfigure` is
+  the alias table's own equivalent (`{"status":"ok"}`), and is a SEPARATE
+  call from `filter/apply` — an alias used by a rule needs the alias
+  table reconfigured too, not just the filter reloaded, confirmed by
+  creating an alias-referencing rule, applying, and reading it back via
+  `search_rule` (see below) before either was reconfigured.
+- **Validation failures are HTTP 200**, not 400/422 — the docs table's
+  own "GET, POST" note for these routes undersold it: the ERROR channel
+  is the JSON body, not the status line. A bad `add_rule` answered
+  `{"result":"failed","validations":{"rule.protocol":"Option [] not in
+  list.","rule.source_net":"not-an-ip is not a valid source IP address or
+  alias."}}` — a dict keyed by `<record>.<field>`, at HTTP 200. A client
+  that only branches on HTTP status will treat this as success.
+- **No credentials at all is HTTP 302 (a redirect), not 401.** Wrong
+  Basic-Auth credentials (a real GUI account, `root:opnsense`, used the
+  wrong way) DO answer `401 {"status":401,"message":"Authentication
+  Failed"}` — measured earlier in this same session. But an entirely
+  missing `Authorization` header answers `302`, presumably a redirect
+  toward the session-based GUI login this route also serves. Two
+  different "you are not authenticated" answers for two different ways
+  of not authenticating; ADR-0043's mapping needs both, and neither is
+  the generic 401 the docs' own wording implies.
+- **An unknown route is a clean 404** (`{"errorMessage":"Endpoint not
+  found"}`), and a non-POST request to a POST-only action route is
+  **200 with a silent no-op** (`{"result":"failed"}` with no
+  `validations`), not a routing error — confirmed by re-running
+  `search_rule` immediately after a `GET` to `add_rule` and finding the
+  rule count unchanged. Matches the source read earlier
+  (`addApiKeyAction`'s own `if ($this->request->isPost())` guard):
+  several of these controllers accept the wrong HTTP verb at the
+  transport level and refuse it themselves, in the body, not the status.
+- **Alias references resolve inline, and `search_rule` proves it**: a
+  rule created with `source_net` set to the test alias's NAME (not its
+  UUID) came back from `search_rule` carrying
+  `"alias_meta_source_net":[{"value":"adr0051spike","isAlias":true,
+  "description":"…<br/>10.99.99.99"}]` — the alias's current content,
+  denormalized into the rule's own read representation. A `Gateway
+  Provider` reading current state back does not need a second call to
+  resolve what an alias means at the time a rule was read.
+- **Cleaned up after measuring**: the test rule and alias were deleted
+  (`del_rule`/`del_item`), `filter/apply` and `alias/reconfigure` run
+  again, and `filter/get` confirmed empty
+  (`{"filter":{"rules":{"rule":[]},…}}`) — the appliance is back to a
+  clean, unmodified firewall config.
 - The VM (`opnsense-adr0051-spike`, `192.168.122.103`, root/opnsense,
   LAN reconfigured to DHCP) is left running for whoever continues this —
   tearing it down would throw away the one thing this spike exists to
   produce: a reachable, credentialed, real appliance to measure against.
+  **Phase 0 is done**: auth, both read shapes, the write shape, `apply()`
+  semantics, and both classes of error are all measured. Phase 2 can
+  start from fact, not guess.
 
 **Phase 1 — the trait, the registry, the native implementation. Zero
 behavior change.** `crates/adapters/delonix-sdn`: `trait GatewayProvider`,
@@ -270,10 +321,11 @@ not pick between them yet; Phase 1/2 do not require the answer.
 - Phase 2 cannot be built responsibly without Phase 0: guessing the
   `apply()` semantics or the write-path JSON shape risks the exact trap
   ADR-0008's own module doc names for Proxmox tasks — treating "staged" as
-  "applied." Auth, and the read-path shape of `filter/get`/`alias/get`,
-  are now measured (see Phase 0 above, started 2026-09-24); the write path
-  (`add_item`/`add_rule`/`apply`) is the piece still blocked on the
-  owner's decision about this session's tool policy.
+  "applied." Phase 0 is now done (2026-09-24): auth (two distinct
+  unauthenticated answers, 401 vs. 302), both read shapes, the write
+  shape, `apply()`'s synchronous confirm-by-body semantics, and the
+  validation/routing error shapes are all measured against the live
+  appliance, not assumed.
 - This decision deliberately rides alongside, not ahead of, P4b's
   `VmBackend`-to-`delonix-compute` migration. If that migration's shape
   changes once it actually lands, `GatewayProvider` moves with it in the
