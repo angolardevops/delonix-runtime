@@ -144,7 +144,7 @@ impl Error {
             Error::UnsupportedField(_) => 1524,
             Error::NoHandle(_) => 1525,
             Error::BadRequest(_) => 1526,
-            Error::InvalidCloudInitKind(_) => 1528,
+            Error::InvalidCloudInitKind(_) => 1529,
             Error::NodeNotFound(_) => 4504,
             Error::NodeConflict(_) => 5504,
             Error::NodeUnavailable(_) => 6506,
