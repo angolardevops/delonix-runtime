@@ -2,7 +2,9 @@
 
 - **Status:** Proposed — all five required spikes done as of 2026-09-19 (`docs/discovery/
   56_..md` through `60_..md`); ready for the owner's Accept/reject decision, not
-  self-promoted here
+  self-promoted here. **Text re-measured against `origin/main` on 2026-09-24** (`25f8b55a`):
+  three things this ADR still described as open had closed in the five days since —
+  see the dated addenda to D3, D8 and D9. The decision itself is unchanged
 - **Date:** 2026-09-18
 - **Deciders:** Walter (owner)
 - **Related:** ADR-0040 (the restructuring this closes phase P4 of — D2.2, D2.3, D2.4,
@@ -350,6 +352,41 @@ crate name **disappears** — nothing in D2.3's provider table or D2.5's directo
 lists it, and its remaining job (the record types) already moved to `delonix-compute`
 ahead of this phase (Context, above).
 
+**Addendum, 2026-09-24 — `capabilities()`/`health()` have content now, and rule 3 has
+zero violations left in `delonix-vm` ahead of P4b.** Two things landed after this section
+was written, neither of which changes its decision:
+
+1. **ADR-0050 (Accepted 2026-09-24, #476/#479) fills in what `capabilities()` returns.**
+   The skeleton above names a `&CapabilitySet` and a `Condition` without saying where
+   either comes from; today they are `delonix_compute::capability::ProviderReport` (the
+   versioned catalog, 100 entries, one declaration per backend with a `match` that has no
+   wildcard arm) and its `ProviderHealth`, built by a `ReportFactory` that rides on
+   `BackendRegistration` next to `new` — never called at registration, so ADR-0008's
+   "registering does no I/O" holds. The request-time refusal this section promises
+   ("requested through `capabilities()` and refused with `CapabilityNotSupported` when
+   absent") exists too: `vm create --require <name>`, `spec.requiredCapabilities`, and
+   `auto_detect(entries, required)` skipping a candidate whose report lacks an entry. All
+   of it lives on the `VmBackend` registry today; ADR-0050 D7 says in its own words that
+   P4b relocates the factory with the registry (D4 below) and `Provider::capabilities()`
+   returns exactly this report. **P4b adds no capability mechanism** — it moves one.
+2. **The Context's second instance of the leak is closed** (this ADR's own PR, same day):
+   `restart_policy_unsupervised` no longer compares `backend_id != "libvirt"` — it asks the
+   backend's report for `vm.restart-policy.native`, which libvirt declares (`partial`, with
+   the `<on_crash>restart` detail) and Cloud Hypervisor and Proxmox declare
+   `unsupported-by-provider`. The same pass found a **second string match this ADR never
+   listed**, `vm_namespace_supported` (`backend_id == "cloud-hypervisor"` — the very
+   function D8 credits for the `namespace` refusal, without noticing its shape), now
+   answered by `vm.namespace-isolation`. Both read the DECLARED state
+   (`CapabilityState::declared_usable`, new: `is_usable` plus `unavailable-on-host`, which
+   only ever comes from `on_host` narrowing a declared yes) rather than the host-probed one,
+   because both ask about the provider's nature, not about this machine; a `--require`
+   keeps asking `is_usable`, because a request has to run here. An id no registration
+   knows is a "no" — the same fail-closed answer an unknown `Extensions` key gets in D2.
+   `grep -n 'backend_id [!=]= "' crates/adapters/delonix-vm/src/lib.rs` now hits only the
+   two doc-comments that record what the predicates used to be, no code; what remains is
+   `builtin_backends`/`registry(id)` naming its own entries, which is the composition-root
+   dispatch rule 3 allows.
+
 ### D4. The backend registry moves with the port, its four rules unchanged
 
 ADR-0008's registry (`BackendFactory`, `BackendRegistration`, `register_backend`,
@@ -602,6 +639,29 @@ are the two backends `VmConfig` was originally shaped around, so most of D1's "u
 column is literally every field they already read, and D2's `Extensions::cloud_hypervisor`/
 `Extensions::libvirt` are close to a straight split of `VmBootSpec`'s existing fields.
 
+**Addendum, 2026-09-24 — `network`'s half closed too, and the Proxmox crate grew a state
+file D6 has not mapped.** Measured on `origin/main` `25f8b55a`:
+
+- **`network` is now refused by name**, before any API call, by #478 (ADR-0049 rule 1):
+  `refuse_unsupported` gained `names_an_engine_network(&cfg.network)`, which treats `""`,
+  `ingress`, `bridge` and `default` as "no engine network named" and refuses anything
+  else — the D8-sized answer this section asked for, landed ahead of P4c. With
+  `namespace` already refused a month earlier (spike nº5), **both halves of D1's finding
+  are closed on `VmBackend`**, and P4c's job for the pair is exactly what this section
+  said for `namespace` alone: carry the two refusals into `VmSpec`/`Extensions`'s new
+  home, where the compiler makes them unnecessary, not invent them.
+- **ADR-0049 slice 1 (#475, #477, #478) grew the list above of "none of this changes"**:
+  the Proxmox client now has typed errors mapped to `DX-` codes, a lost-answer
+  reconciliation on a transport failure, and a **task ledger** — `<vmdir>/
+  proxmox-tasks.json`, written before every wait and settled after, read by the next
+  operation on the same VM. It is a file a *provider* writes into the engine's state
+  root, the same class of write D6's 2026-09-19 addendum mapped for `delonix-vm` (a
+  `ConfigWriter` port, scope mapped, not built) and did not map here because it did not
+  exist yet. It carries into P4c unchanged in mechanism; whether it goes through
+  `ConfigWriter` or stays a plain file the provider owns is a D6 question P4c has to
+  answer before the `("dep", "delonix-proxmox", "delonix-vm")` exception can close, and
+  this addendum records it so P4c does not discover it at merge time.
+
 ### D9. Sequencing: P4 lands as several PRs, each with its own gate
 
 Following ADR-0040's own "strangler order" reasoning (Alternatives, "big-bang rewrite...
@@ -619,6 +679,33 @@ removable:
 P4b before P4c: writing the Proxmox migration against a port that has not itself been
 proven against the two backends it was designed from would risk baking Proxmox's shape
 into `VmSpec` a second time, the same mistake `VmConfig` already made once.
+
+**Addendum, 2026-09-24 — three rows of the table read against `origin/main`.** The
+table is kept as written, because the slices and their order still hold; the corrections
+are to what each row now contains:
+
+- **P4a** is superseded by D6's own two addenda and should be read as they say: at most
+  `delonix-linux` and `delonix-vm` close under this row; `delonix-sdn`/`delonix-oci`/
+  `delonix-volume` are each a different debt (a parallel `flock` in `ipam.rs`, a one-time
+  key write, an unlocked read-modify-write in `VolumeStore`) and need their own sentence
+  before anyone attempts them. What has landed: `StateRepository<T>` in
+  `delonix_model::ports` (the foundation, not `delonix-state` as D6's sketch implied),
+  implemented for `Store` and for `JsonStore<T>`, used by the four `delonix-linux`
+  functions that never touch `SecretStore`; the fitness table names the residuals
+  (`SecretVault` for `delonix-linux`, `ConfigWriter` for `delonix-vm`) in place of the
+  generic reason. The gate stays: those two exceptions removed, suites unchanged.
+- **P4c**'s work column loses *"the `network`/`namespace` gap closed one way or the
+  other"* — both closed before P4c, on `VmBackend` (D8 addendum). Its gate gains the task
+  ledger: a live run against the `proxmox-ve` appliance repeats ADR-0049's watched
+  lifecycle (`tests/live.rs`, ledger read at the end, not just each call's `Ok`) on the
+  new trait, not only ADR-0008's.
+- **P4e** gains `delonix-volume → delonix-provider-mount` on the `StorageProvider` port.
+  ADR-0040 D2.3's provider table names it and `scripts/arch_fitness.py`'s `LAYERS`
+  comment (`"delonix-volume": ADAPTER,  # → delonix-provider-mount (P4)`) already assigns
+  it to this phase; D3's crate-rename list above and this table both omitted it. It is
+  the same shape as the truenas move (a storage provider behind a port the
+  `provision.rs`/`network.rs` string matches are replaced by), so it belongs in the same
+  slice, and the gate is the same: the two fitness annotations naming P4 for it removed.
 
 ## Alternatives considered
 

@@ -279,7 +279,8 @@ fn vm(doc: &ManifestDoc, env: &Env) -> Vec<Condition> {
     }
     // Which backend actually BOOTS — mirrors `select_backend`: explicit wins;
     // in auto (backend absent) Cloud Hypervisor is preferred IF the binary
-    // exists, otherwise it falls back to libvirt. Only libvirt supervises the restart.
+    // exists, otherwise it falls back to libvirt. Which one supervises the restart
+    // is the backend's own `vm.restart-policy.native` declaration (ADR-0050).
     let backend = match spec_str(doc, &["backend"]) {
         Some(b) => b.to_string(),
         None if env.cloud_hypervisor => "cloud-hypervisor".to_string(),
