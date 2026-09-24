@@ -562,6 +562,9 @@ fn run() -> Result<()> {
                       // receives a target. Free when unconfigured, and it does no I/O even
                       // when it is — the node is contacted on first use (ADR-0008).
     cmd::vmbackends::register_configured();
+    // Same reasoning, one layer over: a remote GatewayProvider (OPNsense) has to be
+    // registered before anything selects it by name (ADR-0051).
+    cmd::gatewayproviders::register_configured();
     // The VM engine attaches a Cloud Hypervisor guest through this port instead of
     // reaching into the SDN itself (ADR-0040 P3).
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork));

@@ -209,12 +209,12 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Comment les noms atteignent /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">16</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Standards cloud native, couche par couche</span></a><a class="on" aria-current="page" href="environment-variables.html"><span class="n">22</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Référence</p>
-<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/environment-variables.html">Lire la page en anglais</a></span></div><h1 id="environment-variables-delonix_">Variables d’environnement (<code>DELONIX_*</code>)</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/environment-variables.html">Lire la page en anglais</a></span></div><h1 id="variables-denvironnement-delonix_">Variables d’environnement (<code>DELONIX_*</code>)</h1>
 <p><strong>Avant de lire :</strong> <a href="build-and-test.html#isolating-the-engines-state">Isoler l'état du moteur</a> dans Cloner, construire et tester.</p>
 <p>Cette page recense chaque nom <code>DELONIX_*</code> qui apparaît dans le code du moteur, avec l’endroit où il est lu,
 ce qu’il change, et s’il vous arrivera un jour de le définir. C’est une référence : lisez la section qui
 correspond à ce que vous faites, pas la page entière. Après elle, vous pouvez isoler une exécution, activer les diagnostics dont vous avez besoin, et reconnaître les variables qui abaissent une frontière de sécurité avant d'en définir une.</p>
-<h2 id="how-to-read-this-page">Comment lire cette page<a class="hanchor" href="#how-to-read-this-page" aria-label="#">#</a></h2>
+<h2 id="comment-lire-cette-page">Comment lire cette page<a class="hanchor" href="#comment-lire-cette-page" aria-label="#">#</a></h2>
 <p>Chaque ligne des tableaux de variables a cinq colonnes :</p>
 <ul>
 <li><strong>Lu par</strong> — le crate ou le binaire et le <code>path:symbol</code> où la valeur est lue (ou écrite).
@@ -299,7 +299,7 @@ script et dans <a href="build-and-test.html">Cloner, compiler et tester</a>, pas
 <p><code>delonix serve cri</code> et <code>delonix serve api</code> transmettent leurs flags <strong>à la fois</strong> comme flags et comme la
 variable correspondante au binaire serveur qu’ils <code>exec</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs:run</code></a>),
 de sorte qu’un serveur d’une release plus ancienne qui ne lit que les variables reçoit quand même la valeur.</p>
-<h3 id="isolating-a-development-run">Isoler une exécution de développement<a class="hanchor" href="#isolating-a-development-run" aria-label="#">#</a></h3>
+<h3 id="isoler-une-execution-de-developpement">Isoler une exécution de développement<a class="hanchor" href="#isoler-une-execution-de-developpement" aria-label="#">#</a></h3>
 <p>Avant d’exécuter quoi que ce soit au-delà de <code>--help</code> sur une machine qui exécute aussi des workloads Delonix, faites pointer les deux
 emplacements d’état vers un répertoire jetable :</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copier</span></button></div><pre><code class="language-bash">export DELONIX_ROOT=$HOME/scratch/dlx/root        # records, images, networks, IPAM, volumes, pidfiles
@@ -313,7 +313,7 @@ parce que le chemin d’un socket est limité à environ 108 octets et que <code
 N’en définir qu’une des deux peut laisser deux racines d’état partager un même jeu de sockets. L’histoire complète,
 et la façon de démonter l’infra isolée, se trouvent dans
 <a href="build-and-test.html#isolating-the-engines-state">Isoler l’état du moteur</a>.</p>
-<h2 id="everyday-configuration">Configuration courante<a class="hanchor" href="#everyday-configuration" aria-label="#">#</a></h2>
+<h2 id="configuration-courante">Configuration courante<a class="hanchor" href="#configuration-courante" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -488,7 +488,7 @@ et la façon de démonter l’infra isolée, se trouvent dans
 </tr>
 </tbody>
 </table></div>
-<h2 id="networking-and-security-escape-hatches">Échappatoires réseau et sécurité<a class="hanchor" href="#networking-and-security-escape-hatches" aria-label="#">#</a></h2>
+<h2 id="echappatoires-reseau-et-securite">Échappatoires réseau et sécurité<a class="hanchor" href="#echappatoires-reseau-et-securite" aria-label="#">#</a></h2>
 <p><strong>Chaque variable de cette section abaisse une frontière.</strong> Chacune journalise un <code>SECURITY WARNING</code> (ou un
 avertissement) lorsqu’elle prend effet. Elles existent pour le débogage et pour des désactivations explicites et informées ; aucune
 n’a sa place dans une configuration de production. Lisez la section de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> indiquée avant d’en utiliser une.</p>
@@ -575,7 +575,7 @@ n’a sa place dans une configuration de production. Lisez la section de <a clas
 </tr>
 </tbody>
 </table></div>
-<h2 id="build-and-images">Build et images<a class="hanchor" href="#build-and-images" aria-label="#">#</a></h2>
+<h2 id="build-et-images">Build et images<a class="hanchor" href="#build-et-images" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -617,7 +617,7 @@ n’a sa place dans une configuration de production. Lisez la section de <a clas
 </tr>
 </tbody>
 </table></div>
-<h2 id="cloud-hypervisor-and-vm-resource-tuning">Cloud Hypervisor et réglage des ressources des VM<a class="hanchor" href="#cloud-hypervisor-and-vm-resource-tuning" aria-label="#">#</a></h2>
+<h2 id="cloud-hypervisor-et-reglage-des-ressources-des-vm">Cloud Hypervisor et réglage des ressources des VM<a class="hanchor" href="#cloud-hypervisor-et-reglage-des-ressources-des-vm" aria-label="#">#</a></h2>
 <p>Les plafonds libvirt ci-dessous sont écrits dans le XML de domaine généré
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs:libvirt_domain_xml</code></a>) ; ils ne modifient pas un domaine qui
 existe déjà tant qu’il n’est pas redémarré.</p>
@@ -683,7 +683,7 @@ existe déjà tant qu’il n’est pas redémarré.</p>
 </tr>
 </tbody>
 </table></div>
-<h3 id="container-resource-budget">Budget de ressources des containers<a class="hanchor" href="#container-resource-budget" aria-label="#">#</a></h3>
+<h3 id="budget-de-ressources-des-containers">Budget de ressources des containers<a class="hanchor" href="#budget-de-ressources-des-containers" aria-label="#">#</a></h3>
 <p>Celles-ci règlent les défauts et le plafond agrégé que le moteur applique aux containers
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>).</p>
 <div class="tablewrap"><table>
@@ -820,7 +820,7 @@ commandes. Contexte : <a class="src" href="https://github.com/angolardevops/del
 <p>Le provisionneur TrueNAS (<code>kind: Volume</code> avec <code>spec.provision.truenas</code>) prend sa cible du
 manifeste et d’un <code>kind: Secret</code>, pas de variables d’environnement. Les seuls noms <code>DELONIX_TRUENAS_*</code>
 sont des paramètres de test — voir <a href="#test-only">Tests uniquement</a>.</p>
-<h2 id="observability">Observabilité<a class="hanchor" href="#observability" aria-label="#">#</a></h2>
+<h2 id="observabilite">Observabilité<a class="hanchor" href="#observabilite" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -848,7 +848,7 @@ sont des paramètres de test — voir <a href="#test-only">Tests uniquement</a>.
 </tr>
 </tbody>
 </table></div>
-<h2 id="set-by-the-engine-itself-internal">Définies par le moteur lui-même / internes<a class="hanchor" href="#set-by-the-engine-itself-internal" aria-label="#">#</a></h2>
+<h2 id="definies-par-le-moteur-lui-meme-internes">Définies par le moteur lui-même / internes<a class="hanchor" href="#definies-par-le-moteur-lui-meme-internes" aria-label="#">#</a></h2>
 <p><strong>Ne les définissez pas.</strong> Le moteur les écrit sur les processus qu’il démarre ; les définir à la main fait
 qu’une commande normale se comporte comme une passe interne.</p>
 <div class="tablewrap"><table>
@@ -913,7 +913,7 @@ qu’une commande normale se comporte comme une passe interne.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="build-time">Au moment du build<a class="hanchor" href="#build-time" aria-label="#">#</a></h2>
+<h2 id="au-moment-du-build">Au moment du build<a class="hanchor" href="#au-moment-du-build" aria-label="#">#</a></h2>
 <p>Valeurs de compilation : elles sont fixées lorsque le binaire est compilé et ne peuvent pas être changées en définissant une
 variable au moment où le programme s’exécute.</p>
 <div class="tablewrap"><table>
@@ -971,7 +971,7 @@ variable au moment où le programme s’exécute.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="test-only">Tests uniquement<a class="hanchor" href="#test-only" aria-label="#">#</a></h2>
+<h2 id="tests-uniquement">Tests uniquement<a class="hanchor" href="#tests-uniquement" aria-label="#">#</a></h2>
 <p>Celles-ci ne sont lues que par des tests. Sans elles, les tests réels <strong>se sautent</strong> et affichent <code>SKIP: … is not set</code>
 (un test réel qui passerait silencieusement sans sa cible ne prouverait rien).</p>
 <div class="tablewrap"><table>
@@ -1086,7 +1086,7 @@ DELONIX_TRUENAS_TEST_POOL=tank \
 
 DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 </code></pre></div>
-<h2 id="names-that-look-like-variables-but-are-not">Noms qui ressemblent à des variables mais n’en sont pas<a class="hanchor" href="#names-that-look-like-variables-but-are-not" aria-label="#">#</a></h2>
+<h2 id="noms-qui-ressemblent-a-des-variables-mais-nen-sont-pas">Noms qui ressemblent à des variables mais n’en sont pas<a class="hanchor" href="#noms-qui-ressemblent-a-des-variables-mais-nen-sont-pas" aria-label="#">#</a></h2>
 <p>Quelques noms <code>DELONIX_*</code> apparaissent dans le code sans être lus depuis l’environnement d’aucun processus.
 Ils sont exclus du contrôle ci-dessus par <code>NOT_ENV</code> dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>, chacun avec sa raison,
 et vous n’avez jamais besoin de les définir :</p>
@@ -1108,16 +1108,16 @@ et vous n’avez jamais besoin de les définir :</p>
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#how-to-read-this-page">Comment lire cette page</a><ul>
+<li><a href="#comment-lire-cette-page">Comment lire cette page</a><ul>
 <li><a href="#precedence">Précédence</a></li>
-<li><a href="#isolating-a-development-run">Isoler une exécution de développement</a></li>
+<li><a href="#isoler-une-execution-de-developpement">Isoler une exécution de développement</a></li>
 </ul>
 </li>
-<li><a href="#everyday-configuration">Configuration courante</a></li>
-<li><a href="#networking-and-security-escape-hatches">Échappatoires réseau et sécurité</a></li>
-<li><a href="#build-and-images">Build et images</a></li>
-<li><a href="#cloud-hypervisor-and-vm-resource-tuning">Cloud Hypervisor et réglage des ressources des VM</a><ul>
-<li><a href="#container-resource-budget">Budget de ressources des containers</a></li>
+<li><a href="#configuration-courante">Configuration courante</a></li>
+<li><a href="#echappatoires-reseau-et-securite">Échappatoires réseau et sécurité</a></li>
+<li><a href="#build-et-images">Build et images</a></li>
+<li><a href="#cloud-hypervisor-et-reglage-des-ressources-des-vm">Cloud Hypervisor et réglage des ressources des VM</a><ul>
+<li><a href="#budget-de-ressources-des-containers">Budget de ressources des containers</a></li>
 </ul>
 </li>
 <li><a href="#providers">Providers</a><ul>
@@ -1125,11 +1125,11 @@ et vous n’avez jamais besoin de les définir :</p>
 <li><a href="#truenas">TrueNAS</a></li>
 </ul>
 </li>
-<li><a href="#observability">Observabilité</a></li>
-<li><a href="#set-by-the-engine-itself-internal">Définies par le moteur lui-même / internes</a></li>
-<li><a href="#build-time">Au moment du build</a></li>
-<li><a href="#test-only">Tests uniquement</a></li>
-<li><a href="#names-that-look-like-variables-but-are-not">Noms qui ressemblent à des variables mais n’en sont pas</a></li>
+<li><a href="#observabilite">Observabilité</a></li>
+<li><a href="#definies-par-le-moteur-lui-meme-internes">Définies par le moteur lui-même / internes</a></li>
+<li><a href="#au-moment-du-build">Au moment du build</a></li>
+<li><a href="#tests-uniquement">Tests uniquement</a></li>
+<li><a href="#noms-qui-ressemblent-a-des-variables-mais-nen-sont-pas">Noms qui ressemblent à des variables mais n’en sont pas</a></li>
 </ul>
 </div>
 </aside>

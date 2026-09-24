@@ -211,6 +211,16 @@ pub enum Error {
     #[error("{0}")]
     IpNotInSubnet(String),
 
+    /// A [`crate::gateway::register_gateway_provider`] call with no id, or a
+    /// name another provider already has (ADR-0051).
+    #[error("{0}")]
+    GatewayProviderRegistrationRefused(String),
+
+    /// A [`crate::gateway::GatewayProvider`] operation the provider does not
+    /// implement — every default method (ADR-0051 Phase 2) returns this.
+    #[error("{0}")]
+    UnsupportedByGatewayProvider(String),
+
     // ---- not found ----------------------------------------------------
     /// No `NetworkRoute` between the given pair.
     #[error("{0}")]
@@ -343,6 +353,8 @@ impl Error {
             Error::FirewallEncodeFailed(_) => 1338,
             Error::NoFreeIngressPrefix(_) => 1339,
             Error::IpNotInSubnet(_) => 1340,
+            Error::GatewayProviderRegistrationRefused(_) => 1341,
+            Error::UnsupportedByGatewayProvider(_) => 1342,
             Error::RouteNotFound(_) => 4301,
             Error::ServiceNotFound(_) => 4302,
             Error::IngressNetworkNotRealized(_) => 4303,
@@ -455,6 +467,12 @@ mod tests {
             Error::FirewallEncodeFailed("x".into()),
             Error::NoFreeIngressPrefix("no free /16 prefixes for ingress networks".into()),
             Error::IpNotInSubnet("IP x does not belong to network y (10.201.0.0/16)".into()),
+            Error::GatewayProviderRegistrationRefused(
+                "gateway provider 'x' cannot claim the name 'y': it already belongs to 'z'".into(),
+            ),
+            Error::UnsupportedByGatewayProvider(
+                "ensure_alias is not supported by the 'native' gateway provider".into(),
+            ),
             Error::RouteNotFound("route: a -> b".into()),
             Error::ServiceNotFound("service: default/web".into()),
             Error::IngressNetworkNotRealized("ingress network 'x' does not exist".into()),

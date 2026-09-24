@@ -71,6 +71,7 @@ pub const POD: &str = "Pod";
 pub const INGRESS: &str = "Ingress";
 pub const FIREWALL_POLICY: &str = "NetworkPolicy";
 pub const NETWORK_ACCESS_RULE: &str = "NetworkAccessRule";
+pub const NETWORK_GATEWAY: &str = "NetworkGateway";
 pub const HTTP_ROUTE: &str = "HTTPRoute";
 pub const GATEWAY: &str = "Gateway";
 pub const SERVICE: &str = "Service";
@@ -507,6 +508,24 @@ const FACTS: &[KindFacts] = &[
         teardown: true,
         namespaced: Namespaced::Never,
         presence: Presence::Declarative,
+    },
+    KindFacts {
+        kind: NETWORK_GATEWAY,
+        plural: "networkgateways",
+        short: &["ngw"],
+        api_version: "networking.delonix.io/v1alpha1",
+        domain: Domain::NetPolicy,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "networkGateways",
+        converges: true,
+        teardown: true,
+        namespaced: Namespaced::Never,
+        // Its own registry (ADR-0051 Phase 3): the appliance a `GatewayProvider`
+        // talks to carries no `delonix.io/stack` label of its own to stamp — the
+        // same reason `Service`'s record lives in ITS own registry rather than
+        // on a target container.
+        presence: Presence::Registry,
     },
     KindFacts {
         // ADR-0046 D3: a reservation ledger routes claim addresses from. It sits

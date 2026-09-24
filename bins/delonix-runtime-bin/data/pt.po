@@ -12886,6 +12886,102 @@ msgstr "Um IP fixo dado para ligar um container não está dentro da subnet da r
 msgid "Pass an address inside the network's own subnet (`delonix network inspect <name>`)."
 msgstr "Passa um endereço dentro da própria subnet da rede (`delonix network inspect <name>`)."
 
+msgid "invalid gateway provider registration"
+msgstr "registo de provedor de gateway inválido"
+
+msgid "A GatewayProvider registration (ADR-0051) had no id, or claimed a name another provider already has."
+msgstr "Um registo de GatewayProvider (ADR-0051) não tinha id, ou reclamou um nome que já pertence a outro provider."
+
+msgid "not supported by this gateway provider"
+msgstr "não suportado por este provedor de gateway"
+
+msgid "The alias, rule or commit operation asked for is not implemented by this GatewayProvider (ADR-0051) — the native provider answers only id()/available()."
+msgstr "A operação de alias, regra ou commit pedida não está implementada por este GatewayProvider (ADR-0051) — o provider nativo só responde a id()/available()."
+
+msgid "Use a gateway provider that supports it (an appliance provider like OPNsense), or drop the operation."
+msgstr "Usa um provedor de gateway que suporte isto (um provider de appliance como o OPNsense), ou tira a operação."
+
+msgid "OPNsense rejected the fields sent"
+msgstr "o OPNsense rejeitou os campos enviados"
+
+msgid "The appliance answered HTTP 200 with `{\"result\":\"failed\",\"validations\":{...}}` — a per-field validation error, not a transport failure (ADR-0051 Phase 0, measured live)."
+msgstr "A appliance respondeu HTTP 200 com `{\"result\":\"failed\",\"validations\":{...}}` — um erro de validação por campo, não uma falha de transporte (ADR-0051 Fase 0, medido ao vivo)."
+
+msgid "Read the field-by-field reasons in the message and fix the alias/rule spec."
+msgstr "Lê as razões campo a campo na mensagem e corrige a especificação do alias/regra."
+
+msgid "no such OPNsense API route"
+msgstr "não existe essa rota da API do OPNsense"
+
+msgid "The appliance answered HTTP 404 `{\"errorMessage\":\"Endpoint not found\"}` — the module/controller/command path does not exist on this OPNsense version."
+msgstr "A appliance respondeu HTTP 404 `{\"errorMessage\":\"Endpoint not found\"}` — o caminho módulo/controller/comando não existe nesta versão do OPNsense."
+
+msgid "Check the path against `docs.opnsense.org/development/api.html` for the appliance's own version."
+msgstr "Confere o caminho contra `docs.opnsense.org/development/api.html` para a versão exacta da appliance."
+
+msgid "could not build the OPNsense API client"
+msgstr "não foi possível construir o cliente da API do OPNsense"
+
+msgid "The local HTTP/TLS stack could not be built from the given Target (a malformed CA certificate, most likely)."
+msgstr "A pilha HTTP/TLS local não pôde ser construída a partir do Target dado (o mais provável é um certificado CA malformado)."
+
+msgid "Check `ca_cert_pem`/`insecure_tls` on the Target; nothing on the appliance was reached."
+msgstr "Confere `ca_cert_pem`/`insecure_tls` no Target; nada na appliance foi alcançado."
+
+msgid "the request to OPNsense could not be sent or answered"
+msgstr "o pedido ao OPNsense não pôde ser enviado nem respondido"
+
+msgid "A transport-level failure (DNS, TCP, TLS) talking to the appliance's REST API — not a status the appliance itself returned."
+msgstr "Uma falha ao nível de transporte (DNS, TCP, TLS) a falar com a API REST da appliance — não é um estado que a própria appliance tenha devolvido."
+
+msgid "Check the appliance is reachable at its base_url and the certificate is trusted (or `insecure_tls` is set)."
+msgstr "Confere que a appliance está alcançável no seu base_url e que o certificado é de confiança (ou que `insecure_tls` está definido)."
+
+msgid "OPNsense answered with an unexpected status"
+msgstr "o OPNsense respondeu com um estado inesperado"
+
+msgid "A non-2xx HTTP status this client has no dedicated class for. The message carries the status and body."
+msgstr "Um estado HTTP não-2xx para o qual este cliente não tem classe dedicada. A mensagem traz o estado e o corpo."
+
+msgid "Read the status/body in the message; it may be a version this client has not been measured against (ADR-0051)."
+msgstr "Lê o estado/corpo na mensagem; pode ser uma versão contra a qual este cliente nunca foi medido (ADR-0051)."
+
+msgid "OPNsense refused the credential"
+msgstr "o OPNsense recusou a credencial"
+
+msgid "HTTP 401 (a wrong key/secret pair) or HTTP 302 (no Authorization header sent at all, redirected toward the GUI login) — both measured live against a real appliance (ADR-0051 Phase 0)."
+msgstr "HTTP 401 (um par key/secret errado) ou HTTP 302 (nenhum cabeçalho Authorization enviado, redireccionado para o login da GUI) — os dois medidos ao vivo contra uma appliance real (ADR-0051 Fase 0)."
+
+msgid "Check the API key/secret on the Target; only a generated key/secret pair authenticates, never a GUI account's username/password."
+msgstr "Confere a key/secret da API no Target; só um par key/secret gerado autentica, nunca o utilizador/password de uma conta da GUI."
+
+msgid "OPNsense refused the operation"
+msgstr "o OPNsense recusou a operação"
+
+msgid "HTTP 403: a valid key/secret without the privilege this route needs."
+msgstr "HTTP 403: uma key/secret válida sem o privilégio que esta rota exige."
+
+msgid "Grant the API user's account the privilege this route needs, in the appliance's own System ‣ Access ‣ Users."
+msgstr "Dá à conta do utilizador da API o privilégio que esta rota exige, em System ‣ Access ‣ Users na própria appliance."
+
+msgid "OPNsense response too large"
+msgstr "resposta do OPNsense demasiado grande"
+
+msgid "A body past the size this client reads into memory (16 MiB) — the appliance, or whatever answered in its name, is not one of the small JSON bodies this API normally returns."
+msgstr "Um corpo acima do tamanho que este cliente lê para memória (16 MiB) — a appliance, ou o que quer que tenha respondido em seu nome, não é um dos corpos JSON pequenos que esta API normalmente devolve."
+
+msgid "This should not happen against a real OPNsense; check nothing else is answering on that address."
+msgstr "Isto não devia acontecer contra um OPNsense real; confere que não é outra coisa a responder nesse endereço."
+
+msgid "OPNsense response did not parse"
+msgstr "a resposta do OPNsense não fez parse"
+
+msgid "The appliance's response body did not parse as the JSON this call expected."
+msgstr "O corpo da resposta da appliance não fez parse como o JSON que esta chamada esperava."
+
+msgid "Read the raw body in the message; the appliance's API may have changed shape in a newer/older release than ADR-0051's Phase 0 measured (26.1.2)."
+msgstr "Lê o corpo em bruto na mensagem; a API da appliance pode ter mudado de forma numa versão mais nova/antiga do que a que a Fase 0 do ADR-0051 mediu (26.1.2)."
+
 msgid "no such NetworkRoute"
 msgstr "não existe esse NetworkRoute"
 

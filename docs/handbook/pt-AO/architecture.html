@@ -919,6 +919,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 <li><code>delonix-linux</code> → <code>delonix-state</code> — removida na <strong>P4a</strong></li>
 <li><code>delonix-mcp</code> → <code>delonix-mgmt</code> — removida na <strong>P5</strong></li>
 <li><code>delonix-oci</code> → <code>delonix-state</code> — removida na <strong>P4</strong></li>
+<li><code>delonix-opnsense</code> → <code>delonix-sdn</code> — removida na <strong>P4</strong></li>
 <li><code>delonix-proxmox</code> → <code>delonix-vm</code> — removida na <strong>P4</strong></li>
 <li><code>delonix-scanner</code> → <code>delonix-oci</code> — removida na <strong>P4</strong></li>
 <li><code>delonix-sdn</code> → <code>delonix-state</code> — removida na <strong>P4</strong></li>
@@ -1117,6 +1118,7 @@ responder «será que A depende de B», e lê as figuras por-camada acima para p
     delonix_volume[&quot;delonix-volume&quot;]
   end
   subgraph provider[&quot;Providers&quot;]
+    delonix_opnsense[&quot;delonix-opnsense&quot;]
     delonix_proxmox[&quot;delonix-proxmox&quot;]
     delonix_truenas[&quot;delonix-truenas&quot;]
   end
@@ -1175,6 +1177,8 @@ responder «será que A depende de B», e lê as figuras por-camada acima para p
   delonix_oci --&gt; delonix_model
   delonix_oci --&gt; delonix_node
   delonix_oci --&gt; delonix_state
+  delonix_opnsense --&gt; delonix_model
+  delonix_opnsense --&gt; delonix_sdn
   delonix_proxmox --&gt; delonix_compute
   delonix_proxmox --&gt; delonix_model
   delonix_proxmox --&gt; delonix_vm
@@ -1184,6 +1188,7 @@ responder «será que A depende de B», e lê as figuras por-camada acima para p
   delonix_runtime_bin --&gt; delonix_model
   delonix_runtime_bin --&gt; delonix_node
   delonix_runtime_bin --&gt; delonix_oci
+  delonix_runtime_bin --&gt; delonix_opnsense
   delonix_runtime_bin --&gt; delonix_proxmox
   delonix_runtime_bin --&gt; delonix_scanner
   delonix_runtime_bin --&gt; delonix_sdn
@@ -1228,6 +1233,7 @@ responder «será que A depende de B», e lê as figuras por-camada acima para p
   class delonix_net_rules store
   class delonix_node block
   class delonix_oci block
+  class delonix_opnsense external
   class delonix_proxmox external
   class delonix_runtime_bin engine
   class delonix_scanner block

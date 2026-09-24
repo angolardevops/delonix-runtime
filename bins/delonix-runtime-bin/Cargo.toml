@@ -29,6 +29,9 @@ delonix-truenas = { workspace = true }
 # and the bin is where its target (endpoint, node, credential) is known — so
 # this is the process that registers it.
 delonix-proxmox = { workspace = true }
+# The OPNsense GatewayProvider (ADR-0051). Same reasoning as delonix-proxmox
+# above, one line up: the bin is where the target is known.
+delonix-opnsense = { workspace = true }
 delonix-scanner = { workspace = true }
 # The node's security decisions (ADR-0026). Pure: three dependencies, no daemon,
 # no privileges — see the crate doc for what it deliberately does NOT do.
