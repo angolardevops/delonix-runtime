@@ -500,14 +500,37 @@ fn vm_namespace_of(cfg: &VmConfig) -> String {
 /// Whether `backend` puts its VMs on the holder's SDN, where namespace isolation
 /// is enforceable at all.
 ///
-/// **Only Cloud Hypervisor does.** A libvirt VM lives on `virbr0`, in the HOST's
-/// network namespace — a different L2 entirely, governed by libvirt's own
-/// filtering, which this engine does not program. Accepting `--namespace` there
-/// and quietly doing nothing would be the exact anti-pattern this codebase has
-/// already had to correct three times over (`--security-opt seccomp=`,
-/// `-v …:z`, `--network-alias`): an option accepted, ignored, and believed.
+/// **Today only Cloud Hypervisor does**, and it is the backend's own report that
+/// says so (`vm.namespace-isolation`, ADR-0050) — not this function comparing
+/// the id against a literal, which is the provider-name matching ADR-0044 D3
+/// rule 3 forbids outside a composition root. A libvirt VM lives on `virbr0`,
+/// in the HOST's network namespace — a different L2 entirely, governed by
+/// libvirt's own filtering, which this engine does not program. Accepting
+/// `--namespace` there and quietly doing nothing would be the exact
+/// anti-pattern this codebase has already had to correct three times over
+/// (`--security-opt seccomp=`, `-v …:z`, `--network-alias`): an option
+/// accepted, ignored, and believed. An id no registration knows is a "no".
 pub fn vm_namespace_supported(backend_id: &str) -> bool {
-    backend_id == "cloud-hypervisor"
+    backend_declares(backend_id, Capability::VmNamespaceIsolation)
+}
+
+/// Whether the backend registered as `backend_id` DECLARES `cap` (ADR-0050),
+/// regardless of what this host has installed: the question about a provider's
+/// nature, which is what the two predicates above ask. The registration's
+/// report factory probes the host (three `which`, a `/dev/kvm` stat and one
+/// `virsh uri` — ~10 ms measured), and `declared_usable` puts a declared "yes"
+/// the probe narrowed to `unavailable-on-host` back; a `--require` keeps
+/// asking `is_usable`, because a request has to run HERE. Unknown id: `false`,
+/// never a guess — a backend nobody registered cannot supervise anything.
+fn backend_declares(backend_id: &str, cap: Capability) -> bool {
+    with_backends(|regs| report_of(regs, backend_id))
+        .map(|report| {
+            report
+                .capabilities
+                .iter()
+                .any(|c| c.capability == cap && c.state.declared_usable())
+        })
+        .unwrap_or(false)
 }
 
 /// The primary NIC's MAC, DERIVED from the VM name — the same value both
@@ -4499,9 +4522,10 @@ libvirt+qemu"
             .map(|d| d.as_secs())
             .unwrap_or(0),
     );
-    // restart_policy HONESTY: only libvirt materializes it (`<on_crash>restart`
-    // in the XML). On Cloud Hypervisor there is no supervisor on the host — warn instead of
-    // silently accepting a policy that is not enforced instantly.
+    // restart_policy HONESTY: only a backend that declares
+    // `vm.restart-policy.native` materializes it (libvirt: `<on_crash>restart`
+    // in the XML). On Cloud Hypervisor there is no supervisor on the host — warn
+    // instead of silently accepting a policy that is not enforced instantly.
     if restart_policy_unsupervised(backend.id(), vm.restart_policy.as_deref()) {
         tracing::warn!(
             vm = %cfg.name,
@@ -4520,11 +4544,18 @@ libvirt+qemu"
 }
 
 /// `true` if the `restart_policy` requests automatic restart (`always`/`on-failure`)
-/// but the backend does NOT supervise it on the host (only libvirt materializes it via XML).
-/// On the others the restart depends on reconcile/apply — the caller should warn.
-/// Pure function — testable.
+/// but the backend does NOT declare `vm.restart-policy.native` (ADR-0050) — today
+/// only libvirt does, via `<on_crash>restart` in the XML. On the others the
+/// restart depends on reconcile/apply — the caller should warn.
+///
+/// Used to be `backend_id != "libvirt"`: the name match ADR-0044's Context
+/// names as the second instance of the leak `VmSpec`/`Extensions` exist to
+/// close. A backend that supervises natively under any other name was told it
+/// did not; now it says so in its own report and is believed. The policy check
+/// comes first so a VM without a policy never costs a report.
 pub fn restart_policy_unsupervised(backend_id: &str, policy: Option<&str>) -> bool {
-    backend_id != "libvirt" && matches!(policy, Some("always") | Some("on-failure"))
+    matches!(policy, Some("always") | Some("on-failure"))
+        && !backend_declares(backend_id, Capability::VmRestartPolicyNative)
 }
 
 /// Removes a VM: stops the VMM (via its backend), and deletes overlay/state.
@@ -7014,6 +7045,39 @@ Format specific information:
         assert!(vm_namespace_supported("cloud-hypervisor"));
         assert!(!vm_namespace_supported("libvirt"));
         assert!(!vm_namespace_supported("qualquer-outro"));
+    }
+
+    /// ADR-0044 D3 rule 3: the two predicates ask the backend's REPORT, never
+    /// its name. A fake registered under a name that is neither `libvirt` nor
+    /// `cloud-hypervisor`, declaring both entries, gets both answers — and the
+    /// same fake with an empty declaration gets neither. With the old
+    /// `backend_id == "…"` matches this test fails on the first assertion.
+    #[test]
+    fn the_predicates_read_the_report_not_the_backend_name() {
+        register_backend(fake(
+            "declares-both",
+            false,
+            &[
+                Capability::VmRestartPolicyNative,
+                Capability::VmNamespaceIsolation,
+            ],
+        ))
+        .expect("register");
+        register_backend(fake("declares-neither", false, &[])).expect("register");
+
+        assert!(vm_namespace_supported("declares-both"));
+        assert!(!restart_policy_unsupervised(
+            "declares-both",
+            Some("always")
+        ));
+
+        assert!(!vm_namespace_supported("declares-neither"));
+        assert!(restart_policy_unsupervised(
+            "declares-neither",
+            Some("always")
+        ));
+        // No policy: nothing to supervise, whatever the backend declares.
+        assert!(!restart_policy_unsupervised("declares-neither", None));
     }
 
     /// `start`/`restart` rebuild the `VmConfig` from the record — a namespace that

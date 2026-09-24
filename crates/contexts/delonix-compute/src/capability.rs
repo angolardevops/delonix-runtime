@@ -716,6 +716,17 @@ impl CapabilityState {
         )
     }
 
+    /// `true` when the PROVIDER declares this capability, whatever this host
+    /// has installed: `is_usable`, plus `UnavailableOnHost` — which only ever
+    /// comes from [`CapabilityState::on_host`] narrowing a declared
+    /// `Supported`/`Partial`, so it is a declared "yes" the probe could not
+    /// confirm here. This is the question a predicate about the provider's
+    /// NATURE asks ("does libvirt supervise a crash restart itself?"); a
+    /// request that must run on this host keeps asking `is_usable`.
+    pub fn declared_usable(&self) -> bool {
+        self.is_usable() || matches!(self, CapabilityState::UnavailableOnHost { .. })
+    }
+
     /// Narrows a declared state by what the host probe found: a declared
     /// `Supported`/`Partial` becomes `UnavailableOnHost` when `present` is
     /// false. The other states are already "no" and do not change — a host
@@ -829,6 +840,27 @@ impl ProviderReport {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn declared_usable_survives_the_host_probe_but_never_promotes_a_no() {
+        use super::CapabilityState as S;
+        let yes = S::Partial { detail: "d" };
+        let narrowed = yes.clone().on_host(false, "tool missing");
+        assert!(matches!(narrowed, S::UnavailableOnHost { .. }));
+        assert!(!narrowed.is_usable(), "the host did say no");
+        assert!(narrowed.declared_usable(), "but the provider did say yes");
+        for no in [
+            S::UnsupportedByProvider { reason: "r" },
+            S::RequiresExternalComponent { component: "c" },
+            S::NotImplemented,
+        ] {
+            assert!(!no.declared_usable(), "{}", no.label());
+            assert!(
+                !no.on_host(false, "x").declared_usable(),
+                "a probe cannot make a no a yes"
+            );
+        }
+    }
+
     use super::*;
     use std::collections::HashSet;
 
