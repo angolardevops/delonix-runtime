@@ -42,6 +42,7 @@
 //!   make HTTP requests.
 
 mod error;
+mod sdn;
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
@@ -390,6 +391,23 @@ enum TaskKind {
     UpdateFirewallRule,
     /// `DELETE …/firewall/rules/{pos}`.
     DeleteFirewallRule,
+    /// `POST /cluster/sdn/zones` — stages a new SDN zone. Cluster-scoped, not
+    /// VM-scoped (see [`sdn::SDN_VMID`]). Writes to the PENDING configuration
+    /// only; nothing on any node changes until [`Client::apply_sdn`].
+    CreateSdnZone,
+    /// `DELETE /cluster/sdn/zones/{zone}` — same PENDING-only caveat.
+    DeleteSdnZone,
+    /// `POST /cluster/sdn/vnets` — stages a new SDN vnet inside a zone. Same
+    /// PENDING-only caveat.
+    CreateSdnVnet,
+    /// `DELETE /cluster/sdn/vnets/{vnet}` — same PENDING-only caveat.
+    DeleteSdnVnet,
+    /// `PUT /cluster/sdn` (no body) — reloads the PENDING SDN configuration
+    /// onto every node in the cluster. The one SDN call that genuinely forks
+    /// a cluster-wide task; every other SDN write above is very likely
+    /// synchronous (`null`), which is why they all go through
+    /// [`Client::task_or_done`] rather than [`Client::task`] — safe either way.
+    ApplySdn,
 }
 
 impl TaskKind {
@@ -415,6 +433,11 @@ impl TaskKind {
             TaskKind::AddFirewallRule => "firewall-add-rule",
             TaskKind::UpdateFirewallRule => "firewall-update-rule",
             TaskKind::DeleteFirewallRule => "firewall-delete-rule",
+            TaskKind::CreateSdnZone => "create-sdn-zone",
+            TaskKind::DeleteSdnZone => "delete-sdn-zone",
+            TaskKind::CreateSdnVnet => "create-sdn-vnet",
+            TaskKind::DeleteSdnVnet => "delete-sdn-vnet",
+            TaskKind::ApplySdn => "apply-sdn",
         }
     }
 
@@ -481,6 +504,19 @@ impl TaskKind {
             | TaskKind::AddFirewallRule
             | TaskKind::UpdateFirewallRule
             | TaskKind::DeleteFirewallRule => "pvefw",
+            // NEVER OBSERVED on a live node, and that is the confirmed fact: a
+            // live run against PVE 9.2.2 forked no task for any of the four
+            // (zone/vnet create/delete all apply inline) — these are guesses
+            // that may be permanently dead code, kept only so the match stays
+            // exhaustive.
+            TaskKind::CreateSdnZone => "sdnzonecreate",
+            TaskKind::DeleteSdnZone => "sdnzonedelete",
+            TaskKind::CreateSdnVnet => "sdnvnetcreate",
+            TaskKind::DeleteSdnVnet => "sdnvnetdelete",
+            // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
+            // not assumed: `PUT /cluster/sdn` forks `reloadnetworkall`, not the
+            // `srvreload` this guess was originally written as.
+            TaskKind::ApplySdn => "reloadnetworkall",
         }
     }
 }
@@ -4170,10 +4206,14 @@ mod tests {
     /// that is not a node operation — it exchanges a credential for a
     /// ticket and changes nothing on the node — and it is named here with
     /// that reason, not skipped by pattern.
+    ///
+    /// Reads `sdn.rs` too, not just this file: `impl Client` is split across
+    /// the two (the SDN zone/vnet/apply calls live in `sdn.rs`), and a gate
+    /// that only reads `lib.rs` would wave through a write added there —
+    /// exactly the blind spot this test exists to close.
     #[test]
     fn every_write_to_the_node_goes_through_the_task_path() {
-        let src = include_str!("lib.rs");
-        let src = src.split("#[cfg(test)]").next().unwrap();
+        let sources = [include_str!("lib.rs"), include_str!("sdn.rs")];
         // Writes are what these helpers send; `fn post_form`/`fn delete`
         // themselves are definitions, not call sites.
         let write_calls = ["self.post_form(", "self.put_form(", "self.delete("];
@@ -4194,60 +4234,64 @@ mod tests {
             ),
         ];
         let mut checked = 0;
-        for needle in write_calls {
-            let mut from = 0;
-            while let Some(off) = src[from..].find(needle) {
-                let at = from + off;
-                from = at + needle.len();
-                checked += 1;
-                // The enclosing `fn`: the last `fn <name>(` before the call.
-                let head = &src[..at];
-                // The LATER of the two forms: an `rfind` of `fn ` alone would
-                // stop at a private fn defined before the enclosing `pub fn`.
-                let fn_at = [head.rfind("\n    fn "), head.rfind("\n    pub fn ")]
-                    .into_iter()
-                    .flatten()
-                    .max()
-                    .expect("a call site inside a fn");
-                let fn_name: String = head[fn_at..]
-                    .trim_start_matches('\n')
-                    .trim_start()
-                    .trim_start_matches("pub ")
-                    .trim_start_matches("fn ")
-                    .chars()
-                    .take_while(|c| c.is_alphanumeric() || *c == '_')
-                    .collect();
-                if let Some((_, why)) = allowed_outside_task.iter().find(|(f, _)| *f == fn_name) {
-                    assert!(!why.is_empty());
-                    continue;
-                }
-                // Inside the task path: a `self.task(`/`self.task_or_done(`
-                // opened in this fn whose argument list is still open here.
-                let body = &head[fn_at..];
-                let opened = ["self.task(", "self.task_or_done("]
-                    .iter()
-                    .filter_map(|t| body.rfind(t).map(|i| i + t.len()))
-                    .max();
-                let inside = opened.is_some_and(|i| {
-                    let mut depth = 1i32;
-                    for c in body[i..].chars() {
-                        match c {
-                            '(' => depth += 1,
-                            ')' => depth -= 1,
-                            _ => {}
-                        }
-                        if depth == 0 {
-                            return false;
-                        }
+        for src in sources {
+            let src = src.split("#[cfg(test)]").next().unwrap();
+            for needle in write_calls {
+                let mut from = 0;
+                while let Some(off) = src[from..].find(needle) {
+                    let at = from + off;
+                    from = at + needle.len();
+                    checked += 1;
+                    // The enclosing `fn`: the last `fn <name>(` before the call.
+                    let head = &src[..at];
+                    // The LATER of the two forms: an `rfind` of `fn ` alone would
+                    // stop at a private fn defined before the enclosing `pub fn`.
+                    let fn_at = [head.rfind("\n    fn "), head.rfind("\n    pub fn ")]
+                        .into_iter()
+                        .flatten()
+                        .max()
+                        .expect("a call site inside a fn");
+                    let fn_name: String = head[fn_at..]
+                        .trim_start_matches('\n')
+                        .trim_start()
+                        .trim_start_matches("pub ")
+                        .trim_start_matches("fn ")
+                        .chars()
+                        .take_while(|c| c.is_alphanumeric() || *c == '_')
+                        .collect();
+                    if let Some((_, why)) = allowed_outside_task.iter().find(|(f, _)| *f == fn_name)
+                    {
+                        assert!(!why.is_empty());
+                        continue;
                     }
-                    true
-                });
-                assert!(
+                    // Inside the task path: a `self.task(`/`self.task_or_done(`
+                    // opened in this fn whose argument list is still open here.
+                    let body = &head[fn_at..];
+                    let opened = ["self.task(", "self.task_or_done("]
+                        .iter()
+                        .filter_map(|t| body.rfind(t).map(|i| i + t.len()))
+                        .max();
+                    let inside = opened.is_some_and(|i| {
+                        let mut depth = 1i32;
+                        for c in body[i..].chars() {
+                            match c {
+                                '(' => depth += 1,
+                                ')' => depth -= 1,
+                                _ => {}
+                            }
+                            if depth == 0 {
+                                return false;
+                            }
+                        }
+                        true
+                    });
+                    assert!(
                     inside,
                     "`{needle}` in `fn {fn_name}` is a write outside the task path: route it through \
                      `self.task(...)` so its UPID is waited on and recorded in the ledger, or name \
                      it in `allowed_outside_task` with the reason"
                 );
+                }
             }
         }
         assert!(

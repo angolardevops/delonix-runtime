@@ -1245,3 +1245,157 @@ fn the_vms_own_firewall_rule_round_trips_through_the_node() {
         "the VM is still defined on the node after destroy — an orphan"
     );
 }
+
+/// Stages a Proxmox SDN zone and a vnet inside it, applies the PENDING
+/// configuration to the cluster, and tears both back down — the whole
+/// create→vnet→apply cycle `delonix_proxmox::sdn`'s module doc comment warns
+/// about: every write up to `apply_sdn` only edits a STAGED config, and this
+/// case exists to prove nothing is left half-applied when it is done.
+///
+/// **Not the SDN this engine has of its own** (netns/nftables on this host,
+/// `delonix-sdn`) — see that same module doc comment. This is Proxmox VE's
+/// own cluster-wide Zones/VNets subsystem, provisioned by the node itself.
+///
+/// Only the `simple` zone type is exercised, deliberately: it needs no
+/// VLAN-capable hardware on the lab node to prove the cycle end to end.
+/// `vlan`/`vxlan`/`qinq` are real Proxmox zone types this crate does not
+/// implement.
+#[test]
+fn sdn_zone_and_vnet_are_staged_applied_and_torn_down() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+
+    // Derived from this process's id, the same convention every VM name in
+    // this file uses, so a run never collides with another one on the
+    // shared lab node. Proxmox's own zone/vnet id format (a lowercase letter
+    // then up to 7 more lowercase letters or digits, 8 characters total,
+    // enforced client-side by `delonix_proxmox::sdn::validate_sdn_id`) is
+    // why the prefix is a single letter and the pid is reduced to 6 digits.
+    let suffix = std::process::id() % 1_000_000;
+    let zone = format!("z{suffix}");
+    let vnet = format!("v{suffix}");
+
+    // Create the zone. Answers before anything is REAL — see the module
+    // doc comment — which is exactly why the very next line asks the node
+    // itself, not the create call's `Ok(())`.
+    client
+        .create_sdn_zone(&ledger, &zone)
+        .expect("create the zone");
+    let zones = client.sdn_zones().expect("list zones");
+    assert!(
+        zones
+            .iter()
+            .any(|z| z.get("zone").and_then(|v| v.as_str()) == Some(zone.as_str())),
+        "the zone is not in the pending list: {zones:?}"
+    );
+
+    // A vnet inside that zone, with an alias — proving the field reaches
+    // the node and not just that SOME vnet was created.
+    client
+        .create_sdn_vnet(&ledger, &vnet, &zone, Some("live sdn test"))
+        .expect("create the vnet");
+    let vnets = client.sdn_vnets().expect("list vnets");
+    let listed_vnet = vnets
+        .iter()
+        .find(|v| v.get("vnet").and_then(|s| s.as_str()) == Some(vnet.as_str()))
+        .unwrap_or_else(|| panic!("the vnet is not in the pending list: {vnets:?}"));
+    assert_eq!(
+        listed_vnet.get("zone").and_then(|z| z.as_str()),
+        Some(zone.as_str()),
+        "the vnet is not attached to the zone it was created in: {listed_vnet}"
+    );
+    assert_eq!(
+        listed_vnet.get("alias").and_then(|a| a.as_str()),
+        Some("live sdn test"),
+        "the alias did not reach the node: {listed_vnet}"
+    );
+
+    // The one call in this cycle that genuinely forks a task and makes the
+    // staged zone/vnet REAL on every node (see `delonix_proxmox::sdn`'s doc
+    // comment). Read back from the ledger, not just the call's `Ok(())` —
+    // the same discipline every other write in this file follows.
+    client.apply_sdn(&ledger).expect("apply the pending config");
+    let read_ledger = || -> serde_json::Value {
+        serde_json::from_str(
+            &std::fs::read_to_string(dir.path().join("proxmox-tasks.json"))
+                .expect("the ledger was written"),
+        )
+        .expect("the ledger is JSON")
+    };
+    let last_task = |entries: &[serde_json::Value], action: &str| -> serde_json::Value {
+        entries
+            .iter()
+            .rev()
+            .find(|e| e.get("action").and_then(|a| a.as_str()) == Some(action))
+            .unwrap_or_else(|| panic!("no `{action}` task in the ledger: {entries:?}"))
+            .clone()
+    };
+    let ledger_json = read_ledger();
+    let entries = ledger_json.as_array().expect("the ledger is a list");
+    let applied = last_task(entries, "apply-sdn");
+    assert_eq!(
+        applied.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "the apply did not succeed: {applied}"
+    );
+
+    // Cleanup: the vnet before the zone (the node refuses to remove a zone
+    // a vnet still references — its own business logic, not pre-empted
+    // here), then apply AGAIN. Leaving a pending delete unapplied would be
+    // the same trap as leaving a pending create unapplied: `sdn_zones`/
+    // `sdn_vnets` would agree it is gone while a node that already
+    // realized it keeps running it until the next reload.
+    client
+        .delete_sdn_vnet(&ledger, &vnet)
+        .expect("delete the vnet");
+    client
+        .delete_sdn_zone(&ledger, &zone)
+        .expect("delete the zone");
+    client
+        .apply_sdn(&ledger)
+        .expect("apply the pending deletion");
+
+    // Measured against a live node, not assumed: `create_sdn_zone`/
+    // `create_sdn_vnet`/`delete_sdn_vnet`/`delete_sdn_zone` fork NO task at
+    // all — they apply inline, the same as `unlink` and every per-VM
+    // firewall write. `task_or_done`'s own `task_inner` returns `Ok(())`
+    // BEFORE ever calling `ledger.record(...)` on that path (see its doc
+    // comment), so there is no ledger entry to assert on for any of the
+    // four — asserting one here would be checking for something the
+    // machinery structurally cannot produce. Only `apply_sdn` genuinely
+    // forks a task, and it is the only write this cycle can hold the
+    // ledger accountable for.
+    let ledger_json = read_ledger();
+    let entries = ledger_json.as_array().expect("the ledger is a list");
+    // Two `apply-sdn` tasks by now (the create and the delete); the LAST one
+    // is what has to have succeeded — the same "last task of each action"
+    // rule the ledger assertions above this test already use.
+    let last_apply = last_task(entries, "apply-sdn");
+    assert_eq!(
+        last_apply.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "the final apply (the deletion) did not succeed: {last_apply}"
+    );
+
+    let zones_after = client.sdn_zones().expect("list zones after cleanup");
+    assert!(
+        !zones_after
+            .iter()
+            .any(|z| z.get("zone").and_then(|v| v.as_str()) == Some(zone.as_str())),
+        "the zone is still listed after delete+apply: {zones_after:?}"
+    );
+    let vnets_after = client.sdn_vnets().expect("list vnets after cleanup");
+    assert!(
+        !vnets_after
+            .iter()
+            .any(|v| v.get("vnet").and_then(|s| s.as_str()) == Some(vnet.as_str())),
+        "the vnet is still listed after delete+apply: {vnets_after:?}"
+    );
+}
