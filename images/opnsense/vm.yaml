@@ -17,7 +17,7 @@ images:
     distro: opnsense
     release: "${TAG:-26.1.2}"
     vcpus: 2
-    memory: 2G
+    memory: 3G
     appliance:
       builder: opnsense
       args: ["${TAG:-26.1.2}"]

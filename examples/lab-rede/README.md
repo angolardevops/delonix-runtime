@@ -16,9 +16,9 @@ mínimo para pôr o laboratório de pé.
 | `40-cliente.yaml` | `lab-cli` | posto de trabalho | 10.50.0.50 (por DHCP) | 1 GiB |
 | `50-nas.yaml` | `lab-nas` | TrueNAS SCALE | 10.50.0.20 | 4 GiB |
 | `60-storage.yaml` | — | dataset + quota + export NFS na NAS | — | — |
-| `70-firewall.yaml` | `lab-fw` | OPNsense | 10.50.0.254 | 2 GiB |
+| `70-firewall.yaml` | `lab-fw` | OPNsense | 10.50.0.254 | 3 GiB |
 
-Tudo junto pede ~10 GiB de RAM. O motor recusa criar uma VM que não caiba (reserva
+Tudo junto pede ~11 GiB de RAM. O motor recusa criar uma VM que não caiba (reserva
 2 GiB para o host), por isso arranque por fases se a máquina for partilhada.
 
 ## Pré-requisitos
