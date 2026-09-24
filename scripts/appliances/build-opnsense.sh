@@ -54,4 +54,4 @@ ls -lh "$FINAL"
 echo
 echo "Register it with:"
 echo "  delonix image vm import $FINAL -t opnsense:$BRANCH --appliance \\"
-echo "      --distro opnsense --release $VERSION --default-vcpus 2 --default-memory 2G"
+echo "      --distro opnsense --release $VERSION --default-vcpus 2 --default-memory 3G"

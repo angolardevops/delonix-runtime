@@ -283,7 +283,7 @@ validados** (notas da release v4.2.0). Os builds de imagem são só amd64
 
 ```bash
 delonix vm convert <image-or-path> --to raw|qcow2|vmdk|vdi|vhdx|vhd [-o out] [--compress]
-delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 2G
+delonix image vm import disk.qcow2 -t opnsense:26.1 --appliance --default-vcpus 2 --default-memory 3G
 ```
 
 O `vm convert` achata (sem cadeia de backing); `--compress` só é aceite para `qcow2` e `vmdk`. O

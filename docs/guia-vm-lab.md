@@ -520,7 +520,7 @@ de diagnosticar, e vale a pena não a construir de propósito.
 | `lab-samba` | Samba, autenticação e partilha | 10.50.0.12 | 1 GiB |
 | `lab-cli` | posto de trabalho | 10.50.0.50 (por DHCP) | 1 GiB |
 | `lab-nas` | TrueNAS SCALE | 10.50.0.20 | 4 GiB |
-| `lab-fw` | OPNsense | 10.50.0.254 | 2 GiB |
+| `lab-fw` | OPNsense | 10.50.0.254 | 3 GiB |
 
 ### Passo 0 — a rede do laboratório
 
@@ -829,7 +829,7 @@ a uma firewall.
 
 ### Executar por fases
 
-O laboratório inteiro pede cerca de **10 GiB** de RAM. Num host partilhado, arranque
+O laboratório inteiro pede cerca de **11 GiB** de RAM. Num host partilhado, arranque
 por grupos — a admissão de recursos do motor recusa antes de criar seja o que for,
 mas mais vale não chegar lá:
 
