@@ -19,19 +19,19 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **Untested after this run, and why**: `GET /nodes/{node}/tasks is the lost-answer reconciliation, reached only through failure injection (tests/failure_injection.rs).`
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
-- **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm`
-- **run**: `2026-09-24T11:15Z`
-- **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `3 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the lifecycle case walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; the new case makes its own template (create → stop → POST …/template), grows it (PUT …/resize, worker `resize`), refuses a 1 GiB clone of the 2 GiB template BEFORE any clone exists, clones it at 4 GiB (clone + config + resize) and at the template's own size (no resize task), and destroys the clones and the template; `qmtemplate` and `resize` are the worker names the node registered`
+- **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives (local-lvm does not accept backup content)`
+- **run**: `2026-09-24T17:32Z`
+- **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
+- **result**: `4 passed (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the lifecycle case walks create → snapshot (RAM) → rollback → delete-snapshot → stop → resume → stop → destroy; the template case makes its own template (create → stop → POST …/template), grows it (PUT …/resize), refuses a shrink clone before any clone exists, clones it at two sizes, destroys the clones and the template; the backup case backs up a running VM twice (POST …/vzdump, mode=snapshot, remove=0 — the guest never stops), lists the archives back, deletes both, and confirms a delete of an unknown volid is refused; the node registers the workers as `qmcreate`/`qmstart`/`qmstop`/`qmsnapshot`/`qmrollback`/`qmdelsnapshot`/`qmdestroy`/`qmconfig`/`qmclone`/`qmtemplate`/`resize`/`vzdump`/`imgdel``
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `239`
+- **requests**: `261`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 20 (3.0 % of the schema) — 19 seen in a live trace, 1 not
-- **unsupported by design**: 364 (each with a written reason)
-- **not yet implemented**: 291
+- **called**: 23 (3.4 % of the schema) — 22 seen in a live trace, 1 not
+- **unsupported by design**: 363 (each with a written reason)
+- **not yet implemented**: 289
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
@@ -39,11 +39,11 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | qemu | 15 | 0 | 0 | 94 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
 | sdn | 0 | 0 | 0 | 90 | 90 |
-| storage | 0 | 0 | 0 | 25 | 25 |
+| storage | 2 | 0 | 0 | 23 | 25 |
 | access | 1 | 0 | 42 | 2 | 45 |
 | pools | 0 | 0 | 0 | 7 | 7 |
 | cluster (other) | 1 | 0 | 162 | 11 | 174 |
-| nodes (host) | 2 | 1 | 98 | 61 | 162 |
+| nodes (host) | 3 | 1 | 97 | 61 | 162 |
 | version | 0 | 0 | 0 | 1 | 1 |
 
 ## Routes
@@ -70,7 +70,10 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/nodes/{node}/qemu/{vmid}/status/start` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/status/stop` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/template` | supported+tested | string | yes |  |
+| GET | `/nodes/{node}/storage/{storage}/content` | supported+tested | array | yes |  |
+| DELETE | `/nodes/{node}/storage/{storage}/content/{volume}` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/tasks/{upid}/status` | supported+tested | object | yes |  |
+| POST | `/nodes/{node}/vzdump` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/tasks` | supported+untested | array | yes |  |
 | GET | `/access/acl` | unsupported-by-design | array | yes | identity administration (users, groups, roles, ACLs, TFA) — not a VM operation |
 | PUT | `/access/acl` | unsupported-by-design | null | yes | identity administration (users, groups, roles, ACLs, TFA) — not a VM operation |
@@ -433,7 +436,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/syslog` | unsupported-by-design | array | yes | host logs — host administration |
 | GET | `/nodes/{node}/time` | unsupported-by-design | object | yes | host clock — host administration |
 | PUT | `/nodes/{node}/time` | unsupported-by-design | null | yes | host clock — host administration |
-| POST | `/nodes/{node}/vzdump` | unsupported-by-design | string | yes | node-level dump — slice 2 covers per-VM backup through it, not yet called |
 | GET | `/nodes/{node}/vzdump/defaults` | unsupported-by-design | object | yes | node-level dump — slice 2 covers per-VM backup through it, not yet called |
 | GET | `/nodes/{node}/vzdump/extractconfig` | unsupported-by-design | string | yes | node-level dump — slice 2 covers per-VM backup through it, not yet called |
 | GET | `/access` | not-yet-implemented | array | yes |  |
@@ -687,9 +689,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/nodes/{node}/stopall` | not-yet-implemented | string | yes |  |
 | GET | `/nodes/{node}/storage` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/storage/{storage}` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/storage/{storage}/content` | not-yet-implemented | array | yes |  |
 | POST | `/nodes/{node}/storage/{storage}/content` | not-yet-implemented | string | yes |  |
-| DELETE | `/nodes/{node}/storage/{storage}/content/{volume}` | not-yet-implemented | string | yes |  |
 | GET | `/nodes/{node}/storage/{storage}/content/{volume}` | not-yet-implemented | object | yes |  |
 | POST | `/nodes/{node}/storage/{storage}/content/{volume}` | not-yet-implemented | string | yes |  |
 | PUT | `/nodes/{node}/storage/{storage}/content/{volume}` | not-yet-implemented | null | yes |  |

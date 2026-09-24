@@ -291,6 +291,162 @@ fn cria_arranca_e_destroi_contra_um_no_real() {
     );
 }
 
+/// A backup lands on the storage as a crash-consistent archive, and comes
+/// OFF it: `backup_vm` (`POST …/vzdump`) never stops the VM, `list_backups`
+/// reads back what the node actually has (never what the call said), and
+/// `delete_backup` removes it — the fourth verb this backend's backup
+/// primitive needs, proved the same way the snapshot quadrant was.
+///
+/// The VM stays RUNNING through the whole backup — that is the assertion
+/// that matters, because a VM this backend cannot copy a disk FOR locally
+/// (`manages_own_storage`) has no other honest way to prove "nothing had to
+/// stop".
+#[test]
+fn a_backup_lands_on_the_storage_and_comes_off_it() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let name = format!("dlxbkp{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b
+        .boot(vmdir, &cfg, &cfg.disk, &|_: CreateStage| {})
+        .expect("boot");
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        String::new(),
+        String::new(),
+        boot.api_socket.clone(),
+    );
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+
+    // The archive storage — not necessarily the same as the VM's disk
+    // storage, but the lab node has only the one, so it doubles as both here.
+    let backup_storage =
+        std::env::var("DELONIX_PROXMOX_TEST_BACKUP_STORAGE").unwrap_or_else(|_| storage.clone());
+
+    let before = b
+        .client()
+        .list_backups(&backup_storage, vmid)
+        .expect("list before");
+    assert!(
+        before.is_empty(),
+        "a freshly created VM already has a backup: {before:?}"
+    );
+
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    b.client()
+        .backup_vm(&ledger, vmid, &backup_storage)
+        .expect("backup");
+    assert!(
+        b.is_running(&vm),
+        "the VM must still be running after a snapshot-mode backup"
+    );
+
+    let after = b
+        .client()
+        .list_backups(&backup_storage, vmid)
+        .expect("list after");
+    assert_eq!(
+        after.len(),
+        1,
+        "expected exactly one backup after one call: {after:?}"
+    );
+    let (volid, size) = &after[0];
+    assert!(
+        volid.contains(&vmid.to_string()),
+        "the volid does not name this VM: {volid}"
+    );
+    assert!(
+        *size > 0,
+        "a backup archive of 0 bytes is not a backup: {after:?}"
+    );
+
+    // A second backup adds a second archive — `remove=0` keeps the first.
+    b.client()
+        .backup_vm(&ledger, vmid, &backup_storage)
+        .expect("second backup");
+    let two = b
+        .client()
+        .list_backups(&backup_storage, vmid)
+        .expect("list after second");
+    assert_eq!(
+        two.len(),
+        2,
+        "the first backup did not survive a second one: {two:?}"
+    );
+
+    // Delete both — the proof is the node's list, not the call's answer.
+    for (volid, _) in &two {
+        b.client()
+            .delete_backup(&ledger, vmid, &backup_storage, volid)
+            .unwrap_or_else(|e| panic!("delete {volid}: {e}"));
+    }
+    let gone = b
+        .client()
+        .list_backups(&backup_storage, vmid)
+        .expect("list after delete");
+    assert!(
+        gone.is_empty(),
+        "backups are still on the storage after delete: {gone:?}"
+    );
+
+    // A volid this VM's storage does not have is refused, not silently no-op'd.
+    assert!(
+        b.client()
+            .delete_backup(&ledger, vmid, &backup_storage, "does-not-exist")
+            .is_err(),
+        "deleting a backup that was never there must be refused"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        b.client().config(vmid).is_err(),
+        "the VM is still on the node after destroy"
+    );
+
+    let ledger: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(vmdir.join("proxmox-tasks.json")).expect("ledger"),
+    )
+    .expect("json");
+    let entries = ledger.as_array().unwrap();
+    for want in ["backup", "delete-backup"] {
+        let count = entries
+            .iter()
+            .filter(|e| e.get("action").and_then(|a| a.as_str()) == Some(want))
+            .count();
+        assert!(count >= 1, "no `{want}` task in the ledger: {entries:?}");
+        assert!(
+            entries
+                .iter()
+                .rev()
+                .find(|e| e.get("action").and_then(|a| a.as_str()) == Some(want))
+                .and_then(|e| e.pointer("/state/state"))
+                .and_then(|s| s.as_str())
+                == Some("ok"),
+            "the last `{want}` task did not succeed: {entries:?}"
+        );
+    }
+}
+
 /// `ip()` ATRAVÉS do backend, contra um convidado com o agente REAL a correr.
 ///
 /// O teste acima cria uma VM sem sistema operativo, logo sem agente: ali `ip()`
