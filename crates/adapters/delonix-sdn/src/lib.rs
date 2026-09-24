@@ -42,6 +42,7 @@ pub mod bpf;
 pub mod cni;
 pub mod discover;
 mod flock;
+pub mod gc;
 pub mod infra;
 pub mod ipam;
 mod pin_userns;

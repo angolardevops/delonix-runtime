@@ -160,6 +160,7 @@ it's exposed for debugging and integration.</p>
 
 Commands:
   down       Force tear-down of the ingress infra (kills slirp + holder, frees the netns)
+  gc         Reclaim infra left behind by state roots that no longer exist
   up         Bring the ingress infra up (idempotent): holder netns + delonix0 + single slirp
   status     Show the ingress infra status (holder/slirp pids, bridge, refcount)
   exec       Run a command inside an attached netns (exercises the runtime join path)
@@ -178,7 +179,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Lifecycle   up · down
+  Lifecycle   up · down · gc
   Inspect     status
   Interact    exec
   Networking  attach · detach · publish · unpublish · firewall

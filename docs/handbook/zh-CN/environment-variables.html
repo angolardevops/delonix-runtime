@@ -861,6 +861,13 @@ are test settings — see <a href="#test-only">Test-only</a>.</p>
 <td><code>host:port</code>, e.g. <code>127.0.0.1:9100</code>. Unset → no listener.</td>
 <td>A TCP listener: bind it to loopback unless the metrics should be reachable from the network.</td>
 </tr>
+<tr>
+<td><code>DELONIX_WALK_THREADS</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume/<wbr>src/<wbr>lib.<wbr>rs:walk_threads</code></a> (the disk walk behind <code>system df</code>, volume usage and the rootless quota)</td>
+<td>Sets how many workers the parallel directory walk uses.</td>
+<td>A positive integer; <code>1</code> → the sequential walk. Unset → the number of CPUs, capped.</td>
+<td>The parallel and sequential walks give the SAME total (tested with hardlinks seen by different workers); the variable exists to prove it on a given host, and as the escape hatch if a filesystem misbehaves under concurrent <code>readdir</code>.</td>
+</tr>
 </tbody>
 </table></div>
 <h2 id="set-by-the-engine-itself-internal">Set by the engine itself / internal<a class="hanchor" href="#set-by-the-engine-itself-internal" aria-label="#">#</a></h2>

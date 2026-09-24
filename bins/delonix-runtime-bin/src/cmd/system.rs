@@ -592,12 +592,13 @@ fn print_plan(p: &super::prune::PrunePlan, auto: bool, would_run: bool) {
     println!(
         "{}",
         super::po::tf(
-            "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s) — {size}",
+            "  {d} orphan dir(s), {b} blob(s), {g} cgroup(s), {n} network(s), {k} build-cache entr(y/ies) — {size}",
             &[
                 ("d", &p.dirs.to_string()),
                 ("b", &p.blobs.to_string()),
                 ("g", &p.cgroups.to_string()),
                 ("n", &p.networks.to_string()),
+                ("k", &p.build_cache.to_string()),
                 ("size", &p.bytes_b().fmt()),
             ]
         )
@@ -711,12 +712,18 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
         );
     }
 
+    // Build-cache entries nothing has asked for in a week. Debris in the same
+    // sense as an orphan blob: rebuildable content that no longer earns the
+    // space. See `prune::BUILD_CACHE_TTL_DAYS` for why it is last-USE and not age.
+    let (bc, bc_bytes) = super::prune::sweep_build_cache(images.root());
+
     let mut total = c.freed;
     total.add(i.freed);
+    total.add(bc_bytes);
     println!(
         "{}",
         super::po::tf(
-            "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s) — {size} freed",
+            "removed: {c} container(s), {d} orphan dir(s), {i} image(s), {b} blob(s), {g} cgroup(s), {p} orphan port(s), {n} orphan network(s), {k} build-cache entr(y/ies) — {size} freed",
             &[
                 ("c", &c.containers.to_string()),
                 ("d", &c.dirs.to_string()),
@@ -725,6 +732,7 @@ fn cmd_prune(all: bool, force: bool, auto: bool, threshold: u8, dry_run: bool) -
                 ("g", &c.cgroups.to_string()),
                 ("p", &c.ports.to_string()),
                 ("n", &rmn.to_string()),
+                ("k", &bc.to_string()),
                 ("size", &total.fmt()),
             ]
         )
