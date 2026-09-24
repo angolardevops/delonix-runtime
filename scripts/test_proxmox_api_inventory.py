@@ -138,6 +138,18 @@ class ClientRoutes(unittest.TestCase):
             "/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback",
         )
 
+    def test_an_ipset_cidr_entrys_positional_placeholder_matches_the_schemas_name(self):
+        # The crate's `format!` for firewall_ipset_cidr/update_firewall_ipset_cidr/
+        # delete_firewall_ipset_cidr passes `urlencode(cidr)` positionally
+        # (`.../ipset/{name}/{}`) — the schema names the same slot `{cidr}`. Without
+        # this rule the route is invisible to the matrix under its real name and
+        # shows up a second time as `not-available-in-version`, as if the crate
+        # called something the schema does not have.
+        self.assertEqual(
+            inv.normalise("/nodes/{}/qemu/{vmid}/firewall/ipset/{name}/{}"),
+            "/nodes/{node}/qemu/{vmid}/firewall/ipset/{name}/{cidr}",
+        )
+
 
 class Trace(unittest.TestCase):
     def test_a_concrete_route_maps_to_the_longest_template(self):

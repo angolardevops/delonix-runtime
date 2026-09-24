@@ -2098,11 +2098,22 @@ impl Client {
     }
 
     /// Changes the `cidr`/`comment` of an alias already named
-    /// (`PUT …/firewall/aliases/{name}`). `None` means "leave it as the node
-    /// already has it", not "clear it" — the same convention
-    /// [`Self::update_firewall_rule`] uses, and for the same reason there is
-    /// no probe here: an arbitrary set of changed fields has no single read
-    /// this could compare against without assuming which ones were asked for.
+    /// (`PUT …/firewall/aliases/{name}`). `None` is meant to mean "leave it
+    /// as the node already has it", the same convention
+    /// [`Self::update_firewall_rule`] uses for a rule — **but measured
+    /// against a live node, this route does NOT honour that convention on
+    /// its own.** A live run updated only `cidr` on an alias that already
+    /// carried a `comment`, and the node came back with the comment GONE:
+    /// PVE replaces the whole alias here rather than patching named fields,
+    /// unlike the rules route, where the same live run confirmed the
+    /// opposite. To give a caller of THIS function the "unspecified means
+    /// unchanged" guarantee its doc comment promises, the current alias is
+    /// read first ([`Self::firewall_alias`]) and whichever of `cidr`/
+    /// `comment` is `None` is re-sent from what is already there — nothing
+    /// carried forward for a field the alias never had. No probe: the merge
+    /// read already reaches the node once, and re-reading straight after a
+    /// write to confirm it stuck is the same "trust what it reports, not
+    /// what the call claimed" the merge step itself already practises.
     pub fn update_firewall_alias(
         &self,
         ledger: &Ledger,
@@ -2115,6 +2126,9 @@ impl Client {
         if let Some(c) = cidr {
             validate_firewall_cidr(c)?;
         }
+        let current = self.firewall_alias(vmid, name)?;
+        let cidr = cidr.or_else(|| current.get("cidr").and_then(|v| v.as_str()));
+        let comment = comment.or_else(|| current.get("comment").and_then(|v| v.as_str()));
         let mut form: Vec<(&str, &str)> = Vec::new();
         if let Some(c) = cidr {
             form.push(("cidr", c));
@@ -2306,8 +2320,26 @@ impl Client {
     /// Changes the `comment`/`nomatch` of an entry already in the set
     /// (`PUT …/firewall/ipset/{name}/{cidr}`). The entry's `cidr` itself is
     /// the URL path's own identifier and is not one of the fields this sends
-    /// — removing and re-adding is the node's own way to change it. No
-    /// probe, for the same reason [`Self::update_firewall_alias`] has none.
+    /// — removing and re-adding is the node's own way to change it.
+    ///
+    /// **Reads the entry first and carries forward what `opts` leaves out —
+    /// measured against a live node that this route does NOT do the
+    /// merge itself.** [`Self::update_firewall_rule`]'s doc comment states
+    /// "`None` means leave it as the node already has it, not clear it", and
+    /// a live run confirmed that IS how the rules route behaves. This ipset
+    /// entry route was assumed to work the same way and does not: a live run
+    /// updated only `nomatch` on an entry that already carried a `comment`,
+    /// and the node came back with the comment GONE, not preserved — PVE
+    /// replaces the whole entry here rather than patching named fields. To
+    /// give a caller of THIS function the same "unspecified means unchanged"
+    /// guarantee the rules route gives for free, the current entry is read
+    /// ([`Self::firewall_ipset_cidr`]) and any field `opts` leaves as `None`
+    /// is re-sent from what is already there — nothing carried forward for a
+    /// field the entry never had, so a first-ever update does not invent an
+    /// empty `comment=` out of nothing. No probe: the merge read already
+    /// requires reaching the node once, and re-reading straight after a
+    /// write to confirm it stuck is the same "trust what it reports, not
+    /// what the call claimed" the merge step itself already practises.
     pub fn update_firewall_ipset_cidr(
         &self,
         ledger: &Ledger,
@@ -2318,7 +2350,22 @@ impl Client {
     ) -> Result<()> {
         validate_firewall_object_name(name)?;
         validate_firewall_cidr(cidr)?;
-        let extra = ipset_cidr_fields(opts);
+        let current = self.firewall_ipset_cidr(vmid, name, cidr)?;
+        let merged = IpsetCidrOpts {
+            comment: opts
+                .comment
+                .or_else(|| current.get("comment").and_then(|v| v.as_str())),
+            nomatch: opts.nomatch.or_else(|| {
+                current
+                    .get("nomatch")
+                    .and_then(|v| {
+                        v.as_i64()
+                            .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
+                    })
+                    .map(|n| n != 0)
+            }),
+        };
+        let extra = ipset_cidr_fields(&merged);
         let form: Vec<(&str, &str)> = extra.iter().map(|(k, v)| (*k, v.as_str())).collect();
         self.task_or_done(
             ledger,
