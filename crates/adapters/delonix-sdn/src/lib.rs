@@ -42,6 +42,7 @@ pub mod bpf;
 pub mod cni;
 pub mod discover;
 mod flock;
+pub mod gateway;
 pub mod gc;
 pub mod infra;
 pub mod ipam;
