@@ -432,15 +432,13 @@ impl TaskKind {
             // `qmrestore` (read from a live PVE 9.2.2 task log,
             // `docs/proxmox/trace-9.2.2.routes`, not assumed).
             TaskKind::Restore => "qmrestore",
-            // GUESSED by analogy with `qmclone`/`qmtemplate`'s naming; NOT yet
-            // confirmed against a live trace — will be corrected by whoever
-            // runs the live suite next.
+            // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
+            // not assumed — confirms the original `qmclone`/`qmtemplate`-analogy guess.
             TaskKind::MoveDisk => "qmmove",
-            // GUESSED by analogy with `qmdestroy`/`qmdelsnapshot`; NOT yet
-            // confirmed against a live trace — will be corrected by whoever
-            // runs the live suite next. The schema suggests this route usually
-            // applies inline (`returns: null`), so this worker type may never
-            // actually be exercised at all.
+            // NEVER OBSERVED on a live node, and that is the confirmed fact: a live
+            // run of `unlink` against PVE 9.2.2 forked no task at all (the schema's
+            // `returns: null` was right) — `qmdelete` is a guess that may be
+            // permanently dead code, kept only so the match stays exhaustive.
             TaskKind::Unlink => "qmdelete",
         }
     }

@@ -958,14 +958,18 @@ fn a_template_clone_gets_the_disk_size_asked_for() {
 /// this case independent of the node's config-lock contention window
 /// (`Client::task`'s doc comment) that a `start` opens for about 30 s.
 ///
-/// **`move_disk` here moves to the SAME storage** (`DELONIX_PROXMOX_TEST_STORAGE`,
-/// the only one this suite is given), with the source reference dropped —
-/// exercising the request/response/ledger/probe cycle end to end even though
-/// "new" and "old" name the same pool. Proxmox's own GUI offers exactly this
-/// ("move disk" to the same storage, to defragment a thin volume), so it is
-/// expected to succeed; this specific combination has NOT been run against a
-/// real node yet, unlike the create/snapshot/clone paths above, and is the
-/// first thing to check if this case fails on its first live run.
+/// **`move_disk` moves to a SECOND storage** (`DELONIX_PROXMOX_TEST_MOVE_STORAGE`,
+/// default `local`), with the source reference dropped. Measured against the
+/// real lab node first: the node refuses `move_disk` to the SAME storage with
+/// the SAME format outright ("you can't move to the same storage with same
+/// format", HTTP 500) — Proxmox's own GUI offer to "move disk" within one
+/// storage is a *format* change (e.g. raw → qcow2), not a same-format no-op,
+/// and this crate has no format-conversion parameter wired up in this pass.
+/// A genuine cross-storage move is what the primitive is for in the first
+/// place, so that's what this proves instead. `local` doesn't accept VM disk
+/// images by default on a stock node — the live run enables `content=images`
+/// on it once, out of band, the same way the backup case's own storage
+/// (`DELONIX_PROXMOX_TEST_BACKUP_STORAGE`) needs `content=backup` enabled.
 #[test]
 fn move_disk_unlink_and_cloudinit_dump() {
     // No SKIP line: a print in a library crate's tests is counted debt, and
@@ -1029,22 +1033,25 @@ fn move_disk_unlink_and_cloudinit_dump() {
         "an unknown cloud-init dump type must be refused"
     );
 
-    // move_disk: the boot disk, moved to `storage` (the same one it is
-    // already on) with the source reference dropped. The effect probe is read
-    // back from `config`, never taken from the call's answer, and the SIZE is
-    // asserted unchanged — a move alone must not also resize.
+    // move_disk: the boot disk, moved to a SECOND storage with the source
+    // reference dropped — see the doc comment above for why this has to be a
+    // genuine cross-storage move rather than a same-storage no-op. The effect
+    // probe is read back from `config`, never taken from the call's answer,
+    // and the SIZE is asserted unchanged — a move alone must not also resize.
+    let move_storage =
+        std::env::var("DELONIX_PROXMOX_TEST_MOVE_STORAGE").unwrap_or_else(|_| "local".into());
     let (key, size_before) = b.client().boot_disk(vmid).expect("boot disk before move");
     b.client()
-        .move_disk(&ledger, vmid, &key, Some(&storage), true, None)
-        .expect("move_disk to the same storage, dropping the source reference");
+        .move_disk(&ledger, vmid, &key, Some(&move_storage), true, None)
+        .expect("move_disk to a second storage, dropping the source reference");
     let cfg_after_move = b.client().config(vmid).expect("config after move_disk");
     let disk_val = cfg_after_move
         .get(&key)
         .and_then(|v| v.as_str())
         .unwrap_or_default();
     assert!(
-        disk_val.starts_with(&format!("{storage}:")),
-        "the disk is not on '{storage}' after the move: {disk_val}"
+        disk_val.starts_with(&format!("{move_storage}:")),
+        "the disk is not on '{move_storage}' after the move: {disk_val}"
     );
     let (_, size_after) = b.client().boot_disk(vmid).expect("boot disk after move");
     assert_eq!(
