@@ -114,6 +114,10 @@ pub enum Error {
     #[error("{0}")]
     InvalidFirewallRule(String),
 
+    /// An SDN zone or vnet id Proxmox's own namespace cannot hold.
+    #[error("{0}")]
+    InvalidSdnId(String),
+
     /// A `VmConfig` field this backend cannot honour (local paths, QEMU knobs
     /// the node owns, libvirt-only escape hatches).
     #[error("{0}")]
@@ -146,6 +150,7 @@ impl Error {
             Error::InvalidNodeName(_) => 1521,
             Error::InvalidDiskSpec(_) => 1522,
             Error::InvalidSnapshotName(_) => 1523,
+            Error::InvalidSdnId(_) => 1530,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
             Error::NoHandle(_) => 1525,
@@ -249,6 +254,7 @@ mod tests {
             Error::InvalidSnapshotName("invalid Proxmox snapshot name 'x': expected letters, digits, '-' and '_'".into()),
             Error::InvalidCloudInitKind("proxmox: cloud-init dump type 'x' is not one of 'user', 'network', 'meta'".into()),
             Error::InvalidFirewallRule("invalid Proxmox firewall rule action 'x': expected ACCEPT, DROP or REJECT (a firewall group's name is not accepted here)".into()),
+            Error::InvalidSdnId("invalid Proxmox SDN id 'x': expected a lowercase letter then up to 7 lowercase letters or digits".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),
