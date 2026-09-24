@@ -467,13 +467,28 @@ enum TaskKind {
     /// VM-scoped (see [`sdn::SDN_VMID`]). Writes to the PENDING configuration
     /// only; nothing on any node changes until [`Client::apply_sdn`].
     CreateSdnZone,
+    /// `PUT /cluster/sdn/zones/{zone}` — stages a change to an existing
+    /// zone's `mtu`. Same PENDING-only caveat as [`TaskKind::CreateSdnZone`].
+    UpdateSdnZone,
     /// `DELETE /cluster/sdn/zones/{zone}` — same PENDING-only caveat.
     DeleteSdnZone,
     /// `POST /cluster/sdn/vnets` — stages a new SDN vnet inside a zone. Same
     /// PENDING-only caveat.
     CreateSdnVnet,
+    /// `PUT /cluster/sdn/vnets/{vnet}` — stages a change to an existing
+    /// vnet's `alias`. Same PENDING-only caveat as [`TaskKind::CreateSdnVnet`].
+    UpdateSdnVnet,
     /// `DELETE /cluster/sdn/vnets/{vnet}` — same PENDING-only caveat.
     DeleteSdnVnet,
+    /// `POST /cluster/sdn/vnets/{vnet}/subnets` — stages a new subnet inside
+    /// a vnet. Same PENDING-only caveat.
+    CreateSdnSubnet,
+    /// `PUT /cluster/sdn/vnets/{vnet}/subnets/{subnet}` — stages a change to
+    /// an existing subnet's `gateway`. Same PENDING-only caveat.
+    UpdateSdnSubnet,
+    /// `DELETE /cluster/sdn/vnets/{vnet}/subnets/{subnet}` — same
+    /// PENDING-only caveat.
+    DeleteSdnSubnet,
     /// `PUT /cluster/sdn` (no body) — reloads the PENDING SDN configuration
     /// onto every node in the cluster. The one SDN call that genuinely forks
     /// a cluster-wide task; every other SDN write above is very likely
@@ -515,9 +530,14 @@ impl TaskKind {
             TaskKind::UpdateFirewallIpsetCidr => "firewall-update-ipset-cidr",
             TaskKind::DeleteFirewallIpsetCidr => "firewall-delete-ipset-cidr",
             TaskKind::CreateSdnZone => "create-sdn-zone",
+            TaskKind::UpdateSdnZone => "update-sdn-zone",
             TaskKind::DeleteSdnZone => "delete-sdn-zone",
             TaskKind::CreateSdnVnet => "create-sdn-vnet",
+            TaskKind::UpdateSdnVnet => "update-sdn-vnet",
             TaskKind::DeleteSdnVnet => "delete-sdn-vnet",
+            TaskKind::CreateSdnSubnet => "create-sdn-subnet",
+            TaskKind::UpdateSdnSubnet => "update-sdn-subnet",
+            TaskKind::DeleteSdnSubnet => "delete-sdn-subnet",
             TaskKind::ApplySdn => "apply-sdn",
         }
     }
@@ -629,6 +649,24 @@ impl TaskKind {
             TaskKind::DeleteSdnZone => "sdnzonedelete",
             TaskKind::CreateSdnVnet => "sdnvnetcreate",
             TaskKind::DeleteSdnVnet => "sdnvnetdelete",
+            // UNCONFIRMED GUESS, not yet exercised against a live node — unlike
+            // the four zone/vnet names just above, no live run has reached
+            // `PUT /cluster/sdn/zones/{zone}`, `PUT /cluster/sdn/vnets/{vnet}`,
+            // `POST/PUT/DELETE /cluster/sdn/vnets/{vnet}/subnets[/{subnet}]`
+            // yet, so "applies inline" for these five is an ANALOGY to the
+            // four confirmed ones, not a measurement of its own. `task_or_done`
+            // (not `task`) is what makes the guess safe either way: a `null`
+            // answer is read as "applied inline" and a real UPID is still
+            // waited on correctly if one of these five turns out to fork a
+            // worker after all. Correct these names from what
+            // `GET /nodes/{node}/tasks` actually shows the first time a live
+            // run reaches one of them (`scripts/proxmox_api_inventory.py
+            // --trace`, ADR-0049 D2).
+            TaskKind::UpdateSdnZone => "sdnzoneupdate",
+            TaskKind::UpdateSdnVnet => "sdnvnetupdate",
+            TaskKind::CreateSdnSubnet => "sdnsubnetcreate",
+            TaskKind::UpdateSdnSubnet => "sdnsubnetupdate",
+            TaskKind::DeleteSdnSubnet => "sdnsubnetdelete",
             // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
             // not assumed: `PUT /cluster/sdn` forks `reloadnetworkall`, not the
             // `srvreload` this guess was originally written as.

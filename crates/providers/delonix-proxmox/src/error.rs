@@ -128,6 +128,15 @@ pub enum Error {
     #[error("{0}")]
     InvalidSdnId(String),
 
+    /// An SDN subnet's CIDR that does not parse as a well-formed IPv4 or
+    /// IPv6 network. A separate variant from [`Error::InvalidSdnId`] on
+    /// purpose: a zone/vnet id and a CIDR are different shapes with
+    /// different rules, and folding the two into one message would leave a
+    /// script that greps for "invalid Proxmox SDN id" blind to a rejected
+    /// subnet, and vice versa.
+    #[error("{0}")]
+    InvalidCidr(String),
+
     /// A `VmConfig` field this backend cannot honour (local paths, QEMU knobs
     /// the node owns, libvirt-only escape hatches).
     #[error("{0}")]
@@ -161,6 +170,7 @@ impl Error {
             Error::InvalidDiskSpec(_) => 1522,
             Error::InvalidSnapshotName(_) => 1523,
             Error::InvalidSdnId(_) => 1530,
+            Error::InvalidCidr(_) => 1533,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
             Error::InvalidFirewallObjectName(_) => 1531,
@@ -269,6 +279,7 @@ mod tests {
             Error::InvalidFirewallObjectName("invalid Proxmox firewall alias/ipset name 'x': expected a letter, then one or more letters, digits, '-' or '_' (at least 2 characters total)".into()),
             Error::InvalidFirewallAddress("invalid Proxmox firewall address 'x': expected an IPv4/IPv6 address, optionally with a '/<prefix>'".into()),
             Error::InvalidSdnId("invalid Proxmox SDN id 'x': expected a lowercase letter then up to 7 lowercase letters or digits".into()),
+            Error::InvalidCidr("invalid Proxmox SDN subnet 'x': expected <address>/<prefix-length>".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),
