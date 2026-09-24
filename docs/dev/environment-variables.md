@@ -237,6 +237,7 @@ These are read only by tests. Without them the live tests **skip** and print `SK
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Account for password authentication. | e.g. `root@pam`. Required. | TLS verification is disabled in these tests. |
 | `DELONIX_PROXMOX_TEST_PASS` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Its password. | Required. | |
 | `DELONIX_PROXMOX_TEST_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage for the test VM's disk. | Default `local-lvm`. | |
+| `DELONIX_PROXMOX_TEST_BACKUP_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage the backup archive lands on — the node may not accept backup content on the disk storage (a thin-LVM pool cannot). | Default: same as `DELONIX_PROXMOX_TEST_STORAGE`. | |
 | `DELONIX_PROXMOX_TEST_AGENT_VMID` | `crates/providers/delonix-proxmox/tests/live.rs:o_ip_vem_do_agente_de_um_convidado_a_serio` | An existing VM, with the QEMU guest agent running, whose IP the test reads. | A VM id. | Skipped when unset, even with the URL set. |
 | `DELONIX_TRUENAS_TEST_URL` | `crates/providers/delonix-truenas/tests/live.rs:target` | TrueNAS appliance to run the live provisioner tests against. | `https://<host>`. | Enables the tests. They create and destroy `<pool>/dlxlive-<pid>`. |
 | `DELONIX_TRUENAS_TEST_POOL` | `crates/providers/delonix-truenas/tests/live.rs:target` | Pool for the test dataset. | Default `tank`. | |

@@ -352,6 +352,12 @@ enum TaskKind {
     Resize,
     /// `POST …/template` — turns a stopped VM into a clone source.
     Template,
+    /// `POST …/vzdump` — a crash-consistent backup of the VM's disk to a
+    /// storage, taken WITHOUT stopping the guest.
+    Backup,
+    /// `DELETE …/storage/{storage}/content/{volume}` — removes one backup
+    /// archive.
+    DeleteBackup,
 }
 
 impl TaskKind {
@@ -368,6 +374,8 @@ impl TaskKind {
             TaskKind::DeleteSnapshot => "delete-snapshot",
             TaskKind::Resize => "resize",
             TaskKind::Template => "template",
+            TaskKind::Backup => "backup",
+            TaskKind::DeleteBackup => "delete-backup",
         }
     }
 
@@ -392,6 +400,12 @@ impl TaskKind {
             // (`docs/proxmox/trace-9.2.2.routes`), not assumed.
             TaskKind::Resize => "resize",
             TaskKind::Template => "qmtemplate",
+            // `PVE::API2::VZDump`/`PVE::API2::Storage::Content` fork these under
+            // `vzdump` and `imgdel` (`PVE::AbstractConfig::fork_worker` names read
+            // from a live PVE 9.2.2 task log, `docs/proxmox/trace-9.2.2.routes`,
+            // not assumed).
+            TaskKind::Backup => "vzdump",
+            TaskKind::DeleteBackup => "imgdel",
         }
     }
 }
@@ -902,6 +916,106 @@ impl Client {
                 )
             },
             Some(&|| Ok(self.config(vmid)?.get("template").and_then(|t| t.as_u64()) == Some(1))),
+        )
+    }
+
+    /// The backups `storage` holds for VM `vmid` — `(volid, bytes)`, read from
+    /// `GET …/storage/{storage}/content?content=backup&vmid=<vmid>`.
+    ///
+    /// The `vmid` filter is the NODE'S own: it answers only with archives that
+    /// belong to this VM, so a second VM's backups on the same storage never
+    /// show up here.
+    pub fn list_backups(&self, storage: &str, vmid: u32) -> Result<Vec<(String, u64)>> {
+        let body = self.get(&format!(
+            "/nodes/{}/storage/{storage}/content?content=backup&vmid={vmid}",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "content")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|b| {
+                let volid = b.get("volid")?.as_str()?.to_string();
+                let size = b.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
+                Some((volid, size))
+            })
+            .collect())
+    }
+
+    /// Backs up VM `vmid`'s disk to `storage` (`POST …/vzdump`) WITHOUT
+    /// stopping it — `mode=snapshot`, the same "nothing has to stop" rule
+    /// `rbackup.rs` states for the local backends, now answered by the node's
+    /// own mechanism instead of a local overlay copy this backend has no
+    /// disk to make (`manages_own_storage`: `write_vm_archive` refuses a
+    /// Proxmox VM today, because `vm.overlay` names something on the far
+    /// node, never a local file).
+    ///
+    /// Without a guest agent the filesystem is NOT frozen — an ordinary
+    /// crash-consistent snapshot, the same guarantee vzdump gives any VM that
+    /// has none. `VmBackupQuiesced` stays unclaimed until a guest with an
+    /// agent proves the freeze, which this call does not attempt to force.
+    ///
+    /// `remove=0`: this call is a primitive, not a policy — retention is the
+    /// caller's job (the same split `rbackup.rs`'s own `prune` already makes
+    /// for the local kinds), and a node default that silently deleted the
+    /// PREVIOUS backup would make that job impossible to do from here.
+    ///
+    /// The effect probe is the archive count for this vmid going up, read
+    /// BEFORE the request is sent — a lost answer is reconciled against that
+    /// baseline, never against a bare "does one exist" that a second run
+    /// could satisfy by accident.
+    pub fn backup_vm(&self, ledger: &Ledger, vmid: u32, storage: &str) -> Result<()> {
+        let before = self.list_backups(storage, vmid)?.len();
+        let vmid_s = vmid.to_string();
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Backup,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/vzdump", self.node),
+                    &[
+                        ("vmid", vmid_s.as_str()),
+                        ("storage", storage),
+                        ("mode", "snapshot"),
+                        ("remove", "0"),
+                    ],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.list_backups(storage, vmid)?.len() > before)),
+        )
+    }
+
+    /// Removes one backup archive (`DELETE …/storage/{storage}/content/{volume}`).
+    ///
+    /// `volid` goes through the same [`urlencode`] a form value does: it is a
+    /// single path segment (`{volume}`) that itself contains a `/`
+    /// (`local:backup/vzdump-qemu-100-…`), and an unescaped one would be read
+    /// as a second path level, not part of the id.
+    pub fn delete_backup(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        storage: &str,
+        volid: &str,
+    ) -> Result<()> {
+        let owned_volid = volid.to_string();
+        let path = format!(
+            "/nodes/{}/storage/{storage}/content/{}",
+            self.node,
+            urlencode(volid)
+        );
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::DeleteBackup,
+            || self.delete(&path),
+            Some(&|| {
+                Ok(!self
+                    .list_backups(storage, vmid)?
+                    .iter()
+                    .any(|(v, _)| *v == owned_volid))
+            }),
         )
     }
 
@@ -2478,7 +2592,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmSnapshotRestore => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmSnapshotDelete => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmSnapshotPersistent => S::Partial { detail: "snapshots live on the node; the live case lists `live1` back from the node right after taking it, but deletes it BEFORE the stop, so nothing asserts a snapshot is still there after a stop/start" },
-        C::VmBackupDisk => S::NotImplemented,
+        C::VmBackupDisk => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_backup_lands_on_the_storage_and_comes_off_it" },
         C::VmBackupQuiesced => S::NotImplemented,
         C::VmBackupRestore => S::NotImplemented,
         C::VmMigrationCold => S::NotImplemented,
