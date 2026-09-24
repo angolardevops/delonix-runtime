@@ -339,3 +339,219 @@ fn o_ip_vem_do_agente_de_um_convidado_a_serio() {
     );
     assert!(ip.parse::<std::net::Ipv4Addr>().is_ok(), "não é IPv4: {ip}");
 }
+
+/// A clone of a template comes up with the DISK SIZE asked for, not the
+/// template's — `diskSize` (`VmConfig.disk_size_gib`) was neither read nor
+/// refused by this backend before this case, the ADR-0044 D1 class.
+///
+/// The case makes its own clone source: a fresh 1 GiB VM, stopped and turned
+/// into a template (`POST …/template`). That is also what promotes `clone`
+/// and `POST …/config` from `supported+untested` — until this run the only
+/// route trace had no template on the node to clone.
+///
+/// What is asserted is read back from the node (`GET …/config`, the boot
+/// disk's `size=`), never taken from the call's answer; and a SHRINK is
+/// refused before anything exists on the node, which the VM count proves.
+#[test]
+fn a_template_clone_gets_the_disk_size_asked_for() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+    let record = |name: &str, disk: &str, handle: &str| {
+        delonix_compute::Vm::new(
+            name.to_string(),
+            disk.to_string(),
+            disk.to_string(),
+            1,
+            "512M".into(),
+            String::new(),
+            String::new(),
+            String::new(),
+            handle.to_string(),
+        )
+    };
+    let vmid_of = |handle: &str| -> u32 { handle.rsplit(':').next().unwrap().parse().unwrap() };
+
+    // The clone source: a fresh 1 GiB disk, stopped, marked as a template.
+    let src_name = format!("dlxtpl{}", std::process::id() % 10000);
+    let src_cfg = VmConfig {
+        name: src_name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let src_boot = b
+        .boot(vmdir, &src_cfg, &src_cfg.disk, &stage)
+        .expect("boot the source");
+    let src = record(&src_name, &src_cfg.disk, &src_boot.api_socket);
+    let src_id = vmid_of(&src_boot.api_socket);
+    b.stop(vmdir, &src).expect("stop the source");
+    b.client()
+        .mark_template(&delonix_proxmox::Ledger::at(vmdir), src_id)
+        .expect("template");
+    let tpl_cfg = b.client().config(src_id).expect("template config");
+    assert_eq!(
+        tpl_cfg.get("template").and_then(|t| t.as_u64()),
+        Some(1),
+        "the node does not flag the source as a template: {tpl_cfg}"
+    );
+    let (key, tpl_bytes) = b
+        .client()
+        .boot_disk(src_id)
+        .expect("the template's boot disk");
+    assert_eq!(
+        tpl_bytes,
+        1 << 30,
+        "the source was created with a 1 GiB `{key}`"
+    );
+
+    // A shrink is refused BEFORE a clone exists: the next free id is the same
+    // after the refusal as before it.
+    let vms_before = b.client().next_vmid().ok();
+    let shrink_cfg = VmConfig {
+        name: format!("{src_name}s"),
+        disk: format!("template:{src_id}"),
+        disk_size_gib: None,
+        ..src_cfg.clone()
+    };
+    // Grow the template itself to 2 GiB first, so that asking a clone for 1
+    // GiB is a genuine shrink.
+    b.client()
+        .resize_disk(&delonix_proxmox::Ledger::at(vmdir), src_id, &key, 2)
+        .expect("grow the template to 2 GiB");
+    let (_, tpl_bytes) = b.client().boot_disk(src_id).expect("re-read");
+    assert_eq!(
+        tpl_bytes,
+        2 << 30,
+        "the template's `{key}` is not 2 GiB after the resize"
+    );
+    let shrink = b.boot(
+        vmdir,
+        &VmConfig {
+            disk_size_gib: Some(1),
+            ..shrink_cfg.clone()
+        },
+        &shrink_cfg.disk,
+        &stage,
+    );
+    let Err(e) = shrink else {
+        panic!("a 1 GiB clone of a 2 GiB template must be refused");
+    };
+    let msg = e.to_string();
+    assert!(
+        msg.contains("smaller")
+            && msg.contains(&key)
+            && msg.contains("2 GiB")
+            && msg.contains("1 GiB"),
+        "the refusal must name the disk and both sizes: {msg}"
+    );
+    assert_eq!(
+        b.client().next_vmid().ok(),
+        vms_before,
+        "the refused clone left a VM on the node"
+    );
+
+    // The clone, asked for 4 GiB: the node has to show 4 GiB on the boot disk.
+    let clone_name = format!("{src_name}c");
+    let clone_cfg = VmConfig {
+        name: clone_name.clone(),
+        disk: format!("template:{src_id}"),
+        disk_size_gib: Some(4),
+        ..src_cfg.clone()
+    };
+    let clone_boot = b
+        .boot(vmdir, &clone_cfg, &clone_cfg.disk, &stage)
+        .expect("boot the clone");
+    let clone = record(&clone_name, &clone_cfg.disk, &clone_boot.api_socket);
+    let clone_id = vmid_of(&clone_boot.api_socket);
+    assert_ne!(clone_id, src_id);
+    assert!(b.is_running(&clone), "the clone must be running after boot");
+    let (clone_key, clone_bytes) = b
+        .client()
+        .boot_disk(clone_id)
+        .expect("the clone's boot disk");
+    assert_eq!(
+        clone_key, key,
+        "the clone's boot disk is not the template's"
+    );
+    assert_eq!(
+        clone_bytes,
+        4 << 30,
+        "the clone's `{clone_key}` is not the 4 GiB asked for"
+    );
+    let clone_cfg_node = b.client().config(clone_id).expect("clone config");
+    assert_eq!(
+        clone_cfg_node.get("template").and_then(|t| t.as_u64()),
+        None,
+        "the clone must not itself be a template: {clone_cfg_node}"
+    );
+
+    // Same size as the template: no resize task at all — the ledger says so.
+    let same_name = format!("{src_name}e");
+    let same_cfg = VmConfig {
+        name: same_name.clone(),
+        disk: format!("template:{src_id}"),
+        disk_size_gib: Some(2),
+        ..src_cfg.clone()
+    };
+    let same_dir = tempfile::tempdir().expect("tempdir");
+    let same_boot = b
+        .boot(same_dir.path(), &same_cfg, &same_cfg.disk, &stage)
+        .expect("boot the same-size clone");
+    let same = record(&same_name, &same_cfg.disk, &same_boot.api_socket);
+    let same_ledger: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(same_dir.path().join("proxmox-tasks.json")).expect("ledger"),
+    )
+    .expect("json");
+    assert!(
+        !same_ledger
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|e| e.get("action").and_then(|a| a.as_str()) == Some("resize")),
+        "a clone at the template's size submitted a resize: {same_ledger}"
+    );
+
+    // Tear down: clones, then the template. The proof is the node's answer.
+    for (vm, id) in [(&clone, clone_id), (&same, vmid_of(&same_boot.api_socket))] {
+        b.stop(vmdir, vm).expect("stop clone");
+        b.destroy(vmdir, vm).expect("destroy clone");
+        assert!(
+            b.client().config(id).is_err(),
+            "clone {id} is still on the node"
+        );
+    }
+    b.destroy(vmdir, &src).expect("destroy the template");
+    assert!(
+        b.client().config(src_id).is_err(),
+        "the template is still on the node"
+    );
+
+    // The ledger settled every task, and the last `resize`/`template` succeeded.
+    let ledger: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(vmdir.join("proxmox-tasks.json")).expect("ledger"),
+    )
+    .expect("json");
+    let entries = ledger.as_array().unwrap();
+    for want in ["template", "resize", "clone", "configure"] {
+        let last = entries
+            .iter()
+            .rev()
+            .find(|e| e.get("action").and_then(|a| a.as_str()) == Some(want))
+            .unwrap_or_else(|| panic!("no `{want}` task in the ledger"));
+        assert_eq!(
+            last.pointer("/state/state").and_then(|s| s.as_str()),
+            Some("ok"),
+            "the last `{want}` task did not succeed: {last}"
+        );
+    }
+}

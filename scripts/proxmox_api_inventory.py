@@ -205,6 +205,7 @@ _PATH_RE = re.compile(r'"(/(?:nodes|cluster|access|storage|pools|version)[^"]*)"
 # match, and a path literal never sits next to two different HTTP verbs.
 _METHOD_HINTS = (
     (".delete(", "DELETE"),
+    ("put_form(", "PUT"),
     (".put(", "PUT"),
     ("post_form(", "POST"),
     (".post(", "POST"),
