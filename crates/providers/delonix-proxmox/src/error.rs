@@ -105,6 +105,10 @@ pub enum Error {
     #[error("{0}")]
     InvalidSnapshotName(String),
 
+    /// A cloud-init dump `type` other than `user`, `network` or `meta`.
+    #[error("{0}")]
+    InvalidCloudInitKind(String),
+
     /// A `VmConfig` field this backend cannot honour (local paths, QEMU knobs
     /// the node owns, libvirt-only escape hatches).
     #[error("{0}")]
@@ -140,6 +144,7 @@ impl Error {
             Error::UnsupportedField(_) => 1524,
             Error::NoHandle(_) => 1525,
             Error::BadRequest(_) => 1526,
+            Error::InvalidCloudInitKind(_) => 1529,
             Error::NodeNotFound(_) => 4504,
             Error::NodeConflict(_) => 5504,
             Error::NodeUnavailable(_) => 6506,
@@ -236,6 +241,7 @@ mod tests {
             Error::InvalidNodeName("invalid Proxmox node name 'x': expected letters, digits, '-' and '.'".into()),
             Error::InvalidDiskSpec("proxmox: 'x' does not name anything on the node".into()),
             Error::InvalidSnapshotName("invalid Proxmox snapshot name 'x': expected letters, digits, '-' and '_'".into()),
+            Error::InvalidCloudInitKind("proxmox: cloud-init dump type 'x' is not one of 'user', 'network', 'meta'".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),
