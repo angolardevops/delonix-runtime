@@ -6,7 +6,11 @@
   PVE 9.2.2 node with the route trace on (2026-09-23, `docs/proxmox/trace-9.2.2.routes`):
   **15 of the 18 called routes are `supported+tested`** (the 18th, `DELETE …/snapshot/{snapname}`,
   entered with the same day's second run — see the addendum at the end); the 3 left are named
-  with the reason in the trace header. Slices 2–3 have no live conformance, and the status does
+  with the reason in the trace header. Slice 2 has its first operation live (2026-09-24,
+  same node): `disk_size_gib` on a template clone grows the boot disk through `PUT …/resize`,
+  the clone source is made with `POST …/template`, and the trace now says **19 of 20 called
+  routes are `supported+tested`** — only the lost-answer `GET /nodes/{node}/tasks` stays
+  untested live. The rest of slice 2 and slice 3 have no live conformance, and the status does
   not change before they do
 - **Date:** 2026-09-23
 - **Deciders:** Walter Angolar
@@ -186,7 +190,7 @@ own, after a spike, or it stays excluded.
 |---|---|---|
 | 0 | Versioned endpoint inventory (this ADR, `scripts/proxmox_api_inventory.py`) | Schema source, release, method/path denominator, states with reasons, called routes read from the source; baseline reproduced by someone else with the docstring command — **done for 9.2.2**; the schema is committed with provenance (`docs/proxmox/api-9.2.2.routes.json`), the matrix is generated (`docs/proxmox/matrix-9.2.2.md`) and gated, and the five states of the brief (`supported+tested` from a route trace of a live run, `supported+untested`, `unsupported-by-design`, `not-yet-implemented`, `not-available-in-version`) replace the three |
 | 1 | Hardened transport and task handle | **Built**: 16 MiB response bound; `Auth`/`Ticket` `Debug` redacted and a test that greps every rendered error, `Debug` and the trace file for the secret; typed status errors (`Unauthorized`/`Forbidden`/`NodeNotFound`/`NodeConflict`/`BadRequest`/`NodeUnavailable`/`ResponseTooLarge`, DX-1526/4504/5504/6506/9515–9517 — the `Node` prefix keeps `arch_fitness.py`'s raw-variant counter from reading a local variant as a raw match on the shared class); a task LEDGER per VM written before the wait and settled after, reconciled before the next operation; a lost answer reconciled through `GET /nodes/{node}/tasks?vmid=…&source=active` and an effect probe, never resent; failure injection against a TLS mock node (14 scenarios: TLS refused/accepted-by-CA, 401 renew-once/token-never, 403/404/409/400/5xx, truncated body, unexpected JSON, stalled answer, oversized body, task failed, task timed out, leftover task, lost answer ×3). **Live run done (2026-09-23)**: `tests/live.rs` walks create → snapshot (RAM) → rollback → stop → resume → stop → destroy against a real PVE 9.2.2 node with the trace on; the committed trace promotes 14 of 17 called routes to `supported+tested` and the gate regenerates the matrix WITH it. Measured there and not assumed: a `stop` submitted within ~30 s of a `start` or a RAM rollback fails on the node's 10 s config lock, the client's lock retry resubmits it (2 logical stops, 4 `qmstop` tasks, 2 failed on the node), and the ledger keeps every one. Still untested live: `clone`/`config` (need a template on the node) and `GET /nodes/{node}/tasks` (lost-answer path, failure injection only) |
-| 2 | VM operations mapped to engine semantics | Resize (`…/resize`), disks and NICs beyond `config`, cloud-init through `config`, per-VM backup and restore (`…/vzdump`, `…/qemu` restore) — each behind a capability name from ADR-0044 D2; contract tests plus a `tests/live.rs` case per operation |
+| 2 | VM operations mapped to engine semantics | Resize (`…/resize`), disks and NICs beyond `config`, cloud-init through `config`, per-VM backup and restore (`…/vzdump`, `…/qemu` restore) — each behind a capability name from ADR-0044 D2; contract tests plus a `tests/live.rs` case per operation. **Resize done (2026-09-24)**: `VmConfig.disk_size_gib` was neither read nor refused by this backend (the ADR-0044 D1 class — honoured by the local overlays, dropped here with the command reporting success); it now sizes a template clone's boot disk through `PUT …/resize` after `configure_clone`, is the same number said twice or a refusal next to a fresh `<storage>:<gib>`, and a shrink is refused by name with both sizes BEFORE the clone exists (the node's own «shrinking disks is not supported» arrives inside a failed task). The clone source of the live case is made with `POST …/template` (`mark_template`, a client call — no engine verb yet), which is also what promoted `clone` and `POST …/config` from `supported+untested`. Catalogue: `vm.disk.resize` and `vm.template` are **partial** on purpose (no engine verb resizes an EXISTING VM or marks a template; the local backends declare the same capability `not-implemented` for the same reason), `vm.clone` is supported with the live case as evidence. Still open in this slice: disks/NICs beyond `config`, the rest of cloud-init through `config`, per-VM backup and restore |
 | 3 | Cluster-dependent operations | Capability discovery for storage, migration, HA and SDN on the node's cluster; **no implicit node selection**; integration on the supported topology — the three-node `ngola-lda` cluster above is the named target |
 | 4 | Administration contract, if ever | Its own ADR, threat model, per-route permission, audit trail, deny by default — and it sits under ADR-0010: local socket, never remote |
 
@@ -308,3 +312,20 @@ the others; the live run walks create → snapshot → rollback → **delete-sna
 → stop → destroy, and the trace promotes the route to `supported+tested` (18 called, 15 tested).
 Measured in that run: a delete submitted right after a RAM rollback hits the same 10 s config
 lock as a stop does, and the lock retry resubmits it — the ledger keeps every attempt.
+
+**Added 2026-09-24 (slice 2, first operation, live):** `tests/live.rs::a_template_clone_gets_the_disk_size_asked_for`
+ran against the same appliance node (PVE 9.2.2, `pve-lab-475`), with the trace on, together with
+the two earlier cases: **3 passed, 239 requests**, and the committed trace (`docs/proxmox/trace-9.2.2.routes`)
+regenerates the matrix at **19 tested / 1 untested of 20 called** — `PUT …/resize` and
+`POST …/template` entered as `supported+tested`, `POST …/clone` and `POST …/config` moved from
+`supported+untested` to tested (the case makes its own template, so the "needs a template on the node"
+reason is gone). Measured there and not assumed: the node registers the two workers as `resize`
+(no `qm` prefix) and `qmtemplate`, and the client's `worker_type` table carries those names — the
+lost-answer path finds a resize by that name; a clone asked for the template's own size submits
+no resize task (the ledger has none); a 1 GiB clone of a 2 GiB template is refused before
+`clone` is sent (the node's next free id is unchanged after the refusal); and the node's VM list
+was empty after the run. Not measured: `diskSize` on a clone whose boot disk is not the
+template's first sized drive (the boot-disk choice — `boot: order=…`, then `bootdisk`, then the
+lowest-numbered sized drive — is unit-tested against captured configs, not exercised on the
+node), and a resize of a RUNNING clone (the case resizes before the first start, which is where
+`boot` does it).

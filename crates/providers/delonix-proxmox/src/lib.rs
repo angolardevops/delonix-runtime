@@ -346,6 +346,12 @@ enum TaskKind {
     /// this is the one kind [`Client::task_or_done`] is for.
     Configure,
     DeleteSnapshot,
+    /// `PUT …/resize` — grows ONE disk of a VM. Grow only: the node refuses a
+    /// shrink, and this backend refuses it earlier, by name (see
+    /// [`ProxmoxBackend::boot`]).
+    Resize,
+    /// `POST …/template` — turns a stopped VM into a clone source.
+    Template,
 }
 
 impl TaskKind {
@@ -360,6 +366,8 @@ impl TaskKind {
             TaskKind::Destroy => "destroy",
             TaskKind::Configure => "configure",
             TaskKind::DeleteSnapshot => "delete-snapshot",
+            TaskKind::Resize => "resize",
+            TaskKind::Template => "template",
         }
     }
 
@@ -379,6 +387,11 @@ impl TaskKind {
             TaskKind::Destroy => "qmdestroy",
             TaskKind::Configure => "qmconfig",
             TaskKind::DeleteSnapshot => "qmdelsnapshot",
+            // `PVE::API2::Qemu` forks `resize` (no `qm` prefix) and `qmtemplate`;
+            // both names were read back from a live PVE 9.2.2 task log
+            // (`docs/proxmox/trace-9.2.2.routes`), not assumed.
+            TaskKind::Resize => "resize",
+            TaskKind::Template => "qmtemplate",
         }
     }
 }
@@ -620,6 +633,11 @@ impl Client {
         self.send_authed("POST", path, || self.http.post(&url).form(form))
     }
 
+    fn put_form(&self, path: &str, form: &[(&str, &str)]) -> Result<String> {
+        let url = self.url(path);
+        self.send_authed("PUT", path, || self.http.put(&url).form(form))
+    }
+
     /// The VM's `status` as the node reports it (`running`, `stopped`, …).
     pub fn status_current(&self, vmid: u32) -> Result<String> {
         let body = self.get(&format!("/nodes/{}/qemu/{vmid}/status/current", self.node))?;
@@ -825,6 +843,66 @@ impl Client {
         let body = self.get(&format!("/nodes/{}/qemu/{vmid}/config", self.node))?;
         let w: Wrapped<serde_json::Value> = parse(&body, "config")?;
         Ok(w.data)
+    }
+
+    /// The VM's boot disk as the node has it: `(key, bytes)` — `scsi0` and
+    /// the bytes its `size=` says. Read from [`Self::config`], so it answers
+    /// what the node RECORDED, which is the only size a resize can be judged
+    /// against. A config with no sized boot disk is an unexpected answer, not
+    /// a zero: the caller compares against it, and a zero would make every
+    /// request look like a grow.
+    pub fn boot_disk(&self, vmid: u32) -> Result<(String, u64)> {
+        let cfg = self.config(vmid)?;
+        boot_disk_of(&cfg).ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} has no boot disk with a size in its config: {}",
+                truncate_chars(&cfg.to_string(), 300)
+            ))
+        })
+    }
+
+    /// Grows `disk` of VM `vmid` to `gib` GiB (`PUT …/resize`).
+    ///
+    /// Grow only. The node refuses a shrink («shrinking disks is not
+    /// supported») inside a task that comes back as a generic failure; this
+    /// backend refuses it BEFORE anything is created, by name and with both
+    /// numbers ([`ProxmoxBackend::boot`]), so this is only ever called to grow.
+    /// A UPID, like every write; the effect probe reads the size back from
+    /// the config, never from what the call said.
+    pub fn resize_disk(&self, ledger: &Ledger, vmid: u32, disk: &str, gib: u32) -> Result<()> {
+        let size = format!("{gib}G");
+        let want = u64::from(gib) * GIB;
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Resize,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/resize", self.node),
+                    &[("disk", disk), ("size", size.as_str())],
+                )
+            },
+            Some(&|| Ok(disk_size_of(&self.config(vmid)?, disk).is_some_and(|b| b >= want))),
+        )
+    }
+
+    /// Turns a STOPPED VM into a template (`POST …/template`): the clone
+    /// source `disk: template:<vmid>` names. The effect probe is the config's
+    /// own `template` flag.
+    pub fn mark_template(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Template,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/template", self.node),
+                    &[],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.config(vmid)?.get("template").and_then(|t| t.as_u64()) == Some(1))),
+        )
     }
 
     pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
@@ -1531,6 +1609,135 @@ fn parse_disk_spec(disk: &str) -> Result<DiskSpec> {
     })
 }
 
+const GIB: u64 = 1024 * 1024 * 1024;
+
+/// What `disk_size_gib` means next to a FRESH disk (`<storage>:<gib>`): the
+/// same size said twice, or a refusal. Two numbers for one disk is two
+/// answers to the same question — picking either silently is how a VM comes
+/// up with a disk nobody asked for. Pure.
+fn check_fresh_disk_size(spec: &DiskSpec, asked: Option<u32>) -> Result<()> {
+    match (spec, asked) {
+        (DiskSpec::New { storage, gib }, Some(asked)) if asked != *gib => {
+            Err(Error::InvalidDiskSpec(format!(
+                "proxmox: the disk is sized twice — `disk: {storage}:{gib}` says {gib} GiB and \
+                 `diskSize` says {asked} GiB. Say it once: `{storage}:{asked}`, or drop `diskSize`"
+            )))
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Grow `cur` bytes of `key` to `asked` GiB: `Some((key, gib))` when there is
+/// something to grow, `None` when the size already matches, and a refusal —
+/// by name, with both numbers — for a shrink, because the node cannot do one
+/// and its own refusal arrives inside a failed task with no hint. Pure.
+fn disk_grow_plan(
+    template: u32,
+    key: &str,
+    cur: u64,
+    asked: Option<u32>,
+) -> Result<Option<(String, u32)>> {
+    let Some(gib) = asked else {
+        return Ok(None);
+    };
+    let want = u64::from(gib) * GIB;
+    if want < cur {
+        return Err(Error::InvalidDiskSpec(format!(
+            "proxmox: `diskSize` {gib} GiB is smaller than template {template}'s `{key}` \
+             ({}): a disk on the node grows and never shrinks. Ask for at least that, or \
+             drop `diskSize` to keep the template's size",
+            fmt_gib(cur)
+        )));
+    }
+    if want == cur {
+        return Ok(None);
+    }
+    Ok(Some((key.to_string(), gib)))
+}
+
+fn fmt_gib(bytes: u64) -> String {
+    if bytes.is_multiple_of(GIB) {
+        format!("{} GiB", bytes / GIB)
+    } else {
+        format!("{:.2} GiB", bytes as f64 / GIB as f64)
+    }
+}
+
+/// The boot disk of a node-side VM config: `(key, bytes)`.
+///
+/// `boot: order=scsi0;ide2;net0` names the order, and the first entry that is a
+/// disk with a `size=` is the one; without an order, `bootdisk` (older
+/// configs), then the lowest-numbered `scsi`/`virtio`/`sata`/`ide` drive that
+/// has a size. A cloud-init drive and a CD-ROM never qualify — they carry no
+/// `size=` a resize could apply to. Pure.
+fn boot_disk_of(cfg: &serde_json::Value) -> Option<(String, u64)> {
+    let sized = |key: &str| disk_size_of(cfg, key).map(|b| (key.to_string(), b));
+    if let Some(order) = cfg.get("boot").and_then(|b| b.as_str()) {
+        let order = order
+            .split(',')
+            .find_map(|kv| kv.strip_prefix("order="))
+            .unwrap_or("");
+        if let Some(found) = order.split(';').find_map(sized) {
+            return Some(found);
+        }
+    }
+    if let Some(found) = cfg.get("bootdisk").and_then(|b| b.as_str()).and_then(sized) {
+        return Some(found);
+    }
+    let mut keys: Vec<(usize, u32, String)> = cfg
+        .as_object()?
+        .keys()
+        .filter_map(|k| {
+            let bus = ["scsi", "virtio", "sata", "ide"]
+                .iter()
+                .position(|b| k.starts_with(b))?;
+            let idx: u32 = k[["scsi", "virtio", "sata", "ide"][bus].len()..]
+                .parse()
+                .ok()?;
+            Some((bus, idx, k.clone()))
+        })
+        .collect();
+    keys.sort();
+    keys.into_iter().find_map(|(_, _, k)| sized(&k))
+}
+
+/// The bytes of drive `key` in a config, or `None` when the key is absent, is
+/// not a sized disk (CD-ROM, cloud-init drive) or has no readable `size=`.
+fn disk_size_of(cfg: &serde_json::Value, key: &str) -> Option<u64> {
+    drive_size_bytes(cfg.get(key)?.as_str()?)
+}
+
+/// `size=` of a drive property value (`local-lvm:vm-100-disk-0,size=32G`), in
+/// bytes. The node writes `<n>[KMGT]` in binary units, or bare bytes.
+fn drive_size_bytes(value: &str) -> Option<u64> {
+    if value.contains("media=cdrom") || value.contains(":cloudinit") {
+        return None;
+    }
+    parse_size(value.split(',').find_map(|kv| kv.strip_prefix("size="))?)
+}
+
+fn parse_size(s: &str) -> Option<u64> {
+    let s = s.trim();
+    let last = s.chars().last()?;
+    let (num, mult) = match last {
+        'K' | 'k' => (&s[..s.len() - 1], 1u64 << 10),
+        'M' | 'm' => (&s[..s.len() - 1], 1u64 << 20),
+        'G' | 'g' => (&s[..s.len() - 1], 1u64 << 30),
+        'T' | 't' => (&s[..s.len() - 1], 1u64 << 40),
+        c if c.is_ascii_digit() => (s, 1),
+        _ => return None,
+    };
+    if let Ok(n) = num.parse::<u64>() {
+        return n.checked_mul(mult);
+    }
+    // `1.5G` — the node writes a fraction when the bytes are not a whole unit.
+    let n: f64 = num.parse().ok()?;
+    let bytes = n * mult as f64;
+    // `as u64` saturates: a number past the range would read as u64::MAX, which
+    // is a size no disk has, not «could not read».
+    (n.is_finite() && n >= 0.0 && bytes < u64::MAX as f64).then_some(bytes as u64)
+}
+
 /// Picks the guest's usable IPv4 out of a `network-get-interfaces` answer.
 ///
 /// The shape, from the node (`GET .../agent/network-get-interfaces`), is the
@@ -1909,6 +2116,25 @@ impl VmBackend for ProxmoxBackend {
         // exactly what happened — a `-v /data:/data` or a `--hugepages` went
         // in, the command said it worked, and the VM did not have it.
         refuse_unsupported(cfg)?;
+        // `disk_size_gib` was neither read nor refused here — the class ADR-0044
+        // D1 names (used by the local backends, silently ignored by this one):
+        // a `diskSize: 40` on a template clone came up with the template's
+        // disk and the command said it worked. Now it is decided BEFORE
+        // anything exists on the node: next to a fresh disk it is the same
+        // size said twice or a refusal; on a clone it is a grow after the
+        // clone, and a shrink is refused here with both numbers, because the
+        // node's own refusal arrives inside a failed task.
+        let spec = parse_disk_spec(disk)?;
+        check_fresh_disk_size(&spec, cfg.disk_size_gib)?;
+        // The template's config is read only when there is a size to judge:
+        // a clone without `diskSize` costs no extra round trip.
+        let grow = match (&spec, cfg.disk_size_gib) {
+            (DiskSpec::Template(src), Some(_)) => {
+                let (key, cur) = self.client.boot_disk(*src)?;
+                disk_grow_plan(*src, &key, cur, cfg.disk_size_gib)?
+            }
+            _ => None,
+        };
         let ledger = Ledger::at(vmdir);
         let vmid = self.client.next_vmid()?;
         on(CreateStage::Define);
@@ -1933,7 +2159,7 @@ impl VmBackend for ProxmoxBackend {
             }
             e
         };
-        match parse_disk_spec(disk)? {
+        match spec {
             DiskSpec::Template(src) => {
                 self.client.clone_template(&ledger, src, vmid, &cfg.name)?;
                 // A clone carries the TEMPLATE's CPU, memory, NIC and cloud-init
@@ -1944,6 +2170,14 @@ impl VmBackend for ProxmoxBackend {
                 self.client
                     .configure_clone(&ledger, vmid, cfg)
                     .map_err(undo)?;
+                // And the clone carries the template's DISK SIZE, which is the
+                // golden's floor, never the size the tenant pays for. Same
+                // reason `disk_size_gib` exists for the local overlays.
+                if let Some((key, gib)) = grow {
+                    self.client
+                        .resize_disk(&ledger, vmid, &key, gib)
+                        .map_err(undo)?;
+                }
             }
             DiskSpec::New { storage, gib } => self
                 .client
@@ -2211,13 +2445,13 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmPause => S::UnsupportedByProvider { reason: "`…/status/suspend` is not called; refused by name (`unsupported_pause`)" },
         C::VmResume => S::UnsupportedByProvider { reason: "`…/status/resume` is not called; refused by name" },
         C::VmResumeSameIdentity => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
-        C::VmClone => S::Partial { detail: "`disk: template:<vmid>` clones a template (`…/clone`); ADR-0039's table exercised it, no `tests/live.rs` case" },
-        C::VmTemplate => S::NotImplemented,
+        C::VmClone => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_template_clone_gets_the_disk_size_asked_for" },
+        C::VmTemplate => S::Partial { detail: "`POST …/template` is a client call (`mark_template`) the live case uses to make its clone source; no engine verb turns a VM into a template" },
         C::VmResizeCold => S::NotImplemented,
         C::VmHotplug => S::NotImplemented,
         C::VmExtraDisks => S::UnsupportedByProvider { reason: "refused by name (`refuse_unsupported`); ADR-0049 slice 2 maps disks beyond `config`" },
         C::VmExtraNics => S::UnsupportedByProvider { reason: "refused by name; one `net0` on the target's bridge/VLAN" },
-        C::VmDiskResize => S::NotImplemented,
+        C::VmDiskResize => S::Partial { detail: "`PUT …/resize` grows a template clone's boot disk to `diskSize` at create (live case); a shrink is refused by name; no engine verb resizes an existing VM" },
         C::VmPciPassthrough => S::UnsupportedByProvider { reason: "`devices` refused by name: the guest is on another machine" },
         C::VmTpm => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
         C::VmCpuModel => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
@@ -2556,6 +2790,117 @@ mod tests {
         assert_eq!(truncate_chars("olá", 4000), "olá");
     }
 
+    /// `diskSize` next to a FRESH disk is the same number said twice, or a
+    /// refusal that names both — never one of them picked in silence.
+    #[test]
+    fn a_fresh_disk_sized_twice_is_refused_unless_the_two_agree() {
+        let spec = parse_disk_spec("local-lvm:8").unwrap();
+        assert!(check_fresh_disk_size(&spec, None).is_ok());
+        assert!(check_fresh_disk_size(&spec, Some(8)).is_ok());
+        let e = check_fresh_disk_size(&spec, Some(40)).unwrap_err();
+        assert!(e.is_invalid_argument(), "{e}");
+        let e = e.to_string();
+        assert!(
+            e.contains("local-lvm:8") && e.contains("40") && e.contains("local-lvm:40"),
+            "{e}"
+        );
+        // A template has no size of its own here: nothing to disagree with.
+        assert!(
+            check_fresh_disk_size(&parse_disk_spec("template:9000").unwrap(), Some(40)).is_ok()
+        );
+    }
+
+    /// Grow, keep, or refuse a shrink with both numbers — decided before the
+    /// clone exists, because the node's own «shrinking disks is not supported»
+    /// arrives inside a failed task after a VM has been created.
+    #[test]
+    fn a_clone_grows_keeps_or_refuses_by_name() {
+        assert_eq!(disk_grow_plan(9000, "scsi0", 2 * GIB, None).unwrap(), None);
+        assert_eq!(
+            disk_grow_plan(9000, "scsi0", 2 * GIB, Some(2)).unwrap(),
+            None
+        );
+        assert_eq!(
+            disk_grow_plan(9000, "scsi0", 2 * GIB, Some(40)).unwrap(),
+            Some(("scsi0".into(), 40))
+        );
+        let e = disk_grow_plan(9000, "virtio0", 3 * GIB + GIB / 2, Some(2)).unwrap_err();
+        assert!(e.is_invalid_argument(), "{e}");
+        let e = e.to_string();
+        assert!(
+            e.contains("9000")
+                && e.contains("virtio0")
+                && e.contains("3.50 GiB")
+                && e.contains("2 GiB"),
+            "{e}"
+        );
+    }
+
+    /// The boot disk is read from the config the node RECORDED: the `boot`
+    /// order first, then `bootdisk`, then the lowest-numbered sized drive —
+    /// and a CD-ROM or a cloud-init drive is never it.
+    #[test]
+    fn the_boot_disk_comes_from_the_recorded_config() {
+        let cfg = serde_json::json!({
+            "boot": "order=ide2;scsi0;net0",
+            "ide2": "local:iso/x.iso,media=cdrom,size=700M",
+            "scsi0": "local-lvm:vm-100-disk-0,size=32G",
+            "scsi1": "local-lvm:vm-100-disk-1,size=100G",
+            "ide0": "local-lvm:vm-100-cloudinit,media=cdrom"
+        });
+        assert_eq!(boot_disk_of(&cfg), Some(("scsi0".into(), 32 * GIB)));
+        let cfg = serde_json::json!({
+            "bootdisk": "virtio0",
+            "scsi0": "local-lvm:vm-100-disk-0,size=8G",
+            "virtio0": "local-lvm:vm-100-disk-1,size=1G"
+        });
+        assert_eq!(boot_disk_of(&cfg), Some(("virtio0".into(), GIB)));
+        let cfg = serde_json::json!({
+            "ide2": "local-lvm:vm-100-cloudinit,media=cdrom",
+            "sata1": "local-lvm:vm-100-disk-2,size=3G",
+            "scsi1": "local-lvm:vm-100-disk-1,size=2G"
+        });
+        assert_eq!(boot_disk_of(&cfg), Some(("scsi1".into(), 2 * GIB)));
+        assert_eq!(
+            boot_disk_of(&serde_json::json!({"ide2": "none,media=cdrom"})),
+            None
+        );
+        assert_eq!(boot_disk_of(&serde_json::json!({"memory": 512})), None);
+    }
+
+    /// `size=` as the node writes it: binary units, a fraction when the bytes
+    /// are not a whole unit, bare bytes, and nothing for a drive with none.
+    #[test]
+    fn a_drive_size_reads_as_the_node_writes_it() {
+        assert_eq!(
+            drive_size_bytes("local-lvm:vm-1-disk-0,size=32G"),
+            Some(32 * GIB)
+        );
+        assert_eq!(
+            drive_size_bytes("local-lvm:vm-1-disk-0,size=1.5G,ssd=1"),
+            Some(GIB + GIB / 2)
+        );
+        assert_eq!(
+            drive_size_bytes("local:1/vm-1-disk-0.qcow2,size=500M"),
+            Some(500 << 20)
+        );
+        assert_eq!(drive_size_bytes("x,size=2T"), Some(2u64 << 40));
+        assert_eq!(drive_size_bytes("x,size=4096"), Some(4096));
+        assert_eq!(
+            drive_size_bytes("local-lvm:vm-1-cloudinit,media=cdrom"),
+            None
+        );
+        assert_eq!(drive_size_bytes("none,media=cdrom"), None);
+        assert_eq!(drive_size_bytes("local-lvm:vm-1-disk-0"), None);
+        assert_eq!(parse_size("32X"), None);
+        assert_eq!(parse_size(""), None);
+        assert_eq!(
+            parse_size("99999999999999999999G"),
+            None,
+            "overflow is not a size"
+        );
+    }
+
     #[test]
     fn o_disco_de_um_no_remoto_nao_e_um_caminho_local() {
         assert_eq!(
@@ -2887,7 +3232,7 @@ mod tests {
         let src = src.split("#[cfg(test)]").next().unwrap();
         // Writes are what these helpers send; `fn post_form`/`fn delete`
         // themselves are definitions, not call sites.
-        let write_calls = ["self.post_form(", "self.delete("];
+        let write_calls = ["self.post_form(", "self.put_form(", "self.delete("];
         let allowed_outside_task: &[(&str, &str)] = &[(
             "login",
             "exchanges the credential for a ticket; it writes nothing on the node",
