@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Architecture · Delonix Runtime — 贡献者手册</title>
+<title>架构 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,142 +206,136 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a class="on" aria-current="page" href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a class="on" aria-current="page" href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">架构</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="architecture">Architecture</h1>
-<p><strong>Before you read:</strong> <a href="project-structure.html">Project structure</a> (where things are), <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> (the engine's place and principles) and <a href="cloud-native-primer.html">Cloud native primer</a> (the mechanisms the figures name).</p>
-<p>This page is the map a contributor needs before touching the backend: what the engine is, who
-talks to it, which processes exist at runtime, how the crates are layered and call each other,
-and where state lives on disk. It follows the C4 model in order — <strong>Level 1</strong> system context,
-<strong>Level 2</strong> containers (executables and processes), <strong>Level 3</strong> components (crates), and
-<strong>Level 4</strong> code-level flows as sequences. Every node and arrow in a figure names, in the text
-next to it, the file and symbol it was checked against. After it you can say which process a piece
-of work runs in, which layer a crate belongs to and which dependencies it may take, and where on
-disk its state lives.</p>
-<p>The canonical, longer document is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> at the repository
-root; the decisions behind the structure are in <a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>, above all
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>. If a term is new to
-you, read <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> and
-<a href="linux-foundations.html">Linux foundations</a> first; for the tree itself (what each top-level
-directory is for) see <a href="project-structure.html">Project structure</a>.</p>
+<h1 id="architecture">架构</h1>
+<p><strong>阅读之前：</strong> <a href="project-structure.html">项目结构</a>（各部分位于何处）、<a href="iaas-and-cloud-native.html">IaaS 与云原生</a>（引擎的位置与原则），以及<a href="cloud-native-primer.html">云原生入门</a>（各图所命名的机制）。</p>
+<p>本页是贡献者在触碰后端之前需要的地图：引擎是什么、谁与它对话、运行时存在哪些进程、各个
+crate 如何分层并相互调用，以及状态在磁盘上位于何处。它按顺序遵循 C4 模型——<strong>第 1 层</strong>系统上下文、
+<strong>第 2 层</strong>容器（可执行文件与进程）、<strong>第 3 层</strong>组件（crate），以及<strong>第 4 层</strong>作为序列的代码级流程。
+图中的每一个节点和箭头，都会在旁边的文字中说明它所对照检查的文件和符号。读完之后，你就能说出一段工作
+运行在哪个进程中、一个 crate 属于哪一层、它可以带上哪些依赖，以及它的状态在磁盘上位于何处。</p>
+<p>权威且更详细的文档是仓库根目录下的 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>；结构背后的
+决策在 <a href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> 中，尤其是
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>。如果某个术语对你来说
+是新的，请先阅读 <a href="iaas-and-cloud-native.html">IaaS 与云原生</a>和
+<a href="linux-foundations.html">Linux 基础</a>；至于目录树本身（每个顶层目录的用途），见
+<a href="project-structure.html">项目结构</a>。</p>
 <blockquote>
-<p><strong>Two halves on this page.</strong> The layer table, the ratchet list and the full crate graph are
-<em>generated</em> by <code>python3 scripts/dev_docs.py</code> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> —
-do not edit them by hand. Everything else is narrative and is reviewed after each structural
-change.</p>
+<p><strong>本页有两个部分。</strong> 层级表、ratchet 列表和完整的 crate 图都是由 <code>python3 scripts/dev_docs.py</code>
+从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <strong>生成</strong>的——不要手工编辑它们。其余部分都是叙述性内容，
+在每次结构性变更后接受复核。</p>
 </blockquote>
-<p><strong>How to read the figures.</strong> Every figure uses the same shapes and colours, and its legend comes
-first:</p>
+<p><strong>如何阅读这些图。</strong> 每张图都使用相同的形状和颜色，并且图例总是排在最前面：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Shape</th>
-<th>Meaning</th>
+<th>形状</th>
+<th>含义</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>rounded box, dark</td>
-<td>person or external actor (operator, kubelet, local program)</td>
+<td>圆角方框，深色</td>
+<td>人或外部行为者（操作者、kubelet、本地程序）</td>
 </tr>
 <tr>
-<td>box, red</td>
-<td>the Delonix engine as a whole (this repository)</td>
+<td>方框，红色</td>
+<td>整个 Delonix 引擎（本仓库）</td>
 </tr>
 <tr>
-<td>box, white with red border</td>
-<td>a building block of the engine: executable, process or crate</td>
+<td>方框，白底红边</td>
+<td>引擎的一个构建块：可执行文件、进程或 crate</td>
 </tr>
 <tr>
-<td>box, grey</td>
-<td>an external system (kernel, systemd, registry, hypervisor, remote API)</td>
+<td>方框，灰色</td>
+<td>外部系统（内核、systemd、镜像仓库、hypervisor、远程 API）</td>
 </tr>
 <tr>
-<td>cylinder, blue</td>
-<td>state on disk</td>
+<td>圆柱体，蓝色</td>
+<td>磁盘上的状态</td>
 </tr>
 <tr>
-<td>solid arrow</td>
-<td>a call or a data flow; the label says what flows</td>
+<td>实线箭头</td>
+<td>一次调用或数据流；标签说明流动的内容</td>
 </tr>
 <tr>
-<td>dashed arrow</td>
-<td>spawns, <code>exec</code>s or supervises a process</td>
+<td>虚线箭头</td>
+<td>启动、<code>exec</code> 或监督一个进程</td>
 </tr>
 <tr>
-<td>outlined region</td>
-<td>a trust or process boundary</td>
+<td>带边框的区域</td>
+<td>信任边界或进程边界</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="engine-identity-and-boundaries">Engine identity and boundaries<a class="hanchor" href="#engine-identity-and-boundaries" aria-label="#">#</a></h2>
-<p>The canonical text is the section <em>«Identidade e fronteira do motor»</em> at the top of
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>. What the engine is, what it leaves to a control plane, and how each
-cloud native principle appears in the code are the <em>context</em>, explained in
-<a href="iaas-and-cloud-native.html#where-delonix-runtime-fits-and-where-it-deliberately-stops">IaaS and cloud native</a>.
-This section keeps only the parts that shape the <em>structure</em> below:</p>
+<h2 id="engine-identity-and-boundaries">引擎的身份与边界<a class="hanchor" href="#engine-identity-and-boundaries" aria-label="#">#</a></h2>
+<p>权威文本是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 顶部的 <em>«Identidade e fronteira do motor»</em>
+（引擎的身份与边界）一节。引擎是什么、它把什么留给控制平面，以及每条云原生原则如何体现在代码中，
+这些是<em>上下文</em>，在
+<a href="iaas-and-cloud-native.html#where-delonix-runtime-fits-and-where-it-deliberately-stops">IaaS 与云原生</a>
+中有解释。本节只保留塑造下文<em>结构</em>的那些部分：</p>
 <ul>
-<li><strong>Providers sit behind ports.</strong> The Linux kernel, Cloud Hypervisor and libvirt, Proxmox VE
-  and the Kubernetes CRI are reached through a trait, never through <code>if provider == …</code> spread
-  across the code. Today's ports: <code>VmBackend</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>) and the
-  compute ports in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> and <code>launch.rs</code>
-  (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>, <code>RunHost</code>, <code>NetworkProvider</code>,
-  <code>VmNetwork</code>, <code>WorkloadRuntime</code>). An OpenStack backend is designed
-  (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>, <em>Proposed</em>) but has no crate yet.</li>
-<li><strong>One set of operations, several interfaces</strong> — the CLI, the CRI, the local management API, MCP
-  and a Docker Engine API slice, with the node contract as the intended single API (see
-  <a href="#one-set-of-operations-several-interfaces">below</a>); observability goes through
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry</code></a>.</li>
-<li><strong>Daemonless and rootless-first decide the process model</strong> — what must persist belongs to systemd
-  or to a per-workload process with a clear owner (a container's supervisor, the network pin), and
-  privilege is an explicit opt-in (<code>--privileged</code>, <code>vm bridge</code>). Level 2 shows those processes.</li>
-<li><strong>Knows no consumer.</strong> No platform, control plane, console or agent is named in <code>crates/</code>,
-  <code>bins/</code>, <code>proto/</code> or the manifests, and there is no notion of tenant, account, plan or billing.
-  The <em>namespace</em> you will see everywhere is the engine's own <strong>isolation</strong> namespace, not a
-  tenant.</li>
+<li><strong>各个 provider 都位于端口（port）之后。</strong> Linux 内核、Cloud Hypervisor 与 libvirt、Proxmox VE
+  以及 Kubernetes 的 CRI，都是通过一个 trait 来访问的，绝不会在代码中散布
+  <code>if provider == …</code> 这样的分支。今天已有的端口：<code>VmBackend</code>
+  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>），以及
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> 和 <code>launch.rs</code> 中的计算端口
+  （<code>ImageStore</code>、<code>StorageProvider</code>、<code>DeviceResolver</code>、<code>RunHost</code>、<code>NetworkProvider</code>、
+  <code>VmNetwork</code>、<code>WorkloadRuntime</code>）。一个 OpenStack 后端已经设计好
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0039-openstack-vm-backend.md" target="_blank" rel="noopener">ADR-0039</a>，<em>Proposed</em>），但还没有对应的 crate。</li>
+<li><strong>一套操作，多个接口</strong> —— CLI、CRI、本地管理 API、MCP，以及 Docker Engine API 的一个切片，
+  节点契约是预期中唯一的 API（见<a href="#one-set-of-operations-several-interfaces">下文</a>）；
+  可观测性通过 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-telemetry" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry</code></a> 实现。</li>
+<li><strong>无守护进程与无根优先决定了进程模型</strong> —— 必须持久化的东西属于 systemd，或者属于一个有明确
+  归属者的按工作负载进程（容器的 supervisor、网络的 pin），特权是显式的可选项
+  （<code>--privileged</code>、<code>vm bridge</code>）。第 2 层展示了这些进程。</li>
+<li><strong>不认识任何消费者。</strong> <code>crates/</code>、<code>bins/</code>、<code>proto/</code> 或清单中都不会出现任何平台、控制平面、
+  控制台或代理的名字，也没有租户、账户、方案或计费的概念。你会在各处看到的
+  <em>namespace</em>，是引擎自己的<strong>隔离（isolation）</strong>命名空间，不是租户。</li>
 </ul>
-<p>These are not conventions; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> enforces the structural half in CI:</p>
+<p>这些不是约定；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 会在 CI 中强制执行结构性的那一半：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Check</th>
-<th>Where in <code>arch_fitness.py</code></th>
+<th>检查项</th>
+<th>在 <code>arch_fitness.py</code> 中的位置</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>A dependency against the layer direction fails, unless it is a declared exception that names the ADR-0040 phase removing it</td>
-<td><code>LAYERS</code>, <code>ALLOWED</code>, <code>EXCEPTIONS</code>, <code>rule_failures</code></td>
+<td>一个依赖违反层级方向即失败，除非它是一个声明过的例外，并且注明了移除它的 ADR-0040 阶段</td>
+<td><code>LAYERS</code>、<code>ALLOWED</code>、<code>EXCEPTIONS</code>、<code>rule_failures</code></td>
 </tr>
 <tr>
-<td>A foundation or context crate may not take a runtime/server/CLI dependency (<code>tokio</code>, <code>tonic</code>, <code>reqwest</code>, <code>clap</code>, …)</td>
+<td>基础（foundation）或上下文（context）crate 不得携带运行时/服务器/CLI 依赖（<code>tokio</code>、<code>tonic</code>、<code>reqwest</code>、<code>clap</code>……）</td>
 <td><code>HEAVY</code></td>
 </tr>
 <tr>
-<td>A binary composes <strong>one</strong> interface crate</td>
-<td><code>rule_failures</code> (the <code>roles</code> check)</td>
+<td>一个二进制文件只能组合<strong>一个</strong>接口 crate</td>
+<td><code>rule_failures</code>（<code>roles</code> 检查）</td>
 </tr>
 <tr>
-<td>A crate must live in the directory of its layer</td>
-<td><code>LAYER_DIR</code>, <code>misplaced</code></td>
+<td>一个 crate 必须位于其所属层的目录中</td>
+<td><code>LAYER_DIR</code>、<code>misplaced</code></td>
 </tr>
 <tr>
-<td>A consumer's name anywhere under <code>crates/</code>, <code>bins/</code>, <code>proto/</code> (comments included) fails</td>
-<td><code>CONSUMER_NAMES</code>, <code>consumer_mentions</code></td>
+<td>在 <code>crates/</code>、<code>bins/</code>、<code>proto/</code> 下任何位置出现消费者的名字（包括注释）即失败</td>
+<td><code>CONSUMER_NAMES</code>、<code>consumer_mentions</code></td>
 </tr>
 <tr>
-<td>Dependency versions live only in the root <code>[workspace.<wbr>dependencies]</code></td>
+<td>依赖版本只能存在于根目录的 <code>[workspace.<wbr>dependencies]</code> 中</td>
 <td><code>inline_versions</code></td>
 </tr>
 <tr>
-<td>Ratchets that may only go down (listed below) — e.g. library crates re-running the engine's own binary, <code>println!</code> in libraries, process-environment writes, adapters importing the shared <code>Error</code> as their own</td>
-<td>the ratchet patterns (<code>SELF_EXEC</code>, <code>PRINTS</code>, <code>ENV_WRITES</code>, <code>SHARED_ERROR</code>, …), baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a></td>
+<td>只能下降、不能上升的 ratchet（见下文）——例如库 crate 重新运行引擎自己的二进制文件、库中出现 <code>println!</code>、进程环境写入、适配器把共享的 <code>Error</code> 当作自己的来导入</td>
+<td>ratchet 的各个模式（<code>SELF_EXEC</code>、<code>PRINTS</code>、<code>ENV_WRITES</code>、<code>SHARED_ERROR</code>……），基线在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a> 中</td>
 </tr>
 </tbody>
 </table></div>
 <!-- dev-docs:begin ratchets -->
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> keeps <strong>5 debt ratchets</strong> (baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>):</p>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 维护 <strong>5 个债务棘轮（ratchet）</strong>（基线在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/arch_baseline.json</code></a>）：</p>
 <ul>
 <li><code>self_exec_sites</code></li>
 <li><code>library_prints</code></li>
@@ -351,14 +345,14 @@ This section keeps only the parts that shape the <em>structure</em> below:</p>
 </ul>
 <!-- dev-docs:end ratchets -->
 
-<p><code>python3 scripts/arch_fitness.py --list</code> shows what each ratchet counts today, file by file.</p>
-<h2 id="level-1-system-context">Level 1 — System context<a class="hanchor" href="#level-1-system-context" aria-label="#">#</a></h2>
+<p><code>python3 scripts/arch_fitness.py --list</code> 会逐个文件显示每个 ratchet 今天统计到的数量。</p>
+<h2 id="level-1-system-context">第 1 层——系统上下文<a class="hanchor" href="#level-1-system-context" aria-label="#">#</a></h2>
 <blockquote>
-<p><strong>Legend</strong> — dark rounded box: person or external actor · red box: the Delonix engine ·
-grey box: external system · solid arrow: call or data flow, labelled.</p>
+<p><strong>图例</strong> —— 深色圆角方框：人或外部行为者 · 红色方框：Delonix 引擎 ·
+灰色方框：外部系统 · 实线箭头：调用或数据流，带标签。</p>
 </blockquote>
-<p>The engine sits between four kinds of caller and the systems of one Linux node; it has no
-network-facing API of its own, and everything remote it reaches is reached <em>outward</em>.</p>
+<p>引擎位于四类调用者与一个 Linux 节点上的各系统之间；它自己没有任何面向网络的 API，
+它所触及的一切远程系统，都是<em>向外</em>触及的。</p>
 <pre class="mermaid">flowchart LR
   OP(&quot;operator&lt;br/&gt;&lt;small&gt;shell, scripts, CI&lt;/small&gt;&quot;)
   KL(&quot;kubelet&lt;br/&gt;&lt;small&gt;Kubernetes node agent&lt;/small&gt;&quot;)
@@ -393,104 +387,104 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>Where each arrow is in the code:</p>
+<p>每条箭头在代码中的位置：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Arrow</th>
-<th>Code</th>
+<th>箭头</th>
+<th>代码</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>operator → engine</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a> (<code>main</code>, <code>run</code>); exit classes in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>exitcode.<wbr>rs</code></a></td>
+<td>操作者 → 引擎</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a>（<code>main</code>、<code>run</code>）；退出类别在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/<wbr>foundation/<wbr>delonix-model/<wbr>src/<wbr>exitcode.<wbr>rs</code></a> 中</td>
 </tr>
 <tr>
-<td>kubelet → engine</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>serve_blocking</code>)</td>
+<td>kubelet → 引擎</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>lib.<wbr>rs</code></a>（<code>serve_blocking</code>）</td>
 </tr>
 <tr>
-<td>local program → engine</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mgmt/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>serve_blocking</code>, the <code>axum</code> router)</td>
+<td>本地程序 → 引擎</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mgmt/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mgmt/<wbr>src/<wbr>lib.<wbr>rs</code></a>（<code>serve_blocking</code>，<code>axum</code> 路由器）</td>
 </tr>
 <tr>
-<td>AI client → engine</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>serve_stdio</code>)</td>
+<td>AI 客户端 → 引擎</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-mcp/<wbr>src/<wbr>lib.<wbr>rs</code></a>（<code>serve_stdio</code>）</td>
 </tr>
 <tr>
-<td>engine → kernel</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>spawn</code>, <code>container_init</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a> (<code>ip</code>, <code>nft</code>, <code>nsenter</code> subprocesses)</td>
+<td>引擎 → 内核</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a>（<code>spawn</code>、<code>container_init</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></a>（<code>ip</code>、<code>nft</code>、<code>nsenter</code> 子进程）</td>
 </tr>
 <tr>
-<td>engine → systemd</td>
-<td><code>busctl</code> transient scopes in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a>; boot units in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>boot.<wbr>rs</code></a></td>
+<td>引擎 → systemd</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> 中的 <code>busctl</code> 临时作用域（transient scope）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/boot.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>boot.<wbr>rs</code></a> 中的启动 unit</td>
 </tr>
 <tr>
-<td>engine → registries</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>registry.<wbr>rs</code></a> (<code>resolve_or_pull</code>, <code>push_to_registry</code>)</td>
+<td>引擎 → 镜像仓库</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/registry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>registry.<wbr>rs</code></a>（<code>resolve_or_pull</code>、<code>push_to_registry</code>）</td>
 </tr>
 <tr>
-<td>engine → hypervisors</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a> (<code>CloudHypervisorBackend</code>, <code>LibvirtBackend</code>)</td>
+<td>引擎 → hypervisor</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs</code></a>（<code>CloudHypervisorBackend</code>、<code>LibvirtBackend</code>）</td>
 </tr>
 <tr>
-<td>engine → remote management APIs</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td>引擎 → 远程管理 API</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-truenas/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-truenas/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
 </tr>
 <tr>
-<td>engine → remote hosts</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/remote.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>remote.<wbr>rs</code></a> (<code>ssh</code>, <code>scp</code>), used by <code>cmd/cluster.rs</code></td>
+<td>引擎 → 远程主机</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/remote.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>remote.<wbr>rs</code></a>（<code>ssh</code>、<code>scp</code>），由 <code>cmd/cluster.rs</code> 使用</td>
 </tr>
 <tr>
-<td>engine ↔ observability</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs</code></a> (OTLP), <code>/metrics</code> routes in <code>delonix-mgmt</code> and <code>delonix-cri</code></td>
+<td>引擎 ↔ 可观测性</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-telemetry/<wbr>src/<wbr>telemetry.<wbr>rs</code></a>（OTLP）、<code>delonix-mgmt</code> 和 <code>delonix-cri</code> 中的 <code>/metrics</code> 路由</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="level-2-containers-executables-and-processes">Level 2 — Containers: executables and processes<a class="hanchor" href="#level-2-containers-executables-and-processes" aria-label="#">#</a></h2>
-<p>In C4 a <em>container</em> is something that runs. The build ships four executables (see the generated
-count in the <a href="index.html">handbook README</a>); several more <strong>processes</strong> appear per workload or per
-node, each with an owner. The three figures below split that picture by concern: who enters the
-engine, what one container costs in processes, and the rootless network infrastructure.</p>
-<h3 id="entry-points">Entry points<a class="hanchor" href="#entry-points" aria-label="#">#</a></h3>
-<p><strong>Legend</strong></p>
+<h2 id="level-2-containers-executables-and-processes">第 2 层——容器：可执行文件与进程<a class="hanchor" href="#level-2-containers-executables-and-processes" aria-label="#">#</a></h2>
+<p>在 C4 中，<em>容器（container）</em>是指会运行的东西。构建产物包含四个可执行文件（数量见
+<a href="index.html">手册 README</a>中生成的统计）；此外还会出现更多<strong>进程</strong>，按每个工作负载或每个节点计，
+每一个都有明确的归属者。下面三张图按关注点拆分这幅图景：谁进入引擎、一个容器要付出多少进程的
+成本，以及无根网络基础设施。</p>
+<h3 id="entry-points">入口点<a class="hanchor" href="#entry-points" aria-label="#">#</a></h3>
+<p><strong>图例</strong></p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Shape</th>
-<th>Meaning</th>
+<th>形状</th>
+<th>含义</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>rounded box, dark</td>
-<td>caller</td>
+<td>圆角方框，深色</td>
+<td>调用者</td>
 </tr>
 <tr>
-<td>box, white with red border</td>
-<td>engine executable</td>
+<td>方框，白底红边</td>
+<td>引擎可执行文件</td>
 </tr>
 <tr>
-<td>cylinder, blue</td>
-<td>state on disk</td>
+<td>圆柱体，蓝色</td>
+<td>磁盘上的状态</td>
 </tr>
 <tr>
-<td>solid arrow</td>
-<td>request or file access, labelled</td>
+<td>实线箭头</td>
+<td>请求或文件访问，带标签</td>
 </tr>
 <tr>
-<td>dashed arrow</td>
-<td><code>exec</code> or spawn of a process</td>
+<td>虚线箭头</td>
+<td>进程的 <code>exec</code> 或启动</td>
 </tr>
 <tr>
-<td>outlined region</td>
-<td>process boundary</td>
+<td>带边框的区域</td>
+<td>进程边界</td>
 </tr>
 </tbody>
 </table></div>
-<p>Four doors lead into the engine, but only the one-shot <code>delonix</code> process ever creates a
-container: the multi-threaded servers run the CLI back for that.</p>
+<p>有四扇门通向引擎，但只有一次性（one-shot）的 <code>delonix</code> 进程会创建容器：多线程服务器为此
+会反过来运行 CLI。</p>
 <pre class="mermaid">flowchart LR
   OP(&quot;operator&quot;)
   KL(&quot;kubelet&quot;)
@@ -522,49 +516,49 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>The <code>exec</code> is <code>cmd/serve.rs::exec_server</code> (and <code>cmd/mcp.rs</code>); the run-back is the CRI's
-<code>delonix()</code> helper and <code>write_run_spec</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>,
-<code>run_cli</code> in <code>delonix-mgmt</code> and <code>run_cli_blocking</code> in <code>delonix-mcp</code>, all resolving the CLI through
-<code>delonix_node::dispatch::cli_bin</code>. The CRI also writes its own records under
-<code>cri/</code> — see <a href="#state-on-disk">State on disk</a>.</p>
-<h3 id="one-detached-container">One detached container<a class="hanchor" href="#one-detached-container" aria-label="#">#</a></h3>
-<p><strong>Legend</strong></p>
+<p>这里的 <code>exec</code> 是 <code>cmd/serve.rs::exec_server</code>（以及 <code>cmd/mcp.rs</code>）；反向运行则是 CRI 的
+<code>delonix()</code> 辅助函数，以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a> 中的
+<code>write_run_spec</code>、<code>delonix-mgmt</code> 中的 <code>run_cli</code>，以及 <code>delonix-mcp</code> 中的 <code>run_cli_blocking</code>，
+它们都通过 <code>delonix_node::dispatch::cli_bin</code> 来解析 CLI。CRI 还会在
+<code>cri/</code> 下写入自己的记录——见<a href="#state-on-disk">磁盘上的状态</a>。</p>
+<h3 id="one-detached-container">一个后台（detached）容器<a class="hanchor" href="#one-detached-container" aria-label="#">#</a></h3>
+<p><strong>图例</strong></p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Shape</th>
-<th>Meaning</th>
+<th>形状</th>
+<th>含义</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>box, white with red border</td>
-<td>engine process</td>
+<td>方框，白底红边</td>
+<td>引擎进程</td>
 </tr>
 <tr>
-<td>box, grey</td>
-<td>external system</td>
+<td>方框，灰色</td>
+<td>外部系统</td>
 </tr>
 <tr>
-<td>cylinder, blue</td>
-<td>file on disk</td>
+<td>圆柱体，蓝色</td>
+<td>磁盘上的文件</td>
 </tr>
 <tr>
-<td>solid arrow</td>
-<td>data flow or write, labelled</td>
+<td>实线箭头</td>
+<td>数据流或写入，带标签</td>
 </tr>
 <tr>
-<td>dashed arrow</td>
-<td>fork, clone or spawn</td>
+<td>虚线箭头</td>
+<td>fork、clone 或 spawn</td>
 </tr>
 <tr>
-<td>outlined region</td>
-<td>lives as long as the workload</td>
+<td>带边框的区域</td>
+<td>与工作负载同生共死</td>
 </tr>
 </tbody>
 </table></div>
-<p>A <code>run -d</code> leaves exactly three or four processes behind, and the supervisor — not a daemon — is
-the container's parent.</p>
+<p>一次 <code>run -d</code> 恰好会留下三到四个进程，而容器的父进程是 supervisor（监督者）——而不是
+守护进程。</p>
 <pre class="mermaid">flowchart LR
   CLI[&quot;delonix&lt;br/&gt;&lt;small&gt;container run -d, start&lt;/small&gt;&quot;]
   subgraph WL[&quot;per container — lives as long as the workload&quot;]
@@ -596,51 +590,52 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>The supervisor is <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs::run_supervised</code></a>, chosen by
-<code>delonix_compute::launch::start</code> through <code>HostWorkload::supervise</code>
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>); inside it <code>create_with</code> → <code>spawn</code> does the
-<code>clone</code>, <code>write_userns_maps</code>, the cgroup, the <code>on_started</code> hook (filled with
-<code>delonix_sdn::slirp_attach</code> by <code>cmd/container.rs::with_host_workload</code>) and forks <code>log_shim</code>, all in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>. The record is written through <code>delonix_state::Store</code>.
-A foreground <code>run</code> does the same without the supervisor.</p>
-<h3 id="rootless-network-infrastructure">Rootless network infrastructure<a class="hanchor" href="#rootless-network-infrastructure" aria-label="#">#</a></h3>
-<p><strong>Legend</strong></p>
+<p>supervisor 是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs::run_supervised</code></a>，由
+<code>delonix_compute::launch::start</code> 通过 <code>HostWorkload::supervise</code>
+（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>）选定；在它内部，<code>create_with</code> → <code>spawn</code>
+完成 <code>clone</code>、<code>write_userns_maps</code>、cgroup 设置、<code>on_started</code> 钩子（由
+<code>cmd/container.rs::with_host_workload</code> 填入 <code>delonix_sdn::slirp_attach</code>），并 fork 出
+<code>log_shim</code>，全部都在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 中。记录通过
+<code>delonix_state::Store</code> 写入。前台（foreground）的 <code>run</code> 做的是同样的事，只是没有
+supervisor。</p>
+<h3 id="rootless-network-infrastructure">无根网络基础设施<a class="hanchor" href="#rootless-network-infrastructure" aria-label="#">#</a></h3>
+<p><strong>图例</strong></p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Shape</th>
-<th>Meaning</th>
+<th>形状</th>
+<th>含义</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>box, white with red border</td>
-<td>engine process</td>
+<td>方框，白底红边</td>
+<td>引擎进程</td>
 </tr>
 <tr>
-<td>box, grey</td>
-<td>external system</td>
+<td>方框，灰色</td>
+<td>外部系统</td>
 </tr>
 <tr>
-<td>cylinder, blue</td>
-<td>state on disk</td>
+<td>圆柱体，蓝色</td>
+<td>磁盘上的状态</td>
 </tr>
 <tr>
-<td>solid arrow</td>
-<td>request or traffic, labelled</td>
+<td>实线箭头</td>
+<td>请求或流量，带标签</td>
 </tr>
 <tr>
-<td>dashed arrow</td>
-<td>spawn (the CLI starts the process)</td>
+<td>虚线箭头</td>
+<td>spawn（由 CLI 启动该进程）</td>
 </tr>
 <tr>
-<td>outlined region</td>
-<td>the pin's user, network and mount namespaces</td>
+<td>带边框的区域</td>
+<td>pin 的用户、网络与挂载命名空间</td>
 </tr>
 </tbody>
 </table></div>
-<p>Everything rootless networking needs lives inside one namespace set held by a process that only
-sleeps; the rest can die and be restarted around it.</p>
+<p>无根网络所需的一切，都存在于由一个只会休眠（sleep）的进程所持有的一组命名空间中；
+其余部分可以死亡，并围绕它重新启动。</p>
 <pre class="mermaid">flowchart LR
   CLI[&quot;delonix&lt;br/&gt;&lt;small&gt;ensure_up, attach, publish&lt;/small&gt;&quot;]
   subgraph NS[&quot;network holder — user + net + mount namespaces&quot;]
@@ -674,112 +669,111 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>The pin, control and uplink are <code>start_pin</code>/<code>pin_main</code>, <code>start_control</code>/<code>control_main</code> and
-<code>start_slirp</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>; the pin's namespaces are created in
-<code>pin_userns.rs</code>. The proxy is <code>cmd/ingress_proxy.rs::spawn_proxy</code>; the VMM launch is
-<code>delonix_vm::launch_vmm</code>, given the join argv by the <code>VmNetwork</code> port. A container joins a custom
-network by the CLI re-executing itself into the namespaces (<code>reexec_into_netns</code>, see the run
-sequence under Level 4 below). A libvirt VM lives outside
-the holder, on <code>virbr0</code> in the host's network namespace.</p>
-<h3 id="process-table">Process table<a class="hanchor" href="#process-table" aria-label="#">#</a></h3>
+<p>pin、control 与 uplink 分别是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> 中的
+<code>start_pin</code>/<code>pin_main</code>、<code>start_control</code>/<code>control_main</code> 与 <code>start_slirp</code>；pin 的命名空间在
+<code>pin_userns.rs</code> 中创建。代理是 <code>cmd/ingress_proxy.rs::spawn_proxy</code>；VMM 的启动是
+<code>delonix_vm::launch_vmm</code>，由 <code>VmNetwork</code> 端口提供加入用的 argv。容器通过 CLI 重新把自己
+执行（re-execute）进这些命名空间来加入一个自定义网络
+（<code>reexec_into_netns</code>，见下文第 4 层中的运行序列）。一台 libvirt 虚拟机则生活在 holder
+之外，位于宿主机网络命名空间中的 <code>virbr0</code> 上。</p>
+<h3 id="process-table">进程表<a class="hanchor" href="#process-table" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Process</th>
-<th>Born in</th>
-<th>Lives for</th>
+<th>进程</th>
+<th>诞生于</th>
+<th>存活期</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>delonix</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a> (<code>main</code>, <code>run</code>)</td>
-<td>one command. <code>main</code> intercepts the hidden entry points (<code>netns pin</code>, <code>netns control</code>, <code>netns run</code>, <code>__rmtree</code>, <code>__volsnap</code>, <code>__ovlmigrate</code>, <code>__ovlhold</code>, <code>__duusage</code>, <code>__buildtar</code>, <code>__apirun</code>, <code>__netnsconnect</code>) <strong>before</strong> clap parses</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a>（<code>main</code>、<code>run</code>）</td>
+<td>一条命令的生命周期。<code>main</code> 会在 clap 解析<strong>之前</strong>拦截那些隐藏的入口点（<code>netns pin</code>、<code>netns control</code>、<code>netns run</code>、<code>__rmtree</code>、<code>__volsnap</code>、<code>__ovlmigrate</code>、<code>__ovlhold</code>、<code>__duusage</code>、<code>__buildtar</code>、<code>__apirun</code>、<code>__netnsconnect</code>）</td>
 </tr>
 <tr>
 <td><code>delonix-cri</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/bin/delonix-cri.rs" target="_blank" rel="noopener"><code>crates/<wbr>interfaces/<wbr>delonix-cri/<wbr>src/<wbr>bin/<wbr>delonix-cri.<wbr>rs</code></a> → <code>delonix_cri::<wbr>serve_blocking</code></td>
-<td>a service (typically a systemd unit). <code>delonix serve cri</code> <code>exec</code>s it (<code>cmd/<wbr>serve.<wbr>rs::<wbr>exec_server</code>)</td>
+<td>一个服务（通常是一个 systemd unit）。<code>delonix serve cri</code> 会对它执行 <code>exec</code>（<code>cmd/<wbr>serve.<wbr>rs::<wbr>exec_server</code>）</td>
 </tr>
 <tr>
 <td><code>delonix-mgmt</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs</code></a> → <code>delonix_mgmt::<wbr>serve_blocking</code></td>
-<td>a service; <code>delonix serve api</code> <code>exec</code>s it</td>
+<td>一个服务；<code>delonix serve api</code> 会对它执行 <code>exec</code></td>
 </tr>
 <tr>
 <td><code>delonix-mcp</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mcp-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mcp-bin/<wbr>src/<wbr>main.<wbr>rs</code></a> → <code>delonix_mcp::<wbr>serve_stdio</code></td>
-<td>one AI-client session (a child process on stdio); <code>delonix mcp</code> <code>exec</code>s it</td>
+<td>一个 AI 客户端会话（stdio 上的一个子进程）；<code>delonix mcp</code> 会对它执行 <code>exec</code></td>
 </tr>
 <tr>
-<td>Docker API slice</td>
-<td><code>cmd/serve.rs</code> → <code>cmd::dockerapi::run</code>, <strong>inside</strong> the <code>delonix</code> process</td>
-<td>while <code>delonix serve docker-api</code> runs</td>
+<td>Docker API 切片</td>
+<td><code>cmd/serve.rs</code> → <code>cmd::dockerapi::run</code>，<strong>在</strong> <code>delonix</code> 进程<strong>内部</strong></td>
+<td><code>delonix serve docker-api</code> 运行期间</td>
 </tr>
 <tr>
 <td>supervisor</td>
-<td><code>delonix_linux::<wbr>supervise::<wbr>run_supervised</code>, chosen by <code>delonix_compute::<wbr>launch::<wbr>start</code> for every detached start the caller can fork for</td>
-<td>the container's life; it is the real parent, so it collects the exit status and applies <code>--restart</code></td>
+<td><code>delonix_linux::<wbr>supervise::<wbr>run_supervised</code>，由 <code>delonix_compute::<wbr>launch::<wbr>start</code> 为调用者能够 fork 的每一次后台启动选定</td>
+<td>容器的整个生命周期；它是真正的父进程，因此由它收集退出状态并施加 <code>--restart</code></td>
 </tr>
 <tr>
 <td>container init</td>
 <td><code>delonix_linux::spawn</code> → <code>clone</code> → <code>container_init</code></td>
-<td>the container</td>
+<td>容器本身</td>
 </tr>
 <tr>
 <td>log shim</td>
-<td><code>fork</code> inside <code>spawn</code>, running <code>log_shim</code></td>
-<td>the container</td>
+<td><code>spawn</code> 内部的 <code>fork</code>，运行 <code>log_shim</code></td>
+<td>容器本身</td>
 </tr>
 <tr>
-<td>per-container <code>slirp4netns</code></td>
-<td><code>delonix_sdn::<wbr>slirp_attach</code>, called as the <code>on_started</code> hook</td>
-<td>the container's netns; orphans reaped by <code>reap_orphan_slirp</code></td>
+<td>每容器一个的 <code>slirp4netns</code></td>
+<td><code>delonix_sdn::<wbr>slirp_attach</code>，作为 <code>on_started</code> 钩子被调用</td>
+<td>容器的 netns；孤儿进程由 <code>reap_orphan_slirp</code> 回收</td>
 </tr>
 <tr>
 <td>pin</td>
-<td><code>infra::start_pin</code> spawns <code>delonix netns pin</code>; <code>infra::pin_main</code> creates the user, net and mount namespaces in-process (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>pin_userns.<wbr>rs</code></a>) and sleeps</td>
-<td>the infra; its pid is <code>ingress/holder.pid</code> and it never changes</td>
+<td><code>infra::start_pin</code> 启动 <code>delonix netns pin</code>；<code>infra::pin_main</code> 在进程内创建用户、网络与挂载命名空间（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-sdn/<wbr>src/<wbr>pin_userns.<wbr>rs</code></a>）然后休眠</td>
+<td>整个基础设施的生命周期；它的 pid 就是 <code>ingress/holder.pid</code>，且永不改变</td>
 </tr>
 <tr>
 <td>control</td>
-<td><code>infra::start_control</code> (<code>nsenter -t &lt;pin&gt; -U -m -n -- delonix netns control</code>) → <code>infra::control_main</code></td>
-<td>restartable; serves the control socket, DNS (<code>dns_server_main</code>), Router Advertisements (<code>ra_sender_main</code>) and per-bridge DHCP (<code>dhcp_serve</code>)</td>
+<td><code>infra::start_control</code>（<code>nsenter -t &lt;pin&gt; -U -m -n -- delonix netns control</code>）→ <code>infra::control_main</code></td>
+<td>可重启；提供控制 socket、DNS（<code>dns_server_main</code>）、路由器通告 Router Advertisement（<code>ra_sender_main</code>）以及每网桥一个的 DHCP（<code>dhcp_serve</code>）</td>
 </tr>
 <tr>
-<td>single <code>slirp4netns</code></td>
-<td><code>infra::start_slirp</code> (<code>tap0</code> into the pin's netns, <code>--api-socket</code>)</td>
-<td>the infra</td>
+<td>单一的 <code>slirp4netns</code></td>
+<td><code>infra::start_slirp</code>（<code>tap0</code> 接入 pin 的 netns，带 <code>--api-socket</code>）</td>
+<td>整个基础设施的生命周期</td>
 </tr>
 <tr>
-<td>L7 ingress proxy</td>
-<td><code>cmd/<wbr>ingress_proxy.<wbr>rs::<wbr>spawn_proxy</code> through <code>infra::infra_join_argv</code></td>
-<td>while an <code>HTTPRoute</code>/<code>Ingress</code> or an <code>--expose</code> route exists; reloads routes on <code>SIGHUP</code></td>
+<td>L7 入口代理</td>
+<td><code>cmd/<wbr>ingress_proxy.<wbr>rs::<wbr>spawn_proxy</code>，通过 <code>infra::infra_join_argv</code></td>
+<td>只要存在一个 <code>HTTPRoute</code>/<code>Ingress</code> 或 <code>--expose</code> 路由；收到 <code>SIGHUP</code> 时重新加载路由</td>
 </tr>
 <tr>
 <td><code>cloud-hypervisor</code></td>
-<td><code>delonix_vm::launch_vmm</code>, run through the infra join argv</td>
-<td>the VM</td>
+<td><code>delonix_vm::launch_vmm</code>，通过基础设施的 join argv 运行</td>
+<td>该虚拟机的生命周期</td>
 </tr>
 <tr>
 <td>libvirt domain</td>
-<td><code>LibvirtBackend</code> driving <code>virsh</code></td>
-<td>the VM (the domain lives in libvirt)</td>
+<td><code>LibvirtBackend</code> 驱动 <code>virsh</code></td>
+<td>该虚拟机的生命周期（domain 存在于 libvirt 中）</td>
 </tr>
 </tbody>
 </table></div>
-<p><code>ensure_up</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>) is the only function that brings the
-network infra up, under a per-root file lock, and it distinguishes three cases: pin and control
-alive (nothing to do); pin alive and control gone (restart <strong>only</strong> the control plane — no wire
-moves); pin gone (tear down and rebuild).</p>
-<h3 id="one-set-of-operations-several-interfaces">One set of operations, several interfaces<a class="hanchor" href="#one-set-of-operations-several-interfaces" aria-label="#">#</a></h3>
+<p><code>ensure_up</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>）是唯一一个在按根目录划分的文件锁下
+拉起网络基础设施的函数，它区分三种情况：pin 与 control 都存活（无需操作）；pin 存活但 control
+消失（<strong>只</strong>重启控制平面——不移动任何线路）；pin 消失（拆除并重建）。</p>
+<h3 id="one-set-of-operations-several-interfaces">一套操作，多个接口<a class="hanchor" href="#one-set-of-operations-several-interfaces" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Interface</th>
-<th>Transport</th>
-<th>Entry</th>
-<th>Status</th>
+<th>接口</th>
+<th>传输方式</th>
+<th>入口</th>
+<th>状态</th>
 </tr>
 </thead>
 <tbody>
@@ -787,57 +781,54 @@ moves); pin gone (tear down and rebuild).</p>
 <td>CLI</td>
 <td>argv</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin</code></a></td>
-<td>the complete surface</td>
+<td>完整的表面</td>
 </tr>
 <tr>
-<td>CRI (<code>runtime.v1</code>)</td>
-<td>gRPC on a unix socket, <code>0600</code> + <code>SO_PEERCRED</code></td>
+<td>CRI（<code>runtime.v1</code>）</td>
+<td>基于 unix socket 的 gRPC，<code>0600</code> + <code>SO_PEERCRED</code></td>
 <td><code>delonix_cri::<wbr>serve_blocking</code></td>
-<td>serves the kubelet</td>
+<td>为 kubelet 提供服务</td>
 </tr>
 <tr>
-<td>Management API</td>
-<td>HTTP+JSON on a unix socket, same uid only</td>
-<td><code>delonix_mgmt::<wbr>serve_blocking</code> (routes such as <code>/v1/containers</code>, <code>/v1/volumes</code>, <code>/metrics</code>)</td>
-<td>local only (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> rejected a remote API); to be replaced by the node contract</td>
+<td>管理 API</td>
+<td>基于 unix socket 的 HTTP+JSON，仅限相同 uid</td>
+<td><code>delonix_mgmt::<wbr>serve_blocking</code>（如 <code>/v1/containers</code>、<code>/v1/volumes</code>、<code>/metrics</code> 等路由）</td>
+<td>仅限本地（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0010-remote-management-api.md" target="_blank" rel="noopener">ADR-0010</a> 否决了远程 API）；将被节点契约取代</td>
 </tr>
 <tr>
 <td>MCP</td>
 <td>stdio</td>
 <td><code>delonix_mcp::<wbr>serve_stdio</code></td>
-<td>local, no tenant (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>)</td>
+<td>本地，无租户（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener">ADR-0025</a>）</td>
 </tr>
 <tr>
-<td>Docker Engine API slice</td>
-<td>HTTP on a unix socket</td>
+<td>Docker Engine API 切片</td>
+<td>基于 unix socket 的 HTTP</td>
 <td><code>cmd::dockerapi::run</code></td>
-<td>a compatibility slice, inside <code>delonix</code></td>
+<td>一个兼容性切片，位于 <code>delonix</code> 内部</td>
 </tr>
 <tr>
-<td><strong>Node contract</strong> <code>delonix.node.v1</code></td>
-<td>gRPC <strong>and</strong> HTTP/JSON on one unix socket</td>
+<td><strong>节点契约</strong> <code>delonix.node.v1</code></td>
+<td>同一个 unix socket 上的 gRPC <strong>与</strong> HTTP/JSON</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a></td>
-<td><strong>contract only</strong> — no server yet</td>
+<td><strong>仅契约</strong>——尚无服务器</td>
 </tr>
 </tbody>
 </table></div>
-<p>The node contract is the intended single API
-(<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a> D4,
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>). The <code>.proto</code> files are the source
-of truth; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is <strong>generated</strong> from them and never edited by hand.
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> fails on: <code>buf format</code>, <code>buf lint</code>, <code>buf breaking</code> against the last
-tag that carries <code>proto/</code>, an RPC without an HTTP mapping (or a bidirectional stream with one),
-an OpenAPI document that differs from the generated one, and two paths that are the same URL
-under different variable names. Three rules it protects: one request message per RPC, explicit
-identity (<code>namespace</code>/<code>name</code>) in the request, and images addressed by query parameter.</p>
-<h2 id="level-3-components-crates-by-layer">Level 3 — Components: crates by layer<a class="hanchor" href="#level-3-components-crates-by-layer" aria-label="#">#</a></h2>
-<h3 id="layers-and-the-allowed-direction">Layers and the allowed direction<a class="hanchor" href="#layers-and-the-allowed-direction" aria-label="#">#</a></h3>
+<p>节点契约是预期中唯一的 API（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener">ADR-0040</a>
+D4，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a>）。<code>.proto</code> 文件是权威来源；
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 是从它们<strong>生成</strong>的，绝不手工编辑。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 会在以下情况失败：
+<code>buf format</code>、<code>buf lint</code>、相对于最近一个携带 <code>proto/</code> 的标签的 <code>buf breaking</code>、一个没有 HTTP 映射的
+RPC（或一个带 HTTP 映射的双向流）、一份与生成结果不同的 OpenAPI 文档，以及两条在不同变量名下其实是
+同一个 URL 的路径。它保护的三条规则是：每个 RPC 一个请求消息、请求中显式的身份标识
+（<code>namespace</code>/<code>name</code>），以及通过查询参数寻址的镜像。</p>
+<h2 id="level-3-components-crates-by-layer">第 3 层——组件：按层划分的 crate<a class="hanchor" href="#level-3-components-crates-by-layer" aria-label="#">#</a></h2>
+<h3 id="layers-and-the-allowed-direction">各层及允许的方向<a class="hanchor" href="#layers-and-the-allowed-direction" aria-label="#">#</a></h3>
 <blockquote>
-<p><strong>Legend</strong> — white box with red border: a layer of crates · solid arrow: <em>may depend on</em>, with
-what the dependency is used for.</p>
+<p><strong>图例</strong> —— 白底红边方框：一层 crate · 实线箭头：<em>可以依赖于</em>，并注明这个依赖是用来做什么的。</p>
 </blockquote>
-<p>ADR-0040 D1 fixes one dependency direction: contexts are depended on, never the other way round,
-and binaries are the only place where everything meets.</p>
+<p>ADR-0040 D1 固定了一个依赖方向：上下文（context）是被依赖的一方，绝不会反过来，
+而二进制文件是唯一一个万物汇合的地方。</p>
 <pre class="mermaid">flowchart TB
   BIN[&quot;Binaries&lt;br/&gt;&lt;small&gt;bins/ — composition roots&lt;/small&gt;&quot;]
   IF[&quot;Interfaces&lt;br/&gt;&lt;small&gt;crates/interfaces/ — CRI, management API, MCP&lt;/small&gt;&quot;]
@@ -861,26 +852,27 @@ classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
 <ul>
-<li><strong>Foundation</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>) — shared, pure-ish types every layer may name.</li>
-<li><strong>Contexts</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>) — one crate per bounded context, named after the published
-  API groups: use cases and the <strong>ports</strong> they need. No HTTP, no provider, and no mounts,
-  processes or network configuration. <code>delonix-node</code> is the one context that reads the host
-  directly — <code>/proc</code>, <code>/sys</code>, <code>kill(pid, 0)</code>, <code>SO_PEERCRED</code> — because those questions are what it
-  exists to answer once.</li>
-<li><strong>Adapters</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>) and <strong>providers</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) — implement ports:
-  kernel, SDN, OCI store, VM backends, persisted state; providers bring an HTTP client for one
-  remote target.</li>
-<li><strong>Interfaces</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>) — CRI, management API, MCP: parse a request, call the
-  engine, present.</li>
-<li><strong>Binaries</strong> (<code>bins/</code>) — composition roots.</li>
+<li><strong>Foundation（基础）</strong>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>）—— 每一层都可以引用的共享、近乎纯（pure-ish）
+  的类型。</li>
+<li><strong>Contexts（上下文）</strong>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>）—— 每个有界上下文（bounded context）一个 crate，
+  以已发布的 API 分组命名：用例（use case）以及它们所需的<strong>端口（port）</strong>。没有 HTTP、没有
+  provider，也没有挂载、进程或网络配置。<code>delonix-node</code> 是唯一一个直接读取宿主机的
+  上下文——<code>/proc</code>、<code>/sys</code>、<code>kill(pid, 0)</code>、<code>SO_PEERCRED</code>——因为这些问题正是它存在的目的，
+  由它集中回答一次。</li>
+<li><strong>Adapters（适配器）</strong>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>）与 <strong>Providers（提供者）</strong>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>）
+  —— 实现端口：内核、SDN、OCI 存储、VM 后端、持久化状态；providers 为某一个远程目标携带一个
+  HTTP 客户端。</li>
+<li><strong>Interfaces（接口）</strong>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>）—— CRI、管理 API、MCP：解析请求、调用引擎、
+  呈现结果。</li>
+<li><strong>Binaries（二进制文件）</strong>（<code>bins/</code>）—— 组合根（composition root）。</li>
 </ul>
-<p>The layer each crate belongs to, and the direction it may depend in:</p>
+<p>每个 crate 所属的层，以及它可以依赖的方向：</p>
 <!-- dev-docs:begin layers -->
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Layer</th>
-<th>May depend on</th>
+<th>层</th>
+<th>可以依赖</th>
 </tr>
 </thead>
 <tbody>
@@ -910,75 +902,71 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </tr>
 </tbody>
 </table></div>
-<p>Declared exceptions (each one names the ADR-0040 phase that removes it):</p>
+<p>已声明的例外（每一项都注明了移除它的 ADR-0040 阶段）：</p>
 <ul>
-<li><code>delonix-linux</code> → <code>delonix-state</code> — removed in <strong>P4a</strong></li>
-<li><code>delonix-mcp</code> → <code>delonix-mgmt</code> — removed in <strong>P5</strong></li>
-<li><code>delonix-oci</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-opnsense</code> → <code>delonix-sdn</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-proxmox</code> → <code>delonix-sdn</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-proxmox</code> → <code>delonix-vm</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-scanner</code> → <code>delonix-oci</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-sdn</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-vm</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
-<li><code>delonix-volume</code> → <code>delonix-state</code> — removed in <strong>P4</strong></li>
+<li><code>delonix-linux</code> → <code>delonix-state</code> — 移除于 <strong>P4a</strong></li>
+<li><code>delonix-mcp</code> → <code>delonix-mgmt</code> — 移除于 <strong>P5</strong></li>
+<li><code>delonix-oci</code> → <code>delonix-state</code> — 移除于 <strong>P4</strong></li>
+<li><code>delonix-opnsense</code> → <code>delonix-sdn</code> — 移除于 <strong>P4</strong></li>
+<li><code>delonix-proxmox</code> → <code>delonix-sdn</code> — 移除于 <strong>P4</strong></li>
+<li><code>delonix-proxmox</code> → <code>delonix-vm</code> — 移除于 <strong>P4</strong></li>
+<li><code>delonix-scanner</code> → <code>delonix-oci</code> — 移除于 <strong>P4</strong></li>
+<li><code>delonix-sdn</code> → <code>delonix-state</code> — 移除于 <strong>P4</strong></li>
+<li><code>delonix-vm</code> → <code>delonix-state</code> — 移除于 <strong>P4</strong></li>
+<li><code>delonix-volume</code> → <code>delonix-state</code> — 移除于 <strong>P4</strong></li>
 </ul>
 <!-- dev-docs:end layers -->
 
-<h3 id="where-the-restructuring-stands">Where the restructuring stands<a class="hanchor" href="#where-the-restructuring-stands" aria-label="#">#</a></h3>
-<p>ADR-0040 is a strangler plan in phases (P0 rails → P1 contract → P2 contexts → P3 adapters and
-binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What the code shows today:</p>
+<h3 id="where-the-restructuring-stands">重构现状<a class="hanchor" href="#where-the-restructuring-stands" aria-label="#">#</a></h3>
+<p>ADR-0040 是一个分阶段的绞杀者模式（strangler）计划（P0 轨道 → P1 契约 → P2 上下文 →
+P3 适配器与二进制文件 → P4 providers → P5 节点 API → P6 CRI → P7 可观测性）。代码今天呈现的状态是：</p>
 <ul>
-<li><strong>P0 is done.</strong> Every crate lives in its layer's directory, versions are workspace-level, and
-  the fitness gate runs in CI.</li>
-<li><strong>P1 is done as a contract, not as a server.</strong> <code>proto/delonix/node/v1/*.proto</code> exists, the
-  OpenAPI document <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is generated from it, and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>
-  guards both. <strong>Nothing serves the contract yet</strong> — no crate references <code>delonix.node.v1</code>
-  (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a> D1 says the same).</li>
-<li><strong>P2 has started.</strong> <code>delonix-model</code> (the shared <code>Error</code> and its <code>DX_*</code> codes, generated names,
-  exit classes, the numbered code dictionary, the secret model, and — since #405 — the plain-data
-  records <code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code> with their validators, <code>default_namespace</code> and the
-  lifecycle <code>typestate</code>), <code>delonix-stack</code> (Kind table, 3-way reconciler, revisions) and
-  <code>delonix-compute</code> (the one run specification <code>RunOpts</code>, <code>resolve_run</code>, <code>build_record</code>, the
-  network and launch use cases) exist. Most application logic still lives in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a>.</li>
-<li><strong>P3 is under way.</strong> The compute ports are implemented in adapters (<code>HostImages</code>,
-  <code>HostVolumes</code>, <code>HostDevices</code>, <code>HostRuntime</code>, <code>HostNetwork</code>, <code>HostWorkload</code>, <code>HostVmNetwork</code>),
-  telemetry left the foundation for <code>delonix-telemetry</code>, <code>delonix-vm</code> reaches the SDN only
-  through the <code>VmNetwork</code> port, and the CRI, management API and MCP servers became their own
-  executables. Four adapters carry their ADR-0040 names: <code>delonix-scanner</code> (was <code>delonix-scan</code>),
-  <code>delonix-oci</code> (was <code>delonix-image</code>), <code>delonix-sdn</code> (was <code>delonix-net</code>) and <code>delonix-linux</code> (was
-  <code>delonix-runtime</code>, the container engine crate). <strong>#406 removed <code>delonix-runtime-core</code></strong>, the
-  foundation crate that used to hold everything shared, in steps: <strong>#404</strong> moved the stores,
-  atomic writes and the encrypted secret store to the <code>delonix-state</code> adapter; <strong>#405</strong> moved the
-  plain-data records (<code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>, <code>typestate</code>) down to <code>delonix-model</code>; and
-  <strong>#406</strong> moved the <code>Container</code> and <code>Vm</code> records (with <code>Mount</code>, health and cgroup-parent types,
-  <code>DELONIX_SLICE</code> and <code>workload_net</code>) to <code>delonix-compute</code>, and the event log, <code>virt</code>,
-  <code>peer_cred</code>, <code>dispatch</code> and the host/process helpers (<code>now_unix</code>, <code>is_alive</code>,
-  <code>safe_to_signal</code>, <code>generate_id</code>, …) to a new context, <code>delonix-node</code>. No re-exports were left
-  behind. The adapters that open records or
-  write files through <code>delonix-state</code> (<code>delonix-linux</code>, <code>delonix-vm</code>, <code>delonix-sdn</code>,
-  <code>delonix-oci</code>, <code>delonix-volume</code>) are declared exceptions until P4 gives them a
-  <code>StateRepository</code> port (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>).</li>
-<li><strong>P4 is under way; P5–P7 have not started.</strong> ADR-0044 (accepted 2026-09-24) decides how P4 is
-  done. <strong>#420</strong> landed the <code>StateRepository&lt;T&gt;</code> port
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>), and <code>delonix-linux</code> already uses it for
-  <code>wait_and_record</code>/<code>stop</code>/<code>persist_stop</code>/<code>remove</code>, which is why its exception in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> names phase <code>P4a</code> and lists only the sites still open. <strong>#486</strong> added
-  the VM provider port (<code>VmSpec</code>, <code>Extensions</code>, <code>Provider</code>, <code>VmProvider</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_provider.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_provider.rs</code></a>, P4b slice 1), and <code>delonix-vm</code> implements
-  it for the two local backends (<code>LocalVmProvider</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/provider.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/provider.rs</code></a>)
-  by reusing its existing <code>create_with</code>/<code>stop</code>/<code>start</code> rather than a second orchestration; moving
-  each backend into its own provider crate is P4b slice 2. The remaining exceptions in the table above name the phase that removes each.</li>
+<li><strong>P0 已完成。</strong> 每个 crate 都位于其所属层的目录中，版本统一在 workspace 层级管理，
+  且 fitness 门禁会在 CI 中运行。</li>
+<li><strong>P1 作为一份契约已经完成，但还不是一台服务器。</strong> <code>proto/delonix/node/v1/*.proto</code> 已存在，
+  OpenAPI 文档 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 由它生成，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 同时守护这两者。
+  <strong>目前还没有任何东西为这份契约提供服务</strong>——没有任何 crate 引用 <code>delonix.node.v1</code>
+  （<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0042-one-engine-api-maturity-and-docs.md" target="_blank" rel="noopener">ADR-0042</a> D1 也是这么说的）。</li>
+<li><strong>P2 已经开始。</strong> <code>delonix-model</code>（共享的 <code>Error</code> 及其 <code>DX_*</code> 代码、生成的名称、退出类别、
+  编号的代码字典、密钥模型，以及自 #405 起的纯数据记录 <code>Status</code>、<code>ContainerFw</code>/<code>FwRule</code> 及其
+  校验器、<code>default_namespace</code> 和生命周期的 <code>typestate</code>）、<code>delonix-stack</code>（Kind 表、三路协调器、
+  版本历史）以及 <code>delonix-compute</code>（唯一的运行规格 <code>RunOpts</code>、<code>resolve_run</code>、<code>build_record</code>、
+  网络与启动用例）都已经存在。大部分应用逻辑仍然位于 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a> 中。</li>
+<li><strong>P3 正在进行中。</strong> 计算端口已经在各个适配器中实现（<code>HostImages</code>、<code>HostVolumes</code>、
+  <code>HostDevices</code>、<code>HostRuntime</code>、<code>HostNetwork</code>、<code>HostWorkload</code>、<code>HostVmNetwork</code>），
+  telemetry 已经从 foundation 迁出到 <code>delonix-telemetry</code>，<code>delonix-vm</code> 只通过 <code>VmNetwork</code>
+  端口访问 SDN，CRI、管理 API 和 MCP 服务器也都变成了各自独立的可执行文件。四个适配器已经
+  带上了它们在 ADR-0040 中的名字：<code>delonix-scanner</code>（原为 <code>delonix-scan</code>）、<code>delonix-oci</code>
+  （原为 <code>delonix-image</code>）、<code>delonix-sdn</code>（原为 <code>delonix-net</code>）以及 <code>delonix-linux</code>
+  （原为容器引擎 crate <code>delonix-runtime</code>）。<strong>#406 移除了 <code>delonix-runtime-core</code></strong>——
+  那个曾经承载所有共享内容的 foundation crate——分几步完成：<strong>#404</strong> 把各个 store、原子写入
+  以及加密的密钥 store 移到了 <code>delonix-state</code> 适配器；<strong>#405</strong> 把纯数据记录（<code>Status</code>、
+  <code>ContainerFw</code>/<code>FwRule</code>、<code>typestate</code>）下移到了 <code>delonix-model</code>；<strong>#406</strong> 把 <code>Container</code> 和
+  <code>Vm</code> 记录（连同 <code>Mount</code>、健康检查与 cgroup-parent 类型、<code>DELONIX_SLICE</code> 和 <code>workload_net</code>）
+  移到了 <code>delonix-compute</code>，并把事件日志、<code>virt</code>、<code>peer_cred</code>、<code>dispatch</code> 以及宿主机/进程
+  辅助函数（<code>now_unix</code>、<code>is_alive</code>、<code>safe_to_signal</code>、<code>generate_id</code>……）移到了一个新的上下文
+  <code>delonix-node</code>。没有留下任何重新导出（re-export）。那些通过 <code>delonix-state</code> 打开记录或
+  写入文件的适配器（<code>delonix-linux</code>、<code>delonix-vm</code>、<code>delonix-sdn</code>、<code>delonix-oci</code>、
+  <code>delonix-volume</code>）被声明为例外，直到 P4 为它们提供一个 <code>StateRepository</code> 端口
+  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>）。</li>
+<li><strong>P4 正在进行中；P5–P7 尚未开始。</strong> ADR-0044（于 2026-09-24 被接受）决定了 P4 如何完成。
+  <strong>#420</strong> 落地了 <code>StateRepository&lt;T&gt;</code> 端口（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>），
+  <code>delonix-linux</code> 已经在 <code>wait_and_record</code>/<code>stop</code>/<code>persist_stop</code>/<code>remove</code> 中使用它，这也是为什么
+  它在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 中的例外只标注了阶段 <code>P4a</code>，并且只列出仍然开放的那些位置。
+  <strong>#486</strong> 新增了 VM provider 端口（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_provider.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_provider.rs</code></a> 中的
+  <code>VmSpec</code>、<code>Extensions</code>、<code>Provider</code>、<code>VmProvider</code>，P4b 切片 1），<code>delonix-vm</code> 为两个本地后端
+  实现了它（<code>LocalVmProvider</code>，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/provider.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/provider.rs</code></a>），做法是复用其已有的
+  <code>create_with</code>/<code>stop</code>/<code>start</code>，而不是搞第二套编排；把每个后端各自移入自己的 provider crate
+  是 P4b 切片 2。上表中其余的例外，都各自注明了移除自己的那个阶段。</li>
 </ul>
-<h3 id="records-node-helpers-and-persisted-state-after-406">Records, node helpers and persisted state, after #406<a class="hanchor" href="#records-node-helpers-and-persisted-state-after-406" aria-label="#">#</a></h3>
+<h3 id="records-node-helpers-and-persisted-state-after-406">#406 之后的记录、节点辅助函数与持久化状态<a class="hanchor" href="#records-node-helpers-and-persisted-state-after-406" aria-label="#">#</a></h3>
 <blockquote>
-<p><strong>Legend</strong> — white box with red border: engine crate (or group of crates) · cylinder, blue:
-files under the state root · solid arrow: <em>uses</em>, with what is used.</p>
+<p><strong>图例</strong> —— 白底红边方框：引擎 crate（或一组 crate） · 圆柱体，蓝色：状态根目录下的文件 ·
+实线箭头：<em>使用</em>，并注明使用了什么。</p>
 </blockquote>
-<p>Plain-data types live in the foundation, the workload records in the Compute context, the node's
-own helpers in the Node context, and the files that hold records in one adapter that every other
-adapter reaches those files through.</p>
+<p>纯数据类型存在于 foundation 中，工作负载记录存在于 Compute 上下文中，节点自身的辅助函数
+存在于 Node 上下文中，而保存这些记录的文件则集中在一个适配器中，其他所有适配器都通过它来
+访问这些文件。</p>
 <pre class="mermaid">flowchart TB
   CX[&quot;other contexts&lt;br/&gt;&lt;small&gt;delonix-stack, -security-runtime&lt;/small&gt;&quot;]
   AD[&quot;other adapters&lt;br/&gt;&lt;small&gt;delonix-linux, -oci, -sdn, -vm, -volume&lt;/small&gt;&quot;]
@@ -1007,21 +995,21 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>Checked against: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>use
-delonix_model::records::{…}</code>, <code>use delonix_node::safe_to_signal</code>) and <code>src/lib.rs</code> (<code>pub use
-record::*</code>); <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/lib.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/lib.rs</code></a> and <code>host.rs</code>;
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a> and <code>typestate.rs</code>;
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> (<code>use delonix_compute::Container</code>), <code>secret.rs</code>,
-<code>cred_vault.rs</code>, <code>error.rs</code>. <code>delonix-net-rules</code> is used by <code>delonix-sdn</code> and <code>delonix-vm</code> only;
-<code>delonix-volume</code> and <code>delonix-scanner</code> also name <code>delonix-model</code> directly (the generated graph
-below has every edge).</p>
-<h3 id="compute-ports-and-the-adapters-behind-them">Compute ports and the adapters behind them<a class="hanchor" href="#compute-ports-and-the-adapters-behind-them" aria-label="#">#</a></h3>
+<p>核对来源：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>（<code>use
+delonix_model::records::{…}</code>、<code>use delonix_node::safe_to_signal</code>）与 <code>src/lib.rs</code>（<code>pub use
+record::*</code>）；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/lib.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/lib.rs</code></a> 与 <code>host.rs</code>；
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/records.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/records.rs</code></a> 与 <code>typestate.rs</code>；
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>（<code>use delonix_compute::Container</code>）、<code>secret.rs</code>、
+<code>cred_vault.rs</code>、<code>error.rs</code>。<code>delonix-net-rules</code> 只被 <code>delonix-sdn</code> 和 <code>delonix-vm</code> 使用；
+<code>delonix-volume</code> 和 <code>delonix-scanner</code> 也直接引用 <code>delonix-model</code>（下方生成的图中包含了
+每一条边）。</p>
+<h3 id="compute-ports-and-the-adapters-behind-them">计算端口及其背后的适配器<a class="hanchor" href="#compute-ports-and-the-adapters-behind-them" aria-label="#">#</a></h3>
 <blockquote>
-<p><strong>Legend</strong> — white box with red border: engine component (use cases, adapter, binary) ·
-outlined region: the context crate · solid arrow: a call through the named port.</p>
+<p><strong>图例</strong> —— 白底红边方框：引擎组件（用例、适配器、二进制文件） ·
+带边框的区域：上下文 crate · 实线箭头：一次经过指定端口的调用。</p>
 </blockquote>
-<p><code>container run</code> is the reference path: the context decides through ports, and the binary chooses
-which adapter answers each port.</p>
+<p><code>container run</code> 是参考路径：上下文通过端口做决定，而二进制文件选择由哪个适配器来响应
+每一个端口。</p>
 <pre class="mermaid">flowchart LR
   CMD[&quot;delonix binary&lt;br/&gt;&lt;small&gt;cmd_run and run(): composition root&lt;/small&gt;&quot;]
   subgraph CX[&quot;delonix-compute — context&quot;]
@@ -1049,19 +1037,19 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>Ports: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>,
-<code>DeviceResolver</code>, <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>) and <code>launch.rs</code> (<code>WorkloadRuntime</code>).
-Implementations: <code>delonix-oci/src/run_images.rs</code>, <code>delonix-volume/src/lib.rs</code>,
-<code>delonix-linux/src/{cdi,run_host,workload}.rs</code>, <code>delonix-sdn/src/{run_network,vm_network}.rs</code>.
-Wiring: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs::cmd_run</code></a> and
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs::run</code></a>.</p>
-<h3 id="interfaces-and-binaries">Interfaces and binaries<a class="hanchor" href="#interfaces-and-binaries" aria-label="#">#</a></h3>
+<p>端口：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>ImageStore</code>、<code>StorageProvider</code>、
+<code>DeviceResolver</code>、<code>RunHost</code>、<code>VmNetwork</code>、<code>NetworkProvider</code>）与 <code>launch.rs</code>（<code>WorkloadRuntime</code>）。
+实现：<code>delonix-oci/src/run_images.rs</code>、<code>delonix-volume/src/lib.rs</code>、
+<code>delonix-linux/src/{cdi,run_host,workload}.rs</code>、<code>delonix-sdn/src/{run_network,vm_network}.rs</code>。
+接线：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs::cmd_run</code></a> 与
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs::run</code></a>。</p>
+<h3 id="interfaces-and-binaries">接口与二进制文件<a class="hanchor" href="#interfaces-and-binaries" aria-label="#">#</a></h3>
 <blockquote>
-<p><strong>Legend</strong> — white box with red border: engine crate (or group of crates) · solid arrow: a
-direct Rust call, with what it is used for.</p>
+<p><strong>图例</strong> —— 白底红边方框：引擎 crate（或一组 crate） · 实线箭头：一次直接的 Rust
+调用，并注明用途。</p>
 </blockquote>
-<p>The servers read in-process and hand every fork to the CLI; the one interface-to-interface edge is
-a declared exception.</p>
+<p>服务器在进程内读取数据，并把每一次 fork 都交给 CLI 去做；唯一一条接口到接口的边是一个
+已声明的例外。</p>
 <pre class="mermaid">flowchart TB
   RB[&quot;delonix-runtime-bin&lt;br/&gt;&lt;small&gt;executable delonix&lt;/small&gt;&quot;]
   MB[&quot;delonix-mgmt-bin&lt;br/&gt;&lt;small&gt;executable delonix-mgmt&lt;/small&gt;&quot;]
@@ -1091,16 +1079,16 @@ classDef block fill:#ffffff,stroke:#cc2823,color:#191513
 classDef external fill:#e1ddda,stroke:#8a817c,color:#191513
 classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 </pre>
-<p>Not drawn, to keep the figure legible: every binary and <code>delonix-cri</code>/<code>delonix-mgmt</code> also call
-<code>delonix-telemetry</code> (<code>telemetry::init</code>, metrics), and <code>delonix-mcp</code> and the CLI read
-<code>delonix-state</code> too. The dashboard edges are <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dash.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dash.rs</code></a> and
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a> (<code>delonix_mgmt::dashstats::collect</code>); the CRI's
-<code>RunOpts</code> use is <code>start_run_opts</code> in <code>runtime_svc/lifecycle.rs</code>.</p>
-<h3 id="every-crate-edge">Every crate edge<a class="hanchor" href="#every-crate-edge" aria-label="#">#</a></h3>
-<p>The crate graph, as <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> declares it. It is complete and therefore dense; read it to
-answer "does A depend on B", and read the per-layer figures above to understand why.</p>
+<p>为了保持图的可读性，以下内容没有画出来：每个二进制文件以及 <code>delonix-cri</code>/<code>delonix-mgmt</code>
+也都会调用 <code>delonix-telemetry</code>（<code>telemetry::init</code>、指标），<code>delonix-mcp</code> 和 CLI 也会读取
+<code>delonix-state</code>。仪表盘（dashboard）相关的边是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dash.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dash.rs</code></a>
+和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-mcp/src/lib.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp/src/lib.rs</code></a>（<code>delonix_mgmt::dashstats::collect</code>）；CRI
+对 <code>RunOpts</code> 的使用是 <code>runtime_svc/lifecycle.rs</code> 中的 <code>start_run_opts</code>。</p>
+<h3 id="every-crate-edge">每一条 crate 边<a class="hanchor" href="#every-crate-edge" aria-label="#">#</a></h3>
+<p>这是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 所声明的 crate 图。它是完整的，因此也很密集；用它来回答「A 是否依赖
+B」这样的问题，而要理解「为什么」，请阅读上文按层划分的各张图。</p>
 <!-- dev-docs:begin crates-graph -->
-<p><strong>Legend</strong> — one box per crate, grouped by layer; an arrow <code>A --&gt; B</code> means <em>A depends on B</em>. Red: binaries · white with red border: interfaces · white: contexts and adapters · grey: providers · blue: foundation.</p>
+<p><strong>图例</strong> —— 每个 crate 一个方框，按层分组；箭头 <code>A --&gt; B</code> 表示 <em>A 依赖 B</em>。红色：二进制 · 红边白底：接口 · 白色：上下文与适配器 · 灰色：provider · 蓝色：基础层。</p>
 <pre class="mermaid">flowchart TB
   subgraph foundation[&quot;Foundation&quot;]
     delonix_model[&quot;delonix-model&quot;]
@@ -1259,168 +1247,167 @@ answer "does A depend on B", and read the per-layer figures above to understand 
 </pre>
 <!-- dev-docs:end crates-graph -->
 
-<h3 id="how-the-crates-communicate">How the crates communicate<a class="hanchor" href="#how-the-crates-communicate" aria-label="#">#</a></h3>
+<h3 id="how-the-crates-communicate">crate 之间如何通信<a class="hanchor" href="#how-the-crates-communicate" aria-label="#">#</a></h3>
 <ol>
-<li><strong>Direct Rust calls, along the layer direction.</strong> The normal case. For example <code>cmd_run</code>
-   (<code>cmd/container.rs</code>) calls <code>delonix_compute::run::resolve_run</code> with the adapters
-   <code>delonix_oci::run_images::HostImages</code>, <code>delonix_volume::HostVolumes</code>,
-   <code>delonix_linux::cdi::HostDevices</code> and <code>delonix_linux::run_host::HostRuntime</code>, then
-   <code>delonix_compute::network::{attach_custom_network, wire_network}</code> with
-   <code>delonix_sdn::run_network::HostNetwork</code>, then <code>delonix_compute::launch::start</code> with
-   <code>delonix_linux::workload::HostWorkload</code>.</li>
-<li><strong>Registration at the composition root.</strong> <code>run()</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a>
-   registers configured remote VM backends (<code>cmd::vmbackends::register_configured</code> →
-   <code>delonix_vm::register_backend</code>) and the SDN implementation of the VM network port
-   (<code>delonix_vm::set_network(HostVmNetwork)</code>) before any command runs.</li>
-<li><strong>Re-executing the engine's own binary.</strong> Still common, and counted by the <code>self_exec_sites</code>
-   ratchet. The reasons are real:
-   - <code>clone</code> is only safe in a <strong>single-threaded</strong> process, and the CRI, management API and
-     Docker API servers are multi-threaded <code>tokio</code> runtimes. They hand a typed <code>RunOpts</code> in a
-     <code>0600</code> file to a fresh <code>delonix __apirun &lt;spec&gt;</code> (<code>lifecycle.rs::write_run_spec</code>,
-     <code>cmd::dockerapi::run_from_spec_file</code>).
-   - A rootless process must <strong>enter</strong> the network pin's user and mount namespaces before a
-     container can join a named netns there, so <code>reexec_into_netns</code> runs
-     <code>nsenter … ip netns exec &lt;netns&gt; delonix netns run &lt;spec&gt;</code>.
-   - Work on files owned by mapped subuids needs a process inside a mapped user namespace
-     (<code>delonix_linux::reexec_mapped</code>, <code>reexec_mapped_hold</code>, <code>remove_tree_mapped</code> → the
-     <code>__rmtree</code>/<code>__ovlhold</code>/… entry points).
-   - The servers still build some CLI invocations (<code>delonix-mgmt</code>, <code>delonix-mcp</code>'s
-     <code>run_cli_blocking</code>, the CRI's <code>delonix()</code> helper), resolving the CLI through
-     <code>delonix_node::dispatch::cli_bin</code> (<code>DELONIX_BIN</code>, then the sibling <code>delonix</code>, then
-     the <code>PATH</code>) — never their own executable.
-   ADR-0040 D2.4/D5 plans a <code>delonix-launcher</code> executable receiving a typed spec, so these become
-   use-case calls plus one spawn.</li>
-<li><strong>The control socket.</strong> Everything inside the rootless infra netns is done by the control
-   process: <code>infra::control_send</code>/<code>control_query</code> write one line (<code>attach …</code>, <code>publish …</code>,
-   <code>firewall …</code>) to a <code>0600</code> unix socket; <code>control_loop</code> accepts only peers with the engine's own
-   uid (<code>SO_PEERCRED</code>) and serves one connection at a time, so netns/veth/nftables operations
-   never interleave.</li>
-<li><strong>Subprocesses to host tools</strong>, in adapters: <code>ip</code>, <code>nft</code>, <code>nsenter</code>, <code>slirp4netns</code>
-   (<code>delonix-sdn</code>), <code>newuidmap</code>/<code>newgidmap</code> (<code>delonix-linux</code>, <code>pin_userns</code>), <code>qemu-img</code>,
-   <code>virsh</code>, <code>cloud-localds</code> (<code>delonix-vm</code>), <code>busctl</code> for systemd transient scopes
-   (<code>delonix-linux</code>), <code>ssh</code>/<code>scp</code> (<code>cmd/remote.rs</code>).</li>
-<li><strong>HTTP to a remote management system lives only in providers.</strong> <code>delonix-proxmox</code> and
-   <code>delonix-truenas</code> depend on <code>reqwest</code> for that. Two adapters also speak HTTP, for other reasons:
-   <code>delonix-oci</code> has its own OCI registry client (<code>src/registry.rs</code>, <code>reqwest</code> in its
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>), and <code>delonix-telemetry</code> exports OTLP over HTTP. No context crate does.</li>
+<li><strong>沿着层级方向的直接 Rust 调用。</strong> 这是通常的情况。例如 <code>cmd_run</code>
+   （<code>cmd/container.rs</code>）会带着适配器 <code>delonix_oci::run_images::HostImages</code>、
+   <code>delonix_volume::HostVolumes</code>、<code>delonix_linux::cdi::HostDevices</code> 和
+   <code>delonix_linux::run_host::HostRuntime</code> 调用 <code>delonix_compute::run::resolve_run</code>，接着
+   带着 <code>delonix_sdn::run_network::HostNetwork</code> 调用
+   <code>delonix_compute::network::{attach_custom_network, wire_network}</code>，然后带着
+   <code>delonix_linux::workload::HostWorkload</code> 调用 <code>delonix_compute::launch::start</code>。</li>
+<li><strong>在组合根（composition root）处注册。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> 中的
+   <code>run()</code> 会在任何命令运行之前，注册已配置的远程 VM 后端
+   （<code>cmd::vmbackends::register_configured</code> → <code>delonix_vm::register_backend</code>）以及 VM 网络
+   端口的 SDN 实现（<code>delonix_vm::set_network(HostVmNetwork)</code>）。</li>
+<li><strong>重新执行引擎自己的二进制文件。</strong> 这仍然很常见，并由 <code>self_exec_sites</code> ratchet 计数。
+   原因是真实存在的：
+   - <code>clone</code> 只有在<strong>单线程</strong>进程中才安全，而 CRI、管理 API 和 Docker API 服务器都是多线程的
+     <code>tokio</code> 运行时。它们会把一份类型化的 <code>RunOpts</code> 放进一个 <code>0600</code> 的文件中，交给一个全新的
+     <code>delonix __apirun &lt;spec&gt;</code>（<code>lifecycle.rs::write_run_spec</code>、
+     <code>cmd::dockerapi::run_from_spec_file</code>）。
+   - 一个无根进程必须先<strong>进入</strong>网络 pin 的用户与挂载命名空间，容器才能加入那里一个具名的
+     netns，因此 <code>reexec_into_netns</code> 会运行
+     <code>nsenter … ip netns exec &lt;netns&gt; delonix netns run &lt;spec&gt;</code>。
+   - 对由映射后的 subuid 拥有的文件进行操作，需要一个位于已映射用户命名空间内部的进程
+     （<code>delonix_linux::reexec_mapped</code>、<code>reexec_mapped_hold</code>、<code>remove_tree_mapped</code> →
+     <code>__rmtree</code>/<code>__ovlhold</code>/……等入口点）。
+   - 服务器仍然会构造一些 CLI 调用（<code>delonix-mgmt</code>、<code>delonix-mcp</code> 的
+     <code>run_cli_blocking</code>、CRI 的 <code>delonix()</code> 辅助函数），并通过
+     <code>delonix_node::dispatch::cli_bin</code> 来解析 CLI（先看 <code>DELONIX_BIN</code>，再看同目录下的
+     <code>delonix</code>，最后看 <code>PATH</code>）——绝不使用它们自己的可执行文件。
+   ADR-0040 D2.4/D5 计划推出一个接收类型化规格的 <code>delonix-launcher</code> 可执行文件，届时这些都会
+   变成用例调用加上一次 spawn。</li>
+<li><strong>控制 socket。</strong> 无根基础设施 netns 内部的一切，都由 control 进程完成：
+   <code>infra::control_send</code>/<code>control_query</code> 向一个 <code>0600</code> 的 unix socket 写入一行
+   （<code>attach …</code>、<code>publish …</code>、<code>firewall …</code>）；<code>control_loop</code> 只接受与引擎自身 uid 相同的
+   对端（<code>SO_PEERCRED</code>），并且一次只服务一条连接，因此 netns/veth/nftables 操作绝不会
+   交错发生。</li>
+<li><strong>通向宿主机工具的子进程</strong>，位于各适配器中：<code>ip</code>、<code>nft</code>、<code>nsenter</code>、<code>slirp4netns</code>
+   （<code>delonix-sdn</code>）、<code>newuidmap</code>/<code>newgidmap</code>（<code>delonix-linux</code>、<code>pin_userns</code>）、
+   <code>qemu-img</code>、<code>virsh</code>、<code>cloud-localds</code>（<code>delonix-vm</code>）、用于 systemd 临时作用域的
+   <code>busctl</code>（<code>delonix-linux</code>）、<code>ssh</code>/<code>scp</code>（<code>cmd/remote.rs</code>）。</li>
+<li><strong>面向远程管理系统的 HTTP 只存在于 providers 中。</strong> <code>delonix-proxmox</code> 和
+   <code>delonix-truenas</code> 为此依赖 <code>reqwest</code>。另有两个适配器出于其他原因也会说 HTTP：
+   <code>delonix-oci</code> 有自己的 OCI 镜像仓库客户端（<code>src/registry.rs</code>，其 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 中有
+   <code>reqwest</code>），<code>delonix-telemetry</code> 通过 HTTP 导出 OTLP。没有任何上下文 crate 会这样做。</li>
 </ol>
-<h2 id="state-on-disk">State on disk<a class="hanchor" href="#state-on-disk" aria-label="#">#</a></h2>
-<p>There is no database. State is files under one <strong>state root</strong>:</p>
+<h2 id="state-on-disk">磁盘上的状态<a class="hanchor" href="#state-on-disk" aria-label="#">#</a></h2>
+<p>这里没有数据库。状态就是<strong>状态根目录（state root）</strong>下的文件：</p>
 <ul>
-<li><code>DELONIX_ROOT</code> when set; otherwise <code>$XDG_DATA_HOME/delonix</code> or <code>~/.local/share/delonix</code> for an
-  unprivileged user and <code>/var/lib/delonix</code> for root
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/util.rs::state_root</code></a> → <code>ImageStore::default_root</code>;
-  <code>infra::base_root</code> resolves the same rule on the network side).</li>
-<li><strong>Sockets do not live under the state root.</strong> They are in a short per-user runtime directory
-  (<code>infra::runtime_dir</code>, overridable with <code>DELONIX_NET_RUNTIME_DIR</code>) because <code>AF_UNIX</code> paths are
-  limited in length; a non-default root gets a hashed suffix (<code>root_suffix</code>) so two roots on one
-  login never share sockets. <strong>When you run anything in isolation, set both variables.</strong></li>
+<li>设置了就用 <code>DELONIX_ROOT</code>；否则对非特权用户使用 <code>$XDG_DATA_HOME/delonix</code> 或
+  <code>~/.local/share/delonix</code>，对 root 使用 <code>/var/lib/delonix</code>
+  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/util.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/util.rs::state_root</code></a> → <code>ImageStore::default_root</code>；
+  <code>infra::base_root</code> 在网络这一侧解析的是同一条规则）。</li>
+<li><strong>Socket 不位于状态根目录之下。</strong> 它们位于一个简短的、按用户划分的运行时目录中
+  （<code>infra::runtime_dir</code>，可用 <code>DELONIX_NET_RUNTIME_DIR</code> 覆盖），因为 <code>AF_UNIX</code> 路径的长度
+  是有限的；一个非默认的根目录会带上一个哈希后缀（<code>root_suffix</code>），这样同一次登录中的两个
+  根目录就绝不会共享 socket。<strong>当你在隔离环境中运行任何东西时，请把这两个变量都设置好。</strong></li>
 </ul>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path under the root</th>
-<th>What</th>
-<th>Code</th>
+<th>根目录下的路径</th>
+<th>内容</th>
+<th>代码</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>containers/<wbr>&lt;id&gt;.<wbr>json</code></td>
-<td>one JSON record per container</td>
-<td><code>delonix_state::Store</code> (<code>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code>)</td>
+<td>每个容器一份 JSON 记录</td>
+<td><code>delonix_state::Store</code>（<code>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code>）</td>
 </tr>
 <tr>
 <td><code>containers/<wbr>&lt;id&gt;/<wbr>{upper,work,merged}</code> + <code>overlay-lowers</code></td>
-<td>the container's writable layer and the list of shared image layers it mounts</td>
-<td><code>ImageStore::<wbr>prepare_overlay</code> (<code>delonix-oci/<wbr>src/<wbr>overlay.<wbr>rs</code>)</td>
+<td>容器的可写层，以及它挂载的共享镜像层列表</td>
+<td><code>ImageStore::<wbr>prepare_overlay</code>（<code>delonix-oci/<wbr>src/<wbr>overlay.<wbr>rs</code>）</td>
 </tr>
 <tr>
-<td><code>images/&lt;id&gt;.json</code>, <code>layers/&lt;hex&gt;/</code>, <code>blobs/<wbr>sha256/<wbr>&lt;hex&gt;</code></td>
-<td>image metadata, unpacked layers shared by every container, content-addressed blobs</td>
-<td><code>ImageStore::open</code> (<code>image.rs</code>), <code>Cas</code> (<code>cas.rs</code>)</td>
+<td><code>images/&lt;id&gt;.json</code>、<code>layers/&lt;hex&gt;/</code>、<code>blobs/<wbr>sha256/<wbr>&lt;hex&gt;</code></td>
+<td>镜像元数据、每个容器共享的解包后的层、按内容寻址的 blob</td>
+<td><code>ImageStore::open</code>（<code>image.rs</code>）、<code>Cas</code>（<code>cas.rs</code>）</td>
 </tr>
 <tr>
-<td><code>volumes/<wbr>&lt;name&gt;/<wbr>_data</code>, <code>volumes/.ns/&lt;ns&gt;/</code></td>
-<td>named volumes, namespace-scoped volumes</td>
-<td><code>VolumeStore</code> (<code>delonix-volume/<wbr>src/<wbr>lib.<wbr>rs</code>)</td>
+<td><code>volumes/<wbr>&lt;name&gt;/<wbr>_data</code>、<code>volumes/.ns/&lt;ns&gt;/</code></td>
+<td>具名卷、按命名空间划分的卷</td>
+<td><code>VolumeStore</code>（<code>delonix-volume/<wbr>src/<wbr>lib.<wbr>rs</code>）</td>
 </tr>
 <tr>
 <td><code>vms/</code></td>
-<td>VM records (<code>delonix_state::<wbr>JsonStore&lt;Vm&gt;</code>) and per-VM files</td>
+<td>VM 记录（<code>delonix_state::<wbr>JsonStore&lt;Vm&gt;</code>）与每台 VM 的文件</td>
 <td><code>delonix-vm</code></td>
 </tr>
 <tr>
 <td><code>vm-images/</code></td>
-<td>VM images (<code>.qcow2</code> + <code>.json</code>)</td>
+<td>VM 镜像（<code>.qcow2</code> + <code>.json</code>）</td>
 <td><code>cmd/<wbr>vmimage.<wbr>rs::<wbr>VmImageStore</code></td>
 </tr>
 <tr>
 <td><code>secrets/</code></td>
-<td>encrypted secrets</td>
-<td><code>SecretStore</code> (<code>delonix-state/<wbr>src/<wbr>secret.<wbr>rs</code>)</td>
+<td>加密的密钥</td>
+<td><code>SecretStore</code>（<code>delonix-state/<wbr>src/<wbr>secret.<wbr>rs</code>）</td>
 </tr>
 <tr>
-<td><code>tunnels/keyring.key</code>, <code>tunnels/cred/</code></td>
-<td>the host master key and encrypted credentials</td>
-<td><code>CredVault</code> (<code>delonix-state/<wbr>src/<wbr>cred_vault.<wbr>rs</code>)</td>
+<td><code>tunnels/keyring.key</code>、<code>tunnels/cred/</code></td>
+<td>宿主机主密钥与加密的凭据</td>
+<td><code>CredVault</code>（<code>delonix-state/<wbr>src/<wbr>cred_vault.<wbr>rs</code>）</td>
 </tr>
 <tr>
 <td><code>ingress/</code></td>
-<td>pidfiles (<code>holder.pid</code> is the pin), <code>refs/</code> markers, network and route definitions, logs</td>
+<td>pidfile（<code>holder.pid</code> 就是 pin）、<code>refs/</code> 标记、网络与路由定义、日志</td>
 <td><code>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code></td>
 </tr>
 <tr>
 <td><code>hosts-sync</code></td>
-<td>marker file: <code>delonix hosts sync</code> was run, so the service names of <code>--expose</code> containers are kept in the host's <code>/etc/hosts</code> (it sits at the root, not under <code>ingress/</code>)</td>
-<td><code>hosts_sync_flag</code> in <code>cmd/ingress_proxy.rs</code></td>
+<td>标记文件：表示 <code>delonix hosts sync</code> 已经运行过，因此 <code>--expose</code> 容器的服务名称会被保留在宿主机的 <code>/etc/hosts</code> 中（它位于根目录，而不在 <code>ingress/</code> 之下）</td>
+<td><code>cmd/ingress_proxy.rs</code> 中的 <code>hosts_sync_flag</code></td>
 </tr>
 <tr>
 <td><code>ipam/</code></td>
-<td>per-prefix address leases</td>
+<td>按前缀划分的地址租约</td>
 <td><code>delonix-sdn/src/ipam.rs</code></td>
 </tr>
 <tr>
 <td><code>cri/<wbr>{sandboxes,containers}/<wbr></code></td>
-<td>the CRI's own records</td>
-<td><code>delonix-cri/<wbr>src/<wbr>runtime_svc/<wbr>lifecycle.<wbr>rs</code> (<code>sb_dir</code>, <code>ct_dir</code>)</td>
+<td>CRI 自己的记录</td>
+<td><code>delonix-cri/<wbr>src/<wbr>runtime_svc/<wbr>lifecycle.<wbr>rs</code>（<code>sb_dir</code>、<code>ct_dir</code>）</td>
 </tr>
 <tr>
 <td><code>clusters/</code></td>
-<td>kubeconfigs, keys and PKI of clusters</td>
+<td>各集群的 kubeconfig、密钥与 PKI</td>
 <td><code>cmd/cluster.rs</code></td>
 </tr>
 <tr>
 <td><code>events.jsonl</code></td>
-<td>append-only event log</td>
+<td>只追加的事件日志</td>
 <td><code>delonix_node::events</code></td>
 </tr>
 </tbody>
 </table></div>
-<p>Concurrency is handled by the file system, because several processes (the CLI, the CRI server,
-a supervisor) mutate the same records: writes are atomic (temporary file + <code>rename</code>,
-<code>delonix_state::write_atomic</code>), and read-modify-write goes through <code>Store::update</code> /
-<code>JsonStore::update</code>, which take an exclusive <code>flock</code> and <strong>refuse</strong> to proceed without it. All
-of that lives in the <code>delonix-state</code> adapter. The record types it stores are defined elsewhere:
-<code>Container</code> and <code>Vm</code> in the <code>delonix-compute</code> context, and the plain-data parts of a record
-(<code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>) in the <code>delonix-model</code> foundation crate. The network
-infra has its own <code>FileLock</code> around <code>ensure_up</code>, <code>teardown</code>, <code>acquire</code>, <code>release</code> and the reapers.</p>
-<p>Because nothing resident watches processes, a record saying <code>Running</code> can be stale. Readers
-reconcile: <code>delonix_linux::reconcile_status</code> checks the pid together with its start time
-(<code>delonix_node::safe_to_signal</code>) so a recycled pid is never mistaken for the container.</p>
-<h2 id="level-4-two-flows-as-sequences">Level 4 — Two flows, as sequences<a class="hanchor" href="#level-4-two-flows-as-sequences" aria-label="#">#</a></h2>
-<p>Level 4 is drawn only where the order of steps is the point. Both flows below are sequences
-rather than structure figures.</p>
-<h3 id="container-run-d-net-web-p-808080-nginx-rootless"><code>container run -d --net web -p 8080:80 nginx</code>, rootless<a class="hanchor" href="#container-run-d-net-web-p-808080-nginx-rootless" aria-label="#">#</a></h3>
-<p>Every arrow below is a call in <code>cmd_run</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>) or in
-the functions it reaches.</p>
+<p>并发是由文件系统来处理的，因为有多个进程（CLI、CRI 服务器、supervisor）会修改同一份记录：
+写入是原子的（临时文件 + <code>rename</code>，<code>delonix_state::write_atomic</code>），读-改-写则通过
+<code>Store::update</code> / <code>JsonStore::update</code> 进行，它们会取得一个排他的 <code>flock</code>，并且在拿不到它的情况下
+<strong>拒绝</strong>继续执行。这一切都位于 <code>delonix-state</code> 适配器中。它所存储的记录类型定义在别处：
+<code>Container</code> 和 <code>Vm</code> 定义在 <code>delonix-compute</code> 上下文中，一条记录中纯数据的那部分
+（<code>Status</code>、<code>ContainerFw</code>/<code>FwRule</code>）则定义在 <code>delonix-model</code> 这个 foundation crate 中。
+网络基础设施在 <code>ensure_up</code>、<code>teardown</code>、<code>acquire</code>、<code>release</code> 以及各个回收器周围，有着它自己的
+<code>FileLock</code>。</p>
+<p>由于没有任何驻留的进程在监视其他进程，一条写着 <code>Running</code> 的记录有可能已经过时。读取者会
+自行协调（reconcile）：<code>delonix_linux::reconcile_status</code> 会把 pid 连同它的启动时间一起检查
+（<code>delonix_node::safe_to_signal</code>），这样一个被回收再利用的 pid 就绝不会被误认为是那个容器。</p>
+<h2 id="level-4-two-flows-as-sequences">第 4 层——作为序列的两条流程<a class="hanchor" href="#level-4-two-flows-as-sequences" aria-label="#">#</a></h2>
+<p>只有在步骤的顺序本身就是重点的地方，才会画出第 4 层。下面这两条流程都是序列图，
+而不是结构图。</p>
+<h3 id="container-run-d-net-web-p-808080-nginx-rootless"><code>container run -d --net web -p 8080:80 nginx</code>，无根模式<a class="hanchor" href="#container-run-d-net-web-p-808080-nginx-rootless" aria-label="#">#</a></h3>
+<p>下面的每一条箭头，都是 <code>cmd_run</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>）中的
+一次调用，或是它所触及的函数中的一次调用。</p>
 <blockquote>
-<p><strong>Legend</strong> — participants are processes; solid arrows are calls, socket lines or spawns (the
-label says which); dashed arrows are replies; a self-arrow is work inside that process; notes
-mark what stays behind.</p>
+<p><strong>图例</strong> —— 参与者是各个进程；实线箭头是调用、socket 通信或 spawn（具体是哪一种由标签
+说明）；虚线箭头是回复；指向自身的箭头是该进程内部的工作；注释标出了最终留下了什么。</p>
 </blockquote>
-<p>A custom network forces a second pass of the CLI inside the pin's namespaces, and the record is
-published only after the container's mounts are final.</p>
+<p>自定义网络会强制 CLI 在 pin 的命名空间内再走一遍（第二遍）；而记录只有在容器的挂载点
+最终确定之后才会被发布。</p>
 <pre class="mermaid">sequenceDiagram
     participant U as operator
     participant P1 as delonix (1st pass)
@@ -1452,19 +1439,17 @@ published only after the container's mounts are final.</p>
     I-&gt;&gt;I: execvp the image command
     Note over P1,I: No process stays behind except the supervisor, the init and its log shim.
 </pre>
-<p>Without a custom network the flow has no second pass: <code>spawn</code> creates its own user namespace, and
-the parent writes the id maps (<code>write_userns_maps</code>), sets up the cgroup, runs the <code>on_started</code>
-hook (the per-container <code>slirp_attach</code> when there are <code>-p</code> ports) and only then sends the "go"
-byte to the child.</p>
-<h3 id="cri-runpodsandbox-createcontainer-startcontainer">CRI: <code>RunPodSandbox</code> → <code>CreateContainer</code> → <code>StartContainer</code><a class="hanchor" href="#cri-runpodsandbox-createcontainer-startcontainer" aria-label="#">#</a></h3>
-<p>From <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>.</p>
+<p>如果没有自定义网络，这条流程就没有第二遍：<code>spawn</code> 会创建自己的用户命名空间，父进程写入
+id 映射（<code>write_userns_maps</code>）、设置好 cgroup、运行 <code>on_started</code> 钩子（如果有 <code>-p</code> 端口，
+就是每容器一个的 <code>slirp_attach</code>），然后才向子进程发送「go」字节。</p>
+<h3 id="cri-runpodsandbox-createcontainer-startcontainer">CRI：<code>RunPodSandbox</code> → <code>CreateContainer</code> → <code>StartContainer</code><a class="hanchor" href="#cri-runpodsandbox-createcontainer-startcontainer" aria-label="#">#</a></h3>
+<p>出自 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/runtime_svc/lifecycle.rs</code></a>。</p>
 <blockquote>
-<p><strong>Legend</strong> — participants are processes, plus the state root as a participant; solid arrows are
-gRPC calls, in-process calls, subprocesses or file writes (the label says which); dashed arrows
-are replies; <code>alt</code> boxes are the mutually exclusive network modes.</p>
+<p><strong>图例</strong> —— 参与者是各个进程，此外状态根目录也作为一个参与者；实线箭头是 gRPC 调用、
+进程内调用、子进程或文件写入（具体是哪一种由标签说明）；虚线箭头是回复；<code>alt</code> 框表示
+互斥的各种网络模式。</p>
 </blockquote>
-<p>The CRI server records and decides, but every container start crosses into a fresh <code>delonix</code>
-process.</p>
+<p>CRI 服务器负责记录和决策，但每一次容器启动都会跨越到一个全新的 <code>delonix</code> 进程中。</p>
 <pre class="mermaid">sequenceDiagram
     participant K as kubelet
     participant R as delonix-cri
@@ -1500,129 +1485,129 @@ process.</p>
     K-&gt;&gt;R: ContainerStatus
     R-&gt;&gt;ST: load_reconciled → reconcile_status against the kernel
 </pre>
-<h2 id="known-limitations">Known limitations<a class="hanchor" href="#known-limitations" aria-label="#">#</a></h2>
+<h2 id="known-limitations">已知限制<a class="hanchor" href="#known-limitations" aria-label="#">#</a></h2>
 <blockquote>
-<p><strong>Note — the node contract is not served.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is gated and generates
-OpenAPI, but no process answers it. Integrations today use the CLI, the CRI, the local
-management API or MCP.</p>
-<p><strong>Note — the servers still run the CLI.</strong> <code>delonix-cri</code>, <code>delonix-mgmt</code> and <code>delonix-mcp</code> start
-workloads by re-executing <code>delonix</code>. This keeps <code>clone</code> out of multi-threaded processes, at the
-cost of a process per operation and error text crossing a process boundary.</p>
-<p><strong>Note — adapters still reach the state files directly.</strong> <code>delonix-linux</code>, <code>delonix-vm</code>,
-<code>delonix-sdn</code>, <code>delonix-oci</code> and <code>delonix-volume</code> depend on <code>delonix-state</code> as declared
-exceptions. The <code>StateRepository</code> port that removes them exists since #420
-(<code>delonix-model/src/ports.rs</code>, ADR-0044 D6), and so far only <code>delonix-linux</code> goes through it for
-part of its lifecycle; the other four still open the stores directly until their P4 slice lands.</p>
-<p><strong>Note — <code>macvlan</code>/<code>ipvlan</code> are declared, not realized.</strong> <code>network create</code> records them and
-reports <code>Realized=False</code> with reason <code>DriverNotImplemented</code>
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/network.rs</code></a>): their physical plane needs <code>CAP_NET_ADMIN</code> in
-the host's initial network namespace.</p>
-<p><strong>Note — recovery after the pin dies is by restart.</strong> If the control process dies, <code>ensure_up</code>
-restarts only it and no workload moves. If the <strong>pin</strong> dies, the netns is rebuilt and
-<code>delonix net netns up</code> restarts the stranded containers and pod members
-(<code>cmd/netns.rs::reconcile_after_respawn</code>, which reads the container store only — VMs are not
-recovered this way).</p>
-<p><strong>Note — IPv6 in the SDN is off by default.</strong> The ingress firewall is <code>table ip</code>; the holder
-installs a dropping <code>table ip6</code> (<code>infra::ingress_v6_refusal_ruleset</code>) and disables IPv6 inside
-container netns unless <code>DELONIX_ENABLE_IPV6=1</code> (<code>ipv6_sdn_enabled</code>).</p>
-<p><strong>Note — a caller that cannot fork starts unsupervised.</strong> <code>launch::should_supervise</code> requires
-<code>detach &amp;&amp; forkable</code>; without a supervisor nobody is the process's parent and the real exit
-code cannot be collected.</p>
+<p><strong>注意——节点契约尚未被提供服务。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 已经有门禁并会生成 OpenAPI，
+但没有任何进程会响应它。今天的各种集成使用的是 CLI、CRI、本地管理 API 或 MCP。</p>
+<p><strong>注意——服务器仍然依靠运行 CLI。</strong> <code>delonix-cri</code>、<code>delonix-mgmt</code> 和 <code>delonix-mcp</code> 都是
+通过重新执行 <code>delonix</code> 来启动工作负载的。这样做把 <code>clone</code> 挡在了多线程进程之外，代价是
+每次操作都要多一个进程，错误文本也要跨越进程边界。</p>
+<p><strong>注意——适配器仍然直接访问状态文件。</strong> <code>delonix-linux</code>、<code>delonix-vm</code>、<code>delonix-sdn</code>、
+<code>delonix-oci</code> 和 <code>delonix-volume</code> 作为已声明的例外依赖 <code>delonix-state</code>。移除这些例外所需的
+<code>StateRepository</code> 端口自 #420 起就已存在（<code>delonix-model/src/ports.rs</code>，ADR-0044 D6），
+但到目前为止，只有 <code>delonix-linux</code> 在其生命周期的一部分中通过它访问；其余四个在各自的
+P4 切片落地之前，仍然直接打开这些 store。</p>
+<p><strong>注意——<code>macvlan</code>/<code>ipvlan</code> 只是被声明，并未被实现。</strong> <code>network create</code> 会记录它们，并报告
+<code>Realized=False</code>，原因是 <code>DriverNotImplemented</code>
+（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/network.rs</code></a>）：它们的物理层需要在宿主机的初始网络
+命名空间中拥有 <code>CAP_NET_ADMIN</code>。</p>
+<p><strong>注意——pin 死亡后的恢复是通过重启完成的。</strong> 如果 control 进程死亡，<code>ensure_up</code>
+只会重启它，不会移动任何工作负载。如果 <strong>pin</strong> 死亡，netns 会被重建，
+<code>delonix net netns up</code> 会重启那些被困住的容器和 pod 成员
+（<code>cmd/netns.rs::reconcile_after_respawn</code>，它只读取容器 store——VM 不会通过这种方式
+被恢复）。</p>
+<p><strong>注意——SDN 中的 IPv6 默认是关闭的。</strong> ingress 防火墙是 <code>table ip</code>；holder 会安装一个
+会丢弃流量的 <code>table ip6</code>（<code>infra::ingress_v6_refusal_ruleset</code>），并在容器 netns 内部禁用
+IPv6，除非设置了 <code>DELONIX_ENABLE_IPV6=1</code>（<code>ipv6_sdn_enabled</code>）。</p>
+<p><strong>注意——一个无法 fork 的调用者，启动时是没有监督的。</strong> <code>launch::should_supervise</code>
+要求 <code>detach &amp;&amp; forkable</code>；没有 supervisor，就没有谁是该进程的父进程，真实的退出码
+也就无法被收集。</p>
 </blockquote>
-<h2 id="where-to-start-reading">Where to start reading<a class="hanchor" href="#where-to-start-reading" aria-label="#">#</a></h2>
+<h2 id="where-to-start-reading">从哪里开始阅读<a class="hanchor" href="#where-to-start-reading" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Area</th>
-<th>Start here</th>
+<th>领域</th>
+<th>从这里开始</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>CLI entry and hidden re-exec entry points</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a> (<code>main</code>, <code>run</code>)</td>
+<td>CLI 入口与隐藏的重新执行入口点</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>main.<wbr>rs</code></a>（<code>main</code>、<code>run</code>）</td>
 </tr>
 <tr>
-<td><code>container run</code> end to end</td>
-<td><code>cmd/<wbr>container.<wbr>rs::<wbr>cmd_run</code>, then <code>delonix-compute/<wbr>src/<wbr>{run,network,launch}.<wbr>rs</code></td>
+<td><code>container run</code> 端到端</td>
+<td><code>cmd/<wbr>container.<wbr>rs::<wbr>cmd_run</code>，然后是 <code>delonix-compute/<wbr>src/<wbr>{run,network,launch}.<wbr>rs</code></td>
 </tr>
 <tr>
-<td>Process creation, namespaces, rootfs, seccomp, cgroups</td>
-<td><code>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code> (<code>spawn</code>, <code>container_init</code>, <code>setup_rootfs</code>, <code>setup_cgroup</code>), <code>supervise.rs</code>, <code>launch_spec.rs</code></td>
+<td>进程创建、命名空间、rootfs、seccomp、cgroup</td>
+<td><code>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code>（<code>spawn</code>、<code>container_init</code>、<code>setup_rootfs</code>、<code>setup_cgroup</code>）、<code>supervise.rs</code>、<code>launch_spec.rs</code></td>
 </tr>
 <tr>
-<td>Rootless networking</td>
-<td><code>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code> (<code>ensure_up</code>, <code>control_main</code>, <code>attach_container</code>, <code>publish_port</code>, <code>ingress_table_ruleset</code>, <code>fw_chain_body</code>), <code>pin_userns.rs</code>, <code>ipam.rs</code></td>
+<td>无根网络</td>
+<td><code>delonix-sdn/<wbr>src/<wbr>infra.<wbr>rs</code>（<code>ensure_up</code>、<code>control_main</code>、<code>attach_container</code>、<code>publish_port</code>、<code>ingress_table_ruleset</code>、<code>fw_chain_body</code>）、<code>pin_userns.rs</code>、<code>ipam.rs</code></td>
 </tr>
 <tr>
-<td>Images</td>
+<td>镜像</td>
 <td><code>delonix-oci/<wbr>src/<wbr>{registry,cas,image,overlay,build}.<wbr>rs</code></td>
 </tr>
 <tr>
-<td>VMs</td>
-<td><code>delonix-vm/src/lib.rs</code> (<code>VmBackend</code>, <code>builtin_backends</code>, <code>register_backend</code>, <code>select_backend</code>), <code>cloudinit.rs</code>; <code>cmd/vm.rs</code>, <code>cmd/vmimage.rs</code></td>
+<td>虚拟机</td>
+<td><code>delonix-vm/src/lib.rs</code>（<code>VmBackend</code>、<code>builtin_backends</code>、<code>register_backend</code>、<code>select_backend</code>）、<code>cloudinit.rs</code>；<code>cmd/vm.rs</code>、<code>cmd/vmimage.rs</code></td>
 </tr>
 <tr>
-<td>Declarative apply</td>
-<td><code>delonix-stack/<wbr>src/<wbr>{kinds,reconcile}.<wbr>rs</code>; <code>cmd/stack.rs</code>, <code>cmd/manifest.rs</code></td>
+<td>声明式 apply</td>
+<td><code>delonix-stack/<wbr>src/<wbr>{kinds,reconcile}.<wbr>rs</code>；<code>cmd/stack.rs</code>、<code>cmd/manifest.rs</code></td>
 </tr>
 <tr>
-<td>Records, errors, persisted state</td>
-<td><code>delonix-compute/<wbr>src/<wbr>record.<wbr>rs</code> (<code>Container</code>, <code>Vm</code>), <code>delonix-model/<wbr>src/<wbr>{records,error,exitcode}.<wbr>rs</code>, <code>delonix-state/<wbr>src/<wbr>{store,secret}.<wbr>rs</code></td>
+<td>记录、错误、持久化状态</td>
+<td><code>delonix-compute/<wbr>src/<wbr>record.<wbr>rs</code>（<code>Container</code>、<code>Vm</code>）、<code>delonix-model/<wbr>src/<wbr>{records,error,exitcode}.<wbr>rs</code>、<code>delonix-state/<wbr>src/<wbr>{store,secret}.<wbr>rs</code></td>
 </tr>
 <tr>
 <td>CRI</td>
-<td><code>delonix-cri/<wbr>src/<wbr>lib.<wbr>rs::<wbr>serve_blocking</code>, <code>runtime_svc.rs</code>, <code>runtime_svc/<wbr>lifecycle.<wbr>rs</code></td>
+<td><code>delonix-cri/<wbr>src/<wbr>lib.<wbr>rs::<wbr>serve_blocking</code>、<code>runtime_svc.rs</code>、<code>runtime_svc/<wbr>lifecycle.<wbr>rs</code></td>
 </tr>
 <tr>
-<td>Management API / MCP</td>
-<td><code>delonix-mgmt/src/lib.rs</code>, <code>delonix-mcp/src/lib.rs</code></td>
+<td>管理 API / MCP</td>
+<td><code>delonix-mgmt/src/lib.rs</code>、<code>delonix-mcp/src/lib.rs</code></td>
 </tr>
 <tr>
-<td>Node contract</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
+<td>节点契约</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
 </tr>
 <tr>
-<td>Architecture rules</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, ADR-0040</td>
+<td>架构规则</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>、ADR-0040</td>
 </tr>
 </tbody>
 </table></div>
 <hr />
-<p><strong>Next:</strong> <a href="crates.html">The crates</a> — one section per crate: what it owns, its main types, where to start reading and the traps it has already paid for.</p>
-<nav class="pager"><a href="project-structure.html"><span>← 上一页</span>Project structure</a><a class="next" href="crates.html"><span>下一页 →</span>The crates</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/architecture.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/architecture.md</code></footer>
+<p><strong>下一步：</strong> <a href="crates.html">各个 crate</a>——每个 crate 一段：它拥有什么、主要类型、从哪里开始阅读，
+以及它已经付出过代价学到的陷阱。</p>
+<nav class="pager"><a href="project-structure.html"><span>← 上一页</span>项目结构</a><a class="next" href="crates.html"><span>下一页 →</span>各个 crate</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/architecture.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/architecture.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#engine-identity-and-boundaries">Engine identity and boundaries</a></li>
-<li><a href="#level-1-system-context">Level 1 — System context</a></li>
-<li><a href="#level-2-containers-executables-and-processes">Level 2 — Containers: executables and processes</a><ul>
-<li><a href="#entry-points">Entry points</a></li>
-<li><a href="#one-detached-container">One detached container</a></li>
-<li><a href="#rootless-network-infrastructure">Rootless network infrastructure</a></li>
-<li><a href="#process-table">Process table</a></li>
-<li><a href="#one-set-of-operations-several-interfaces">One set of operations, several interfaces</a></li>
+<li><a href="#engine-identity-and-boundaries">引擎的身份与边界</a></li>
+<li><a href="#level-1-system-context">第 1 层——系统上下文</a></li>
+<li><a href="#level-2-containers-executables-and-processes">第 2 层——容器：可执行文件与进程</a><ul>
+<li><a href="#entry-points">入口点</a></li>
+<li><a href="#one-detached-container">一个后台（detached）容器</a></li>
+<li><a href="#rootless-network-infrastructure">无根网络基础设施</a></li>
+<li><a href="#process-table">进程表</a></li>
+<li><a href="#one-set-of-operations-several-interfaces">一套操作，多个接口</a></li>
 </ul>
 </li>
-<li><a href="#level-3-components-crates-by-layer">Level 3 — Components: crates by layer</a><ul>
-<li><a href="#layers-and-the-allowed-direction">Layers and the allowed direction</a></li>
-<li><a href="#where-the-restructuring-stands">Where the restructuring stands</a></li>
-<li><a href="#records-node-helpers-and-persisted-state-after-406">Records, node helpers and persisted state, after #406</a></li>
-<li><a href="#compute-ports-and-the-adapters-behind-them">Compute ports and the adapters behind them</a></li>
-<li><a href="#interfaces-and-binaries">Interfaces and binaries</a></li>
-<li><a href="#every-crate-edge">Every crate edge</a></li>
-<li><a href="#how-the-crates-communicate">How the crates communicate</a></li>
+<li><a href="#level-3-components-crates-by-layer">第 3 层——组件：按层划分的 crate</a><ul>
+<li><a href="#layers-and-the-allowed-direction">各层及允许的方向</a></li>
+<li><a href="#where-the-restructuring-stands">重构现状</a></li>
+<li><a href="#records-node-helpers-and-persisted-state-after-406">#406 之后的记录、节点辅助函数与持久化状态</a></li>
+<li><a href="#compute-ports-and-the-adapters-behind-them">计算端口及其背后的适配器</a></li>
+<li><a href="#interfaces-and-binaries">接口与二进制文件</a></li>
+<li><a href="#every-crate-edge">每一条 crate 边</a></li>
+<li><a href="#how-the-crates-communicate">crate 之间如何通信</a></li>
 </ul>
 </li>
-<li><a href="#state-on-disk">State on disk</a></li>
-<li><a href="#level-4-two-flows-as-sequences">Level 4 — Two flows, as sequences</a><ul>
-<li><a href="#container-run-d-net-web-p-808080-nginx-rootless">container run -d --net web -p 8080:80 nginx, rootless</a></li>
-<li><a href="#cri-runpodsandbox-createcontainer-startcontainer">CRI: RunPodSandbox → CreateContainer → StartContainer</a></li>
+<li><a href="#state-on-disk">磁盘上的状态</a></li>
+<li><a href="#level-4-two-flows-as-sequences">第 4 层——作为序列的两条流程</a><ul>
+<li><a href="#container-run-d-net-web-p-808080-nginx-rootless">container run -d --net web -p 8080:80 nginx，无根模式</a></li>
+<li><a href="#cri-runpodsandbox-createcontainer-startcontainer">CRI：RunPodSandbox → CreateContainer → StartContainer</a></li>
 </ul>
 </li>
-<li><a href="#known-limitations">Known limitations</a></li>
-<li><a href="#where-to-start-reading">Where to start reading</a></li>
+<li><a href="#known-limitations">已知限制</a></li>
+<li><a href="#where-to-start-reading">从哪里开始阅读</a></li>
 </ul>
 </div>
 </aside>

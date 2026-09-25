@@ -209,14 +209,14 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a class="on" aria-current="page" href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Referência</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/environment-variables.html">Ler a página em inglês</a></span></div><h1 id="variaveis-de-ambiente-delonix_">Variáveis de ambiente (<code>DELONIX_*</code>)</h1>
+<h1 id="environment-variables-delonix_">Variáveis de ambiente (<code>DELONIX_*</code>)</h1>
 <p><strong>Antes de leres:</strong> <a href="build-and-test.html#isolating-the-engines-state">Isolar o estado do motor</a> em Clonar, construir e testar.</p>
 <p>Esta página lista todos os nomes <code>DELONIX_*</code> que aparecem no código do motor, com o sítio onde são
 lidos, o que mudam e se alguma vez os deves definir. É uma referência: lê a secção que corresponde
 ao que estás a fazer, não a página inteira. Depois dela consegues isolar uma corrida, ligar os
 diagnósticos de que precisas, e reconhecer as variáveis que baixam uma fronteira de segurança
 antes de definires uma.</p>
-<h2 id="como-ler-esta-pagina">Como ler esta página<a class="hanchor" href="#como-ler-esta-pagina" aria-label="#">#</a></h2>
+<h2 id="how-to-read-this-page">Como ler esta página<a class="hanchor" href="#how-to-read-this-page" aria-label="#">#</a></h2>
 <p>Cada linha das tabelas de variáveis tem cinco colunas:</p>
 <ul>
 <li><strong>Lida por</strong> — o crate ou binário e o <code>path:symbol</code> onde o valor é lido (ou escrito).
@@ -240,7 +240,7 @@ verificação continue exacta.</p>
 <p>As variáveis usadas apenas por scripts fora desse âmbito — por exemplo <code>DELONIX_CHAOS_DIR</code> e a
 família <code>DELONIX_CHAOS_TRUENAS_*</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/chaos.sh" target="_blank" rel="noopener"><code>scripts/chaos.sh</code></a> — estão documentadas no cabeçalho de cada
 script e no <a href="build-and-test.html">Clonar, compilar e testar</a>, não aqui.</p>
-<h3 id="precedencia">Precedência<a class="hanchor" href="#precedencia" aria-label="#">#</a></h3>
+<h3 id="precedence">Precedência<a class="hanchor" href="#precedence" aria-label="#">#</a></h3>
 <p>Onde o código tem uma regra de precedência, ela é normalmente <strong>flag &gt; ambiente &gt; omissão</strong>; a tabela mostra cada caso tal como o código o resolve, incluindo os que têm um nível a mais ou nenhuma flag:</p>
 <div class="tablewrap"><table>
 <thead>
@@ -302,7 +302,7 @@ script e no <a href="build-and-test.html">Clonar, compilar e testar</a>, não aq
 com <code>exec</code> <strong>das duas formas</strong>, como flags e como a variável correspondente
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/serve.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/serve.rs:run</code></a>), para que um servidor de uma release anterior que
 só lê as variáveis receba mesmo assim o valor.</p>
-<h3 id="isolar-uma-corrida-de-desenvolvimento">Isolar uma corrida de desenvolvimento<a class="hanchor" href="#isolar-uma-corrida-de-desenvolvimento" aria-label="#">#</a></h3>
+<h3 id="isolating-a-development-run">Isolar uma corrida de desenvolvimento<a class="hanchor" href="#isolating-a-development-run" aria-label="#">#</a></h3>
 <p>Antes de correres qualquer coisa além de <code>--help</code> numa máquina que também corre workloads Delonix,
 aponta as duas localizações de estado para um directório de rascunho:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">export DELONIX_ROOT=$HOME/scratch/dlx/root        # records, images, networks, IPAM, volumes, pidfiles
@@ -316,7 +316,7 @@ porque o caminho de um socket está limitado a cerca de 108 bytes e o <code>DELO
 arbitrariamente profundo. Definir só uma das duas pode deixar dois state roots a partilhar o mesmo
 conjunto de sockets. A história completa, e como desmontar a infra isolada, está em
 <a href="build-and-test.html#isolating-the-engines-state">Isolar o estado do motor</a>.</p>
-<h2 id="configuracao-do-dia-a-dia">Configuração do dia-a-dia<a class="hanchor" href="#configuracao-do-dia-a-dia" aria-label="#">#</a></h2>
+<h2 id="everyday-configuration">Configuração do dia-a-dia<a class="hanchor" href="#everyday-configuration" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -491,7 +491,7 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 </tr>
 </tbody>
 </table></div>
-<h2 id="escapatorias-de-rede-e-de-seguranca">Escapatórias de rede e de segurança<a class="hanchor" href="#escapatorias-de-rede-e-de-seguranca" aria-label="#">#</a></h2>
+<h2 id="networking-and-security-escape-hatches">Escapatórias de rede e de segurança<a class="hanchor" href="#networking-and-security-escape-hatches" aria-label="#">#</a></h2>
 <p><strong>Todas as variáveis desta secção baixam uma fronteira.</strong> Cada uma regista um <code>SECURITY WARNING</code> (ou
 um aviso) quando produz efeito. Existem para depuração e para opções de saída explícitas e
 informadas; nenhuma pertence a uma configuração de produção. Lê a secção do <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> indicada
@@ -579,7 +579,7 @@ antes de usares uma delas.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="build-e-imagens">Build e imagens<a class="hanchor" href="#build-e-imagens" aria-label="#">#</a></h2>
+<h2 id="build-and-images">Build e imagens<a class="hanchor" href="#build-and-images" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -621,7 +621,7 @@ antes de usares uma delas.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="afinacao-de-recursos-do-cloud-hypervisor-e-das-vms">Afinação de recursos do Cloud Hypervisor e das VMs<a class="hanchor" href="#afinacao-de-recursos-do-cloud-hypervisor-e-das-vms" aria-label="#">#</a></h2>
+<h2 id="cloud-hypervisor-and-vm-resource-tuning">Afinação de recursos do Cloud Hypervisor e das VMs<a class="hanchor" href="#cloud-hypervisor-and-vm-resource-tuning" aria-label="#">#</a></h2>
 <p>Os tectos do libvirt abaixo são escritos no XML de domínio gerado
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs:libvirt_domain_xml</code></a>); não mudam um domínio que já exista
 até ele voltar a arrancar.</p>
@@ -687,7 +687,7 @@ até ele voltar a arrancar.</p>
 </tr>
 </tbody>
 </table></div>
-<h3 id="orcamento-de-recursos-dos-containers">Orçamento de recursos dos containers<a class="hanchor" href="#orcamento-de-recursos-dos-containers" aria-label="#">#</a></h3>
+<h3 id="container-resource-budget">Orçamento de recursos dos containers<a class="hanchor" href="#container-resource-budget" aria-label="#">#</a></h3>
 <p>Estas afinam as omissões e o tecto agregado que o motor aplica aos containers
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>).</p>
 <div class="tablewrap"><table>
@@ -825,13 +825,85 @@ impede os outros comandos. Contexto: <a class="src" href="https://github.com/ang
 <td>1–4094. Fora do intervalo é um <strong>erro</strong>, nunca descartado.</td>
 <td></td>
 </tr>
+<tr>
+<td><code>DELONIX_PROXMOX_CA_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>Um certificado CA (PEM) a confiar para o nó, além das raízes do sistema.</td>
+<td>Caminho para um ficheiro PEM; ilegível é um <strong>erro</strong>.</td>
+<td>A forma de verificar um nó cujo certificado foi assinado por uma CA interna, em vez de <code>DELONIX_PROXMOX_INSECURE_TLS</code>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TRACE_ROUTES</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code> (lida uma vez, entregue ao cliente como <code>ClientOptions::<wbr>trace_routes</code>; a constante <code>TRACE_ROUTES_ENV</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>src/<wbr>lib.<wbr>rs</code></a> nomeia-a) e <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:backend</code></a> (a suite ao vivo, cuja corrida está commitada como <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/proxmox/trace-9.2.2.routes" target="_blank" rel="noopener"><code>docs/<wbr>proxmox/<wbr>trace-9.<wbr>2.<wbr>2.<wbr>routes</code></a>)</td>
+<td>Acrescenta <code>METHOD /path</code> de cada pedido a este ficheiro — o numerador da matriz de cobertura (ADR-0049).</td>
+<td>Caminho para um ficheiro; vazio = desligado.</td>
+<td>Alimenta-o ao <code>scripts/<wbr>proxmox_api_inventory.<wbr>py --trace</code> para marcar rotas <code>supported+tested</code>.</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="opnsense">OPNsense<a class="hanchor" href="#opnsense" aria-label="#">#</a></h3>
+<p>O <code>GatewayProvider</code> para um appliance OPNsense real (<code>kind: NetworkGateway</code>, ADR-0051), registado
+da mesma forma que o backend Proxmox acima e lido por <code>cmd::gatewayproviders</code>.</p>
+<div class="tablewrap"><table>
+<thead>
+<tr>
+<th>Variável</th>
+<th>Lida por</th>
+<th>Finalidade</th>
+<th>Valores / omissão</th>
+<th>Notas</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>DELONIX_OPNSENSE_URL</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td>Endpoint da API do appliance. Defini-lo é o que activa o provider.</td>
+<td><code>https://&lt;host&gt;</code>.</td>
+<td>Exige uma credencial.</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_CREDENTIAL</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code></td>
+<td>Nome de um <code>kind: Secret</code> que guarda a credencial.</td>
+<td>Segredo com os campos <code>key</code>+<code>secret</code> — um par gerado de chave/segredo de API, nunca o utilizador/password de uma conta da GUI (ADR-0051 Fase 0: esses são recusados pela API).</td>
+<td>Verificada <strong>primeiro</strong>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_KEY</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code></td>
+<td>Chave de API.</td>
+<td></td>
+<td>Usada com <code>DELONIX_OPNSENSE_SECRET</code>; verificada depois do <code>kind: Secret</code>.</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_SECRET</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code> (via <code>credential_value</code>)</td>
+<td>Segredo de API.</td>
+<td>Prefere <code>DELONIX_OPNSENSE_SECRET_FILE</code> (um caminho <code>chmod 600</code>).</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_INSECURE_TLS</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td>Salta a verificação do certificado TLS do appliance.</td>
+<td><code>1</code>, <code>true</code> ou <code>yes</code> → salta; por omissão verifica.</td>
+<td>Um OPNsense de fábrica serve um certificado self-signed (medido ao vivo, ADR-0051 Fase 0). <strong>Outra máquina a responder em nome do appliance recebe a credencial.</strong> Só opt-in.</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_CA_FILE</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td>Um certificado CA (PEM) a confiar para o appliance, além das raízes do sistema.</td>
+<td>Caminho para um ficheiro PEM; ilegível é um <strong>erro</strong>.</td>
+<td>Em vez de <code>DELONIX_OPNSENSE_INSECURE_TLS</code>.</td>
+</tr>
 </tbody>
 </table></div>
 <h3 id="truenas">TrueNAS<a class="hanchor" href="#truenas" aria-label="#">#</a></h3>
 <p>O provisionador TrueNAS (<code>kind: Volume</code> com <code>spec.provision.truenas</code>) obtém o seu alvo do manifesto
 e de um <code>kind: Secret</code>, não de variáveis de ambiente. Os únicos nomes <code>DELONIX_TRUENAS_*</code> são
 definições de teste — ver <a href="#test-only">Só para testes</a>.</p>
-<h2 id="observabilidade">Observabilidade<a class="hanchor" href="#observabilidade" aria-label="#">#</a></h2>
+<h2 id="observability">Observabilidade<a class="hanchor" href="#observability" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
@@ -857,9 +929,16 @@ definições de teste — ver <a href="#test-only">Só para testes</a>.</p>
 <td><code>host:port</code>, por exemplo <code>127.0.0.1:9100</code>. Sem valor → sem listener.</td>
 <td>Um listener TCP: faz bind ao loopback, a menos que as métricas devam ser alcançáveis pela rede.</td>
 </tr>
+<tr>
+<td><code>DELONIX_WALK_THREADS</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-volume/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-volume/<wbr>src/<wbr>lib.<wbr>rs:walk_threads</code></a> (a varredura de disco por trás do <code>system df</code>, do uso de volumes e da quota rootless)</td>
+<td>Define quantos workers a varredura paralela de directórios usa.</td>
+<td>Um inteiro positivo; <code>1</code> → a varredura sequencial. Não definida → o número de CPUs, com tecto.</td>
+<td>As varreduras paralela e sequencial dão o MESMO total (testado com hardlinks vistos por workers diferentes); a variável existe para o provar num host dado, e como escapatória se um sistema de ficheiros se comportar mal sob <code>readdir</code> concorrente.</td>
+</tr>
 </tbody>
 </table></div>
-<h2 id="definidas-pelo-proprio-motor-internas">Definidas pelo próprio motor / internas<a class="hanchor" href="#definidas-pelo-proprio-motor-internas" aria-label="#">#</a></h2>
+<h2 id="set-by-the-engine-itself-internal">Definidas pelo próprio motor / internas<a class="hanchor" href="#set-by-the-engine-itself-internal" aria-label="#">#</a></h2>
 <p><strong>Não as definas.</strong> O motor escreve-as nos processos que arranca; defini-las à mão faz um comando
 normal comportar-se como uma passagem interna.</p>
 <div class="tablewrap"><table>
@@ -924,7 +1003,7 @@ normal comportar-se como uma passagem interna.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="em-tempo-de-build">Em tempo de build<a class="hanchor" href="#em-tempo-de-build" aria-label="#">#</a></h2>
+<h2 id="build-time">Em tempo de build<a class="hanchor" href="#build-time" aria-label="#">#</a></h2>
 <p>Valores de compilação: são fixados quando o binário é compilado e não se mudam definindo uma
 variável quando o programa corre.</p>
 <div class="tablewrap"><table>
@@ -982,7 +1061,7 @@ variável quando o programa corre.</p>
 </tr>
 </tbody>
 </table></div>
-<h2 id="so-para-testes">Só para testes<a class="hanchor" href="#so-para-testes" aria-label="#">#</a></h2>
+<h2 id="test-only">Só para testes<a class="hanchor" href="#test-only" aria-label="#">#</a></h2>
 <p>Estas são lidas apenas por testes. Sem elas, os testes ao vivo <strong>saltam</strong> e imprimem
 <code>SKIP: … is not set</code> (um teste ao vivo que passasse em silêncio sem o seu alvo não provaria nada).</p>
 <div class="tablewrap"><table>
@@ -1032,6 +1111,27 @@ variável quando o programa corre.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_BACKUP_STORAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Storage onde o arquivo de backup aterra — o nó pode não aceitar conteúdo de backup no storage do disco (uma pool thin-LVM não pode).</td>
+<td>Omissão: igual a <code>DELONIX_PROXMOX_TEST_STORAGE</code>.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_MOVE_STORAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Um SEGUNDO storage para onde o <code>move_disk</code> move o disco de arranque da VM de teste — o nó recusa um move para o mesmo storage com o mesmo formato, por isso tem de ser mesmo uma pool diferente.</td>
+<td>Omissão <code>local</code> (tem de ter <code>content=images</code> activado).</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_CALLBACK_ADDR</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node</code></a></td>
+<td>O endereço em que o NÓ alcança este host: o teste arranca um servidor HTTP stub e dá ao nó <code>http:/<wbr>/<wbr>&lt;addr&gt;:&lt;port&gt;/<wbr>…</code> como o URL de um controlador IPAM e de um controlador DNS, porque o nó verifica os dois chamando-lhes.</td>
+<td>Um IP que o nó consegue rotear (<code>192.168.122.1</code> para um nó de laboratório libvirt-NAT).</td>
+<td>Sem ela, a metade do controlador desse teste é saltada; o resto continua a correr.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_AGENT_VMID</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:o_ip_vem_do_agente_de_um_convidado_a_serio</code></a></td>
 <td>Uma VM existente, com o QEMU guest agent a correr, cujo IP o teste lê.</td>
@@ -1074,6 +1174,27 @@ variável quando o programa corre.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_OPNSENSE_TEST_URL</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>Appliance OPNsense contra o qual correr os testes ao vivo do cliente.</td>
+<td><code>https://&lt;host&gt;</code>.</td>
+<td>Activa os testes. Criam e removem um alias e uma regra, e depois confirmam que o appliance fica limpo.</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_TEST_KEY</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>Chave de API.</td>
+<td>Obrigatória.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_TEST_SECRET</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-opnsense/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-opnsense/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>Segredo de API.</td>
+<td>Obrigatório.</td>
+<td>A verificação TLS está desligada nestes testes.</td>
+</tr>
+<tr>
 <td><code>DELONIX_UPDATE_FIXTURES</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/tests/advisor_fixtures.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>advisor_fixtures.<wbr>rs:goldens_match_the_rules_as_they_are_today</code></a></td>
 <td>Reescreve as fixtures golden do advisor em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux/tests/fixtures/advisor" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>tests/<wbr>fixtures/<wbr>advisor/<wbr></code></a> em vez de comparar com elas.</td>
@@ -1097,7 +1218,7 @@ DELONIX_TRUENAS_TEST_POOL=tank \
 
 DELONIX_UPDATE_FIXTURES=1 cargo test -p delonix-linux --test advisor_fixtures
 </code></pre></div>
-<h2 id="nomes-que-parecem-variaveis-mas-nao-sao">Nomes que parecem variáveis mas não são<a class="hanchor" href="#nomes-que-parecem-variaveis-mas-nao-sao" aria-label="#">#</a></h2>
+<h2 id="names-that-look-like-variables-but-are-not">Nomes que parecem variáveis mas não são<a class="hanchor" href="#names-that-look-like-variables-but-are-not" aria-label="#">#</a></h2>
 <p>Alguns nomes <code>DELONIX_*</code> aparecem no código sem serem lidos do ambiente de nenhum processo. Estão
 excluídos da verificação acima por <code>NOT_ENV</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>, cada um com a sua razão, e
 nunca precisas de os definir:</p>
@@ -1120,28 +1241,29 @@ nunca precisas de os definir:</p>
 </div></main>
 <aside class="toc"><p class="ttitle">Nesta página</p><div class="toc">
 <ul>
-<li><a href="#como-ler-esta-pagina">Como ler esta página</a><ul>
-<li><a href="#precedencia">Precedência</a></li>
-<li><a href="#isolar-uma-corrida-de-desenvolvimento">Isolar uma corrida de desenvolvimento</a></li>
+<li><a href="#how-to-read-this-page">Como ler esta página</a><ul>
+<li><a href="#precedence">Precedência</a></li>
+<li><a href="#isolating-a-development-run">Isolar uma corrida de desenvolvimento</a></li>
 </ul>
 </li>
-<li><a href="#configuracao-do-dia-a-dia">Configuração do dia-a-dia</a></li>
-<li><a href="#escapatorias-de-rede-e-de-seguranca">Escapatórias de rede e de segurança</a></li>
-<li><a href="#build-e-imagens">Build e imagens</a></li>
-<li><a href="#afinacao-de-recursos-do-cloud-hypervisor-e-das-vms">Afinação de recursos do Cloud Hypervisor e das VMs</a><ul>
-<li><a href="#orcamento-de-recursos-dos-containers">Orçamento de recursos dos containers</a></li>
+<li><a href="#everyday-configuration">Configuração do dia-a-dia</a></li>
+<li><a href="#networking-and-security-escape-hatches">Escapatórias de rede e de segurança</a></li>
+<li><a href="#build-and-images">Build e imagens</a></li>
+<li><a href="#cloud-hypervisor-and-vm-resource-tuning">Afinação de recursos do Cloud Hypervisor e das VMs</a><ul>
+<li><a href="#container-resource-budget">Orçamento de recursos dos containers</a></li>
 </ul>
 </li>
 <li><a href="#providers">Providers</a><ul>
 <li><a href="#proxmox-ve">Proxmox VE</a></li>
+<li><a href="#opnsense">OPNsense</a></li>
 <li><a href="#truenas">TrueNAS</a></li>
 </ul>
 </li>
-<li><a href="#observabilidade">Observabilidade</a></li>
-<li><a href="#definidas-pelo-proprio-motor-internas">Definidas pelo próprio motor / internas</a></li>
-<li><a href="#em-tempo-de-build">Em tempo de build</a></li>
-<li><a href="#so-para-testes">Só para testes</a></li>
-<li><a href="#nomes-que-parecem-variaveis-mas-nao-sao">Nomes que parecem variáveis mas não são</a></li>
+<li><a href="#observability">Observabilidade</a></li>
+<li><a href="#set-by-the-engine-itself-internal">Definidas pelo próprio motor / internas</a></li>
+<li><a href="#build-time">Em tempo de build</a></li>
+<li><a href="#test-only">Só para testes</a></li>
+<li><a href="#names-that-look-like-variables-but-are-not">Nomes que parecem variáveis mas não são</a></li>
 </ul>
 </div>
 </aside>

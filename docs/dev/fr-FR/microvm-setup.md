@@ -1,4 +1,4 @@
-<!-- translated-from: microvm-setup.md sha256:10d65caba96f8246274f99b813161fdd1de0d0b5d43e81ebe5352b2b5f524247 -->
+<!-- translated-from: microvm-setup.md sha256:5e00934168ce8abaeb7e284855fff4df09522a9379b0b302800bcea4178b5543 -->
 # Construire des microVMs
 
 **Avant de lire :** [Préparer votre environnement](environment.md), [Cloner, compiler et tester](build-and-test.md), la [section virtualisation du manuel de cloud native](cloud-native-primer.md#47-virtualization-kvm-virtio-cloud-hypervisor-libvirt-cloud-init), et la Partie 2 de [Delonixfile et VMfile](delonixfile-and-vmfile.md#part-2-vmfile).

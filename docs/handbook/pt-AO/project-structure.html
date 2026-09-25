@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Arquitectura</p>
-<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/project-structure.html">Ler a página em inglês</a></span></div><h1 id="project-structure">Estrutura do projecto</h1>
+<h1 id="project-structure">Estrutura do projecto</h1>
 <p><strong>Antes de leres:</strong> <a href="build-and-test.html">Clonar, compilar e testar</a> — tens uma checkout que compila, e sabes que gates existem.</p>
 <p>Esta página é o mapa do repositório: o que é cada ficheiro e directório de topo, quem o muda e
 quando, e que partes são <strong>geradas</strong> e nunca devem ser editadas à mão. Lê-a depois de
@@ -504,6 +504,12 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 <td>Quem trabalha em compatibilidade com o CRI ou a API Docker.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener"><code>docs/cri-conformance.md</code></a>, <a href="build-and-test.html">Clonar, compilar e testar</a></td>
 </tr>
+<tr>
+<td><code>fuzz/</code></td>
+<td>Alvos <code>cargo-fuzz</code> sobre parsers escritos à mão alimentados com input não confiável (um <code>Dockerfile</code> de um repo clonado, uma string de referência de imagem). Tem o seu próprio <code>[workspace]</code>, para as flags de build do sanitizer nunca tocarem no principal; o job de CI <code>fuzz</code> corre cada alvo por 60s a cada push/PR.</td>
+<td>Quem acrescentar um parser escrito à mão para input controlado externamente.</td>
+<td>M04 de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/roadmap/13-improvements-traceability.md" target="_blank" rel="noopener"><code>docs/<wbr>roadmap/<wbr>13-improvements-traceability.<wbr>md</code></a></td>
+</tr>
 </tbody>
 </table></div>
 <h2 id="documentation-docs">Documentação (docs/…)<a class="hanchor" href="#documentation-docs" aria-label="#">#</a></h2>
@@ -571,6 +577,12 @@ HTML (<code>index.html</code>, <code>cheatsheet.html</code>, <code>estrutura.htm
 <td>Este manual como um site (<code>en/</code>, <code>pt-AO/</code>, <code>fr-FR/</code>, <code>zh-CN/</code>, <code>index.html</code>), <strong>gerado</strong> por <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/<wbr>dev_docs_site.<wbr>py</code></a> a partir de <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>. Nunca edites o HTML.</td>
 <td>Regenerado com <code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code> depois de uma mudança em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>, e no momento da release.</td>
 <td><a href="publishing-docs.html">Publicar a documentação</a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
+<td>A matriz de cobertura da API do Proxmox VE (ADR-0049): <code>api-&lt;ver&gt;.<wbr>routes.<wbr>json</code>, o schema de uma release nomeada extraído do <code>apidoc.js</code> de um nó com a sua proveniência (data de obtenção, sha256), e <code>matrix-&lt;ver&gt;.md</code>, <strong>gerada</strong> a partir dele e das rotas que o crate do provider chama. Nunca editar a matriz.</td>
+<td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code> depois de uma rota ser acrescentada ao <code>delonix-proxmox</code>; o schema só quando uma release nova é medida.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a></td>
@@ -713,6 +725,12 @@ espera que a CI falhe se editares a saída à mão.</p>
 <td>só as regiões <code>dev-docs</code></td>
 <td><code>python3 scripts/<wbr>dev_docs.<wbr>py</code></td>
 <td>job <code>arch fitness</code>, passo <code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code>; também actualizado pelo <code>release.yml</code></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
+<td><code>matrix-9.2.2.md</code></td>
+<td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code></td>
+<td>job <code>script tests</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/test_proxmox_api_inventory.py" target="_blank" rel="noopener"><code>scripts/<wbr>test_proxmox_api_inventory.<wbr>py</code></a> (<code>test_the_committed_matrix_is_up_to_date</code>)</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>

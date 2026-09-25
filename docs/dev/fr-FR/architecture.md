@@ -1,4 +1,4 @@
-<!-- translated-from: architecture.md sha256:ce0b4cc047eb967f418349a1b81b6096f61bd47fdc80136d63667a1c6ea1c28e -->
+<!-- translated-from: architecture.md sha256:b386f534ba4f3a6df4c7e43ccb89095987972faa8be57403b9127c8a62dd2551 -->
 # Architecture
 
 **Avant de lire :** [Structure du projet](project-structure.md) (où se trouvent les choses), [IaaS et cloud native](iaas-and-cloud-native.md) (la place et les principes du moteur) et [Initiation au cloud native](cloud-native-primer.md) (les mécanismes que les figures nomment).
