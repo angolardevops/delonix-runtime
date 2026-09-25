@@ -209,8 +209,9 @@ Written 2026-09-25, from what the discovery measured:
   resources would contradict D3; it waits for D3 to be revisited by its own decision.
 - **An engine verb that names the target node.** "No implicit node selection" means the caller
   says where the VM goes; the backend never picks. `vm migrate --host` (ADR-0031) moves a VM
-  between two `delonix` hosts, which is a different operation — whether a node move is a flag
-  of that verb or a verb of its own is a decision to write down before code.
+  between two `delonix` hosts, which is a different operation. **Written down in ADR-0053
+  (Proposed):** a verb of its own, `vm move --node <target> [--live]`, and each VM addressed on
+  the node its handle names — which also finds a VM moved from the Proxmox UI.
 - **A lab cluster, never `ngola-lda`.** Two Proxmox nodes joined in a cluster (`pvecm`), quorate,
   with a storage that is SHARED and holds VM disks (NFS or Ceph RBD) — the condition the
   discovery's migration verdict checks. On 2026-09-25 `ngola-lda` has no such storage (its only
