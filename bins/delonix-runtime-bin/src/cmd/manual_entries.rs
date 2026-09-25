@@ -2415,6 +2415,14 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm pause", "describe"],
     },
     Entry {
+        path: "vm cloud-init",
+        group: "Lifecycle",
+        examples: &[
+            ("give a stopped VM a new hostname and replace its SSH keys, for its next boot", "delonix vm cloud-init web-1 --hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub"),
+        ],
+        see_also: &["vm stop", "vm start", "vm resize"],
+    },
+    Entry {
         path: "vm resize",
         group: "Lifecycle",
         examples: &[

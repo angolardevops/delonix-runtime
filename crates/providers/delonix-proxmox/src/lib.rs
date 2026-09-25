@@ -1898,6 +1898,88 @@ impl Client {
         )
     }
 
+    /// Writes a cloud-init intent into a VM's config and bakes it into the
+    /// drive — `vm cloud-init` on this backend — then proves the guest will
+    /// read it from the node's OWN rendering, never from the call's answer.
+    ///
+    /// `POST …/config` (task path) with `ciuser` and `sshkeys` (percent-encoded
+    /// by us, see [`cloud_init_form`]) and `name` for the hostname — the node's
+    /// cloud-init reads the VM name as the hostname, the same thing create and
+    /// `configure_clone` do; then [`Self::cloudinit_regenerate`]. Then read
+    /// back: [`Self::cloudinit_pending`] must have nothing pending, and
+    /// [`Self::cloudinit_dump`] of the user-data must carry the hostname and
+    /// every key. A key missing from the rendering is an unexpected answer,
+    /// whatever the writes said.
+    pub fn update_cloud_init(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        vm_name: &str,
+        intent: &delonix_vm::CloudInitIntent,
+    ) -> Result<()> {
+        let hostname = intent
+            .hostname
+            .as_deref()
+            .filter(|h| !h.is_empty())
+            .unwrap_or(vm_name)
+            .to_string();
+        let user = intent
+            .ci_user
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .unwrap_or(delonix_vm::cloudinit::DEFAULT_CI_USER)
+            .to_string();
+        let keys = urlencode(&intent.ssh_keys.join("\n"));
+        let mut form: Vec<(&str, &str)> =
+            vec![("name", hostname.as_str()), ("ciuser", user.as_str())];
+        if !intent.ssh_keys.is_empty() {
+            form.push(("sshkeys", keys.as_str()));
+        }
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        self.cloudinit_regenerate(ledger, vmid)?;
+        let left: Vec<String> = self
+            .cloudinit_pending(vmid)?
+            .into_iter()
+            .filter(|k| k.is_pending())
+            .map(|k| k.key)
+            .collect();
+        if !left.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid}'s cloud-init drive still has pending keys after regenerate: {}",
+                left.join(", ")
+            )));
+        }
+        let user_data = self.cloudinit_dump(vmid, "user")?;
+        let mut missing: Vec<String> = Vec::new();
+        if !user_data.contains(&format!("hostname: {hostname}")) {
+            missing.push(format!("hostname {hostname}"));
+        }
+        for (i, k) in intent.ssh_keys.iter().enumerate() {
+            if !user_data.contains(k.as_str()) {
+                missing.push(format!("ssh key #{}", i + 1));
+            }
+        }
+        if !missing.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid}'s rendered user-data does not carry {}",
+                missing.join(", ")
+            )));
+        }
+        Ok(())
+    }
+
     pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
         self.task(
             ledger,
@@ -4635,6 +4717,33 @@ impl VmBackend for ProxmoxBackend {
             .resize_hardware(&ledger, vmid, vcpus, memory_mib)?)
     }
 
+    /// `vm cloud-init`: the engine has checked its record; the node is asked
+    /// too, because a VM started from the node's own UI would read the old
+    /// drive until its next reboot. A task still in flight is waited on first.
+    fn update_cloud_init(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        intent: &delonix_vm::CloudInitIntent,
+    ) -> delonix_model::Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        let ps = self.client.power_state(vmid)?;
+        if ps.status != "stopped" {
+            return Err(delonix_vm::Error::CloudInitNeedsStopped(format!(
+                "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+                 is stopped: the guest reads cloud-init at boot — stop it first (`delonix vm \
+                 stop {}`)",
+                vm.name, ps.status, vm.name
+            ))
+            .into());
+        }
+        Ok(self
+            .client
+            .update_cloud_init(&ledger, vmid, &vm.name, intent)?)
+    }
+
     /// Starts the VM this record already names, instead of creating another.
     ///
     /// Without this, `vm start` on a stopped Proxmox VM went through `boot`,
@@ -4962,7 +5071,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmCpuModel => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
         C::VmCpuPinning => S::UnsupportedByProvider { reason: "refused by name" },
         C::VmHugepages => S::UnsupportedByProvider { reason: "refused by name" },
-        C::VmCloudInit => S::Partial { detail: "hostname/user/ssh keys map to the node's cloud-init keys through `config`; a `seed` file is refused" },
+        C::VmCloudInit => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it" },
         C::VmRestartPolicyNative => S::UnsupportedByProvider { reason: "the engine's supervisor is not on the node; no policy is set there" },
         C::VmNamespaceIsolation => S::UnsupportedByProvider { reason: "refused before any API call (`vm_namespace_supported`)" },
         C::VmAntispoof => S::RequiresExternalComponent { component: "the node's firewall (`…/firewall`), excluded as administration (ADR-0049 D3)" },

@@ -1379,3 +1379,46 @@ fn extra_devices_on_a_template_clone_are_refused_before_any_request() {
         node.log()
     );
 }
+
+// ===========================================================================
+// Cloud-init change: the node's rendering is the proof, not the writes
+// ===========================================================================
+
+/// The config write and the regenerate both answer `null` (done), nothing is
+/// pending — and the node's rendered user-data does not carry the new key.
+/// That is an unexpected answer that names what is missing, never a success.
+#[test]
+fn a_cloud_init_change_the_rendering_does_not_carry_is_an_error() {
+    let node = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/config", ok_data("null")),
+        ("PUT", "/nodes/pve/qemu/100/cloudinit", ok_data("null")),
+        ("GET", "/nodes/pve/qemu/100/cloudinit", ok_data("[]")),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/cloudinit/dump",
+            ok_data(r##""#cloud-config\nhostname: web-1\nuser: ops\n""##),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let intent = delonix_vm::CloudInitIntent {
+        hostname: Some("web-1".into()),
+        ci_user: Some("ops".into()),
+        ssh_keys: vec!["ssh-ed25519 AAAA k1".into()],
+    };
+    let err = client
+        .update_cloud_init(&Ledger::at(dir.path()), 100, "web-1", &intent)
+        .expect_err("a key the rendering lacks is not applied");
+    assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
+    assert!(err.to_string().contains("ssh key #1"), "{err}");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == "/nodes/pve/qemu/100/config")
+        .unwrap();
+    assert!(
+        sent.body.starts_with("name=web-1&ciuser=ops&sshkeys="),
+        "{}",
+        sent.body
+    );
+}
