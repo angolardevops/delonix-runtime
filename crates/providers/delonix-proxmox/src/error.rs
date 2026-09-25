@@ -137,6 +137,16 @@ pub enum Error {
     #[error("{0}")]
     InvalidCidr(String),
 
+    /// A plain address an SDN field takes — a DHCP range end, a DNS server,
+    /// an IPAM reservation, a fabric node's router address — or a MAC, that
+    /// does not parse as one. Its own variant, next to [`Error::InvalidCidr`],
+    /// for the same reason that one is next to [`Error::InvalidSdnId`]: an
+    /// address without a prefix is a different shape from a network, and a
+    /// message that called a MAC a "subnet CIDR" would send the reader to
+    /// the wrong field.
+    #[error("{0}")]
+    InvalidSdnAddress(String),
+
     /// A `VmConfig` field this backend cannot honour (local paths, QEMU knobs
     /// the node owns, libvirt-only escape hatches).
     #[error("{0}")]
@@ -171,6 +181,7 @@ impl Error {
             Error::InvalidSnapshotName(_) => 1523,
             Error::InvalidSdnId(_) => 1530,
             Error::InvalidCidr(_) => 1533,
+            Error::InvalidSdnAddress(_) => 1534,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
             Error::InvalidFirewallObjectName(_) => 1531,
@@ -280,6 +291,7 @@ mod tests {
             Error::InvalidFirewallAddress("invalid Proxmox firewall address 'x': expected an IPv4/IPv6 address, optionally with a '/<prefix>'".into()),
             Error::InvalidSdnId("invalid Proxmox SDN id 'x': expected a lowercase letter then up to 7 lowercase letters or digits".into()),
             Error::InvalidCidr("invalid Proxmox SDN subnet 'x': expected <address>/<prefix-length>".into()),
+            Error::InvalidSdnAddress("invalid Proxmox SDN MAC address 'x': expected XX:XX:XX:XX:XX:XX".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),

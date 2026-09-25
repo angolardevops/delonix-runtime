@@ -43,6 +43,10 @@
 
 mod error;
 mod sdn;
+pub use sdn::{
+    validate_fabric_id, validate_ip, validate_mac, DhcpRange, FabricProtocol, IpamKind,
+    SubnetOptions, ZoneOptions,
+};
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
@@ -489,6 +493,34 @@ enum TaskKind {
     /// `DELETE /cluster/sdn/vnets/{vnet}/subnets/{subnet}` — same
     /// PENDING-only caveat.
     DeleteSdnSubnet,
+    /// `POST/PUT/DELETE /cluster/sdn/ipams[/{ipam}]` — an external IPAM
+    /// controller entry. STAGED, and VERIFIED by the node against the
+    /// controller's URL before it is (see [`Client::create_sdn_ipam`]).
+    CreateSdnIpam,
+    UpdateSdnIpam,
+    DeleteSdnIpam,
+    /// `POST/PUT/DELETE /cluster/sdn/dns[/{dns}]` — a DNS controller entry,
+    /// same STAGED-and-verified shape as the IPAM ones.
+    CreateSdnDns,
+    UpdateSdnDns,
+    DeleteSdnDns,
+    /// `POST/PUT/DELETE /cluster/sdn/fabrics/fabric[/{id}]` — a fabric.
+    /// STAGED; measured to answer an empty STRING, never a UPID (see
+    /// [`upid_or_done`]).
+    CreateSdnFabric,
+    UpdateSdnFabric,
+    DeleteSdnFabric,
+    /// `POST/PUT/DELETE /cluster/sdn/fabrics/node/{fabric_id}[/{node_id}]` —
+    /// a node's membership of a fabric. Same shape as the fabric itself.
+    CreateSdnFabricNode,
+    UpdateSdnFabricNode,
+    DeleteSdnFabricNode,
+    /// `POST/PUT/DELETE /cluster/sdn/vnets/{vnet}/ips` — an IPAM
+    /// reservation. NOT staged: acts on the IPAM database at once, against
+    /// the RUNNING subnet (see [`Client::sdn_vnet_ip_add`]).
+    AddSdnIp,
+    UpdateSdnIp,
+    DeleteSdnIp,
     /// `PUT /cluster/sdn` (no body) — reloads the PENDING SDN configuration
     /// onto every node in the cluster. The one SDN call that genuinely forks
     /// a cluster-wide task; every other SDN write above is very likely
@@ -538,6 +570,21 @@ impl TaskKind {
             TaskKind::CreateSdnSubnet => "create-sdn-subnet",
             TaskKind::UpdateSdnSubnet => "update-sdn-subnet",
             TaskKind::DeleteSdnSubnet => "delete-sdn-subnet",
+            TaskKind::CreateSdnIpam => "create-sdn-ipam",
+            TaskKind::UpdateSdnIpam => "update-sdn-ipam",
+            TaskKind::DeleteSdnIpam => "delete-sdn-ipam",
+            TaskKind::CreateSdnDns => "create-sdn-dns",
+            TaskKind::UpdateSdnDns => "update-sdn-dns",
+            TaskKind::DeleteSdnDns => "delete-sdn-dns",
+            TaskKind::CreateSdnFabric => "create-sdn-fabric",
+            TaskKind::UpdateSdnFabric => "update-sdn-fabric",
+            TaskKind::DeleteSdnFabric => "delete-sdn-fabric",
+            TaskKind::CreateSdnFabricNode => "create-sdn-fabric-node",
+            TaskKind::UpdateSdnFabricNode => "update-sdn-fabric-node",
+            TaskKind::DeleteSdnFabricNode => "delete-sdn-fabric-node",
+            TaskKind::AddSdnIp => "add-sdn-ip",
+            TaskKind::UpdateSdnIp => "update-sdn-ip",
+            TaskKind::DeleteSdnIp => "delete-sdn-ip",
             TaskKind::ApplySdn => "apply-sdn",
         }
     }
@@ -667,6 +714,26 @@ impl TaskKind {
             TaskKind::CreateSdnSubnet => "sdnsubnetcreate",
             TaskKind::UpdateSdnSubnet => "sdnsubnetupdate",
             TaskKind::DeleteSdnSubnet => "sdnsubnetdelete",
+            // NEVER OBSERVED, and measured NOT to fork: a live run against PVE
+            // 9.2.2 (2026-09-25) had every one of these fifteen writes answer
+            // inline — the IPAM/DNS/IP ones with `null`, the fabric ones with an
+            // empty string — so these names are placeholders that keep the
+            // match exhaustive, never something a ledger has recorded.
+            TaskKind::CreateSdnIpam => "sdnipamcreate",
+            TaskKind::UpdateSdnIpam => "sdnipamupdate",
+            TaskKind::DeleteSdnIpam => "sdnipamdelete",
+            TaskKind::CreateSdnDns => "sdndnscreate",
+            TaskKind::UpdateSdnDns => "sdndnsupdate",
+            TaskKind::DeleteSdnDns => "sdndnsdelete",
+            TaskKind::CreateSdnFabric => "sdnfabriccreate",
+            TaskKind::UpdateSdnFabric => "sdnfabricupdate",
+            TaskKind::DeleteSdnFabric => "sdnfabricdelete",
+            TaskKind::CreateSdnFabricNode => "sdnfabricnodecreate",
+            TaskKind::UpdateSdnFabricNode => "sdnfabricnodeupdate",
+            TaskKind::DeleteSdnFabricNode => "sdnfabricnodedelete",
+            TaskKind::AddSdnIp => "sdnipadd",
+            TaskKind::UpdateSdnIp => "sdnipupdate",
+            TaskKind::DeleteSdnIp => "sdnipdelete",
             // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
             // not assumed: `PUT /cluster/sdn` forks `reloadnetworkall`, not the
             // `srvreload` this guess was originally written as.
@@ -2700,7 +2767,12 @@ fn upid_or_done(body: &str, what: &str, null_is_done: bool) -> Result<Option<Str
     if let Some(s) = w.data.as_str().filter(|s| s.starts_with("UPID:")) {
         return Ok(Some(s.to_string()));
     }
-    if null_is_done && w.data.is_null() {
+    // `null` is how the Perl-side SDN/config routes say "applied inline"; the
+    // Rust-side fabrics API (`/cluster/sdn/fabrics/*`, PVE 9) says the same
+    // with an EMPTY STRING — measured against a live 9.2.2 node, `{"data":""}`
+    // on every fabric write. Both mean the same thing to a caller: done, no
+    // task to wait on.
+    if null_is_done && (w.data.is_null() || w.data.as_str() == Some("")) {
         return Ok(None);
     }
     Err(Error::UnexpectedAnswer(format!(
@@ -2900,7 +2972,7 @@ fn truncate_chars(s: &str, max: usize) -> &str {
 /// emoji) is not percent-encoding at all — the server would read a path nobody
 /// wrote. A UPID comes back from the node with the account name inside it, so
 /// the input is not ours to assume ASCII.
-fn urlencode(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
