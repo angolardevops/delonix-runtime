@@ -1,0 +1,20 @@
+# kind: NetworkZone — a zone of Proxmox VE's own SDN and the vnets inside it
+# (ADR-0049 addendum). The document never names the infrastructure: it is
+# realized by the zone provider the runtime has configured, which today is a
+# Proxmox node registered through DELONIX_PROXMOX_URL/_NODE and a credential
+# (see "Remote providers" in the README). With no provider configured, `apply`
+# refuses; `manifest validate` does not need one.
+#
+# metadata.name is the zone's SDN id on the node — a lowercase letter and up to
+# seven more lowercase letters or digits; the provider checks the exact format.
+# There is no update in place: `apply` ensures every vnet listed is present, and
+# a vnet dropped from the list stays until the whole zone is torn down
+# (`stack apply --prune`, `stack destroy`, or `--replace NetworkZone/<name>`),
+# which removes the vnets, then the zone, then commits once.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkZone
+metadata: { name: lab }
+spec:
+  vnets:
+    - { name: labnet1, alias: "lab network 1" }
+    - { name: labnet2 }
