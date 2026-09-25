@@ -1,0 +1,26 @@
+# kind: NetworkGateway — aliases and filter rules on a perimeter firewall
+# appliance (ADR-0051). `spec.provider` names a registered gateway provider:
+# `opnsense`, registered through DELONIX_OPNSENSE_URL and a credential — a
+# generated API key/secret pair (DELONIX_OPNSENSE_CREDENTIAL names a
+# `kind: Secret` with `key` and `secret`); an account's password is refused by
+# the appliance. `manifest validate` does not contact it.
+#
+# Aliases are applied before rules and removed after them, because the
+# appliance checks a rule's source against its alias table. A rule's identity
+# on the appliance is its `description`. There is no update in place: a changed
+# spec is removed and applied again.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: edge }
+spec:
+  provider: opnsense
+  aliases:
+    - name: delonix_web
+      kind: host            # host | network
+      content: ["10.20.0.10", "10.20.0.11"]
+      description: web tier
+  rules:
+    - description: office to web tier
+      source: 192.168.1.0/24   # an alias name, a CIDR, or any
+      destination: delonix_web
+      protocol: TCP            # omit for any protocol
