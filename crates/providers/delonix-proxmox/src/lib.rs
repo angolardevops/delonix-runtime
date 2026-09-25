@@ -45,6 +45,7 @@ pub mod cluster;
 mod error;
 mod network_zone;
 mod sdn;
+pub mod vm_firewall;
 pub use sdn::{
     validate_fabric_id, validate_ip, validate_mac, DhcpRange, FabricProtocol, IpamKind,
     SubnetOptions, ZoneOptions,
@@ -2285,6 +2286,94 @@ impl Client {
                     .get("enable")
                     .and_then(|v| v.as_u64())
                     == Some(u64::from(enabled)))
+            }),
+        )
+    }
+
+    /// The cluster's DATACENTER-level firewall options (`GET
+    /// /cluster/firewall/options`) — the top switch of the three a VM's rules
+    /// need (datacenter `enable`, the VM's own `enable`, and `firewall=1` on
+    /// its NIC). Measured on PVE 9.2.2: a cluster that never had it turned on
+    /// answers only a `digest`, with no `enable` key at all — which the node
+    /// reads as off.
+    pub fn cluster_firewall_options(&self) -> Result<serde_json::Value> {
+        let body = self.get("/cluster/firewall/options")?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "cluster firewall options")?;
+        Ok(w.data)
+    }
+
+    /// Sets the default verdict of ONE direction of the VM's own firewall
+    /// (`PUT …/firewall/options`, `policy_in`/`policy_out`). `verdict` is
+    /// `ACCEPT`, `DROP` or `REJECT`, validated before anything is sent. The
+    /// probe re-reads the option: the node's own answer, never the call's.
+    pub fn set_firewall_policy(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        direction: &str,
+        verdict: &str,
+    ) -> Result<()> {
+        validate_firewall_direction(direction)?;
+        validate_firewall_action(verdict)?;
+        let key = if direction == "in" {
+            "policy_in"
+        } else {
+            "policy_out"
+        };
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::FirewallOptions,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/options", self.node),
+                    &[(key, verdict)],
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .firewall_options(vmid)?
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    == Some(verdict))
+            }),
+        )
+    }
+
+    /// Puts `firewall=1` on the VM's `net0`, the NIC switch without which the
+    /// node never routes the VM's traffic through its firewall bridge — rules
+    /// and `enable=1` present, nothing filtered. A NIC that already has it is
+    /// left alone (no request at all). Everything else in the property — the
+    /// MAC included — is sent back as the node has it, so the guest keeps its
+    /// address.
+    pub fn ensure_nic_firewall(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        let cfg = self.config(vmid)?;
+        let net0 = cfg.get("net0").and_then(|v| v.as_str()).ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} has no net0 to put its firewall on"
+            ))
+        })?;
+        let Some(wanted) = vm_firewall::net0_with_firewall(net0) else {
+            return Ok(());
+        };
+        let form = [("net0", wanted.as_str())];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .config(vmid)?
+                    .get("net0")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|n| vm_firewall::net0_with_firewall(n).is_none()))
             }),
         )
     }
@@ -4609,6 +4698,28 @@ impl VmBackend for ProxmoxBackend {
         Ok(self.client.delete_snapshot(&ledger, vmid, name)?)
     }
 
+    /// The node's own per-VM firewall (ADR-0052) — see [`vm_firewall`].
+    fn apply_firewall(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        policy: &delonix_vm::firewall::Policy,
+    ) -> delonix_model::Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        let ledger = Ledger::at(vmdir);
+        Ok(vm_firewall::apply(&self.client, &ledger, vmid, policy)?)
+    }
+
+    fn read_firewall(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        direction: delonix_vm::firewall::Direction,
+    ) -> delonix_model::Result<delonix_vm::firewall::Policy> {
+        let vmid = self.vmid_of(vm)?;
+        Ok(vm_firewall::read(&self.client, vmid, direction)?)
+    }
+
     /// The address is OBSERVED: it comes from the guest agent
     /// (`agent/network-get-interfaces`), and a guest without one answers
     /// `None`, never a computed address. Written out rather than inherited so
@@ -4726,6 +4837,77 @@ pub fn register_network_zone_provider(
         },
     )
     .map_err(delonix_model::Error::from)
+}
+
+/// What the Proxmox backend says about the NETWORK half of the capability
+/// catalog (ADR-0050): the node's own per-VM firewall (ADR-0052) and the
+/// cluster SDN that `kind: NetworkZone` drives (ADR-0049 addendum).
+///
+/// A separate report from [`capability_report`] because the catalog files the
+/// firewall under the network kind — the same split the Linux provider has
+/// (`delonix-linux` for compute, `delonix-sdn` for network). Declared, never
+/// probed, for the same reason.
+///
+/// The four firewall rows are `partial`, not `supported`, and the detail says
+/// why: the live case proves the node HOLDS the policy — the three switches,
+/// the default verdict, the rules in order, a hand-made rule untouched — but
+/// no guest in it sends traffic, so "the node filters" is read from the node's
+/// configuration, not measured on a packet.
+pub fn network_capability_report(configured: bool) -> delonix_compute::capability::ProviderReport {
+    use delonix_compute::capability::{
+        Capability as C, CapabilityState as S, HealthStatus, ProviderHealth, ProviderKind,
+        ProviderReport,
+    };
+    let health = if configured {
+        ProviderHealth {
+            status: HealthStatus::Unknown,
+            reason: "NotProbed",
+            message: "a remote provider is not contacted by `provider ls`; the first operation authenticates".to_string(),
+        }
+    } else {
+        ProviderHealth {
+            status: HealthStatus::Unavailable,
+            reason: "NotConfigured",
+            message: "set DELONIX_PROXMOX_URL/_NODE and a credential to register a target"
+                .to_string(),
+        }
+    };
+    ProviderReport::build("proxmox", ProviderKind::Network, configured, health, |c| {
+        match c {
+        C::FirewallPerWorkload => S::Partial { detail: "`NetworkPolicy` `scope: vm` replaces the engine's rules of one direction on the node's own firewall (ADR-0052); the live case reads rules, order and the three switches back — no guest traffic is measured" },
+        C::FirewallDefaultDeny => S::Partial { detail: "`defaultPolicy` becomes the VM's `policy_in`/`policy_out`, written after the rules; read back live, not measured on a packet" },
+        C::FirewallSourceFiltering => S::Partial { detail: "`from`/`to` CIDRs become the rule's `source`/`dest`; `fromWorkload` is refused (an SDN address the VM is not on); read back live, not measured on a packet" },
+        C::FirewallEgressPolicy => S::Partial { detail: "`direction: egress` writes `out` rules and `policy_out`; read back live, not measured on a packet" },
+        C::NetBridge => S::Partial { detail: "`kind: NetworkZone` creates a simple SDN zone and its VNets on the cluster and reloads the SDN (ADR-0049 addendum); a VNet is the node's bridge, not `network create`" },
+        C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted
+        | C::NetIpam | C::NetDns | C::NetRoutesBetweenNetworks | C::NetRateLimit => S::NotImplemented,
+        C::NetStaticIp | C::NetPublishPorts | C::NetNamespaceIsolation | C::NetL7Proxy
+        | C::NetPacketCapture => S::UnsupportedByProvider { reason: "a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it" },
+        C::NetTunnelEgress => S::UnsupportedByProvider { reason: "a tunnel agent runs on this host, not on the node" },
+        C::NetIpv6 => S::NotImplemented,
+        C::ProviderAvailability | C::ResourceReadback | C::Events | C::AsyncOperations
+        | C::VmCreate | C::VmStart | C::VmStop | C::VmDestroy | C::VmRestart | C::VmPause
+        | C::VmResume | C::VmResumeSameIdentity | C::VmClone | C::VmTemplate | C::VmResizeCold
+        | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
+        | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
+        | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
+        | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
+        | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
+        | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
+        | C::ContainerImages | C::VmNetworkNat | C::VmNetworkBridge | C::VmNetworkSdn
+        | C::VmStaticIp | C::VolumeLocal | C::VolumeBind | C::VolumeNfs | C::VolumeCifs
+        | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot | C::VolumeProvisionNas
+        | C::StoragePools | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph
+        | C::VmSnapshotDisk | C::VmSnapshotMemory | C::VmSnapshotRestore | C::VmSnapshotDelete
+        | C::VmSnapshotPersistent | C::VmBackupDisk | C::VmBackupQuiesced | C::VmBackupRestore
+        | C::ContainerBackupRestore | C::VmMigrationCold | C::VmMigrationLive | C::VmReplication
+        | C::VmHighAvailability | C::VmConsoleSerial | C::VmConsoleVnc | C::VmGuestAgent
+        | C::VmIpObserved | C::MetricsPrometheus | C::MetricsPerWorkloadNetwork | C::HostHealth
+        | C::HostCapacity | C::TransportVerified | C::CredentialInVault => {
+            S::UnsupportedByProvider { reason: "not a network capability" }
+        }
+    }
+    })
 }
 
 /// What the Proxmox backend says about the capability catalog (ADR-0050).

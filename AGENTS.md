@@ -7530,3 +7530,38 @@ correr o `critest` num nó) e nada neste binário o consegue derivar: um
 seu envelhecimento. O OCI não tem neste repositório trabalho de conformidade
 nenhum, logo a contagem honesta é zero, e um comando que imprime uma tabela
 vazia não ensina nada.
+
+## A firewall por VM do nó Proxmox é o segundo provider do domínio `firewall` (ADR-0052)
+
+Até aqui o domínio `firewall` do catálogo tinha um só provider: a cadeia nftables do holder
+(`linux`), que só filtra containers. Uma VM num nó Proxmox estava fora de qualquer regra do
+motor. O cliente já falava com a firewall própria de cada VM (#492, #496, testado ao vivo),
+mas nenhum código do motor lhe chamava. Agora `kind: NetworkPolicy` com `scope: vm` põe a
+política na firewall do nó, através de `VmBackend::apply_firewall`/`read_firewall`. Nos outros
+backends estes métodos recusam por nome (DX-1501).
+
+- **Três interruptores, e só um é nosso para ligar.** As regras de uma VM só filtram com o
+  `enable` de DATACENTER, o `enable` da VM e `firewall=1` no `net0`. O motor liga os dois
+  últimos e **recusa com DX-6508** quando o primeiro está desligado, antes de qualquer escrita.
+  Ligá-lo muda o que os nós aceitam, e foi medido: no lab cortou o acesso ao nó (API e ping),
+  porque o `/etc/hosts` do appliance ainda aponta `pve` para o `10.0.2.15` do build e a
+  firewall detectou só `127.0.0.0/8` como rede local. Recuperado pela consola série, com um
+  IPSet `management`. **O defeito do appliance fica por corrigir** (`scripts/appliances/`).
+- **Posse por comentário** `delonix-managed:<n>`: o nó guarda as regras só por posição, e o
+  operador pode acrescentar regras à mão. Uma regra sem a etiqueta nunca é apagada nem conta
+  como deriva. O nó insere no TOPO, por isso as regras escrevem-se ao contrário e ficam por
+  cima das feitas à mão. A política por omissão escreve-se em ÚLTIMO lugar, para um `deny`
+  nunca vigorar antes de os `allow` estarem escritos.
+- **A ordem é significado** só em `scope: vm` (o nó avalia por ordem e a primeira regra que
+  casa ganha), por isso o `plan` compara a lista sem a ordenar. `fromWorkload` é recusado,
+  porque resolve para um endereço da SDN do motor, onde a VM não está.
+- **Provado**: o caso ao vivo `a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back`
+  nos dois ramos (recusa com o datacenter desligado; ciclo completo com ele ligado). Pela CLI:
+  `stack apply`, depois `plan` com código 0; uma mudança no manifesto dá `~` e converge a
+  quente; uma regra apagada à mão no nó dá código 2 e é reposta. A cadeia `tap<vmid>i0-IN` que
+  o `pve-firewall` compilou foi lida uma vez à mão e tinha as regras pela ordem, com `DROP`
+  no fim. **As quatro linhas `firewall.*` ficam `partial`**: nenhum pacote atravessa a VM em
+  teste nenhum.
+- **O perímetro por `/cluster/firewall` NÃO foi feito**: o ADR-0049 D3 exclui essas escritas
+  como administração do provider, e as regras de datacenter guardam os NÓS, não as VMs. Só
+  entrou a leitura `GET /cluster/firewall/options`.

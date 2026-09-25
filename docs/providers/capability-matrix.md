@@ -86,29 +86,30 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 ## network
 
 - **linux**: 7 of 20 — 7 supported, 10 partial, 2 unsupported-by-provider, 1 requires-external-component
+- **proxmox**: 0 of 20 — 5 partial, 6 unsupported-by-provider, 9 not-implemented
 
-| domain | capability | linux |
-|---|---|---|
-| network | `net.bridge` | supported — e2e:network: ciclo de vida |
-|  | `net.macvlan-ipvlan` | unsupported-by-provider — needs CAP_NET_ADMIN in the host's init netns; registered with Realized=False, never realised rootless |
-|  | `net.vlan` | partial — `network vlan` puts an 802.1Q VLAN on a physical NIC — root only, and it says so on every run |
-|  | `net.overlay.vxlan` | partial — VXLAN uplink + FDB peers inside the holder; inter-node forwarding needs a second node the battery does not have |
-|  | `net.overlay.encrypted` | partial — WireGuard peer per overlay node; peer removal proven on one node, traffic across two nodes not measured |
-|  | `net.ipam` | supported — chaos:scen_concurrent_attach |
-|  | `net.static-ip` | partial — `--ip` reserves in the same per-prefix IPAM ledger; unit-tested, not attached live in the battery |
-|  | `net.dns` | partial — `<name>.<ns>.delonix.internal` served by the holder; proven E2E in-session, no battery `nslookup` |
-|  | `net.publish-ports` | supported — check:update: publish-add a quente |
-|  | `net.routes` | supported — chaos:scen_stack_netroute |
-|  | `net.namespace-isolation` | supported — chaos:scen_namespace_isolation |
-|  | `net.l7-proxy` | partial — hyper reverse proxy in the holder, TLS termination, SIGHUP reload; proven E2E in-session, battery only lists routes |
-|  | `net.tunnel` | requires-external-component — a tunnel provider (pinggy, ngrok, cloudflared) and its binary/account |
-|  | `net.ipv6` | unsupported-by-provider — disabled in every container netns and dropped by `table ip6` in the holder: the firewall is `table ip` (v0.37.1); `DELONIX_ENABLE_IPV6=1` is a noisy escape, not a feature |
-|  | `net.rate-limit` | supported — check:update: net-rate a quente |
-|  | `net.capture` | partial — `net capture` on a container's SDN interface; no battery |
-| firewall | `firewall.per-workload` | supported — e2e:container em rede custom: hot reconfig pelo ingress |
-|  | `firewall.default-deny` | partial — `policy deny` per direction with the conntrack prologue (2026-07-28); validated live, no battery check |
-|  | `firewall.source-filtering` | partial — `allow <port> --from <cidr>` works on published ports for routable sources (never for a loopback client); validated live, no battery |
-|  | `firewall.egress-policy` | partial — per-container and per-network egress policy; battery lists (`net egress ls`), does not block |
+| domain | capability | linux | proxmox |
+|---|---|---|---|
+| network | `net.bridge` | supported — e2e:network: ciclo de vida | partial — `kind: NetworkZone` creates a simple SDN zone and its VNets on the cluster and reloads the SDN (ADR-0049 addendum); a VNet is the node's bridge, not `network create` |
+|  | `net.macvlan-ipvlan` | unsupported-by-provider — needs CAP_NET_ADMIN in the host's init netns; registered with Realized=False, never realised rootless | not-implemented |
+|  | `net.vlan` | partial — `network vlan` puts an 802.1Q VLAN on a physical NIC — root only, and it says so on every run | not-implemented |
+|  | `net.overlay.vxlan` | partial — VXLAN uplink + FDB peers inside the holder; inter-node forwarding needs a second node the battery does not have | not-implemented |
+|  | `net.overlay.encrypted` | partial — WireGuard peer per overlay node; peer removal proven on one node, traffic across two nodes not measured | not-implemented |
+|  | `net.ipam` | supported — chaos:scen_concurrent_attach | not-implemented |
+|  | `net.static-ip` | partial — `--ip` reserves in the same per-prefix IPAM ledger; unit-tested, not attached live in the battery | unsupported-by-provider — a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it |
+|  | `net.dns` | partial — `<name>.<ns>.delonix.internal` served by the holder; proven E2E in-session, no battery `nslookup` | not-implemented |
+|  | `net.publish-ports` | supported — check:update: publish-add a quente | unsupported-by-provider — a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it |
+|  | `net.routes` | supported — chaos:scen_stack_netroute | not-implemented |
+|  | `net.namespace-isolation` | supported — chaos:scen_namespace_isolation | unsupported-by-provider — a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it |
+|  | `net.l7-proxy` | partial — hyper reverse proxy in the holder, TLS termination, SIGHUP reload; proven E2E in-session, battery only lists routes | unsupported-by-provider — a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it |
+|  | `net.tunnel` | requires-external-component — a tunnel provider (pinggy, ngrok, cloudflared) and its binary/account | unsupported-by-provider — a tunnel agent runs on this host, not on the node |
+|  | `net.ipv6` | unsupported-by-provider — disabled in every container netns and dropped by `table ip6` in the holder: the firewall is `table ip` (v0.37.1); `DELONIX_ENABLE_IPV6=1` is a noisy escape, not a feature | not-implemented |
+|  | `net.rate-limit` | supported — check:update: net-rate a quente | not-implemented |
+|  | `net.capture` | partial — `net capture` on a container's SDN interface; no battery | unsupported-by-provider — a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it |
+| firewall | `firewall.per-workload` | supported — e2e:container em rede custom: hot reconfig pelo ingress | partial — `NetworkPolicy` `scope: vm` replaces the engine's rules of one direction on the node's own firewall (ADR-0052); the live case reads rules, order and the three switches back — no guest traffic is measured |
+|  | `firewall.default-deny` | partial — `policy deny` per direction with the conntrack prologue (2026-07-28); validated live, no battery check | partial — `defaultPolicy` becomes the VM's `policy_in`/`policy_out`, written after the rules; read back live, not measured on a packet |
+|  | `firewall.source-filtering` | partial — `allow <port> --from <cidr>` works on published ports for routable sources (never for a loopback client); validated live, no battery | partial — `from`/`to` CIDRs become the rule's `source`/`dest`; `fromWorkload` is refused (an SDN address the VM is not on); read back live, not measured on a packet |
+|  | `firewall.egress-policy` | partial — per-container and per-network egress policy; battery lists (`net egress ls`), does not block | partial — `direction: egress` writes `out` rules and `policy_out`; read back live, not measured on a packet |
 
 ## storage
 

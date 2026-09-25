@@ -2601,8 +2601,8 @@ msgstr "resolver {path}"
 msgid "FirewallPolicy/{name}: direction is required and ∈ {{ingress, egress}} (got {other})"
 msgstr "FirewallPolicy/{name}: direction obrigatório e ∈ {{ingress, egress}} (veio {other})"
 
-msgid "{kind}/{name}: invalid scope '{scope}' (use container|network)"
-msgstr "{kind}/{name}: scope inválido '{scope}' (usa container|network)"
+msgid "{kind}/{name}: invalid scope '{scope}' (use container|network|vm)"
+msgstr "{kind}/{name}: scope inválido '{scope}' (usa container|network|vm)"
 
 msgid "{kind}/{name}: scope: network is only supported in Egress (there is no per-network INGRESS policy)"
 msgstr "{kind}/{name}: scope: network só é suportado em Egress (não há política de INGRESS por-rede)"
@@ -3186,8 +3186,8 @@ msgstr "FirewallPolicy '{name}' → direction obrigatório e ∈ {{ingress, egre
 msgid "FirewallPolicy '{name}' → scope: network is only supported with direction: egress"
 msgstr "FirewallPolicy '{name}' → scope: network só é suportado com direction: egress"
 
-msgid "{kind} '{name}' → invalid scope '{scope}' (use container|network)"
-msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network)"
+msgid "{kind} '{name}' → invalid scope '{scope}' (use container|network|vm)"
+msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network|vm)"
 
 msgid "{kind} '{name}' (scope network) → target '{target}' is not a declared or existing Network"
 msgstr "{kind} '{name}' (scope network) → target '{target}' não é uma Network declarada nem existente"
@@ -13927,3 +13927,23 @@ msgstr "O que o cluster oferece é um facto sobre o cluster, não suporte do mot
 
 msgid "measure the cluster around the configured Proxmox node — nodes, quorum, shared storage, HA — with read-only requests"
 msgstr "medir o cluster à volta do nó Proxmox configurado — nós, quórum, storage partilhado, HA — só com pedidos de leitura"
+
+# DX-6508 — NetworkPolicy scope: vm on a Proxmox cluster (ADR-0052)
+msgid "the Proxmox datacenter firewall is off"
+msgstr "a firewall de datacenter do Proxmox está desligada"
+
+msgid "A `NetworkPolicy` with `scope: vm` asked for rules on a VM of a Proxmox cluster whose datacenter-level firewall is disabled. With it off, no rule of any VM filters anything, so applying the policy would report protection that does not exist (ADR-0052). The engine never turns it on: that also changes what the cluster's own nodes accept."
+msgstr "Um `NetworkPolicy` com `scope: vm` pediu regras numa VM de um cluster Proxmox cuja firewall de datacenter está desligada. Com ela desligada, nenhuma regra de nenhuma VM filtra nada, e aplicar a política anunciaria uma protecção que não existe (ADR-0052). O motor nunca a liga: isso muda também o que os próprios nós do cluster aceitam."
+
+msgid "Enable the firewall at Datacenter level on the cluster (Datacenter › Firewall › Options, or `pvesh set /cluster/firewall/options --enable 1`), after checking the management rules for the nodes, then apply again."
+msgstr "Liga a firewall ao nível de Datacenter no cluster (Datacenter › Firewall › Options, ou `pvesh set /cluster/firewall/options --enable 1`), depois de verificar as regras de gestão dos nós, e aplica outra vez."
+
+# NetworkPolicy scope: vm (ADR-0052)
+msgid "{kind} '{name}' (scope vm) → target '{target}' is not a declared or existing VirtualMachine"
+msgstr "{kind} '{name}' (scope vm) → o alvo '{target}' não é uma VirtualMachine declarada nem existente"
+
+msgid "{kind}/{name}: allowCidrs/fqdnAllowlist/rateLimit are only for scope: network"
+msgstr "{kind}/{name}: allowCidrs/fqdnAllowlist/rateLimit são só para scope: network"
+
+msgid "{kind}/{name}: fromWorkload/toWorkload name an address on this engine's SDN, which a VM filtered by its node's firewall is not on — use from/to with a CIDR"
+msgstr "{kind}/{name}: fromWorkload/toWorkload nomeiam um endereço na SDN deste motor, onde uma VM filtrada pela firewall do seu nó não está — usa from/to com um CIDR"
