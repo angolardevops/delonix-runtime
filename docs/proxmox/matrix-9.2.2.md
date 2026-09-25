@@ -20,23 +20,23 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
 - **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to; dnsmasq 2.91 installed and its global service disabled, frr 10.6 present, ifupdown2 3.3; for the ADR-0052 run the datacenter firewall was turned on, with a `management` IPSet holding 192.168.122.0/24 — the appliance's /etc/hosts still names the build-time 10.0.2.15, so the node detected only 127.0.0.0/8 as its local network and cut the host off without it`
-- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations): each PR's own live run appended after the previous. And 2026-09-25 (NetworkPolicy `scope: vm`, ADR-0052): the new case once with the datacenter firewall off (the DX-6508 refusal, reads only) and once with it on (the full cycle).`
+- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations) and 2026-09-25T09:40Z (power operations: suspend/resume/reset/reboot/shutdown): each PR's own live run appended after the previous. And 2026-09-25 (NetworkPolicy `scope: vm`, ADR-0052): the new case once with the datacenter firewall off (the DX-6508 refusal, reads only) and once with it on (the full cycle).`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TEST_MOVE_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
+- **result**: `the power-operations case passed on its own run (1 passed, 44 s): suspend read back as qmpstatus=paused, resume, reset, a reboot and a plain shutdown of the OS-less guest failing with «VM quit/powerdown failed - got timeout» and the VM still running, then a forceStop shutdown to stopped. Before it, 14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `3307`
+- **requests**: `3378`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 103 (15.3 % of the schema) — 100 seen in a live trace, 3 not
+- **called**: 108 (16.0 % of the schema) — 105 seen in a live trace, 3 not
 - **unsupported by design**: 362 (each with a written reason)
-- **not yet implemented**: 210
+- **not yet implemented**: 205
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
 |---|---:|---:|---:|---:|---:|
-| qemu | 44 | 2 | 0 | 63 | 109 |
+| qemu | 49 | 2 | 0 | 58 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
 | sdn | 48 | 0 | 0 | 42 | 90 |
 | storage | 2 | 0 | 0 | 23 | 25 |
@@ -137,8 +137,13 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/rollback` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/status/current` | supported+tested | object | yes |  |
+| POST | `/nodes/{node}/qemu/{vmid}/status/reboot` | supported+tested | string | yes |  |
+| POST | `/nodes/{node}/qemu/{vmid}/status/reset` | supported+tested | string | yes |  |
+| POST | `/nodes/{node}/qemu/{vmid}/status/resume` | supported+tested | string | yes |  |
+| POST | `/nodes/{node}/qemu/{vmid}/status/shutdown` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/status/start` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/status/stop` | supported+tested | string | yes |  |
+| POST | `/nodes/{node}/qemu/{vmid}/status/suspend` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/template` | supported+tested | string | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/unlink` | supported+tested | null | yes |  |
 | GET | `/nodes/{node}/sdn/fabrics/{fabric}` | supported+tested | array | yes |  |
@@ -656,11 +661,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | PUT | `/nodes/{node}/qemu/{vmid}/snapshot/{snapname}/config` | not-yet-implemented | null | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/spiceproxy` | not-yet-implemented |  | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/status` | not-yet-implemented | array | yes |  |
-| POST | `/nodes/{node}/qemu/{vmid}/status/reboot` | not-yet-implemented | string | yes |  |
-| POST | `/nodes/{node}/qemu/{vmid}/status/reset` | not-yet-implemented | string | yes |  |
-| POST | `/nodes/{node}/qemu/{vmid}/status/resume` | not-yet-implemented | string | yes |  |
-| POST | `/nodes/{node}/qemu/{vmid}/status/shutdown` | not-yet-implemented | string | yes |  |
-| POST | `/nodes/{node}/qemu/{vmid}/status/suspend` | not-yet-implemented | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/termproxy` | not-yet-implemented |  | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/vncproxy` | not-yet-implemented |  | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/vncwebsocket` | not-yet-implemented | object | yes |  |

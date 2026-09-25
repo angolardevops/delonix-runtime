@@ -153,6 +153,12 @@ pub enum Error {
     #[error("{0}")]
     InvalidSdnAddress(String),
 
+    /// A guest-driven shutdown/reboot timeout this client could not wait out:
+    /// the node would still be inside the task when the client's own task
+    /// deadline ran out, and the answer would read as a timeout of the CLIENT.
+    #[error("{0}")]
+    InvalidPowerTimeout(String),
+
     /// A `VmConfig` field this backend cannot honour (local paths, QEMU knobs
     /// the node owns, libvirt-only escape hatches).
     #[error("{0}")]
@@ -188,6 +194,7 @@ impl Error {
             Error::InvalidSdnId(_) => 1530,
             Error::InvalidCidr(_) => 1533,
             Error::InvalidSdnAddress(_) => 1534,
+            Error::InvalidPowerTimeout(_) => 1535,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
             Error::InvalidFirewallObjectName(_) => 1531,
@@ -302,6 +309,7 @@ mod tests {
             Error::InvalidSdnId("invalid Proxmox SDN id 'x': expected a lowercase letter then up to 7 lowercase letters or digits".into()),
             Error::InvalidCidr("invalid Proxmox SDN subnet 'x': expected <address>/<prefix-length>".into()),
             Error::InvalidSdnAddress("invalid Proxmox SDN MAC address 'x': expected XX:XX:XX:XX:XX:XX".into()),
+            Error::InvalidPowerTimeout("proxmox: a shutdown timeout of 900s does not fit inside this client's 600s task deadline".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),

@@ -166,6 +166,24 @@ pub struct Target {
     pub ca_cert_pem: Option<Vec<u8>>,
 }
 
+/// A VM's power state read from `…/status/current` ([`Client::power_state`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PowerState {
+    /// The node's view: `running` or `stopped`.
+    pub status: String,
+    /// QEMU's own view (`running`, `paused`, `prelaunch`, …), `None` when the
+    /// node did not send it.
+    pub qmpstatus: Option<String>,
+}
+
+impl PowerState {
+    /// Suspended with memory kept: the node says `running`, QEMU says
+    /// `paused`.
+    pub fn is_paused(&self) -> bool {
+        self.qmpstatus.as_deref() == Some("paused")
+    }
+}
+
 /// Bounds the client applies to every call. `Default` is what production
 /// runs with; a test lowers them to make a hang observable in seconds.
 #[derive(Debug, Clone)]
@@ -384,6 +402,20 @@ enum TaskKind {
     Clone,
     Start,
     Stop,
+    /// `POST …/status/shutdown` — asks the GUEST to power off (ACPI, or the
+    /// agent), unlike [`TaskKind::Stop`], which pulls the plug.
+    Shutdown,
+    /// `POST …/status/reboot` — a guest-driven shutdown followed by a start.
+    Reboot,
+    /// `POST …/status/reset` — a hard reset of the vCPUs; the guest is not
+    /// asked.
+    Reset,
+    /// `POST …/status/suspend` — pauses the vCPUs, memory kept (not the
+    /// `todisk` hibernation).
+    Suspend,
+    /// `POST …/status/resume` — continues a VM paused by [`TaskKind::Suspend`].
+    /// Not [`ProxmoxBackend`]'s `resume`, which STARTS a stopped VM.
+    ResumeSuspended,
     Snapshot,
     Rollback,
     Destroy,
@@ -540,6 +572,11 @@ impl TaskKind {
             TaskKind::Clone => "clone",
             TaskKind::Start => "start",
             TaskKind::Stop => "stop",
+            TaskKind::Shutdown => "shutdown",
+            TaskKind::Reboot => "reboot",
+            TaskKind::Reset => "reset",
+            TaskKind::Suspend => "suspend",
+            TaskKind::ResumeSuspended => "resume",
             TaskKind::Snapshot => "snapshot",
             TaskKind::Rollback => "rollback",
             TaskKind::Destroy => "destroy",
@@ -620,6 +657,15 @@ impl TaskKind {
             TaskKind::Clone => "qmclone",
             TaskKind::Start => "qmstart",
             TaskKind::Stop => "qmstop",
+            // Read from the UPIDs a live PVE 9.2.2 node answered, not assumed.
+            // `…/status/suspend` forks `qmpause`, NOT the `qmsuspend` its path
+            // suggests — the name `qmsuspend` was the first guess here, and a
+            // lost-answer recovery keyed on it would never have found the task.
+            TaskKind::Shutdown => "qmshutdown",
+            TaskKind::Reboot => "qmreboot",
+            TaskKind::Reset => "qmreset",
+            TaskKind::Suspend => "qmpause",
+            TaskKind::ResumeSuspended => "qmresume",
             TaskKind::Snapshot => "qmsnapshot",
             TaskKind::Rollback => "qmrollback",
             TaskKind::Destroy => "qmdestroy",
@@ -1767,6 +1813,179 @@ impl Client {
             },
             Some(&|| Ok(self.status_current(vmid)? == "stopped")),
         )
+    }
+
+    /// The VM's power state as the node reports it: `status` (`running`,
+    /// `stopped`) AND `qmpstatus`, QEMU's own view (`running`, `paused`,
+    /// `prelaunch`, …).
+    ///
+    /// Both, because [`Self::status_current`] alone cannot tell a suspended VM
+    /// from a running one: measured on PVE 9.2.2, a VM after
+    /// `…/status/suspend` still answers `status: running`, and only
+    /// `qmpstatus` says `paused`. A stopped VM carries `qmpstatus: stopped`;
+    /// an answer without it is `None`, never guessed.
+    pub fn power_state(&self, vmid: u32) -> Result<PowerState> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/status/current", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "status")?;
+        let field = |k: &str| w.data.get(k).and_then(|s| s.as_str()).map(str::to_string);
+        let status = field("status").ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: status/current of VM {vmid} carries no `status`: {}",
+                truncate_chars(&body, 200)
+            ))
+        })?;
+        Ok(PowerState {
+            status,
+            qmpstatus: field("qmpstatus"),
+        })
+    }
+
+    /// Asks the GUEST to power off (`POST …/status/shutdown`) — ACPI, or the
+    /// guest agent when the VM has one — instead of pulling the plug like
+    /// [`Self::stop`].
+    ///
+    /// A guest that ignores the request makes the node's task FAIL once
+    /// `timeout` runs out (measured: a VM with no OS answers «VM quit/powerdown
+    /// failed - got timeout»), and that failure is returned, not swallowed:
+    /// «I asked and it did not go down» is not the same answer as «it is
+    /// down». With `force_stop` the node pulls the plug itself after the
+    /// timeout, and the call succeeds with the VM stopped.
+    ///
+    /// `timeout: None` takes the node's own default. A timeout this client
+    /// could not wait out is refused here, before any request.
+    pub fn shutdown(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        timeout: Option<Duration>,
+        force_stop: bool,
+    ) -> Result<()> {
+        let secs = self.power_timeout(timeout, "shutdown")?;
+        let mut form: Vec<(&str, &str)> = Vec::new();
+        if let Some(t) = &secs {
+            form.push(("timeout", t));
+        }
+        if force_stop {
+            form.push(("forceStop", "1"));
+        }
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Shutdown,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/shutdown", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| Ok(self.status_current(vmid)? == "stopped")),
+        )
+    }
+
+    /// Reboots the guest (`POST …/status/reboot`): a guest-driven shutdown
+    /// the node follows with a start. Same failure shape as
+    /// [`Self::shutdown`] without `force_stop` — a guest that ignores ACPI
+    /// makes the task fail after `timeout`, and the VM stays running.
+    ///
+    /// No probe: a rebooted VM and one never touched both read `running`, so
+    /// nothing on the node tells a lost answer's effect apart. A lost answer
+    /// with no task in flight is a plain transport error, the choice
+    /// [`Self::rollback`] makes for the same reason.
+    pub fn reboot(&self, ledger: &Ledger, vmid: u32, timeout: Option<Duration>) -> Result<()> {
+        let secs = self.power_timeout(timeout, "reboot")?;
+        let form: Vec<(&str, &str)> = secs.iter().map(|t| ("timeout", t.as_str())).collect();
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Reboot,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/reboot", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Hard-resets the vCPUs (`POST …/status/reset`) — the guest is not asked,
+    /// the same as the reset button. No probe, for the reason
+    /// [`Self::reboot`] gives.
+    pub fn reset(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Reset,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/reset", self.node),
+                    &[],
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Pauses the vCPUs with memory kept (`POST …/status/suspend`) — what
+    /// `vm pause` means on the other backends. Not the `todisk` hibernation,
+    /// which writes the RAM to a storage and needs more permissions; that
+    /// form is not sent.
+    pub fn suspend(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Suspend,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/suspend", self.node),
+                    &[],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.power_state(vmid)?.is_paused())),
+        )
+    }
+
+    /// Continues a VM paused by [`Self::suspend`] (`POST …/status/resume`).
+    /// Named apart from [`ProxmoxBackend`]'s `resume`, which STARTS a stopped
+    /// VM — two different operations the node happens to share a verb for.
+    pub fn resume_suspended(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::ResumeSuspended,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/resume", self.node),
+                    &[],
+                    true,
+                )
+            },
+            Some(&|| {
+                let p = self.power_state(vmid)?;
+                Ok(p.status == "running" && !p.is_paused())
+            }),
+        )
+    }
+
+    /// The `timeout` form value for a guest-driven shutdown/reboot, refused
+    /// when this client would stop waiting before the node's task could end.
+    fn power_timeout(&self, timeout: Option<Duration>, what: &str) -> Result<Option<String>> {
+        let Some(t) = timeout else {
+            return Ok(None);
+        };
+        if t >= self.task_timeout {
+            return Err(Error::InvalidPowerTimeout(format!(
+                "proxmox: a {what} timeout of {}s does not fit inside this client's {}s task \
+                 deadline — give a shorter one, or none for the node's default",
+                t.as_secs(),
+                self.task_timeout.as_secs()
+            )));
+        }
+        Ok(Some(t.as_secs().max(1).to_string()))
     }
 
     /// Takes a snapshot, refusing a name that is already taken as a CONFLICT.
@@ -4087,6 +4306,25 @@ impl VmBackend for ProxmoxBackend {
         Ok(self.client.destroy(&Ledger::at(vmdir), vmid)?)
     }
 
+    /// `vm pause`: the node's `…/status/suspend`, vCPUs stopped with memory
+    /// kept — the same notion as the libvirt and Cloud Hypervisor backends,
+    /// never the `todisk` hibernation. A task still in flight for the VM is
+    /// waited on first, like every other operation here.
+    fn pause(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        Ok(self.client.suspend(&ledger, vmid)?)
+    }
+
+    /// `vm unpause`: the node's `…/status/resume` on a suspended VM.
+    fn unpause(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        Ok(self.client.resume_suspended(&ledger, vmid)?)
+    }
+
     /// Starts the VM this record already names, instead of creating another.
     ///
     /// Without this, `vm start` on a stopped Proxmox VM went through `boot`,
@@ -4399,8 +4637,8 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmStop => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmDestroy => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmRestart => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
-        C::VmPause => S::UnsupportedByProvider { reason: "`…/status/suspend` is not called; refused by name (`unsupported_pause`)" },
-        C::VmResume => S::UnsupportedByProvider { reason: "`…/status/resume` is not called; refused by name" },
+        C::VmPause => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::power_operations_round_trip_through_the_node" },
+        C::VmResume => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::power_operations_round_trip_through_the_node" },
         C::VmResumeSameIdentity => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmClone => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_template_clone_gets_the_disk_size_asked_for" },
         C::VmTemplate => S::Partial { detail: "`POST …/template` is a client call (`mark_template`) the live case uses to make its clone source; no engine verb turns a VM into a template" },

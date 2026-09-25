@@ -1083,3 +1083,177 @@ fn a_vm_policy_on_a_cluster_with_its_firewall_off_is_refused_before_any_write() 
         "the refusal wrote to the node: {writes:?}"
     );
 }
+
+// ===========================================================================
+// Power operations: shutdown, reboot, reset, suspend, resume
+// ===========================================================================
+
+/// `…/status/suspend` forks a task the node lists as `qmpause` — measured on
+/// PVE 9.2.2, and NOT the `qmsuspend` the path suggests. A lost answer has to
+/// be found under the name the node actually uses, or the recovery falls
+/// through to its probe while the suspend is still in flight.
+#[test]
+fn a_lost_suspend_is_found_as_the_qmpause_task_the_node_runs() {
+    let upid = "UPID:pve:0001A2B3:0000C4D5:66F0:qmpause:100:root@pam:";
+    let status = format!("/nodes/pve/tasks/{upid}/status");
+    let node = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/status/suspend", Reply::Drop),
+        (
+            "GET",
+            "/nodes/pve/tasks",
+            ok_data(&format!(
+                r#"[{{"upid":"{upid}","type":"qmpause","status":"running"}}]"#
+            )),
+        ),
+        (
+            "GET",
+            &status,
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    client
+        .suspend(&ledger, 100)
+        .expect("the qmpause task the node was running finished OK");
+    assert_eq!(
+        node.count("POST", "/nodes/pve/qemu/100/status/suspend"),
+        1,
+        "NEVER resent"
+    );
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(recs[0].upid, upid, "the node's task, recorded as ours");
+    assert_eq!(recs[0].state, TaskState::Ok);
+}
+
+/// A suspended VM still answers `status: running`; only `qmpstatus` says
+/// `paused`. The lost-answer probe has to read the second field, or a
+/// suspend that never happened would be accepted.
+#[test]
+fn a_lost_suspend_is_accepted_only_when_qmpstatus_says_paused() {
+    let paused = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/status/suspend", Reply::Drop),
+        ("GET", "/nodes/pve/tasks", ok_data("[]")),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/status/current",
+            ok_data(r#"{"status":"running","qmpstatus":"paused"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&paused), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    client
+        .suspend(&Ledger::at(dir.path()), 100)
+        .expect("paused already: done");
+
+    let running = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/status/suspend", Reply::Drop),
+        ("GET", "/nodes/pve/tasks", ok_data("[]")),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/status/current",
+            ok_data(r#"{"status":"running","qmpstatus":"running"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&running), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .suspend(&Ledger::at(dir.path()), 100)
+        .expect_err("`status: running` alone is not a suspended VM");
+    assert!(matches!(err, Error::Request(_)), "{err:?}");
+    assert_eq!(
+        running.count("POST", "/nodes/pve/qemu/100/status/suspend"),
+        1,
+        "a lost answer is never resent"
+    );
+}
+
+/// A guest that ignores ACPI makes the node's shutdown task FAIL after the
+/// timeout (measured: «VM quit/powerdown failed - got timeout»). That is an
+/// error here, recorded as `failed` — never read as «it went down».
+#[test]
+fn a_shutdown_the_guest_ignores_is_a_failure_and_the_form_carries_the_timeout() {
+    let upid = "UPID:pve:0001A2B3:0000C4D5:66F0:qmshutdown:100:root@pam:";
+    let status = format!("/nodes/pve/tasks/{upid}/status");
+    let node = MockNode::start(script(&[
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/shutdown",
+            ok_data(&format!(r#""{upid}""#)),
+        ),
+        (
+            "GET",
+            &status,
+            ok_data(
+                r#"{"status":"stopped","exitstatus":"VM quit/powerdown failed - got timeout"}"#,
+            ),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), slow_task()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let err = client
+        .shutdown(&ledger, 100, Some(Duration::from_secs(5)), false)
+        .expect_err("a guest that did not go down is not a successful shutdown");
+    assert!(matches!(err, Error::TaskFailed(_)), "{err:?}");
+    assert!(err.to_string().contains("powerdown failed"), "{err}");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.path == "/nodes/pve/qemu/100/status/shutdown")
+        .unwrap();
+    assert_eq!(sent.body, "timeout=5", "no forceStop unless asked");
+    assert!(matches!(
+        ledger.records()[0].state,
+        TaskState::Failed { .. }
+    ));
+}
+
+/// `force_stop` and the timeout both reach the node, and a timeout this
+/// client could not wait out is refused before any request.
+#[test]
+fn a_forced_shutdown_sends_force_stop_and_an_unwaitable_timeout_is_refused_first() {
+    let node = MockNode::start(script(&[(
+        "POST",
+        "/nodes/pve/qemu/100/status/shutdown",
+        ok_data(r#""UPID:pve:0001A2B3:0000C4D5:66F0:qmshutdown:100:root@pam:""#),
+    )]));
+    let client = Client::connect_with(&token_target(&node), slow_task()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    client
+        .shutdown(&ledger, 100, Some(Duration::from_secs(5)), true)
+        .expect("forced shutdown");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.path == "/nodes/pve/qemu/100/status/shutdown")
+        .unwrap();
+    assert_eq!(sent.body, "timeout=5&forceStop=1");
+
+    let before = node.count("POST", "/nodes/pve/qemu/100/status/shutdown");
+    let err = client
+        .shutdown(&ledger, 100, Some(Duration::from_secs(100_000)), true)
+        .expect_err("a timeout past the client's task deadline");
+    assert!(matches!(err, Error::InvalidPowerTimeout(_)), "{err:?}");
+    let err = client
+        .reboot(&ledger, 100, Some(Duration::from_secs(100_000)))
+        .expect_err("the same bound applies to a reboot");
+    assert!(matches!(err, Error::InvalidPowerTimeout(_)), "{err:?}");
+    assert_eq!(
+        node.count("POST", "/nodes/pve/qemu/100/status/shutdown"),
+        before,
+        "refused before any request"
+    );
+    assert_eq!(node.count("POST", "/nodes/pve/qemu/100/status/reboot"), 0);
+}
+
+/// [`fast`] with room for a 5 s guest timeout inside the task deadline.
+fn slow_task() -> ClientOptions {
+    ClientOptions {
+        task_timeout: Duration::from_secs(30),
+        ..fast()
+    }
+}
