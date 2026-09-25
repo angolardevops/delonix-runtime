@@ -546,6 +546,11 @@ check "provider matrix é a matriz publicada, byte a byte" ok bash -c \
   "diff <('$BIN' provider matrix) '$(dirname "$0")/../docs/providers/capability-matrix.md' >/dev/null"
 check "provider ls --l18n=pt traduz o cabeçalho" ok bash -c \
   "'$BIN' --l18n=pt provider ls | grep -q 'medidos neste host'"
+# `--probe` (ADR-0049 fatia 3) só existe para o provider remoto: num local
+# seria uma flag que não faz nada, e sem alvo configurado a classe é a do
+# «indisponível» (69) — nunca um 0 com a secção do cluster em falta.
+check "provider describe libvirt --probe recusa (1)" 1 "$BIN" provider describe libvirt --probe
+check "provider describe proxmox --probe sem alvo diz 69" 69 env -u DELONIX_PROXMOX_URL "$BIN" provider describe proxmox --probe
 
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################

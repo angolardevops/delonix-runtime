@@ -461,3 +461,55 @@ storage (`GET …/storage/{storage}/content?content=images`, the route `list_bac
 calls — the cloud-init drive is there too, so disks are counted by name), and after `destroy`
 asserts neither the VM nor any volume is left. Catalogue: both rows `supported` on that case.
 Matrix unchanged at 108/675 — no new route.
+
+**Added 2026-09-25 (slice 3, first part: cluster discovery, read-only):** `delonix provider
+describe proxmox --probe` connects to the configured target — the same `Target` the backend
+registers, now built by one `proxmox_target()` shared by both — and reads its cluster with five
+`GET`s only (`/cluster/status`, `/storage`, `/cluster/ha/status/current`, `/cluster/ha/resources`,
+`/cluster/sdn/zones`; new module `cluster.rs`, `Client::cluster_facts`). `provider ls` still costs
+zero requests (ADR-0050); `--probe` is refused for any provider but `proxmox` (the local ones are
+measured on every describe, exit 1), and with no target configured it answers in the unavailable
+class (69). What it prints:
+
+- **facts**: cluster name and quorum (`None` for a node outside a cluster — measured: such a node
+  answers `/cluster/status` with one `type: node` entry and no `type: cluster` entry), every node
+  with `online` and a `target` mark on EXACTLY the configured node (none if it is not a member —
+  never picked: slice 3's "no implicit node selection"), every storage with type, `shared` (the
+  flag is absent on local storages) and whether it holds VM disks, the CRM master and the number
+  of HA resources, the number of SDN zones;
+- **verdicts** (`cluster_verdicts`, pure) for the five cluster-dependent capabilities — migration
+  cold/live (quorate, two online nodes, a SHARED storage that holds VM disks; a shared backup
+  store does not count), HA (quorate, two nodes, a CRM master), replication (a `zfspool` on two or
+  more nodes), Ceph (`rbd`/`cephfs`). They are facts about the cluster, printed next to the
+  declared state, and change no catalogue row: the engine still does not migrate or manage HA.
+
+Reading the HA status for discovery is not the administration D3 excluded; nothing under
+`/cluster/ha` is written. Measured against the lab node (a node outside any cluster): the trace
+shows the password login and the five reads, nothing else, and every verdict says "not in a
+cluster". Matrix: 112/675 called (16.6 %), 109 in a live trace. `DELONIX_PROXMOX_TOKEN_FILE` (an
+API token in an owner-only file, which `credential_value` always accepted) is now documented.
+
+**Measured against `ngola-lda` itself (2026-09-25)**, node `ngola`, with a token
+`root@pam!delonix-audit` created with privilege separation and only `PVEAuditor` on `/` — so the
+cluster's own permissions, not this code, are what keeps the run read-only. The trace shows
+`GET /nodes` and the five reads, no login POST (a token needs none) and nothing else; exit 0.
+What it found, and it is **not what this ADR's opening section says** (dated 2026-09-23):
+
+- cluster `ngola-lda`, **quorate**, with `ngola` and `delonix03` online and **`delonix02`
+  offline** — running on two of its three nodes;
+- four storages: `pbs-ngola-substrato` (`pbs`, shared, backup only), `local-lvm` and
+  `bkp-delonix03` (`lvmthin`, not shared), `local` (`dir`, no VM disks) — **no `rbd`/`cephfs`
+  storage**, and **0 SDN zones**;
+- no CRM master and 0 HA resources.
+
+So every verdict is "does not": migration because no SHARED storage holds VM disks (the one
+shared store is PBS, for backups), HA because no CRM is master, replication because there is no
+`zfspool`, Ceph because no Ceph storage is defined. The opening section's "with Ceph, SDN (zones,
+VNets, IPAM, fabrics)" is either out of date or describes a Ceph cluster that is not registered
+as a VM storage and SDN config that is not there — this run cannot tell which, and `PVEAuditor`
+(which carries `Datastore.Audit`, `SDN.Audit` and `Sys.Audit`) on `/` with propagation should
+see both. Recorded as measured, not reconciled by guess.
+
+**Still to do in slice 3**: the writes (a migration, an HA resource) — against a lab cluster
+with shared storage, never the production one, which on this measurement could not migrate
+without copying disks anyway.

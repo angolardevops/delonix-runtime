@@ -13900,6 +13900,34 @@ msgstr "dar a uma VM parada 4 vCPUs e 8 GiB para o próximo arranque"
 msgid "stop, resize the memory only, start again with it"
 msgstr "parar, redimensionar só a memória, e voltar a arrancar com ela"
 
+# provider describe proxmox --probe (ADR-0049 slice 3, read-only)
+msgid "Contact the configured Proxmox target and measure its cluster (nodes, quorum, shared storage, HA, SDN zones) with read-only requests. Only for `proxmox`: the local providers are measured on every describe"
+msgstr "Contacta o alvo Proxmox configurado e mede o cluster dele (nós, quórum, storage partilhado, HA, zonas SDN) só com pedidos de leitura. Só para `proxmox`: os providers locais são medidos em cada describe"
+
+msgid "--probe applies to a remote provider (proxmox); '{id}' is measured on this host by every describe"
+msgstr "o --probe aplica-se a um provider remoto (proxmox); '{id}' é medido neste host por cada describe"
+
+msgid "no Proxmox target is configured: set DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE and a credential (DELONIX_PROXMOX_SECRET, or DELONIX_PROXMOX_TOKEN_ID with DELONIX_PROXMOX_TOKEN_FILE)"
+msgstr "não há alvo Proxmox configurado: define DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE e uma credencial (DELONIX_PROXMOX_SECRET, ou DELONIX_PROXMOX_TOKEN_ID com DELONIX_PROXMOX_TOKEN_FILE)"
+
+msgid "Cluster of the target, measured now ({url}, node {node}), read-only:"
+msgstr "Cluster do alvo, medido agora ({url}, nó {node}), só leitura:"
+
+msgid "cluster:"
+msgstr "cluster:"
+
+msgid "none — the node is not in a cluster"
+msgstr "nenhum — o nó não está num cluster"
+
+msgid "resource(s)"
+msgstr "recurso(s)"
+
+msgid "What the cluster offers is a fact about the cluster, not engine support: the backend addresses one node and never picks another (ADR-0049 slice 3)."
+msgstr "O que o cluster oferece é um facto sobre o cluster, não suporte do motor: o backend fala com um nó e nunca escolhe outro (ADR-0049, fatia 3)."
+
+msgid "measure the cluster around the configured Proxmox node — nodes, quorum, shared storage, HA — with read-only requests"
+msgstr "medir o cluster à volta do nó Proxmox configurado — nós, quórum, storage partilhado, HA — só com pedidos de leitura"
+
 # DX-6508 — NetworkPolicy scope: vm on a Proxmox cluster (ADR-0052)
 msgid "the Proxmox datacenter firewall is off"
 msgstr "a firewall de datacenter do Proxmox está desligada"

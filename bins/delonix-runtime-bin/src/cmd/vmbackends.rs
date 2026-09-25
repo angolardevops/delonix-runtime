@@ -53,8 +53,26 @@ fn register_proxmox() -> Result<()> {
 /// hand it a map instead of writing the PROCESS environment — tests run on parallel
 /// threads, and a `set_var` there races every other reader of the environment.
 fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> {
-    let Some(url) = lookup("DELONIX_PROXMOX_URL") else {
+    let Some((target, opts)) = proxmox_target_with(lookup)? else {
         return Ok(());
+    };
+    delonix_proxmox::register_with(target, opts)
+}
+
+/// The configured Proxmox target, read from the environment — the SAME one
+/// the backend registers, so `provider describe proxmox --probe` asks the
+/// node a VM operation would talk to and no other. `Ok(None)` when no target
+/// is configured.
+pub(crate) fn proxmox_target(
+) -> Result<Option<(delonix_proxmox::Target, delonix_proxmox::ClientOptions)>> {
+    proxmox_target_with(&|key| nonempty(std::env::var(key).ok()))
+}
+
+fn proxmox_target_with(
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<(delonix_proxmox::Target, delonix_proxmox::ClientOptions)>> {
+    let Some(url) = lookup("DELONIX_PROXMOX_URL") else {
+        return Ok(None);
     };
     let node = lookup("DELONIX_PROXMOX_NODE").ok_or_else(|| {
         Error::Invalid(
@@ -101,7 +119,7 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
             .map(std::path::PathBuf::from),
         ..Default::default()
     };
-    delonix_proxmox::register_with(
+    Ok(Some((
         delonix_proxmox::Target {
             base_url: url,
             node,
@@ -112,7 +130,7 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
             ca_cert_pem,
         },
         opts,
-    )
+    )))
 }
 
 /// The credential, preferring an API token.

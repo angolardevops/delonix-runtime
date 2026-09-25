@@ -58,6 +58,7 @@ from pathlib import Path
 CRATE_SOURCE = [
     Path("crates/providers/delonix-proxmox/src/lib.rs"),
     Path("crates/providers/delonix-proxmox/src/sdn.rs"),
+    Path("crates/providers/delonix-proxmox/src/cluster.rs"),
 ]
 
 SUPPORTED_TESTED = "supported+tested"
