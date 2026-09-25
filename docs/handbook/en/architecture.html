@@ -960,7 +960,16 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   write files through <code>delonix-state</code> (<code>delonix-linux</code>, <code>delonix-vm</code>, <code>delonix-sdn</code>,
   <code>delonix-oci</code>, <code>delonix-volume</code>) are declared exceptions until P4 gives them a
   <code>StateRepository</code> port (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>).</li>
-<li><strong>P4–P7 have not started.</strong> The remaining exceptions in the table above name those phases.</li>
+<li><strong>P4 is under way; P5–P7 have not started.</strong> ADR-0044 (accepted 2026-09-24) decides how P4 is
+  done. <strong>#420</strong> landed the <code>StateRepository&lt;T&gt;</code> port
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>), and <code>delonix-linux</code> already uses it for
+  <code>wait_and_record</code>/<code>stop</code>/<code>persist_stop</code>/<code>remove</code>, which is why its exception in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> names phase <code>P4a</code> and lists only the sites still open. <strong>#486</strong> added
+  the VM provider port (<code>VmSpec</code>, <code>Extensions</code>, <code>Provider</code>, <code>VmProvider</code> in
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_provider.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_provider.rs</code></a>, P4b slice 1), and <code>delonix-vm</code> implements
+  it for the two local backends (<code>LocalVmProvider</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/provider.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/provider.rs</code></a>)
+  by reusing its existing <code>create_with</code>/<code>stop</code>/<code>start</code> rather than a second orchestration; moving
+  each backend into its own provider crate is P4b slice 2. The remaining exceptions in the table above name the phase that removes each.</li>
 </ul>
 <h3 id="records-node-helpers-and-persisted-state-after-406">Records, node helpers and persisted state, after #406<a class="hanchor" href="#records-node-helpers-and-persisted-state-after-406" aria-label="#">#</a></h3>
 <blockquote>
@@ -1501,7 +1510,9 @@ workloads by re-executing <code>delonix</code>. This keeps <code>clone</code> ou
 cost of a process per operation and error text crossing a process boundary.</p>
 <p><strong>Note — adapters still reach the state files directly.</strong> <code>delonix-linux</code>, <code>delonix-vm</code>,
 <code>delonix-sdn</code>, <code>delonix-oci</code> and <code>delonix-volume</code> depend on <code>delonix-state</code> as declared
-exceptions; the <code>StateRepository</code> port that removes them is ADR-0040 P4, not yet written.</p>
+exceptions. The <code>StateRepository</code> port that removes them exists since #420
+(<code>delonix-model/src/ports.rs</code>, ADR-0044 D6), and so far only <code>delonix-linux</code> goes through it for
+part of its lifecycle; the other four still open the stores directly until their P4 slice lands.</p>
 <p><strong>Note — <code>macvlan</code>/<code>ipvlan</code> are declared, not realized.</strong> <code>network create</code> records them and
 reports <code>Realized=False</code> with reason <code>DriverNotImplemented</code>
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/network.rs</code></a>): their physical plane needs <code>CAP_NET_ADMIN</code> in
