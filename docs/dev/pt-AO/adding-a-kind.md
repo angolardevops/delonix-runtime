@@ -8,8 +8,10 @@ aí fora (o `delonix api-resources` lista-os todos). Acrescentar um toca em mais
 braço de `match`: a tabela que descreve o que o Kind É, o código que o aplica, e a fiação do
 reconciliador que deixa o `stack plan`/`apply` tratá-lo como qualquer outro Kind. Esta página
 percorre isso pela ordem, com um Kind real — **`Service`** (ADR-0032) — como exemplo trabalhado do
-princípio ao fim, porque é o Kind acrescentado mais recentemente e todo o ficheiro citado abaixo é
-lido da árvore, não da memória de uma disposição antiga.
+princípio ao fim. Não é o Kind mais recente (o `IPPool`, o `NetworkGateway`, o `NetworkZone` e o
+`RuntimePolicy` vieram depois), mas é o que exercita todos os caminhos de uma vez: primário,
+convergente, removível, com namespace e com registo próprio. Todo o ficheiro citado abaixo é lido
+da árvore, não da memória de uma disposição antiga.
 
 ## A única tabela a que um Kind tem de responder
 
@@ -37,6 +39,7 @@ KindFacts {
     domain: Domain::NetConnectivity,
     form: Form::Primary,
     in_stack: true,
+    stack_group: "services",
     converges: true,
     teardown: true,
     namespaced: Namespaced::Always,

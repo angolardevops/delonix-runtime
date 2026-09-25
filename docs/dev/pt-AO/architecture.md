@@ -486,7 +486,17 @@ binários → P4 providers → P5 API de nó → P6 CRI → P7 observabilidade).
   do `delonix-state` (`delonix-linux`, `delonix-vm`, `delonix-sdn`, `delonix-oci`,
   `delonix-volume`) são excepções declaradas até a P4 lhes dar uma porta `StateRepository`
   (`scripts/arch_fitness.py`).
-- **As P4–P7 não começaram.** As excepções restantes na tabela acima nomeiam essas fases.
+- **A P4 está em curso; as P5–P7 não começaram.** O ADR-0044 (aceite a 2026-09-24) decide como a
+  P4 se faz. O **#420** trouxe a porta `StateRepository<T>`
+  (`crates/foundation/delonix-model/src/ports.rs`), que o `delonix-linux` já usa em
+  `wait_and_record`/`stop`/`persist_stop`/`remove` — por isso a sua excepção no
+  `scripts/arch_fitness.py` diz `P4a` e lista só os sítios ainda abertos. O **#486** acrescentou a
+  porta de provider de VM (`VmSpec`, `Extensions`, `Provider`, `VmProvider` em
+  `crates/contexts/delonix-compute/src/vm_provider.rs`, P4b fatia 1), e o `delonix-vm`
+  implementa-a para os dois backends locais (`LocalVmProvider`,
+  `crates/adapters/delonix-vm/src/provider.rs`) reaproveitando o `create_with`/`stop`/`start` que
+  já tinha; mover cada backend para o seu crate de provider é a P4b fatia 2. As excepções
+  restantes na tabela acima nomeiam a fase que remove cada uma.
 
 ### Registos, helpers de nó e estado persistido, depois da #406
 
@@ -1001,8 +1011,10 @@ sequenceDiagram
 
 > **Nota — os adapters ainda alcançam os ficheiros de estado directamente.** O `delonix-linux`, o
 > `delonix-vm`, o `delonix-sdn`, o `delonix-oci` e o `delonix-volume` dependem do `delonix-state`
-> como excepções declaradas; a porta `StateRepository` que os remove é a P4 do ADR-0040, ainda
-> não escrita.
+> como excepções declaradas. A porta `StateRepository` que os remove existe desde o #420
+> (`delonix-model/src/ports.rs`, ADR-0044 D6), e por agora só o `delonix-linux` passa por ela em
+> parte do seu ciclo de vida; os outros quatro abrem os stores directamente até a sua fatia da P4
+> entrar.
 
 > **Nota — `macvlan`/`ipvlan` estão declaradas, não realizadas.** O `network create` regista-as e
 > reporta `Realized=False` com a razão `DriverNotImplemented`

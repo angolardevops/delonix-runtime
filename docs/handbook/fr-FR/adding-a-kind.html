@@ -209,16 +209,19 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Comment les noms atteignent /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">16</span><span>Conventions de code</span></a><a class="on" aria-current="page" href="adding-a-kind.html"><span class="n">17</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Standards cloud native, couche par couche</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Contribuer</p>
-<h1 id="adding-a-kind">Ajouter un Kind</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/adding-a-kind.html">Lire la page en anglais</a></span></div><h1 id="ajouter-un-kind">Ajouter un Kind</h1>
 <p><strong>À lire avant :</strong> <a href="coding-conventions.html">Conventions de code</a>, <a href="architecture.html">Architecture</a> et <a href="crates.html#delonix-stack">Les crates</a> — cette page suppose que vous savez ce que possède <code>delonix-stack</code> et pourquoi la planification est pure.</p>
 <p>Un Kind est une ressource déclarative que ce moteur connaît — <code>Container</code>, <code>Volume</code>, <code>Service</code>,
 et ainsi de suite (<code>delonix api-resources</code> les liste tous). En ajouter un touche à plus qu'un
 simple bras de <code>match</code> : la table qui décrit ce qu'EST le Kind, le code qui l'applique, et le
 câblage du réconciliateur qui permet à <code>stack plan</code>/<code>apply</code> de le traiter comme n'importe quel
 autre Kind. Cette page parcourt cela dans l'ordre, avec un Kind réel — <strong><code>Service</code></strong> (ADR-0032) —
-comme exemple travaillé de bout en bout, car c'est le Kind ajouté le plus récemment et chaque
-fichier cité ci-dessous est lu depuis l'arbre, pas depuis le souvenir d'une ancienne disposition.</p>
-<h2 id="the-one-table-a-kind-has-to-answer">La table unique à laquelle un Kind doit répondre<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
+comme exemple travaillé de bout en bout. Ce n'est pas le Kind le plus récent (<code>IPPool</code>,
+<code>NetworkGateway</code>, <code>NetworkZone</code> et <code>RuntimePolicy</code> sont venus après), mais c'est celui qui
+parcourt tous les chemins à la fois : primaire, convergent, supprimable, avec namespace et doté
+de son propre registre. Chaque fichier cité ci-dessous est lu depuis l'arbre, pas depuis le
+souvenir d'une ancienne disposition.</p>
+<h2 id="la-table-unique-a-laquelle-un-kind-doit-repondre">La table unique à laquelle un Kind doit répondre<a class="hanchor" href="#la-table-unique-a-laquelle-un-kind-doit-repondre" aria-label="#">#</a></h2>
 <p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> est la source unique de ce qu'est un Kind. Le
 commentaire du module lui-même explique pourquoi elle existe : avant cette table, les mêmes faits
 sur un Kind vivaient dans six listes séparées (<code>KINDS</code>, <code>CONVERGING_KINDS</code>, <code>TEARDOWN_KINDS</code>,
@@ -238,6 +241,7 @@ par le mauvais chemin.</p>
     domain: Domain::NetConnectivity,
     form: Form::Primary,
     in_stack: true,
+    stack_group: &quot;services&quot;,
     converges: true,
     teardown: true,
     namespaced: Namespaced::Always,
@@ -314,7 +318,7 @@ par le mauvais chemin.</p>
 <p>La ligne de <code>Service</code> se lit, en une phrase : appliqué par le stack, juste après les Kinds de
 calcul qu'il sélectionne ; a un chemin réel (<code>NetConnectivity</code>) ; primaire ; converge sans
 recréer ; peut être démonté ; toujours namespaced ; et un vrai registre est derrière.</p>
-<h2 id="the-spec-type-and-the-schema">Le type de spec et le schéma<a class="hanchor" href="#the-spec-type-and-the-schema" aria-label="#">#</a></h2>
+<h2 id="le-type-de-spec-et-le-schema">Le type de spec et le schéma<a class="hanchor" href="#le-type-de-spec-et-le-schema" aria-label="#">#</a></h2>
 <p>Un Kind avec une spec de manifeste typée (la plupart) a besoin d'une struct
 <code>#[derive(Deserialize, Serialize, JsonSchema)]</code> — <code>ServiceSpec</code> pour cet exemple, dans
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a> — et d'une branche dans <code>TYPED_KINDS</code>, dans
@@ -328,7 +332,7 @@ donne la redirection spécifique, et <code>todo_kind_conhecido_tem_schema_ou_dic
 fait échouer le build si un Kind que la table connaît n'est ni dans <code>TYPED_KINDS</code> ni doté d'un
 indice. Le message générique (« no typed schema for X ») se lit comme un bug du manifeste ;
 l'indice dit que c'est une propriété du Kind.</p>
-<h2 id="wiring-the-kind-into-the-reconciler">Câbler le Kind dans le réconciliateur<a class="hanchor" href="#wiring-the-kind-into-the-reconciler" aria-label="#">#</a></h2>
+<h2 id="cabler-le-kind-dans-le-reconciliateur">Câbler le Kind dans le réconciliateur<a class="hanchor" href="#cabler-le-kind-dans-le-reconciliateur" aria-label="#">#</a></h2>
 <p>Le plan du réconciliateur (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>) est pur — il
 n'ouvre jamais un store ni n'exécute une commande. Tout ce qui touche la machine vit dans
 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>, ré-exporté comme <code>cmd::kinds</code>/<code>cmd::reconcile</code> depuis
@@ -365,7 +369,7 @@ où un document est réellement <em>créé</em> la première fois, une couche pa
 l'ordre de la table (<code>layers.run(k::SERVICE, "🧭", || super::service::apply(docs))?</code>) — cette
 fonction <code>apply(docs)</code> est la même que possède déjà le groupe impératif de la CLI, réutilisée
 plutôt que dupliquée.</p>
-<h2 id="fields-that-converge-without-recreating">Champs qui convergent sans recréer<a class="hanchor" href="#fields-that-converge-without-recreating" aria-label="#">#</a></h2>
+<h2 id="champs-qui-convergent-sans-recreer">Champs qui convergent sans recréer<a class="hanchor" href="#champs-qui-convergent-sans-recreer" aria-label="#">#</a></h2>
 <p>Si <code>converges: true</code>, ajoutez une entrée à <code>hot_fields</code> dans <code>reconcile.rs</code> nommant exactement
 quels champs du manifeste peuvent changer <em>à chaud</em>. Cette table est une promesse que l'exécuteur
 doit tenir — lister un champ que l'étape de convergence ne peut pas réellement appliquer
@@ -388,7 +392,7 @@ de <code>hot_fields</code> apparaît quand même dans le plan ; il force simple
   (<code>kinds::has_teardown</code>), soit possède une entrée dans <code>no_teardown_reason</code> ; jamais les deux,
   jamais aucun.</li>
 </ul>
-<h2 id="presence-for-lsdescribewait">Présence, pour <code>ls</code>/<code>describe</code>/<code>wait</code><a class="hanchor" href="#presence-for-lsdescribewait" aria-label="#">#</a></h2>
+<h2 id="presence-pour-lsdescribewait">Présence, pour <code>ls</code>/<code>describe</code>/<code>wait</code><a class="hanchor" href="#presence-pour-lsdescribewait" aria-label="#">#</a></h2>
 <p>Ajoutez une branche à <code>presence(kind, doc, containers)</code> dans <code>stack.rs</code> qui indique si une
 instance existe et, le cas échéant, sa chaîne de statut. La branche de <code>Service</code> vérifie
 <code>delonix_sdn::infra::service_get(namespace, nom)</code> et, si trouvée, compte combien de containers
@@ -411,7 +415,7 @@ voyage vers l'enregistrement d'un autre Kind (le namespace d'un <code>Pod</code>
 <code>Container</code>s membres, par exemple). <code>every_namespaced_kind_declares_a_source</code> échoue sinon —
 l'effet pratique d'oublier cela est que l'autocomplétion du shell ne peut jamais proposer un
 locataire dont la seule ressource serait le nouveau Kind.</p>
-<h2 id="the-checklist">La checklist<a class="hanchor" href="#the-checklist" aria-label="#">#</a></h2>
+<h2 id="la-checklist">La checklist<a class="hanchor" href="#la-checklist" aria-label="#">#</a></h2>
 <p>Pour un Kind qui se comporte comme <code>Service</code> (primaire, converge, a un démontage, namespaced) :</p>
 <ol>
 <li><code>kinds.rs</code> — un <code>pub const</code> nommé, et une ligne <code>KindFacts</code>.</li>
@@ -438,12 +442,12 @@ exige <code>in_stack: false</code> et <code>converges: false</code> pour ces for
 </div></main>
 <aside class="toc"><p class="ttitle">Sur cette page</p><div class="toc">
 <ul>
-<li><a href="#the-one-table-a-kind-has-to-answer">La table unique à laquelle un Kind doit répondre</a></li>
-<li><a href="#the-spec-type-and-the-schema">Le type de spec et le schéma</a></li>
-<li><a href="#wiring-the-kind-into-the-reconciler">Câbler le Kind dans le réconciliateur</a></li>
-<li><a href="#fields-that-converge-without-recreating">Champs qui convergent sans recréer</a></li>
-<li><a href="#presence-for-lsdescribewait">Présence, pour ls/describe/wait</a></li>
-<li><a href="#the-checklist">La checklist</a></li>
+<li><a href="#la-table-unique-a-laquelle-un-kind-doit-repondre">La table unique à laquelle un Kind doit répondre</a></li>
+<li><a href="#le-type-de-spec-et-le-schema">Le type de spec et le schéma</a></li>
+<li><a href="#cabler-le-kind-dans-le-reconciliateur">Câbler le Kind dans le réconciliateur</a></li>
+<li><a href="#champs-qui-convergent-sans-recreer">Champs qui convergent sans recréer</a></li>
+<li><a href="#presence-pour-lsdescribewait">Présence, pour ls/describe/wait</a></li>
+<li><a href="#la-checklist">La checklist</a></li>
 </ul>
 </div>
 </aside>

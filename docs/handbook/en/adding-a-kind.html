@@ -216,8 +216,11 @@ and so on (<code>delonix api-resources</code> lists them all). Adding one touche
 <code>match</code> arm: the table that describes what the Kind IS, the code that applies it, and the
 reconciler wiring that lets <code>stack plan</code>/<code>apply</code> treat it like every other Kind. This page
 walks through that in order, with a real Kind — <strong><code>Service</code></strong> (ADR-0032) — as the worked
-example throughout, because it is the most recently added Kind and every file cited below is
-read from the tree, not from memory of an older layout.</p>
+example throughout. It is not the newest Kind (<code>IPPool</code>, <code>NetworkGateway</code>, <code>NetworkZone</code> and
+<code>RuntimePolicy</code> came after it), but it is the one that exercises every path at once: primary,
+converging, removable, namespaced, and backed by a registry of its own. The newer Kinds went
+through the same steps; every file cited below is read from the tree, not from memory of an
+older layout.</p>
 <h2 id="the-one-table-a-kind-has-to-answer">The one table a Kind has to answer<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
 <p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> is the single source of what a Kind is. Its own
 module doc explains why it exists: before this table, the same facts about a Kind lived in six
@@ -237,6 +240,7 @@ resource looking correct through the wrong path.</p>
     domain: Domain::NetConnectivity,
     form: Form::Primary,
     in_stack: true,
+    stack_group: &quot;services&quot;,
     converges: true,
     teardown: true,
     namespaced: Namespaced::Always,
@@ -289,6 +293,11 @@ resource looking correct through the wrong path.</p>
 <td>A Kind applied out of dependency order, or a remote-procedure Kind like <code>KubernetesCluster</code> (SSH against hosts that already exist, not a local resource) mistakenly wired into the cycle.</td>
 </tr>
 <tr>
+<td><code>stack_group</code></td>
+<td>The key of a <code>kind: Stack</code> <code>spec</code> that holds documents of this Kind (<code>services:</code>), or <code>""</code> when it cannot be grouped. This column governs the expansion: <code>expand_stack</code>, the schema, the unknown-field warning and the generated docs all read it, and there is no second list of groups (see <a href="#the-stack-group">The Stack group</a> below). Not the same question as <code>in_stack</code> — <code>Workload</code> and <code>Dependency</code> are lowered at load, so they are not applied as themselves, yet both are things a person writes inside a Stack.</td>
+<td>A Kind <code>stack apply</code> handles that cannot be put inside a Stack — which is what happened to <code>NetworkRoute</code>, <code>NetworkAccessRule</code>, <code>Service</code> and <code>App</code> while the group list was written by hand.</td>
+</tr>
+<tr>
 <td><code>converges</code></td>
 <td>Whether a <em>changed</em> field is really applied, versus "ensure present" only. <code>false</code> is legitimate — <code>Secret</code>'s state is encrypted values a plan will not decrypt to compare — but it needs a reason (see <code>not_converged_reason</code> below); a generic excuse fails a test.</td>
 <td>A Kind that reports <code>!</code> on every plan with a reason that reads as "nobody got to it" when the truth is a property of the resource.</td>
@@ -311,12 +320,39 @@ resource looking correct through the wrong path.</p>
 </tbody>
 </table></div>
 <p><code>Service</code>'s row reads, in one line: applied by the stack, right after the compute Kinds it
-selects; a real path exists (<code>NetConnectivity</code>); primary; converges without recreating; can be
-torn down; always namespaced; and a real registry backs it.</p>
+selects; grouped under <code>services:</code> in a Stack; a real path exists (<code>NetConnectivity</code>); primary;
+converges without recreating; can be torn down; always namespaced; and a real registry backs it.</p>
+<h2 id="the-stack-group">The Stack group<a class="hanchor" href="#the-stack-group" aria-label="#">#</a></h2>
+<p>A Kind with <code>in_stack: true</code> must have a <code>stack_group</code>, and four tests in <code>kinds.rs</code> hold the
+column in place (ADR-0045):</p>
+<ul>
+<li><strong><code>every_kind_applied_by_the_stack_has_a_group</code></strong> — nothing the stack applies can be missing
+  from <code>kind: Stack</code>.</li>
+<li><strong><code>a_kind_without_a_group_says_why</code></strong> — a row with <code>stack_group: ""</code> needs an entry in
+  <code>stack_group_absent_reason</code> (<code>Stack</code> itself, <code>KubernetesCluster</code>), and a row with a group must
+  not have one.</li>
+<li><strong><code>a_group_key_is_unique_and_no_alias_shadows_it</code></strong> — two Kinds under one key would merge their
+  children and hand one of them the wrong spec.</li>
+<li><strong><code>a_group_is_the_plural_of_its_kind</code></strong> — the key is the plural in lowerCamelCase
+  (<code>networkRoutes</code> for <code>NetworkRoute</code>), so nobody has to look it up. Only three older keys are
+  exempt (<code>ingress</code>, <code>vms</code>, <code>firewallPolicies</code>), because renaming a group breaks every published
+  Stack.</li>
+</ul>
+<p>The group then has to be proved end to end, in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a>:</p>
+<ul>
+<li><code>manifest.rs</code>, <strong><code>stack_group_sample</code></strong> — the minimal <code>spec</code> of one child in the group and the
+  Kind it lands as; <code>every_stack_group_loads</code> walks every group and fails on one without a sample.</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/stack.yaml" target="_blank" rel="noopener"><code>examples/stack.yaml</code></a></strong> — must mention the group; <code>the_stack_example_names_every_group</code>
+  fails otherwise. This file is also what the user site's Kinds page shows.</li>
+<li><code>schema.rs</code>, <strong><code>every_stack_group_is_typed_against_its_kinds_own_spec</code></strong> — the group's items
+  are typed against the Kind's own spec, so the Kind needs its <code>TYPED_KINDS</code> branch (next
+  section) before its group can validate.</li>
+</ul>
 <h2 id="the-spec-type-and-the-schema">The spec type and the schema<a class="hanchor" href="#the-spec-type-and-the-schema" aria-label="#">#</a></h2>
 <p>A Kind with a typed manifest spec (most of them) needs a <code>#[derive(Deserialize, Serialize,
 JsonSchema)]</code> struct — <code>ServiceSpec</code> for this example, in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a>
-— and a branch in <code>TYPED_KINDS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>. That constant feeds
+— and a branch in <code>TYPED_KINDS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>, plus the matching
+arm that names the struct for <code>manifest_schema</code>. That constant feeds
 <code>delonix manifest schema</code> and <code>delonix explain &lt;Kind&gt;.&lt;field&gt;</code>, both generated from the same struct
 (ADR-0007) so the published schema cannot drift from what the code actually accepts. Leaving a
 Kind out is a real, allowed state — <code>Storage</code> and <code>ShareVolume</code> have no schema on purpose,
@@ -326,6 +362,22 @@ gives the specific redirection, and <code>todo_kind_conhecido_tem_schema_ou_dica
 fails the build if a Kind the table knows about is neither in <code>TYPED_KINDS</code> nor has a hint. The
 generic message ("no typed schema for X") reads as a manifest bug; the hint says it is a property
 of the Kind.</p>
+<p>Two more places read the spec, both in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a>:</p>
+<ul>
+<li><strong><code>filled_spec</code></strong> — an arm calling the Kind's <code>spec_with_defaults(doc)</code>, the round trip through
+  the typed struct that <code>stack apply --dry-run</code> and <code>manifest render</code> print with every default
+  filled in.</li>
+<li><strong><code>spec_fields_for</code></strong> — an arm returning the Kind's <code>*_SPEC_FIELDS</code> list, which is what
+  <code>warn_unknown_fields</code> checks a document against. The schema's <code>additionalProperties: false</code>
+  takes its accepted keys from the same list, so a typo in a field name is caught in both places.</li>
+</ul>
+<p><strong>Then regenerate the published schema</strong>, because it is a file an editor fetches, not a copy
+someone keeps up by hand:</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">delonix manifest schema &gt; docs/schema/v1/delonix.json
+</code></pre></div>
+<p><code>o_schema_publicado_esta_em_dia_com_o_codigo</code> (in <code>schema.rs</code>) fails until the file is exactly
+what the binary generates. Use the binary built from your tree
+(<code>target/release/delonix</code> or <code>cargo run -p delonix-runtime-bin --</code>), not the one on your <code>PATH</code>.</p>
 <h2 id="wiring-the-kind-into-the-reconciler">Wiring the Kind into the reconciler<a class="hanchor" href="#wiring-the-kind-into-the-reconciler" aria-label="#">#</a></h2>
 <p>The reconciler's plan (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>) is pure — it never
 opens a store or runs a command. Everything that touches the machine lives in
@@ -395,6 +447,24 @@ this column specifically:</p>
   sign of readiness, so a manifest with <em>any</em> declarative Kind burned its whole <code>--timeout</code>
   waiting for a marker that Kind can never produce.</li>
 </ul>
+<h2 id="the-generic-verbs-and-drift">The generic verbs and <code>drift</code><a class="hanchor" href="#the-generic-verbs-and-drift" aria-label="#">#</a></h2>
+<p><code>delonix get</code>/<code>describe</code>/<code>delete &lt;plural&gt;</code> route by Kind through three lists in
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/verbs.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/verbs.rs</code></a> — <code>GET_ROUTES</code>, <code>DESCRIBE_ROUTES</code> and
+<code>DELETE_ROUTES</code> — plus one arm per verb that calls the Kind's own <code>cmd_ls</code>, <code>cmd_describe</code> and
+<code>remove_for_replace</code>. A Kind that cannot answer them writes the obstacle in <code>no_verb_reason</code>
+instead (<code>Stack</code> is read from a file, <code>Workload</code> lowers at load, …). Be aware of what the gate
+does and does not do: <code>a_kind_never_both_routes_and_claims_it_cannot</code> <strong>fails</strong> only when a Kind
+both routes and claims it cannot; a Kind that is in neither list only produces a
+<code>not wired yet: …</code> line on stderr during the test run, and <code>delonix get &lt;plural&gt;</code> answers
+"not wired yet" to the user. Read that line; the build will not stop you.</p>
+<p><code>delonix drift</code> compares the <code>last-applied</code> stamp with what the machine holds, and most Kinds can
+be enumerated from their own store. If your <code>actual()</code> needs the parsed documents to answer — the
+node keeps no registry that lists the Kind on its own, the way a <code>NetworkPolicy</code> lives as nft rules
+on a target — add it to <code>DOC_SCOPED</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/drift.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/drift.rs</code></a>.
+<code>doc_scoped_matches_the_stack_wiring</code> reads <code>stack.rs</code> (the call site <strong>and</strong> the <code>actual</code>
+signature) and fails if the list and the wiring disagree; a module that receives <code>docs</code> and ignores
+them (<code>fn actual(_docs: …)</code>) does not belong in the list.</p>
+<h2 id="namespaces-and-completion">Namespaces and completion<a class="hanchor" href="#namespaces-and-completion" aria-label="#">#</a></h2>
 <p>If the Kind is namespaced (<code>namespaced != Namespaced::Never</code>), it also needs an entry in
 <code>NAMESPACE_SOURCES</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>) — either <code>NsSource::Store(fn)</code>
 reading the Kind's own store, or <code>NsSource::Via("OtherKind — reason")</code> when the namespace travels
@@ -405,17 +475,29 @@ resource is the new Kind.</p>
 <h2 id="the-checklist">The checklist<a class="hanchor" href="#the-checklist" aria-label="#">#</a></h2>
 <p>For a Kind that behaves like <code>Service</code> (primary, converges, has teardown, namespaced):</p>
 <ol>
-<li><code>kinds.rs</code> — a <code>pub const</code> name and a <code>KindFacts</code> row.</li>
-<li>A spec struct with <code>JsonSchema</code>, and a branch in <code>TYPED_KINDS</code> (<code>schema.rs</code>) — or an entry in
-   <code>untyped_hint</code> explaining why not.</li>
+<li><code>kinds.rs</code> — a <code>pub const</code> name and a <code>KindFacts</code> row, including its <code>stack_group</code> (or an
+   entry in <code>stack_group_absent_reason</code>).</li>
+<li>A spec struct with <code>JsonSchema</code>; a branch in <code>TYPED_KINDS</code> and in <code>manifest_schema</code>
+   (<code>schema.rs</code>) — or an entry in <code>untyped_hint</code> explaining why not.</li>
+<li><code>manifest.rs</code> — an arm in <code>filled_spec</code> (<code>spec_with_defaults</code>), an arm in <code>spec_fields_for</code>,
+   and a sample in <code>stack_group_sample</code>; the group in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/stack.yaml" target="_blank" rel="noopener"><code>examples/stack.yaml</code></a>.</li>
 <li><code>stack.rs</code> — branches in <code>desired_of</code>, <code>actual_of</code>, <code>converge_and_stamp</code>, <code>stamp_all</code>,
    <code>destroy_one</code>, <code>presence</code>, and a layer in <code>run_layers</code> calling the Kind's own <code>apply(docs)</code>.</li>
 <li><code>reconcile.rs</code> — a <code>hot_fields</code> entry naming the fields that converge live.</li>
 <li>If the Kind does not converge or cannot be torn down: a specific sentence in
    <code>not_converged_reason</code> / <code>no_teardown_reason</code> (<code>stack.rs</code>).</li>
+<li><code>verbs.rs</code> — the Kind in <code>GET_ROUTES</code>/<code>DESCRIBE_ROUTES</code>/<code>DELETE_ROUTES</code> with its arms, or a
+   reason in <code>no_verb_reason</code>.</li>
+<li><code>drift.rs</code> — <code>DOC_SCOPED</code>, only if <code>actual()</code> genuinely needs the documents.</li>
 <li>If namespaced: an entry in <code>NAMESPACE_SOURCES</code> (<code>complete.rs</code>).</li>
+<li>Every new user-facing string in English in the code and translated in
+    <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>; a new error code in the <code>DX-CDNN</code> dictionary
+    (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>) also needs its PT text
+    (<code>every_dictionary_text_has_a_portuguese_translation</code>). Run <code>python3 scripts/lang_ratchet.py</code>.</li>
+<li><code>delonix manifest schema &gt; docs/schema/v1/delonix.json</code> with the tree's binary, then
+    <code>python3 docs/gen.py &lt;that binary&gt;</code> so the user site's Kinds page follows.</li>
 <li><code>cargo test -p delonix-runtime-bin -p delonix-stack</code> — the tests named above are what catch a
-   skipped step, not a reviewer reading the diff by eye.</li>
+    skipped step, not a reviewer reading the diff by eye.</li>
 </ol>
 <p>A Kind that is <code>Sugar</code>/<code>Aggregate</code> (rewritten or expanded at load, like <code>Workload</code> or <code>Stack</code>)
 skips most of this: <code>um_kind_que_baixa_para_outro_nao_pertence_ao_ciclo_do_stack</code> requires
@@ -429,10 +511,13 @@ skips most of this: <code>um_kind_que_baixa_para_outro_nao_pertence_ao_ciclo_do_
 <aside class="toc"><p class="ttitle">On this page</p><div class="toc">
 <ul>
 <li><a href="#the-one-table-a-kind-has-to-answer">The one table a Kind has to answer</a></li>
+<li><a href="#the-stack-group">The Stack group</a></li>
 <li><a href="#the-spec-type-and-the-schema">The spec type and the schema</a></li>
 <li><a href="#wiring-the-kind-into-the-reconciler">Wiring the Kind into the reconciler</a></li>
 <li><a href="#fields-that-converge-without-recreating">Fields that converge without recreating</a></li>
 <li><a href="#presence-for-lsdescribewait">Presence, for ls/describe/wait</a></li>
+<li><a href="#the-generic-verbs-and-drift">The generic verbs and drift</a></li>
+<li><a href="#namespaces-and-completion">Namespaces and completion</a></li>
 <li><a href="#the-checklist">The checklist</a></li>
 </ul>
 </div>
