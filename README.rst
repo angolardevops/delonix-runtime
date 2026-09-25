@@ -187,7 +187,20 @@ Highlights
   and UTS — a Kubernetes-style pod, rootless (PID sharing is a follow-up).
 - **Declarative microVMs.** ``kind: VirtualMachine`` on a pluggable ``VmBackend`` (Cloud
   Hypervisor or libvirt), with per-instance cloud-init and libvirt system
-  checkpoints (``vm snapshot``/``restore``).
+  checkpoints (``vm snapshot``/``restore``), and ``vm pause``/``unpause`` to
+  suspend vCPUs with memory intact. A remote Proxmox VE node plugs in as a third
+  backend (see `Remote providers`_), and ``delonix provider ls`` says what each
+  backend can do on this host, with the evidence for every "supported".
+- **Networks beyond the node.** ``kind: NetworkZone`` declares a zone and its
+  vnets on Proxmox's own SDN, ``kind: NetworkGateway`` puts aliases and rules on
+  a perimeter firewall (OPNsense, ADR-0051), and ``kind: IPPool`` is a ledger of
+  host addresses that routes claim instead of binding to loopback.
+- **An admission ceiling as code.** ``kind: RuntimePolicy`` (group
+  ``security.delonix.io``) is the node's own limit — refuse ``--privileged``,
+  host networking, ``:latest``, unlisted registries, device passthrough —
+  checked by ``container run`` and ``vm create`` before anything is created.
+  ``apply`` converges it like any Kind, but dropping it from the manifest does
+  not remove it — only ``policy unset`` does.
 - **One workload model.** ``kind: Workload`` (``spec.type: container | vm |
   pod | microvm``) is a single declarative object that lowers to ``Pod``,
   ``VirtualMachine`` or ``Container`` at load time,
@@ -200,7 +213,9 @@ Highlights
   ``destroy``, three-way diff against ``delonix.io/last-applied`` on the
   resource itself, ownership by label, hot convergence with the PID unchanged,
   and a fail-closed refusal for anything needing a recreate. The manifest schema
-  is generated from the code and **stable** within ``0.x``.
+  is generated from the code and covered by the semver promise since v1.0.0 —
+  what is stable and what is not is spelled out in
+  `docs/cli-stability.md <docs/cli-stability.md>`_.
 - **One command to start.** ``delonix init`` looks at the directory, says what it
   detected and why, and dispatches to ``stack init``/``vm init`` with the right
   template — or tells you to keep your ``docker-compose.yml``, which already runs
@@ -281,15 +296,56 @@ Fedora/RHEL, openSUSE and Arch families (uses ``sudo`` for packages):
    curl -fsSL https://github.com/angolardevops/delonix-runtime/releases/latest/download/install.sh | bash
 
 The installer detects your hardware (CPU features, RAM, disk, GPU) and picks
-the best binary for it — an ``x86-64-v3`` (AVX2) build on modern CPUs, the
-generic ``x86-64`` everywhere else — and applies the kernel tuning that
-containers, Kubernetes and VMs need (inotify limits, ip_forward,
-``br_netfilter``, ``overlay``/``tun`` modules, ...).
+the best binary for it — on x86-64, an ``x86-64-v3`` (AVX2) build on modern
+CPUs and the generic ``x86-64`` everywhere else; on ``aarch64`` (arm64), the
+single native build — and applies the kernel tuning that containers,
+Kubernetes and VMs need (inotify limits, ip_forward, ``br_netfilter``,
+``overlay``/``tun`` modules, ...).
 
-Useful flags (pass after ``bash -s --``): ``--no-vm`` skips the microVM stack,
-``--no-tune`` skips kernel tuning, ``--with-cri`` also installs ``delonix-cri``
-(Kubernetes node), ``--low-ports`` allows publishing ports below 1024,
-``--user`` installs to ``~/.local/bin``, ``--version vX.Y.Z`` pins a release.
+Before installing anything it **verifies the release**: ``SHA256SUMS`` is
+checked against its minisign signature with the public key embedded in the
+installer (``minisign`` is installed if missing, and a missing tool or a bad
+signature **aborts**), and every downloaded binary is then checked against
+that ``SHA256SUMS``. The script itself, run as ``curl … | bash``, is not
+covered by this — download it first and check it against the signed
+``SHA256SUMS`` if that matters to you (see
+`docs/SECURITY-RELEASES.md <docs/SECURITY-RELEASES.md>`_).
+
+Flags (pass after ``bash -s --``):
+
+- ``--no-vm`` skips the microVM stack; ``--no-tune`` skips kernel tuning.
+- ``--no-gpu`` skips accelerator setup (the NVIDIA CDI spec, the ``render``
+  group). It is on by default and does nothing on a host without a GPU.
+- ``--no-delegate`` does not write the cgroup delegation drop-in for
+  ``user@.service``. Without delegation ``-m``/``--cpus``/``--pids-limit``
+  are inert; the installer already skips the drop-in when the distribution
+  delegates ``cpu`` on its own.
+- ``--no-binary`` configures dependencies and the host only, keeping the
+  ``delonix`` already installed.
+- ``--no-editor-plugin`` does not install the VS Code extension.
+- ``--with-cri`` also installs ``delonix-cri`` (Kubernetes node).
+- ``--low-ports`` allows publishing ports below 1024 (see below).
+- ``--with-image-build`` installs what BUILDING VM images needs
+  (libguestfs, a DHCP client for its appliance) and makes
+  ``/boot/vmlinuz-*`` readable — that last step lowers a host security
+  boundary, which is why it is opt-in and says how to revert it.
+- ``--production`` raises the limits a busy node hits under load: conntrack
+  table and hash size, ARP table, ephemeral ports, backlogs, pids, file
+  descriptors, and ``LimitNOFILE``/``TasksMax`` on ``user@.service``
+  (rootless containers are its children). Written to
+  ``/etc/sysctl.d/99-delonix-production.conf`` and a drop-in.
+- ``--performance`` applies, without asking, the CPU performance mode
+  (governor, EPP, power profile), transparent hugepages in ``madvise`` plus
+  irqbalance, and a disk GC timer (``system prune --auto`` at 75% full,
+  never touching volumes). Without it — and without ``--no-performance`` —
+  the installer ASKS for each (Enter = yes); with no terminal the answer is
+  no. The CPU and hugepage settings live in ``delonix-performance.service``,
+  which restores the boot-time values on stop:
+  ``systemctl disable --now delonix-performance`` reverts them.
+- ``--insecure-skip-signature`` skips the signature check — only for
+  debugging, or a release from before signing existed. You lose the only
+  proof that the binary came from this project.
+- ``--user`` installs to ``~/.local/bin``; ``--version vX.Y.Z`` pins a release.
 
 Publishing port 80 or 443 (``-p 80:80``) needs ``--low-ports``:
 
@@ -307,14 +363,33 @@ machine, the alternative that lowers nothing is a root-owned proxy on port 80
 (nginx/haproxy/systemd socket activation) forwarding to a high port. It writes
 ``/etc/sysctl.d/99-delonix-lowports.conf`` — delete it to revert.
 
-Manual alternative (binary only — you install the runtime deps yourself):
+Manual alternative (binaries only — you install the runtime deps yourself).
+``delonix`` is one of four binaries: ``delonix mcp`` runs ``delonix-mcp``,
+``delonix serve api`` runs ``delonix-mgmt`` and ``delonix serve cri`` runs
+``delonix-cri``, each looked up next to ``delonix`` first and then on the
+``PATH``, and a server from another release refuses to start. Without them
+those three commands refuse; everything else works with ``delonix`` alone. Check the signature and the checksums before
+installing — the public key is the ``MINISIGN_PUBKEY`` line of the release's
+``install.sh`` (take it from a copy you already trust, not from the same
+download you are verifying):
 
 .. code-block:: bash
 
-   curl -fL -o ~/.local/bin/delonix \
-     https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
-   chmod +x ~/.local/bin/delonix
+   BASE=https://github.com/angolardevops/delonix-runtime/releases/latest/download
+   ARCH=x86_64      # or aarch64
+   cd "$(mktemp -d)"
+   for f in SHA256SUMS SHA256SUMS.minisig \
+            delonix-$ARCH-linux delonix-mcp-$ARCH-linux delonix-mgmt-$ARCH-linux; do
+     curl -fsSLO "$BASE/$f"
+   done
+   minisign -Vm SHA256SUMS -P '<MINISIGN_PUBKEY from install.sh>'
+   sha256sum -c SHA256SUMS --ignore-missing
+   install -m 0755 delonix-$ARCH-linux      ~/.local/bin/delonix
+   install -m 0755 delonix-mcp-$ARCH-linux  ~/.local/bin/delonix-mcp
+   install -m 0755 delonix-mgmt-$ARCH-linux ~/.local/bin/delonix-mgmt
    echo 'source <(delonix completion shell bash)' >> ~/.bashrc
+
+Add ``delonix-cri-$ARCH-linux`` the same way for a Kubernetes node.
 
 Quickstart
 ==========
@@ -364,7 +439,7 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
    * - ``pod``
      - Real multi-container pods (``kind: Pod``): create, logs, exec, cp, attach, port-forward — N containers sharing netns/IPC/UTS as one unit. Listing and removal go through ``get pods``/``delete pods``.
    * - ``vm``
-     - Declarative microVMs: create, ls, start, stop, console, apply, snapshot (create/ls/rm/restore), migrate.
+     - Declarative microVMs: create, ls, start, stop, pause/unpause, destroy, console, ssh, apply, snapshot (create/ls/rm/restore), migrate.
    * - ``workload``
      - Unified compute layer over containers **and** VMs (ADR-0002): ls, describe, stop, rm — creation stays declarative via ``kind: Workload``.
    * - ``image``
@@ -378,7 +453,7 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
    * - ``policy``
      - The node's admission ceiling (``kind: RuntimePolicy``): ``unset`` is the only verb — the ceiling is read via ``get runtimepolicies``/``describe runtimepolicy`` and raised/tightened via ``stack apply``, never lowered by ``destroy``/``--prune``.
    * - ``network``
-     - User bridge/overlay networks: create, ls, inspect, describe, route, diagnose, vlan, node, apply.
+     - User bridge/overlay networks: create, ls, inspect, describe, connect/disconnect (a running container, hot), route, ipam (the lease registry: ``ls``, ``prune``), diagnose, vlan, node, apply.
    * - ``net``
      - Low-level network/infra, grouped: ``netns`` (rootless ingress infra), ``flow`` (live per-container traffic via eBPF), ``ingress``/``egress`` (L4 firewall), ``l4guard`` (ingress-wide DDoS guard), ``capture`` (tcpdump on a container's SDN interface), ``httproute`` (embedded L7/HTTP(S) reverse-proxy with hot reload and ``run --expose`` auto-registration), ``tunnel`` (expose a port publicly via pinggy/ngrok/cloudflare).
    * - ``stack``
@@ -416,6 +491,44 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
    * - ``explain`` · ``api-resources``
      - The field reference for a Kind (``kubectl explain`` style, read from the generated schema) and the catalogue of every Kind this engine serves.
 
+Remote providers
+----------------
+
+The local VM backends (libvirt, Cloud Hypervisor) need no configuration. A
+remote one does — an endpoint, a node and a credential — and it is read from
+the environment when ``delonix`` starts. Nothing is contacted until a command
+selects it, and a misconfigured target prints a warning instead of stopping
+unrelated commands.
+
+For **Proxmox VE** (one node, ADR-0008), keep the credential in the vault
+rather than in the shell history:
+
+.. code-block:: bash
+
+   read -rs PVE_TOKEN_SECRET && export PVE_TOKEN_SECRET   # never in argv
+   delonix secret create pve-api --from-literal tokenId='root@pam!delonix' \
+                                 --from-env tokenSecret=PVE_TOKEN_SECRET
+   export DELONIX_PROXMOX_URL=https://pve.example:8006
+   export DELONIX_PROXMOX_NODE=pve                # the name GET /nodes reports
+   export DELONIX_PROXMOX_SECRET=pve-api          # tokenId+tokenSecret, or username+password
+   export DELONIX_PROXMOX_CA_FILE=/etc/ssl/pve-ca.pem   # node signed by an internal CA
+   delonix provider ls                            # proxmox: NotConfigured -> NotProbed
+   delonix vm create web --backend proxmox --disk local-lvm:8
+
+``provider ls`` never contacts the node — the first VM operation is what
+authenticates. ``DELONIX_PROXMOX_TOKEN_ID`` with ``DELONIX_PROXMOX_TOKEN``
+(or ``DELONIX_PROXMOX_TOKEN_FILE``, a ``chmod 600`` file), and
+``DELONIX_PROXMOX_USER`` with ``DELONIX_PROXMOX_PASSWORD``, are accepted too;
+``DELONIX_PROXMOX_BRIDGE`` and ``DELONIX_PROXMOX_VLAN`` set how the node is
+cabled. ``DELONIX_PROXMOX_INSECURE_TLS=1`` switches certificate verification
+off — another machine answering in the node's name then receives the
+credential, so prefer the CA file. The same variables register the Proxmox
+SDN behind ``kind: NetworkZone``. An **OPNsense** appliance (``kind:
+NetworkGateway``, ADR-0051) is registered the same way through
+``DELONIX_OPNSENSE_URL`` and ``DELONIX_OPNSENSE_CREDENTIAL`` (a secret with
+``key`` and ``secret``). The full list, with what reads each variable, is in
+`docs/dev/environment-variables.md <docs/dev/environment-variables.md>`_.
+
 Languages
 =========
 
@@ -443,11 +556,13 @@ stale:
    virtualmachines   vm           compute.delonix.io/v1alpha1     VirtualMachine  ...
    networks          net          networking.delonix.io/v1alpha1  Network         ...
 
-Nineteen at the time of writing (2026-09-10; ``api-resources`` is the count that
-cannot go stale), each in the group of its domain
-(``compute``/``networking``/``gateway``/``storage``/``artifact``/``core``/
-``infrastructure``). ``apiVersion: delonix.io/v1`` is still accepted everywhere
-— a Kind takes **its own group or the legacy one**, and nothing else.
+Each Kind lives in the group of its domain — ``compute``, ``networking``,
+``gateway``, ``storage``, ``artifact``, ``core``, ``infrastructure`` and
+``security`` (the node's own admission ceiling, ``RuntimePolicy``), all
+``<group>.delonix.io/v1alpha1``; ``api-resources`` is the count, since any
+number written here goes stale with the next Kind. ``apiVersion:
+delonix.io/v1`` is still accepted everywhere — a Kind takes **its own group or
+the legacy one**, and nothing else.
 
 Four of them are not destinations: ``Workload`` and ``Dependency`` are sugar
 that lowers at load time, ``Ingress`` is the k8s spelling of an ``HTTPRoute``,
@@ -530,7 +645,9 @@ ls/describe/stop/rm``, which routes by name across containers and VMs.
 Architecture
 ============
 
-Twenty-two crates in five layers (ADR-0040), one ``delonix`` command, no residing process:
+The crates of the workspace, in five layers (ADR-0040) — the directory a crate lives in
+is its layer, and ``scripts/arch_fitness.py`` fails when the two disagree — one ``delonix``
+command, no residing process:
 
 .. list-table::
    :header-rows: 1
@@ -578,6 +695,8 @@ Twenty-two crates in five layers (ADR-0040), one ``delonix`` command, no residin
      - A ``VmBackend`` against one Proxmox VE node's API.
    * - ``delonix-truenas``
      - Dataset, quota and share provisioning on a TrueNAS appliance.
+   * - ``delonix-opnsense``
+     - A ``GatewayProvider`` against an OPNsense appliance's REST API (``kind: NetworkGateway``, ADR-0051).
    * - **Interfaces and binaries**
      -
    * - ``delonix-cri``

@@ -151,13 +151,16 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <p class='lang-pt'>O grupo <code>container</code> é o dia a dia do runtime — o homólogo do
 <code>docker container</code>. Cada invocação é um processo efémero (sem daemon): o
 <code>run</code> faz <code>clone()</code> directo com os namespaces pedidos e o estado fica em
-JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma cópia flat
-<em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.</p><p class='lang-en'>The <code>container</code> group is the runtime's everyday surface — the
+JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs é um overlay montado dentro do user
+namespace do próprio container: as layers da imagem são partilhadas entre todos os containers e
+cada um tem a sua camada de escrita <em>persistente</em> — as escritas sobrevivem a
+<code>stop</code>/<code>start</code>, como no Docker.</p><p class='lang-en'>The <code>container</code> group is the runtime's everyday surface — the
 counterpart to <code>docker container</code>. Each invocation is an ephemeral process (no daemon):
 <code>run</code> does a direct <code>clone()</code> with the requested namespaces and the state
-lands as JSON under <code>$DELONIX_ROOT</code>. In rootless mode, a container's rootfs is a
-<em>persistent</em> flat copy — writes survive <code>stop</code>/<code>start</code>, just like in
-Docker.</p>
+lands as JSON under <code>$DELONIX_ROOT</code>. In rootless mode, the rootfs is an overlay mounted
+inside the container's own user namespace: the image layers are shared by every container, and
+each one has its own <em>persistent</em> writable layer — writes survive
+<code>stop</code>/<code>start</code>, just like in Docker.</p>
 <p class='src-link'>📄 Implementação real em Rust: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs"><code>cmd/container.rs</code></a></p>
 <div class='help'><pre><code>Usage: delonix container [OPTIONS] &lt;COMMAND&gt;
 

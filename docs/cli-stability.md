@@ -212,9 +212,12 @@ contrato.
 
 **Para automação há `-o json`**, e é ele que é estável: um array JSON por
 recurso, campos podem ser ACRESCENTADOS mas não removidos nem com o tipo mudado
-(ADR-0005). Verificado a funcionar nos nove comandos de listagem — `container
-ps`, `image ls`, `volumes ls`, `network ls`, `vm ls`, `pod ls`, `secret ls`,
-`storage ls`, `workload ls`. Também `inspect` e `-q`/`--quiet`.
+(ADR-0005). Verificado a funcionar (2026-09-25, v4.4.0) em `container ps`,
+`image ls`, `volume ls`, `network ls`, `vm ls`, `secret ls`, `workload ls` e no
+verbo genérico `get <plural>` (`get pods`, `get volumes`, …), que é o caminho de
+listagem dos Kinds sem `ls` próprio — o `pod ls` já não existe, e o grupo
+`storage` fundiu-se no `volume`. Também `inspect` e `-q`/`--quiet`. **Excepção
+medida:** `backup ls` ainda não aceita `-o json`.
 
 > Uma versão anterior deste documento dizia que `-o json` estava «por fazer e é a
 > lacuna reconhecida aqui». **Estava errado** — existe desde a ADR-0005. É
@@ -291,11 +294,16 @@ diferenças — serve directamente como gate de CI. Um campo removido ou com o
 tipo mudado é assinalado como **quebra de contrato**, que é o que esta secção
 promete não acontecer.
 
-**O que fica de fora, e é honesto dizê-lo:** os restantes Kinds
-(`Vm`, `Cluster`, `ShareVolume`, `Image`, `Secret`, `Ingress`,
-`FirewallPolicy`, `HTTPRoute`, `Tunnel`, `Workload`, `Stack`) ainda não têm
-schema gerado, e por isso continuam sem promessa. O `delonix manifest schema`/`explain`
-diz quais são, em vez de os omitir.
+**Todos os Kinds têm hoje schema gerado.** Esta secção dizia que `Vm`,
+`Cluster`, `ShareVolume`, `Image`, `Secret`, `Ingress`, `FirewallPolicy`,
+`HTTPRoute`, `Tunnel`, `Workload` e `Stack` não o tinham — deixou de ser
+verdade: `delonix explain <Kind>` responde para cada Kind que
+`delonix api-resources` lista (verificado a 2026-09-25, v4.4.0), com os nomes
+canónicos (`VirtualMachine`, `KubernetesCluster`, `NetworkPolicy`, `Gateway`; os
+nomes antigos `Vm`/`Cluster`/`FirewallPolicy`/`Tunnel` continuam a resolver como
+alias). `ShareVolume` já não existe: é um `kind: Volume` com bloco `share:`. Se
+um Kind futuro chegar sem schema, o `delonix explain` recusa-o a dizer que Kinds
+o têm, em vez de o omitir.
 
 > **Três Kinds deixaram de existir** nesta série, fundidos no que já faziam:
 > `Egress` → `FirewallPolicy` com `direction: egress`; `Dependency` →
