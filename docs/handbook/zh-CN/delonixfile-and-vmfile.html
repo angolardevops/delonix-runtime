@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Delonixfile and VMfile · Delonix Runtime — 贡献者手册</title>
+<title>Delonixfile 与 VMfile · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,284 +206,283 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a class="on" aria-current="page" href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a class="on" aria-current="page" href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">镜像与 microVM</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="delonixfile-and-vmfile">Delonixfile and VMfile</h1>
-<p><strong>Before you read:</strong> <a href="build-and-test.html">Clone, build and test</a> (a binary and an isolated state root) and <a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">OCI images, content-addressed storage and overlayfs</a> in the Cloud native primer.</p>
-<p>Delonix has two build files, and they look alike on purpose: anyone who has written a Dockerfile
-can read both. What they build is different.</p>
+<h1 id="delonixfile-and-vmfile">Delonixfile 与 VMfile</h1>
+<p><strong>阅读之前：</strong><a href="build-and-test.html">克隆、构建与测试</a>（一个二进制程序和一个隔离的状态根目录），以及云原生入门里的<a href="cloud-native-primer.html#44-oci-images-content-addressed-storage-and-overlayfs">OCI 镜像、按内容寻址的存储与 overlayfs</a>一节。</p>
+<p>Delonix 有两种构建文件，它们看起来相像是故意的：任何写过 Dockerfile 的人都能读懂这两种。
+它们构建出来的东西不一样。</p>
 <ul>
-<li>A <strong>Delonixfile</strong> builds an <strong>OCI container image</strong> (layers of a filesystem). It is a Dockerfile
-  grammar with a few Delonix instructions on top, built by <code>delonix build</code>.</li>
-<li>A <strong>VMfile</strong> builds a <strong>bootable qcow2 disk</strong> for a VM. It borrows the Dockerfile <em>shape</em>, but the
-  mechanism is <code>qemu-img</code> + <code>virt-customize</code> on a whole disk, built by <code>delonix image vm build</code>.</li>
+<li>一个 <strong>Delonixfile</strong> 构建出一个 <strong>OCI 容器镜像</strong>（一层层的文件系统）。它是在 Dockerfile
+  语法上再加了少数几条 Delonix 指令，由 <code>delonix build</code> 构建。</li>
+<li>一个 <strong>VMfile</strong> 为一台虚拟机构建出一块<strong>可启动的 qcow2 磁盘</strong>。它借用了 Dockerfile 的
+  <em>形状</em>，但机制是对整块磁盘用 <code>qemu-img</code> + <code>virt-customize</code>，由 <code>delonix image vm build</code>
+  构建。</li>
 </ul>
-<p>This page describes what the parsers in this repository actually accept — not what Docker accepts.
-Every rule below points at the code that enforces it. After it you can write both files, predict
-what each parser accepts or refuses, and find where to change a grammar.</p>
+<p>本页描述的是这个仓库里的解析器实际接受什么——而不是 Docker 接受什么。下面每一条规则都指
+向强制执行它的代码。读完之后，你能够写出这两种文件、预测每个解析器会接受还是拒绝，并且
+找到该去哪里改动某种语法。</p>
 <blockquote>
-<p>Examples marked <em>parse-checked</em> were run against a binary built from this tree, with
-<code>DELONIX_ROOT</code>, <code>DELONIX_NET_RUNTIME_DIR</code> and <code>TMPDIR</code> pointed at a scratch directory, up to the
-point where the build would start pulling images or downloading base disks. Full builds were
-<strong>not executed in this review</strong> (they need registry/network access and, for VMs, libguestfs and
-several GB of RAM and disk).</p>
+<p>标了 <em>已通过解析校验</em> 的例子，都是把 <code>DELONIX_ROOT</code>、<code>DELONIX_NET_RUNTIME_DIR</code> 和
+<code>TMPDIR</code> 指向一个临时目录之后，对着用这棵树构建出的二进制程序跑过的，一直跑到构建即将
+开始拉取镜像或下载 base 磁盘的那一步为止。完整的构建<strong>在本次复核中没有被执行</strong>（它们
+需要镜像仓库/网络访问，对虚拟机而言还需要 libguestfs 以及好几 GB 的内存和磁盘）。</p>
 </blockquote>
 <hr />
-<h2 id="part-1-delonixfile">Part 1 — Delonixfile<a class="hanchor" href="#part-1-delonixfile" aria-label="#">#</a></h2>
-<h3 id="where-the-code-lives">Where the code lives<a class="hanchor" href="#where-the-code-lives" aria-label="#">#</a></h3>
+<h2 id="part-1-delonixfile">第 1 部分 —— Delonixfile<a class="hanchor" href="#part-1-delonixfile" aria-label="#">#</a></h2>
+<h3 id="where-the-code-lives">代码在哪里<a class="hanchor" href="#where-the-code-lives" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Concern</th>
-<th>File</th>
-<th>Symbol</th>
+<th>关注点</th>
+<th>文件</th>
+<th>符号</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Grammar (parser)</td>
+<td>语法（解析器）</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
-<td><code>parse_dockerfile_with_args</code>, <code>parse_run_flags</code>, <code>parse_secret_mount</code>, <code>resolve_target_stage</code></td>
+<td><code>parse_dockerfile_with_args</code>、<code>parse_run_flags</code>、<code>parse_secret_mount</code>、<code>resolve_target_stage</code></td>
 </tr>
 <tr>
-<td>Build orchestration</td>
+<td>构建编排</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/build.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>build.<wbr>rs</code></a></td>
-<td><code>run</code>, <code>build_from_spec</code>, <code>build_one_stage</code>, <code>default_build_file</code></td>
+<td><code>run</code>、<code>build_from_spec</code>、<code>build_one_stage</code>、<code>default_build_file</code></td>
 </tr>
 <tr>
-<td>Image commit</td>
+<td>镜像提交</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/build.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-oci/<wbr>src/<wbr>build.<wbr>rs</code></a></td>
-<td><code>ImageStore::<wbr>commit_flat_rootfs</code> (rootless), <code>commit_upper</code> + <code>build_image</code> (root)</td>
+<td><code>ImageStore::<wbr>commit_flat_rootfs</code>（rootless）、<code>commit_upper</code> + <code>build_image</code>（root）</td>
 </tr>
 <tr>
-<td>Project templates</td>
+<td>项目模板</td>
 <td><code>bins/<wbr>delonix-runtime-bin/<wbr>templates/<wbr>&lt;name&gt;/<wbr>Delonixfile</code></td>
-<td>rendered by <code>delonix init</code> / <code>stack init</code></td>
+<td>由 <code>delonix init</code> / <code>stack init</code> 渲染</td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="file-lookup">File lookup<a class="hanchor" href="#file-lookup" aria-label="#">#</a></h3>
-<p><code>delonix build [CONTEXT]</code> without <code>-f</code> calls <code>default_build_file</code> (<code>cmd/build.rs</code>): it uses
-<code>&lt;context&gt;/Delonixfile</code> if it exists, otherwise <code>&lt;context&gt;/Dockerfile</code>. <strong>The grammar is the same
-for both names</strong> — the Delonix instructions below are accepted in a file called <code>Dockerfile</code> too.
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> is just the name that is discovered first. <code>-t/--tag</code> is required.</p>
+<h3 id="file-lookup">文件查找<a class="hanchor" href="#file-lookup" aria-label="#">#</a></h3>
+<p>不带 <code>-f</code> 的 <code>delonix build [CONTEXT]</code> 会调用 <code>default_build_file</code>（<code>cmd/build.rs</code>）：
+<code>&lt;context&gt;/Delonixfile</code> 存在就用它，否则用 <code>&lt;context&gt;/Dockerfile</code>。<strong>两个名字用的是同一套
+语法</strong>——下面这些 Delonix 指令，在一个叫 <code>Dockerfile</code> 的文件里同样会被接受。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a>
+只是先被发现的那个名字而已。<code>-t/--tag</code> 是必填的。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix build -t myapp:dev .                 # Delonixfile, else Dockerfile
 delonix build -t myapp:dev -f build/Other .  # explicit file
 </code></pre></div>
-<h3 id="instructions-the-parser-accepts">Instructions the parser accepts<a class="hanchor" href="#instructions-the-parser-accepts" aria-label="#">#</a></h3>
-<p><code>parse_dockerfile_with_args</code> is <strong>fail-closed</strong>: an instruction it does not know is an error with
-the line number, and any instruction except <code>ARG</code> before the first <code>FROM</code> is an error. Lines ending
-in <code>\</code> are joined; lines starting with <code>#</code> are comments. Instruction names are case-insensitive.</p>
+<h3 id="instructions-the-parser-accepts">解析器接受的指令<a class="hanchor" href="#instructions-the-parser-accepts" aria-label="#">#</a></h3>
+<p><code>parse_dockerfile_with_args</code> 是 <strong>fail-closed</strong> 的：一个它不认识的指令是一个带行号的错误，
+第一个 <code>FROM</code> 之前除了 <code>ARG</code> 以外的任何指令也是一个错误。以 <code>\</code> 结尾的行会被拼接；以 <code>#</code>
+开头的行是注释。指令名字不区分大小写。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Instruction</th>
-<th>What happens</th>
-<th>Notes</th>
+<th>指令</th>
+<th>发生了什么</th>
+<th>备注</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>ARG NAME[=default]</code></td>
-<td>Declares a build variable; <code>${NAME}</code>/<code>$NAME</code> is substituted in every later line</td>
-<td>Allowed before <code>FROM</code> (to parameterize it). <code>--build-arg NAME=VALUE</code> overrides only a declared <code>ARG</code>. Simplification: args live in <strong>one</strong> scope for the whole file, not per stage. No <code>${NAME:-default}</code> forms (<code>substitute_vars</code>).</td>
+<td>声明一个构建变量；之后每一行里的 <code>${NAME}</code>/<code>$NAME</code> 都会被替换</td>
+<td>允许出现在 <code>FROM</code> 之前（用来给它传参）。<code>--build-arg NAME=VALUE</code> 只能覆盖一个已声明的 <code>ARG</code>。简化之处：变量的作用域是<strong>整个文件</strong>，而不是按阶段划分。不支持 <code>${NAME:-default}</code> 这种形式（<code>substitute_vars</code>）。</td>
 </tr>
 <tr>
 <td><code>FROM &lt;image&gt; [AS &lt;name&gt;]</code></td>
-<td>Opens a stage</td>
-<td>A later stage may also say <code>FROM &lt;earlier-stage&gt;</code> (see multi-stage).</td>
+<td>打开一个阶段</td>
+<td>更靠后的阶段也可以写 <code>FROM &lt;earlier-stage&gt;</code>（见多阶段构建）。</td>
 </tr>
 <tr>
 <td><code>RUN &lt;shell&gt;</code></td>
-<td>Runs in a working container via <code>exec</code></td>
-<td>Only <code>--mount=type=secret,...</code>/<code>--mount=type=cache,...</code> are accepted as a flag (below).</td>
+<td>通过 <code>exec</code> 在一个工作容器里运行</td>
+<td>作为参数只接受 <code>--mount=type=secret,...</code>/<code>--mount=type=cache,...</code>（见下文）。</td>
 </tr>
 <tr>
 <td><code>COPY [--from=&lt;stage&gt;] &lt;src&gt; &lt;dst&gt;</code></td>
-<td>Writes into the stage's rootfs on disk</td>
-<td>Confined to the context/rootfs (<code>safe_join</code>, <code>confine_to</code>): <code>..</code>, absolute escapes and symlinks that leave the base are refused.</td>
+<td>写入该阶段磁盘上的根文件系统</td>
+<td>被限制在 context/rootfs 之内（<code>safe_join</code>、<code>confine_to</code>）：<code>..</code>、绝对路径的逃逸，以及离开 base 的符号链接都会被拒绝。</td>
 </tr>
 <tr>
 <td><code>ADD</code></td>
-<td><strong>Same as <code>COPY</code></strong></td>
-<td>No URL download, no automatic archive extraction.</td>
+<td><strong>和 <code>COPY</code> 一样</strong></td>
+<td>不支持 URL 下载，也不会自动解压归档。</td>
 </tr>
 <tr>
-<td><code>ENV K=V [K2="v 2" …]</code> or <code>ENV K V</code></td>
-<td>Affects later <code>RUN</code>s; final stage's <code>ENV</code> goes into the image config</td>
-<td>Values are expanded against earlier <code>ENV</code>s (<code>expand_env_value</code>).</td>
+<td><code>ENV K=V [K2="v 2" …]</code> 或 <code>ENV K V</code></td>
+<td>影响之后的各个 <code>RUN</code>；最后一个阶段的 <code>ENV</code> 会写进镜像配置</td>
+<td>值会针对更早的 <code>ENV</code> 做展开（<code>expand_env_value</code>）。</td>
 </tr>
 <tr>
 <td><code>WORKDIR &lt;dir&gt;</code></td>
-<td>Working dir of later <code>RUN</code>s; final value goes into the image config</td>
+<td>之后各个 <code>RUN</code> 的工作目录；最终的值会写进镜像配置</td>
 <td></td>
 </tr>
 <tr>
 <td><code>USER &lt;name|uid[:gid]&gt;</code></td>
-<td>Recorded in the image config</td>
-<td>Empty → inherits the base image's.</td>
+<td>记录进镜像配置</td>
+<td>留空 → 继承 base 镜像的设置。</td>
 </tr>
 <tr>
-<td><code>CMD</code>, <code>ENTRYPOINT</code></td>
-<td>Recorded in the image config</td>
-<td>Exec (JSON) and shell forms.</td>
+<td><code>CMD</code>、<code>ENTRYPOINT</code></td>
+<td>记录进镜像配置</td>
+<td>支持 exec（JSON）和 shell 两种形式。</td>
 </tr>
 <tr>
 <td><code>HEALTHCHECK [opts] CMD &lt;cmd&gt;</code> / <code>HEALTHCHECK NONE</code></td>
-<td>The part after <code>CMD</code> is stored as the image's health command</td>
-<td>Options before <code>CMD</code> are ignored. Used by <code>delonix container healthcheck &lt;id&gt;</code> and by compose's <code>depends_on: condition: service_healthy</code>.</td>
+<td><code>CMD</code> 之后的部分会被存为这个镜像的健康检查命令</td>
+<td><code>CMD</code> 之前的选项会被忽略。被 <code>delonix container healthcheck &lt;id&gt;</code> 以及 compose 的 <code>depends_on: condition: service_healthy</code> 用到。</td>
 </tr>
 <tr>
-<td><code>LABEL</code>, <code>EXPOSE</code>, <code>MAINTAINER</code>, <code>VOLUME</code>, <code>STOPSIGNAL</code>, <code>SHELL</code>, <code>ONBUILD</code></td>
-<td><strong>Accepted and ignored</strong></td>
-<td>Metadata only; no build effect.</td>
+<td><code>LABEL</code>、<code>EXPOSE</code>、<code>MAINTAINER</code>、<code>VOLUME</code>、<code>STOPSIGNAL</code>、<code>SHELL</code>、<code>ONBUILD</code></td>
+<td><strong>被接受，但会被忽略</strong></td>
+<td>只是元数据；对构建没有影响。</td>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Delonix extensions</strong> (parsed into <code>Dockerfile</code> fields in the same file):</p>
+<p><strong>Delonix 扩展</strong>（被解析进同一个文件里的 <code>Dockerfile</code> 字段）：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Instruction</th>
-<th>Parsed into</th>
-<th>Effect in this tree</th>
+<th>指令</th>
+<th>被解析进</th>
+<th>在这棵树里的效果</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>SCAN fail-on=&lt;sev&gt;</code></td>
-<td><code>scan_fail_on</code> (default <code>high</code> if no <code>fail-on=</code>)</td>
-<td><strong>Parsed but not enforced by <code>delonix build</code></strong> — no caller reads the field. Gate images explicitly with <code>delonix image scan --fail-on &lt;sev&gt; &lt;image&gt;</code>.</td>
+<td><code>scan_fail_on</code>（没有 <code>fail-on=</code> 时默认 <code>high</code>）</td>
+<td><strong>会被解析，但 <code>delonix build</code> 不会强制执行它</strong>——没有调用方去读这个字段。要给镜像加门禁，显式用 <code>delonix image scan --fail-on &lt;sev&gt; &lt;image&gt;</code>。</td>
 </tr>
 <tr>
 <td><code>CPUS &lt;n&gt;</code></td>
 <td><code>cpus</code></td>
-<td>Written to the image config (non-standard <code>Cpus</code> key); inherited from the base if absent. No run-time consumer was found in this review.</td>
+<td>写进镜像配置（一个非标准的 <code>Cpus</code> 键）；缺省时继承 base 的值。本次复核没有找到任何运行时的消费者。</td>
 </tr>
 <tr>
 <td><code>MEMORY &lt;n&gt;</code></td>
 <td><code>memory</code></td>
-<td>Same as <code>CPUS</code> (<code>Memory</code> key).</td>
+<td>和 <code>CPUS</code> 一样（<code>Memory</code> 键）。</td>
 </tr>
 <tr>
 <td><code>SECURITY &lt;opt&gt;...</code></td>
 <td><code>security</code></td>
-<td>Same as <code>CPUS</code> (<code>Security</code> key).</td>
+<td>和 <code>CPUS</code> 一样（<code>Security</code> 键）。</td>
 </tr>
 </tbody>
 </table></div>
-<p>Treat <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> as <em>recorded intent</em>; set real limits at run time
-(<code>container run -m/--cpus</code>, or <code>resources</code> in a manifest). If you wire them up, update this table.</p>
-<p>Parser behaviour worth knowing (read in the code, not a design promise):</p>
+<p>把 <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> 当作<em>被记录下来的意图</em>就好；真正的限制要在运行时去设置
+（<code>container run -m/--cpus</code>，或者清单里的 <code>resources</code>）。如果你把它们接上了实际效果，记得
+更新这张表。</p>
+<p>值得了解的解析器行为（是从代码里读出来的，不是一个设计上的承诺）：</p>
 <ul>
-<li><code>COPY a b c /dst</code> keeps only the <strong>first</strong> source and the <strong>last</strong> argument; middle sources are
-  dropped silently.</li>
-<li><code>COPY --chown=…</code>/<code>--chmod=…</code> are not recognized; the flag token would be taken as the source path.</li>
-<li><code>RUN --network=…</code>, <code>RUN --security=…</code> and any other <code>RUN --&lt;flag&gt;</code> are refused.</li>
+<li><code>COPY a b c /dst</code> 只保留<strong>第一个</strong>源和<strong>最后一个</strong>参数；中间的源会被悄悄丢掉。</li>
+<li><code>COPY --chown=…</code>/<code>--chmod=…</code> 不被识别；那个参数 token 会被当成源路径来处理。</li>
+<li><code>RUN --network=…</code>、<code>RUN --security=…</code>，以及其他任何 <code>RUN --&lt;flag&gt;</code> 都会被拒绝。</li>
 </ul>
-<h3 id="multi-stage-copy-from-and-target">Multi-stage, <code>COPY --from</code> and <code>--target</code><a class="hanchor" href="#multi-stage-copy-from-and-target" aria-label="#">#</a></h3>
-<p>Each stage (the final one included) gets its <strong>own working container and rootfs</strong>
-(<code>build_one_stage</code>). The working container (<code>sleep infinity</code> over the stage's rootfs) is created
-by <code>ensure_container</code> through the same <code>WorkloadRuntime</code> that <code>container run</code> and <code>start</code> use
-(<code>container::with_host_workload</code>), so a build cannot drift from a container's spawn specification. Intermediate stages stay on disk until the whole build ends, so:</p>
+<h3 id="multi-stage-copy-from-and-target">多阶段构建、<code>COPY --from</code> 与 <code>--target</code><a class="hanchor" href="#multi-stage-copy-from-and-target" aria-label="#">#</a></h3>
+<p>每一个阶段（包括最后一个）都会拿到<strong>自己的工作容器和根文件系统</strong>
+（<code>build_one_stage</code>）。这个工作容器（在该阶段的根文件系统上跑 <code>sleep infinity</code>）由
+<code>ensure_container</code> 创建，走的是和 <code>container run</code>/<code>start</code> 相同的那个 <code>WorkloadRuntime</code>
+（<code>container::with_host_workload</code>），所以构建不可能偏离容器自己的启动规格。中间阶段会
+一直留在磁盘上，直到整个构建结束，因此：</p>
 <ul>
-<li><code>COPY --from=&lt;name-or-index&gt; &lt;src&gt; &lt;dst&gt;</code> reads straight out of that stage's rootfs
-  (<code>resolve_copy_source</code>, <code>copy_into_rootfs</code>).</li>
-<li><code>FROM &lt;earlier-stage&gt;</code> clones that stage's rootfs with <code>cp -a --reflink=auto</code>
-  (<code>clone_rootfs</code>) — <code>cp -a</code> so symlinks such as <code>/bin -&gt; usr/bin</code> stay symlinks.</li>
-<li><code>--target &lt;name-or-index&gt;</code> (<code>resolve_target_stage</code>) stops at that stage and packages it; later
-  stages are not built. An unknown name is refused and the error lists the stages that exist.
-  With <code>--target</code> on an intermediate stage, <code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code>/<code>WORKDIR</code>/<code>HEALTHCHECK</code>
-  come from <strong>that</strong> stage, not from the file's final stage.</li>
+<li><code>COPY --from=&lt;name-or-index&gt; &lt;src&gt; &lt;dst&gt;</code> 直接从那个阶段的根文件系统里读
+  （<code>resolve_copy_source</code>、<code>copy_into_rootfs</code>）。</li>
+<li><code>FROM &lt;earlier-stage&gt;</code> 用 <code>cp -a --reflink=auto</code>（<code>clone_rootfs</code>）克隆那个阶段的根文件
+  系统——用 <code>cp -a</code> 是为了让 <code>/bin -&gt; usr/bin</code> 这样的符号链接依然是符号链接。</li>
+<li><code>--target &lt;name-or-index&gt;</code>（<code>resolve_target_stage</code>）会在那个阶段停下并打包它；更靠后的
+  阶段不会被构建。一个未知的名字会被拒绝，错误信息里会列出实际存在的各个阶段。对一个
+  中间阶段用 <code>--target</code> 时，<code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code>/<code>WORKDIR</code>/<code>HEALTHCHECK</code> 来自
+  <strong>那一个</strong>阶段，而不是文件里的最后一个阶段。</li>
 </ul>
-<p>Two root-mode (overlay) restrictions, both refused up front with a clear message: the final stage
-cannot be <code>FROM &lt;earlier-stage&gt;</code> (the OCI commit needs a real base image for lineage), and
-<code>--target</code> on an intermediate stage is refused. Rootless has neither restriction.</p>
-<h3 id="build-secrets">Build secrets<a class="hanchor" href="#build-secrets" aria-label="#">#</a></h3>
+<p>root 模式（overlay）下有两条限制，两条都会在一开始就带着明确的提示被拒绝：最后一个阶段
+不能是 <code>FROM &lt;earlier-stage&gt;</code>（OCI 提交需要一个真实的 base 镜像来提供世系信息），并且对
+一个中间阶段使用 <code>--target</code> 会被拒绝。Rootless 模式下这两条限制都不存在。</p>
+<h3 id="build-secrets">构建密钥<a class="hanchor" href="#build-secrets" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix build -t app:dev --secret id=npmrc,src=$HOME/.npmrc .
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-dockerfile">RUN --mount=type=secret,id=npmrc,target=/root/.npmrc npm ci
 </code></pre></div>
 <ul>
-<li><code>--secret id=&lt;name&gt;,src=&lt;path&gt;</code> is repeatable; a malformed entry or a missing <code>src</code> file is a hard
-  error (<code>parse_build_secrets</code>).</li>
-<li>In the file: <code>--mount=type=secret,id=&lt;name&gt;[,target=&lt;path&gt;][,required=true|false]</code>. <code>target</code>
-  defaults to <code>/run/secrets/&lt;id&gt;</code>; <code>required</code> defaults to <code>false</code> (a missing optional secret is
-  skipped, like Docker).</li>
-<li>The secret is bind-mounted live (<code>mount_run_secrets</code>) inside the working container's mount
-  namespace only for that one <code>RUN</code>, then unmounted — the host-side view of the rootfs that the
-  commit and the layer cache read never contains it. The secret material is also not hashed into
-  the cache key.</li>
+<li><code>--secret id=&lt;name&gt;,src=&lt;path&gt;</code> 可以重复给出；一条格式错误的条目或者一个缺失的 <code>src</code>
+  文件是一个硬错误（<code>parse_build_secrets</code>）。</li>
+<li>在文件里：<code>--mount=type=secret,id=&lt;name&gt;[,target=&lt;path&gt;][,required=true|false]</code>。
+  <code>target</code> 默认是 <code>/run/secrets/&lt;id&gt;</code>；<code>required</code> 默认是 <code>false</code>（一个缺失的可选密钥会
+  像 Docker 那样被跳过）。</li>
+<li>这个密钥只在那<strong>一次</strong> <code>RUN</code> 期间，在工作容器的挂载命名空间里被实时绑定挂载
+  （<code>mount_run_secrets</code>），然后就被卸载——提交和层缓存所读取的那份根文件系统的宿主机侧
+  视图，从来不会包含它。密钥的内容也不会被哈希进缓存键。</li>
 </ul>
-<h3 id="cache-mounts-m03-of-the-13-improvements-programme">Cache mounts (M03 of the 13-improvements programme)<a class="hanchor" href="#cache-mounts-m03-of-the-13-improvements-programme" aria-label="#">#</a></h3>
+<h3 id="cache-mounts-m03-of-the-13-improvements-programme">缓存挂载（十三项改进计划中的 M03）<a class="hanchor" href="#cache-mounts-m03-of-the-13-improvements-programme" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-dockerfile">RUN --mount=type=cache,target=/root/.cache/pip pip install -r requirements.txt
 </code></pre></div>
 <ul>
-<li><code>--mount=type=cache,target=&lt;path&gt;[,id=&lt;name&gt;]</code>. <code>target</code> is required; <code>id</code> defaults to <code>target</code>
-  itself (Docker's own rule), so two <code>RUN</code>s that mount the same <code>target</code> without naming an <code>id</code>
-  share the same persistent directory.</li>
-<li>Unlike a secret, this directory is <strong>read-write</strong> and <strong>persists across builds</strong> (and across
-  different Dockerfiles): it lives at <code>&lt;DELONIX_ROOT&gt;/build-cache/mounts/&lt;sha256(id)&gt;</code> — hashed,
-  never the raw <code>id</code>/<code>target</code> string, since an omitted <code>id</code> defaults to an arbitrary
-  Dockerfile-controlled path (<code>cache_mount_dir</code>). No GC/TTL yet, same honestly-stated gap as the
-  layer cache below.</li>
-<li>A layer-cache <strong>hit</strong> on the instruction skips the <code>RUN</code> entirely, so it never touches the cache
-  mount's directory either — only a miss does (<code>mount_run_caches</code>).</li>
-<li><code>sharing=</code>/<code>ro</code> (Docker's own extra fields) are <strong>refused</strong>, not silently accepted-and-ignored:
-  there is no cross-process locking between concurrent <code>delonix build</code>s sharing a cache id yet, and
-  every cache mount here is read-write.</li>
-<li><code>type=ssh</code> and <code>type=bind</code> are still <strong>refused</strong> (<code>parse_mount_flag</code>) — not yet implemented.</li>
+<li><code>--mount=type=cache,target=&lt;path&gt;[,id=&lt;name&gt;]</code>。<code>target</code> 是必填的；<code>id</code> 默认就是
+  <code>target</code> 本身（这是 Docker 自己的规则），所以两个没有指定 <code>id</code> 却挂载同一个 <code>target</code>
+  的 <code>RUN</code>，共享的是同一个持久化目录。</li>
+<li>和密钥不同，这个目录是<strong>可读写</strong>的，并且<strong>会跨构建持久化</strong>（也跨不同的 Dockerfile）：
+  它位于 <code>&lt;DELONIX_ROOT&gt;/build-cache/mounts/&lt;sha256(id)&gt;</code>——是哈希值，绝不是原始的
+  <code>id</code>/<code>target</code> 字符串，因为一个省略掉的 <code>id</code> 会默认成一个由 Dockerfile 任意决定的路径
+  （<code>cache_mount_dir</code>）。目前还没有 GC/TTL，和下面的层缓存有着同样被如实写出来的缺口。</li>
+<li>一次针对该指令的层缓存<strong>命中</strong>会完全跳过这条 <code>RUN</code>，所以它也就根本不会碰到这个缓存
+  挂载的目录——只有未命中时才会碰（<code>mount_run_caches</code>）。</li>
+<li><code>sharing=</code>/<code>ro</code>（Docker 自己额外加的字段）会被<strong>拒绝</strong>，而不是悄悄地接受并忽略：目前
+  并发的 <code>delonix build</code> 之间共享同一个 cache id 时还没有跨进程加锁，而这里的每一个
+  缓存挂载都是可读写的。</li>
+<li><code>type=ssh</code> 和 <code>type=bind</code> 仍然会被<strong>拒绝</strong>（<code>parse_mount_flag</code>）——还没有实现。</li>
 </ul>
-<h3 id="-platform-and-binfmt"><code>--platform</code> and binfmt<a class="hanchor" href="#-platform-and-binfmt" aria-label="#">#</a></h3>
-<p><code>--platform linux/&lt;arch&gt;</code> (<code>parse_platform</code>: only <code>linux/</code> is accepted) resolves the base image
-for that architecture and stamps the arch into the result. <strong>Running</strong> a foreign-arch <code>RUN</code> needs
-the host's own <code>binfmt_misc</code> + <code>qemu-user-static</code> registration, which Delonix does not manage.
-<code>build_from_spec</code> checks <code>/proc/sys/fs/binfmt_misc/qemu-&lt;arch&gt;</code> before building and refuses with
-the interpreter name if it is missing or disabled.</p>
-<h3 id="rootless-vs-root-and-the-layer-cache">Rootless vs root, and the layer cache<a class="hanchor" href="#rootless-vs-root-and-the-layer-cache" aria-label="#">#</a></h3>
+<h3 id="-platform-and-binfmt"><code>--platform</code> 与 binfmt<a class="hanchor" href="#-platform-and-binfmt" aria-label="#">#</a></h3>
+<p><code>--platform linux/&lt;arch&gt;</code>（<code>parse_platform</code>：只接受 <code>linux/</code>）会解析出那个架构对应的
+base 镜像，并把这个架构戳进构建结果里。<strong>运行</strong>一个跨架构的 <code>RUN</code> 需要宿主机自己注册好
+<code>binfmt_misc</code> + <code>qemu-user-static</code>，这一步 Delonix 不负责管理。<code>build_from_spec</code> 会在构建
+之前检查 <code>/proc/sys/fs/binfmt_misc/qemu-&lt;arch&gt;</code>，缺失或被禁用时会带着解释器的名字拒绝。</p>
+<h3 id="rootless-vs-root-and-the-layer-cache">Rootless 与 root 的差异，以及层缓存<a class="hanchor" href="#rootless-vs-root-and-the-layer-cache" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th></th>
-<th>Rootless (normal path)</th>
+<th>Rootless（常规路径）</th>
 <th>Root</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Rootfs of a stage</td>
-<td>flat directory (<code>prepare_rootfs_flat</code>)</td>
+<td>一个阶段的根文件系统</td>
+<td>扁平目录（<code>prepare_rootfs_flat</code>）</td>
 <td>overlay</td>
 </tr>
 <tr>
-<td>Commit</td>
-<td><code>commit_flat_rootfs</code> — one squashed layer on top of the base's layers</td>
-<td><code>commit_upper</code> (tar of the upperdir) + <code>build_image</code></td>
+<td>提交</td>
+<td><code>commit_flat_rootfs</code>——在 base 的各层之上压成一层</td>
+<td><code>commit_upper</code>（upperdir 的 tar）+ <code>build_image</code></td>
 </tr>
 <tr>
-<td>Layer cache</td>
-<td><strong>yes</strong></td>
-<td><strong>never</strong></td>
+<td>层缓存</td>
+<td><strong>有</strong></td>
+<td><strong>从来没有</strong></td>
 </tr>
 </tbody>
 </table></div>
-<p>The cache (<code>&lt;DELONIX_ROOT&gt;/build-cache/&lt;hash&gt;/rootfs</code>, <code>--no-cache</code> to bypass) is a rolling hash
-chain, one link per instruction. <code>RUN</code>/<code>COPY</code> snapshot the full rootfs after running; <code>ENV</code>/<code>WORKDIR</code>
-fold into the chain without a snapshot. A <code>COPY</code> link hashes the <strong>bytes</strong> being copied, so a changed
-file invalidates everything after it. On a hit, the cached snapshot is cloned into a fresh
-container's rootfs — never synced onto a live one (that corrupted the <code>/proc</code>/<code>/sys</code>/<code>/dev</code> mounts
-and was abandoned). Trade-offs stated in the module doc: full-rootfs snapshots, not per-layer diffs
-(mitigated by <code>--reflink=auto</code>), and <strong>no cache GC</strong> — <code>build-cache/</code> only grows.</p>
-<p>Because every <code>RUN</code> executes in a real container, the host prerequisites of
-<a href="environment.html">Preparing your environment</a> (user namespaces, subuid/subgid, AppArmor on
-Ubuntu) apply to builds too.</p>
-<h3 id="worked-example-a-template">Worked example: a template<a class="hanchor" href="#worked-example-a-template" aria-label="#">#</a></h3>
-<p><code>delonix init -t &lt;template&gt; [DIR]</code> (or <code>delonix stack init --template &lt;template&gt;</code>) renders
-<code>bins/delonix-runtime-bin/templates/&lt;template&gt;/</code>, replacing <code>__NAME__</code>, <code>__PORT__</code> and
-<code>__TEMPLATE_VERSION__</code> (the <code>version=</code> default in <code>template.meta</code>, or <code>-v/--template-version</code>).
-In an empty directory it writes the full project; in a non-empty one it only adds the Delonix glue
-(Delonixfile, manifest, CI files). Generated in a scratch directory from <code>httpd</code> (<em>run</em>):</p>
+<p>这个缓存（<code>&lt;DELONIX_ROOT&gt;/build-cache/&lt;hash&gt;/rootfs</code>，<code>--no-cache</code> 可以绕过）是一条滚动
+哈希链，一条指令对应链上一环。<code>RUN</code>/<code>COPY</code> 运行之后会给整个根文件系统拍一张快照；
+<code>ENV</code>/<code>WORKDIR</code> 只是并入这条链，不会拍快照。一个 <code>COPY</code> 环节会对被复制的<strong>字节内容</strong>
+做哈希，所以一个变动过的文件会让它之后的一切都失效。命中时，缓存下来的快照会被克隆进一个
+全新容器的根文件系统——绝不会同步到一个活着的容器上（那样做会破坏
+<code>/proc</code>/<code>/sys</code>/<code>/dev</code> 的挂载，这条路已经被放弃了）。模块文档里写明的取舍：拍的是整个
+根文件系统的快照，而不是按层的差异（用 <code>--reflink=auto</code> 来缓解），并且<strong>没有缓存 GC</strong>
+——<code>build-cache/</code> 只会不断变大。</p>
+<p>因为每一条 <code>RUN</code> 都在一个真实的容器里执行，<a href="environment.html">准备你的环境</a>里说的那些
+宿主机前置条件（user 命名空间、subuid/subgid、Ubuntu 上的 AppArmor）对构建同样适用。</p>
+<h3 id="worked-example-a-template">实例演示：一个模板<a class="hanchor" href="#worked-example-a-template" aria-label="#">#</a></h3>
+<p><code>delonix init -t &lt;template&gt; [DIR]</code>（或者 <code>delonix stack init --template &lt;template&gt;</code>）会渲染
+<code>bins/delonix-runtime-bin/templates/&lt;template&gt;/</code>，替换掉 <code>__NAME__</code>、<code>__PORT__</code> 和
+<code>__TEMPLATE_VERSION__</code>（<code>template.meta</code> 里 <code>version=</code> 的默认值，或者
+<code>-v/--template-version</code>）。在一个空目录里，它会写出完整的项目；在一个非空目录里，它只会
+加上 Delonix 的胶水代码（Delonixfile、清单、CI 文件）。下面是用 <code>httpd</code> 在一个临时目录里
+生成出来的（<em>已运行</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">$ delonix init -t httpd web
 detected an empty directory → stack init --template httpd
   created: web/.dockerignore
@@ -501,10 +500,10 @@ EXPOSE 8080
 HEALTHCHECK CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
 CMD [&quot;httpd-foreground&quot;]
 </code></pre></div>
-<p>The generated <code>delonix-manifest.yaml</code> passes <code>delonix manifest validate</code> (<em>run</em>). <code>--up</code> would build,
-<code>stack apply</code> and wait for health — not executed here.</p>
-<p>A multi-stage file using most of the grammar, <em>parse-checked</em> (the <code>--target nosuch</code> error proves
-the file parsed and lists its stages, before any pull):</p>
+<p>生成出来的 <code>delonix-manifest.yaml</code> 能通过 <code>delonix manifest validate</code>（<em>已运行</em>）。
+<code>--up</code> 本该去构建、<code>stack apply</code>，再等待健康检查——这里没有执行过。</p>
+<p>一个用到了大部分语法的多阶段文件，<em>已通过解析校验</em>（<code>--target nosuch</code> 的报错证明了
+这个文件在任何拉取动作之前就已经解析完毕，并且列出了它的各个阶段）：</p>
 <div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-dockerfile">ARG GO_VERSION=1.23
 FROM golang:${GO_VERSION}-alpine AS builder
 WORKDIR /src
@@ -526,241 +525,241 @@ error invalid argument: RUN --mount=type=ssh: only type=secret and type=cache ar
 $ delonix build -t d --platform windows/amd64 .
 error invalid argument: --platform &#x27;windows/amd64&#x27;: only &#x27;linux/&lt;arch&gt;&#x27; is supported (this engine does not run another OS)
 </code></pre></div>
-<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">The repository's own <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> is not built by <code>delonix</code><a class="hanchor" href="#the-repositorys-own-delonixfile-is-not-built-by-delonix" aria-label="#">#</a></h3>
-<p>The <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> at the repository root packages the <code>delonix</code> CLI into a container image. It is
-built with <strong>Docker or Podman</strong> (<code>docker build -f Delonixfile …</code>, or <code>make image</code>), not with
-<code>delonix build</code>. It only uses <code>type=cache</code> mounts (now parsed) and the <code># syntax=</code> directive (a
-comment to this parser, since any line starting with <code>#</code> is one) — but building it with
-<code>delonix build</code> has never been tried: it compiles this entire Rust workspace inside the working
-container, which is a different order of magnitude from the templates below and outside the scope
-this feature was validated against. Do not use it as an example of the Delonix grammar; use the
-templates.</p>
+<h3 id="the-repositorys-own-delonixfile-is-not-built-by-delonix">本仓库自己的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> 不是用 <code>delonix</code> 构建的<a class="hanchor" href="#the-repositorys-own-delonixfile-is-not-built-by-delonix" aria-label="#">#</a></h3>
+<p>仓库根目录下的那个 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> 把 <code>delonix</code> 这个 CLI 打包成一个容器镜像。它是用
+<strong>Docker 或 Podman</strong>（<code>docker build -f Delonixfile …</code>，或者 <code>make image</code>）构建的，不是用
+<code>delonix build</code>。它只用到了 <code>type=cache</code> 挂载（现在已经能被解析）和 <code># syntax=</code> 指令
+（对这个解析器来说就是一行注释，因为任何以 <code>#</code> 开头的行都是注释）——但用
+<code>delonix build</code> 去构建它这件事从来没有试过：它要在工作容器里编译整个 Rust 工作区，这和
+下面那些模板不是一个数量级，也超出了这项功能被验证过的范围。不要把它当作 Delonix
+语法的例子；要用就用那些模板。</p>
 <hr />
-<h2 id="part-2-vmfile">Part 2 — VMfile<a class="hanchor" href="#part-2-vmfile" aria-label="#">#</a></h2>
-<h3 id="where-the-code-lives_1">Where the code lives<a class="hanchor" href="#where-the-code-lives_1" aria-label="#">#</a></h3>
+<h2 id="part-2-vmfile">第 2 部分 —— VMfile<a class="hanchor" href="#part-2-vmfile" aria-label="#">#</a></h2>
+<h3 id="where-the-code-lives_1">代码在哪里<a class="hanchor" href="#where-the-code-lives_1" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Concern</th>
-<th>File</th>
-<th>Symbol</th>
+<th>关注点</th>
+<th>文件</th>
+<th>符号</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Grammar, scaffold, builder</td>
+<td>语法、脚手架、构建器</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmfile.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmfile.<wbr>rs</code></a></td>
-<td><code>parse</code>, <code>classify_base</code>, <code>resolve_base</code>, <code>stage_ops</code>, <code>build</code>, <code>finalize</code>, <code>scaffold</code></td>
+<td><code>parse</code>、<code>classify_base</code>、<code>resolve_base</code>、<code>stage_ops</code>、<code>build</code>、<code>finalize</code>、<code>scaffold</code></td>
 </tr>
 <tr>
-<td>CLI entry, golden recipe</td>
+<td>CLI 入口、黄金配方</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmimage.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vmimage.<wbr>rs</code></a></td>
-<td><code>VmImageCmd::Build</code>, <code>VmImageStore</code>, <code>VmImage</code>, <code>customize_args</code>, <code>tool_failure_hint</code></td>
+<td><code>VmImageCmd::Build</code>、<code>VmImageStore</code>、<code>VmImage</code>、<code>customize_args</code>、<code>tool_failure_hint</code></td>
 </tr>
 <tr>
-<td>Declarative build</td>
+<td>声明式构建</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vm.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>vm.<wbr>rs</code></a></td>
-<td><code>VmBuildSpec</code> (<code>spec.build</code> of <code>kind: VirtualMachine</code>)</td>
+<td><code>VmBuildSpec</code>（<code>kind: VirtualMachine</code> 的 <code>spec.build</code>）</td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="scaffold">Scaffold<a class="hanchor" href="#scaffold" aria-label="#">#</a></h3>
+<h3 id="scaffold">脚手架<a class="hanchor" href="#scaffold" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm init --vmfile [DIR] [--name &lt;n&gt;]   # or: delonix image vm init &lt;name&gt; [-d DIR]
 </code></pre></div>
-<p>Both write <code>VMfile</code> and <code>cloud-init/user-data.yaml</code> (<em>run</em> in a scratch directory). The scaffold is
-meant to be a working recipe, and the <code>parseia_o_scaffold_que_escrevemos</code> test keeps it parseable.
-Two things to correct by hand in the "Next:" hint it prints: the flag is <code>vm create --disk</code>, not
-<code>--disk-image</code>; and see the <code>CLOUDINIT</code> note below about the file name.</p>
-<h3 id="building">Building<a class="hanchor" href="#building" aria-label="#">#</a></h3>
+<p>两个命令都会写出 <code>VMfile</code> 和 <code>cloud-init/user-data.yaml</code>（<em>在一个临时目录里已运行过</em>）。
+这份脚手架被设计成一份能用的配方，<code>parseia_o_scaffold_que_escrevemos</code> 这个测试保证它
+始终能被解析。它打印出来的"Next:"提示里有两处需要手动改正：那个参数是
+<code>vm create --disk</code>，不是 <code>--disk-image</code>；另外关于文件名，见下面 <code>CLOUDINIT</code> 那条说明。</p>
+<h3 id="building">构建<a class="hanchor" href="#building" aria-label="#">#</a></h3>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix vm build [-f vm.yaml|VMfile] [-t &lt;tag&gt;] [--target &lt;image&gt;] [--network] [--no-compress] [CONTEXT]
 </code></pre></div>
-<p><code>delonix image vm build</code> is the same command (both share one <code>BuildArgs</code>). Which recipe runs is
-decided like <code>docker build</code> decides between files: an explicit <code>-f</code> wins (a <code>.yaml</code>/<code>.yml</code> is read
-as a <code>vm.yaml</code>, anything else as a <code>VMfile</code>); with no <code>-f</code>, a <code>vm.yaml</code> in the context beats a
-<code>VMfile</code>, which beats the built-in golden recipe (see <a href="microvm-setup.html">Building microVMs</a>). The
-golden-recipe flags (<code>--k8s-version</code>, <code>--extra-package</code>, <code>--extra-run</code>, <code>--offline</code>, <code>--no-k8s</code>,
-<code>--cri-bin</code>, <code>--delonix-bin</code>) are <strong>refused</strong> with a <code>vm.yaml</code> or a <code>VMfile</code>, and <code>--network</code> is
-refused without one of them.</p>
-<h3 id="vmyaml-the-compose-style-front-end"><code>vm.yaml</code>: the compose-style front end<a class="hanchor" href="#vmyaml-the-compose-style-front-end" aria-label="#">#</a></h3>
-<p>A <code>VMfile</code> is to a VM image what a <code>Dockerfile</code> is to a container image. A <code>vm.yaml</code> is what a
-<code>compose.yaml</code> is to it: it names the images of a folder and carries the parameters that make the
-qcow2 complete — <code>size</code>, <code>packages.install</code>, <code>users</code>, <code>services</code>, <code>files</code>, <code>env</code>, <code>cloud_init</code>,
-<code>run</code>, what to <strong>remove</strong> (<code>remove.packages/paths/users/services</code>, applied after everything else so
-it can prune what a package or a <code>run:</code> pulled in) and <code>cleanup</code> (package cache, logs, history,
-<code>/tmp</code>, <code>machine-id</code>).</p>
-<p>It is a front end only (<code>cmd/vmspec.rs</code>). Each image compiles to a builder that already exists —
-a synthesised <code>VMfile</code> (<code>profile: custom</code>, the default), the golden recipe (<code>profile: rootless|k8s</code>)
-or an existing file (<code>build.file</code>) — so there is no second build engine. Rules worth knowing:</p>
+<p><code>delonix image vm build</code> 是同一个命令（两者共用一个 <code>BuildArgs</code>）。用哪一份配方，决定
+方式和 <code>docker build</code> 在各文件之间做决定一样：一个显式给出的 <code>-f</code> 优先（<code>.yaml</code>/<code>.yml</code>
+被当作 <code>vm.yaml</code> 来读，别的一律当作 <code>VMfile</code>）；不带 <code>-f</code> 时，context 里的 <code>vm.yaml</code> 优先
+于 <code>VMfile</code>，<code>VMfile</code> 又优先于内置的黄金配方（见<a href="microvm-setup.html">构建 microVM</a>）。黄金
+配方专属的参数（<code>--k8s-version</code>、<code>--extra-package</code>、<code>--extra-run</code>、<code>--offline</code>、
+<code>--no-k8s</code>、<code>--cri-bin</code>、<code>--delonix-bin</code>）在有 <code>vm.yaml</code> 或 <code>VMfile</code> 时会被<strong>拒绝</strong>，而
+<code>--network</code> 在没有它们两者之一时也会被拒绝。</p>
+<h3 id="vmyaml-the-compose-style-front-end"><code>vm.yaml</code>：compose 风格的前端<a class="hanchor" href="#vmyaml-the-compose-style-front-end" aria-label="#">#</a></h3>
+<p><code>VMfile</code> 之于虚拟机镜像，就相当于 <code>Dockerfile</code> 之于容器镜像。<code>vm.yaml</code> 之于它，就相当于
+<code>compose.yaml</code> 之于那一边：它给出一个目录里各个镜像的名字，并带上让 qcow2 完整起来所需的
+参数——<code>size</code>、<code>packages.install</code>、<code>users</code>、<code>services</code>、<code>files</code>、<code>env</code>、<code>cloud_init</code>、
+<code>run</code>，要<strong>移除</strong>什么（<code>remove.packages/paths/users/services</code>，在其他一切之后应用，
+这样才能清理掉某个软件包或 <code>run:</code> 拉进来的东西），以及 <code>cleanup</code>（软件包缓存、日志、
+历史记录、<code>/tmp</code>、machine-id）。</p>
+<p>它只是一个前端（<code>cmd/vmspec.rs</code>）。每一个镜像都会编译成一个已经存在的构建器——一份
+合成出来的 <code>VMfile</code>（<code>profile: custom</code>，默认值）、黄金配方（<code>profile: rootless|k8s</code>），
+或者一个已有的文件（<code>build.file</code>）——所以并不存在第二套构建引擎。值得了解的规则：</p>
 <ul>
-<li><strong>Strict</strong>: an unknown key is an error, and so is a field the chosen route cannot honour (a
-  <code>hostname:</code> with <code>profile: k8s</code> is refused by name, not ignored).</li>
-<li><strong><code>${TAG}</code> / <code>${VAR:-default}</code></strong> are expanded on the parsed values (a <code>${TAG}</code> in a comment is not
-  evaluated). <code>-t</code> is the tag of the result <strong>and</strong> <code>${TAG}</code>.</li>
-<li><strong>Relative paths are relative to the <code>vm.yaml</code>'s own folder</strong>, whatever the context says.</li>
-<li><strong><code>packages</code> needs <code>network: true</code></strong>: a build that reaches the internet gives a different image on
-  a different day, so it is opt-in and the refusal says so.</li>
-<li><code>remove.paths</code> must be absolute, without <code>..</code>, and never a top-level system directory.</li>
+<li><strong>严格</strong>：一个未知的键是一个错误，一个所选路线无法兑现的字段也是一个错误
+  （<code>profile: k8s</code> 配上一个 <code>hostname:</code> 会被按名字拒绝，而不是被忽略）。</li>
+<li><strong><code>${TAG}</code> / <code>${VAR:-default}</code></strong> 会在已解析出的值上展开（注释里的 <code>${TAG}</code> 不会被
+  求值）。<code>-t</code> 既是构建结果的 tag，<strong>又</strong>是 <code>${TAG}</code>。</li>
+<li><strong>相对路径是相对于 <code>vm.yaml</code> 自己所在的目录</strong>，不管 context 说的是什么。</li>
+<li><strong><code>packages</code> 需要 <code>network: true</code></strong>：一次能联网的构建，在不同的日子里会构建出不同的
+  镜像，所以这是可选加入的，拒绝时也会说明这一点。</li>
+<li><code>remove.paths</code> 必须是绝对路径，不能带 <code>..</code>，也绝不能是一个顶层系统目录。</li>
 </ul>
-<p><strong>Appliances</strong> (<code>appliance:</code>). Some images cannot be described as edits to a cloud image: the
-vendor's installer has to run (Proxmox from its ISO, OpenStack pulling ~20 GiB of containers).
-For those the recipe names a <strong>builder</strong>, not a path: <code>appliance: {builder: proxmox, args: [pve,
-"9.2-1"]}</code> runs <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/appliances/build-proxmox.sh" target="_blank" rel="noopener"><code>scripts/appliances/build-proxmox.sh</code></a> (found in the <code>vm.yaml</code>'s folder or any
-folder above it) with an isolated <code>OUT_DIR</code> next to the image store, takes the one <code>*.qcow2</code> it
-leaves (a <code>.raw.qcow2</code> is ignored), and registers it with <code>image vm import</code> semantics —
-<code>--appliance</code> unless <code>cloud_init: true</code>. Because the name is validated (<code>[a-z0-9-]</code>) and resolved
-inside <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>, a <code>vm.yaml</code> cannot make the host run a file of its choosing; <code>args</code>
-and <code>env</code> are validated too (no leading <code>-</code>, no <code>PATH</code>/<code>LD_*</code>/<code>BASH_ENV</code>…). The fields a builder
-decides itself (<code>packages</code>, <code>users</code>, <code>hostname</code>, <code>network</code>, <code>profile</code>…) are refused by name.</p>
-<p>The per-distro folders under <code>images/</code> (<code>images/ubuntu/</code> first) each carry a <code>vm.yaml</code>, the
-cloud-init file, the artefacts and a README.</p>
-<h3 id="instructions">Instructions<a class="hanchor" href="#instructions" aria-label="#">#</a></h3>
-<p><code>parse</code> is fail-closed: an unknown instruction is an error naming the supported set. Only <code>FROM</code>
-may come first. <code>\</code> continuations are joined; a <code>#</code> starts a comment only at the start of a line
-(so <code>RUN sed 's/#x/y/'</code> is not mangled).</p>
+<p><strong>Appliance</strong>（<code>appliance:</code>）。有些镜像没法描述成对一个云镜像的编辑：必须运行厂商自己的
+安装程序（Proxmox 要从它的 ISO 装，OpenStack 要拉大约 20 GiB 的容器）。对这些镜像，配方
+给出的是一个<strong>构建器</strong>的名字，而不是一个路径：<code>appliance: {builder: proxmox, args: [pve,
+"9.2-1"]}</code> 会运行 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/appliances/build-proxmox.sh" target="_blank" rel="noopener"><code>scripts/appliances/build-proxmox.sh</code></a>（在 <code>vm.yaml</code> 所在目录或它之上的
+任何目录里查找），配一个和镜像存储放在一起的隔离 <code>OUT_DIR</code>，取走它留下的那唯一一个
+<code>*.qcow2</code>（一个 <code>.raw.qcow2</code> 会被忽略），并按 <code>image vm import</code> 的语义注册它——除非
+<code>cloud_init: true</code>，否则带上 <code>--appliance</code>。因为这个名字会被校验（<code>[a-z0-9-]</code>），并且
+只在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a> 内部解析，所以一个 <code>vm.yaml</code> 没法让宿主机去运行一个它随便指定
+的文件；<code>args</code> 和 <code>env</code> 也会被校验（不能以 <code>-</code> 开头，不能是 <code>PATH</code>/<code>LD_*</code>/<code>BASH_ENV</code>……）。
+一个构建器自己决定的那些字段（<code>packages</code>、<code>users</code>、<code>hostname</code>、<code>network</code>、<code>profile</code>……）
+会被按名字拒绝。</p>
+<p><code>images/</code> 下按发行版分的各个目录（<code>images/ubuntu/</code> 是第一个）各自带着一份 <code>vm.yaml</code>、
+cloud-init 文件、产出物和一份 README。</p>
+<h3 id="instructions">指令<a class="hanchor" href="#instructions" aria-label="#">#</a></h3>
+<p><code>parse</code> 是 fail-closed 的：一个未知指令是一个会说明支持哪些指令的错误。只有 <code>FROM</code> 可以
+排在最前面。<code>\</code> 续行会被拼接；<code>#</code> 只有出现在一行的开头才算注释的开始（所以
+<code>RUN sed 's/#x/y/'</code> 不会被搞乱）。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Instruction</th>
-<th>Scope</th>
-<th>Effect (<code>stage_ops</code> → <code>virt-customize</code>)</th>
+<th>指令</th>
+<th>作用范围</th>
+<th>效果（<code>stage_ops</code> → <code>virt-customize</code>）</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>FROM &lt;ref&gt; [AS &lt;name&gt;]</code></td>
-<td>opens a stage</td>
-<td>See <em>What <code>FROM</code> accepts</em>. <code>as</code> is case-insensitive.</td>
+<td>打开一个阶段</td>
+<td>见 <em><code>FROM</code> 接受什么</em>。<code>as</code> 不区分大小写。</td>
 </tr>
 <tr>
 <td><code>RUN &lt;shell&gt;</code></td>
-<td>step</td>
-<td><code>--run-command</code> inside the guest; <strong>offline</strong> unless <code>--network</code>.</td>
+<td>步骤</td>
+<td>客户机里的 <code>--run-command</code>；<strong>离线</strong>执行，除非有 <code>--network</code>。</td>
 </tr>
 <tr>
 <td><code>COPY &lt;src&gt; &lt;dst&gt;</code></td>
-<td>step</td>
-<td>Copy-in from the build context; <code>src</code> confined to the context (<code>build::safe_join</code>). Exactly two arguments.</td>
+<td>步骤</td>
+<td>从构建 context 里拷入；<code>src</code> 被限制在 context 之内（<code>build::safe_join</code>）。恰好两个参数。</td>
 </tr>
 <tr>
 <td><code>COPY --from=&lt;stage&gt; &lt;src&gt; &lt;dst&gt;</code></td>
-<td>step</td>
-<td><code>virt-copy-out</code> from that stage's disk to a host staging dir, then copy-in. The stage must be <strong>named and declared earlier</strong> — checked at parse time.</td>
+<td>步骤</td>
+<td>用 <code>virt-copy-out</code> 把那个阶段磁盘里的内容取到宿主机的一个暂存目录，再拷入。那个阶段必须<strong>已被命名并且在更早的地方声明过</strong>——在解析时就会被检查。</td>
 </tr>
 <tr>
 <td><code>ENV KEY=value</code></td>
-<td>step</td>
-<td>Appends <code>KEY=value</code> to <code>/etc/environment</code> (a VM has no image config). One pair per line; the key and value are passed to a shell <strong>unquoted</strong>, so avoid spaces and shell metacharacters.</td>
+<td>步骤</td>
+<td>把 <code>KEY=value</code> 追加进 <code>/etc/environment</code>（虚拟机没有镜像配置）。每行一对；键和值会被<strong>不加引号</strong>地传给 shell，所以要避免空格和 shell 的元字符。</td>
 </tr>
 <tr>
 <td><code>USER &lt;name&gt;</code></td>
-<td>step</td>
-<td><code>useradd -m -s /<wbr>bin/<wbr>bash &lt;name&gt;</code> if the account does not exist.</td>
+<td>步骤</td>
+<td>如果这个账户不存在，就执行 <code>useradd -m -s /<wbr>bin/<wbr>bash &lt;name&gt;</code>。</td>
 </tr>
 <tr>
 <td><code>PASSWORD &lt;user&gt;:&lt;password&gt;</code></td>
-<td>step</td>
-<td>Sets that account's password. It is baked into every copy of the image.</td>
+<td>步骤</td>
+<td>设置那个账户的密码。它会被烤进这个镜像的每一份拷贝里。</td>
 </tr>
 <tr>
 <td><code>ROOTPASSWORD &lt;password&gt;</code></td>
-<td>step</td>
-<td>Sets root's password. Same caveat.</td>
+<td>步骤</td>
+<td>设置 root 的密码。同样的警告。</td>
 </tr>
 <tr>
 <td><code>SSHKEY &lt;user&gt; &lt;path-or-key&gt;</code></td>
-<td>step</td>
-<td>Appends to <code>/<wbr>home/<wbr>&lt;user&gt;/<wbr>.<wbr>ssh/<wbr>authorized_keys</code> (<code>~/</code> is expanded). The value must be a readable file or a key starting with <code>ssh-</code>/<code>ecdsa-</code>. The account must exist (create it with <code>USER</code> first).</td>
+<td>步骤</td>
+<td>追加进 <code>/<wbr>home/<wbr>&lt;user&gt;/<wbr>.<wbr>ssh/<wbr>authorized_keys</code>（<code>~/</code> 会被展开）。这个值必须是一个可读的文件，或者一个以 <code>ssh-</code>/<code>ecdsa-</code> 开头的密钥。这个账户必须已经存在（先用 <code>USER</code> 创建它）。</td>
 </tr>
 <tr>
 <td><code>CLOUDINIT &lt;path&gt;</code></td>
-<td>step</td>
-<td>Copies that file (context-confined) into <code>/etc/cloud/cloud.cfg.d/</code>, <strong>keeping its file name</strong>. cloud-init only loads files ending in <code>.cfg</code> from that directory, so name it e.g. <code>99-myimage.cfg</code> — the scaffold's <code>user-data.yaml</code> name is not picked up as written (not executed in this review; from the code path and cloud-init's documented behaviour). <code>vm create</code> still adds its own per-instance NoCloud seed on top.</td>
+<td>步骤</td>
+<td>把那个文件（被限制在 context 之内）拷贝进 <code>/etc/cloud/cloud.cfg.d/</code>，<strong>保留它原来的文件名</strong>。cloud-init 只会从那个目录加载以 <code>.cfg</code> 结尾的文件，所以要给它起个比如 <code>99-myimage.cfg</code> 这样的名字——脚手架里 <code>user-data.yaml</code> 这个名字原样是不会被拾取的（本次复核没有实际执行过；这是从代码路径和 cloud-init 自己文档写明的行为推断出的）。<code>vm create</code> 仍然会在此之上加上它自己那份每实例专属的 NoCloud seed。</td>
 </tr>
 <tr>
 <td><code>SIZE &lt;n&gt;G</code></td>
-<td>stage property</td>
-<td><code>qemu-img resize</code> <strong>before</strong> any step runs — growing after a <code>RUN</code> filled the disk would be too late, which is why it is not a step.</td>
+<td>阶段属性</td>
+<td>在任何步骤运行<strong>之前</strong>执行 <code>qemu-img resize</code>——等 <code>RUN</code> 把磁盘填满了再扩容就太晚了，这也是它不是一个步骤的原因。</td>
 </tr>
 <tr>
 <td><code>HOSTNAME &lt;name&gt;</code></td>
-<td>stage property</td>
-<td>Writes <code>/etc/hostname</code> (first op of the stage).</td>
+<td>阶段属性</td>
+<td>写入 <code>/etc/hostname</code>（该阶段的第一个操作）。</td>
 </tr>
 <tr>
 <td><code>VCPUS &lt;n&gt;</code></td>
-<td>image</td>
-<td>Recorded as <code>default_vcpus</code>.</td>
+<td>镜像</td>
+<td>记录为 <code>default_vcpus</code>。</td>
 </tr>
 <tr>
 <td><code>MEMORY &lt;n&gt;</code></td>
-<td>image</td>
-<td>Recorded as <code>default_memory</code>.</td>
+<td>镜像</td>
+<td>记录为 <code>default_memory</code>。</td>
 </tr>
 <tr>
 <td><code>HYPERVISOR &lt;backend&gt;</code></td>
-<td>image</td>
-<td>Validated and canonicalized by <code>delonix_vm::<wbr>valid_backend_name</code> (<code>ch</code> → <code>cloud-hypervisor</code>); recorded as <code>default_backend</code>.</td>
+<td>镜像</td>
+<td>由 <code>delonix_vm::<wbr>valid_backend_name</code> 校验并规范化（<code>ch</code> → <code>cloud-hypervisor</code>）；记录为 <code>default_backend</code>。</td>
 </tr>
 <tr>
 <td><code>LABEL k=v</code></td>
-<td>image</td>
-<td><strong>Parsed but not recorded</strong> in the image metadata in this tree.</td>
+<td>镜像</td>
+<td>在这棵树里<strong>只会被解析，不会被记录</strong>进镜像元数据。</td>
 </tr>
 </tbody>
 </table></div>
-<p>There is no <code>CMD</code>/<code>ENTRYPOINT</code>: a VM boots an init. <code>CLOUDINIT</code> is the closest equivalent.</p>
-<h3 id="what-from-accepts">What <code>FROM</code> accepts<a class="hanchor" href="#what-from-accepts" aria-label="#">#</a></h3>
-<p><code>classify_base</code> is pure and decides the kind of reference:</p>
+<p>没有 <code>CMD</code>/<code>ENTRYPOINT</code>：虚拟机启动的是一个 init。<code>CLOUDINIT</code> 是最接近的等价物。</p>
+<h3 id="what-from-accepts"><code>FROM</code> 接受什么<a class="hanchor" href="#what-from-accepts" aria-label="#">#</a></h3>
+<p><code>classify_base</code> 是一个纯函数，负责判断引用的种类：</p>
 <ol>
-<li><strong>A named earlier stage</strong> — wins over everything (<code>resolve_base</code>).</li>
-<li><strong><code>ubuntu:&lt;rel&gt;</code>, <code>debian:&lt;rel&gt;</code>, <code>rocky:&lt;rel&gt;</code>, <code>fedora:&lt;rel&gt;</code></strong> — first the project's own
-   base image for that distro/release (local copy, then the official registry —
-   <code>vmimage::official_distro_base</code>); if there is none, the distro's own cloud image, downloaded and
-   verified against the publisher's checksum file (<code>vmimage::download_base</code>).</li>
-<li><strong><code>http://</code> / <code>https://</code> URL</strong> — downloaded; verified against <code>&lt;url&gt;.sha256</code> when the publisher
-   offers one, otherwise trusted on TLS alone and the build says so.</li>
-<li><strong>Anything else</strong> — a VM image already in the local store (<code>delonix image vm ls</code>). Any other
-   <code>name:tag</code> is treated as a local tag, not as an unknown distro.</li>
+<li><strong>一个已命名的更早阶段</strong>——优先于一切（<code>resolve_base</code>）。</li>
+<li><strong><code>ubuntu:&lt;rel&gt;</code>、<code>debian:&lt;rel&gt;</code>、<code>rocky:&lt;rel&gt;</code>、<code>fedora:&lt;rel&gt;</code></strong>——先找项目自己为那个
+   发行版/版本准备的 base 镜像（先本地副本，再官方镜像仓库——
+   <code>vmimage::official_distro_base</code>）；如果没有，就用该发行版自己的云镜像，下载后对照
+   发布者的校验和文件核实（<code>vmimage::download_base</code>）。</li>
+<li><strong><code>http://</code> / <code>https://</code> URL</strong>——下载它；发布者提供了 <code>&lt;url&gt;.sha256</code> 时就对照校验，
+   否则就只信任 TLS，构建过程会说明这一点。</li>
+<li><strong>其他任何情况</strong>——本地存储里已经有的一个虚拟机镜像（<code>delonix image vm ls</code>）。任何
+   别的 <code>name:tag</code> 都会被当作一个本地 tag 来处理，而不是当作一个未知的发行版。</li>
 </ol>
-<h3 id="what-a-stage-is-and-where-the-result-lands">What a stage is, and where the result lands<a class="hanchor" href="#what-a-stage-is-and-where-the-result-lands" aria-label="#">#</a></h3>
-<p>A stage is a <strong>whole disk</strong>, not a layer (<code>build</code>):</p>
+<h3 id="what-a-stage-is-and-where-the-result-lands">什么是一个阶段，结果落在哪里<a class="hanchor" href="#what-a-stage-is-and-where-the-result-lands" aria-label="#">#</a></h3>
+<p>一个阶段是<strong>一整块磁盘</strong>，而不是一层（<code>build</code>）：</p>
 <ol>
-<li>The base is <strong>flattened</strong> into <code>&lt;work&gt;/&lt;stage&gt;.qcow2</code> with <code>qemu-img convert</code> (no backing file,
-   so the artefact never depends on the base still being present).</li>
-<li><code>SIZE</code> is applied, then all steps run in one <code>virt-customize</code> call (<code>--no-network</code> unless
-   <code>--network</code>). <code>vmimage::customize_args</code> always appends an SELinux relabel as the last command
-   (and turns off libguestfs's own deferred relabel), so SELinux guests do not boot with unlabeled
-   files.</li>
-<li>Named stages are kept for <code>COPY --from</code>; unnamed ones are not addressable. Only the <strong>last</strong>
-   stage becomes an image.</li>
-<li>Unless <code>--no-compress</code>: <code>virt-sparsify --in-place</code> (best effort), then
-   <code>qemu-img convert -c -o compression_type=zstd</code>. zstd because the image becomes the read-only
-   backing file of every VM created from it, so decompression speed is a runtime property.</li>
-<li>The qcow2 is moved to <code>VmImageStore::qcow2_path(tag)</code> under <code>&lt;DELONIX_ROOT&gt;/vm-images/</code>, and a
-   <code>VmImage</code> metadata record is saved next to it.</li>
+<li>base 会用 <code>qemu-img convert</code> <strong>拍平</strong>成 <code>&lt;work&gt;/&lt;stage&gt;.qcow2</code>（没有 backing file，所以
+   这个产出物永远不会依赖 base 是否还存在）。</li>
+<li>应用 <code>SIZE</code>，然后所有步骤在一次 <code>virt-customize</code> 调用里跑完（默认 <code>--no-network</code>，除非
+   有 <code>--network</code>）。<code>vmimage::customize_args</code> 总是把一次 SELinux relabel 追加成最后一条
+   命令（并关掉 libguestfs 自己那次延后的 relabel），这样 SELinux 客户机就不会带着没打
+   标签的文件启动。</li>
+<li>已命名的阶段会被保留，供 <code>COPY --from</code> 使用；未命名的则无法被寻址。只有<strong>最后</strong>一个
+   阶段会成为一个镜像。</li>
+<li>除非有 <code>--no-compress</code>：先 <code>virt-sparsify --in-place</code>（尽力而为），再
+   <code>qemu-img convert -c -o compression_type=zstd</code>。用 zstd 是因为这个镜像会成为每一台由
+   它创建出来的虚拟机的只读 backing file，所以解压速度是一个运行时属性。</li>
+<li>这个 qcow2 会被移动到 <code>&lt;DELONIX_ROOT&gt;/vm-images/</code> 下的
+   <code>VmImageStore::qcow2_path(tag)</code>，一条 <code>VmImage</code> 元数据记录会保存在它旁边。</li>
 </ol>
-<p>Recorded metadata: <code>digest</code> and <code>size</code>; <code>default_vcpus</code>/<code>default_memory</code>/<code>default_backend</code> from the
-file; <code>cloud_init: true</code>; <code>built_by: "delonix &lt;version&gt;"</code>; <code>distro</code> and <code>kernel_version</code>
-<strong>inherited</strong> only when the final <code>FROM</code> is a local image (a URL gives nothing to inherit, and the
-code refuses to guess).</p>
-<p><code>vm create</code> applies the recorded defaults only where the caller did not decide: <code>--vcpus</code>/<code>--memory</code>
-flags win over <code>VCPUS</code>/<code>MEMORY</code>; for the backend, <code>--backend</code> &gt; the image's <code>HYPERVISOR</code> &gt;
-<code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; auto-detection (<code>resolve_vm_defaults</code> in <code>cmd/vm.rs</code>,
-and <code>delonix_vm::create_with</code>).</p>
-<p><strong>Offline by default, and why.</strong> A <code>RUN</code> that reaches the internet produces a different image
-depending on when it ran. <code>--network</code> is opt-in because the most common thing a VMfile wants is to
-install a package. With <code>--network</code>, libguestfs's appliance gets its network from <code>passt</code>, which has
-host traps documented in <a href="microvm-setup.html#6-troubleshooting">Building microVMs</a>.</p>
-<p><strong>Scratch space.</strong> The work directory is created under <code>std::env::temp_dir()</code>
-(<code>delonix-vmfile-&lt;pid&gt;</code>), i.e. <code>$TMPDIR</code> or <code>/tmp</code>, and holds one full flattened disk per stage. Point
-<code>TMPDIR</code> at a filesystem with room — <code>/tmp</code> is often a small tmpfs and is emptied on reboot. A build
-that fails leaves that directory behind (observed during this review); remove it by hand.</p>
-<h3 id="declarative-build">Declarative build<a class="hanchor" href="#declarative-build" aria-label="#">#</a></h3>
-<p><code>kind: VirtualMachine</code> can build its own disk with <code>spec.build</code> (<code>VmBuildSpec</code>): <code>context</code> (relative
-to the <strong>manifest's</strong> directory), <code>file</code> (default <code>&lt;context&gt;/VMfile</code>), <code>tag</code> (default
-<code>&lt;metadata.name&gt;:latest</code>), <code>compress</code>, <code>network</code>. <code>apply</code> calls the same <code>vmfile::build</code>. <code>disk</code> and
-<code>build</code> are mutually exclusive.</p>
-<h3 id="worked-example-parse-checked">Worked example (parse-checked)<a class="hanchor" href="#worked-example-parse-checked" aria-label="#">#</a></h3>
+<p>记录下来的元数据：<code>digest</code> 和 <code>size</code>；来自文件的
+<code>default_vcpus</code>/<code>default_memory</code>/<code>default_backend</code>；<code>cloud_init: true</code>；
+<code>built_by: "delonix &lt;version&gt;"</code>；<code>distro</code> 和 <code>kernel_version</code> 只有在最后一个 <code>FROM</code> 是
+一个本地镜像时才会被<strong>继承</strong>（一个 URL 没有什么可继承的，代码也拒绝去猜）。</p>
+<p><code>vm create</code> 只会在调用者没有自己决定的地方应用记录下来的默认值：<code>--vcpus</code>/<code>--memory</code>
+参数优先于 <code>VCPUS</code>/<code>MEMORY</code>；对后端来说，<code>--backend</code> &gt; 镜像自己的 <code>HYPERVISOR</code> &gt;
+<code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend</code> &gt; 自动检测（<code>cmd/vm.rs</code> 里的
+<code>resolve_vm_defaults</code>，以及 <code>delonix_vm::create_with</code>）。</p>
+<p><strong>默认离线，以及为什么。</strong> 一条能联网的 <code>RUN</code>，会因为运行的时间不同而产出不同的镜像。
+<code>--network</code> 是可选加入的，因为一个 VMfile 最常见的诉求就是装一个软件包。带上
+<code>--network</code> 时，libguestfs 的 appliance 会从 <code>passt</code> 那里拿到网络，而它的宿主机陷阱记录
+在<a href="microvm-setup.html#6-troubleshooting">构建 microVM</a>里。</p>
+<p><strong>临时空间。</strong> 工作目录被创建在 <code>std::env::temp_dir()</code>（<code>delonix-vmfile-&lt;pid&gt;</code>）之下，
+也就是 <code>$TMPDIR</code> 或者 <code>/tmp</code>，每个阶段都会在里面放一整块拍平的磁盘。把 <code>TMPDIR</code> 指向一个
+空间够用的文件系统——<code>/tmp</code> 往往是一个很小的 tmpfs，而且会在重启时被清空。一次失败的
+构建会把那个目录留下来（本次复核中观察到了这一点）；要手动清理它。</p>
+<h3 id="declarative-build">声明式构建<a class="hanchor" href="#declarative-build" aria-label="#">#</a></h3>
+<p><code>kind: VirtualMachine</code> 可以通过 <code>spec.build</code>（<code>VmBuildSpec</code>）构建自己的磁盘：<code>context</code>
+（相对于<strong>清单</strong>所在的目录）、<code>file</code>（默认 <code>&lt;context&gt;/VMfile</code>）、<code>tag</code>（默认
+<code>&lt;metadata.name&gt;:latest</code>）、<code>compress</code>、<code>network</code>。<code>apply</code> 调用的是同一个
+<code>vmfile::build</code>。<code>disk</code> 和 <code>build</code> 是互斥的。</p>
+<h3 id="worked-example-parse-checked">实例演示（已通过解析校验）<a class="hanchor" href="#worked-example-parse-checked" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">dockerfile</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-dockerfile">FROM my-base:1.0 AS builder
 RUN make -C /src
 
@@ -775,180 +774,180 @@ MEMORY 2G
 HYPERVISOR ch
 LABEL org.opencontainers.image.title=web
 </code></pre></div>
-<p>With no image called <code>my-base:1.0</code> in the scratch store, the file parses and the build stops at
-base resolution — before any disk work:</p>
+<p>临时存储里没有一个叫 <code>my-base:1.0</code> 的镜像时，这个文件能被解析，构建会停在解析 base
+这一步——在任何磁盘操作之前：</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">$ delonix image vm build -t web:1.0 .
 [1/2] builder: FROM my-base:1.0
 error invalid argument: FROM my-base:1.0: no such local VM image, and it is not a URL nor a known cloud image (ubuntu:/debian:/rocky:) — see `delonix vm ls`
 </code></pre></div>
-<p>And the parser's refusals:</p>
+<p>以及解析器的各种拒绝：</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">VMfile:2: unknown instruction &#x27;CMD&#x27; — supported: FROM RUN COPY ENV USER PASSWORD ROOTPASSWORD CLOUDINIT SSHKEY SIZE HOSTNAME VCPUS MEMORY HYPERVISOR LABEL
 VMfile:2: no earlier stage named &#x27;nope&#x27;
 VMfile:2: invalid argument: unknown VM backend: &#x27;vmware&#x27; (use &#x27;cloud-hypervisor&#x27;, &#x27;libvirt&#x27;)
 --offline belong to the built-in golden recipe and mean nothing with a VMfile — the VMfile describes all of that itself
 </code></pre></div>
-<p>A full build (<code>virt-customize</code>, downloads, compression) was <strong>not executed in this review</strong>.</p>
+<p>一次完整的构建（<code>virt-customize</code>、下载、压缩）<strong>在本次复核中没有被执行</strong>。</p>
 <hr />
-<h2 id="comparison">Comparison<a class="hanchor" href="#comparison" aria-label="#">#</a></h2>
+<h2 id="comparison">对照<a class="hanchor" href="#comparison" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th></th>
-<th>Dockerfile (Docker/BuildKit)</th>
-<th>Delonixfile (<code>delonix build</code>)</th>
-<th>VMfile (<code>delonix image vm build</code>)</th>
+<th>Dockerfile（Docker/BuildKit）</th>
+<th>Delonixfile（<code>delonix build</code>）</th>
+<th>VMfile（<code>delonix image vm build</code>）</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Output</td>
-<td>OCI image</td>
-<td>OCI image (pushable, pullable by Docker)</td>
-<td>bootable qcow2 + <code>VmImage</code> metadata</td>
+<td>产出物</td>
+<td>OCI 镜像</td>
+<td>OCI 镜像（可推送，也能被 Docker 拉取）</td>
+<td>可启动的 qcow2 + <code>VmImage</code> 元数据</td>
 </tr>
 <tr>
-<td>Unit of a stage</td>
-<td>filesystem layers</td>
-<td>a working container + rootfs</td>
-<td>a whole flattened disk</td>
+<td>一个阶段的单位</td>
+<td>文件系统的层</td>
+<td>一个工作容器 + 根文件系统</td>
+<td>一整块拍平的磁盘</td>
 </tr>
 <tr>
 <td><code>FROM</code></td>
-<td>image</td>
-<td>image or earlier stage</td>
-<td>distro:release, URL, local VM image, or earlier stage</td>
+<td>镜像</td>
+<td>镜像或更早的阶段</td>
+<td>distro:release、URL、本地虚拟机镜像，或更早的阶段</td>
 </tr>
 <tr>
-<td><code>RUN</code> executes in</td>
-<td>build container</td>
-<td>working container via <code>exec</code> (rootless userns)</td>
-<td>guest, via <code>virt-customize</code> (offline by default)</td>
+<td><code>RUN</code> 在哪里执行</td>
+<td>构建容器里</td>
+<td>通过 <code>exec</code> 在工作容器里（rootless userns）</td>
+<td>客户机里，通过 <code>virt-customize</code>（默认离线）</td>
 </tr>
 <tr>
 <td><code>COPY --from</code></td>
-<td>yes</td>
-<td>yes (name or index)</td>
-<td>yes (named, earlier stages only; <code>virt-copy-out</code>)</td>
+<td>支持</td>
+<td>支持（按名字或索引）</td>
+<td>支持（仅限已命名的更早阶段；<code>virt-copy-out</code>）</td>
 </tr>
 <tr>
-<td><code>COPY</code> flags <code>--chown/--chmod</code></td>
-<td>yes</td>
-<td>no</td>
-<td>no</td>
+<td><code>COPY</code> 的 <code>--chown/--chmod</code> 参数</td>
+<td>支持</td>
+<td>不支持</td>
+<td>不支持</td>
 </tr>
 <tr>
-<td><code>ADD</code> URL / archive extraction</td>
-<td>yes</td>
-<td>no (<code>ADD</code> = <code>COPY</code>)</td>
-<td>no <code>ADD</code></td>
+<td><code>ADD</code> 的 URL / 归档自动解压</td>
+<td>支持</td>
+<td>不支持（<code>ADD</code> 等同于 <code>COPY</code>）</td>
+<td>没有 <code>ADD</code></td>
 </tr>
 <tr>
 <td><code>RUN --mount</code></td>
-<td>secret, ssh, cache, bind, tmpfs</td>
-<td><code>type=secret</code>/<code>type=cache</code> only</td>
-<td>none</td>
+<td>secret、ssh、cache、bind、tmpfs</td>
+<td>仅 <code>type=secret</code>/<code>type=cache</code></td>
+<td>没有</td>
 </tr>
 <tr>
 <td><code>--target</code></td>
-<td>yes</td>
-<td>yes</td>
-<td>no</td>
+<td>支持</td>
+<td>支持</td>
+<td>不支持</td>
 </tr>
 <tr>
 <td><code>--platform</code></td>
-<td>yes</td>
-<td><code>linux/&lt;arch&gt;</code>, host binfmt required</td>
-<td>no (images stay amd64 — <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>)</td>
+<td>支持</td>
+<td><code>linux/&lt;arch&gt;</code>，需要宿主机的 binfmt</td>
+<td>不支持（镜像只有 amd64 —— <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0018-vm-images-stay-amd64.md" target="_blank" rel="noopener">ADR-0018</a>）</td>
 </tr>
 <tr>
-<td>Layer cache</td>
-<td>yes</td>
-<td>rootless only, no GC</td>
-<td>none</td>
+<td>层缓存</td>
+<td>支持</td>
+<td>仅 rootless，且没有 GC</td>
+<td>没有</td>
 </tr>
 <tr>
 <td><code>CMD</code>/<code>ENTRYPOINT</code>/<code>USER</code>/<code>ENV</code></td>
-<td>image config</td>
-<td>image config</td>
-<td>no <code>CMD</code>; <code>USER</code> creates an account; <code>ENV</code> → <code>/etc/environment</code></td>
+<td>镜像配置</td>
+<td>镜像配置</td>
+<td>没有 <code>CMD</code>；<code>USER</code> 会创建一个账户；<code>ENV</code> → <code>/etc/environment</code></td>
 </tr>
 <tr>
-<td>Resource hints</td>
+<td>资源提示</td>
 <td>—</td>
-<td><code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> recorded, not applied</td>
-<td><code>VCPUS</code>/<code>MEMORY</code>/<code>HYPERVISOR</code> applied by <code>vm create</code> as defaults</td>
+<td><code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code> 只是被记录，不会被应用</td>
+<td><code>VCPUS</code>/<code>MEMORY</code>/<code>HYPERVISOR</code> 会被 <code>vm create</code> 当作默认值应用</td>
 </tr>
 <tr>
-<td>Vulnerability gate</td>
+<td>漏洞门禁</td>
 <td>—</td>
-<td><code>SCAN</code> parsed, not enforced (use <code>image scan --fail-on</code>)</td>
+<td><code>SCAN</code> 会被解析，但不会被强制（用 <code>image scan --fail-on</code>）</td>
 <td>—</td>
 </tr>
 <tr>
-<td>Accounts / keys / passwords</td>
+<td>账户 / 密钥 / 密码</td>
 <td>—</td>
 <td>—</td>
-<td><code>USER</code>, <code>SSHKEY</code>, <code>PASSWORD</code>, <code>ROOTPASSWORD</code></td>
+<td><code>USER</code>、<code>SSHKEY</code>、<code>PASSWORD</code>、<code>ROOTPASSWORD</code></td>
 </tr>
 <tr>
-<td>Disk size</td>
+<td>磁盘大小</td>
 <td>—</td>
 <td>—</td>
-<td><code>SIZE</code> (before any step)</td>
+<td><code>SIZE</code>（在任何步骤之前）</td>
 </tr>
 <tr>
-<td>Unknown instruction</td>
-<td>error</td>
-<td>error</td>
-<td>error</td>
+<td>未知指令</td>
+<td>报错</td>
+<td>报错</td>
+<td>报错</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="if-you-change-a-grammar">If you change a grammar<a class="hanchor" href="#if-you-change-a-grammar" aria-label="#">#</a></h2>
+<h2 id="if-you-change-a-grammar">如果你要改动某种语法<a class="hanchor" href="#if-you-change-a-grammar" aria-label="#">#</a></h2>
 <ul>
-<li>Keep both parsers <strong>fail-closed</strong>: an unknown instruction is an error, never a skipped line.</li>
-<li>A new instruction lands with a unit test in the parser's <code>mod tests</code>, a row in this page, and — if
-  the scaffold uses it — the scaffold test still passing.</li>
-<li>If an instruction is parsed but not yet wired to an effect (as <code>SCAN</code>, <code>CPUS</code>/<code>MEMORY</code>/<code>SECURITY</code>
-  and VMfile <code>LABEL</code> are today), say so here; a field the user writes and the engine ignores must be
-  documented as such or removed.</li>
-<li>The Delonixfile parser lives in a library crate (<code>delonix-oci</code>), so it must not print; the
-  VMfile parser is in the CLI binary. See <a href="crates.html">Crates</a>.</li>
+<li>让两个解析器始终 <strong>fail-closed</strong>：一个未知指令是一个错误，绝不是一行被跳过的内容。</li>
+<li>一个新指令落地时，要在解析器的 <code>mod tests</code> 里带一个单元测试、在本页加一行——如果
+  脚手架用到了它，还要让脚手架测试继续通过。</li>
+<li>如果一个指令已经被解析，却还没接上任何效果（就像今天的 <code>SCAN</code>、<code>CPUS</code>/<code>MEMORY</code>/
+  <code>SECURITY</code>，以及 VMfile 的 <code>LABEL</code> 那样），就要在这里说明；一个用户写了、引擎却
+  忽略掉的字段，必须被这样记录下来，否则就该被去掉。</li>
+<li>Delonixfile 的解析器活在一个库 crate（<code>delonix-oci</code>）里，所以它绝不能打印任何东西；
+  VMfile 的解析器则在 CLI 二进制程序里。见<a href="crates.html">各个 crate</a>。</li>
 </ul>
 <hr />
-<p><strong>Next:</strong> <a href="microvm-setup.html">Building microVMs</a> — the host prerequisites, backends, images and day-2 verbs for booting and testing microVMs.</p>
-<nav class="pager"><a href="system-design-interview.html"><span>← 上一页</span>System Design Interview — the Delonix Engine</a><a class="next" href="microvm-setup.html"><span>下一页 →</span>Building microVMs</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/delonixfile-and-vmfile.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/delonixfile-and-vmfile.md</code></footer>
+<p><strong>下一篇：</strong> <a href="microvm-setup.html">构建 microVM</a>——启动和测试 microVM 所需要的宿主机前置条件、各个后端、镜像，以及 day-2 动词。</p>
+<nav class="pager"><a href="system-design-interview.html"><span>← 上一页</span>系统设计面试 — Delonix 引擎</a><a class="next" href="microvm-setup.html"><span>下一页 →</span>构建 microVM</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/delonixfile-and-vmfile.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/delonixfile-and-vmfile.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#part-1-delonixfile">Part 1 — Delonixfile</a><ul>
-<li><a href="#where-the-code-lives">Where the code lives</a></li>
-<li><a href="#file-lookup">File lookup</a></li>
-<li><a href="#instructions-the-parser-accepts">Instructions the parser accepts</a></li>
-<li><a href="#multi-stage-copy-from-and-target">Multi-stage, COPY --from and --target</a></li>
-<li><a href="#build-secrets">Build secrets</a></li>
-<li><a href="#cache-mounts-m03-of-the-13-improvements-programme">Cache mounts (M03 of the 13-improvements programme)</a></li>
-<li><a href="#-platform-and-binfmt">--platform and binfmt</a></li>
-<li><a href="#rootless-vs-root-and-the-layer-cache">Rootless vs root, and the layer cache</a></li>
-<li><a href="#worked-example-a-template">Worked example: a template</a></li>
-<li><a href="#the-repositorys-own-delonixfile-is-not-built-by-delonix">The repository's own Delonixfile is not built by delonix</a></li>
+<li><a href="#part-1-delonixfile">第 1 部分 —— Delonixfile</a><ul>
+<li><a href="#where-the-code-lives">代码在哪里</a></li>
+<li><a href="#file-lookup">文件查找</a></li>
+<li><a href="#instructions-the-parser-accepts">解析器接受的指令</a></li>
+<li><a href="#multi-stage-copy-from-and-target">多阶段构建、COPY --from 与 --target</a></li>
+<li><a href="#build-secrets">构建密钥</a></li>
+<li><a href="#cache-mounts-m03-of-the-13-improvements-programme">缓存挂载（十三项改进计划中的 M03）</a></li>
+<li><a href="#-platform-and-binfmt">--platform 与 binfmt</a></li>
+<li><a href="#rootless-vs-root-and-the-layer-cache">Rootless 与 root 的差异，以及层缓存</a></li>
+<li><a href="#worked-example-a-template">实例演示：一个模板</a></li>
+<li><a href="#the-repositorys-own-delonixfile-is-not-built-by-delonix">本仓库自己的 Delonixfile 不是用 delonix 构建的</a></li>
 </ul>
 </li>
-<li><a href="#part-2-vmfile">Part 2 — VMfile</a><ul>
-<li><a href="#where-the-code-lives_1">Where the code lives</a></li>
-<li><a href="#scaffold">Scaffold</a></li>
-<li><a href="#building">Building</a></li>
-<li><a href="#vmyaml-the-compose-style-front-end">vm.yaml: the compose-style front end</a></li>
-<li><a href="#instructions">Instructions</a></li>
-<li><a href="#what-from-accepts">What FROM accepts</a></li>
-<li><a href="#what-a-stage-is-and-where-the-result-lands">What a stage is, and where the result lands</a></li>
-<li><a href="#declarative-build">Declarative build</a></li>
-<li><a href="#worked-example-parse-checked">Worked example (parse-checked)</a></li>
+<li><a href="#part-2-vmfile">第 2 部分 —— VMfile</a><ul>
+<li><a href="#where-the-code-lives_1">代码在哪里</a></li>
+<li><a href="#scaffold">脚手架</a></li>
+<li><a href="#building">构建</a></li>
+<li><a href="#vmyaml-the-compose-style-front-end">vm.yaml：compose 风格的前端</a></li>
+<li><a href="#instructions">指令</a></li>
+<li><a href="#what-from-accepts">FROM 接受什么</a></li>
+<li><a href="#what-a-stage-is-and-where-the-result-lands">什么是一个阶段，结果落在哪里</a></li>
+<li><a href="#declarative-build">声明式构建</a></li>
+<li><a href="#worked-example-parse-checked">实例演示（已通过解析校验）</a></li>
 </ul>
 </li>
-<li><a href="#comparison">Comparison</a></li>
-<li><a href="#if-you-change-a-grammar">If you change a grammar</a></li>
+<li><a href="#comparison">对照</a></li>
+<li><a href="#if-you-change-a-grammar">如果你要改动某种语法</a></li>
 </ul>
 </div>
 </aside>

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Troubleshooting · Delonix Runtime — 贡献者手册</title>
+<title>排查问题 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,151 +206,115 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a class="on" aria-current="page" href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a class="on" aria-current="page" href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">运维与排障</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="troubleshooting">Troubleshooting</h1>
-<p><strong>Before you read:</strong> <a href="environment.html">Preparing your environment</a> (host traps) and <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> (the gates, and isolating the engine's state).</p>
-<p>This page is an index by <strong>symptom</strong>: the literal text a gate or a live run prints, what it
-actually means, and the fix. It does not re-teach what <a href="environment.html">Preparing your
-environment</a> and <a href="build-and-test.html">Clone, build and test</a> already cover in
-depth — it points at the right section instead, so a fresh clone can go from "I am stuck" to "I
-know which section to read" without reading either page end to end first. If a symptom is not
-here, <a href="start-here.html#when-you-are-stuck">Start here § When you are stuck</a> is the next place to
-look — this page is a shortcut for the specific case where the <em>tool itself already told you
-what is wrong</em>, in text you did not recognise yet.</p>
-<h2 id="quick-index">Quick index<a class="hanchor" href="#quick-index" aria-label="#">#</a></h2>
+<h1 id="troubleshooting">排查问题</h1>
+<p><strong>阅读前须知：</strong> <a href="environment.html">准备你的环境</a>（宿主机的那些陷阱）和<a href="build-and-test.html#the-gates-ci-runs">克隆、构建与测试</a>（各个门禁，以及如何隔离引擎的状态）。</p>
+<p>这一页是按<strong>症状</strong>建立的索引：某个门禁或某次实机运行打印出来的那段原文，它实际上是什么意思，以及怎么修。它不会重新讲一遍<a href="environment.html">准备你的环境</a>和<a href="build-and-test.html">克隆、构建与测试</a>已经深入讲过的内容——而是直接指向对应的那一节，这样一个刚克隆下来的仓库才能从"我卡住了"直接跳到"我知道该看哪一节"，不必先从头到尾读完那两页。如果你遇到的症状不在这里，<a href="start-here.html#when-you-are-stuck">从这里开始 § 当你卡住时</a>是下一个该看的地方——这一页只是一个捷径，专门针对<em>工具本身已经把哪里错了告诉你了</em>、只是你还没认出那段文字这种具体情况。</p>
+<h2 id="quick-index">快速索引<a class="hanchor" href="#quick-index" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>You saw</th>
-<th>It is</th>
-<th>Fixed in</th>
+<th>你看到了</th>
+<th>它是什么</th>
+<th>修复方法在</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>FAIL &lt;name&gt;: N (baseline M) — new debt entered</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
-<td><a href="#a-debt-ratchet-moved-arch_fitnesspy">Architecture ratchets</a></td>
+<td><a href="#a-debt-ratchet-moved-arch_fitnesspy">某个架构棘轮动了</a></td>
 </tr>
 <tr>
 <td><code>FALHA &lt;kind&gt;: N &gt; M — entrou português novo.<wbr></code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></td>
-<td><a href="#new-portuguese-entered-lang_ratchetpy">The language ratchet</a></td>
+<td><a href="#new-portuguese-entered-lang_ratchetpy">语言棘轮</a></td>
 </tr>
 <tr>
 <td><code>&lt;name&gt; (&lt;layer&gt;) → &lt;name&gt; (&lt;layer&gt;): forbidden direction</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
-<td><a href="#a-dependency-goes-against-the-layer-direction">A dependency goes against the layer direction</a></td>
+<td><a href="#a-dependency-goes-against-the-layer-direction">某个依赖违反了层级方向</a></td>
 </tr>
 <tr>
 <td><code>&lt;file&gt;:&lt;n&gt;: names a consumer (…) — the engine knows none</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></td>
-<td><a href="#a-consumer-name-leaked-into-the-engine">A consumer name leaked into the engine</a></td>
+<td><a href="#a-consumer-name-leaked-into-the-engine">某个消费者的名字混进了引擎</a></td>
 </tr>
 <tr>
 <td><code>FAIL &lt;tag&gt; is published but this commit does not contain it</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
-<td><a href="#the-version-gate-refuses-your-branch">The branch predates the newest tag</a></td>
+<td><a href="#the-version-gate-refuses-your-branch">你的分支比最新的 tag 还旧</a></td>
 </tr>
 <tr>
 <td><code>FAIL Cargo.<wbr>toml says X, above Y, and docs/<wbr>releases/<wbr>vX.<wbr>md does not exist</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a></td>
-<td><a href="#the-version-gate-refuses-your-branch">A version bump with no release commit</a></td>
+<td><a href="#the-version-gate-refuses-your-branch">升了版本号却没有对应的发布提交</a></td>
 </tr>
 <tr>
 <td><code>FAIL  buf format</code> / <code>buf lint</code> / <code>buf breaking against …</code> / <code>has no google.<wbr>api.<wbr>http mapping</code> / <code>openapi.<wbr>yaml is not the generated one</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
-<td><a href="#the-node-contract-gate">The node contract gate</a></td>
+<td><a href="#the-node-contract-gate">节点契约门禁</a></td>
 </tr>
 <tr>
-<td><code>unshare()</code> fails, <code>EPERM</code></td>
-<td>AppArmor + user namespaces</td>
-<td><a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Preparing your environment § AppArmor</a></td>
+<td><code>unshare()</code> 失败，<code>EPERM</code></td>
+<td>AppArmor + user namespace</td>
+<td><a href="environment.html#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">准备你的环境 § AppArmor</a></td>
 </tr>
 <tr>
-<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> refused, exit <code>69</code></td>
-<td>cgroup delegation</td>
-<td><a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Preparing your environment § cgroup delegation</a></td>
+<td><code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> 被拒绝，退出码 <code>69</code></td>
+<td>cgroup 委派</td>
+<td><a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">准备你的环境 § cgroup 委派</a></td>
 </tr>
 <tr>
 <td><code>path must be shorter than SUN_LEN</code></td>
-<td><code>DELONIX_NET_RUNTIME_DIR</code> too long</td>
-<td><a href="build-and-test.html#isolating-the-engines-state">Clone, build and test § Isolating the engine's state</a></td>
+<td><code>DELONIX_NET_RUNTIME_DIR</code> 太长</td>
+<td><a href="build-and-test.html#isolating-the-engines-state">克隆、构建与测试 § 隔离引擎的状态</a></td>
 </tr>
 <tr>
-<td>A gate fails against a diff you did not write, or a build finishes suspiciously fast</td>
-<td>a stale or shared <code>CARGO_TARGET_DIR</code></td>
-<td><a href="#a-shared-or-stale-build-cache">A shared or stale build cache</a></td>
+<td>某个门禁针对一份你根本没写过的 diff 失败了，或者一次构建结束得快得可疑</td>
+<td>一个共享或过期的 <code>CARGO_TARGET_DIR</code></td>
+<td><a href="#a-shared-or-stale-build-cache">共享或过期的构建缓存</a></td>
 </tr>
 <tr>
-<td>The binary answers with an old version or a command that does not exist</td>
-<td>a stale <code>delonix</code> on <code>PATH</code></td>
-<td><a href="environment.html#a-stale-delonix-on-your-path">Preparing your environment § A stale PATH</a></td>
+<td>二进制返回的是旧版本，或者一个根本不存在的命令</td>
+<td><code>PATH</code> 上有一个过期的 <code>delonix</code></td>
+<td><a href="environment.html#a-stale-delonix-on-your-path">准备你的环境 § 过期的 PATH</a></td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="ci-gates-with-a-reason-in-the-message">CI gates with a reason in the message<a class="hanchor" href="#ci-gates-with-a-reason-in-the-message" aria-label="#">#</a></h2>
-<p>Every gate names what to fix — the table below is only here so you recognise the <em>shape</em> of the
-message before reading it closely. Run the local command from <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test § The gates
-CI runs</a> to reproduce any of these without waiting for CI.</p>
-<h3 id="new-portuguese-entered-lang_ratchetpy">New Portuguese entered (<code>lang_ratchet.py</code>)<a class="hanchor" href="#new-portuguese-entered-lang_ratchetpy" aria-label="#">#</a></h3>
+<h2 id="ci-gates-with-a-reason-in-the-message">消息里自带原因的 CI 门禁<a class="hanchor" href="#ci-gates-with-a-reason-in-the-message" aria-label="#">#</a></h2>
+<p>每个门禁都会说明该修什么——下面这张表只是为了让你在仔细读之前先认出消息的<em>样子</em>。从<a href="build-and-test.html#the-gates-ci-runs">克隆、构建与测试 § CI 会跑的那些门禁</a>里找到对应的本地命令，就能在不等 CI 的情况下重现下面任何一种情况。</p>
+<h3 id="new-portuguese-entered-lang_ratchetpy">新的葡萄牙语混进来了（<code>lang_ratchet.py</code>）<a class="hanchor" href="#new-portuguese-entered-lang_ratchetpy" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FALHA identifiers: 1051 &gt; 1050 — entrou português novo.
        `python3 scripts/lang_ratchet.py --list --only identifiers` mostra onde.
 </code></pre></div>
-<p>(The gate's own messages are in Portuguese — LANG-01 is about the <em>code</em>, not this script; see
-<a href="contributing-workflow.html#language-english-in-the-code-lang-01">Contribution workflow § Language</a>.)
-The count of Portuguese identifiers, comments or user-facing messages rose. <code>--list --only
-&lt;kind&gt;</code> names the new lines. If you <em>translated</em> something and the count instead <strong>fell</strong> without
-you lowering the baseline, the message is the mirror image ("traduziste, mas não baixaste a linha
-de base") — run <code>python3 scripts/lang_ratchet.py --update</code> and commit
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a> in the same commit as the translation.</p>
-<h3 id="a-debt-ratchet-moved-arch_fitnesspy">A debt ratchet moved (<code>arch_fitness.py</code>)<a class="hanchor" href="#a-debt-ratchet-moved-arch_fitnesspy" aria-label="#">#</a></h3>
+<p>（这个门禁自己的消息是用葡萄牙语写的——LANG-01 管的是<em>代码</em>，不是这个脚本；见<a href="contributing-workflow.html#language-english-in-the-code-lang-01">贡献流程 § 语言</a>。）
+葡萄牙语标识符、注释或面向用户消息的计数上升了。<code>--list --only &lt;kind&gt;</code> 会点出新增的那些行。如果你<em>翻译</em>了什么东西，结果计数反而<strong>下降</strong>了，却没有把基线一起降下来，消息会是镜像版本（"traduziste, mas não baixaste a linha de base"）——运行 <code>python3 scripts/lang_ratchet.py --update</code>，并把 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/lang_baseline.json</code></a> 和这次翻译放进同一个提交。</p>
+<h3 id="a-debt-ratchet-moved-arch_fitnesspy">某个架构棘轮动了（<code>arch_fitness.py</code>）<a class="hanchor" href="#a-debt-ratchet-moved-arch_fitnesspy" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FAIL  self_exec_sites: 6 (baseline 5) — new debt entered
 </code></pre></div>
-<p>One of the five tracked numbers (<code>self_exec_sites</code>, <code>library_prints</code>, <code>env_writes</code>,
-<code>shared_error_imports</code>, <code>raw_error_variant_matches</code>) rose. <code>python3 scripts/arch_fitness.py
---list</code> prints every site each one counts, with a short explanation of what the count means next
-to it — see <a href="contributing-workflow.html#architecture-rules-the-gates-enforce">Contribution workflow § Architecture rules the gates
-enforce</a> for what each one is. As
-with the language ratchet, the same message shape appears when the count <strong>falls</strong> without the
-baseline moving with it in the same commit ("debt was paid; lower the baseline … <code>--update</code>").</p>
-<h3 id="a-dependency-goes-against-the-layer-direction">A dependency goes against the layer direction<a class="hanchor" href="#a-dependency-goes-against-the-layer-direction" aria-label="#">#</a></h3>
+<p>五个被追踪的数字之一（<code>self_exec_sites</code>、<code>library_prints</code>、<code>env_writes</code>、<code>shared_error_imports</code>、<code>raw_error_variant_matches</code>）上升了。<code>python3 scripts/arch_fitness.py --list</code> 会打印出每一个被计入统计的地方，并在旁边附上对这个计数含义的简短说明——每一个具体是什么，见<a href="contributing-workflow.html#architecture-rules-the-gates-enforce">贡献流程 § 门禁强制执行的架构规则</a>。和语言棘轮一样，当计数<strong>下降</strong>、却没有在同一个提交里让基线一起动的时候，也会出现同样形状的消息（"debt was paid; lower the baseline … <code>--update</code>"）。</p>
+<h3 id="a-dependency-goes-against-the-layer-direction">某个依赖违反了层级方向<a class="hanchor" href="#a-dependency-goes-against-the-layer-direction" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FAIL  delonix-oci (adapters) → delonix-cri (interfaces): forbidden direction
 </code></pre></div>
-<p>A crate imported another crate from a layer it is not allowed to depend on — see <a href="architecture.html#layers-and-the-allowed-direction">Architecture §
-Layers and the allowed direction</a> for the table
-of who may depend on whom. Either the dependency is wrong (most of the time — an adapter has no
-business depending on an interface), or the change genuinely needs a declared, phased exception
-in <code>EXCEPTIONS</code> inside <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, which the gate itself refuses to accept without
-a phase that removes it and a reason.</p>
-<h3 id="a-consumer-name-leaked-into-the-engine">A consumer name leaked into the engine<a class="hanchor" href="#a-consumer-name-leaked-into-the-engine" aria-label="#">#</a></h3>
+<p>某个 crate 从一个它不被允许依赖的层导入了另一个 crate——谁可以依赖谁，见<a href="architecture.html#layers-and-the-allowed-direction">架构 § 层与允许的方向</a>里的那张表。要么是这个依赖本身就是错的（多数情况都是这样——一个适配器根本没理由依赖一个接口），要么这个改动确实需要在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 内的 <code>EXCEPTIONS</code> 里声明一个分阶段的例外，而门禁本身会拒绝接受一个没有附带移除阶段和理由的例外。</p>
+<h3 id="a-consumer-name-leaked-into-the-engine">某个消费者的名字混进了引擎<a class="hanchor" href="#a-consumer-name-leaked-into-the-engine" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FAIL  crates/adapters/delonix-oci/src/registry.rs:42: names a consumer (&#x27;SomeControlPlaneName&#x27;) — the engine knows none
 </code></pre></div>
-<p>The engine's canonical boundary — <em>«the engine knows no consumer»</em>, the section at the top of
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> — is enforced by grep, not by review alone. This fires on the name
-of any platform, control plane, console or agent that uses the engine, in code <strong>or comments</strong>,
-anywhere under <code>crates/</code>, <code>bins/</code> or <code>proto/</code>. Generalise the requirement into the capability it
-actually is, in the engine's own vocabulary; history that needs the external name belongs in
-<code>docs/</code>, never in code.</p>
-<h3 id="the-version-gate-refuses-your-branch">The version gate refuses your branch<a class="hanchor" href="#the-version-gate-refuses-your-branch" aria-label="#">#</a></h3>
+<p>引擎的那条基本边界——<em>「引擎不认识任何消费者」</em>，<a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 顶部的那一节——是靠 grep 强制执行的，不只是靠评审。任何使用这个引擎的平台、control plane、控制台或 agent 的名字，只要出现在 <code>crates/</code>、<code>bins/</code> 或 <code>proto/</code> 下的代码里<strong>或注释里</strong>，都会触发这条检查。把这个需求泛化成它实际所代表的那种能力，用引擎自己的词汇表达出来；需要用到那个外部名字的历史背景，属于 <code>docs/</code>，永远不属于代码。</p>
+<h3 id="the-version-gate-refuses-your-branch">版本门禁拒绝了你的分支<a class="hanchor" href="#the-version-gate-refuses-your-branch" aria-label="#">#</a></h3>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FAIL  v1.4.2 is published but this commit does not contain it (newest contained: v1.4.0) —
       merge origin/main first; merging a branch that predates a release undoes what it shipped
 </code></pre></div>
-<p>Your branch started before a release that has since shipped. <code>git fetch --tags origin &amp;&amp; git
-merge origin/main</code> (this repository merges, it does not rebase feature branches onto releases —
-see <a href="contributing-workflow.html#one-worktree-per-task">Contribution workflow § One worktree per task</a>
-for why a linear history is still expected from your own commits).</p>
+<p>你的分支是在某个后来已经发布的版本之前开始的。<code>git fetch --tags origin &amp;&amp; git merge origin/main</code>（这个仓库用的是合并，不会把功能分支 rebase 到某个发布上——为什么你自己的提交历史依然要求是线性的，见<a href="contributing-workflow.html#one-worktree-per-task">贡献流程 § 一个任务一个 worktree</a>）。</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FAIL  Cargo.toml says 1.5.0, above 1.4.2, and docs/releases/v1.5.0.md does not exist —
       a bump belongs only to the release commit
 </code></pre></div>
-<p>You bumped <code>version</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>. Do not — that is done only in the release commit, together
-with the release notes file. Revert the bump; see <a href="releases-and-stability.html#the-version-gate">Releases and stability § The version
-gate</a>.</p>
-<h3 id="the-node-contract-gate">The node contract gate<a class="hanchor" href="#the-node-contract-gate" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> wraps five independent checks, and each prints its own <code>FAIL</code> line —
-running it locally is the fastest way to see which of the five is yours:</p>
+<p>你在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里把 <code>version</code> 往上调了。不要这样做——这种事只能在发布提交里做，并且要和发布说明文件一起提交。把这次调整撤回去；见<a href="releases-and-stability.html#the-version-gate">发布与稳定性 § 版本门禁</a>。</p>
+<h3 id="the-node-contract-gate">节点契约门禁<a class="hanchor" href="#the-node-contract-gate" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 包裹了五项相互独立的检查，每一项都会打印自己的 <code>FAIL</code> 行——在本地跑一遍是最快看出五项里到底是哪一项出了问题的办法：</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">FAIL  buf format — run `buf format -w proto`
 FAIL  buf lint
 FAIL  buf breaking against v1.4.0
@@ -358,51 +322,32 @@ FAIL  buf breaking against v1.4.0
 FAIL  node.proto: SomeRpc has no google.api.http mapping
 FAIL  docs/api/openapi.yaml is not the generated one — run `python3 scripts/contract_gate.py --update` and commit it
 </code></pre></div>
-<p>It needs <code>protoc</code>, <code>buf</code> (pinned at v1.73.0) and <code>protoc-gen-openapi</code> (pinned at v0.7.1) on
-<code>PATH</code>, and the git tags fetched — a missing tool fails with the more familiar "command not
-found", but a missing tag makes the <code>buf breaking</code> check print <code>ok</code> while explicitly saying there
-is no baseline yet to compare against, rather than silently skipping it. A genuine breaking
-change to <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> needs an ADR first, same as any change to a stable node
-contract — see <a href="contributing-workflow.html#when-to-write-an-adr">Contribution workflow § When to write an ADR</a>.
-If what actually changed is generator output (a new field, a new RPC), <code>python3
-scripts/contract_gate.py --update</code> regenerates <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>; commit it in the same
-commit as the <code>.proto</code> change.</p>
-<h2 id="a-shared-or-stale-build-cache">A shared or stale build cache<a class="hanchor" href="#a-shared-or-stale-build-cache" aria-label="#">#</a></h2>
-<p><a href="build-and-test.html#build">Clone, build and test § Build</a> already names the trade-off: pointing
-several worktrees at one shared <code>CARGO_TARGET_DIR</code> saves disk, but two builds running against it
-at the same time wait on each other and <strong>can invalidate each other's artefacts</strong>. The symptom is
-specific and easy to misread as a real failure: a gate (particularly <code>test</code> or <code>clippy</code>) fails
-against code that looks unrelated to your change, or a build finishes suspiciously fast and then
-the binary it produced behaves like an older version — including a local pre-commit or pre-push
-hook that reuses a shared target directory across sessions and links against whatever object
-files happen to be sitting there from a different, concurrent build.</p>
-<p>This is not a bug in the gate: it is genuinely building the wrong thing. Rule out a stale cache
-before debugging the "failure" itself:</p>
+<p>它需要 <code>PATH</code> 上有 <code>protoc</code>、<code>buf</code>（钉在 v1.73.0）和 <code>protoc-gen-openapi</code>（钉在 v0.7.1），还需要拉取到 git 的 tag——缺工具会失败在更常见的 "command not found" 上，但缺 tag 会让 <code>buf breaking</code> 那项检查打印出 <code>ok</code>，同时明确说明目前还没有可比较的基线，而不是悄悄跳过这项检查。对 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 的一次真正的破坏性改动，需要先有一份 ADR，就像对任何一个稳定节点契约的改动一样——见<a href="contributing-workflow.html#when-to-write-an-adr">贡献流程 § 什么时候要写 ADR</a>。如果实际改变的只是生成器的输出（一个新字段、一个新 RPC），<code>python3 scripts/contract_gate.py --update</code> 会重新生成 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>；把它和 <code>.proto</code> 的改动放进同一个提交里一起提交。</p>
+<h2 id="a-shared-or-stale-build-cache">共享或过期的构建缓存<a class="hanchor" href="#a-shared-or-stale-build-cache" aria-label="#">#</a></h2>
+<p><a href="build-and-test.html#build">克隆、构建与测试 § 构建</a>里已经点明了这个取舍：让几个 worktree 共用同一个 <code>CARGO_TARGET_DIR</code> 能省磁盘，但两个同时对它进行构建的进程会互相等待，还<strong>可能互相覆盖对方的产物</strong>。这个症状很特殊，也很容易被误读成一次真正的失败：某个门禁（尤其是 <code>test</code> 或 <code>clippy</code>）针对一段看起来和你的改动毫无关系的代码失败了，或者一次构建结束得快得可疑，随后产出的那个二进制却表现得像一个更老的版本——包括某个本地的 pre-commit 或 pre-push 钩子，跨会话复用同一个共享的 target 目录，链接的时候用的是当时恰好躺在那里的、来自另一次并发构建的目标文件。</p>
+<p>这不是门禁本身的 bug：它确确实实是在构建错误的东西。在你开始调试这个"失败"本身之前，先排除是不是缓存过期：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">cargo clean -p delonix-runtime-bin   # or the crate the failure points at
 cargo build -p delonix-runtime-bin   # rebuild clean, then re-run the gate that failed
 </code></pre></div>
-<p>If you routinely work from several worktrees at once, giving each one its own <code>CARGO_TARGET_DIR</code>
-(unset the shared one, or export a worktree-local path) removes the class of symptom entirely, at
-the cost of a slower first build in each — the same trade-off <a href="build-and-test.html#build">Clone, build and test</a>
-already states.</p>
+<p>如果你经常同时从好几个 worktree 里工作，给每一个都配上自己的 <code>CARGO_TARGET_DIR</code>（取消共享的那个环境变量，或者导出一个 worktree 本地的路径），就能把这一整类症状彻底消除，代价是每个 worktree 第一次构建会慢一些——这正是<a href="build-and-test.html#build">克隆、构建与测试</a>里已经说明过的那个取舍。</p>
 <hr />
-<p><strong>Next:</strong> <a href="service-names-and-hosts.html">How names reach <code>/etc/hosts</code></a> — the block that publishes service names and route hosts, and why it refuses. Then <a href="coding-conventions.html">Coding conventions</a> — how code in this repository must be written, each rule tagged with the gate or decision behind it.</p>
-<nav class="pager"><a href="microvm-setup.html"><span>← 上一页</span>Building microVMs</a><a class="next" href="service-names-and-hosts.html"><span>下一页 →</span>How names reach /etc/hosts</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/troubleshooting.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/troubleshooting.md</code></footer>
+<p><strong>下一篇：</strong> <a href="service-names-and-hosts.html">名字是如何抵达 <code>/etc/hosts</code> 的</a> —— 发布服务名和路由 host 的那个模块，以及它为什么会拒绝。然后是<a href="coding-conventions.html">编码规范</a> —— 本仓库里的代码必须怎么写，每条规则都标注了它背后的门禁或决定。</p>
+<nav class="pager"><a href="microvm-setup.html"><span>← 上一页</span>构建 microVM</a><a class="next" href="service-names-and-hosts.html"><span>下一页 →</span>名称是如何抵达 /etc/hosts 的</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/troubleshooting.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/troubleshooting.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#quick-index">Quick index</a></li>
-<li><a href="#ci-gates-with-a-reason-in-the-message">CI gates with a reason in the message</a><ul>
-<li><a href="#new-portuguese-entered-lang_ratchetpy">New Portuguese entered (lang_ratchet.py)</a></li>
-<li><a href="#a-debt-ratchet-moved-arch_fitnesspy">A debt ratchet moved (arch_fitness.py)</a></li>
-<li><a href="#a-dependency-goes-against-the-layer-direction">A dependency goes against the layer direction</a></li>
-<li><a href="#a-consumer-name-leaked-into-the-engine">A consumer name leaked into the engine</a></li>
-<li><a href="#the-version-gate-refuses-your-branch">The version gate refuses your branch</a></li>
-<li><a href="#the-node-contract-gate">The node contract gate</a></li>
+<li><a href="#quick-index">快速索引</a></li>
+<li><a href="#ci-gates-with-a-reason-in-the-message">消息里自带原因的 CI 门禁</a><ul>
+<li><a href="#new-portuguese-entered-lang_ratchetpy">新的葡萄牙语混进来了（lang_ratchet.py）</a></li>
+<li><a href="#a-debt-ratchet-moved-arch_fitnesspy">某个架构棘轮动了（arch_fitness.py）</a></li>
+<li><a href="#a-dependency-goes-against-the-layer-direction">某个依赖违反了层级方向</a></li>
+<li><a href="#a-consumer-name-leaked-into-the-engine">某个消费者的名字混进了引擎</a></li>
+<li><a href="#the-version-gate-refuses-your-branch">版本门禁拒绝了你的分支</a></li>
+<li><a href="#the-node-contract-gate">节点契约门禁</a></li>
 </ul>
 </li>
-<li><a href="#a-shared-or-stale-build-cache">A shared or stale build cache</a></li>
+<li><a href="#a-shared-or-stale-build-cache">共享或过期的构建缓存</a></li>
 </ul>
 </div>
 </aside>

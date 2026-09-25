@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Coding conventions · Delonix Runtime — 贡献者手册</title>
+<title>编码规范 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,118 +206,82 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a class="on" aria-current="page" href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a class="on" aria-current="page" href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">贡献</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="coding-conventions">Coding conventions</h1>
-<p><strong>Before you read:</strong> <a href="rust-primer.html">Rust primer</a>, <a href="architecture.html">Architecture</a> and <a href="crates.html">The crates</a> — the rules below refer to layers, ports and crates by name.</p>
-<p>This page tells you how to write code that passes review in this repository, so you don't have
-to guess the rules or make up your own. After it you can apply the review checklist at the end to
-your own diff before a reviewer does. Every rule below carries a tag and a source:</p>
+<h1 id="coding-conventions">编码规范</h1>
+<p><strong>阅读前须知：</strong> <a href="rust-primer.html">Rust 入门</a>、<a href="architecture.html">架构</a> 和 <a href="crates.html">crate 一览</a> —— 下面的规则会按名称引用层（layer）、端口（port）和 crate。</p>
+<p>本页告诉你如何写出能在本仓库通过评审的代码，这样你就不必去猜规则或自己编一套。读完之后，你可以在提交给评审者之前，先用文末的评审清单检查一遍自己的 diff。下面每条规则都带有一个标签和一个来源：</p>
 <ul>
-<li><strong>Enforced (gate)</strong>: a CI job fails if you break it. The gate is named, so you can run it
-  locally (see <a href="build-and-test.html#the-gates-ci-runs">Build and test</a>).</li>
-<li><strong>Decided (ADR/AGENTS.md)</strong>: an <strong>Accepted</strong> Architecture Decision Record in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> or a
-  section of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> settles it. No gate checks it yet, so review does.</li>
-<li><strong>Proposed (ADR, not yet decided)</strong>: the only written source is an ADR whose status is still
-  <strong>Proposed</strong> (see the status column of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>). It is the
-  direction the code is moving in, and review applies it, but it can still change; when the ADR is
-  accepted or rejected, the tag changes with it.</li>
-<li><strong>Convention (observed)</strong>: the code does it consistently and nothing wrote it down. The
-  examples are real <code>path:symbol</code> references. Copy them.</li>
+<li><strong>强制（门禁）</strong>：如果你违反了它，CI 任务会失败。门禁都有名字，你可以在本地跑它（见<a href="build-and-test.html#the-gates-ci-runs">构建与测试</a>）。</li>
+<li><strong>已决定（ADR/AGENTS.md）</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> 中某个状态为<strong>已接受</strong>的 Architecture Decision Record，或 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 的某一节，已经把这件事定下来了。目前还没有门禁去检查它，所以由评审来把关。</li>
+<li><strong>提议中（ADR，尚未决定）</strong>：唯一的书面依据是一份状态仍为<strong>提议中</strong>的 ADR（见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> 的状态一栏）。这是代码正在走的方向，评审也会照此执行，但它仍可能改变；当那份 ADR 被接受或被否决时，标签会跟着变。</li>
+<li><strong>惯例（观察所得）</strong>：代码一直这么做，但没有人把它写下来。举的例子都是真实的 <code>path:symbol</code> 引用，照抄即可。</li>
 </ul>
-<p>If a question is not answered here, and the code around your change doesn't answer it either,
-the honest answer is <strong>"not decided — follow the surrounding code"</strong>. The list of known open
-questions is in <a href="#undecided">Undecided</a>. Don't turn a personal preference into a rule in a PR.</p>
-<p>Related pages: the layers and the reasons behind them in <a href="architecture.html">Architecture</a>,
-what each crate holds in <a href="crates.html">Crates</a>, the Rust idioms in
-<a href="rust-primer.html">Rust primer</a>, and the workflow (worktree, version, ADRs, PRs) in
-<a href="contributing-workflow.html">Contribution workflow</a>.</p>
+<p>如果这里没有回答某个问题，而你改动周围的代码也没有回答，那诚实的答案就是<strong>「未决定——跟着周围的代码走」</strong>。已知的悬而未决的问题清单在<a href="#undecided">未决问题</a>。不要把个人偏好在某个 PR 里变成一条规则。</p>
+<p>相关页面：层以及它们背后的原因见<a href="architecture.html">架构</a>，每个 crate 里有什么见 <a href="crates.html">crate 一览</a>，Rust 的惯用写法见 <a href="rust-primer.html">Rust 入门</a>，工作流程（worktree、版本号、ADR、PR）见<a href="contributing-workflow.html">贡献流程</a>。</p>
 <hr />
-<h2 id="1-the-tooling-that-enforces-style">1. The tooling that enforces style<a class="hanchor" href="#1-the-tooling-that-enforces-style" aria-label="#">#</a></h2>
+<h2 id="1-the-tooling-that-enforces-style">1. 强制风格的工具<a class="hanchor" href="#1-the-tooling-that-enforces-style" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Tool</th>
-<th>What it checks</th>
-<th>Tag and source</th>
+<th>工具</th>
+<th>检查什么</th>
+<th>标签与来源</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><strong>rustfmt</strong></td>
-<td>Formatting. <strong>No config file</strong>: there is no <code>rustfmt.toml</code> or <code>.rustfmt.toml</code> at the root, so the defaults apply.</td>
-<td><strong>Enforced (gate)</strong>: CI job <code>fmt</code> runs <code>cargo fmt --all --check</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a>). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style: "<code>cargo fmt</code> defaults, no custom config".</td>
+<td>格式化。<strong>没有配置文件</strong>：根目录没有 <code>rustfmt.toml</code> 或 <code>.rustfmt.toml</code>，所以用的是默认设置。</td>
+<td><strong>强制（门禁）</strong>：CI 任务 <code>fmt</code> 跑 <code>cargo fmt --all --check</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a>）。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style："<code>cargo fmt</code> defaults, no custom config"。</td>
 </tr>
 <tr>
 <td><strong>clippy</strong></td>
-<td>Every clippy lint <strong>and every rustc warning</strong> fails the build, tests included (<code>--all-targets</code>). No <code>clippy.toml</code>, so the lint defaults apply.</td>
-<td><strong>Enforced (gate)</strong>: CI job <code>clippy</code> runs <code>cargo clippy --workspace --all-targets --locked -- -D warnings</code>.</td>
+<td>每一条 clippy lint、<strong>以及 rustc 自身发出的每一条警告</strong>都会让构建失败，测试也包含在内（<code>--all-targets</code>）。没有 <code>clippy.toml</code>，所以用的是 lint 的默认设置。</td>
+<td><strong>强制（门禁）</strong>：CI 任务 <code>clippy</code> 跑 <code>cargo clippy --workspace --all-targets --locked -- -D warnings</code>。</td>
 </tr>
 <tr>
 <td><strong><code>[workspace.lints]</code></strong></td>
-<td>The root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> declares exactly one workspace lint: <code>[workspace.<wbr>lints.<wbr>clippy] undocumented_unsafe_blocks = "deny"</code>. Every member manifest has <code>[lints] workspace = true</code>.</td>
-<td><strong>Enforced (gate)</strong>: clippy. It was introduced by phase P0 of ADR-0040 ("<code>[workspace.lints]</code> (<code>undocumented_unsafe_blocks = deny</code>)"), an ADR that is still <strong>Proposed</strong>; the gate holds regardless.</td>
+<td>根目录的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 只声明了一条 workspace lint：<code>[workspace.<wbr>lints.<wbr>clippy] undocumented_unsafe_blocks = "deny"</code>。每个成员 crate 的清单文件都有 <code>[lints] workspace = true</code>。</td>
+<td><strong>强制（门禁）</strong>：clippy。它是 ADR-0040 P0 阶段引入的（"<code>[workspace.lints]</code>（<code>undocumented_unsafe_blocks = deny</code>）"），这份 ADR 目前仍是<strong>提议中</strong>；但门禁不受此影响，照样生效。</td>
 </tr>
 <tr>
 <td><strong>cargo-deny</strong></td>
-<td>RUSTSEC advisories and yanked crates, permissive licences only (no GPL/AGPL), crates.io as the only registry, no git sources. The <code>[bans]</code> section of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> (duplicate versions and wildcards, set to warn) is <strong>not</strong> evaluated in CI.</td>
-<td><strong>Enforced (gate)</strong>: CI job <code>deny</code> runs <code>check advisories licenses sources</code> with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a>. <strong>Convention (observed)</strong>: every ignored advisory in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> carries a comment with its reason — no gate checks that the comment exists.</td>
+<td>RUSTSEC 安全公告和已撤回（yanked）的 crate，只允许宽松许可证（不允许 GPL/AGPL），crates.io 是唯一的注册表，不允许 git 来源。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> 的 <code>[bans]</code> 一节（重复版本和通配符，设为警告）在 CI 里<strong>不</strong>被评估。</td>
+<td><strong>强制（门禁）</strong>：CI 任务 <code>deny</code> 用 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> 跑 <code>check advisories licenses sources</code>。<strong>惯例（观察所得）</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> 里每一条被忽略的公告都带有说明理由的注释——没有门禁检查这条注释是否存在。</td>
 </tr>
 <tr>
 <td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a></strong></td>
-<td>Portuguese in identifiers, comments and user-facing strings (LANG-01, see <a href="#2-language-of-the-code">§2</a>).</td>
-<td><strong>Enforced (gate)</strong>: CI job <code>lang</code>, baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>.</td>
+<td>标识符、注释和面向用户的字符串里的葡萄牙语（LANG-01，见<a href="#2-language-of-the-code">§2</a>）。</td>
+<td><strong>强制（门禁）</strong>：CI 任务 <code>lang</code>，基线在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>lang_baseline.<wbr>json</code></a>。</td>
 </tr>
 <tr>
 <td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a></strong></td>
-<td>Layer direction, crate directory = layer, versions only in the root, consumer names, and the debt ratchets listed in <a href="architecture.html#layers-and-the-allowed-direction">Architecture</a> (see <a href="#4-structure-where-code-goes">§4</a> and <a href="#5-internal-api-and-boundaries">§5</a>).</td>
-<td><strong>Enforced (gate)</strong>: CI job <code>arch</code>, baseline in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a>.</td>
+<td>依赖方向、crate 所在目录是否等于其所属层、版本号是否只在根目录声明、消费者名称，以及<a href="architecture.html#layers-and-the-allowed-direction">架构</a>里列出的那几个债务棘轮（见<a href="#4-structure-where-code-goes">§4</a>和<a href="#5-internal-api-and-boundaries">§5</a>）。</td>
+<td><strong>强制（门禁）</strong>：CI 任务 <code>arch</code>，基线在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_baseline.json" target="_blank" rel="noopener"><code>scripts/<wbr>arch_baseline.<wbr>json</code></a>。</td>
 </tr>
 <tr>
 <td><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></strong></td>
-<td>The node contract under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> (see <a href="#54-the-node-contract">§5.4</a>).</td>
-<td><strong>Enforced (gate)</strong>: CI job <code>contract</code>.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 下的节点契约（见<a href="#54-the-node-contract">§5.4</a>）。</td>
+<td><strong>强制（门禁）</strong>：CI 任务 <code>contract</code>。</td>
 </tr>
 </tbody>
 </table></div>
-<p>Keep one mechanic in mind for <strong>ratchets</strong> (<code>lang_ratchet.py</code> and the <code>arch_fitness.py</code>
-numbers). A ratchet fails when its number <strong>rises</strong>, and it <strong>also</strong> fails when the number falls
-without the baseline being lowered in the same commit (<code>arch_fitness.py</code> prints "debt was paid;
-lower the baseline in the same commit (--update)"). If you pay debt, run <code>--update</code> and commit the
-new baseline together with the fix. A <code>&lt;=</code> check would let the debt read as green forever (module
-docstrings of both scripts).</p>
-<p>A consequence you will meet: <strong>Enforced (gate)</strong>. Because <code>-D warnings</code> covers rustc's own lints,
-rustc's naming lints (<code>non_snake_case</code>, <code>non_camel_case_types</code>, <code>non_upper_case_globals</code>) are
-enforced too. <code>snake_case</code> functions and variables, <code>UpperCamelCase</code> types and <code>SCREAMING_SNAKE_CASE</code>
-constants are not a style choice here.</p>
-<p><code>#[allow(clippy::…)]</code> exists in the tree, for example <code>#[allow(clippy::too_many_arguments)]</code> on
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>.
-<strong>Not decided</strong>: no rule says when an <code>allow</code> is acceptable. If you add one, put a <code>// why</code>
-comment next to it, as you would for any other exception (see <a href="#10-comments-and-documentation">§10</a>).</p>
+<p>对<strong>棘轮</strong>（<code>lang_ratchet.py</code> 和 <code>arch_fitness.py</code> 里的那些数字）要记住一个机制。一个棘轮数字<strong>上升</strong>时会失败，数字<strong>下降</strong>但基线没有在同一个提交里一起降下来时<strong>也</strong>会失败（<code>arch_fitness.py</code> 会打印 "debt was paid; lower the baseline in the same commit (--update)"）。如果你还了债，就跑一次 <code>--update</code>，把新的基线和修复放进同一个提交。用 <code>&lt;=</code> 判断的话，债务就会永远显示为绿色（两个脚本的模块级 docstring 里都写了这一点）。</p>
+<p>由此带来一个后果：<strong>强制（门禁）</strong>。因为 <code>-D warnings</code> 也覆盖了 rustc 自身的 lint，rustc 里关于命名的 lint（<code>non_snake_case</code>、<code>non_camel_case_types</code>、<code>non_upper_case_globals</code>）同样被强制执行。函数和变量用 <code>snake_case</code>、类型用 <code>UpperCamelCase</code>、常量用 <code>SCREAMING_SNAKE_CASE</code>，在这里不是一种风格上的选择。</p>
+<p>树里存在 <code>#[allow(clippy::…)]</code>，例如 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/run.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/run.rs</code></a> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a> 里的 <code>#[allow(clippy::too_many_arguments)]</code>。<strong>未决定</strong>：没有规则说明什么时候可以接受一个 <code>allow</code>。如果你加了一个，就在旁边放一句 <code>// why</code> 注释，就像对待任何其他例外一样（见<a href="#10-comments-and-documentation">§10</a>）。</p>
 <hr />
-<h2 id="2-language-of-the-code">2. Language of the code<a class="hanchor" href="#2-language-of-the-code" aria-label="#">#</a></h2>
+<h2 id="2-language-of-the-code">2. 代码的语言<a class="hanchor" href="#2-language-of-the-code" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Identifiers, comments and messages are written in English.</strong> <strong>Enforced (gate)</strong>:
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>. <strong>Decided</strong>: AGENTS.md § "Língua do código: inglês (LANG-01)". The
-  ratchet scans every <code>.rs</code>, <code>.py</code>, <code>.ts</code>, <code>.go</code> and <code>.yml</code>/<code>.yaml</code> file outside <code>target/</code>,
-  <code>third_party/</code> and similar. It counts three things:</li>
-<li><strong>identifiers</strong>: any name declared by <code>fn</code>, <code>struct</code>, <code>enum</code>, <code>trait</code>, <code>const</code>, <code>static</code>,
-    <code>type</code>, <code>mod</code>, <code>union</code> or <code>let</code> whose <code>snake_case</code>/<code>camelCase</code> segments contain a word from
-    <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_pt_lexicon.txt" target="_blank" rel="noopener"><code>scripts/lang_pt_lexicon.txt</code></a>;</li>
-<li><strong>comments</strong>: <code>//</code>, <code>///</code> and <code>//!</code> lines containing a lexicon word;</li>
-<li><strong>user text</strong>: literals of 8 or more characters inside <code>format!</code>, <code>println!</code>, <code>eprintln!</code>,
-    <code>panic!</code>, <code>anyhow!</code>, <code>bail!</code>, <code>expect</code> or <code>unimplemented!</code>.</li>
-<li><strong>Portuguese reaches the operator only through the catalogue.</strong> <strong>Decided</strong>: AGENTS.md §
-  "i18n (fonte EN + catálogo pt.po embutido)" and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § "If you add or change a CLI
-  command". The English text goes in the source. The Portuguese goes in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>, which <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> embeds with
-  <code>include_str!</code>.</li>
-<li><code>po::t("…")</code> for a fixed string.</li>
+<li><strong>标识符、注释和消息都用英语写。</strong> <strong>强制（门禁）</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>。<strong>已决定</strong>：AGENTS.md § "Língua do código: inglês (LANG-01)"。这个棘轮会扫描 <code>target/</code>、<code>third_party/</code> 等目录之外的每一个 <code>.rs</code>、<code>.py</code>、<code>.ts</code>、<code>.go</code> 和 <code>.yml</code>/<code>.yaml</code> 文件，统计三样东西：</li>
+<li><strong>标识符</strong>：任何由 <code>fn</code>、<code>struct</code>、<code>enum</code>、<code>trait</code>、<code>const</code>、<code>static</code>、<code>type</code>、<code>mod</code>、<code>union</code> 或 <code>let</code> 声明的名字，只要其 <code>snake_case</code>/<code>camelCase</code> 的某个片段包含 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_pt_lexicon.txt" target="_blank" rel="noopener"><code>scripts/lang_pt_lexicon.txt</code></a> 里的一个词；</li>
+<li><strong>注释</strong>：包含词典中某个词的 <code>//</code>、<code>///</code> 和 <code>//!</code> 行；</li>
+<li><strong>面向用户的文本</strong>：<code>format!</code>、<code>println!</code>、<code>eprintln!</code>、<code>panic!</code>、<code>anyhow!</code>、<code>bail!</code>、<code>expect</code> 或 <code>unimplemented!</code> 里长度不小于 8 个字符的字面量。</li>
+<li><strong>葡萄牙语只通过目录文件到达操作者。</strong> <strong>已决定</strong>：AGENTS.md § "i18n (fonte EN + catálogo pt.po embutido)" 以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § "If you add or change a CLI command"。源码里写英语文本。葡萄牙语放在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a> 里，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/po.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/po.rs</code></a> 用 <code>include_str!</code> 把它嵌入进去。</li>
+<li>固定字符串用 <code>po::t("…")</code>。</li>
 <li>
-<p><code>po::tf("… {name} …", &amp;[("name", value)])</code> for interpolated text. Use <strong>named</strong> placeholders:
-    a translation may reorder them, and <code>format!</code> needs a compile-time literal, so the template is
-    translated first and the values are substituted afterwards (<code>po.rs</code>, doc comment of <code>tf</code>).</p>
+<p>插值文本用 <code>po::tf("… {name} …", &amp;[("name", value)])</code>。要用<strong>具名</strong>占位符：因为一次翻译可能会调整它们的顺序，而 <code>format!</code> 又需要编译期字面量，所以模板会先被翻译，值再在之后被代入（<code>po.rs</code>，<code>tf</code> 的 doc comment）。</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/config.rs — refuse_unknown_key
 Err(Error::Invalid(super::po::tf(
     &quot;&#x27;{key}&#x27; is not a config key — known: {known}&quot;,
@@ -326,229 +290,117 @@ Err(Error::Invalid(super::po::tf(
 </code></pre></div>
 </li>
 <li>
-<p><code>--help</code> text is also English in the source, translated at runtime by <code>po::translate_help</code>.
-    <strong>Enforced (gate)</strong>: <code>help_i18n_tests</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a>.
-    <code>todo_o_help_de_comando_tem_traducao_pt</code> is strict for command help, and
-    <code>o_help_dos_argumentos_so_pode_encolher</code> is a ratchet on <code>ARG_HELP_PENDING</code> for flag help. A new
-    command or flag needs a <code>pt.po</code> entry.</p>
+<p><code>--help</code> 的文字在源码里也是英语，由 <code>po::translate_help</code> 在运行时翻译。<strong>强制（门禁）</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> 里的 <code>help_i18n_tests</code>。<code>todo_o_help_de_comando_tem_traducao_pt</code> 对命令帮助是严格检查，<code>o_help_dos_argumentos_so_pode_encolher</code> 是针对参数帮助中 <code>ARG_HELP_PENDING</code> 的棘轮。新增一个命令或标志需要一条 <code>pt.po</code> 条目。</p>
 </li>
-<li>A missing entry falls back to English, so the UI never goes blank (<code>po::t</code>). A Portuguese
-    string written directly in the code is a bug, not a shortcut.</li>
-<li>Don't reuse a <code>msgid</code> whose Portuguese depends on the grammatical gender of the subject.
-    "created" can be <em>criada</em> for a network and <em>criado</em> for a volume, so use separate keys.
-    <strong>Decided</strong>: AGENTS.md § "v0.32.2 — 380+ strings PT hardcoded".</li>
-<li><strong>Lexicon pitfalls.</strong> <strong>Decided</strong>: AGENTS.md § LANG-01.</li>
-<li><strong>Don't name anything <code>num</code>.</strong> It is in the lexicon on purpose, because it catches real
-    Portuguese ("num apply falhado"). A <code>num</code> identifier therefore counts as Portuguese debt and
-    fails the gate. Use <code>count</code> or <code>number</code>.</li>
-<li>Adding a word to the lexicon <strong>raises</strong> the count and fails the gate. Lower the baseline in the
-    same commit. Homographs (<code>data</code>, <code>base</code>, <code>no</code>, <code>nas</code>…) are excluded unless a measurement shows they catch
-    real Portuguese; <code>num</code> is the recorded exception (AGENTS.md § LANG-01).</li>
+<li>缺失的条目会回退到英语，所以界面永远不会空白（<code>po::t</code>）。直接在代码里写死一条葡萄牙语字符串是一个 bug，不是一条捷径。</li>
+<li>不要复用一个其葡萄牙语译文依赖主语语法性别的 <code>msgid</code>。"created" 对于一个网络可以是 <em>criada</em>，对于一个卷则是 <em>criado</em>，所以要用不同的 key。<strong>已决定</strong>：AGENTS.md § "v0.32.2 — 380+ strings PT hardcoded"。</li>
+<li><strong>词典的陷阱。</strong> <strong>已决定</strong>：AGENTS.md § LANG-01。</li>
+<li><strong>不要给任何东西起名叫 <code>num</code>。</strong> 它被故意留在词典里，因为它能抓到真正的葡萄牙语（"num apply falhado"）。所以一个叫 <code>num</code> 的标识符会被算作葡萄牙语债务，让门禁失败。请用 <code>count</code> 或 <code>number</code>。</li>
+<li>往词典里加一个词会让计数<strong>上升</strong>，让门禁失败。要在同一个提交里把基线降下来。同形异义词（<code>data</code>、<code>base</code>、<code>no</code>、<code>nas</code>……）默认排除在外，除非有测量证明它们真的能抓到葡萄牙语；<code>num</code> 是有记录的例外（AGENTS.md § LANG-01）。</li>
 </ul>
 <hr />
-<h2 id="3-naming">3. Naming<a class="hanchor" href="#3-naming" aria-label="#">#</a></h2>
-<h3 id="31-crates-and-directories">3.1 Crates and directories<a class="hanchor" href="#31-crates-and-directories" aria-label="#">#</a></h3>
+<h2 id="3-naming">3. 命名<a class="hanchor" href="#3-naming" aria-label="#">#</a></h2>
+<h3 id="31-crates-and-directories">3.1 crate 和目录<a class="hanchor" href="#31-crates-and-directories" aria-label="#">#</a></h3>
 <ul>
-<li><strong>The directory is the layer.</strong> A crate lives in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> or <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, or it is a binary in <code>bins/</code>. The
-  directory must match the crate's entry in the <code>LAYERS</code> table. <strong>Enforced (gate)</strong>:
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>misplaced()</code> / <code>LAYER_DIR</code>. A new crate goes into <code>LAYERS</code> <strong>and</strong> the
-  right directory in the same commit.</li>
-<li><strong>Target naming convention for new or restructured crates.</strong> <strong>Proposed (ADR, not yet
-  decided)</strong>: ADR-0040 D2.1.</li>
+<li><strong>目录就是层。</strong> 一个 crate 要么放在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> 或 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a> 之一，要么是 <code>bins/</code> 下的一个二进制。目录必须和这个 crate 在 <code>LAYERS</code> 表里的条目一致。<strong>强制（门禁）</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 的 <code>misplaced()</code> / <code>LAYER_DIR</code>。一个新 crate 要在同一个提交里同时进入 <code>LAYERS</code><strong>和</strong>对应的目录。</li>
+<li><strong>新建或重构 crate 时的目标命名惯例。</strong> <strong>提议中（ADR，尚未决定）</strong>：ADR-0040 D2.1。</li>
 </ul>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Role</th>
-<th>Name</th>
+<th>角色</th>
+<th>名称</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Shared pure foundation</td>
+<td>共享的纯粹基础层</td>
 <td><code>delonix-model</code></td>
 </tr>
 <tr>
-<td>Bounded context</td>
-<td><code>delonix-&lt;context&gt;</code>, named after the published API group (D2.2): <code>delonix-compute</code>, <code>delonix-stack</code></td>
+<td>限界上下文（bounded context）</td>
+<td><code>delonix-&lt;context&gt;</code>，以其对外发布的 API 组命名（D2.2）：<code>delonix-compute</code>、<code>delonix-stack</code></td>
 </tr>
 <tr>
-<td>Technology adapter</td>
-<td><code>delonix-&lt;technology&gt;</code>: <code>delonix-linux</code>, <code>delonix-sdn</code>, <code>delonix-oci</code></td>
+<td>技术适配器</td>
+<td><code>delonix-&lt;technology&gt;</code>：<code>delonix-linux</code>、<code>delonix-sdn</code>、<code>delonix-oci</code></td>
 </tr>
 <tr>
-<td>Pluggable provider</td>
+<td>可插拔 provider</td>
 <td><code>delonix-provider-&lt;technology&gt;</code></td>
 </tr>
 <tr>
-<td>Interface library</td>
-<td><code>delonix-&lt;protocol&gt;</code>: <code>delonix-cri</code>, <code>delonix-mcp</code></td>
+<td>接口库</td>
+<td><code>delonix-&lt;protocol&gt;</code>：<code>delonix-cri</code>、<code>delonix-mcp</code></td>
 </tr>
 </tbody>
 </table></div>
-<p>A crate exists only if it is a bounded context, isolates a heavy or privileged dependency, or is
-  a separately installed binary. <strong>No <code>-core</code>, <code>-common</code>, <code>-utils</code> or <code>-types</code> suffixes</strong>
-  (ADR-0040 D2.1 records how a <code>-core</code> crate became "the sink of everything"; that crate,
-  <code>delonix-runtime-core</code>, was removed in #406). Some crates still
-  carry older names: <code>delonix-proxmox</code>, <code>delonix-truenas</code>,
-  <code>delonix-security-runtime</code>. ADR-0040 renames each one in the phase that restructures it, "never
-  twice". <strong>Don't rename a crate outside its phase.</strong>
-- <strong>Every crate's path is written once</strong>, in <code>[workspace.dependencies]</code> of the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>.
-  Members depend on each other with <code>{ workspace = true }</code>. <strong>Decided</strong>: AGENTS.md § "A direcção
-  das dependências é um portão (ADR-0040, fase P0)", and the comment at the top of
-  <code>[workspace.dependencies]</code>.</p>
-<h3 id="32-modules-and-files">3.2 Modules and files<a class="hanchor" href="#32-modules-and-files" aria-label="#">#</a></h3>
+<p>一个 crate 只有在它是一个限界上下文、隔离了某个笨重或需要特权的依赖、或者是一个单独安装的二进制时才应该存在。<strong>不允许 <code>-core</code>、<code>-common</code>、<code>-utils</code> 或 <code>-types</code> 后缀</strong>（ADR-0040 D2.1 记录了一个 <code>-core</code> crate 是如何变成"the sink of everything"的；那个 crate，<code>delonix-runtime-core</code>，已在 #406 中被移除）。有些 crate 仍保留着旧名字：<code>delonix-proxmox</code>、<code>delonix-truenas</code>、<code>delonix-security-runtime</code>。ADR-0040 会在重构对应部分的那个阶段里把它们逐一改名，"never twice"（永远不改第二次）。<strong>不要在某个 crate 的对应阶段之外去改它的名字。</strong>
+- <strong>每个 crate 的路径只写一次</strong>，写在根目录 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 的 <code>[workspace.dependencies]</code> 里。各成员之间用 <code>{ workspace = true }</code> 互相依赖。<strong>已决定</strong>：AGENTS.md § "A direcção das dependências é um portão (ADR-0040, fase P0)"，以及 <code>[workspace.dependencies]</code> 顶部的注释。</p>
+<h3 id="32-modules-and-files">3.2 模块和文件<a class="hanchor" href="#32-modules-and-files" aria-label="#">#</a></h3>
 <ul>
-<li><strong>CLI command groups</strong>: one module per group in <code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code>,
-  with a <code>pub enum &lt;Group&gt;Cmd</code> (clap subcommands), a <code>pub fn run(action: &lt;Group&gt;Cmd) -&gt; Result&lt;()&gt;</code>
-  dispatcher, and one <code>cmd_&lt;verb&gt;</code> function per subcommand. <strong>Convention (observed)</strong>:
-  <code>cmd/volume.rs:VolumeCmd</code> + <code>run</code> + <code>cmd_create</code>/<code>cmd_ls</code>/<code>cmd_describe</code>;
-  <code>cmd/secret.rs:SecretCmd</code> + <code>run</code>; <code>cmd/container.rs:cmd_run</code>/<code>cmd_start</code>/<code>cmd_stop</code>.
-  AGENTS.md § "CLI (<code>delonix</code>)" states the one-module-per-group part.</li>
-<li><strong>Adapters for a compute port</strong> go in a file named after the port's concern, not after the
-  technology: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>, <code>.../run_host.rs</code>,
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a>, <code>.../vm_network.rs</code>,
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a>. <strong>Convention (observed)</strong>.</li>
+<li><strong>CLI 命令组</strong>：每个组一个模块，放在 <code>bins/delonix-runtime-bin/src/cmd/&lt;group&gt;.rs</code> 里，包含一个 <code>pub enum &lt;Group&gt;Cmd</code>（clap 子命令）、一个分发函数 <code>pub fn run(action: &lt;Group&gt;Cmd) -&gt; Result&lt;()&gt;</code>，以及每个子命令对应一个 <code>cmd_&lt;verb&gt;</code> 函数。<strong>惯例（观察所得）</strong>：<code>cmd/volume.rs:VolumeCmd</code> + <code>run</code> + <code>cmd_create</code>/<code>cmd_ls</code>/<code>cmd_describe</code>；<code>cmd/secret.rs:SecretCmd</code> + <code>run</code>；<code>cmd/container.rs:cmd_run</code>/<code>cmd_start</code>/<code>cmd_stop</code>。AGENTS.md § "CLI (<code>delonix</code>)" 说明了"每个组一个模块"这部分。</li>
+<li><strong>compute 端口的适配器</strong>放在以该端口所关心的事情命名的文件里，而不是以技术命名：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/workload.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/workload.rs</code></a>、<code>.../run_host.rs</code>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/run_network.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/run_network.rs</code></a>、<code>.../vm_network.rs</code>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-oci/src/run_images.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/src/run_images.rs</code></a>。<strong>惯例（观察所得）</strong>。</li>
 </ul>
-<h3 id="33-types-traits-functions-constants">3.3 Types, traits, functions, constants<a class="hanchor" href="#33-types-traits-functions-constants" aria-label="#">#</a></h3>
+<h3 id="33-types-traits-functions-constants">3.3 类型、trait、函数、常量<a class="hanchor" href="#33-types-traits-functions-constants" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Ports are named after the capability, not the technology.</strong> <strong>Proposed (ADR, not yet
-  decided)</strong>: ADR-0040 D3 lists the ports: <code>WorkloadRuntime</code>, <code>SandboxProvider</code>, <code>VmProvider</code>, <code>NetworkProvider</code>, <code>StorageProvider</code>,
-  <code>ImageRegistry</code>, <code>ImageStore</code>, … The ones that exist today are in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a> (<code>ImageStore</code>, <code>StorageProvider</code>, <code>DeviceResolver</code>,
-  <code>RunHost</code>, <code>VmNetwork</code>, <code>NetworkProvider</code>) and <code>.../launch.rs</code> (<code>WorkloadRuntime</code>). The older
-  <code>VmBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> is due to become <code>VmProvider</code> in P4.</li>
-<li><strong>Host implementations of a port are called <code>Host&lt;Thing&gt;</code>.</strong> <strong>Convention (observed)</strong>:
-  <code>delonix-linux/src/workload.rs:HostWorkload</code> (implements <code>WorkloadRuntime</code>),
-  <code>delonix-sdn/src/run_network.rs:HostNetwork</code> (implements <code>NetworkProvider</code>),
-  <code>delonix-oci/src/run_images.rs:HostImages</code>, <code>delonix-volume/src/lib.rs:HostVolumes</code>,
-  <code>delonix-linux/src/cdi.rs:HostDevices</code>.</li>
-<li><strong>Pure decision functions</strong> are verbs or questions: <code>resolve_*</code>, <code>parse_*</code>, <code>valid_*</code>, <code>is_*</code>,
-  <code>*_plan</code>. <strong>Convention (observed)</strong>: <code>cmd/vm.rs:resolve_vm_defaults</code>,
-  <code>delonix-oci/src/registry.rs:parse_content_range</code>, <code>cmd/stack.rs:is_pending</code>,
-  <code>delonix-net-rules/src/lib.rs:bridge_name</code>.</li>
-<li><strong>Constants</strong> are <code>SCREAMING_SNAKE_CASE</code> (<strong>Enforced (gate)</strong>, rustc lint under clippy
-  <code>-D warnings</code>). <strong>Kind names are constants too, never repeated string literals</strong>
-  (<strong>Decided</strong>: AGENTS.md § "Os Kinds ganham grupos e nomes definitivos"; the constants are in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a>: <code>pub const VM: &amp;str = "VirtualMachine";</code>).</li>
+<li><strong>端口以能力命名，而不是以技术命名。</strong> <strong>提议中（ADR，尚未决定）</strong>：ADR-0040 D3 列出了这些端口：<code>WorkloadRuntime</code>、<code>SandboxProvider</code>、<code>VmProvider</code>、<code>NetworkProvider</code>、<code>StorageProvider</code>、<code>ImageRegistry</code>、<code>ImageStore</code>……今天已经存在的那些在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/ports.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/ports.rs</code></a>（<code>ImageStore</code>、<code>StorageProvider</code>、<code>DeviceResolver</code>、<code>RunHost</code>、<code>VmNetwork</code>、<code>NetworkProvider</code>）和 <code>.../launch.rs</code>（<code>WorkloadRuntime</code>）里。较老的 <code>VmBackend</code>（在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>）会在 P4 阶段改名为 <code>VmProvider</code>。</li>
+<li><strong>一个端口的宿主机实现叫 <code>Host&lt;Thing&gt;</code>。</strong> <strong>惯例（观察所得）</strong>：<code>delonix-linux/src/workload.rs:HostWorkload</code>（实现 <code>WorkloadRuntime</code>）、<code>delonix-sdn/src/run_network.rs:HostNetwork</code>（实现 <code>NetworkProvider</code>）、<code>delonix-oci/src/run_images.rs:HostImages</code>、<code>delonix-volume/src/lib.rs:HostVolumes</code>、<code>delonix-linux/src/cdi.rs:HostDevices</code>。</li>
+<li><strong>纯粹的决策函数</strong>是动词或疑问句的形式：<code>resolve_*</code>、<code>parse_*</code>、<code>valid_*</code>、<code>is_*</code>、<code>*_plan</code>。<strong>惯例（观察所得）</strong>：<code>cmd/vm.rs:resolve_vm_defaults</code>、<code>delonix-oci/src/registry.rs:parse_content_range</code>、<code>cmd/stack.rs:is_pending</code>、<code>delonix-net-rules/src/lib.rs:bridge_name</code>。</li>
+<li><strong>常量</strong>用 <code>SCREAMING_SNAKE_CASE</code>（<strong>强制（门禁）</strong>，clippy 的 <code>-D warnings</code> 下的 rustc lint）。<strong>Kind 的名字也一律是常量，从不用重复的字符串字面量</strong>（<strong>已决定</strong>：AGENTS.md § "Os Kinds ganham grupos e nomes definitivos"；这些常量在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> 里：<code>pub const VM: &amp;str = "VirtualMachine";</code>）。</li>
 </ul>
-<h3 id="34-test-names">3.4 Test names<a class="hanchor" href="#34-test-names" aria-label="#">#</a></h3>
+<h3 id="34-test-names">3.4 测试名<a class="hanchor" href="#34-test-names" aria-label="#">#</a></h3>
 <ul>
-<li><strong>The ratchet counts test names.</strong> <code>lang_ratchet.py</code> matches every <code>fn</code> declaration and does not
-  skip <code>#[cfg(test)]</code>, so a Portuguese test name raises <code>identifiers</code> and fails the gate.
-  <strong>Enforced (gate)</strong>.</li>
-<li>Many existing tests have Portuguese sentence names, for example
-  <code>delonix-model/src/exitcode.rs:nao_existe_e_rebentou_deixam_de_ser_o_mesmo_numero</code>. That is
-  counted debt, not a style to copy. New tests are <strong>English sentences that state the behaviour
-  being proven</strong>, like the newer tests in the same file: <code>a_missing_capability_is_not_a_wrong_argument</code>
-  and <code>the_text_class_and_the_number_cannot_diverge</code>. <strong>Decided</strong>: LANG-01 (AGENTS.md); the
-  "sentence" shape is a <strong>Convention (observed)</strong>.</li>
-<li>If you translate an existing test name, the count goes down, so run
-  <code>python3 scripts/lang_ratchet.py --update</code> in the same commit.</li>
+<li><strong>棘轮会统计测试名。</strong> <code>lang_ratchet.py</code> 匹配每一个 <code>fn</code> 声明，并不会跳过 <code>#[cfg(test)]</code>，所以一个葡萄牙语的测试名会让 <code>identifiers</code> 上升，让门禁失败。<strong>强制（门禁）</strong>。</li>
+<li>许多既有测试用的是葡萄牙语的句子式命名，例如 <code>delonix-model/src/exitcode.rs:nao_existe_e_rebentou_deixam_de_ser_o_mesmo_numero</code>。那是被计入统计的债务，不是要照抄的写法。新测试要用<strong>陈述所要证明的行为的英语句子</strong>，就像同一个文件里较新的那些测试：<code>a_missing_capability_is_not_a_wrong_argument</code> 和 <code>the_text_class_and_the_number_cannot_diverge</code>。<strong>已决定</strong>：LANG-01（AGENTS.md）；"句子式"这个形式是<strong>惯例（观察所得）</strong>。</li>
+<li>如果你翻译了一个既有测试的名字，计数会下降，所以要在同一个提交里跑一次 <code>python3 scripts/lang_ratchet.py --update</code>。</li>
 </ul>
-<h3 id="35-cli-commands-and-flags">3.5 CLI commands and flags<a class="hanchor" href="#35-cli-commands-and-flags" aria-label="#">#</a></h3>
+<h3 id="35-cli-commands-and-flags">3.5 CLI 命令与标志<a class="hanchor" href="#35-cli-commands-and-flags" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Grouped commands, <code>delonix &lt;group&gt; &lt;verb&gt;</code>.</strong> No flat top-level shortcuts. <strong>Decided</strong>:
-  AGENTS.md § "Reorganização da raiz da CLI (v0.30.0)"; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> (the top-level
-  shortcuts were removed in v1.0.0).</li>
-<li><strong>Verbs follow Docker/Podman/kubectl</strong> when such a verb exists. <strong>Decided</strong>: AGENTS.md § the
-  "Reestruturação da CLI (semântica Docker/Podman/kubectl)" sprints; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> §
-  "Estável".</li>
-<li>Listing verbs use <code>ls</code> (<code>network ls</code>, <code>volume ls</code>, <code>image ls</code>…). <code>image list</code> was reverted to
-    <code>ls</code> in v2.0.0 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a>).</li>
-<li><code>create</code> only creates, and refuses an existing name with exit 5 unless <code>--force</code>. Upsert is a
-    separate verb (<code>secret set</code>). <code>apply</code> is idempotent "ensure present". <strong>Decided</strong>: AGENTS.md §
-    "Sprint 1: <code>secret create</code> vs <code>secret set</code>".</li>
-<li><code>describe</code> is for humans (kubectl style), <code>inspect</code> is JSON for scripts. <strong>Decided</strong>: AGENTS.md
-    § "Output: <code>ls</code> estilo docker, <code>describe</code> estilo kubectl".</li>
-<li>Flag order and names copy Docker where Docker has the concept:
-    <code>network connect &lt;NETWORK&gt; &lt;CONTAINER&gt;</code>, <code>-p [hostIp:]hostPort:containerPort</code>,
-    <code>volume create --driver … --opt k=v</code>. <strong>Decided</strong>: AGENTS.md § Sprints 5 and 6.</li>
-<li><strong>Breaking changes are clean cuts, without aliases.</strong> The old spelling must fail with
-  <code>unrecognized subcommand</code>, never silently do something else. Before you cut, grep for internal
-  callers across the <strong>whole</strong> workspace. <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "Como uma quebra é
-  feita". The groups listed as stable in that file may only break in a major release.</li>
-<li><strong>A command reachable from several paths must be wired on all of them</strong> (for example
-  <code>vm pull</code> / <code>image vm pull</code> / <code>image --vm pull</code>). <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>; see
-  <a href="contributing-workflow.html#adding-or-changing-a-cli-command">Contribution workflow</a>.</li>
-<li><strong>Leaf changes update the CLI baseline</strong> (<code>scripts/cli-tree.sh --update</code>) in the same commit.
-  <strong>Enforced (gate)</strong>: see <a href="contributing-workflow.html#adding-or-changing-a-cli-command">Contribution workflow</a>.</li>
+<li><strong>命令要分组，形如 <code>delonix &lt;group&gt; &lt;verb&gt;</code>。</strong> 不要有扁平的顶层快捷方式。<strong>已决定</strong>：AGENTS.md § "Reorganização da raiz da CLI (v0.30.0)"；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a>（那些顶层快捷方式已在 v1.0.0 中被移除）。</li>
+<li><strong>有对应动词存在时，就跟随 Docker/Podman/kubectl 的用词。</strong> <strong>已决定</strong>：AGENTS.md § "Reestruturação da CLI (semântica Docker/Podman/kubectl)" 系列 sprint；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "Estável"。</li>
+<li>列举用的动词是 <code>ls</code>（<code>network ls</code>、<code>volume ls</code>、<code>image ls</code>……）。<code>image list</code> 在 v2.0.0 中被改回了 <code>ls</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a>）。</li>
+<li><code>create</code> 只负责创建，遇到已存在的名字会以退出码 5 拒绝，除非带上 <code>--force</code>。Upsert 是另一个独立的动词（<code>secret set</code>）。<code>apply</code> 是幂等的"确保存在"。<strong>已决定</strong>：AGENTS.md § "Sprint 1: <code>secret create</code> vs <code>secret set</code>"。</li>
+<li><code>describe</code> 面向人（kubectl 风格），<code>inspect</code> 是给脚本用的 JSON。<strong>已决定</strong>：AGENTS.md § "Output: <code>ls</code> estilo docker, <code>describe</code> estilo kubectl"。</li>
+<li>在 Docker 已有对应概念的地方，标志的顺序和名字要照搬 Docker：<code>network connect &lt;NETWORK&gt; &lt;CONTAINER&gt;</code>、<code>-p [hostIp:]hostPort:containerPort</code>、<code>volume create --driver … --opt k=v</code>。<strong>已决定</strong>：AGENTS.md § Sprint 5 和 6。</li>
+<li><strong>不兼容的改动要干净利落地切断，不留别名。</strong> 旧的写法必须以 <code>unrecognized subcommand</code> 失败，绝不能悄悄地做别的事情。在你切断之前，先在<strong>整个</strong> workspace 里 grep 一遍内部调用者。<strong>已决定</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "Como uma quebra é feita"。该文件里列为稳定的那些组，只能在大版本发布时才允许破坏兼容。</li>
+<li><strong>一个从多条路径都能到达的命令，必须在所有路径上都接好</strong>（例如 <code>vm pull</code> / <code>image vm pull</code> / <code>image --vm pull</code>）。<strong>已决定</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>；见<a href="contributing-workflow.html#adding-or-changing-a-cli-command">贡献流程</a>。</li>
+<li><strong>叶子命令的变动要在同一个提交里更新 CLI 基线</strong>（<code>scripts/cli-tree.sh --update</code>）。<strong>强制（门禁）</strong>：见<a href="contributing-workflow.html#adding-or-changing-a-cli-command">贡献流程</a>。</li>
 </ul>
-<h3 id="36-kinds-api-groups-and-manifest-fields">3.6 Kinds, API groups and manifest fields<a class="hanchor" href="#36-kinds-api-groups-and-manifest-fields" aria-label="#">#</a></h3>
+<h3 id="36-kinds-api-groups-and-manifest-fields">3.6 Kind、API 组和清单字段<a class="hanchor" href="#36-kinds-api-groups-and-manifest-fields" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Kinds are <code>UpperCamelCase</code> nouns</strong> in one of the published groups
-  <code>core</code>, <code>compute</code>, <code>networking</code>, <code>gateway</code>, <code>storage</code>, <code>artifact</code>, <code>infrastructure</code>
-  (<code>&lt;group&gt;.delonix.io/v1alpha1</code>). <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira do
-  motor" and § "Os Kinds ganham grupos" (ADR-0020, which introduced the groups, is still
-  <strong>Proposed</strong>). Each Kind is <strong>one row</strong> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> (<code>KindFacts</code>: <code>kind</code>, <code>plural</code>, <code>short</code>,
-  <code>api_version</code>, <code>domain</code>, <code>form</code>, <code>in_stack</code>, <code>converges</code>, …). <code>delonix api-resources</code> prints that
-  table. Adding a Kind also touches tables that nothing derives from <code>kinds.rs</code> (<code>hot_fields</code>,
-  <code>NAMESPACE_SOURCES</code>, <code>TYPED_KINDS</code>, the generated schema). The tests fail until each one is done.
-  <strong>Enforced (gate)</strong>: AGENTS.md § "<code>kind: Service</code>" lists which test caught each table.</li>
-<li><strong>A renamed Kind keeps its old name as a silent, case-insensitive alias.</strong> A <strong>merge</strong> warns,
-  because its meaning changed. <strong>Decided</strong>: AGENTS.md § "Os Kinds ganham grupos e nomes
-  definitivos" ("Alias silencioso, não depreciação"); implemented in
-  <code>cmd/manifest.rs:KIND_ALIASES</code>. ADR-0020 is still <strong>Proposed</strong>.</li>
-<li><strong>Manifest fields are <code>camelCase</code>.</strong> If a field had a <code>snake_case</code> spelling before, that spelling
-  stays accepted as a <code>serde</code> <code>alias</code>. <strong>Convention (observed)</strong>, per field rather than
-  <code>rename_all</code>:</li>
+<li><strong>Kind 是 <code>UpperCamelCase</code> 形式的名词</strong>，属于已发布分组中的一个：<code>core</code>、<code>compute</code>、<code>networking</code>、<code>gateway</code>、<code>storage</code>、<code>artifact</code>、<code>infrastructure</code>（<code>&lt;group&gt;.delonix.io/v1alpha1</code>）。<strong>已决定</strong>：AGENTS.md § "Identidade e fronteira do motor" 和 § "Os Kinds ganham grupos"（引入这些分组的 ADR-0020 目前仍是<strong>提议中</strong>）。每个 Kind 在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> 里都是<strong>一行</strong>（<code>KindFacts</code>：<code>kind</code>、<code>plural</code>、<code>short</code>、<code>api_version</code>、<code>domain</code>、<code>form</code>、<code>in_stack</code>、<code>converges</code>……）。<code>delonix api-resources</code> 会打印那张表。新增一个 Kind 还要动到那些没有从 <code>kinds.rs</code> 派生的表（<code>hot_fields</code>、<code>NAMESPACE_SOURCES</code>、<code>TYPED_KINDS</code>、生成的 schema）。在每一个都改完之前测试都会失败。<strong>强制（门禁）</strong>：AGENTS.md § "<code>kind: Service</code>" 列出了每张表分别由哪个测试抓住。</li>
+<li><strong>一个改了名字的 Kind 会把旧名字保留为一个不区分大小写、默认不打印警告的别名。</strong> 一次<strong>合并</strong>则会给出警告，因为它的含义变了。<strong>已决定</strong>：AGENTS.md § "Os Kinds ganham grupos e nomes definitivos"（"Alias silencioso, não depreciação"）；实现在 <code>cmd/manifest.rs:KIND_ALIASES</code>。ADR-0020 目前仍是<strong>提议中</strong>。</li>
+<li><strong>清单字段用 <code>camelCase</code>。</strong> 如果某个字段以前是 <code>snake_case</code> 的拼法，那个拼法会作为 <code>serde</code> 的 <code>alias</code> 继续被接受。<strong>惯例（观察所得）</strong>，按字段逐个处理，而不是用 <code>rename_all</code>：</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/vm.rs — VmSpec
 /// Canonical `cpuAffinity`; `cpu_affinity` stays accepted (back-compat).
 #[serde(rename = &quot;cpuAffinity&quot;, alias = &quot;cpu_affinity&quot;)]
 cpu_affinity: Option&lt;String&gt;,
 </code></pre></div>
-<p>Other examples: <code>delonix-compute/src/pod.rs:PodSpec.restart_policy</code> (<code>rename = "restartPolicy"</code>),
-  <code>cmd/service.rs:ServiceSelector.match_labels</code> (<code>rename = "matchLabels"</code>). The published schema
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>) is <strong>generated</strong> from these structs and is tested to match them
-  (ADR-0007). The manifest schema is declared <strong>stable</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "O schema dos
-  manifestos").
-- <strong>Internal records</strong> (the JSON under the state root) keep Rust's <code>snake_case</code> field names. See
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> (<code>net_mode</code>, <code>namespace</code>). <strong>Convention
-  (observed)</strong>.</p>
-<h3 id="37-environment-variables">3.7 Environment variables<a class="hanchor" href="#37-environment-variables" aria-label="#">#</a></h3>
+<p>其他例子：<code>delonix-compute/src/pod.rs:PodSpec.restart_policy</code>（<code>rename = "restartPolicy"</code>）、<code>cmd/service.rs:ServiceSelector.match_labels</code>（<code>rename = "matchLabels"</code>）。已发布的 schema（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>）是从这些结构体<strong>生成</strong>的，并有测试保证它和这些结构体一致（ADR-0007）。清单的 schema 被声明为<strong>稳定</strong>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "O schema dos manifestos"）。
+- <strong>内部记录</strong>（state root 下的那些 JSON）保留 Rust 的 <code>snake_case</code> 字段名。见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>（<code>net_mode</code>、<code>namespace</code>）。<strong>惯例（观察所得）</strong>。</p>
+<h3 id="37-environment-variables">3.7 环境变量<a class="hanchor" href="#37-environment-variables" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Prefix <code>DELONIX_</code></strong>, upper case: <code>DELONIX_ROOT</code>, <code>DELONIX_NET_RUNTIME_DIR</code>, <code>DELONIX_L18N</code>,
-  <code>DELONIX_LOG_FORMAT</code>, <code>DELONIX_CRI_CAP_CEILING</code>. <strong>Convention (observed)</strong> across <code>crates/</code> and
-  <code>bins/</code>.</li>
-<li><strong>For telemetry, read the standard <code>OTEL_*</code> variables</strong>, not a new <code>DELONIX_*</code> alias.
-  <strong>Proposed (ADR, not yet decided)</strong>: ADR-0040 D6. This is the target, not today's code:
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> reads <code>DELONIX_OTLP_ENDPOINT</code> for the OTLP
-  exporter, and from the standard set only <code>OTEL_SERVICE_NAME</code>. Don't add a new <code>DELONIX_*</code>
-  telemetry variable, and don't remove <code>DELONIX_OTLP_ENDPOINT</code> outside the phase that migrates it.</li>
-<li><strong>An escape hatch that weakens a safety default is loud and explicit.</strong> It is off unless set to
-  <code>1</code>, and it warns: <code>DELONIX_ENABLE_IPV6=1</code>, <code>DELONIX_ALLOW_LINK_LOCAL=1</code>. <strong>Decided</strong>: AGENTS.md §
-  "Bloco 0 do plano 33 (v0.37.1)".</li>
-<li>A flag beats the environment variable, which beats the default (<code>serve cri --cap-ceiling</code> vs
-  <code>DELONIX_CRI_CAP_CEILING</code>). <strong>Decided</strong>: AGENTS.md § "Tecto de capabilities no CRI".</li>
+<li><strong>前缀 <code>DELONIX_</code></strong>，全部大写：<code>DELONIX_ROOT</code>、<code>DELONIX_NET_RUNTIME_DIR</code>、<code>DELONIX_L18N</code>、<code>DELONIX_LOG_FORMAT</code>、<code>DELONIX_CRI_CAP_CEILING</code>。<strong>惯例（观察所得）</strong>，贯穿 <code>crates/</code> 和 <code>bins/</code>。</li>
+<li><strong>遥测（telemetry）要读标准的 <code>OTEL_*</code> 变量</strong>，而不是新建一个 <code>DELONIX_*</code> 别名。<strong>提议中（ADR，尚未决定）</strong>：ADR-0040 D6。这是目标，不是今天的代码现状：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> 为 OTLP 导出器读取 <code>DELONIX_OTLP_ENDPOINT</code>，而在标准变量集里只读 <code>OTEL_SERVICE_NAME</code>。不要新增一个 <code>DELONIX_*</code> 遥测变量，也不要在迁移它的那个阶段之外移除 <code>DELONIX_OTLP_ENDPOINT</code>。</li>
+<li><strong>一个会削弱某个安全默认值的逃生舱口，要做得响亮且明确。</strong> 除非设为 <code>1</code>，否则它是关闭的，而且一旦开启就会发出警告：<code>DELONIX_ENABLE_IPV6=1</code>、<code>DELONIX_ALLOW_LINK_LOCAL=1</code>。<strong>已决定</strong>：AGENTS.md § "Bloco 0 do plano 33 (v0.37.1)"。</li>
+<li>标志优先于环境变量，环境变量优先于默认值（<code>serve cri --cap-ceiling</code> 相对于 <code>DELONIX_CRI_CAP_CEILING</code>）。<strong>已决定</strong>：AGENTS.md § "Tecto de capabilities no CRI"。</li>
 </ul>
-<h3 id="38-exit-codes-and-dx_-codes">3.8 Exit codes and <code>DX_*</code> codes<a class="hanchor" href="#38-exit-codes-and-dx_-codes" aria-label="#">#</a></h3>
+<h3 id="38-exit-codes-and-dx_-codes">3.8 退出码与 <code>DX_*</code> 代码<a class="hanchor" href="#38-exit-codes-and-dx_-codes" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Exit codes are derived from the error type in one place</strong>: the exhaustive
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs:for_error</code></a>. The classes are 1 generic,
-  2 usage, 3 <code>NOT_RUNNING</code>, 4 <code>NOT_FOUND</code>, 5 <code>CONFLICT</code>, 69 <code>UNAVAILABLE</code>, 74 <code>IO</code>,
-  77 <code>NO_PERMISSION</code>, 124 <code>TIMEOUT</code>. Each error also has a stable text identity, <code>Error::code()</code>,
-  which returns a <code>DX_*</code> string. <strong>Enforced (gate)</strong>: the match has no <code>_ =&gt;</code> arm, so a new variant
-  stops the build until someone classifies it. The test
-  <code>the_text_class_and_the_number_cannot_diverge</code> keeps the two in step. <strong>Decided</strong>: AGENTS.md §
-  "Códigos de saída com classe (v0.49.0)"; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "Códigos de saída".</li>
-<li><strong>You don't pick a number, you return the right variant.</strong> "It doesn't exist" is
-  <code>Error::NotFound</code>, "it already exists" is <code>Error::Conflict</code>, "this host lacks a tool" is
-  <code>Error::Unavailable</code>. A new number needs a real producer. <strong>Decided</strong>: module docs of
-  <code>exitcode.rs</code> ("every extra number is a promise").</li>
+<li><strong>退出码在一个地方从错误类型推导而来</strong>：详尽穷举的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs:for_error</code></a>。各个类别是 1（通用）、2（用法错误）、3 <code>NOT_RUNNING</code>、4 <code>NOT_FOUND</code>、5 <code>CONFLICT</code>、69 <code>UNAVAILABLE</code>、74 <code>IO</code>、77 <code>NO_PERMISSION</code>、124 <code>TIMEOUT</code>。每个错误还有一个稳定的文本身份，<code>Error::code()</code>，会返回一个 <code>DX_*</code> 字符串。<strong>强制（门禁）</strong>：那个 match 没有 <code>_ =&gt;</code> 分支，所以一个新的变体会让构建停下来，直到有人把它归类。测试 <code>the_text_class_and_the_number_cannot_diverge</code> 让这两者保持同步。<strong>已决定</strong>：AGENTS.md § "Códigos de saída com classe (v0.49.0)"；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> § "Códigos de saída"。</li>
+<li><strong>你不是自己挑一个数字，而是返回正确的那个变体。</strong> "不存在"是 <code>Error::NotFound</code>，"已经存在"是 <code>Error::Conflict</code>，"这台宿主机缺少某个工具"是 <code>Error::Unavailable</code>。一个新数字需要一个真实的生产者。<strong>已决定</strong>：<code>exitcode.rs</code> 的模块文档（"every extra number is a promise"）。</li>
 </ul>
 <hr />
-<h2 id="4-structure-where-code-goes">4. Structure: where code goes<a class="hanchor" href="#4-structure-where-code-goes" aria-label="#">#</a></h2>
-<h3 id="41-the-layers-and-the-direction">4.1 The layers and the direction<a class="hanchor" href="#41-the-layers-and-the-direction" aria-label="#">#</a></h3>
-<p>The allowed direction is written in one place, <code>ALLOWED</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>.
-<strong>Enforced (gate)</strong>:</p>
+<h2 id="4-structure-where-code-goes">4. 结构：代码该放在哪里<a class="hanchor" href="#4-structure-where-code-goes" aria-label="#">#</a></h2>
+<h3 id="41-the-layers-and-the-direction">4.1 层与依赖方向<a class="hanchor" href="#41-the-layers-and-the-direction" aria-label="#">#</a></h3>
+<p>允许的依赖方向写在一个地方，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 里的 <code>ALLOWED</code>。<strong>强制（门禁）</strong>：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Layer</th>
-<th>May depend on</th>
+<th>层</th>
+<th>可以依赖</th>
 </tr>
 </thead>
 <tbody>
@@ -570,171 +422,146 @@ cpu_affinity: Option&lt;String&gt;,
 </tr>
 <tr>
 <td>bin</td>
-<td>everything</td>
+<td>全部</td>
 </tr>
 </tbody>
 </table></div>
-<p>Dev- and build-dependencies don't count. A declared exception must name the ADR-0040 phase that
-removes it, and an exception that no longer applies also fails (<code>EXCEPTIONS</code>). The generated layer
-table and current exceptions are in <a href="architecture.html#layers-and-the-allowed-direction">Architecture</a>.</p>
-<p>More structural rules, each <strong>Enforced (gate)</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>:</p>
+<p>开发依赖和构建依赖不计入统计。一个声明的例外必须指名会移除它的那个 ADR-0040 阶段，一个已经不再适用的例外同样会让检查失败（<code>EXCEPTIONS</code>）。生成的层级表和当前的例外列表在<a href="architecture.html#layers-and-the-allowed-direction">架构</a>里。</p>
+<p>更多结构性规则，每一条都由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <strong>强制（门禁）</strong>：</p>
 <ul>
-<li><strong>Foundation and contexts stay pure of heavy dependencies.</strong> <code>tokio</code>, <code>axum</code>, <code>hyper</code>, <code>tonic</code>,
-  <code>reqwest</code>, <code>clap</code>, <code>ratatui</code>, <code>serde_yaml</code>, <code>rmcp</code>, OpenTelemetry and <code>prometheus-client</code> are
-  refused there (<code>HEAVY</code>).</li>
-<li><strong>A binary composes exactly one interface.</strong> Enforced in <code>rule_failures()</code> (introduced by
-  ADR-0040 D2.4, still <strong>Proposed</strong>; also written in AGENTS.md § "A direcção das dependências é um
-  portão").</li>
-<li><strong>Dependency versions live only in the root <code>[workspace.dependencies]</code>.</strong> A member writes
-  <code>{ workspace = true, features = [...] }</code> and nothing else. <code>default-features = false</code> stays in the
-  root, because a member cannot turn off what the root turns on (<code>inline_versions()</code>).</li>
-<li><strong>Libraries don't print.</strong> The <code>library_prints</code> ratchet counts <code>println!</code>/<code>eprintln!</code>/<code>print!</code>
-  outside <code>bins/</code>. Emit <code>tracing</code> instead (for example <code>tracing::warn!</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a>) and let the interface present the output.
-  <strong>Decided</strong>: AGENTS.md § "A direcção das dependências é um portão (ADR-0040, fase P0)" ("Uma
-  biblioteca não escreve para o terminal; emite <code>tracing</code>").</li>
-<li><strong>Libraries don't re-run the engine's own binary.</strong> The <code>self_exec_sites</code> ratchet counts
-  <code>current_exe()</code>, <code>cli_bin()</code> and <code>delonix_bin()</code> outside <code>bins/</code>. Call a function or a use case
-  instead. <code>Command::new("ip")</code>, <code>nft</code>, <code>qemu-img</code> and <code>ssh</code> are <strong>not</strong> counted, because running
-  those tools is exactly what an adapter is for (comment above <code>SELF_EXEC</code>).</li>
-<li><strong>Don't write the process environment.</strong> The <code>env_writes</code> ratchet counts
-  <code>env::set_var</code>/<code>remove_var</code> everywhere, tests included. Tests run on parallel threads and a write
-  races every reader. Pass values in instead (comment above <code>ENV_WRITES</code>).</li>
+<li><strong>基础层和各上下文都不带重量级依赖。</strong> <code>tokio</code>、<code>axum</code>、<code>hyper</code>、<code>tonic</code>、<code>reqwest</code>、<code>clap</code>、<code>ratatui</code>、<code>serde_yaml</code>、<code>rmcp</code>、OpenTelemetry 和 <code>prometheus-client</code> 在那里都会被拒绝（<code>HEAVY</code>）。</li>
+<li><strong>一个二进制只组合恰好一个接口。</strong> 在 <code>rule_failures()</code> 里强制执行（由 ADR-0040 D2.4 引入，目前仍是<strong>提议中</strong>；AGENTS.md § "A direcção das dependências é um portão" 里也写了这一点）。</li>
+<li><strong>依赖版本号只存在于根目录的 <code>[workspace.dependencies]</code> 里。</strong> 一个成员只写 <code>{ workspace = true, features = [...] }</code>，别的都不写。<code>default-features = false</code> 只留在根目录，因为一个成员无法关掉根目录已经打开的东西（<code>inline_versions()</code>）。</li>
+<li><strong>库不打印任何东西。</strong> <code>library_prints</code> 棘轮统计 <code>bins/</code> 之外的 <code>println!</code>/<code>eprintln!</code>/<code>print!</code>。改用 <code>tracing</code>（例如 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/lib.rs</code></a> 里的 <code>tracing::warn!</code>），让接口层来呈现输出。<strong>已决定</strong>：AGENTS.md § "A direcção das dependências é um portão (ADR-0040, fase P0)"（"Uma biblioteca não escreve para o terminal; emite <code>tracing</code>"）。</li>
+<li><strong>库不会重新执行引擎自己的二进制文件。</strong> <code>self_exec_sites</code> 棘轮统计 <code>bins/</code> 之外的 <code>current_exe()</code>、<code>cli_bin()</code> 和 <code>delonix_bin()</code>。要调用一个函数或一个用例来代替。<code>Command::new("ip")</code>、<code>nft</code>、<code>qemu-img</code> 和 <code>ssh</code> <strong>不</strong>被计入统计，因为运行这些工具正是一个适配器存在的意义（<code>SELF_EXEC</code> 上方的注释）。</li>
+<li><strong>不要写进进程环境。</strong> <code>env_writes</code> 棘轮统计所有地方（测试也包括在内）的 <code>env::set_var</code>/<code>remove_var</code>。测试运行在并行线程上，一次写入会和每一个读取者发生竞争。改为把值作为参数传进去（<code>ENV_WRITES</code> 上方的注释）。</li>
 </ul>
-<h3 id="42-my-change-is-x-it-goes-in-y">4.2 "My change is X → it goes in Y"<a class="hanchor" href="#42-my-change-is-x-it-goes-in-y" aria-label="#">#</a></h3>
-<p>This table uses the crates as they exist today. Check <a href="crates.html">The crates</a> for each crate's contents
-before you add to it. Where the source column cites ADR-0040 or ADR-0026, the tag is <strong>Proposed
-(ADR, not yet decided)</strong>: both ADRs are still Proposed, even though the crates they describe
-already exist.</p>
+<h3 id="42-my-change-is-x-it-goes-in-y">4.2 "我的改动是 X → 它应该放进 Y"<a class="hanchor" href="#42-my-change-is-x-it-goes-in-y" aria-label="#">#</a></h3>
+<p>这张表用的是 crate 今天实际的样子。在往某个 crate 里加东西之前，先去<a href="crates.html">crate 一览</a>查一下它的内容。凡是来源一栏引用 ADR-0040 或 ADR-0026 的地方，标签都是<strong>提议中（ADR，尚未决定）</strong>：这两份 ADR 目前都仍是提议中，尽管它们描述的那些 crate 已经存在。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Your change</th>
-<th>Crate (layer)</th>
-<th>Source</th>
+<th>你的改动</th>
+<th>crate（层）</th>
+<th>来源</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>A pure rule on CIDRs, bridge names or IPAM arithmetic that both sides must compute identically</td>
-<td><code>delonix-net-rules</code> (foundation)</td>
-<td>06; AGENTS.md § Arquitetura</td>
+<td>一条关于 CIDR、桥接名或 IPAM 算术、且双方都必须算出完全相同结果的纯规则</td>
+<td><code>delonix-net-rules</code>（foundation）</td>
+<td>06；AGENTS.md § Arquitetura</td>
 </tr>
 <tr>
-<td>A new error class, exit code or <code>DX_*</code> code; generated names</td>
-<td><code>delonix-model</code> (foundation)</td>
+<td>一个新的错误类别、退出码或 <code>DX_*</code> 代码；生成的名字</td>
+<td><code>delonix-model</code>（foundation）</td>
 <td>ADR-0040 D1</td>
 </tr>
 <tr>
-<td>A persisted workload record type (<code>Container</code>, <code>Vm</code>, <code>Mount</code>, …)</td>
-<td><code>delonix-compute</code> (context): <code>record.rs</code></td>
-<td>ADR-0040 D2.2; #406</td>
+<td>一种被持久化的工作负载记录类型（<code>Container</code>、<code>Vm</code>、<code>Mount</code>……）</td>
+<td><code>delonix-compute</code>（context）：<code>record.rs</code></td>
+<td>ADR-0040 D2.2；#406</td>
 </tr>
 <tr>
-<td>A plain-data record with no mechanism (<code>Status</code>, <code>ContainerFw</code>/<code>FwRule</code>, <code>typestate</code>)</td>
-<td><code>delonix-model</code> (foundation): <code>records.rs</code>, <code>typestate.rs</code></td>
-<td>ADR-0040 P3 (#405)</td>
+<td>一条没有机制、纯粹是数据的记录（<code>Status</code>、<code>ContainerFw</code>/<code>FwRule</code>、<code>typestate</code>）</td>
+<td><code>delonix-model</code>（foundation）：<code>records.rs</code>、<code>typestate.rs</code></td>
+<td>ADR-0040 P3（#405）</td>
 </tr>
 <tr>
-<td>A question asked of the host or of a process (<code>now_unix</code>, pid liveness, user namespace, id generation), the event log, the server dispatch rule, <code>SO_PEERCRED</code></td>
-<td><code>delonix-node</code> (context)</td>
-<td>ADR-0040 D2.2; #406</td>
+<td>一个向宿主机或某个进程提出的问题（<code>now_unix</code>、pid 存活判断、user namespace、id 生成）、事件日志、服务器分发规则、<code>SO_PEERCRED</code></td>
+<td><code>delonix-node</code>（context）</td>
+<td>ADR-0040 D2.2；#406</td>
 </tr>
 <tr>
-<td>A pure rule of the secret model (<code>Secret</code>, valid names and keys, env-file parsing)</td>
-<td><code>delonix-model</code> (foundation): <code>secret.rs</code></td>
-<td>ADR-0040 P3 (the PR that moved the stores)</td>
+<td>一条 secret 模型的纯规则（<code>Secret</code>、合法的名字和 key、env-file 解析）</td>
+<td><code>delonix-model</code>（foundation）：<code>secret.rs</code></td>
+<td>ADR-0040 P3（迁移 store 的那个 PR）</td>
 </tr>
 <tr>
-<td>A store, the file lock, <code>write_atomic*</code>/<code>write_private_temp</code>, the encrypted secret store or credential vault</td>
-<td><code>delonix-state</code> (adapter)</td>
+<td>一个 store、文件锁、<code>write_atomic*</code>/<code>write_private_temp</code>、加密的 secret store 或凭证保险库</td>
+<td><code>delonix-state</code>（adapter）</td>
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
-<td>Kind facts, the planner/diff, conditions, revisions</td>
-<td><code>delonix-stack</code> (context)</td>
+<td>Kind 的事实表、planner/diff、condition、revision</td>
+<td><code>delonix-stack</code>（context）</td>
 <td>AGENTS.md § Arquitetura</td>
 </tr>
 <tr>
-<td>The run specification, its pure validation, a port the run use case needs</td>
-<td><code>delonix-compute</code> (context): <code>run_opts.rs</code>, <code>preflight.rs</code>, <code>ports.rs</code></td>
+<td>运行规格（run specification）、它的纯校验逻辑、run 用例需要的某个端口</td>
+<td><code>delonix-compute</code>（context）：<code>run_opts.rs</code>、<code>preflight.rs</code>、<code>ports.rs</code></td>
 <td>ADR-0040 D2.2</td>
 </tr>
 <tr>
-<td>Security policy, admission, score, redaction</td>
-<td><code>delonix-security-runtime</code> (context)</td>
+<td>安全策略、准入（admission）、评分、脱敏</td>
+<td><code>delonix-security-runtime</code>（context）</td>
 <td>ADR-0026</td>
 </tr>
 <tr>
-<td>Namespaces, cgroups, mounts, capabilities, seccomp, devices</td>
-<td><code>delonix-linux</code> (adapter)</td>
+<td>namespace、cgroup、挂载、capabilities、seccomp、设备</td>
+<td><code>delonix-linux</code>（adapter）</td>
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
-<td>netns holder, nftables, slirp, DNS, DHCP, overlay, WireGuard, CNI</td>
-<td><code>delonix-sdn</code> (adapter)</td>
+<td>netns holder、nftables、slirp、DNS、DHCP、overlay、WireGuard、CNI</td>
+<td><code>delonix-sdn</code>（adapter）</td>
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
-<td>Registry client, CAS, layers, overlay, image build</td>
-<td><code>delonix-oci</code> (adapter)</td>
+<td>registry 客户端、CAS、层（layer）、overlay、镜像构建</td>
+<td><code>delonix-oci</code>（adapter）</td>
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
 <td>SBOM / CVE</td>
-<td><code>delonix-scanner</code> (adapter)</td>
+<td><code>delonix-scanner</code>（adapter）</td>
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
-<td>Tracing, OpenTelemetry, Prometheus registry setup</td>
-<td><code>delonix-telemetry</code> (adapter)</td>
+<td>Tracing、OpenTelemetry、Prometheus registry 的搭建</td>
+<td><code>delonix-telemetry</code>（adapter）</td>
 <td>ADR-0040 D2.3</td>
 </tr>
 <tr>
-<td>A local VM backend (Cloud Hypervisor, libvirt)</td>
-<td><code>delonix-vm</code> (adapter)</td>
+<td>一个本地 VM 后端（Cloud Hypervisor、libvirt）</td>
+<td><code>delonix-vm</code>（adapter）</td>
 <td>ADR-0008</td>
 </tr>
 <tr>
-<td>A remote or pluggable provider (hypervisor API, NAS API)</td>
-<td>a provider crate in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>. <strong>Write an ADR first</strong></td>
-<td>ADR-0008, ADR-0009; <a href="contributing-workflow.html#when-to-write-an-adr">Contribution workflow</a></td>
+<td>一个远程或可插拔的 provider（hypervisor 的 API、NAS 的 API）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> 下的一个 provider crate。<strong>先写一份 ADR</strong></td>
+<td>ADR-0008、ADR-0009；<a href="contributing-workflow.html#when-to-write-an-adr">贡献流程</a></td>
 </tr>
 <tr>
-<td>A CRI RPC</td>
-<td><code>delonix-cri</code> (interface)</td>
+<td>一个 CRI RPC</td>
+<td><code>delonix-cri</code>（interface）</td>
 <td>AGENTS.md</td>
 </tr>
 <tr>
-<td>The local management API, <code>/metrics</code></td>
-<td><code>delonix-mgmt</code> (interface)</td>
+<td>本地管理 API、<code>/metrics</code></td>
+<td><code>delonix-mgmt</code>（interface）</td>
 <td>ADR-0010</td>
 </tr>
 <tr>
-<td>An MCP tool</td>
-<td><code>delonix-mcp</code> (interface)</td>
+<td>一个 MCP tool</td>
+<td><code>delonix-mcp</code>（interface）</td>
 <td>ADR-0025</td>
 </tr>
 <tr>
-<td>A CLI command, its presentation and translations</td>
+<td>一个 CLI 命令、它的呈现方式和翻译</td>
 <td><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>&lt;group&gt;.<wbr>rs</code> + <code>data/pt.po</code></td>
 <td>AGENTS.md § CLI</td>
 </tr>
 <tr>
-<td>Which adapter backs which port (composition)</td>
-<td>the binary's composition root. No business logic there</td>
+<td>哪个适配器承载哪个端口（组合）</td>
+<td>二进制的组合根（composition root）。那里不放业务逻辑</td>
 <td>ADR-0040 D1 "Binaries"</td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="43-pure-core-io-at-the-edges">4.3 Pure core, I/O at the edges<a class="hanchor" href="#43-pure-core-io-at-the-edges" aria-label="#">#</a></h3>
+<h3 id="43-pure-core-io-at-the-edges">4.3 纯粹的核心，I/O 在边缘<a class="hanchor" href="#43-pure-core-io-at-the-edges" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Decisions are pure functions over data you have already read.</strong> They take no store, run no
-  command and need no privilege, so a test can call them with plain values. <strong>Proposed (ADR, not yet
-  decided)</strong>: ADR-0040 D1 (a context's <code>domain/</code> has "no I/O, no <code>tokio</code>, <code>libc</code>, <code>nix</code>,
-  <code>std::fs</code>"). <strong>Convention (observed)</strong>: <code>delonix-stack/src/reconcile.rs</code> ("decides it WITHOUT touching the machine"),
-  <code>cmd/vm.rs:resolve_vm_defaults</code>, <code>delonix-sdn/src/infra.rs:vmtap_line</code>,
-  <code>delonix-oci/src/registry.rs:parse_content_range</code>.</li>
+<li><strong>决策是作用于你已经读到手的数据的纯函数。</strong> 它们不接受 store、不运行任何命令、不需要任何特权，所以测试可以用普通的值去调用它们。<strong>提议中（ADR，尚未决定）</strong>：ADR-0040 D1（一个上下文的 <code>domain/</code> "no I/O, no <code>tokio</code>, <code>libc</code>, <code>nix</code>, <code>std::fs</code>"）。<strong>惯例（观察所得）</strong>：<code>delonix-stack/src/reconcile.rs</code>（"decides it WITHOUT touching the machine"）、<code>cmd/vm.rs:resolve_vm_defaults</code>、<code>delonix-sdn/src/infra.rs:vmtap_line</code>、<code>delonix-oci/src/registry.rs:parse_content_range</code>。</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/stack.rs — is_pending
 fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
@@ -748,35 +575,16 @@ fn is_pending(present: &amp;str, kind: &amp;str, status: &amp;str) -&gt; bool {
 }
 </code></pre></div>
 <ul>
-<li><strong>If a pure function needs something from the outside, take it as a parameter.</strong> For example,
-  <code>resolve_image_ref</code> takes the image store instead of opening the real one, so the test can pass a
-  temporary directory. <strong>Decided</strong>: AGENTS.md § "O manifesto de VM resolvia a imagem de outra
-  maneira que a CLI".</li>
-<li><strong>One rule, one owner.</strong> When two call sites need the same derivation, extract one function and
-  call it from both. A second copy drifts. Examples: <code>delonix_net_rules::bridge_name</code>, re-exported by <code>delonix-sdn</code> (the bridge name
-  had two formulas and printed a device that did not exist), <code>infra::dhcp_lease_ip</code>,
-  <code>effective_entrypoints</code>. <strong>Decided</strong>: AGENTS.md § "<code>delonix network</code>", § "Isolamento de
-  namespace", § "Reverse-proxy L7".</li>
+<li><strong>如果一个纯函数需要外部的某样东西，就把它当作参数接收进来。</strong> 举例来说，<code>resolve_image_ref</code> 接收镜像 store 作为参数，而不是自己去打开那个真实的 store，这样测试就可以传一个临时目录进去。<strong>已决定</strong>：AGENTS.md § "O manifesto de VM resolvia a imagem de outra maneira que a CLI"。</li>
+<li><strong>一条规则，一个主人。</strong> 当两处调用点需要同一种推导时，抽出一个函数，让两处都调用它。第二份拷贝会渐渐走偏。例子：<code>delonix_net_rules::bridge_name</code>，由 <code>delonix-sdn</code> 重新导出（桥接名以前有两套公式，会打印出一个根本不存在的设备名）、<code>infra::dhcp_lease_ip</code>、<code>effective_entrypoints</code>。<strong>已决定</strong>：AGENTS.md § "<code>delonix network</code>"、§ "Isolamento de namespace"、§ "Reverse-proxy L7"。</li>
 </ul>
 <hr />
-<h2 id="5-internal-api-and-boundaries">5. Internal API and boundaries<a class="hanchor" href="#5-internal-api-and-boundaries" aria-label="#">#</a></h2>
-<h3 id="51-ports-and-adapters">5.1 Ports and adapters<a class="hanchor" href="#51-ports-and-adapters" aria-label="#">#</a></h3>
+<h2 id="5-internal-api-and-boundaries">5. 内部 API 与边界<a class="hanchor" href="#5-internal-api-and-boundaries" aria-label="#">#</a></h2>
+<h3 id="51-ports-and-adapters">5.1 端口与适配器<a class="hanchor" href="#51-ports-and-adapters" aria-label="#">#</a></h3>
 <ul>
-<li><strong>A new backend implements a port. It is never an <code>if provider == …</code> somewhere else.</strong>
-  <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira do motor" ("Um provider novo entra como
-  implementação de uma porta, nunca como um <code>if provider == …</code>"). ADR-0040 D3 rule 3 ("No string
-  matching on provider names outside the composition root") restates it and is still <strong>Proposed</strong>.
-  D3 plans a fitness test for this, but
-  <strong>it does not exist yet in <code>arch_fitness.py</code></strong>, so review enforces it for now.</li>
-<li><strong>Backend-specific knowledge lives on the backend.</strong> For example,
-  <code>VmBackend::ip_is_predicted()</code> answers whether a VM's IP was predicted, instead of the call site
-  checking <code>backend.contains("cloud-hypervisor")</code>. <strong>Decided</strong>: ADR-0008, quoted in the doc comment
-  in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>.</li>
-<li><strong>An adapter does not depend on another adapter.</strong> What it needs from another concern comes in
-  as a hook or a port, wired by the composition root. <strong>Enforced (gate)</strong>: <code>ALLOWED</code> (adapter →
-  foundation, context). <strong>Convention (observed)</strong>: the doc comment of
-  <code>delonix-linux/src/workload.rs:HostWorkload</code> explains its <code>addresses</code>/<code>attach_slirp</code> hooks this
-  way.</li>
+<li><strong>一个新后端要实现一个端口。它绝不能在别的什么地方写成一个 <code>if provider == …</code>。</strong> <strong>已决定</strong>：AGENTS.md § "Identidade e fronteira do motor"（"Um provider novo entra como implementação de uma porta, nunca como um <code>if provider == …</code>"）。ADR-0040 D3 规则 3（"No string matching on provider names outside the composition root"）重申了这一点，目前仍是<strong>提议中</strong>。D3 计划为此写一个 fitness test，但<strong>它在 <code>arch_fitness.py</code> 里还不存在</strong>，所以现在靠评审来执行这条规则。</li>
+<li><strong>和某个具体后端相关的知识要放在那个后端里。</strong> 例如，<code>VmBackend::ip_is_predicted()</code> 会回答一台 VM 的 IP 是不是靠预测得到的，而不是让调用点去检查 <code>backend.contains("cloud-hypervisor")</code>。<strong>已决定</strong>：ADR-0008，被引用在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 的 doc comment 里。</li>
+<li><strong>一个适配器不依赖另一个适配器。</strong> 它需要的、属于另一个关注点的东西，要以 hook 或端口的形式进来，由组合根来接线。<strong>强制（门禁）</strong>：<code>ALLOWED</code>（adapter → foundation、context）。<strong>惯例（观察所得）</strong>：<code>delonix-linux/src/workload.rs:HostWorkload</code> 的 doc comment 就是这样解释它的 <code>addresses</code>/<code>attach_slirp</code> 这两个 hook 的。</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-compute/src/ports.rs — NetworkProvider (excerpt)
 pub trait NetworkProvider {
@@ -789,22 +597,12 @@ pub trait NetworkProvider {
 }
 </code></pre></div>
 <ul>
-<li><strong>A trait needs a real consumer when it lands.</strong> Don't write scaffolding that waits for its first
-  caller. Every method must have a caller. <strong>Decided</strong>: AGENTS.md § "<code>delonix workload</code>"
-  (ADR-0002). A public function with no callers is also a known hazard: several of them turned out
-  to hide a latent bug (<code>mount_live</code>, <code>set_net_rate</code>, <code>update_limits</code>, <code>publish_port_allow</code>), and
-  some were deleted rather than wired (AGENTS.md § "Endurecimento do ingress/egress").</li>
+<li><strong>一个 trait 落地时需要一个真实的消费者。</strong> 不要写那种等着第一个调用者的脚手架代码。每个方法都必须有一个调用者。<strong>已决定</strong>：AGENTS.md § "<code>delonix workload</code>"（ADR-0002）。一个没有调用者的公开函数同样是一个已知的隐患：其中好几个后来都被发现藏着一个潜伏的 bug（<code>mount_live</code>、<code>set_net_rate</code>、<code>update_limits</code>、<code>publish_port_allow</code>），有些干脆被删掉，而不是被接上线（AGENTS.md § "Endurecimento do ingress/egress"）。</li>
 </ul>
-<h3 id="52-errors-per-crate-adr-0040-p3">5.2 Errors per crate (ADR-0040 P3)<a class="hanchor" href="#52-errors-per-crate-adr-0040-p3" aria-label="#">#</a></h3>
+<h3 id="52-errors-per-crate-adr-0040-p3">5.2 各 crate 自己的错误类型（ADR-0040 P3）<a class="hanchor" href="#52-errors-per-crate-adr-0040-p3" aria-label="#">#</a></h3>
 <ul>
-<li><strong>An adapter or provider defines its own <code>Error</code> and converts it into the shared class</strong>
-  (<code>delonix_model::Error</code>), which carries the <code>DX_*</code> code. <strong>Proposed (ADR, not yet decided)</strong>:
-  ADR-0040 P3.
-  <strong>Enforced (gate)</strong>: the <code>shared_error_imports</code> ratchet in <code>arch_fitness.py</code> (<code>SHARED_ERROR</code>,
-  limited to <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>) counts
-  <code>use delonix_model::{…Error/Result…}</code> imports that make the
-  shared type the crate's own result type. The shared type may still be named inside a <code>From</code>
-  impl. The reference implementation is <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/error.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/error.rs</code></a>:</li>
+<li><strong>一个适配器或 provider 定义自己的 <code>Error</code>，并把它转换成共享的错误类别</strong>（<code>delonix_model::Error</code>），后者带有 <code>DX_*</code> 代码。<strong>提议中（ADR，尚未决定）</strong>：ADR-0040 P3。
+  <strong>强制（门禁）</strong>：<code>arch_fitness.py</code> 里的 <code>shared_error_imports</code> 棘轮（<code>SHARED_ERROR</code>，只限定在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>）会统计那些把共享类型当成本 crate 自身结果类型的 <code>use delonix_model::{…Error/Result…}</code> 导入。共享类型仍然可以在一个 <code>From</code> 实现内部被点名使用。参照实现是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-scanner/src/error.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-scanner/src/error.rs</code></a>：</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">impl From&lt;Error&gt; for Dx {
     fn from(e: Error) -&gt; Self {
@@ -816,109 +614,47 @@ pub trait NetworkProvider {
     }
 }
 </code></pre></div>
-<p>Three things in that file are the pattern: the conversion <strong>decides</strong> the class; <code>code()</code> asks the
-  conversion instead of keeping a second table; and a test (<code>the_code_is_the_code_of_the_class_it_converts_into</code>)
-  keeps the two in step. The converted message is also kept byte-for-byte identical to what the CLI
-  printed before (<code>the_converted_message_is_the_one_printed_before</code>).
-- <strong>Ask the error its class; don't match on a variant of the shared error.</strong> Outside the
-  foundation, write <code>e.is_not_found()</code> or <code>e.class()</code>, or match on <code>e.root()</code> when you need the
-  payload — never <code>Err(Error::NotFound(_))</code> or <code>matches!(…, Error::NotFound(_))</code>. A crate's own
-  error travels inside the shared class with its code, so a variant match stops matching it
-  without a word from the compiler. <strong>Decided</strong>: ADR-0043 D4 (Accepted).
-  <strong>Enforced (gate)</strong>: the <code>raw_error_variant_matches</code> ratchet in <code>arch_fitness.py</code>
-  (<code>RAW_VARIANT_MATCH</code>, skipping <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/</code></a>), whose baseline is 0 — any
-  new raw match fails CI. The methods live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>.</p>
-<h3 id="53-visibility">5.3 Visibility<a class="hanchor" href="#53-visibility" aria-label="#">#</a></h3>
+<p>这个文件里有三处体现了这个模式：转换逻辑<strong>决定</strong>了类别；<code>code()</code> 会去问这个转换逻辑，而不是自己再维护第二张表；还有一个测试（<code>the_code_is_the_code_of_the_class_it_converts_into</code>）让两者保持同步。转换后的消息也和 CLI 以前打印的那个消息保持逐字节一致（<code>the_converted_message_is_the_one_printed_before</code>）。
+- <strong>去问错误本身它属于哪个类别；不要对共享错误的某个变体做匹配。</strong> 在 foundation 之外，要写 <code>e.is_not_found()</code> 或 <code>e.class()</code>，或者在需要负载内容时对 <code>e.root()</code> 做匹配——绝不要写 <code>Err(Error::NotFound(_))</code> 或 <code>matches!(…, Error::NotFound(_))</code>。一个 crate 自己的错误会带着它自己的代码，旅行在共享类别内部，所以一次针对变体的匹配会在编译器不吭一声的情况下悄悄失效。<strong>已决定</strong>：ADR-0043 D4（已接受）。
+  <strong>强制（门禁）</strong>：<code>arch_fitness.py</code> 里的 <code>raw_error_variant_matches</code> 棘轮（<code>RAW_VARIANT_MATCH</code>，跳过 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation/delonix-model" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/</code></a>），其基线为 0——任何新增的此类原始匹配都会让 CI 失败。相关方法在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a> 里。</p>
+<h3 id="53-visibility">5.3 可见性<a class="hanchor" href="#53-visibility" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Default to private.</strong> Inside the CLI crate, use <code>pub(crate)</code> for something another <code>cmd</code>
-  module needs to call. <strong>Convention (observed)</strong>: <code>cmd/container.rs:cmd_run</code>, <code>cmd_start</code> and
-  <code>cmd_stop</code> are <code>pub(crate)</code> so that <code>pod</code>, <code>compose</code> and <code>stack</code> can delegate to them;
-  <code>cmd/firewall.rs:update_locked</code>; <code>cmd/manifest.rs:KIND_ALIASES</code>.</li>
-<li><strong><code>pub</code> in a library crate is a promise to other crates.</strong> Removing a public item is a breaking
-  change for library users, even with zero callers in this workspace. rustc's <code>dead_code</code> lint
-  doesn't see unused <code>pub</code> items, so when you delete one, count the orphaned public items by hand.
-  <strong>Decided</strong>: AGENTS.md § "<code>delonix_sdn::Net</code> foi APAGADO — e é breaking para quem usa a biblioteca".</li>
+<li><strong>默认私有。</strong> 在 CLI crate 内部，当另一个 <code>cmd</code> 模块需要调用某样东西时，用 <code>pub(crate)</code>。<strong>惯例（观察所得）</strong>：<code>cmd/container.rs:cmd_run</code>、<code>cmd_start</code> 和 <code>cmd_stop</code> 都是 <code>pub(crate)</code>，好让 <code>pod</code>、<code>compose</code> 和 <code>stack</code> 可以委托给它们；<code>cmd/firewall.rs:update_locked</code>；<code>cmd/manifest.rs:KIND_ALIASES</code>。</li>
+<li><strong>一个库 crate 里的 <code>pub</code> 是对其他 crate 的承诺。</strong> 移除一个公开项，对使用这个库的人来说是一个破坏性变更，即使在这个 workspace 里它的调用者数量是零也一样。rustc 的 <code>dead_code</code> lint 看不见没有被使用的 <code>pub</code> 项，所以当你删除一个时，要自己手动数一数有多少个公开项因此变成了孤儿。<strong>已决定</strong>：AGENTS.md § "<code>delonix_sdn::Net</code> foi APAGADO — e é breaking para quem usa a biblioteca"。</li>
 </ul>
-<h3 id="54-the-node-contract">5.4 The node contract<a class="hanchor" href="#54-the-node-contract" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is the source of truth for both the gRPC and the HTTP/JSON encodings.
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> is generated from it. <strong>Never edit the OpenAPI file by hand.</strong>
-<strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> runs <code>buf format</code>, <code>buf lint</code>, <code>buf breaking</code>
-against the last tag that contains <code>proto/</code>, checks the HTTP mapping of every RPC, and checks that
-the OpenAPI file equals the generated one. <strong>Decided</strong>: AGENTS.md § "O contrato de nó é um portão"
-(which cites ADR-0040 P1; ADR-0040 D4 is still <strong>Proposed</strong>).</p>
+<h3 id="54-the-node-contract">5.4 节点契约<a class="hanchor" href="#54-the-node-contract" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 是 gRPC 和 HTTP/JSON 这两种编码方式共同的真相来源。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 是从它生成出来的。<strong>永远不要手动编辑那份 OpenAPI 文件。</strong> <strong>强制（门禁）</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 会跑 <code>buf format</code>、<code>buf lint</code>、针对最近一个包含 <code>proto/</code> 的 tag 的 <code>buf breaking</code>，检查每个 RPC 的 HTTP 映射，并检查那份 OpenAPI 文件是否和生成出来的那份一致。<strong>已决定</strong>：AGENTS.md § "O contrato de nó é um portão"（引用了 ADR-0040 P1；ADR-0040 D4 目前仍是<strong>提议中</strong>）。</p>
 <ul>
-<li><strong>One request message per RPC</strong>, named <code>&lt;Rpc&gt;Request</code>. <strong>Enforced (gate)</strong>: <code>buf lint</code>
-  <code>RPC_REQUEST_STANDARD_NAME</code> (see <code>buf.yaml</code>). A shared request lets a field meant for one method
-  show up in five.</li>
-<li><strong>Explicit identity in the request</strong>: <code>name</code> and <code>namespace</code> fields, never a generic metadata
-  message with fields the engine would ignore. <strong>Decided</strong>: AGENTS.md. <strong>Convention (observed)</strong>:
-  <code>compute.proto:GetContainerRequest { string name = 1; string namespace = 2; }</code>.</li>
-<li><strong>Images are addressed by query, not in the path</strong>, because in a path like <code>alpine:3.20</code> the <code>:</code>
-  would be read as a custom verb. <strong>Decided</strong>: AGENTS.md. <strong>Convention (observed)</strong>:
-  <code>infra.proto</code> <code>GetImage</code> → <code>get: "/v1/images:get"</code>, with <code>GetImageRequest { string reference = 1; }</code>.</li>
-<li><strong>Responses</strong> return the resource, or an <code>Operation</code> for long-running mutations. <code>buf lint</code>'s
-  response-naming rules are switched off on purpose (<code>buf.yaml</code> comment).</li>
-<li><strong>Every RPC has an HTTP mapping except the bidirectional streams</strong> (<code>Exec</code>, <code>Console</code>), which must
-  not have one. <strong>Enforced (gate)</strong>: <code>contract_gate.py</code> check 4.</li>
+<li><strong>每个 RPC 只有一个请求消息</strong>，命名为 <code>&lt;Rpc&gt;Request</code>。<strong>强制（门禁）</strong>：<code>buf lint</code> 的 <code>RPC_REQUEST_STANDARD_NAME</code>（见 <code>buf.yaml</code>）。一个共享的请求消息会让某个本该只属于一个方法的字段出现在五个方法里。</li>
+<li><strong>请求里的身份是显式的</strong>：<code>name</code> 和 <code>namespace</code> 字段，绝不用一个带着引擎会忽略的字段的通用元数据消息。<strong>已决定</strong>：AGENTS.md。<strong>惯例（观察所得）</strong>：<code>compute.proto:GetContainerRequest { string name = 1; string namespace = 2; }</code>。</li>
+<li><strong>镜像通过 query 寻址，而不是放在路径里</strong>，因为在像 <code>alpine:3.20</code> 这样的路径里，<code>:</code> 会被当成一个自定义动词来解析。<strong>已决定</strong>：AGENTS.md。<strong>惯例（观察所得）</strong>：<code>infra.proto</code> 的 <code>GetImage</code> → <code>get: "/v1/images:get"</code>，配合 <code>GetImageRequest { string reference = 1; }</code>。</li>
+<li><strong>响应</strong>返回资源本身，或者对于长时间运行的变更操作返回一个 <code>Operation</code>。<code>buf lint</code> 里关于响应命名的规则被有意关掉了（<code>buf.yaml</code> 里的注释）。</li>
+<li><strong>每个 RPC 都要有 HTTP 映射，双向流式的除外</strong>（<code>Exec</code>、<code>Console</code>），它们必须没有映射。<strong>强制（门禁）</strong>：<code>contract_gate.py</code> 的第 4 项检查。</li>
 </ul>
-<h3 id="55-the-engine-knows-no-consumer">5.5 The engine knows no consumer<a class="hanchor" href="#55-the-engine-knows-no-consumer" aria-label="#">#</a></h3>
-<p>The engine doesn't know who uses it. No name of a platform, control plane, console or agent, and
-no notion of tenant, account, plan or billing, may appear in <code>crates/</code>, <code>bins/</code>, <code>proto/</code>, the root
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> or the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a>, <strong>comments included</strong>.</p>
+<h3 id="55-the-engine-knows-no-consumer">5.5 引擎不认识任何消费者<a class="hanchor" href="#55-the-engine-knows-no-consumer" aria-label="#">#</a></h3>
+<p>引擎不知道是谁在用它。任何平台、control plane、控制台或 agent 的名字，以及任何关于租户、账户、套餐或计费的概念，都不能出现在 <code>crates/</code>、<code>bins/</code>、<code>proto/</code>、根目录的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 或 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a> 里，<strong>注释也包括在内</strong>。</p>
 <ul>
-<li><strong>Consumer names.</strong> <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> <code>consumer_mentions()</code> matches
-  the <code>CONSUMER_NAMES</code> regular expression, a fixed list of names, in those paths. A name that is
-  not on the list is not caught.</li>
-<li><strong>Tenant, account, plan and billing concepts.</strong> <strong>Decided</strong>: AGENTS.md § "Identidade e fronteira
-  do motor". No gate matches them; review checks it.</li>
+<li><strong>消费者的名字。</strong> <strong>强制（门禁）</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 的 <code>consumer_mentions()</code> 会在这些路径里匹配 <code>CONSUMER_NAMES</code> 这个正则表达式，那是一份固定的名单。不在这份名单里的名字不会被抓到。</li>
+<li><strong>租户、账户、套餐和计费这些概念。</strong> <strong>已决定</strong>：AGENTS.md § "Identidade e fronteira do motor"。没有门禁去匹配它们；由评审来检查。</li>
 </ul>
-<p>If a consumer needs something, write it as a generic
-capability in the engine's own vocabulary (Kinds and resources), and add it only if it makes sense
-for any client. The engine validates its own contract and never trusts a caller to refuse what it
-doesn't support.</p>
+<p>如果某个消费者需要什么东西，就用引擎自己的词汇，把它写成一种通用的能力（Kind 和资源），并且只有在它对任意客户端都说得通时才加进来。引擎会校验自己的契约，绝不指望调用方去替它拒绝它自己都不支持的东西。</p>
 <hr />
-<h2 id="6-error-handling-and-messages">6. Error handling and messages<a class="hanchor" href="#6-error-handling-and-messages" aria-label="#">#</a></h2>
+<h2 id="6-error-handling-and-messages">6. 错误处理与消息<a class="hanchor" href="#6-error-handling-and-messages" aria-label="#">#</a></h2>
 <ul>
-<li><strong>No silent failure.</strong> If an option is accepted and then ignored, that is worse than a missing
-  feature, because the user believes it took effect. Refuse it with a clear error, and name the
-  flag. <strong>Decided</strong>: AGENTS.md § "Falhas silenciosas corrigidas (fail-closed)"; the v0.37.0 audit
-  (§ "Auditoria sistemática dos 208 subcomandos") calls this class "relato desonesto" (dishonest
-  reporting). The patterns that section lists are:</li>
-<li><strong>Don't destroy anything before you know the object is yours to destroy, and delete the
-    bookkeeping last.</strong> If the record is removed first and the data removal then fails, the data
-    is orphaned and a later <code>create</code> hands it to someone else.</li>
-<li><strong>An unreadable measurement is <em>unknown</em>, never zero.</strong> A <code>read_dir</code> that fails is not an empty
-    directory. That is why <code>Usage { bytes, unreadable }</code> exists.</li>
-<li><strong>Watch the patterns that turn failures into success</strong>: <code>let _ =</code> on a result that matters
-    (entropy, a socket read), <code>as u64</code> on an <code>f64</code> (it saturates), <code>capture()</code> read by its <code>Result</code>
-    instead of its output. AGENTS.md § "A classe «X não é Y»" catalogues these.</li>
-<li><strong>Unknown or unmeasurable is not a guess.</strong> When the engine can't read a value, it reports that
-  it doesn't know, or it refuses. It doesn't pick the likelier answer. Example: <code>system prune --auto</code>
-  refuses if disk usage can't be read, and the IPAM reaper fails closed when a store is unreadable
-  (an empty list would read as "nothing is alive"). <strong>Decided</strong>: AGENTS.md § CLI (<code>system prune</code>),
-  § "O IPAM vaza".</li>
-<li><strong>Message shape: the fact first, then what to do</strong>, with the exact command when there is one.
-  <strong>Decided</strong>: AGENTS.md § "<code>-p 80:80</code> respondia com o JSON cru do slirp" ("facto primeiro, depois
-  os comandos prontos a copiar"). <strong>Convention (observed)</strong>:
-  <code>delonix-model/src/error.rs:Error::VmNotFound</code> → <code>"no such VM: {0} (see \</code>delonix vm ls`)"<code>;</code>cmd/config.rs:refuse_unknown_key<code>names the valid keys. Name the missing **tool and its
-  package** instead of passing on a raw</code>ENOENT<code>, which reads like a missing file (AGENTS.md §
-  "A bateria mede o</code>--help` de tudo", achado 1).</li>
-<li><strong>A partial measurement is not a success.</strong> <code>--wait</code> must observe what it claims, and <code>✓ … is up</code>
-  is only printed after checking. <strong>Decided</strong>: AGENTS.md § "O <code>--wait</code> de uma VM CH".</li>
-<li><strong>Never parse an error message to decide what to do.</strong> Messages are translated
-  (<code>--l18n=pt</code>/<code>DELONIX_L18N</code>), so a <code>grep 'no such'</code> classifies on one machine and silently stops
-  classifying on another. Use the exit class or the <code>DX_*</code> code. <strong>Decided</strong>: module docs of
-  <code>delonix-model/src/exitcode.rs</code>.</li>
-<li><strong>Return the variant that matches the class</strong> (<code>NotFound</code>, <code>Conflict</code>, <code>NotRunning</code>,
-  <code>Unavailable</code>, <code>Timeout</code>), not <code>Invalid</code> for everything. <strong>Decided</strong>: AGENTS.md § "Códigos de
-  saída com classe": <code>util::find</code> returning <code>Invalid</code> for "not found" made the most-used resource
-  unclassifiable.</li>
+<li><strong>不允许静默失败。</strong> 如果一个选项被接受了却又被悄悄忽略，那比根本没有这个功能还糟，因为用户会以为它生效了。要用一个清楚的错误拒绝它，并且点名那个标志。<strong>已决定</strong>：AGENTS.md § "Falhas silenciosas corrigidas (fail-closed)"；v0.37.0 的那次审计（§ "Auditoria sistemática dos 208 subcomandos"）把这一类问题叫做"relato desonesto"（不诚实的汇报）。那一节列出的模式有：</li>
+<li><strong>在确认某个对象确实归你销毁之前，不要动手销毁任何东西，账本要最后才删。</strong> 如果记录先被移除、随后数据的移除又失败了，数据就成了孤儿，之后的一次 <code>create</code> 会把它交给别人。</li>
+<li><strong>一次读不出来的测量结果是<em>未知</em>，绝不是零。</strong> 一个失败的 <code>read_dir</code> 不等于一个空目录。这正是 <code>Usage { bytes, unreadable }</code> 存在的原因。</li>
+<li><strong>留意那些会把失败变成成功的写法</strong>：对一个重要结果（熵、一次 socket 读取）用 <code>let _ =</code>；对一个 <code>f64</code> 用 <code>as u64</code>（它会饱和截断）；用 <code>capture()</code> 的 <code>Result</code> 而不是它的输出去判断结果。AGENTS.md § "A classe «X não é Y»" 把这些都归了类。</li>
+<li><strong>未知或无法测量的东西，不能靠猜。</strong> 当引擎没办法读到一个值时，它要么报告自己不知道，要么直接拒绝。它不会去挑那个更可能对的答案。例子：<code>system prune --auto</code> 在读不出磁盘占用时会拒绝执行，IPAM 的回收器在某个 store 读不出来时会失败关闭（一份空列表会被读成"什么都没活着"）。<strong>已决定</strong>：AGENTS.md § CLI（<code>system prune</code>）、§ "O IPAM vaza"。</li>
+<li><strong>消息的形状：先说事实，再说该怎么做</strong>，有确切命令时就给出那个确切命令。<strong>已决定</strong>：AGENTS.md § "<code>-p 80:80</code> respondia com o JSON cru do slirp"（"facto primeiro, depois os comandos prontos a copiar"）。<strong>惯例（观察所得）</strong>：<code>delonix-model/src/error.rs:Error::VmNotFound</code> → <code>"no such VM: {0} (see \</code>delonix vm ls`)"<code>；</code>cmd/config.rs:refuse_unknown_key<code>会点名有效的 key 有哪些。要点名**缺失的工具及其所属的包**，而不是原样传出一个</code>ENOENT<code>，后者读起来像是缺了一个文件（AGENTS.md § "A bateria mede o</code>--help` de tudo"，achado 1）。</li>
+<li><strong>一次不完整的测量不是一次成功。</strong> <code>--wait</code> 必须真的去观察它所声称的那件事，<code>✓ … is up</code> 只能在检查过之后才打印出来。<strong>已决定</strong>：AGENTS.md § "O <code>--wait</code> de uma VM CH"。</li>
+<li><strong>绝不要靠解析错误消息来决定该做什么。</strong> 消息是会被翻译的（<code>--l18n=pt</code>/<code>DELONIX_L18N</code>），所以一个 <code>grep 'no such'</code> 在一台机器上能分类，到另一台机器上会悄悄地不再起作用。要用退出码类别或 <code>DX_*</code> 代码。<strong>已决定</strong>：<code>delonix-model/src/exitcode.rs</code> 的模块文档。</li>
+<li><strong>返回和该类别匹配的那个变体</strong>（<code>NotFound</code>、<code>Conflict</code>、<code>NotRunning</code>、<code>Unavailable</code>、<code>Timeout</code>），不要什么都用 <code>Invalid</code>。<strong>已决定</strong>：AGENTS.md § "Códigos de saída com classe"：<code>util::find</code> 对"没找到"返回 <code>Invalid</code>，让最常用的那种资源变得没法分类。</li>
 </ul>
 <hr />
-<h2 id="7-unsafe-syscalls-and-processes">7. <code>unsafe</code>, syscalls and processes<a class="hanchor" href="#7-unsafe-syscalls-and-processes" aria-label="#">#</a></h2>
+<h2 id="7-unsafe-syscalls-and-processes">7. <code>unsafe</code>、系统调用与进程<a class="hanchor" href="#7-unsafe-syscalls-and-processes" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Every <code>unsafe</code> block has a <code>// SAFETY:</code> comment directly above it.</strong> <strong>Enforced (gate)</strong>:
-  <code>undocumented_unsafe_blocks = "deny"</code> in <code>[workspace.lints.clippy]</code>.</li>
+<li><strong>每一个 <code>unsafe</code> 块的正上方都要有一句 <code>// SAFETY:</code> 注释。</strong> <strong>强制（门禁）</strong>：<code>[workspace.lints.clippy]</code> 里的 <code>undocumented_unsafe_blocks = "deny"</code>。</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-linux/src/lib.rs — apply_filter_logged
 // SAFETY: `fprog` points to a valid BPF program; NO_NEW_PRIVS is already set.
@@ -926,52 +662,19 @@ let rc = unsafe {
     libc::syscall(libc::SYS_seccomp, SET_MODE_FILTER, FLAG_LOG, &amp;fprog as *const _)
 };
 </code></pre></div>
-<p>The comment has to state the invariant that makes the call sound. "same" is acceptable only
-  directly after an identical, justified call (as in <code>delonix-linux/src/lib.rs</code> right after the
-  first <code>_exit(126)</code>).
-- <strong>No raw <code>clone()</code>/<code>fork()</code> in a multi-threaded process</strong> (the tokio servers, the Docker API
-  shim). <code>clone</code> doesn't run <code>pthread_atfork</code> handlers, so the child can deadlock on the malloc lock.
-  Re-execute a typed spec instead, handed over through a <code>0600</code>/<code>O_EXCL</code> file rather than argv.
-  <strong>Decided</strong>: AGENTS.md § "Auditoria de segurança #3", item 5. Background:
-  <a href="rust-primer.html#why-forkclone-in-a-multi-threaded-process-is-dangerous">Rust primer for this codebase</a>.
-- <strong>A <code>pre_exec</code> hook must not block on something the parent does after <code>spawn</code> returns.</strong>
-  <code>Command::spawn</code> only returns after <code>exec</code>, so the two processes wait for each other forever.
-  Use a raw <code>fork</code> for handshakes. <strong>Decided</strong>: AGENTS.md § "A classe «X não é Y»" (the
-  <code>reexec_mapped_hold</code> entry).
-- <strong>Temporary files: use <code>delonix_state::write_private_temp</code>.</strong> It opens with a unique name,
-  <code>O_EXCL</code> and mode <code>0600</code>, so it never follows a planted symlink. Don't use a fixed or pid-derived
-  name in <code>/tmp</code>. <strong>Decided</strong>: AGENTS.md § "Auditoria de segurança #3", passagem 2; doc comment in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>. <strong>Convention (observed)</strong>: <code>delonix-sdn/src/bpf.rs</code>,
-  <code>delonix-linux/src/run_host.rs</code>.
-- <strong>Files that must be private or atomic: use <code>write_atomic_mode(path, bytes, Some(0o600))</code>.</strong> It
-  sets the mode at creation and publishes with an atomic rename. Never write the file and then
-  <code>chmod</code> it, because another user can open it in between. <strong>Decided</strong>: doc comment of
-  <code>delonix-state/src/store.rs:write_atomic_mode</code>; AGENTS.md (kubeconfig TOCTOU).
-- <strong>Before signalling a pid read from a file, check that it is still the same process.</strong> Use
-  <code>delonix_node::safe_to_signal(pid, starttime)</code>, which compares the start time so a
-  recycled pid isn't killed. <strong>Decided</strong>: AGENTS.md § "A classe «X não é Y»" (the pid entries).
-- <strong>A process's argv doesn't prove it is ours.</strong> Other state roots of the same user, and other
-  tools, run with the same argv. Check a token only we choose: a path derived from our root, or an
-  environment variable we pinned at spawn. <strong>Decided</strong>: AGENTS.md § "A classe «X não é Y»" (the
-  "o argv de um processo" entry).
-- <strong>Pass <code>--</code> before positional arguments that come from input</strong> in the argv of external tools
-  (<code>ssh</code>, <code>scp</code>, <code>virsh</code>, <code>mount</code>, <code>qemu-img</code>), and validate any value that ends up in a remote
-  shell against a character whitelist. <code>shell_quote</code> does not sanitise content. <strong>Decided</strong>:
-  AGENTS.md § "Auditoria de segurança (skill <code>delonix-runtime-sec</code>)" and § "#2".
-- <strong>Paths built from names in user or manifest input are confined.</strong> Use a <code>valid_*</code> name check at
-  the engine boundary (<code>delonix_vm::valid_vm_name</code>), and a safe join that refuses <code>..</code>/absolute
-  components and symlinks (<code>safe_join</code>, <code>safe_bind_target</code>). <strong>Decided</strong>: same AGENTS.md sections.</p>
+<p>这句注释必须说明使这次调用得以成立的那个不变量。只有紧跟在一次相同的、已经给出理由的调用之后，才可以写"same"（就像 <code>delonix-linux/src/lib.rs</code> 里紧跟在第一个 <code>_exit(126)</code> 之后那样）。
+- <strong>在多线程进程里（tokio 的那些服务器、Docker API 的 shim）不允许原始的 <code>clone()</code>/<code>fork()</code>。</strong> <code>clone</code> 不会执行 <code>pthread_atfork</code> 的处理函数，所以子进程可能会在 malloc 的锁上死锁。要改为重新执行一份类型化的 spec，通过一个 <code>0600</code>/<code>O_EXCL</code> 的文件传递，而不是通过 argv。<strong>已决定</strong>：AGENTS.md § "Auditoria de segurança #3"，第 5 项。背景：<a href="rust-primer.html#why-forkclone-in-a-multi-threaded-process-is-dangerous">面向本代码库的 Rust 入门</a>。
+- <strong>一个 <code>pre_exec</code> hook 不能等待父进程在 <code>spawn</code> 返回之后才做的事情。</strong> <code>Command::spawn</code> 只有在 <code>exec</code> 之后才会返回，所以两个进程会永远互相等待对方。握手场景要用一次原始的 <code>fork</code>。<strong>已决定</strong>：AGENTS.md § "A classe «X não é Y»"（<code>reexec_mapped_hold</code> 那一条）。
+- <strong>临时文件：用 <code>delonix_state::write_private_temp</code>。</strong> 它以一个唯一的名字、<code>O_EXCL</code> 和 <code>0600</code> 模式打开，所以永远不会跟着一个被人预先埋好的符号链接走。不要在 <code>/tmp</code> 下用固定名字或从 pid 派生的名字。<strong>已决定</strong>：AGENTS.md § "Auditoria de segurança #3"，passagem 2；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a> 里的 doc comment。<strong>惯例（观察所得）</strong>：<code>delonix-sdn/src/bpf.rs</code>、<code>delonix-linux/src/run_host.rs</code>。
+- <strong>必须私密或原子写入的文件：用 <code>write_atomic_mode(path, bytes, Some(0o600))</code>。</strong> 它在创建时就设好模式，并通过一次原子的 rename 来发布。绝不要先写文件再 <code>chmod</code>，因为在这个间隙里别的用户可以打开它。<strong>已决定</strong>：<code>delonix-state/src/store.rs:write_atomic_mode</code> 的 doc comment；AGENTS.md（kubeconfig 的 TOCTOU）。
+- <strong>在向一个从文件里读出来的 pid 发信号之前，先确认它还是同一个进程。</strong> 用 <code>delonix_node::safe_to_signal(pid, starttime)</code>，它会比较进程的启动时间，避免一个被回收再利用的 pid 被误杀。<strong>已决定</strong>：AGENTS.md § "A classe «X não é Y»"（pid 相关的那几条）。
+- <strong>一个进程的 argv 并不能证明它是我们自己的。</strong> 同一个用户下别的 state root、以及别的工具，都可能以相同的 argv 运行。要检查一个只有我们自己会选择的 token：一个从我们的 root 派生出来的路径，或者一个我们在 spawn 时钉死的环境变量。<strong>已决定</strong>：AGENTS.md § "A classe «X não é Y»"（"o argv de um processo" 那一条）。
+- <strong>在外部工具</strong>（<code>ssh</code>、<code>scp</code>、<code>virsh</code>、<code>mount</code>、<code>qemu-img</code>）<strong>的 argv 里，来自输入的位置参数前面要加 <code>--</code></strong>，并且要用字符白名单去校验任何最终会进入远程 shell 的值。<code>shell_quote</code> 不会对内容做任何消毒处理。<strong>已决定</strong>：AGENTS.md § "Auditoria de segurança (skill <code>delonix-runtime-sec</code>)" 和 § "#2"。
+- <strong>从用户或清单输入的名字拼出来的路径必须被限制住。</strong> 在引擎边界用一个 <code>valid_*</code> 名字检查（<code>delonix_vm::valid_vm_name</code>），再加上一个会拒绝 <code>..</code>/绝对路径分量和符号链接的安全拼接函数（<code>safe_join</code>、<code>safe_bind_target</code>）。<strong>已决定</strong>：AGENTS.md 中的同几节。</p>
 <hr />
-<h2 id="8-state-and-concurrency">8. State and concurrency<a class="hanchor" href="#8-state-and-concurrency" aria-label="#">#</a></h2>
+<h2 id="8-state-and-concurrency">8. 状态与并发<a class="hanchor" href="#8-state-and-concurrency" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Read–modify–write goes through <code>update</code>, never <code>load</code> → mutate → <code>save</code>.</strong>
-  <code>Store::update</code> and <code>JsonStore::update</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>)
-  take a <code>flock</code>, <strong>re-read under the lock</strong>, apply your closure and write atomically. A closure
-  that returns <code>false</code> aborts the write. The CLI, the CRI server and background refreshes all touch
-  the same records concurrently, and without the lock one write is silently lost. <strong>Decided</strong>: doc
-  comments of both functions; AGENTS.md § "Revisão ampla de código/arquitectura (2026-07-27)",
-  bugs 5 and the <code>JsonStore</code> item. <strong>Convention (observed)</strong>: a mutation that can itself fail is
-  wrapped like this:</li>
+<li><strong>读—改—写要走 <code>update</code>，绝不能是 <code>load</code> → 改 → <code>save</code>。</strong> <code>Store::update</code> 和 <code>JsonStore::update</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-state/src/store.rs</code></a>）会拿一把 <code>flock</code>，<strong>在锁内重新读一遍</strong>，套用你的闭包，再原子地写回去。一个返回 <code>false</code> 的闭包会中止这次写入。CLI、CRI 服务器和后台刷新任务都会并发地碰同一批记录，没有这把锁，一次写入会悄无声息地丢失。<strong>已决定</strong>：这两个函数的 doc comment；AGENTS.md § "Revisão ampla de código/arquitectura (2026-07-27)"，第 5 号 bug 和关于 <code>JsonStore</code> 的那一条。<strong>惯例（观察所得）</strong>：一个自身可能失败的变更是这样包装的：</li>
 </ul>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/firewall.rs — update_locked
 let c = store.update(id_or_name, |c| match f(c) {
@@ -983,190 +686,127 @@ let c = store.update(id_or_name, |c| match f(c) {
 })?;
 </code></pre></div>
 <ul>
-<li><strong>Persist each step as soon as the dataplane confirms it.</strong> If a multi-step change fails
-  halfway, the record must still match what the kernel actually has. <strong>Decided</strong>: AGENTS.md §
-  "Reconfiguração a quente" ("Persistência").</li>
-<li><strong>New fields on persisted records take <code>#[serde(default)]</code></strong> (or <code>default = "fn"</code>), so records
-  written by older versions still load. The default must describe what old records actually were,
-  not a guess. <strong>Decided</strong>: AGENTS.md (for example <code>Vm.namespace</code>, <code>VmImage.cloud_init</code>).
-  <strong>Convention (observed)</strong>: <code>delonix-compute/src/record.rs</code>, the doc comment on <code>Vm.namespace</code>
-  ("the default is a statement of fact and not a guess").</li>
-<li><strong>Anything needed to rebuild a resource must be persisted, not only used at creation.</strong> When you
-  touch a <code>start</code>/<code>restart</code> path, compare field by field what creation uses with what the record
-  stores. <strong>Decided</strong>: AGENTS.md § "BUG GRAVE corrigido… <code>-v</code> nunca era persistido" (listed there as
-  the third bug of the same family).</li>
-<li><strong>Lock files are never deleted.</strong> Deleting one opens a window where two processes lock different
-  inodes. <strong>Decided</strong>: doc comment of <code>store.rs:lock_path</code> (<code>delonix-state</code>).</li>
-<li><strong><code>SecretStore::update</code> is the one <code>update</code> whose lock is best-effort.</strong> Its <code>FileLock::acquire</code>
-  returns <code>Option</code> and proceeds unlocked if the lock file cannot be opened, unlike <code>Store</code> and
-  <code>JsonStore</code>. <strong>Not decided</strong>: whether it should refuse like the others; follow the surrounding
-  code and say so in the PR if you touch it.</li>
+<li><strong>每一步一旦被数据平面确认，就立刻持久化。</strong> 如果一次多步骤的变更在中途失败，记录必须仍然和内核实际拥有的状态保持一致。<strong>已决定</strong>：AGENTS.md § "Reconfiguração a quente"（"Persistência"）。</li>
+<li><strong>持久化记录上的新字段要带 <code>#[serde(default)]</code></strong>（或 <code>default = "fn"</code>），这样旧版本写下的记录才能继续加载。默认值必须描述旧记录实际上是什么，而不是一个猜测。<strong>已决定</strong>：AGENTS.md（例如 <code>Vm.namespace</code>、<code>VmImage.cloud_init</code>）。<strong>惯例（观察所得）</strong>：<code>delonix-compute/src/record.rs</code>，<code>Vm.namespace</code> 的 doc comment（"the default is a statement of fact and not a guess"）。</li>
+<li><strong>重建一个资源所需要的一切都必须被持久化，而不能只在创建时用一下就丢掉。</strong> 当你改动某个 <code>start</code>/<code>restart</code> 路径时，要逐个字段比较创建时用到的东西和记录里保存的东西。<strong>已决定</strong>：AGENTS.md § "BUG GRAVE corrigido… <code>-v</code> nunca era persistido"（在那里被列为同一类问题里的第三个 bug）。</li>
+<li><strong>锁文件永远不会被删除。</strong> 删除一个锁文件会打开一个窗口，让两个进程锁住不同的 inode。<strong>已决定</strong>：<code>store.rs:lock_path</code>（<code>delonix-state</code>）的 doc comment。</li>
+<li><strong><code>SecretStore::update</code> 是唯一一个锁是尽力而为（best-effort）的 <code>update</code>。</strong> 它的 <code>FileLock::acquire</code> 会返回 <code>Option</code>，如果锁文件打不开就不加锁继续往下走，这和 <code>Store</code>、<code>JsonStore</code> 不一样。<strong>未决定</strong>：它是否也该像其他两个一样直接拒绝；跟着周围的代码走，如果你动了它，就在 PR 里说明这一点。</li>
 </ul>
 <hr />
-<h2 id="9-tests">9. Tests<a class="hanchor" href="#9-tests" aria-label="#">#</a></h2>
+<h2 id="9-tests">9. 测试<a class="hanchor" href="#9-tests" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Where they go.</strong> Unit tests go in <code>#[cfg(test)] mod tests</code> at the bottom of the file. Integration
-  tests go in <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/</code> and use only the public API. Live provider tests are
-  opt-in. <strong>Convention (observed)</strong>; details in <a href="rust-primer.html#39-tests">03 § 3.9</a>.</li>
-<li><strong>Pure first.</strong> Put the decision in a pure function and test it as data. Anything that needs
-  real namespaces, cgroups or a network holder is validated live or with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a>.
-  <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> ("Write a unit test for any new pure function"); AGENTS.md §
-  "IaC nativo" (<code>reconcile.rs</code> is pure so it can be tested as data).</li>
-<li><strong>Names</strong>: English sentences that state the behaviour (see <a href="#34-test-names">§3.4</a>).</li>
-<li><strong>Tests never touch the host's real state.</strong> Give stores a temporary root. Don't call code that
-  resolves the real state root. Don't <code>set_var</code> (the <code>env_writes</code> ratchet, <a href="#41-the-layers-and-the-direction">§4.1</a>).
-  <strong>Decided</strong>: AGENTS.md § "IaC nativo", the <code>ShareVolume</code> fusion note ("Nota de método: um teste que
-  chamasse <code>apply_share</code> … escreveria no estado REAL da máquina"). <strong>Convention (observed)</strong>:
-  <code>delonix-state/src/store.rs</code> tests use a <code>tmp_dir(tag)</code> helper. For manual and E2E runs,
-  isolate <strong>both</strong> <code>DELONIX_ROOT</code> and <code>DELONIX_NET_RUNTIME_DIR</code>. Isolating only one is worse than
-  none (AGENTS.md § "Meia-isolação é pior que nenhuma"; <a href="build-and-test.html#isolating-the-engines-state">Clone, build and test</a>).</li>
-<li><strong>A regression test must fail with the fix reverted.</strong> Revert the fix, watch the test fail, then
-  restore the fix. A test that passes either way proves nothing, and AGENTS.md records several
-  (an exit-code check that <code>1</code> couldn't distinguish; a chaos scenario that stayed green with a
-  reversion). <strong>Decided</strong>: AGENTS.md, "verificado pela regra do repo" throughout, for example §
-  "IaC nativo" (<code>stack_converge</code>) and § "A bateria mede o <code>--help</code>".</li>
-<li><strong>Test the path production uses.</strong> If production passes relative paths, the test uses relative
-  paths. A test can encode the bug. <strong>Decided</strong>: AGENTS.md § "Auditoria sistemática dos 208
-  subcomandos" (<code>default_project_name</code>).</li>
-<li><strong>Concurrency bugs get a real race.</strong> Use threads plus an explicit sleep inside the critical
-  window. <strong>Convention (observed)</strong>: <code>delonix-state/src/store.rs:jsonstore_update_concorrente_nao_perde_escritas</code>.</li>
-<li><strong>Prefer properties over sampled timing.</strong> When a race can only be sampled, generate load and
-  repeat. <strong>Decided</strong>: AGENTS.md § "Um <code>exec</code> logo a seguir ao <code>run -d</code> corria no HOST".</li>
-<li><strong>Generated regions carry no volatile counts</strong> (lines, tests, commits). <strong>Decided</strong>:
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> docstring ("Deliberately NOT generated: line counts, test counts, commit
-  counts"). A <strong>hand-written measurement</strong> cites the measured value together with the date it was
-  measured, never a running total. <strong>Decided</strong>: AGENTS.md § "A bateria mede o <code>--help</code> de tudo e
-  EXECUTA um quarto" ("Cita-se a fracção medida e a data, nunca o total"). Whether counts may appear
-  in prose or code comments at all is <strong>not decided</strong> — follow the surrounding text.</li>
+<li><strong>放在哪里。</strong> 单元测试放在文件底部的 <code>#[cfg(test)] mod tests</code> 里。集成测试放在 <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/</code>，只使用公开 API。针对真实 provider 的测试是可选启用的。<strong>惯例（观察所得）</strong>；细节见 <a href="rust-primer.html#39-tests">03 § 3.9</a>。</li>
+<li><strong>先纯粹再说。</strong> 把决策放进一个纯函数，把它当作数据来测试。任何需要真实 namespace、cgroup 或网络 holder 的东西，都靠实机验证或 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/e2e.sh" target="_blank" rel="noopener"><code>scripts/e2e.sh</code></a> 来验证。<strong>已决定</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>（"Write a unit test for any new pure function"）；AGENTS.md § "IaC nativo"（<code>reconcile.rs</code> 是纯粹的，所以能被当作数据来测试）。</li>
+<li><strong>命名</strong>：陈述所验证行为的英语句子（见<a href="#34-test-names">§3.4</a>）。</li>
+<li><strong>测试绝不能碰宿主机的真实状态。</strong> 给 store 一个临时根目录。不要调用那些会解析出真实 state root 的代码。不要用 <code>set_var</code>（<code>env_writes</code> 棘轮，见<a href="#41-the-layers-and-the-direction">§4.1</a>）。<strong>已决定</strong>：AGENTS.md § "IaC nativo"，<code>ShareVolume</code> 合并那条方法论笔记（"Nota de método: um teste que chamasse <code>apply_share</code> … escreveria no estado REAL da máquina"）。<strong>惯例（观察所得）</strong>：<code>delonix-state/src/store.rs</code> 里的测试用了一个 <code>tmp_dir(tag)</code> 辅助函数。对手动和 E2E 测试而言，要<strong>同时</strong>隔离 <code>DELONIX_ROOT</code> 和 <code>DELONIX_NET_RUNTIME_DIR</code>。只隔离一个比一个都不隔离还糟（AGENTS.md § "Meia-isolação é pior que nenhuma"；<a href="build-and-test.html#isolating-the-engines-state">克隆、构建与测试</a>）。</li>
+<li><strong>一个回归测试必须在修复被回退之后失败。</strong> 把修复回退掉，看着测试失败，再把修复恢复回来。一个在两种情况下都能通过的测试什么都证明不了，AGENTS.md 里记录了好几个这样的例子（一个 <code>1</code> 没办法区分开的退出码检查；一个在被回退之后依然是绿色的混沌场景）。<strong>已决定</strong>：AGENTS.md，全篇多处出现"verificado pela regra do repo"，例如 § "IaC nativo"（<code>stack_converge</code>）和 § "A bateria mede o <code>--help</code>"。</li>
+<li><strong>要测试生产环境实际会走的那条路径。</strong> 如果生产环境传的是相对路径，测试也要用相对路径。一个测试是可能把 bug 也一起写进去的。<strong>已决定</strong>：AGENTS.md § "Auditoria sistemática dos 208 subcomandos"（<code>default_project_name</code>）。</li>
+<li><strong>并发类的 bug 需要一次真实的竞争。</strong> 用线程，再在临界窗口内加一个明确的 sleep。<strong>惯例（观察所得）</strong>：<code>delonix-state/src/store.rs:jsonstore_update_concorrente_nao_perde_escritas</code>。</li>
+<li><strong>优先验证属性，而不是采样的时序。</strong> 当一次竞争只能靠采样来发现时，就制造负载并重复多次。<strong>已决定</strong>：AGENTS.md § "Um <code>exec</code> logo a seguir ao <code>run -d</code> corria no HOST"。</li>
+<li><strong>生成的区域不携带易变的数字</strong>（行数、测试数、提交数）。<strong>已决定</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> 的 docstring（"Deliberately NOT generated: line counts, test counts, commit counts"）。一次<strong>手写的测量</strong>要连同测量当天的日期一起引用，绝不是一个不断累加的总数。<strong>已决定</strong>：AGENTS.md § "A bateria mede o <code>--help</code> de tudo e EXECUTA um quarto"（"Cita-se a fracção medida e a data, nunca o total"）。数字是否可以出现在正文或代码注释里，这件事本身<strong>未决定</strong>——跟着周围的文字走。</li>
 </ul>
 <hr />
-<h2 id="10-comments-and-documentation">10. Comments and documentation<a class="hanchor" href="#10-comments-and-documentation" aria-label="#">#</a></h2>
+<h2 id="10-comments-and-documentation">10. 注释与文档<a class="hanchor" href="#10-comments-and-documentation" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Comments explain <em>why</em>, not <em>what</em>.</strong> Write one for a hidden constraint, a workaround for a
-  specific bug, or an invariant the code doesn't make obvious. Comments that restate the code are
-  removed in review. <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
-<li><strong>When a decision was measured, say what was measured.</strong> "Measured: …" beats "should". The
-  module docs in <code>exitcode.rs</code> and <code>reconcile.rs</code> are the model. <strong>Convention (observed)</strong>.</li>
-<li><strong>Doc comments (<code>///</code>, <code>//!</code>) on public items and module headers</strong> say what the item promises and
-  why it exists. <strong>Convention (observed)</strong>: every port in <code>delonix-compute/src/ports.rs</code>,
-  <code>delonix-state/src/store.rs:write_private_temp</code>, <code>exitcode.rs</code>. <strong>Not decided</strong>: no <code>missing_docs</code> lint is enabled.</li>
-<li><strong>Comments are English and name no consumer.</strong> The language ratchet and the consumer gate both
-  scan comments. <strong>Enforced (gate)</strong>.</li>
-<li><strong>Don't add abstractions, config flags or error handling for cases that can't happen.</strong>
-  <strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style.</li>
-<li><strong>When you move a boundary, update its records in the same change</strong>:</li>
-<li>an ADR <strong>before</strong> the code, for a new provider, port, daemon, external dependency in an engine
-    crate, privilege boundary, or change to the contract or layers. Accepted ADRs are never
-    rewritten; a new one supersedes them (<strong>Decided</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>;
-    <a href="contributing-workflow.html#when-to-write-an-adr">Contribution workflow</a>);</li>
-<li>the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> section that describes the area. A stale section there misleads the next
-    person, and <strong>conflicts in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> are resolved by keeping both sides</strong> (<strong>Decided</strong>:
-    AGENTS.md § "Método: um worktree por sessão");</li>
-<li>the generated artefacts: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>, the CLI
-    baseline, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, and the <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> generated regions via
-    <code>python3 scripts/dev_docs.py</code> (<strong>Enforced (gate)</strong>; see
-    <a href="publishing-docs.html">Publishing the documentation</a>).</li>
+<li><strong>注释要解释<em>为什么</em>，而不是<em>做了什么</em>。</strong> 为一个隐藏的约束、一个针对具体 bug 的变通办法、或者一个代码本身没有把它说明白的不变量写一句注释。复述代码本身的注释会在评审中被删掉。<strong>已决定</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style。</li>
+<li><strong>当一个决定是靠测量得出的，就说清楚测的是什么。</strong> "Measured: …" 比"should"更有说服力。<code>exitcode.rs</code> 和 <code>reconcile.rs</code> 里的模块文档就是这方面的范本。<strong>惯例（观察所得）</strong>。</li>
+<li><strong>公开项和模块头部的 doc comment（<code>///</code>、<code>//!</code>）</strong>要说明这个项承诺了什么、为什么存在。<strong>惯例（观察所得）</strong>：<code>delonix-compute/src/ports.rs</code> 里的每一个端口、<code>delonix-state/src/store.rs:write_private_temp</code>、<code>exitcode.rs</code>。<strong>未决定</strong>：没有启用 <code>missing_docs</code> 这个 lint。</li>
+<li><strong>注释用英语写，也不点名任何消费者。</strong> 语言棘轮和消费者门禁都会扫描注释。<strong>强制（门禁）</strong>。</li>
+<li><strong>不要为根本不可能发生的情况添加抽象、配置开关或错误处理。</strong> <strong>已决定</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> § Style。</li>
+<li><strong>当你移动一条边界时，要在同一次改动里更新它对应的记录</strong>：</li>
+<li>对于一个新的 provider、端口、守护进程、引擎 crate 里的外部依赖、特权边界，或者对契约或层级的改动，要<strong>先</strong>写一份 ADR，再动代码。已被接受的 ADR 永远不会被重写；只有新的 ADR 能取代它们（<strong>已决定</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>；<a href="contributing-workflow.html#when-to-write-an-adr">贡献流程</a>）；</li>
+<li>更新描述那块区域的那节 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>。一节过时的内容会误导下一个人，而且<strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里的冲突要靠保留双方内容来解决</strong>（<strong>已决定</strong>：AGENTS.md § "Método: um worktree por sessão"）；</li>
+<li>更新生成出来的那些文件：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/schema/v1/delonix.json" target="_blank" rel="noopener"><code>docs/schema/v1/delonix.json</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>、CLI 基线、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>，以及通过 <code>python3 scripts/dev_docs.py</code> 生成的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> 各区域（<strong>强制（门禁）</strong>；见<a href="publishing-docs.html">发布文档</a>）。</li>
 </ul>
 <hr />
-<h2 id="undecided">Undecided<a class="hanchor" href="#undecided" aria-label="#">#</a></h2>
-<p>Nothing in the repository settles these. Follow the surrounding code and mention the choice in
-your PR:</p>
+<h2 id="undecided">未决问题<a class="hanchor" href="#undecided" aria-label="#">#</a></h2>
+<p>仓库里的任何东西都没有把这些问题定下来。跟着周围的代码走，并在你的 PR 里提一下这个选择：</p>
 <ul>
-<li><strong>When <code>#[allow(clippy::…)]</code> is acceptable.</strong> It is used (<code>too_many_arguments</code>) without a written
-  policy.</li>
-<li><strong>The <code>Result</code> type of today's compute ports.</strong> The ports in
-  <code>delonix-compute/src/ports.rs</code> return <code>delonix_model::Result</code>, so the adapters that
-  implement them (<code>HostWorkload</code>, <code>HostNetwork</code>, …) import the shared result type, and those imports
-  count towards <code>shared_error_imports</code>. P3 decides errors per crate. No document says how a port's
-  signature changes, and adding such an import in a new file fails the ratchet. If your change
-  needs one, raise it in the PR. Don't work around the regex.</li>
-<li><strong>Crate names during the transition.</strong> ADR-0040 D2 (still Proposed) sets the target names, but a brand-new crate
-  that lands before its context exists (for example a second provider before the
-  <code>delonix-provider-*</code> renames) has no written rule. Ask in the issue first.</li>
-<li><strong>Required doc comments.</strong> There is no <code>missing_docs</code> lint, only the observed habit.</li>
-<li><strong>The fitness test for provider-name matching</strong> (ADR-0040 D3 rule 3) is proposed but not yet
-  implemented.</li>
+<li><strong><code>#[allow(clippy::…)]</code> 什么时候可以接受。</strong> 它确实被用到了（<code>too_many_arguments</code>），但没有一份写下来的政策。</li>
+<li><strong>今天 compute 端口的 <code>Result</code> 类型。</strong> <code>delonix-compute/src/ports.rs</code> 里的端口返回的是 <code>delonix_model::Result</code>，所以实现它们的那些适配器（<code>HostWorkload</code>、<code>HostNetwork</code>……）要导入这个共享的结果类型，而这些导入会被计入 <code>shared_error_imports</code>。P3 阶段会决定每个 crate 各自的错误方案。目前没有任何文档说明一个端口的签名该怎么改，而在一个新文件里加上这样一条导入就会让棘轮失败。如果你的改动确实需要这样做，在 PR 里提出来，不要绕开那条正则表达式。</li>
+<li><strong>过渡期里 crate 的命名。</strong> ADR-0040 D2（目前仍是提议中）定下了目标命名，但如果一个全新的 crate 在它所属的上下文还不存在之前就落地了（例如在 <code>delonix-provider-*</code> 系列改名之前出现了第二个 provider），目前没有写下来的规则。先在 issue 里问一下。</li>
+<li><strong>是否要求写 doc comment。</strong> 没有启用 <code>missing_docs</code> 这个 lint，只有观察到的习惯。</li>
+<li><strong>针对 provider 名字匹配的 fitness test</strong>（ADR-0040 D3 规则 3）已经提出，但尚未实现。</li>
 </ul>
 <hr />
-<h2 id="review-checklist">Review checklist<a class="hanchor" href="#review-checklist" aria-label="#">#</a></h2>
-<p>Before you open the PR, go through the list:</p>
+<h2 id="review-checklist">评审清单<a class="hanchor" href="#review-checklist" aria-label="#">#</a></h2>
+<p>在开 PR 之前，过一遍这份清单：</p>
 <ol>
-<li><code>cargo fmt --all --check</code> and <code>cargo clippy --workspace --all-targets --locked -- -D warnings</code>
-   are clean. → <a href="#1-the-tooling-that-enforces-style">§1</a></li>
-<li><code>python3 scripts/lang_ratchet.py</code> and <code>python3 scripts/arch_fitness.py</code> pass, and any baseline
-   you lowered is in this commit. → <a href="#1-the-tooling-that-enforces-style">§1</a></li>
-<li>New identifiers, comments, messages <strong>and test names</strong> are English. User text goes through
-   <code>po::t</code>/<code>po::tf</code>, with <code>pt.po</code> entries. No <code>num</code>. → <a href="#2-language-of-the-code">§2</a>,
-   <a href="#34-test-names">§3.4</a></li>
-<li>The code is in the right crate and layer, versions are only in the root, the library has no
-   <code>println!</code> and doesn't re-run its own binary. → <a href="#4-structure-where-code-goes">§4</a></li>
-<li>Decisions are pure functions with unit tests, and I/O stays at the edges. →
+<li><code>cargo fmt --all --check</code> 和 <code>cargo clippy --workspace --all-targets --locked -- -D warnings</code>
+   都是干净的。→ <a href="#1-the-tooling-that-enforces-style">§1</a></li>
+<li><code>python3 scripts/lang_ratchet.py</code> 和 <code>python3 scripts/arch_fitness.py</code> 都能通过，任何你降低过的
+   基线都在这个提交里。→ <a href="#1-the-tooling-that-enforces-style">§1</a></li>
+<li>新增的标识符、注释、消息<strong>以及测试名</strong>都是英语。面向用户的文本走 <code>po::t</code>/<code>po::tf</code>，并带上
+   <code>pt.po</code> 条目。不要用 <code>num</code>。→ <a href="#2-language-of-the-code">§2</a>、<a href="#34-test-names">§3.4</a></li>
+<li>代码放在正确的 crate 和层里，版本号只在根目录声明，库里没有 <code>println!</code>，也不会重新执行
+   自己的二进制。→ <a href="#4-structure-where-code-goes">§4</a></li>
+<li>决策是带单元测试的纯函数，I/O 留在边缘。→
    <a href="#43-pure-core-io-at-the-edges">§4.3</a></li>
-<li>New backends implement a port, with no provider-name matching. Adapters don't depend on
-   adapters. → <a href="#51-ports-and-adapters">§5.1</a></li>
-<li>Adapter/provider failures use a crate <code>Error</code> that converts into <code>delonix_model::Error</code>. →
+<li>新后端要实现一个端口，不做 provider 名字匹配。适配器不依赖适配器。→
+   <a href="#51-ports-and-adapters">§5.1</a></li>
+<li>适配器/provider 的失败要用一个能转换成 <code>delonix_model::Error</code> 的 crate 级 <code>Error</code>。→
    <a href="#52-errors-per-crate-adr-0040-p3">§5.2</a></li>
-<li>If you touched <code>proto/</code>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> passes, with one request per RPC, explicit
-   identity, and a regenerated OpenAPI. → <a href="#54-the-node-contract">§5.4</a></li>
-<li>No consumer name anywhere in <code>crates/</code>, <code>bins/</code> or <code>proto/</code>, comments included. →
+<li>如果你动了 <code>proto/</code>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a> 要通过，做到每个 RPC 一个请求消息、身份显式、
+   OpenAPI 已重新生成。→ <a href="#54-the-node-contract">§5.4</a></li>
+<li><code>crates/</code>、<code>bins/</code> 或 <code>proto/</code> 里任何地方都没有消费者的名字，注释也包括在内。→
    <a href="#55-the-engine-knows-no-consumer">§5.5</a></li>
-<li>Nothing is accepted and then ignored. Errors state the fact and then the fix, and use the
-    variant of the right class. → <a href="#6-error-handling-and-messages">§6</a>, <a href="#38-exit-codes-and-dx_-codes">§3.8</a></li>
-<li>Every <code>unsafe</code> block has a <code>// SAFETY:</code> comment. There is no raw fork in a multi-threaded
-    process, temp files use <code>write_private_temp</code>, and secrets use <code>write_atomic_mode</code>. →
+<li>没有什么是先被接受、后又被悄悄忽略的。错误先陈述事实，再说该怎么做，并使用正确类别的
+    变体。→ <a href="#6-error-handling-and-messages">§6</a>、<a href="#38-exit-codes-and-dx_-codes">§3.8</a></li>
+<li>每一个 <code>unsafe</code> 块都有一句 <code>// SAFETY:</code> 注释。多线程进程里没有原始的 fork，临时文件用
+    <code>write_private_temp</code>，secret 用 <code>write_atomic_mode</code>。→
     <a href="#7-unsafe-syscalls-and-processes">§7</a></li>
-<li>Record mutations go through <code>update</code>, and new record fields have <code>#[serde(default)]</code>. →
+<li>记录的变更都走 <code>update</code>，新的记录字段都有 <code>#[serde(default)]</code>。→
     <a href="#8-state-and-concurrency">§8</a></li>
-<li>Tests use isolated roots, the regression test fails with the fix reverted, and a measured
-    number carries its date. → <a href="#9-tests">§9</a></li>
-<li>CLI changes: all entry points are wired, verbs are Docker-aligned, cuts have no aliases, and
-    the CLI baseline is updated. → <a href="#35-cli-commands-and-flags">§3.5</a></li>
-<li>Kinds and manifest fields: a row in <code>kinds.rs</code>, <code>camelCase</code> fields with old spellings as
-    aliases, and the schema regenerated. → <a href="#36-kinds-api-groups-and-manifest-fields">§3.6</a></li>
-<li>ADR, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> and the generated docs are updated if a boundary moved. →
+<li>测试用了隔离的根目录，回归测试在修复被回退之后会失败，一个测量出来的数字带着它的日期。→
+    <a href="#9-tests">§9</a></li>
+<li>CLI 的改动：所有入口都接好了线，动词和 Docker 对齐，不兼容的切断没有别名，CLI 基线已经
+    更新。→ <a href="#35-cli-commands-and-flags">§3.5</a></li>
+<li>Kind 和清单字段：在 <code>kinds.rs</code> 里有一行，字段用 <code>camelCase</code>、旧拼法作为别名保留，schema
+    已重新生成。→ <a href="#36-kinds-api-groups-and-manifest-fields">§3.6</a></li>
+<li>如果某条边界发生了移动，ADR、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 和生成的文档都已更新。→
     <a href="#10-comments-and-documentation">§10</a></li>
 </ol>
 <hr />
-<p><strong>Next:</strong> <a href="adding-a-kind.html">Adding a Kind</a> — the table, the schema and the reconciler wiring a new declarative Kind needs, worked through a real one.</p>
-<nav class="pager"><a href="service-names-and-hosts.html"><span>← 上一页</span>How names reach /etc/hosts</a><a class="next" href="adding-a-kind.html"><span>下一页 →</span>Adding a Kind</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/coding-conventions.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/coding-conventions.md</code></footer>
+<p><strong>下一篇：</strong> <a href="adding-a-kind.html">新增一个 Kind</a> —— 通过一个真实的例子，走一遍新增一个声明式 Kind 所需要的表、schema 和协调器接线。</p>
+<nav class="pager"><a href="service-names-and-hosts.html"><span>← 上一页</span>名称是如何抵达 /etc/hosts 的</a><a class="next" href="adding-a-kind.html"><span>下一页 →</span>新增一个 Kind</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/coding-conventions.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/coding-conventions.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#1-the-tooling-that-enforces-style">1. The tooling that enforces style</a></li>
-<li><a href="#2-language-of-the-code">2. Language of the code</a></li>
-<li><a href="#3-naming">3. Naming</a><ul>
-<li><a href="#31-crates-and-directories">3.1 Crates and directories</a></li>
-<li><a href="#32-modules-and-files">3.2 Modules and files</a></li>
-<li><a href="#33-types-traits-functions-constants">3.3 Types, traits, functions, constants</a></li>
-<li><a href="#34-test-names">3.4 Test names</a></li>
-<li><a href="#35-cli-commands-and-flags">3.5 CLI commands and flags</a></li>
-<li><a href="#36-kinds-api-groups-and-manifest-fields">3.6 Kinds, API groups and manifest fields</a></li>
-<li><a href="#37-environment-variables">3.7 Environment variables</a></li>
-<li><a href="#38-exit-codes-and-dx_-codes">3.8 Exit codes and DX_* codes</a></li>
+<li><a href="#1-the-tooling-that-enforces-style">1. 强制风格的工具</a></li>
+<li><a href="#2-language-of-the-code">2. 代码的语言</a></li>
+<li><a href="#3-naming">3. 命名</a><ul>
+<li><a href="#31-crates-and-directories">3.1 crate 和目录</a></li>
+<li><a href="#32-modules-and-files">3.2 模块和文件</a></li>
+<li><a href="#33-types-traits-functions-constants">3.3 类型、trait、函数、常量</a></li>
+<li><a href="#34-test-names">3.4 测试名</a></li>
+<li><a href="#35-cli-commands-and-flags">3.5 CLI 命令与标志</a></li>
+<li><a href="#36-kinds-api-groups-and-manifest-fields">3.6 Kind、API 组和清单字段</a></li>
+<li><a href="#37-environment-variables">3.7 环境变量</a></li>
+<li><a href="#38-exit-codes-and-dx_-codes">3.8 退出码与 DX_* 代码</a></li>
 </ul>
 </li>
-<li><a href="#4-structure-where-code-goes">4. Structure: where code goes</a><ul>
-<li><a href="#41-the-layers-and-the-direction">4.1 The layers and the direction</a></li>
-<li><a href="#42-my-change-is-x-it-goes-in-y">4.2 "My change is X → it goes in Y"</a></li>
-<li><a href="#43-pure-core-io-at-the-edges">4.3 Pure core, I/O at the edges</a></li>
+<li><a href="#4-structure-where-code-goes">4. 结构：代码该放在哪里</a><ul>
+<li><a href="#41-the-layers-and-the-direction">4.1 层与依赖方向</a></li>
+<li><a href="#42-my-change-is-x-it-goes-in-y">4.2 "我的改动是 X → 它应该放进 Y"</a></li>
+<li><a href="#43-pure-core-io-at-the-edges">4.3 纯粹的核心，I/O 在边缘</a></li>
 </ul>
 </li>
-<li><a href="#5-internal-api-and-boundaries">5. Internal API and boundaries</a><ul>
-<li><a href="#51-ports-and-adapters">5.1 Ports and adapters</a></li>
-<li><a href="#52-errors-per-crate-adr-0040-p3">5.2 Errors per crate (ADR-0040 P3)</a></li>
-<li><a href="#53-visibility">5.3 Visibility</a></li>
-<li><a href="#54-the-node-contract">5.4 The node contract</a></li>
-<li><a href="#55-the-engine-knows-no-consumer">5.5 The engine knows no consumer</a></li>
+<li><a href="#5-internal-api-and-boundaries">5. 内部 API 与边界</a><ul>
+<li><a href="#51-ports-and-adapters">5.1 端口与适配器</a></li>
+<li><a href="#52-errors-per-crate-adr-0040-p3">5.2 各 crate 自己的错误类型（ADR-0040 P3）</a></li>
+<li><a href="#53-visibility">5.3 可见性</a></li>
+<li><a href="#54-the-node-contract">5.4 节点契约</a></li>
+<li><a href="#55-the-engine-knows-no-consumer">5.5 引擎不认识任何消费者</a></li>
 </ul>
 </li>
-<li><a href="#6-error-handling-and-messages">6. Error handling and messages</a></li>
-<li><a href="#7-unsafe-syscalls-and-processes">7. unsafe, syscalls and processes</a></li>
-<li><a href="#8-state-and-concurrency">8. State and concurrency</a></li>
-<li><a href="#9-tests">9. Tests</a></li>
-<li><a href="#10-comments-and-documentation">10. Comments and documentation</a></li>
-<li><a href="#undecided">Undecided</a></li>
-<li><a href="#review-checklist">Review checklist</a></li>
+<li><a href="#6-error-handling-and-messages">6. 错误处理与消息</a></li>
+<li><a href="#7-unsafe-syscalls-and-processes">7. unsafe、系统调用与进程</a></li>
+<li><a href="#8-state-and-concurrency">8. 状态与并发</a></li>
+<li><a href="#9-tests">9. 测试</a></li>
+<li><a href="#10-comments-and-documentation">10. 注释与文档</a></li>
+<li><a href="#undecided">未决问题</a></li>
+<li><a href="#review-checklist">评审清单</a></li>
 </ul>
 </div>
 </aside>
