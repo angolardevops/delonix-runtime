@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Preparing your environment · Delonix Runtime — 贡献者手册</title>
+<title>准备你的环境 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,299 +206,300 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a class="on" aria-current="page" href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a class="on" aria-current="page" href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">环境与构建</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="preparing-your-environment">Preparing your environment</h1>
-<p><strong>Before you read:</strong> <a href="start-here.html#day-0-in-30-minutes">Start here</a> (Day 0) and <a href="linux-foundations.html">Linux foundations</a> — the host traps below are explained in terms of user namespaces and cgroup delegation.</p>
-<p>Delonix Runtime is <strong>Linux-only</strong>: every primitive it uses — namespaces, cgroups v2, nftables,
-<code>pivot_root</code>, the new mount API — lives in the Linux kernel. You can <em>compile</em> most of the
-workspace and run its pure-logic tests on any Linux box with the toolchain below; to <em>run</em>
-containers and exercise the live paths you need a host that satisfies the kernel and package
-requirements in this page. After it your host passes <code>delonix system info</code>, and when something
-fails you can tell a host prerequisite from an engine bug.</p>
-<p>A lot of what looks like an engine bug on a fresh machine is a host prerequisite. Read the
-<a href="#known-host-traps">Known host traps</a> section before you open an issue.</p>
-<h2 id="toolchain">Toolchain<a class="hanchor" href="#toolchain" aria-label="#">#</a></h2>
+<h1 id="preparing-your-environment">准备你的环境</h1>
+<p><strong>阅读之前：</strong><a href="start-here.html#day-0-in-30-minutes">从这里开始</a>（第 0 天）和 <a href="linux-foundations.html">Linux 基础</a> —— 下面这些宿主机陷阱，都是用用户命名空间和 cgroup 委派的术语来解释的。</p>
+<p>Delonix Runtime <strong>只支持 Linux</strong>：它用到的每一个原语 —— 命名空间、cgroups v2、
+nftables、<code>pivot_root</code>、新的 mount API —— 都活在 Linux 内核里。你可以在任何装有下面这套
+工具链的 Linux 机器上<em>编译</em>大部分工作区，也能跑它的纯逻辑测试；但要<em>运行</em>容器、走一遍那些
+实机路径，你需要一台满足本页内核与软件包要求的宿主机。读完本页之后，你的宿主机应该能通过
+<code>delonix system info</code>；出问题的时候，你也能分清是宿主机的前提条件没满足，还是引擎本身
+的 bug。</p>
+<p>很多在一台全新机器上看起来像是引擎 bug 的东西，其实是宿主机的前提条件没满足。开
+issue 之前，先读一读 <a href="#known-host-traps">已知的宿主机陷阱</a> 这一节。</p>
+<h2 id="toolchain">工具链<a class="hanchor" href="#toolchain" aria-label="#">#</a></h2>
 <!-- dev-docs:begin toolchain -->
 <ul>
-<li><strong>Rust toolchain:</strong> <code>1.96.0</code> (pinned in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a>; <code>rustup</code> installs it on the first <code>cargo</code> call)</li>
-<li><strong>Components:</strong> <code>rustfmt</code>, <code>clippy</code></li>
+<li><strong>Rust 工具链：</strong> <code>1.96.0</code>（固定在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 中；首次调用 <code>cargo</code> 时由 <code>rustup</code> 安装）</li>
+<li><strong>组件：</strong> <code>rustfmt</code>, <code>clippy</code></li>
 </ul>
 <!-- dev-docs:end toolchain -->
 
-<p>Install <a href="https://rustup.rs/"><code>rustup</code></a> and let it pick up the pinned channel; do not override it
-with <code>stable</code>. CI uses exactly the same file (<code>rustup show</code> in every job).</p>
-<h3 id="protoc-required-to-build"><code>protoc</code> (required to build)<a class="hanchor" href="#protoc-required-to-build" aria-label="#">#</a></h3>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> compiles the Kubernetes CRI protobuf with
-<code>tonic-build</code>/<code>prost</code>, which needs the Protocol Buffers compiler on <code>PATH</code>. The <code>delonix</code> binary
-depends on <code>delonix-cri</code>, so <strong>a plain <code>cargo build --workspace</code> fails without it</strong>:</p>
+<p>安装 <a href="https://rustup.rs/"><code>rustup</code></a>，让它去读取那个固定版本的 channel；不要用 <code>stable</code>
+去覆盖它。CI 用的是完全同一份文件（每个 job 里都会跑 <code>rustup show</code>）。</p>
+<h3 id="protoc-required-to-build"><code>protoc</code>（构建必需）<a class="hanchor" href="#protoc-required-to-build" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/build.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/build.rs</code></a> 用 <code>tonic-build</code>/<code>prost</code> 编译 Kubernetes CRI
+的 protobuf，这需要 <code>PATH</code> 上有 Protocol Buffers 编译器。<code>delonix</code> 这个二进制程序依赖
+<code>delonix-cri</code>，所以<strong>如果没有它，一次普通的 <code>cargo build --workspace</code> 就会失败</strong>：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash"># Debian / Ubuntu
 sudo apt install protobuf-compiler
 # Fedora / RHEL family
 sudo dnf install protobuf-compiler
 </code></pre></div>
-<p>Or download a release from <a href="https://github.com/protocolbuffers/protobuf/releases">https://github.com/protocolbuffers/protobuf/releases</a>. CI installs
-<code>protobuf-compiler</code> from apt in every job that compiles.</p>
-<h3 id="optional-tools-only-for-specific-gates">Optional tools, only for specific gates<a class="hanchor" href="#optional-tools-only-for-specific-gates" aria-label="#">#</a></h3>
+<p>或者从 <a href="https://github.com/protocolbuffers/protobuf/releases">https://github.com/protocolbuffers/protobuf/releases</a> 下载一个发行版。CI 里
+每一个要编译的 job 都会用 apt 安装 <code>protobuf-compiler</code>。</p>
+<h3 id="optional-tools-only-for-specific-gates">可选工具，只用于特定门禁<a class="hanchor" href="#optional-tools-only-for-specific-gates" aria-label="#">#</a></h3>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Tool</th>
-<th>Needed for</th>
-<th>Where it is pinned</th>
+<th>用在哪里</th>
+<th>版本固定在哪里</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>Python 3.11+</td>
-<td>every <code>scripts/*.py</code> gate (they use <code>tomllib</code>)</td>
+<td>每一个 <code>scripts/*.py</code> 门禁（它们用到了 <code>tomllib</code>）</td>
 <td>—</td>
 </tr>
 <tr>
-<td><code>buf</code> v1.73.0 and <code>protoc-gen-openapi</code> v0.7.1 (Go toolchain to install them)</td>
+<td><code>buf</code> v1.73.0 和 <code>protoc-gen-openapi</code> v0.7.1（需要 Go 工具链来安装它们）</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a></td>
-<td><code>contract</code> job in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.<wbr>github/<wbr>workflows/<wbr>ci.<wbr>yml</code></a> 里的 <code>contract</code> job</td>
 </tr>
 <tr>
 <td><code>cargo-deny</code></td>
-<td>the supply-chain check</td>
-<td><code>deny</code> job, config in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
+<td>供应链检查</td>
+<td><code>deny</code> job，配置在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
 </tr>
 <tr>
-<td>Python <code>markdown</code> module</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> (renders <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>)</td>
+<td>Python 的 <code>markdown</code> 模块</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>（渲染 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>）</td>
 <td><code>docs</code> job</td>
 </tr>
 <tr>
 <td><code>groff</code></td>
-<td>checking the generated man pages</td>
+<td>检查生成出来的 man page</td>
 <td><code>docs</code> job</td>
 </tr>
 </tbody>
 </table></div>
-<p>See <a href="build-and-test.html">Clone, build and test</a> for how each one is run.</p>
-<h2 id="kernel-requirements">Kernel requirements<a class="hanchor" href="#kernel-requirements" aria-label="#">#</a></h2>
-<p>These are the kernel features the engine relies on. The installer (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>) and
-<code>delonix system doctor</code> check most of them for you.</p>
+<p>各自怎么跑，见 <a href="build-and-test.html">克隆、构建与测试</a>。</p>
+<h2 id="kernel-requirements">内核要求<a class="hanchor" href="#kernel-requirements" aria-label="#">#</a></h2>
+<p>这些是引擎所依赖的内核特性。安装脚本（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>）和
+<code>delonix system doctor</code> 会替你检查其中大部分。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Requirement</th>
-<th>Why</th>
-<th>How to check</th>
+<th>要求</th>
+<th>为什么</th>
+<th>怎么检查</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>cgroup v2</strong> (unified hierarchy)</td>
-<td>resource limits and accounting are written to <code>/sys/fs/cgroup</code></td>
-<td><code>stat -fc %T /<wbr>sys/<wbr>fs/<wbr>cgroup</code> prints <code>cgroup2fs</code></td>
+<td><strong>cgroup v2</strong>（统一层级）</td>
+<td>资源限制和统计都是写到 <code>/sys/fs/cgroup</code> 里的</td>
+<td><code>stat -fc %T /<wbr>sys/<wbr>fs/<wbr>cgroup</code> 会打印出 <code>cgroup2fs</code></td>
 </tr>
 <tr>
-<td><strong>Unprivileged user namespaces</strong></td>
-<td>the rootless model: the engine becomes "root" only inside its own user namespace</td>
-<td><code>unshare -r -n true</code> succeeds</td>
+<td><strong>无特权 user 命名空间</strong></td>
+<td>rootless 模型的基础：引擎只在自己的 user 命名空间<em>里面</em>才是「root」</td>
+<td><code>unshare -r -n true</code> 能成功执行</td>
 </tr>
 <tr>
 <td><strong><code>/dev/net/tun</code></strong></td>
-<td><code>slirp4netns</code> (rootless networking) and VM taps</td>
+<td><code>slirp4netns</code>（rootless 网络）和 VM 的 tap 设备</td>
 <td><code>test -e /dev/net/tun</code></td>
 </tr>
 <tr>
-<td><strong>overlayfs</strong> with the new mount API and <code>lowerdir+</code> (Linux <strong>6.5</strong> or newer)</td>
-<td>container root filesystems are overlay mounts built with <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>, one <code>lowerdir+</code> call per layer — see <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
+<td>带新 mount API 和 <code>lowerdir+</code> 的 <strong>overlayfs</strong>（Linux <strong>6.5</strong> 或更新）</td>
+<td>容器的根文件系统是用 <code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code> 构建出来的 overlay 挂载，每一层调用一次 <code>lowerdir+</code> —— 见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a></td>
 <td><code>uname -r</code></td>
 </tr>
 <tr>
-<td><strong><code>br_netfilter</code></strong> loaded, <code>net.<wbr>bridge.<wbr>bridge-nf-call-iptables=1</code></td>
-<td>namespace isolation is enforced in nftables <code>forward</code> chains; without this module traffic between two containers on the same bridge never reaches them, and isolation is silently inert</td>
+<td>已加载 <strong><code>br_netfilter</code></strong>，<code>net.<wbr>bridge.<wbr>bridge-nf-call-iptables=1</code></td>
+<td>命名空间隔离是在 nftables 的 <code>forward</code> 链里强制执行的；没有这个模块，同一网桥上两个容器之间的流量就永远到不了它们，隔离会悄无声息地失效</td>
 <td><code>delonix system doctor</code></td>
 </tr>
 <tr>
-<td><strong>KVM</strong> (<code>/dev/kvm</code>)</td>
-<td>only for microVMs — see <a href="microvm-setup.html">Building microVMs</a></td>
+<td><strong>KVM</strong>（<code>/dev/kvm</code>）</td>
+<td>只有 microVM 才需要 —— 见 <a href="microvm-setup.html">构建 microVM</a></td>
 <td><code>test -w /dev/kvm</code></td>
 </tr>
 </tbody>
 </table></div>
-<p>The 6.5 requirement has <strong>no preflight check</strong>: an older kernel fails when the first container
-rootfs is mounted, not at startup (ADR-0037 records this as a deliberate choice).</p>
-<p>On older Debian kernels unprivileged user namespaces are switched off by
-<code>kernel.unprivileged_userns_clone=0</code>; the installer sets it to <code>1</code>.</p>
-<h2 id="host-packages">Host packages<a class="hanchor" href="#host-packages" aria-label="#">#</a></h2>
-<p>The source of truth is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>, which is also the
-official installer (it is published as a release asset). It detects the package manager through
-<code>/etc/os-release</code> and supports <strong>apt</strong> (Debian, Ubuntu and derivatives), <strong>dnf</strong> (Fedora, RHEL,
-CentOS Stream, Rocky, AlmaLinux), <strong>zypper</strong> (openSUSE, SLES) and <strong>pacman</strong> (Arch and
-derivatives). The installer installs prebuilt binaries for <strong>x86_64</strong> and <strong>aarch64</strong> (<code>arm64</code> is
-normalised): the asset name is composed from <code>uname -m</code> as <code>&lt;name&gt;-&lt;arch&gt;-linux</code>, and any other
-architecture stops with "no prebuilt binary for <arch> yet", so build from source. Three things differ
-on aarch64: the <code>-v3</code> variant is an x86-64 microarchitecture level and does not exist there; the pinned
-static Cloud Hypervisor, the EDK2 <code>CLOUDHV.fd</code> and <code>hypervisor-fw</code> are x86-64 builds, so they are not
-downloaded (a distro-packaged <code>cloud-hypervisor</code> is still installed if the package manager has it) and the VM backend is libvirt; and the QEMU probe asks for <code>qemu-system-aarch64</code>. The
-aarch64 release assets exist since v4.2.0 (the v4.1.0 release has none).
-<strong>Not validated:</strong> a complete install on a real aarch64 host, and the QEMU package names per distro
-on arm64 — what has been checked is the asset-name composition against the published v4.2.0 assets.</p>
-<p>To run containers the engine needs:</p>
+<p>6.5 这条要求<strong>没有预检</strong>：更老的内核会在第一个容器 rootfs 被挂载的时候才失败，而不是
+在启动时（ADR-0037 记录了这是一个刻意的选择）。</p>
+<p>在较老的 Debian 内核上，无特权 user 命名空间是被
+<code>kernel.unprivileged_userns_clone=0</code> 关掉的；安装脚本会把它设成 <code>1</code>。</p>
+<h2 id="host-packages">宿主机软件包<a class="hanchor" href="#host-packages" aria-label="#">#</a></h2>
+<p>唯一的真相来源是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a>，它同时也是官方安装
+脚本（作为发布资产发布出去）。它通过 <code>/etc/os-release</code> 检测包管理器，支持 <strong>apt</strong>（Debian、
+Ubuntu 及其衍生版）、<strong>dnf</strong>（Fedora、RHEL、CentOS Stream、Rocky、AlmaLinux）、<strong>zypper</strong>
+（openSUSE、SLES）和 <strong>pacman</strong>（Arch 及其衍生版）。安装脚本会为 <strong>x86_64</strong> 和 <strong>aarch64</strong>
+安装预编译的二进制程序（<code>arm64</code> 会被规范化）：资产名是由 <code>uname -m</code> 拼成
+<code>&lt;name&gt;-&lt;arch&gt;-linux</code>，任何其他架构都会以「no prebuilt binary for <arch> yet」中止，需要从
+源码构建。在 aarch64 上有三处不同：<code>-v3</code> 变体是一个 x86-64 的微架构级别，在那里根本不存在；
+固定版本的静态 Cloud Hypervisor、EDK2 的 <code>CLOUDHV.fd</code> 和 <code>hypervisor-fw</code> 都是 x86-64 的
+构建产物，所以不会被下载（如果包管理器里有，仍然会安装一个发行版打包的 <code>cloud-hypervisor</code>），
+VM 后端会用 libvirt；而 QEMU 的探测会去找 <code>qemu-system-aarch64</code>。aarch64 的发布资产从
+v4.2.0 起才有（v4.1.0 的发布里一个都没有）。
+<strong>尚未验证：</strong> 在一台真正的 aarch64 宿主机上完整安装，以及 arm64 各发行版下 QEMU 软件包的
+名字 —— 已经核实过的，只是资产名的拼法和已发布的 v4.2.0 资产是否一致。</p>
+<p>要运行容器，引擎需要：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Command</th>
-<th>Package (apt / dnf names)</th>
-<th>Why</th>
+<th>软件包（apt / dnf 的名字）</th>
+<th>为什么</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>slirp4netns</code></td>
 <td><code>slirp4netns</code></td>
-<td>rootless networking and published ports — without it <code>run -p</code> fails</td>
+<td>rootless 网络和端口发布 —— 没有它 <code>run -p</code> 会失败</td>
 </tr>
 <tr>
 <td><code>newuidmap</code> / <code>newgidmap</code></td>
 <td><code>uidmap</code> / <code>shadow-utils</code></td>
-<td>setuid helpers that map more than one uid into the user namespace; without them images with a non-root user fail in <code>chown()</code></td>
+<td>把不止一个 uid 映射进 user 命名空间的 setuid 辅助程序；没有它们，带非 root 用户的镜像会在 <code>chown()</code> 上失败</td>
 </tr>
 <tr>
 <td><code>nft</code></td>
 <td><code>nftables</code></td>
-<td>SDN firewall, isolation and port DNAT</td>
+<td>SDN 防火墙、隔离和端口 DNAT</td>
 </tr>
 <tr>
 <td><code>ip</code></td>
 <td><code>iproute2</code> / <code>iproute</code></td>
-<td>veth, bridge and netns plumbing</td>
+<td>veth、网桥和 netns 相关的管道</td>
 </tr>
 <tr>
-<td><code>conntrack</code> (optional)</td>
+<td><code>conntrack</code>（可选）</td>
 <td><code>conntrack</code> / <code>conntrack-tools</code></td>
-<td>cleaning up connections when a port is unpublished</td>
+<td>在一个端口被取消发布时清理连接</td>
 </tr>
 </tbody>
 </table></div>
-<p>For VMs, <code>qemu-img</code>, <code>cloud-localds</code> (<code>cloud-image-utils</code>), <code>virsh</code> (libvirt) and/or
-Cloud Hypervisor with its firmware — see <a href="microvm-setup.html">Building microVMs</a>. For building VM images,
-<code>libguestfs-tools</code> (<code>install.sh --with-image-build</code>).</p>
-<p>You also need a <strong>subordinate uid/gid range</strong> for your user in <code>/etc/subuid</code> and <code>/etc/subgid</code>;
-without it the user namespace can map only one uid.</p>
-<h3 id="the-quickest-way-to-a-working-host">The quickest way to a working host<a class="hanchor" href="#the-quickest-way-to-a-working-host" aria-label="#">#</a></h3>
-<p>You do not have to replicate the installer by hand. To install only the host dependencies and
-configuration, keeping the binary you build yourself:</p>
+<p>对于 VM，需要 <code>qemu-img</code>、<code>cloud-localds</code>（<code>cloud-image-utils</code>）、<code>virsh</code>（libvirt）
+和/或带固件的 Cloud Hypervisor —— 见 <a href="microvm-setup.html">构建 microVM</a>。要构建 VM 镜像，
+需要 <code>libguestfs-tools</code>（<code>install.sh --with-image-build</code>）。</p>
+<p>你还需要在 <code>/etc/subuid</code> 和 <code>/etc/subgid</code> 里为自己的用户配一段<strong>从属 uid/gid 范围</strong>；
+没有它，user 命名空间就只能映射一个 uid。</p>
+<h3 id="the-quickest-way-to-a-working-host">最快搭出一台能用的宿主机<a class="hanchor" href="#the-quickest-way-to-a-working-host" aria-label="#">#</a></h3>
+<p>你不用手工照抄一遍安装脚本做的事。如果只想安装宿主机的依赖和配置，同时保留你自己构建
+的二进制程序：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">bash scripts/install.sh --no-binary
 </code></pre></div>
-<p>Read the flag list at the top of the script first: some flags change host-wide security settings
-(<code>--low-ports</code> lets any local program bind ports from 80, <code>--with-image-build</code> makes
-<code>/boot/vmlinuz-*</code> world-readable), and <code>--no-tune</code> skips the kernel modules and sysctls, including
-<code>br_netfilter</code>. <code>--performance</code> / <code>--no-performance</code> control CPU performance mode, transparent
-hugepages with <code>irqbalance</code>, and a user timer that runs <code>system prune --auto --threshold 75</code>; with
-neither flag the installer asks about each and, with no terminal, answers no. The CPU part is a
-systemd service that stores the boot-time values and puts them back on <code>stop</code>. None of this is
-needed for development.</p>
-<h3 id="memory-and-disk">Memory and disk<a class="hanchor" href="#memory-and-disk" aria-label="#">#</a></h3>
-<p>There is no fixed minimum. What costs resources is what you run: container images and layers,
-VM disks, and the Rust <code>target/</code> directory itself (debug builds of the whole workspace take
-several gigabytes). Keep an eye on free disk space — kubelets in a local cluster start evicting
-pods on disk pressure, which then looks like an engine problem.</p>
-<h2 id="diagnosing-the-host">Diagnosing the host<a class="hanchor" href="#diagnosing-the-host" aria-label="#">#</a></h2>
-<p>Build the binary (see <a href="build-and-test.html">Clone, build and test</a>) and ask it. The commands below are
-read-only unless you pass <code>--delegate</code>:</p>
+<p>先读一遍脚本开头的那份 flag 清单：有些 flag 会改变宿主机级别的安全设置
+（<code>--low-ports</code> 会让任何本地程序都能绑定 80 以上的端口，<code>--with-image-build</code> 会让
+<code>/boot/vmlinuz-*</code> 变成任何人都能读），<code>--no-tune</code> 会跳过内核模块和 sysctl，包括
+<code>br_netfilter</code>。<code>--performance</code> / <code>--no-performance</code> 控制 CPU 性能模式、带 <code>irqbalance</code>
+的透明大页，以及一个跑 <code>system prune --auto --threshold 75</code> 的用户级定时器；两个 flag 都不给
+的话，安装脚本会就每一项分别询问，而在没有终端的情况下会一律回答否。CPU 那部分是一个 systemd
+服务，会保存启动时的原始值，并在 <code>stop</code> 时把它们还原回去。开发时都不需要这些。</p>
+<h3 id="memory-and-disk">内存与磁盘<a class="hanchor" href="#memory-and-disk" aria-label="#">#</a></h3>
+<p>没有固定的最低要求。真正耗资源的是你实际跑的东西：容器镜像和层、VM 磁盘，以及 Rust 的
+<code>target/</code> 目录本身（整个工作区的 debug 构建能占好几个 GB）。留意可用磁盘空间 —— 本地集群里
+的 kubelet 一遇到磁盘压力就会开始驱逐 pod，那看起来又会像是引擎的问题。</p>
+<h2 id="diagnosing-the-host">诊断宿主机<a class="hanchor" href="#diagnosing-the-host" aria-label="#">#</a></h2>
+<p>构建出这个二进制程序（见 <a href="build-and-test.html">克隆、构建与测试</a>），然后去问它。下面这些
+命令，只要不带 <code>--delegate</code>，就都是只读的：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">./target/debug/delonix system doctor          # is every prerequisite met? says how to fix each
 ./target/debug/delonix system info            # rootless?, cgroup delegation, network infra, counts
 ./target/debug/delonix system setup           # diagnose cgroup delegation
 ./target/debug/delonix system resources       # which controllers are delegated, which flags are ignored
 </code></pre></div>
-<p><code>delonix system doctor --strict</code> exits non-zero when a check fails, which is useful in a
-provisioning script. If you run these on a machine that already has a Delonix installation in use,
-isolate the state first (see <a href="build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a>).</p>
-<h2 id="known-host-traps">Known host traps<a class="hanchor" href="#known-host-traps" aria-label="#">#</a></h2>
-<h3 id="ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: AppArmor blocks user namespaces for your dev binary<a class="hanchor" href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary" aria-label="#">#</a></h3>
-<p>Recent Ubuntu sets <code>kernel.apparmor_restrict_unprivileged_userns=1</code>. A binary without an AppArmor
-profile then cannot create a user namespace, and the engine dies at <code>unshare()</code> with <code>EPERM</code> —
-which reads like an engine bug.</p>
-<p><code>install.sh</code> installs a profile (<code>/etc/apparmor.d/delonix</code>, <code>flags=(unconfined)</code> with <code>userns</code>),
-but that profile is <strong>bound to one path</strong>: <code>&lt;install dir&gt;/delonix</code> (<code>/usr/local/bin/delonix</code> by
-default, <code>~/.local/bin/delonix</code> with <code>--user</code>). A binary you just built at
-<code>target/debug/delonix</code> — or copied to <code>/tmp</code> — is <strong>not</strong> covered.</p>
-<p>Options, from least to most invasive:</p>
+<p><code>delonix system doctor --strict</code> 在某项检查失败时会以非零码退出，这在置备脚本里很有用。
+如果你是在一台已经有正在使用的 Delonix 安装的机器上跑这些命令，先把状态隔离开（见
+<a href="build-and-test.html#isolating-the-engines-state">隔离引擎的状态</a>）。</p>
+<h2 id="known-host-traps">已知的宿主机陷阱<a class="hanchor" href="#known-host-traps" aria-label="#">#</a></h2>
+<h3 id="ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+：AppArmor 会挡住你的开发二进制程序创建 user 命名空间<a class="hanchor" href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary" aria-label="#">#</a></h3>
+<p>较新的 Ubuntu 会设置 <code>kernel.apparmor_restrict_unprivileged_userns=1</code>。这样一来，一个
+没有 AppArmor 配置文件的二进制程序就没法创建 user 命名空间，引擎会在 <code>unshare()</code> 上带着
+<code>EPERM</code> 死掉 —— 读起来就像引擎的 bug。</p>
+<p><code>install.sh</code> 会安装一个配置文件（<code>/etc/apparmor.d/delonix</code>，带 <code>userns</code> 的
+<code>flags=(unconfined)</code>），但那个配置文件<strong>绑定在一个路径上</strong>：<code>&lt;安装目录&gt;/delonix</code>（默认是
+<code>/usr/local/bin/delonix</code>，加 <code>--user</code> 就是 <code>~/.local/bin/delonix</code>）。你刚构建出来、放在
+<code>target/debug/delonix</code> 的二进制程序 —— 或者复制到 <code>/tmp</code> 的那个 —— <strong>不在</strong>它的覆盖范围内。</p>
+<p>几个选项，按侵入程度从小到大排列：</p>
 <ol>
-<li>Add a second profile for your development path (for example your worktree's
-   <code>target/debug/delonix</code>), following the same shape as the one the installer writes, and load it
-   with <code>sudo apparmor_parser -r &lt;file&gt;</code>. This touches nothing that is already running.</li>
-<li>Install your build to the profiled path (<code>sudo install -m 0755 target/debug/delonix /usr/local/bin/</code>)
-   — <strong>only on a machine where no Delonix workload is in use</strong>. The installed binary is what boot
-   units (<code>ExecStart=&lt;exe&gt; container start …</code>) and the servers re-execute, so on a host with live
-   workloads a debug build would silently become the production engine.</li>
-<li>Set <code>kernel.apparmor_restrict_unprivileged_userns=0</code> — this lowers a host-wide boundary; only
-   on a machine you own.</li>
+<li>为你的开发路径（比如你 worktree 里的 <code>target/debug/delonix</code>）另外加一个配置文件，
+   照搬安装脚本写的那份的形状，再用 <code>sudo apparmor_parser -r &lt;file&gt;</code> 加载它。这不会碰任何
+   已经在跑的东西。</li>
+<li>把你的构建安装到那个有配置文件覆盖的路径
+   （<code>sudo install -m 0755 target/debug/delonix /usr/local/bin/</code>）—— <strong>只能在一台没有
+   Delonix 工作负载在用的机器上这么做</strong>。boot unit（<code>ExecStart=&lt;exe&gt; container start …</code>）
+   和各个服务器重新执行的就是这个已安装的二进制程序，所以在一台有实机工作负载的宿主机上，
+   一个 debug 构建会悄无声息地变成生产环境的引擎。</li>
+<li>设置 <code>kernel.apparmor_restrict_unprivileged_userns=0</code> —— 这会降低一道宿主机级别的
+   边界；只能在你自己的机器上这么做。</li>
 </ol>
-<h3 id="cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation: some limits are refused, others are not enforced<a class="hanchor" href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced" aria-label="#">#</a></h3>
-<p>Resource limits only reach the kernel if the shell you run the engine from sits in a <strong>delegated</strong>
-cgroup. This is a cgroup v2 rule, not a Delonix limitation — rootless Podman has the same
-requirement. Without delegation the engine does two different things, depending on the flag:</p>
+<h3 id="cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup 委派：有些限制会被拒绝，有些不会被强制执行<a class="hanchor" href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced" aria-label="#">#</a></h3>
+<p>资源限制只有在你用来运行引擎的那个 shell 本身位于一个<strong>受委派</strong>的 cgroup 里时，才能
+到达内核。这是 cgroup v2 的规则，不是 Delonix 的限制 —— rootless 的 Podman 也有同样的
+要求。没有委派的情况下，引擎会做两种不同的事，取决于用的是哪个 flag：</p>
 <ul>
-<li><code>-m</code>/<code>--memory</code>, <code>-c</code>/<code>--cpus</code> and <code>--cpu-weight</code>: <code>container run</code> <strong>refuses</strong> before creating
-  anything, with an error that names the fix, and exits <strong>69</strong> (<code>Error::Unavailable</code>, the
-  <code>EX_UNAVAILABLE</code> class — <code>preflight_resource_limits</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> runs the
-  container anyway, unlimited, with a warning.</li>
-<li><code>--cpuset</code>, <code>--io-weight</code> and the <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/
-  <code>--device-write-iops</code> family are <strong>not</strong> checked by that probe: they are accepted and applied
-  best-effort, so without the <code>cpuset</code>/<code>io</code> controllers they have no effect and nothing fails.</li>
+<li><code>-m</code>/<code>--memory</code>、<code>-c</code>/<code>--cpus</code> 和 <code>--cpu-weight</code>：<code>container run</code> 会在创建任何东西之前就
+  <strong>拒绝</strong>执行，报出一个点名修法的错误，退出码是 <strong>69</strong>（<code>Error::Unavailable</code>，
+  <code>EX_UNAVAILABLE</code> 这一类 —— 见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a> 里的
+  <code>preflight_resource_limits</code>）。<code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> 会带着告警照样把容器
+  跑起来，只是不加限制。</li>
+<li><code>--cpuset</code>、<code>--io-weight</code> 以及
+  <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/<code>--device-write-iops</code> 这一
+  族，<strong>不会</strong>被那个探测检查：它们会被接受，并尽力应用，所以没有 <code>cpuset</code>/<code>io</code>
+  控制器时，它们就是不生效，也不会报任何错误。</li>
 </ul>
-<p>There is no <code>--pids-limit</code> flag; the pids ceiling is a property of the engine's cgroup group, not
-of <code>container run</code>.</p>
-<p>The common case is an <strong>SSH session</strong>: its scope sits outside your delegated subtree, and the
-session cannot move itself in — why, with the commands to see it, is in
-<a href="linux-foundations.html#delegation-to-users">Linux foundations — Delegation to users</a>. The
-per-command fix needs no root:</p>
+<p>没有 <code>--pids-limit</code> 这个 flag；pids 的上限是引擎那个 cgroup 组本身的属性，不是
+<code>container run</code> 的属性。</p>
+<p>最常见的情况是 <strong>SSH 会话</strong>：它的 scope 位于你被委派的那棵子树之外，会话本身也没法把
+自己挪进去 —— 具体为什么，以及怎么用命令看出来，见
+<a href="linux-foundations.html#delegation-to-users">Linux 基础 —— 委派给用户</a>。针对单条命令的修法
+不需要 root：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 </code></pre></div>
-<p>For long-lived workloads, use a systemd <strong>user</strong> unit with <code>Delegate=yes</code>. Some hosts delegate only
-<code>cpu memory pids</code> to user sessions; <code>cpuset</code> and <code>io</code> may never be available rootless, and
-<code>delonix system resources</code> names the flags that will be ignored. <code>delonix system setup --delegate</code>
-writes a system-wide drop-in (needs root, takes effect at the next login) when the <code>cpu</code>
-controller itself is missing.</p>
-<h3 id="a-stale-delonix-on-your-path">A stale <code>delonix</code> on your <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
-<p>If Delonix is installed on the machine, <code>delonix</code> on your <code>PATH</code> is the installed release, not your
-tree. Always run <code>./target/debug/delonix</code> (or <code>target/release/delonix</code>) when you test a change.
-<code>--version</code> shows the commit and the distance from the last tag
-(<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>), because between releases two builds share the same
-version number.</p>
-<h3 id="other-traps-you-may-hit">Other traps you may hit<a class="hanchor" href="#other-traps-you-may-hit" aria-label="#">#</a></h3>
+<p>对长期运行的工作负载，用一个带 <code>Delegate=yes</code> 的 systemd <strong>user</strong> unit。有些宿主机只把
+<code>cpu memory pids</code> 委派给用户会话；<code>cpuset</code> 和 <code>io</code> 在 rootless 下可能永远都拿不到，
+<code>delonix system resources</code> 会点名哪些 flag 将会被忽略。当 <code>cpu</code> 控制器本身都缺失时，
+<code>delonix system setup --delegate</code> 会写一个系统级的 drop-in（需要 root，在下次登录时生效）。</p>
+<h3 id="a-stale-delonix-on-your-path"><code>PATH</code> 上一个过期的 <code>delonix</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
+<p>如果这台机器上装了 Delonix，<code>PATH</code> 上的 <code>delonix</code> 就是那个已安装的发行版，不是你的
+代码树。测试改动时，永远运行 <code>./target/debug/delonix</code>（或者 <code>target/release/delonix</code>）。
+<code>--version</code> 会显示提交号和它离上一个 tag 的距离
+（<code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>），因为在两次发布之间，两个构建会共用同一个
+版本号。</p>
+<h3 id="other-traps-you-may-hit">你可能遇到的其他陷阱<a class="hanchor" href="#other-traps-you-may-hit" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Ports below 1024</strong> fail rootless with <code>slirp_add_hostfwd failed</code>: the port is bound by
-  <code>slirp4netns</code>, an unprivileged process. Use a high port, or opt in with <code>install.sh --low-ports</code>.</li>
-<li><strong>Hosted CI runners</strong> (GitHub-hosted) block unprivileged user namespaces. The chaos workflow
-  detects this and reports <code>skipped</code>, not <code>success</code>; to exercise the live paths you need a real
-  host, a self-hosted runner or a VM.</li>
-<li><strong>VM firmware and image-building traps</strong> (the Cloud Hypervisor firmware choice, an old <code>passt</code>
-  in libguestfs builds, <code>/boot/vmlinuz-*</code> permissions) are covered in <a href="microvm-setup.html">Building microVMs</a>.</li>
+<li><strong>1024 以下的端口</strong>在 rootless 下会以 <code>slirp_add_hostfwd failed</code> 失败：端口是由
+  <code>slirp4netns</code> 这个无特权进程绑定的。用一个高位端口，或者用
+  <code>install.sh --low-ports</code> 主动打开这个口子。</li>
+<li><strong>托管的 CI runner</strong>（GitHub 托管的那种）会挡住无特权 user 命名空间。混沌测试的
+  workflow 会检测到这一点，报告 <code>skipped</code>，而不是 <code>success</code>；要走一遍那些实机路径，你需要
+  一台真实的宿主机、一个自托管 runner，或者一台 VM。</li>
+<li><strong>VM 固件和构建镜像时的陷阱</strong>（Cloud Hypervisor 固件的选择、libguestfs 构建里那个
+  过时的 <code>passt</code>、<code>/boot/vmlinuz-*</code> 的权限）在 <a href="microvm-setup.html">构建 microVM</a> 里讲过。</li>
 </ul>
 <hr />
-<p><strong>Next:</strong> <a href="build-and-test.html">Clone, build and test</a> — building, installing and testing your tree, and every CI gate as a local command.</p>
-<nav class="pager"><a href="rust-primer.html"><span>← 上一页</span>Rust primer for this codebase</a><a class="next" href="build-and-test.html"><span>下一页 →</span>Clone, build and test</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/environment.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/environment.md</code></footer>
+<p><strong>下一篇：</strong><a href="build-and-test.html">克隆、构建与测试</a> —— 构建、安装并测试你的代码树，以及
+把每一个 CI 门禁都当作本地命令来跑。</p>
+<nav class="pager"><a href="rust-primer.html"><span>← 上一页</span>本代码库的 Rust 入门</a><a class="next" href="build-and-test.html"><span>下一页 →</span>克隆、构建与测试</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/environment.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/environment.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#toolchain">Toolchain</a><ul>
-<li><a href="#protoc-required-to-build">protoc (required to build)</a></li>
-<li><a href="#optional-tools-only-for-specific-gates">Optional tools, only for specific gates</a></li>
+<li><a href="#toolchain">工具链</a><ul>
+<li><a href="#protoc-required-to-build">protoc（构建必需）</a></li>
+<li><a href="#optional-tools-only-for-specific-gates">可选工具，只用于特定门禁</a></li>
 </ul>
 </li>
-<li><a href="#kernel-requirements">Kernel requirements</a></li>
-<li><a href="#host-packages">Host packages</a><ul>
-<li><a href="#the-quickest-way-to-a-working-host">The quickest way to a working host</a></li>
-<li><a href="#memory-and-disk">Memory and disk</a></li>
+<li><a href="#kernel-requirements">内核要求</a></li>
+<li><a href="#host-packages">宿主机软件包</a><ul>
+<li><a href="#the-quickest-way-to-a-working-host">最快搭出一台能用的宿主机</a></li>
+<li><a href="#memory-and-disk">内存与磁盘</a></li>
 </ul>
 </li>
-<li><a href="#diagnosing-the-host">Diagnosing the host</a></li>
-<li><a href="#known-host-traps">Known host traps</a><ul>
-<li><a href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+: AppArmor blocks user namespaces for your dev binary</a></li>
-<li><a href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation: some limits are refused, others are not enforced</a></li>
-<li><a href="#a-stale-delonix-on-your-path">A stale delonix on your PATH</a></li>
-<li><a href="#other-traps-you-may-hit">Other traps you may hit</a></li>
+<li><a href="#diagnosing-the-host">诊断宿主机</a></li>
+<li><a href="#known-host-traps">已知的宿主机陷阱</a><ul>
+<li><a href="#ubuntu-2310-apparmor-blocks-user-namespaces-for-your-dev-binary">Ubuntu 23.10+：AppArmor 会挡住你的开发二进制程序创建 user 命名空间</a></li>
+<li><a href="#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup 委派：有些限制会被拒绝，有些不会被强制执行</a></li>
+<li><a href="#a-stale-delonix-on-your-path">PATH 上一个过期的 delonix</a></li>
+<li><a href="#other-traps-you-may-hit">你可能遇到的其他陷阱</a></li>
 </ul>
 </li>
 </ul>

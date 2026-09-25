@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Publishing the documentation · Delonix Runtime — 贡献者手册</title>
+<title>发布文档 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,120 +206,95 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a class="on" aria-current="page" href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a class="on" aria-current="page" href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">贡献</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="publishing-the-documentation">Publishing the documentation</h1>
-<p><strong>Before you read:</strong> <a href="contributing-workflow.html">Contribution workflow</a>, <a href="releases-and-stability.html">Releases and stability</a> (what a pushed tag does — this page's § <em>What happens at release time</em> is its documentation half) and the <a href="project-structure.html#generated-vs-hand-written">generated vs hand-written table</a> in Project structure.</p>
-<p>Documentation in this repository is either <strong>generated from the code</strong> (and then checked by a gate)
-or <strong>written by hand</strong> (and then reviewed). This page explains which is which, how each is
-published, and what you have to do when your change affects documentation. After it you know,
-for any change, which generator to run and which files to commit with it.</p>
-<h2 id="where-it-is-published">Where it is published<a class="hanchor" href="#where-it-is-published" aria-label="#">#</a></h2>
-<p>The site is served by <strong>GitHub Pages</strong> from the <code>/docs</code> directory of <code>main</code>, at
-<a href="https://angolardevops.github.io/delonix-runtime/">https://angolardevops.github.io/delonix-runtime/</a>. The Pages source setting itself lives in the
-repository settings, not in the tree; what the tree does contain is <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/.nojekyll" target="_blank" rel="noopener"><code>docs/.nojekyll</code></a>, which turns
-Jekyll off so every file under <code>docs/</code> is served exactly as committed.</p>
-<p>A consequence worth knowing: because Jekyll is off, Markdown files under <code>docs/</code> — including this
-handbook in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> — are <strong>not</strong> rendered to HTML by Pages; they are served as plain files.
-The rendered view of the handbook is GitHub's own Markdown rendering when browsing the repository
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener"><code>docs/dev/README.md</code></a> on github.com), which also renders the Mermaid diagrams. Links between
-handbook pages are relative, so they work in both places.</p>
-<h2 id="who-owns-what">Who owns what<a class="hanchor" href="#who-owns-what" aria-label="#">#</a></h2>
+<h1 id="publishing-the-documentation">发布文档</h1>
+<p><strong>阅读之前：</strong> <a href="contributing-workflow.html">贡献工作流</a>、<a href="releases-and-stability.html">发布与稳定性</a>（一个被推送的标签会做什么——本页的 <em>发布时会发生什么</em> 一节正是它对应的文档说明）以及项目结构页里的<a href="project-structure.html#generated-vs-hand-written">生成 vs 手写对照表</a>。</p>
+<p>本仓库里的文档要么是<strong>从代码生成的</strong>（然后由一个门禁检查），要么是<strong>手写的</strong>（然后经过评审）。本页解释哪个是哪个、每一种是怎么发布的，以及当你的改动影响到文档时你该做什么。读完之后，对于任何一种改动，你都会知道该跑哪个生成器、该把哪些文件和它一起提交。</p>
+<h2 id="where-it-is-published">发布在哪里<a class="hanchor" href="#where-it-is-published" aria-label="#">#</a></h2>
+<p>这个站点由 <strong>GitHub Pages</strong> 从 <code>main</code> 的 <code>/docs</code> 目录提供服务，地址是
+<a href="https://angolardevops.github.io/delonix-runtime/">https://angolardevops.github.io/delonix-runtime/</a>。Pages 的来源设置本身存在于仓库设置里，不在代码树中；代码树里实际存在的是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/.nojekyll" target="_blank" rel="noopener"><code>docs/.nojekyll</code></a>，它关掉了 Jekyll，让 <code>docs/</code> 下的每一个文件都原样按提交时的样子被提供。</p>
+<p>值得知道的一个后果：因为 Jekyll 被关掉了，<code>docs/</code> 下的 Markdown 文件——包括 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> 里的这本手册——<strong>不会</strong>被 Pages 渲染成 HTML；它们是以纯文件形式提供的。手册的渲染视图，是 GitHub 自己在浏览仓库时对 Markdown 的渲染（github.com 上的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener"><code>docs/dev/README.md</code></a>），它也会渲染 Mermaid 图。手册各页面之间的链接都是相对链接，所以在两个地方都能用。</p>
+<h2 id="who-owns-what">谁负责什么<a class="hanchor" href="#who-owns-what" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Surface</th>
-<th>What it is</th>
-<th>How it stays true</th>
+<th>表面</th>
+<th>是什么</th>
+<th>如何保持真实</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener"><code>README.rst</code></a></td>
-<td>the project front page</td>
-<td>hand-written, checked by <code>docs_cli_gate.py</code></td>
+<td>项目的门面页</td>
+<td>手写，由 <code>docs_cli_gate.py</code> 检查</td>
 </tr>
 <tr>
-<td><code>docs/*.html</code>, <code>docs/comandos/*.html</code></td>
-<td>the user site</td>
-<td><strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> from the binary's <code>--help</code> plus editorial text in the generator; checked by the <code>docs</code> CI job and at release time</td>
+<td><code>docs/*.html</code>、<code>docs/comandos/*.html</code></td>
+<td>用户站点</td>
+<td>由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> 从二进制文件的 <code>--help</code> 加上生成器里的编辑文字<strong>生成</strong>；由 <code>docs</code> CI 任务以及发布时检查</td>
 </tr>
 <tr>
 <td><code>docs/<wbr>releases/<wbr>v&lt;version&gt;.<wbr>md</code></td>
-<td>release notes, one per tag</td>
-<td>hand-written in the release commit; published as the GitHub Release body</td>
+<td>发布说明，一个标签一份</td>
+<td>在发布提交中手写；作为 GitHub Release 的正文发布</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a></td>
-<td>the per-release feature appendix</td>
-<td><strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a>; never edit by hand</td>
+<td>按发布版本划分的功能附录</td>
+<td>由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> 从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a> <strong>生成</strong>；绝不手动编辑</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a></td>
-<td>C4 architecture diagrams</td>
-<td>hand-written, kept in step with the code; rendered into the site by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a></td>
+<td>C4 架构图</td>
+<td>手写，与代码保持同步；由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> 渲染进站点</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></td>
-<td>architecture decisions</td>
-<td>one file per decision; accepted ADRs are superseded, never rewritten</td>
+<td>架构决策</td>
+<td>一个决策一个文件；已接受的 ADR 会被后来者取代，绝不重写</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
-<td>the node API's REST encoding</td>
-<td><strong>generated</strong> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> by <code>scripts/<wbr>contract_gate.<wbr>py --update</code></td>
+<td>节点 API 的 REST 编码</td>
+<td>由 <code>scripts/<wbr>contract_gate.<wbr>py --update</code> 从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> <strong>生成</strong></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
-<td>this contributor handbook</td>
-<td>generated <strong>facts</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) plus hand-written <strong>narrative</strong></td>
+<td>本贡献者手册</td>
+<td>生成的<strong>事实</strong>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>）加上手写的<strong>叙述</strong></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a></td>
-<td>the short front door for contributors</td>
-<td>hand-written; points into <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
+<td>贡献者的简短入口</td>
+<td>手写；指向 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="the-user-site-docsgenpy">The user site: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a><a class="hanchor" href="#the-user-site-docsgenpy" aria-label="#">#</a></h2>
-<p>The reference pages embed the <strong>real</strong> <code>--help</code> of the <code>delonix</code> binary, captured when the generator
-runs, so the site never documents a flag that does not exist. The editorial content (introductions,
-examples, notes) lives in dictionaries inside <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> itself — edit it there, not in the HTML.</p>
+<h2 id="the-user-site-docsgenpy">用户站点：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a><a class="hanchor" href="#the-user-site-docsgenpy" aria-label="#">#</a></h2>
+<p>参考页面嵌入的是生成器运行时捕获的 <code>delonix</code> 二进制文件的<strong>真实</strong> <code>--help</code> 输出，所以站点里绝不会写着一个不存在的标志位。编辑性的内容（介绍、示例、说明）存在于 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> 自身内部的字典里——要编辑就在那里编辑，不要在 HTML 里改。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin
 python3 -m pip install markdown     # the generator renders ARCHITECTURE.md
 python3 docs/gen.py                 # uses the tree&#x27;s release binary by default
 git diff --stat -- docs/
 </code></pre></div>
-<p>The generator also accepts the binary path as its first argument. Commit the regenerated files
-together with the CLI change that caused them. Two checks fail if you do not:</p>
+<p>生成器也接受二进制文件路径作为它的第一个参数。把重新生成的文件和引起它们变化的 CLI 改动一起提交。有两个检查会在你不这样做时失败：</p>
 <ul>
-<li>the <strong><code>docs</code> job</strong> in CI regenerates the site and fails when <code>git diff -- docs/</code> is not empty; the
-  same job validates every <code>examples/*.yaml</code> with <code>stack apply --dry-run</code> and <code>stack validate</code>, and
-  checks the man pages generated by <code>delonix man --dir &lt;dir&gt; --index</code> with <code>groff</code>;</li>
-<li>the <strong>release workflow</strong> repeats the regeneration against the release build before publishing, so
-  a tag whose site is out of date does not ship.</li>
+<li>CI 里的 <strong><code>docs</code> 任务</strong> 会重新生成站点，如果 <code>git diff -- docs/</code> 不为空就失败；同一个任务还会用 <code>stack apply --dry-run</code> 和 <code>stack validate</code> 验证每一个 <code>examples/*.yaml</code>，并用 <code>groff</code> 检查由 <code>delonix man --dir &lt;dir&gt; --index</code> 生成的 man 手册页；</li>
+<li><strong>发布工作流</strong> 会在发布构建之上重新跑一遍生成流程，然后才发布，所以一个站点已经过时的标签不会发出去。</li>
 </ul>
-<h2 id="the-command-citation-gate-scriptsdocs_cli_gatepy">The command-citation gate: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a><a class="hanchor" href="#the-command-citation-gate-scriptsdocs_cli_gatepy" aria-label="#">#</a></h2>
-<p>Every <code>delonix …</code> command quoted in a code context (<code>&lt;code&gt;</code>, <code>&lt;pre&gt;</code>, Markdown code fences, reST
-literal blocks, YAML comments) in the current documentation must resolve in the command tree of the
-binary built from the tree (read through <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a>). It runs in the <code>cli-surface</code> CI job:</p>
+<h2 id="the-command-citation-gate-scriptsdocs_cli_gatepy">命令引用门禁：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a><a class="hanchor" href="#the-command-citation-gate-scriptsdocs_cli_gatepy" aria-label="#">#</a></h2>
+<p>当前文档中任何以代码上下文（<code>&lt;code&gt;</code>、<code>&lt;pre&gt;</code>、Markdown 代码围栏、reST 字面量块、YAML 注释）引用的 <code>delonix …</code> 命令，都必须能在这棵代码树构建出的二进制文件的命令树里解析出来（通过 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli-tree.sh" target="_blank" rel="noopener"><code>scripts/cli-tree.sh</code></a> 读取）。它运行在 CI 的 <code>cli-surface</code> 任务里：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">cargo build --release -p delonix-runtime-bin
 DELONIX_BIN=&quot;$PWD/target/release/delonix&quot; python3 scripts/docs_cli_gate.py
 python3 scripts/docs_cli_gate.py --list      # every citation and where it is
 </code></pre></div>
-<p>It exists because commands were removed in consecutive major releases and several current pages
-kept teaching <code>unrecognized subcommand</code>. Dated historical records — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/discovery" target="_blank" rel="noopener"><code>docs/discovery/</code></a> and the dated audit and measurement reports — are excluded on
-purpose: they must keep quoting the spelling of the version they describe. A citation that is wrong
-on purpose goes into <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_allow.tsv" target="_blank" rel="noopener"><code>scripts/docs_cli_allow.tsv</code></a> with a reason.</p>
-<p>The files it scans are listed in <code>TARGETS</code> at the top of the script. Check that list when you add a
-new documentation directory; a page outside it is not checked.</p>
-<h2 id="the-handbooks-facts-scriptsdev_docspy">The handbook's facts: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a><a class="hanchor" href="#the-handbooks-facts-scriptsdev_docspy" aria-label="#">#</a></h2>
-<p>The structural facts in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> — the crates and their layers, the dependency graph, the
-binaries, the pinned toolchain and the CI jobs — are generated from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>,
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. In a page they sit
-between markers:</p>
+<p>它之所以存在，是因为命令在连续几个大版本里被移除过，而当时有好几个现存页面还在教人 <code>unrecognized subcommand</code>。带日期的历史记录——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/discovery" target="_blank" rel="noopener"><code>docs/discovery/</code></a> 以及带日期的审计与测量报告——是刻意被排除在外的：它们必须继续沿用它们所描述的那个版本的拼写。一处故意错误的引用，会被记录进 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/docs_cli_gate.py" target="_blank" rel="noopener"><code>scripts/docs_cli_gate.py</code></a> 并附上原因。</p>
+<p>它扫描的文件列在脚本顶部的 <code>TARGETS</code> 里。当你新增一个文档目录时，要检查这份列表；不在里面的页面不会被检查。</p>
+<h2 id="the-handbooks-facts-scriptsdev_docspy">手册的事实部分：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a><a class="hanchor" href="#the-handbooks-facts-scriptsdev_docspy" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> 里的结构性事实——各个 crate 及其所在的层、依赖图、各个二进制文件、锁定的工具链版本、CI 任务——是从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> 生成的。在页面中，它们位于标记之间：</p>
 <div class="code"><div class="code-head"><span class="lang">markdown</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-markdown">&lt;!-- dev-docs:begin &lt;key&gt; --&gt;
 …generated, do not edit…
 &lt;!-- dev-docs:end &lt;key&gt; --&gt;
@@ -327,86 +302,71 @@ between markers:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">python3 scripts/dev_docs.py            # rewrite every generated region
 python3 scripts/dev_docs.py --check    # exit 1 when docs/dev is stale (CI job `arch`)
 </code></pre></div>
-<p>Rules:</p>
+<p>规则：</p>
 <ul>
-<li><strong>Never edit inside a region.</strong> The next regeneration overwrites it and <code>--check</code> fails in CI. If
-  a fact is wrong, fix its source (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, the <code>LAYERS</code> table in <code>arch_fitness.py</code>, <code>ci.yml</code>)
-  or the generator.</li>
-<li>Text <strong>outside</strong> the markers is never touched, so narrative can surround a generated table.</li>
-<li>A <strong>new region</strong> needs a <code>render_*</code> function, a key in <code>regions()</code> and a marker on a page, in the
-  same commit.</li>
-<li>No numbers that change on every commit (lines, tests, commits) — not in the generator and not in
-  the narrative. A gate that is red on every PR stops being read, and a hand-written count silently
-  becomes false.</li>
+<li><strong>绝不在一个区域内部编辑。</strong> 下一次重新生成会把它覆盖掉，<code>--check</code> 也会在 CI 里失败。如果某个事实错了，去修它的源头（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>、<code>arch_fitness.py</code> 里的 <code>LAYERS</code> 表、<code>ci.yml</code>），或者修生成器本身。</li>
+<li>标记<strong>之外</strong>的文字永远不会被触碰，所以叙述可以围绕着一张生成的表来写。</li>
+<li>一个<strong>新区域</strong>需要一个 <code>render_*</code> 函数、<code>regions()</code> 里的一个键，以及某个页面上的一个标记——三者在同一个提交里一起加上。</li>
+<li>不要写任何每次提交都会变的数字（行数、测试数、提交数）——生成器里不要写，叙述里也不要写。一个每次 PR 都是红的门禁会不再被人看，一个手写的数字会在不知不觉中变成假的。</li>
 </ul>
-<p>If your PR adds or moves a crate, changes a dependency between crates, adds a binary, bumps the
-toolchain or changes a CI job, run <code>python3 scripts/dev_docs.py</code> and commit the result with it.</p>
-<h2 id="what-happens-at-release-time">What happens at release time<a class="hanchor" href="#what-happens-at-release-time" aria-label="#">#</a></h2>
-<p>The release workflow (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a>) runs when someone asks for it
-(<code>gh workflow run release.yml -f tag=v4.4.0</code>) — a pushed tag alone does nothing. For documentation
-it:</p>
+<p>如果你的 PR 新增或移动了一个 crate、改变了 crate 之间的依赖、新增了一个二进制文件、升级了工具链，或者改动了一个 CI 任务，就跑一遍 <code>python3 scripts/dev_docs.py</code>，并把结果一起提交。</p>
+<h2 id="what-happens-at-release-time">发布时会发生什么<a class="hanchor" href="#what-happens-at-release-time" aria-label="#">#</a></h2>
+<p>发布工作流（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/release.yml" target="_blank" rel="noopener"><code>.github/workflows/release.yml</code></a>）只在有人要求时才运行（<code>gh workflow run release.yml -f tag=v4.4.0</code>）——单单推送一个标签什么都不会发生。就文档而言，它会：</p>
 <ol>
-<li>regenerates the user site against the release build and <strong>fails</strong> if <code>docs/</code> differs;</li>
-<li>publishes the GitHub Release with <code>docs/releases/&lt;tag&gt;.md</code> as its notes (or generated notes when
-   that file does not exist);</li>
-<li>checks out <code>main</code>, runs <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> (the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a> appendix) and
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> (the handbook facts), and commits both to <code>main</code> with <code>[skip ci]</code> when
-   they changed.</li>
+<li>针对发布构建重新生成用户站点，如果 <code>docs/</code> 有差异就<strong>失败</strong>；</li>
+<li>以 <code>docs/releases/&lt;tag&gt;.md</code> 作为正文发布 GitHub Release（如果该文件不存在，就用生成的说明）；</li>
+<li>检出 <code>main</code>，跑 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a> 附录）和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>（手册的事实部分），如果有变化，就把两者一起提交到 <code>main</code>，并带上 <code>[skip ci]</code>。</li>
 </ol>
-<p>The <strong>narrative</strong> of the handbook is not regenerated by CI. After a release has been published and
-validated, a maintainer-run review step reads the changes between the previous and the new tag
-together with the release notes, updates only the handbook pages those changes affect, and opens a
-pull request for it. When nothing structural or procedural changed, the outcome of that review is
-"nothing to update", stated explicitly.</p>
-<h2 id="what-this-means-for-your-pull-request">What this means for your pull request<a class="hanchor" href="#what-this-means-for-your-pull-request" aria-label="#">#</a></h2>
+<p>手册的<strong>叙述</strong>部分不会被 CI 重新生成。在一次发布被发布并验证之后，会有一个由维护者手动触发的评审步骤，读取上一个标签和新标签之间的改动以及发布说明，只更新那些改动所影响到的手册页面，并为此开一个拉取请求。当没有任何结构性或流程性的东西发生变化时，那次评审的结论就是"没什么要更新的"，并明确说出来。</p>
+<h2 id="what-this-means-for-your-pull-request">这对你的拉取请求意味着什么<a class="hanchor" href="#what-this-means-for-your-pull-request" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Your change</th>
-<th>Also do</th>
+<th>你的改动</th>
+<th>还要做的事</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>CLI help, a command, a flag</td>
-<td><code>python3 docs/gen.py</code> (release build) and commit <code>docs/</code>; update <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a> if leaves changed; fix any citation <code>docs_cli_gate.py</code> reports</td>
+<td>CLI 帮助文字、一个命令、一个标志位</td>
+<td><code>python3 docs/gen.py</code>（发布构建）并提交 <code>docs/</code>；如果叶子命令变了，更新 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/cli_baseline.tsv" target="_blank" rel="noopener"><code>scripts/<wbr>cli_baseline.<wbr>tsv</code></a>；修好 <code>docs_cli_gate.py</code> 报告的任何引用问题</td>
 </tr>
 <tr>
-<td>A crate, a crate dependency, a binary, the toolchain or a CI job</td>
-<td><code>python3 scripts/<wbr>dev_docs.<wbr>py</code> and commit <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
+<td>一个 crate、一个 crate 依赖、一个二进制文件、工具链，或者一个 CI 任务</td>
+<td><code>python3 scripts/<wbr>dev_docs.<wbr>py</code> 并提交 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
 </tr>
 <tr>
-<td>The node contract in <code>proto/</code></td>
-<td><code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code> and commit <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
+<td><code>proto/</code> 里的节点契约</td>
+<td><code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code> 并提交 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a></td>
 </tr>
 <tr>
-<td>A structural decision</td>
-<td>an ADR in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> (see <a href="contributing-workflow.html#when-to-write-an-adr">Contribution workflow</a>)</td>
+<td>一个结构性决策</td>
+<td>在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a> 里写一份 ADR（见<a href="contributing-workflow.html#when-to-write-an-adr">贡献工作流</a>）</td>
 </tr>
 <tr>
-<td>A user-visible feature</td>
-<td>describe it in the PR so it can go into the next release notes</td>
+<td>一个用户可见的功能</td>
+<td>在 PR 里描述它，这样它就能进入下一份发布说明</td>
 </tr>
 <tr>
-<td>How contributors build, test or work</td>
-<td>the relevant page of this handbook</td>
+<td>贡献者如何构建、测试或工作</td>
+<td>本手册相应的那一页</td>
 </tr>
 </tbody>
 </table></div>
 <hr />
-<p><strong>Next:</strong> <a href="cloud-native-standards.html">Cloud native standards, layer by layer</a> — the reference part: each cloud native standard, what it requires, and the engine's conformance with dates.</p>
-<nav class="pager"><a href="releases-and-stability.html"><span>← 上一页</span>Releases and stability</a><a class="next" href="cloud-native-standards.html"><span>下一页 →</span>Cloud native standards, layer by layer</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/publishing-docs.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/publishing-docs.md</code></footer>
+<p><strong>下一篇：</strong> <a href="cloud-native-standards.html">云原生标准，逐层讲解</a>——参考部分：每一项云原生标准、它要求什么，以及引擎对它的符合情况和日期。</p>
+<nav class="pager"><a href="releases-and-stability.html"><span>← 上一页</span>发布与稳定性</a><a class="next" href="cloud-native-standards.html"><span>下一页 →</span>云原生标准，逐层展开</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/publishing-docs.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/publishing-docs.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#where-it-is-published">Where it is published</a></li>
-<li><a href="#who-owns-what">Who owns what</a></li>
-<li><a href="#the-user-site-docsgenpy">The user site: docs/gen.py</a></li>
-<li><a href="#the-command-citation-gate-scriptsdocs_cli_gatepy">The command-citation gate: scripts/docs_cli_gate.py</a></li>
-<li><a href="#the-handbooks-facts-scriptsdev_docspy">The handbook's facts: scripts/dev_docs.py</a></li>
-<li><a href="#what-happens-at-release-time">What happens at release time</a></li>
-<li><a href="#what-this-means-for-your-pull-request">What this means for your pull request</a></li>
+<li><a href="#where-it-is-published">发布在哪里</a></li>
+<li><a href="#who-owns-what">谁负责什么</a></li>
+<li><a href="#the-user-site-docsgenpy">用户站点：docs/gen.py</a></li>
+<li><a href="#the-command-citation-gate-scriptsdocs_cli_gatepy">命令引用门禁：scripts/docs_cli_gate.py</a></li>
+<li><a href="#the-handbooks-facts-scriptsdev_docspy">手册的事实部分：scripts/dev_docs.py</a></li>
+<li><a href="#what-happens-at-release-time">发布时会发生什么</a></li>
+<li><a href="#what-this-means-for-your-pull-request">这对你的拉取请求意味着什么</a></li>
 </ul>
 </div>
 </aside>

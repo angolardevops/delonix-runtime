@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Rust primer for this codebase · Delonix Runtime — 贡献者手册</title>
+<title>本代码库的 Rust 入门 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,28 +206,19 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a class="on" aria-current="page" href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a class="on" aria-current="page" href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">基础</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="rust-primer-for-this-codebase">Rust primer for this codebase</h1>
-<p><strong>Before you read:</strong> <a href="cloud-native-primer.html">Cloud native primer</a>, whose vocabulary the examples use, and basic Rust (<a href="https://doc.rust-lang.org/book/">The Rust Programming Language</a>, chapters 1–10).</p>
-<p>This is not a Rust tutorial. It is the subset of Rust you need to <em>read this repository</em>,
-with each idea pinned to a file you can open. If a concept is new to you, the "Read more"
-links go to the official source; come back here to see how the engine uses it. After it you can
-open any crate in the workspace and follow its error types, its traits, its <code>unsafe</code> blocks and its
-tests without stopping at the language.</p>
-<p>Paths are relative to the repository root. Symbols are named so you can <code>grep</code> for them —
-line numbers are deliberately left out, because they move with every PR.</p>
-<p>The pinned toolchain is in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> (a fixed <code>channel</code>, plus <code>rustfmt</code> and
-<code>clippy</code>). <code>rustup</code> honours it automatically, so you build with the same compiler CI uses.</p>
+<h1 id="rust-primer-for-this-codebase">本代码库的 Rust 入门</h1>
+<p><strong>阅读之前：</strong> <a href="cloud-native-primer.html">云原生入门</a>（示例用到其中的词汇），以及基础 Rust（<a href="https://doc.rust-lang.org/book/">The Rust Programming Language</a> 第 1–10 章）。</p>
+<p>这不是一篇 Rust 教程。它是<em>阅读这个仓库</em>所需要的那部分 Rust，每个概念都钉在一个你可以打开的文件上。如果某个概念对你来说是新的，"延伸阅读"链接会指向官方资料；回到这里看引擎是怎么用它的。读完之后，你就能打开工作区里的任何一个 crate，一路追踪它的错误类型、trait、<code>unsafe</code> 块和测试，而不会被语言本身绊住。</p>
+<p>路径都是相对于仓库根目录的。符号的命名是为了方便你 <code>grep</code>——行号被有意省略了，因为它们随每个 PR 都会变动。</p>
+<p>固定下来的工具链写在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 里（一个固定的 <code>channel</code>，加上 <code>rustfmt</code> 和 <code>clippy</code>）。<code>rustup</code> 会自动遵守它，所以你构建时用的编译器和 CI 一样。</p>
 <hr />
-<h2 id="31-the-cargo-workspace">3.1 The Cargo workspace<a class="hanchor" href="#31-the-cargo-workspace" aria-label="#">#</a></h2>
-<p>The repository is one Cargo <strong>workspace</strong>: a root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> with <code>[workspace] members = [...]</code>
-and one <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> per crate. Three conventions matter here:</p>
+<h2 id="31-the-cargo-workspace">3.1 Cargo 工作区（The Cargo workspace）<a class="hanchor" href="#31-the-cargo-workspace" aria-label="#">#</a></h2>
+<p>这个仓库是一个 Cargo <strong>workspace</strong>（工作区）：根目录有一个 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>，里面是 <code>[workspace] members = [...]</code>，每个 crate 各有一个自己的 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>。这里有三条约定值得注意：</p>
 <ol>
-<li><strong>Every path and every version is written once, in the root.</strong> The root has a
-   <code>[workspace.dependencies]</code> table listing both the engine's own crates (by <code>path</code>) and every
-   third-party crate (by <code>version</code>). A member never writes a version; it writes:</li>
+<li><strong>每一个路径和每一个版本号都只写一次，写在根目录里。</strong> 根目录有一张 <code>[workspace.dependencies]</code> 表，列出了引擎自己的 crate（用 <code>path</code>）以及每一个第三方 crate（用 <code>version</code>）。一个成员 crate 从不写版本号；它写的是：</li>
 </ol>
 <div class="code"><div class="code-head"><span class="lang">toml</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-toml"># crates/contexts/delonix-node/Cargo.toml
 [dependencies]
@@ -236,56 +227,39 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 libc = { workspace = true }
 </code></pre></div>
-<p>A member may add <code>features = [...]</code>, and that is all. <code>default-features = false</code> lives in
-   the root because a member cannot turn off defaults the workspace turned on.
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> (function <code>inline_versions</code>) fails the build if a member writes
-   its own version.</p>
+<p>一个成员可以加上 <code>features = [...]</code>，仅此而已。<code>default-features = false</code> 留在根目录里，因为一个成员没办法关掉工作区已经打开的默认特性。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>（函数 <code>inline_versions</code>）会在某个成员写了自己的版本号时让构建失败。</p>
 <ol start="2">
 <li>
-<p><strong>The directory is the layer.</strong> Crates live in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>,
-   <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a> and binaries in <code>bins/</code>
-   (ADR-0040). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> refuses a crate whose directory does not match its
-   declared layer, and a dependency that points against the allowed direction. The layer rules
-   are taught later in the course, in
-   <a href="architecture.html#layers-and-the-allowed-direction">Architecture — Layers and the allowed direction</a>.</p>
+<p><strong>目录就是层（layer）。</strong> Crate 分别位于 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>，二进制程序位于 <code>bins/</code>（ADR-0040）。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 会拒绝一个目录和它声明的层不匹配的 crate，也会拒绝一条指向不被允许方向的依赖。层的规则会在课程后面讲到，见
+   <a href="architecture.html#layers-and-the-allowed-direction">架构 — 层与允许的依赖方向</a>。</p>
 </li>
 <li>
-<p><strong>Lints are inherited.</strong> The root declares <code>[workspace.lints.clippy]</code> with
-   <code>undocumented_unsafe_blocks = "deny"</code>, and each member opts in with <code>[lints] workspace = true</code>.
-   Every <code>unsafe</code> block therefore carries a <code>// SAFETY:</code> comment (see §3.4).</p>
+<p><strong>Lint 是继承下来的。</strong> 根目录声明了 <code>[workspace.lints.clippy]</code>，其中
+   <code>undocumented_unsafe_blocks = "deny"</code>，每个成员用 <code>[lints] workspace = true</code> 来选择加入。因此每一个 <code>unsafe</code> 块都带有一句 <code>// SAFETY:</code> 注释（见 §3.4）。</p>
 </li>
 </ol>
-<p>The root also sets <code>[workspace.package]</code> (the shared <code>version</code>, <code>edition</code>, <code>license</code>), which
-members consume as <code>version.workspace = true</code>. The version is not decoration: see
-<a href="contributing-workflow.html#version-alignment">Version alignment</a> for the rule and
-<a href="build-and-test.html#the-gates-ci-runs">The gates CI runs</a> for the version gate.</p>
-<p><strong>Read more:</strong> Cargo Book —
-<a href="https://doc.rust-lang.org/cargo/reference/workspaces.html">Workspaces</a>,
-<a href="https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table"><code>[workspace.dependencies]</code></a>,
-<a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-lints-section"><code>[lints]</code></a>,
-<a href="https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file"><code>rust-toolchain.toml</code></a>.</p>
+<p>根目录还设置了 <code>[workspace.package]</code>（共享的 <code>version</code>、<code>edition</code>、<code>license</code>），成员用 <code>version.workspace = true</code> 来引用它。这个版本号不是装饰：规则见
+<a href="contributing-workflow.html#version-alignment">版本对齐</a>，版本门禁见
+<a href="build-and-test.html#the-gates-ci-runs">CI 运行的门禁</a>。</p>
+<p><strong>延伸阅读：</strong> Cargo Book ——
+<a href="https://doc.rust-lang.org/cargo/reference/workspaces.html">Workspaces</a>，
+<a href="https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table"><code>[workspace.dependencies]</code></a>，
+<a href="https://doc.rust-lang.org/cargo/reference/manifest.html#the-lints-section"><code>[lints]</code></a>，
+<a href="https://rust-lang.github.io/rustup/overrides.html#the-toolchain-file"><code>rust-toolchain.toml</code></a>。</p>
 <hr />
-<h2 id="32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 Errors: one <code>Error</code>, and exit codes derived from its type<a class="hanchor" href="#32-errors-one-error-and-exit-codes-derived-from-its-type" aria-label="#">#</a></h2>
-<p>Almost every fallible function in the engine returns <code>delonix_model::Result&lt;T&gt;</code>, an alias
-over the shared enum defined in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a>. The enum lives in the
-pure foundation crate <code>delonix-model</code>, which every other engine crate may depend on. Some adapters
-define their own error and convert it into this one (§5.2 of
-<a href="coding-conventions.html">Coding conventions</a>). It is built with
-<a href="https://docs.rs/thiserror"><code>thiserror</code></a>: <code>#[derive(Error)]</code> generates <code>Display</code> from the
-<code>#[error("...")]</code> attribute, and <code>#[from]</code> generates <code>From</code> impls so <code>?</code> converts a lower-level
-error automatically:</p>
+<h2 id="32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 错误处理：一个 <code>Error</code>，退出码由它的类型派生而来<a class="hanchor" href="#32-errors-one-error-and-exit-codes-derived-from-its-type" aria-label="#">#</a></h2>
+<p>几乎引擎里每一个可能失败的函数都返回 <code>delonix_model::Result&lt;T&gt;</code>，这是对定义在
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/error.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/error.rs</code></a> 里的那个共享枚举的一个别名。这个枚举位于纯粹的基础 crate <code>delonix-model</code> 里，引擎里的任何其他 crate 都可以依赖它。一些适配器定义了自己的错误类型，再把它转换成这一个（<a href="coding-conventions.html">编码约定</a> §5.2）。它是用
+<a href="https://docs.rs/thiserror"><code>thiserror</code></a> 构建的：<code>#[derive(Error)]</code> 会根据
+<code>#[error("...")]</code> 属性生成 <code>Display</code>，<code>#[from]</code> 会生成 <code>From</code> 实现，这样 <code>?</code> 就能自动转换一个更底层的错误：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-model/src/error.rs
 #[error(&quot;I/O error: {0}&quot;)]
 Io(#[from] std::io::Error),
 </code></pre></div>
-<p>The variants are about <strong>what the caller should do next</strong>, not about which subsystem failed:
-<code>NotFound</code>, <code>NotRunning</code>, <code>Conflict</code>, <code>Unavailable</code> (a missing tool or kernel feature),
-<code>Timeout</code>, <code>Invalid</code>, <code>Registry</code>, <code>Runtime { context, message }</code> for a failed syscall, and so on.
-The doc comments on each variant explain why it exists; read them before adding a variant.</p>
-<p>Those variants become <strong>process exit codes</strong> in one place:
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>, function <code>for_error</code>. The CLI re-exports the
-module (<code>pub use delonix_model::exitcode;</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a>) and
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> calls <code>std::process::exit(cmd::exitcode::for_error(&amp;e))</code>.</p>
+<p>这些变体说的是<strong>调用者接下来该做什么</strong>，而不是哪个子系统出了故障：<code>NotFound</code>、<code>NotRunning</code>、<code>Conflict</code>、<code>Unavailable</code>（缺少某个工具或内核特性）、<code>Timeout</code>、<code>Invalid</code>、<code>Registry</code>、给一次失败的系统调用用的 <code>Runtime { context, message }</code>，等等。每个变体上的 doc comment 都解释了它为什么存在；在新增一个变体之前先读一读它们。</p>
+<p>这些变体在<strong>一个地方</strong>变成<strong>进程退出码</strong>：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/exitcode.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/exitcode.rs</code></a>，函数 <code>for_error</code>。CLI 重新导出了这个模块（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/mod.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/mod.rs</code></a> 里的
+<code>pub use delonix_model::exitcode;</code>），<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a> 调用
+<code>std::process::exit(cmd::exitcode::for_error(&amp;e))</code>。</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/foundation/delonix-model/src/exitcode.rs
 pub fn for_error(e: &amp;Error) -&gt; i32 {
     match e {
@@ -293,23 +267,20 @@ pub fn for_error(e: &amp;Error) -&gt; i32 {
         Error::NotRunning(_) =&gt; NOT_RUNNING,
         // ...
 </code></pre></div>
-<p>Two things to notice:</p>
+<p>有两点值得留意：</p>
 <ul>
-<li>The <code>match</code> is <strong>exhaustive, with no <code>_ =&gt;</code> arm</strong>. Adding a variant to <code>Error</code> stops the build
-  in <code>for_error</code> (and in <code>Error::code</code> in <code>error.rs</code>) until someone decides its class. That is a
-  deliberate use of the compiler as a checklist.</li>
-<li>Messages are translated for the operator, so scripts must branch on the exit code (or the
-  stable machine code from <code>Error::code</code>), never on message text.</li>
+<li>这个 <code>match</code> 是<strong>穷尽的，没有 <code>_ =&gt;</code> 分支</strong>。给 <code>Error</code> 加一个新变体，会让构建在
+  <code>for_error</code>（以及 <code>error.rs</code> 里的 <code>Error::code</code>）那里停下来，直到有人决定它该属于哪一类。这是故意把编译器当作一份检查清单来用。</li>
+<li>消息是给操作者看的翻译文本，所以脚本必须根据退出码（或者来自 <code>Error::code</code> 的那个稳定机器码）来分支，绝不能根据消息文本。</li>
 </ul>
-<p><strong>Read more:</strong> The Rust Book —
-<a href="https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html">Recoverable errors with <code>Result</code></a>,
-<a href="https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html#a-shortcut-for-propagating-errors-the--operator">the <code>?</code> operator</a>;
-Rust by Example — <a href="https://doc.rust-lang.org/rust-by-example/error/multiple_error_types/define_error_type.html">Defining an error type</a>;
-<a href="https://docs.rs/thiserror"><code>thiserror</code> on docs.rs</a>.</p>
+<p><strong>延伸阅读：</strong> The Rust Book ——
+<a href="https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html">用 <code>Result</code> 处理可恢复的错误</a>，
+<a href="https://doc.rust-lang.org/book/ch09-02-recoverable-errors-with-result.html#a-shortcut-for-propagating-errors-the--operator"><code>?</code> 运算符</a>；
+Rust by Example ——<a href="https://doc.rust-lang.org/rust-by-example/error/multiple_error_types/define_error_type.html">定义一个错误类型</a>；
+<a href="https://docs.rs/thiserror">docs.rs 上的 <code>thiserror</code></a>。</p>
 <hr />
-<h2 id="33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 Traits as ports: <code>VmBackend</code> and the backend registry<a class="hanchor" href="#33-traits-as-ports-vmbackend-and-the-backend-registry" aria-label="#">#</a></h2>
-<p>The engine talks to providers through <strong>traits</strong> ("ports"), and a provider is an implementation
-of one. The clearest example is <code>VmBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a>:</p>
+<h2 id="33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 作为端口的 trait：<code>VmBackend</code> 与后端注册表<a class="hanchor" href="#33-traits-as-ports-vmbackend-and-the-backend-registry" aria-label="#">#</a></h2>
+<p>引擎通过 <strong>trait</strong>（"端口"）与各个 provider 对话，一个 provider 就是某个端口的一份实现。最清楚的例子是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/lib.rs</code></a> 里的 <code>VmBackend</code>：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">pub trait VmBackend {
     fn id(&amp;self) -&gt; &amp;&#x27;static str;
     fn available(&amp;self) -&gt; bool;
@@ -320,12 +291,10 @@ of one. The clearest example is <code>VmBackend</code> in <a class="src" href="h
     // ... more methods, many with default bodies
 }
 </code></pre></div>
-<p>Implementations: <code>CloudHypervisorBackend</code> and <code>LibvirtBackend</code> in the same file, and
-<code>ProxmoxBackend</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a>. Methods with a <strong>default
-body</strong> in the trait (for example <code>auto_selectable</code>) let a new backend inherit sensible behaviour
-and override only what differs.</p>
-<p>Backends are chosen at runtime, so they are handled as <strong>trait objects</strong>, <code>Box&lt;dyn VmBackend&gt;</code>.
-They are created through a registry of factories:</p>
+<p>实现有：同一个文件里的 <code>CloudHypervisorBackend</code> 和 <code>LibvirtBackend</code>，以及
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/src/lib.rs" target="_blank" rel="noopener"><code>crates/providers/delonix-proxmox/src/lib.rs</code></a> 里的 <code>ProxmoxBackend</code>。trait 里带有<strong>默认实现体</strong>的方法（比如 <code>auto_selectable</code>）让一个新后端可以继承一份合理的行为，只覆盖不一样的那部分。</p>
+<p>后端是在运行时挑选出来的，所以它们被当作 <strong>trait 对象</strong>来处理，也就是
+<code>Box&lt;dyn VmBackend&gt;</code>。它们是通过一个工厂（factory）注册表创建出来的：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-vm/src/lib.rs
 pub type BackendFactory = Box&lt;dyn Fn() -&gt; Result&lt;Box&lt;dyn VmBackend&gt;&gt; + Send + Sync&gt;;
 
@@ -333,182 +302,155 @@ static BACKENDS: std::sync::OnceLock&lt;std::sync::RwLock&lt;Vec&lt;BackendRegis
     std::sync::OnceLock::new();
 </code></pre></div>
 <ul>
-<li>The factory is a <strong>closure</strong> (<code>dyn Fn</code>), because a remote backend needs captured
-  configuration (endpoint, node, credential) that a plain <code>fn()</code> pointer cannot carry.</li>
-<li><code>Send + Sync</code> is required because the table is a process-wide <code>static</code>; the bound constrains
-  the closure, not the <code>VmBackend</code> trait.</li>
-<li><code>OnceLock</code> initialises the table lazily (<code>builtin_backends()</code> seeds the two local backends),
-  and <code>RwLock</code> lets <code>register_backend</code> add a third one at startup. The binary does that in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a> (<code>register_configured</code>).</li>
+<li>这个工厂是一个<strong>闭包</strong>（<code>dyn Fn</code>），因为一个远程后端需要携带一些捕获到的配置（端点、节点、凭据），而一个普通的 <code>fn()</code> 函数指针没法携带这些。</li>
+<li>之所以要求 <code>Send + Sync</code>，是因为这张表是一个进程范围的 <code>static</code>；这个约束限制的是闭包，而不是 <code>VmBackend</code> 这个 trait 本身。</li>
+<li><code>OnceLock</code> 惰性地初始化这张表（<code>builtin_backends()</code> 会播种两个本地后端），
+  <code>RwLock</code> 让 <code>register_backend</code> 可以在启动时再加一个第三方后端。二进制程序在
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/vmbackends.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/vmbackends.rs</code></a>（<code>register_configured</code>）里就是这么做的。</li>
 </ul>
-<p>The decision behind this shape is <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a>. The same
-"trait + implementations + one place that picks" pattern appears elsewhere (for example the
-<code>VmNetwork</code> port, held in a <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> near the top of the same file).</p>
-<p><strong>Read more:</strong> The Rust Book —
-<a href="https://doc.rust-lang.org/book/ch10-02-traits.html">Traits</a>,
-<a href="https://doc.rust-lang.org/book/ch18-02-trait-objects.html">Trait objects</a>,
-<a href="https://doc.rust-lang.org/book/ch13-01-closures.html">Closures</a>,
-<a href="https://doc.rust-lang.org/book/ch16-04-extensible-concurrency-sync-and-send.html"><code>Send</code> and <code>Sync</code></a>;
-std docs — <a href="https://doc.rust-lang.org/std/sync/struct.OnceLock.html"><code>OnceLock</code></a>.</p>
+<p>这个设计背后的决定记在 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener">ADR-0008</a> 里。同样的"trait + 各种实现 + 一个地方来挑选"这种模式在别处也会出现（比如 <code>VmNetwork</code> 这个端口，保存在同一个文件靠前位置的一个 <code>OnceLock&lt;Box&lt;dyn VmNetwork&gt;&gt;</code> 里）。</p>
+<p><strong>延伸阅读：</strong> The Rust Book ——
+<a href="https://doc.rust-lang.org/book/ch10-02-traits.html">Trait</a>，
+<a href="https://doc.rust-lang.org/book/ch18-02-trait-objects.html">Trait 对象</a>，
+<a href="https://doc.rust-lang.org/book/ch13-01-closures.html">闭包</a>，
+<a href="https://doc.rust-lang.org/book/ch16-04-extensible-concurrency-sync-and-send.html"><code>Send</code> 与 <code>Sync</code></a>；
+标准库文档 ——<a href="https://doc.rust-lang.org/std/sync/struct.OnceLock.html"><code>OnceLock</code></a>。</p>
 <hr />
-<h2 id="34-unsafe-ffi-and-linux-syscalls">3.4 <code>unsafe</code>, FFI and Linux syscalls<a class="hanchor" href="#34-unsafe-ffi-and-linux-syscalls" aria-label="#">#</a></h2>
-<p>A container engine is mostly system calls. This repo reaches the kernel through three crates:</p>
+<h2 id="34-unsafe-ffi-and-linux-syscalls">3.4 <code>unsafe</code>、FFI 与 Linux 系统调用<a class="hanchor" href="#34-unsafe-ffi-and-linux-syscalls" aria-label="#">#</a></h2>
+<p>一个容器引擎大部分时候做的都是系统调用。这个仓库通过三个 crate 触达内核：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Crate</th>
-<th>Used for</th>
-<th>Example in this repo</th>
+<th>用途</th>
+<th>本仓库里的例子</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a href="https://docs.rs/nix"><code>nix</code></a></td>
-<td>Safe-ish wrappers: <code>clone</code>, <code>setns</code>, <code>unshare</code>, <code>pivot_root</code>, <code>fork</code>, <code>mount</code>, signals</td>
-<td><code>use nix::<wbr>sched::<wbr>{clone, setns, unshare, CloneFlags};</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td>相对安全的封装：<code>clone</code>、<code>setns</code>、<code>unshare</code>、<code>pivot_root</code>、<code>fork</code>、<code>mount</code>、信号</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> 里的 <code>use nix::<wbr>sched::<wbr>{clone, setns, unshare, CloneFlags};</code></td>
 </tr>
 <tr>
 <td><a href="https://docs.rs/libc"><code>libc</code></a></td>
-<td>Raw calls <code>nix</code> does not wrap, or where the exact struct matters</td>
-<td><code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a> (<code>peer_uid</code>); <code>libc::flock</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a></td>
+<td><code>nix</code> 没有封装的原始调用，或者结构体的确切布局很重要的地方</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/peer_cred.rs" target="_blank" rel="noopener"><code>crates/<wbr>contexts/<wbr>delonix-node/<wbr>src/<wbr>peer_cred.<wbr>rs</code></a>（<code>peer_uid</code>）里的 <code>libc::<wbr>getsockopt(.<wbr>.<wbr>, SO_PEERCRED, .<wbr>.<wbr>)</code>；<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-state/src/store.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-state/<wbr>src/<wbr>store.<wbr>rs</code></a> 里的 <code>libc::flock</code></td>
 </tr>
 <tr>
 <td><a href="https://docs.rs/rustix"><code>rustix</code></a></td>
-<td>The new mount API (<code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code>)</td>
-<td><code>fsopen_overlay</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a></td>
+<td>新的挂载 API（<code>fsopen</code>/<code>fsconfig</code>/<code>fsmount</code>/<code>move_mount</code>）</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-linux/<wbr>src/<wbr>lib.<wbr>rs</code></a> 里的 <code>fsopen_overlay</code></td>
 </tr>
 </tbody>
 </table></div>
-<p><strong>Every <code>unsafe</code> block states why it is sound</strong>, next to it (the workspace lint enforces the
-comment's presence; reviewers enforce its truth):</p>
+<p><strong>每一个 <code>unsafe</code> 块都在旁边说明了它为什么是安全的</strong>（workspace 的 lint 强制要求这句注释存在；审阅者来把关它说的是不是真的）：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/contexts/delonix-node/src/peer_cred.rs
 // SAFETY: getsockopt on SO_PEERCRED with a correctly-sized ucred buffer.
 let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, ...) };
 </code></pre></div>
-<h3 id="where-the-container-is-born">Where the container is born<a class="hanchor" href="#where-the-container-is-born" aria-label="#">#</a></h3>
-<p><code>fn spawn</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> ends in:</p>
+<h3 id="where-the-container-is-born">容器诞生的地方<a class="hanchor" href="#where-the-container-is-born" aria-label="#">#</a></h3>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>fn spawn</code> 以这样结尾：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// SAFETY: single-threaded; the child mounts the container and does `exec`.
 let cloned = unsafe { clone(cb, &amp;mut stack, flags, Some(Signal::SIGCHLD as i32)) };
 </code></pre></div>
-<p>The child runs <code>container_init</code>, which calls <code>setup_rootfs</code> (bind mounts, then <code>pivot_root</code>),
-<code>drop_capabilities</code>, installs seccomp, and finally <code>execvp</code>. <code>setns</code> is how <code>exec</code> enters an
-existing container's namespaces. The uid/gid maps of a user namespace are written from the
-parent (<code>write_userns_maps</code>, which uses the <code>newuidmap</code>/<code>newgidmap</code> helpers when available).</p>
-<h3 id="why-forkclone-in-a-multi-threaded-process-is-dangerous">Why <code>fork</code>/<code>clone</code> in a multi-threaded process is dangerous<a class="hanchor" href="#why-forkclone-in-a-multi-threaded-process-is-dangerous" aria-label="#">#</a></h3>
-<p>After <code>fork</code> or <code>clone</code>, only the calling thread exists in the child, but the child inherits
-every lock <em>as it was</em> — including locks held by threads that no longer exist. If another thread
-held the allocator lock at that instant, the child's first allocation blocks forever. <code>fork</code>
-mitigates some of this with <code>pthread_atfork</code> handlers; raw <code>clone</code> does not run them.</p>
-<p>This repo has two concrete rules because of it, both explained in comments you should read:</p>
+<p>子进程运行 <code>container_init</code>，它会调用 <code>setup_rootfs</code>（先绑定挂载，再
+<code>pivot_root</code>）、<code>drop_capabilities</code>、安装 seccomp，最后 <code>execvp</code>。<code>setns</code> 就是
+<code>exec</code> 用来进入一个已存在容器的命名空间的方式。用户命名空间的 uid/gid 映射是从父进程写入的（<code>write_userns_maps</code>，在可用时会用到 <code>newuidmap</code>/<code>newgidmap</code> 这两个辅助程序）。</p>
+<h3 id="why-forkclone-in-a-multi-threaded-process-is-dangerous">为什么在多线程进程里 <code>fork</code>/<code>clone</code> 是危险的<a class="hanchor" href="#why-forkclone-in-a-multi-threaded-process-is-dangerous" aria-label="#">#</a></h3>
+<p><code>fork</code> 或 <code>clone</code> 之后，子进程里只存在调用它的那一个线程，但子进程继承的却是<strong>那一刻的原样</strong>——包括那些已经不存在的线程当时持有的锁。如果另一个线程恰好在那一刻持有分配器的锁，子进程的第一次内存分配就会永远阻塞。<code>fork</code> 靠
+<code>pthread_atfork</code> 处理程序缓解了部分这个问题；原始的 <code>clone</code> 不会运行它们。</p>
+<p>正因为这个原因，这个仓库有两条具体的规则，两条都在注释里解释过，值得你去读一读：</p>
 <ul>
-<li><strong><code>serve docker-api</code> never calls <code>spawn</code> in-process.</strong> The doc comment above the re-exec helper
-  in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> explains that the server is a multi-threaded
-  tokio runtime, so it re-executes the binary (<code>__apirun &lt;spec.json&gt;</code>) to get a fresh
-  single-threaded process where the <code>clone</code> precondition is true again.</li>
-<li><strong>After a raw <code>fork</code>, only async-signal-safe work.</strong> <code>reexec_mapped</code> and <code>reexec_mapped_hold</code>
-  in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> pre-compute every allocation <em>before</em> the fork.
-  The comment on <code>reexec_mapped_hold</code> also records why they use raw <code>fork</code> instead of
-  <code>std::process::Command</code> + <code>pre_exec</code>: <code>Command::spawn</code> waits for the child to reach <code>exec</code>, and
-  a <code>pre_exec</code> hook that blocks waiting on the parent deadlocks.</li>
+<li><strong><code>serve docker-api</code> 绝不在进程内调用 <code>spawn</code>。</strong>
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> 里、重新执行（re-exec）那个辅助函数上方的 doc comment 解释道，这个服务器是一个多线程的 tokio 运行时，所以它会重新执行这个二进制程序本身（<code>__apirun &lt;spec.json&gt;</code>），以此得到一个全新的、单线程的进程，让 <code>clone</code> 的前提条件重新成立。</li>
+<li><strong>在原始 <code>fork</code> 之后，只能做异步信号安全的事情。</strong>
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>reexec_mapped</code> 和
+  <code>reexec_mapped_hold</code> 会在 fork <em>之前</em> 就把每一次内存分配都预先算好。
+  <code>reexec_mapped_hold</code> 上的注释还记录了为什么它们用原始的 <code>fork</code>，而不是
+  <code>std::process::Command</code> + <code>pre_exec</code>：<code>Command::spawn</code> 会等子进程到达
+  <code>exec</code>，而一个阻塞着等父进程的 <code>pre_exec</code> 钩子会造成死锁。</li>
 </ul>
-<h3 id="the-new-mount-api-and-why-it-exists-here">The new mount API, and why it exists here<a class="hanchor" href="#the-new-mount-api-and-why-it-exists-here" aria-label="#">#</a></h3>
-<p><code>mount_overlay_if_marked</code> mounts a container's overlay root through <code>rustix::mount::fsopen</code> and
-one <code>fsconfig_set_string(&amp;fs, "lowerdir+", lower)</code> call per layer. The classic <code>mount(2)</code> packs
-all options into a single page-sized <code>data</code> string, which the kernel truncates silently for
-images with many layers. The measurement and decision are in
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a>. This is a good example of the repo's habit:
-the <code>///</code> comment above a non-obvious syscall explains the failure that motivated it.</p>
-<p><strong>Read more:</strong> The Rust Book — <a href="https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html">Unsafe Rust</a>;
-the <a href="https://doc.rust-lang.org/nomicon/">Rustonomicon</a> (especially
-<a href="https://doc.rust-lang.org/nomicon/ffi.html">FFI</a>); man pages
-<a href="https://man7.org/linux/man-pages/man2/clone.2.html"><code>clone(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/setns.2.html"><code>setns(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/pivot_root.2.html"><code>pivot_root(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/fork.2.html"><code>fork(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man7/signal-safety.7.html"><code>signal-safety(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/fsopen.2.html"><code>fsopen(2)</code></a>.</p>
+<h3 id="the-new-mount-api-and-why-it-exists-here">新的挂载 API，以及它为什么会出现在这里<a class="hanchor" href="#the-new-mount-api-and-why-it-exists-here" aria-label="#">#</a></h3>
+<p><code>mount_overlay_if_marked</code> 通过 <code>rustix::mount::fsopen</code>，再对每一层调用一次
+<code>fsconfig_set_string(&amp;fs, "lowerdir+", lower)</code>，来挂载一个容器的 overlay 根。经典的 <code>mount(2)</code> 把所有选项都打包进一个页大小的 <code>data</code> 字符串里，对于层数很多的镜像，内核会把它默默地截断。这个测量和这个决定都记在
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0037-overlay-mount-new-api.md" target="_blank" rel="noopener">ADR-0037</a> 里。这是这个仓库一个习惯的好例子：一个不那么直观的系统调用上方的 <code>///</code> 注释，会解释促使它这么写的那次故障。</p>
+<p><strong>延伸阅读：</strong> The Rust Book ——<a href="https://doc.rust-lang.org/book/ch20-01-unsafe-rust.html">Unsafe Rust</a>；
+<a href="https://doc.rust-lang.org/nomicon/">Rustonomicon</a>（尤其是
+<a href="https://doc.rust-lang.org/nomicon/ffi.html">FFI</a>）；man 手册页
+<a href="https://man7.org/linux/man-pages/man2/clone.2.html"><code>clone(2)</code></a>，
+<a href="https://man7.org/linux/man-pages/man2/setns.2.html"><code>setns(2)</code></a>，
+<a href="https://man7.org/linux/man-pages/man2/pivot_root.2.html"><code>pivot_root(2)</code></a>，
+<a href="https://man7.org/linux/man-pages/man2/fork.2.html"><code>fork(2)</code></a>，
+<a href="https://man7.org/linux/man-pages/man7/signal-safety.7.html"><code>signal-safety(7)</code></a>，
+<a href="https://man7.org/linux/man-pages/man2/fsopen.2.html"><code>fsopen(2)</code></a>。</p>
 <hr />
-<h2 id="35-serialization-serde-yaml-manifests-generated-schema">3.5 Serialization: serde, YAML manifests, generated schema<a class="hanchor" href="#35-serialization-serde-yaml-manifests-generated-schema" aria-label="#">#</a></h2>
-<p>State on disk is JSON; manifests are YAML. Both go through
-<a href="https://serde.rs/"><code>serde</code></a> derives.</p>
-<p><strong>Backward-compatible records.</strong> A record written by an older binary must still load. The rule
-is: a new field gets <code>#[serde(default)]</code>, and when "absent" must mean something different from
-the type's default, it becomes an <code>Option</code>:</p>
+<h2 id="35-serialization-serde-yaml-manifests-generated-schema">3.5 序列化：serde、YAML 清单、自动生成的 schema<a class="hanchor" href="#35-serialization-serde-yaml-manifests-generated-schema" aria-label="#">#</a></h2>
+<p>磁盘上的状态是 JSON；清单是 YAML。两者都用 <a href="https://serde.rs/"><code>serde</code></a> 的 derive 宏。</p>
+<p><strong>向后兼容的记录。</strong> 一份由更老的二进制程序写下的记录，必须仍然能被加载。规则是：一个新字段加上 <code>#[serde(default)]</code>，当"缺失"必须表示一种和该类型默认值不一样的意思时，就把它做成 <code>Option</code>：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// bins/delonix-runtime-bin/src/cmd/vmimage.rs  (VmImage)
 #[serde(default)]
 pub cloud_init: Option&lt;bool&gt;,
 </code></pre></div>
-<p>Here <code>None</code> (every record written before the field existed) is read as "yes"; a plain <code>bool</code>
-would have defaulted to <code>false</code> and silently changed behaviour for old images. You will see the
-same reasoning in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a>: <code>Mount::propagation</code> is an
-<code>Option</code> (<code>#[serde(default, skip_serializing_if = "Option::is_none")]</code>), and <code>Mount::optional</code> is
-a plain <code>bool</code> with <code>#[serde(default)]</code>, because <code>false</code> is what every older record meant.</p>
-<p><strong>Manifests.</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> parses multi-document YAML with
-<code>serde_yaml::Deserializer::from_str(text)</code> into <code>ManifestDoc</code>, whose <code>spec</code> stays a raw
-<code>serde_yaml::Value</code> until the owning Kind deserializes it into its typed spec.</p>
-<p><strong>Generated schema.</strong> Spec types derive <code>schemars::JsonSchema</code> (for example <code>PodSpec</code> in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a>), and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>
-generates the published JSON Schema from them (<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>).
-Note the comment there: schemars honours <code>#[serde(rename)]</code> but not <code>#[serde(alias)]</code>.</p>
-<p><strong>Read more:</strong> <a href="https://serde.rs/">serde.rs</a> —
-<a href="https://serde.rs/field-attrs.html">field attributes</a> (<code>default</code>, <code>skip_serializing_if</code>, <code>alias</code>);
-<a href="https://docs.rs/serde_yaml"><code>serde_yaml</code></a>; <a href="https://docs.rs/schemars"><code>schemars</code></a>.</p>
+<p>这里，<code>None</code>（也就是每一份在这个字段存在之前写下的记录）被读作"是"；一个普通的 <code>bool</code> 会默认为 <code>false</code>，从而悄悄改变旧镜像的行为。你会在
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/record.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/record.rs</code></a> 里看到同样的推理：
+<code>Mount::propagation</code> 是一个 <code>Option</code>（<code>#[serde(default, skip_serializing_if = "Option::is_none")]</code>），而 <code>Mount::optional</code> 是一个带 <code>#[serde(default)]</code> 的普通
+<code>bool</code>，因为 <code>false</code> 正是每一份更老的记录本来的意思。</p>
+<p><strong>清单。</strong> <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> 用
+<code>serde_yaml::Deserializer::from_str(text)</code> 解析多文档的 YAML，得到
+<code>ManifestDoc</code>，它的 <code>spec</code> 会一直保持一个原始的 <code>serde_yaml::Value</code>，直到拥有该 Kind 的代码把它反序列化成自己类型化的 spec 为止。</p>
+<p><strong>自动生成的 schema。</strong> Spec 类型会 derive <code>schemars::JsonSchema</code>（比如
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/pod.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/pod.rs</code></a> 里的 <code>PodSpec</code>），
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a> 会从它们生成出已发布的 JSON Schema
+（<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener">ADR-0007</a>）。留意那里的一句注释：schemars 遵守 <code>#[serde(rename)]</code>，但不遵守 <code>#[serde(alias)]</code>。</p>
+<p><strong>延伸阅读：</strong> <a href="https://serde.rs/">serde.rs</a> ——
+<a href="https://serde.rs/field-attrs.html">字段属性</a>（<code>default</code>、<code>skip_serializing_if</code>、<code>alias</code>）；
+<a href="https://docs.rs/serde_yaml"><code>serde_yaml</code></a>；<a href="https://docs.rs/schemars"><code>schemars</code></a>。</p>
 <hr />
-<h2 id="36-the-cli-clap-derive-and-translated-output">3.6 The CLI: clap derive and translated output<a class="hanchor" href="#36-the-cli-clap-derive-and-translated-output" aria-label="#">#</a></h2>
-<p>The <code>delonix</code> binary is <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>. Its top level is a
-<a href="https://docs.rs/clap"><code>clap</code></a> derive in <code>src/main.rs</code>: <code>#[derive(Parser)] struct Cli</code> holding a
-global <code>--l18n</code> flag and <code>#[command(subcommand)] cmd: Cmd</code>, where <code>enum Cmd</code> is a
-<code>#[derive(Subcommand)]</code>. Each group has its own module and enum in <code>src/cmd/</code> — for example
-<code>pub enum ContainerCmd</code> in <code>src/cmd/container.rs</code>.</p>
-<p>Doc comments (<code>///</code>) on variants and fields become the <code>--help</code> text. You will see
-<code>#[allow(clippy::large_enum_variant)]</code> on command enums, with a comment explaining why: they are
-parsed once per invocation, so boxing variants would buy nothing.</p>
-<p><strong>Source strings are English; Portuguese comes from a catalogue.</strong> <code>src/cmd/po.rs</code> embeds
-<code>data/pt.po</code> with <code>include_str!</code> and exposes:</p>
+<h2 id="36-the-cli-clap-derive-and-translated-output">3.6 CLI：clap 的 derive 与翻译后的输出<a class="hanchor" href="#36-the-cli-clap-derive-and-translated-output" aria-label="#">#</a></h2>
+<p><code>delonix</code> 这个二进制程序就是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin</code></a>。它的顶层是
+<code>src/main.rs</code> 里的一个 <a href="https://docs.rs/clap"><code>clap</code></a> derive：
+<code>#[derive(Parser)] struct Cli</code> 里有一个全局的 <code>--l18n</code> 标志和
+<code>#[command(subcommand)] cmd: Cmd</code>，其中 <code>enum Cmd</code> 是一个
+<code>#[derive(Subcommand)]</code>。每个命令组在 <code>src/cmd/</code> 下都有自己的模块和枚举——比如
+<code>src/cmd/container.rs</code> 里的 <code>pub enum ContainerCmd</code>。</p>
+<p>变体和字段上的 doc comment（<code>///</code>）会变成 <code>--help</code> 的文字。你会在命令枚举上看到
+<code>#[allow(clippy::large_enum_variant)]</code>，旁边有一句注释解释原因：它们每次调用只解析一次，所以把变体装箱（box）不会带来任何好处。</p>
+<p><strong>源码里的字符串是英文的；葡萄牙语来自一份目录（catalogue）。</strong>
+<code>src/cmd/po.rs</code> 用 <code>include_str!</code> 内嵌了 <code>data/pt.po</code>，并暴露出：</p>
 <ul>
-<li><code>po::t("already exists, nothing to do")</code> — a fixed string;</li>
-<li><code>po::tf("port {port} is taken by '{owner}'", &amp;[("port", &amp;hp), ("owner", &amp;ow)])</code> — a template
-  with <strong>named</strong> placeholders, because a translation may reorder them;</li>
-<li><code>po::translate_help</code>, which rewrites clap's help text after <code>po::peek_lang</code> has decided the
-  language <em>before</em> parsing.</li>
+<li><code>po::t("already exists, nothing to do")</code> —— 一个固定字符串；</li>
+<li><code>po::tf("port {port} is taken by '{owner}'", &amp;[("port", &amp;hp), ("owner", &amp;ow)])</code>
+  —— 一个带<strong>具名</strong>占位符的模板，因为一次翻译可能会调整它们的顺序；</li>
+<li><code>po::translate_help</code>，它会在 <code>po::peek_lang</code> 于<em>解析之前</em>就先决定好语言之后，重写 clap 的帮助文字。</li>
 </ul>
-<p>A new user-facing string is English in the code plus an entry in <code>data/pt.po</code>. The language
-policy (LANG-01) and its gate are covered in <a href="contributing-workflow.html">Contributing workflow</a>.</p>
-<p><strong>Read more:</strong> <a href="https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html">clap derive tutorial</a>;
-std — <a href="https://doc.rust-lang.org/std/macro.include_str.html"><code>include_str!</code></a>.</p>
+<p>一个新的、面向用户的字符串，做法是在代码里写英文，再加一条到 <code>data/pt.po</code> 里。语言策略（LANG-01）及其门禁在<a href="contributing-workflow.html">贡献工作流</a>里有讲。</p>
+<p><strong>延伸阅读：</strong> <a href="https://docs.rs/clap/latest/clap/_derive/_tutorial/index.html">clap derive 教程</a>；
+标准库 ——<a href="https://doc.rust-lang.org/std/macro.include_str.html"><code>include_str!</code></a>。</p>
 <hr />
-<h2 id="37-async-and-grpc-and-why-most-of-the-engine-is-synchronous">3.7 Async and gRPC — and why most of the engine is synchronous<a class="hanchor" href="#37-async-and-grpc-and-why-most-of-the-engine-is-synchronous" aria-label="#">#</a></h2>
-<p>The core engine is <strong>synchronous</strong>: the CLI starts, does its work with blocking syscalls and
-file I/O, and exits. There is no daemon and no ambient async runtime. Async code appears only in
-the <em>interfaces</em> that serve a protocol:</p>
+<h2 id="37-async-and-grpc-and-why-most-of-the-engine-is-synchronous">3.7 异步与 gRPC——以及为什么引擎的大部分是同步的<a class="hanchor" href="#37-async-and-grpc-and-why-most-of-the-engine-is-synchronous" aria-label="#">#</a></h2>
+<p>核心引擎是<strong>同步</strong>的：CLI 启动，用阻塞式的系统调用和文件 I/O 完成自己的工作，然后退出。没有守护进程，也没有常驻的异步运行时。异步代码只出现在服务某个协议的那些<em>接口</em>里：</p>
 <ul>
-<li><strong>CRI server</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>. The gRPC stubs are generated at build time:
-  <code>build.rs</code> calls <code>tonic_build::configure()...compile_protos(&amp;["proto/api.proto"], &amp;["proto"])</code>.
-  That needs <strong><code>protoc</code></strong> installed (CI installs <code>protobuf-compiler</code>); a missing <code>protoc</code> is the
-  most common first build failure. <code>serve_blocking</code> in <code>src/lib.rs</code> creates its own
-  <code>tokio::runtime::Builder::new_multi_thread()</code> runtime, and handlers push blocking engine work
-  off the async workers through the <code>blocking</code> helper in <code>src/runtime_svc.rs</code> — otherwise a
-  <code>clone</code> or a shell-out to <code>delonix</code> would stall the tokio workers.</li>
-<li><strong>L7 reverse proxy</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs</code></a> uses
-  <a href="https://docs.rs/hyper"><code>hyper</code></a> directly (<code>hyper::service::service_fn</code>) on its own tokio
-  runtime.</li>
-<li><strong>MCP server</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> uses <a href="https://docs.rs/rmcp"><code>rmcp</code></a> over
-  stdio (<code>rmcp::transport::io::stdio</code>).</li>
-<li><strong>Telemetry</strong> — <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a> exports OpenTelemetry spans
-  from a dedicated thread with a <em>blocking</em> HTTP client, precisely so the synchronous CLI does not
-  need a runtime.</li>
+<li><strong>CRI 服务器</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-cri" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri</code></a>。gRPC 的桩代码是在构建时生成的：<code>build.rs</code> 调用
+  <code>tonic_build::configure()...compile_protos(&amp;["proto/api.proto"], &amp;["proto"])</code>。这需要安装<strong><code>protoc</code></strong>（CI 会安装 <code>protobuf-compiler</code>）；缺少
+  <code>protoc</code> 是第一次构建时最常见的失败原因。<code>src/lib.rs</code> 里的
+  <code>serve_blocking</code> 会创建自己的
+  <code>tokio::runtime::Builder::new_multi_thread()</code> 运行时，处理函数通过
+  <code>src/runtime_svc.rs</code> 里的 <code>blocking</code> 辅助函数，把阻塞式的引擎工作挪出异步工作线程——否则一次 <code>clone</code>，或者对 <code>delonix</code> 的一次 shell-out，都会把 tokio 的工作线程拖住。</li>
+<li><strong>L7 反向代理</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/ingress_proxy.rs</code></a> 在它自己的 tokio 运行时上直接使用 <a href="https://docs.rs/hyper"><code>hyper</code></a>（<code>hyper::service::service_fn</code>）。</li>
+<li><strong>MCP 服务器</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces/delonix-mcp" target="_blank" rel="noopener"><code>crates/interfaces/delonix-mcp</code></a> 通过 stdio
+  （<code>rmcp::transport::io::stdio</code>）使用 <a href="https://docs.rs/rmcp"><code>rmcp</code></a>。</li>
+<li><strong>遥测（telemetry）</strong>——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-telemetry/src/telemetry.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-telemetry/src/telemetry.rs</code></a>
+  用一个带<em>阻塞式</em> HTTP 客户端的专用线程导出 OpenTelemetry span，这正是为了让同步的 CLI 不需要一个运行时。</li>
 </ul>
-<p>The node contract under <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> is a separate protobuf API with its own gate
-(<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>, <code>buf</code>); see <a href="build-and-test.html">Build and test</a>.</p>
-<p><strong>Read more:</strong> <a href="https://rust-lang.github.io/async-book/">Asynchronous Programming in Rust</a>;
-<a href="https://tokio.rs/tokio/tutorial">Tokio tutorial</a>;
-<a href="https://docs.rs/tonic"><code>tonic</code></a> and <a href="https://docs.rs/tonic-build"><code>tonic-build</code></a>;
-<a href="https://protobuf.dev/installation/">Protocol Buffers install</a>.</p>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/proto/delonix/node/v1" target="_blank" rel="noopener"><code>proto/delonix/node/v1</code></a> 下的节点契约是一个独立的 protobuf API，有它自己的门禁（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/contract_gate.py</code></a>、<code>buf</code>）；见<a href="build-and-test.html">构建与测试</a>。</p>
+<p><strong>延伸阅读：</strong> <a href="https://rust-lang.github.io/async-book/">Rust 中的异步编程</a>；
+<a href="https://tokio.rs/tokio/tutorial">Tokio 教程</a>；
+<a href="https://docs.rs/tonic"><code>tonic</code></a> 与 <a href="https://docs.rs/tonic-build"><code>tonic-build</code></a>；
+<a href="https://protobuf.dev/installation/">Protocol Buffers 安装说明</a>。</p>
 <hr />
-<h2 id="38-concurrency-and-shared-state">3.8 Concurrency and shared state<a class="hanchor" href="#38-concurrency-and-shared-state" aria-label="#">#</a></h2>
-<p>There is no database. State is JSON files under the state root, and <strong>several processes</strong> (two
-CLI invocations, the CRI server, a supervisor) may touch the same record at once. The pattern for
-every read-modify-write is <code>update</code> with a closure, under an exclusive <code>flock</code>:</p>
+<h2 id="38-concurrency-and-shared-state">3.8 并发与共享状态<a class="hanchor" href="#38-concurrency-and-shared-state" aria-label="#">#</a></h2>
+<p>没有数据库。状态是状态根目录下的一堆 JSON 文件，而<strong>多个进程</strong>（两次 CLI 调用、CRI 服务器、一个 supervisor）可能会同时碰同一条记录。每一次读—改—写遵循的都是同一个模式：在一把互斥的 <code>flock</code> 之下，用一个闭包调用 <code>update</code>：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">// crates/adapters/delonix-state/src/store.rs  (Store::update)
 let id = self.load(id_or_name)?.id;
 let _lock = FileLock::acquire(&amp;self.lock_path(&amp;id))?;
@@ -517,114 +459,102 @@ let mut c = self.load(&amp;id)?;
 if !f(&amp;mut c) { return Ok(c); }
 self.save(&amp;c)?;
 </code></pre></div>
-<p><code>JsonStore&lt;T&gt;::update</code> in the same file is the generic version for other record types. Both
-<strong>refuse</strong> to run when the lock cannot be taken (<code>Error::Lock</code>) instead of carrying on unlocked.
-(<code>SecretStore::update</code> in <code>secret.rs</code> is the exception: its lock is best-effort.) Rules that
-follow from it:</p>
+<p>同一个文件里的 <code>JsonStore&lt;T&gt;::update</code> 是给其他记录类型用的通用版本。两者在拿不到锁的时候都会<strong>拒绝</strong>运行（<code>Error::Lock</code>），而不是不加锁就继续下去。（<code>secret.rs</code> 里的 <code>SecretStore::update</code> 是个例外：它的锁是尽力而为的。）由此而来的几条规则：</p>
 <ul>
-<li>Never do <code>load</code> → mutate → <code>save</code> by hand for a record another process can write; you will
-  lose updates. Use <code>update</code>.</li>
-<li>Re-read inside the lock. The value you loaded earlier may already be stale.</li>
-<li><code>FileLock</code> releases the lock in <code>Drop</code> — the RAII pattern.</li>
+<li>永远不要对一份可能被另一个进程写入的记录，手动去做 <code>load</code> → 修改 →
+  <code>save</code>；你会丢掉别人的更新。用 <code>update</code>。</li>
+<li>在锁内重新读一遍。你之前加载到的那个值可能已经过时了。</li>
+<li><code>FileLock</code> 在 <code>Drop</code> 里释放锁——RAII 模式。</li>
 </ul>
-<p>Inside a single process, shared state uses the standard types: an
-<code>Arc&lt;std::sync::RwLock&lt;Arc&lt;Vec&lt;Route&gt;&gt;&gt;&gt;</code> holds the proxy's hot-swappable route table
-(<code>SharedRoutes</code> in <code>cmd/ingress_proxy.rs</code>), and the dashboard shares its slow sample through an
-<code>Arc&lt;Mutex&lt;...&gt;&gt;</code> (<code>cmd/dash.rs</code>).</p>
-<p>A related idea you will meet in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a>: the
-<strong>typestate</strong> pattern, where lifecycle states are types and illegal transitions do not compile
-(its doc tests include <code>compile_fail</code> examples).</p>
-<p><strong>Read more:</strong> The Rust Book —
-<a href="https://doc.rust-lang.org/book/ch16-03-shared-state.html">Shared-state concurrency</a>,
-<a href="https://doc.rust-lang.org/book/ch15-03-drop.html"><code>Drop</code></a>;
-<a href="https://man7.org/linux/man-pages/man2/flock.2.html"><code>flock(2)</code></a>;
-std — <a href="https://doc.rust-lang.org/std/sync/struct.Arc.html"><code>Arc</code></a>,
-<a href="https://doc.rust-lang.org/std/sync/struct.RwLock.html"><code>RwLock</code></a>.</p>
+<p>在单个进程内部，共享状态用的是标准类型：一个
+<code>Arc&lt;std::sync::RwLock&lt;Arc&lt;Vec&lt;Route&gt;&gt;&gt;&gt;</code> 持有代理的可热替换路由表
+（<code>cmd/ingress_proxy.rs</code> 里的 <code>SharedRoutes</code>），dashboard 通过一个
+<code>Arc&lt;Mutex&lt;...&gt;&gt;</code>（<code>cmd/dash.rs</code>）共享它那份较慢的采样数据。</p>
+<p>你还会在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/typestate.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/typestate.rs</code></a> 里遇到一个相关的想法：<strong>typestate</strong> 模式，生命周期状态被表示成类型，非法的转换根本编译不过去（它的 doc test 里就包含 <code>compile_fail</code> 的例子）。</p>
+<p><strong>延伸阅读：</strong> The Rust Book ——
+<a href="https://doc.rust-lang.org/book/ch16-03-shared-state.html">共享状态并发</a>，
+<a href="https://doc.rust-lang.org/book/ch15-03-drop.html"><code>Drop</code></a>；
+<a href="https://man7.org/linux/man-pages/man2/flock.2.html"><code>flock(2)</code></a>；
+标准库 ——<a href="https://doc.rust-lang.org/std/sync/struct.Arc.html"><code>Arc</code></a>，
+<a href="https://doc.rust-lang.org/std/sync/struct.RwLock.html"><code>RwLock</code></a>。</p>
 <hr />
-<h2 id="39-tests">3.9 Tests<a class="hanchor" href="#39-tests" aria-label="#">#</a></h2>
+<h2 id="39-tests">3.9 测试<a class="hanchor" href="#39-tests" aria-label="#">#</a></h2>
 <ul>
-<li><strong>Unit tests live next to the code</strong>, in a <code>#[cfg(test)] mod tests { ... }</code> at the bottom of
-  the file. Many pure functions exist precisely so a decision can be tested as data (for example
-  <code>reconcile::plan</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a>).</li>
-<li><strong>Integration tests</strong> live in <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/*.rs</code> and use only the crate's
-  public API. Example: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a> starts the CRI server
-  on a Unix socket and talks to it with the <em>generated gRPC client</em> (which is why <code>build.rs</code> sets
-  <code>build_client(true)</code>). Tests under <code>crates/providers/*/tests/live.rs</code> need a real provider and
-  are opt-in.</li>
-<li><strong>Property tests</strong> use <a href="https://docs.rs/proptest"><code>proptest</code></a>: see
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/tests/ip_invariants.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/tests/ip_invariants.rs</code></a> (<code>proptest! { ... }</code>).</li>
-<li><strong>Doc tests</strong> run too — including <code>compile_fail</code> blocks such as those in <code>typestate.rs</code>.</li>
-<li><strong>Benchmarks</strong> use <a href="https://docs.rs/criterion"><code>criterion</code></a> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/benches" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/benches/</code></a>).</li>
-<li><strong>Names.</strong> Test names describe the behaviour being proven. Many existing tests have Portuguese
-  names; new identifiers are English (LANG-01, enforced as a ratchet by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a>).</li>
-<li><strong>Tests must not touch the host's real state.</strong> Take a temporary directory and pass it in
-  (the stores take a root path) rather than calling code that resolves the real state root.
-  Anything that needs real namespaces, cgroups or a network holder belongs to the live/E2E
-  validation described in <a href="build-and-test.html">Build and test</a>.</li>
+<li><strong>单元测试写在代码旁边</strong>，放在文件末尾的 <code>#[cfg(test)] mod tests { ... }</code> 里。许多纯函数存在的理由，正是为了让一个决策能像数据一样被测试（比如
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs</code></a> 里的 <code>reconcile::plan</code>）。</li>
+<li><strong>集成测试</strong>放在 <code>crates/&lt;layer&gt;/&lt;crate&gt;/tests/*.rs</code> 里，只使用该 crate 的公开 API。例子：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/tests/grpc_status.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/tests/grpc_status.rs</code></a> 在一个 unix 套接字上启动 CRI 服务器，再用<em>自动生成的 gRPC 客户端</em>和它对话（这也是为什么 <code>build.rs</code> 要设 <code>build_client(true)</code> 的原因）。<code>crates/providers/*/tests/live.rs</code> 下的测试需要一个真实的 provider，是可选启用（opt-in）的。</li>
+<li><strong>属性测试（property test）</strong>用的是 <a href="https://docs.rs/proptest"><code>proptest</code></a>：见
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/tests/ip_invariants.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/tests/ip_invariants.rs</code></a>（<code>proptest! { ... }</code>）。</li>
+<li><strong>Doc test</strong> 也会被运行——包括 <code>typestate.rs</code> 里那些 <code>compile_fail</code> 代码块。</li>
+<li><strong>基准测试（benchmark）</strong>用的是 <a href="https://docs.rs/criterion"><code>criterion</code></a>
+  （<a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-oci/benches" target="_blank" rel="noopener"><code>crates/adapters/delonix-oci/benches/</code></a>）。</li>
+<li><strong>命名。</strong> 测试的名字描述的是被证明的那个行为。许多既有的测试用的是葡萄牙语名字；新的标识符用英文（LANG-01，由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> 作为一个棘轮强制执行）。</li>
+<li><strong>测试不能碰主机的真实状态。</strong> 拿一个临时目录传进去（各个 store 都接受一个根路径），而不是调用那些会解析出真实状态根目录的代码。任何需要真实命名空间、cgroup 或者网络 holder 的东西，都属于<a href="build-and-test.html">构建与测试</a>里讲的现场（live）/ E2E 验证。</li>
 </ul>
-<p><strong>Read more:</strong> The Rust Book — <a href="https://doc.rust-lang.org/book/ch11-01-writing-tests.html">Writing tests</a>,
-<a href="https://doc.rust-lang.org/book/ch11-03-test-organization.html">Test organization</a>;
-rustdoc — <a href="https://doc.rust-lang.org/rustdoc/write-documentation/documentation-tests.html">Documentation tests</a>.</p>
+<p><strong>延伸阅读：</strong> The Rust Book ——<a href="https://doc.rust-lang.org/book/ch11-01-writing-tests.html">编写测试</a>，
+<a href="https://doc.rust-lang.org/book/ch11-03-test-organization.html">测试的组织结构</a>；
+rustdoc ——<a href="https://doc.rust-lang.org/rustdoc/write-documentation/documentation-tests.html">文档测试</a>。</p>
 <hr />
-<h2 id="310-tooling-the-ci-enforces">3.10 Tooling the CI enforces<a class="hanchor" href="#310-tooling-the-ci-enforces" aria-label="#">#</a></h2>
+<h2 id="310-tooling-the-ci-enforces">3.10 CI 强制执行的工具<a class="hanchor" href="#310-tooling-the-ci-enforces" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Tool</th>
-<th>CI command (from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>)</th>
-<th>What it catches</th>
+<th>工具</th>
+<th>CI 命令（来自 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>）</th>
+<th>它会抓住什么</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>rustfmt</td>
 <td><code>cargo fmt --all --check</code></td>
-<td>formatting drift</td>
+<td>格式漂移</td>
 </tr>
 <tr>
 <td>clippy</td>
 <td><code>cargo clippy --workspace --all-targets --locked -- -D warnings</code></td>
-<td>any warning, including <code>undocumented_unsafe_blocks</code></td>
+<td>任何警告，包括 <code>undocumented_unsafe_blocks</code></td>
 </tr>
 <tr>
 <td>tests</td>
 <td><code>cargo test --workspace --locked --no-fail-fast</code></td>
-<td>regressions</td>
+<td>回归</td>
 </tr>
 <tr>
 <td>cargo-deny</td>
-<td><code>EmbarkStudios/<wbr>cargo-deny-action</code> with <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
-<td>RUSTSEC advisories, licences, crate sources</td>
+<td>带 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a> 的 <code>EmbarkStudios/<wbr>cargo-deny-action</code></td>
+<td>RUSTSEC 安全公告、许可证、crate 来源</td>
 </tr>
 </tbody>
 </table></div>
-<p>The repo also has Python gates (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> and others).
-The full list and how to run each one locally is in <a href="build-and-test.html">Build and test</a>.</p>
-<p><strong>Read more:</strong> <a href="https://doc.rust-lang.org/clippy/">Clippy</a>,
-<a href="https://rust-lang.github.io/rustfmt/">rustfmt</a>,
-<a href="https://embarkstudios.github.io/cargo-deny/">cargo-deny</a>.</p>
+<p>这个仓库还有一些 Python 门禁（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>、
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/lang_ratchet.py" target="_blank" rel="noopener"><code>scripts/lang_ratchet.py</code></a> 等等）。完整列表以及如何在本地逐一运行它们，见
+<a href="build-and-test.html">构建与测试</a>。</p>
+<p><strong>延伸阅读：</strong> <a href="https://doc.rust-lang.org/clippy/">Clippy</a>，
+<a href="https://rust-lang.github.io/rustfmt/">rustfmt</a>，
+<a href="https://embarkstudios.github.io/cargo-deny/">cargo-deny</a>。</p>
 <hr />
-<p><strong>Next:</strong> <a href="environment.html">Preparing your environment</a> — a host that can build the tree and run the live paths, and the host traps that look like engine bugs.</p>
-<nav class="pager"><a href="cloud-native-primer.html"><span>← 上一页</span>Cloud native primer</a><a class="next" href="environment.html"><span>下一页 →</span>Preparing your environment</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/rust-primer.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/rust-primer.md</code></footer>
+<p><strong>下一步：</strong> <a href="environment.html">准备你的环境</a>——一台能构建这棵树、能跑现场（live）路径的主机，以及那些看起来像引擎 bug 的主机陷阱。</p>
+<nav class="pager"><a href="cloud-native-primer.html"><span>← 上一页</span>云原生入门</a><a class="next" href="environment.html"><span>下一页 →</span>准备你的环境</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/rust-primer.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/rust-primer.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#31-the-cargo-workspace">3.1 The Cargo workspace</a></li>
-<li><a href="#32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 Errors: one Error, and exit codes derived from its type</a></li>
-<li><a href="#33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 Traits as ports: VmBackend and the backend registry</a></li>
-<li><a href="#34-unsafe-ffi-and-linux-syscalls">3.4 unsafe, FFI and Linux syscalls</a><ul>
-<li><a href="#where-the-container-is-born">Where the container is born</a></li>
-<li><a href="#why-forkclone-in-a-multi-threaded-process-is-dangerous">Why fork/clone in a multi-threaded process is dangerous</a></li>
-<li><a href="#the-new-mount-api-and-why-it-exists-here">The new mount API, and why it exists here</a></li>
+<li><a href="#31-the-cargo-workspace">3.1 Cargo 工作区（The Cargo workspace）</a></li>
+<li><a href="#32-errors-one-error-and-exit-codes-derived-from-its-type">3.2 错误处理：一个 Error，退出码由它的类型派生而来</a></li>
+<li><a href="#33-traits-as-ports-vmbackend-and-the-backend-registry">3.3 作为端口的 trait：VmBackend 与后端注册表</a></li>
+<li><a href="#34-unsafe-ffi-and-linux-syscalls">3.4 unsafe、FFI 与 Linux 系统调用</a><ul>
+<li><a href="#where-the-container-is-born">容器诞生的地方</a></li>
+<li><a href="#why-forkclone-in-a-multi-threaded-process-is-dangerous">为什么在多线程进程里 fork/clone 是危险的</a></li>
+<li><a href="#the-new-mount-api-and-why-it-exists-here">新的挂载 API，以及它为什么会出现在这里</a></li>
 </ul>
 </li>
-<li><a href="#35-serialization-serde-yaml-manifests-generated-schema">3.5 Serialization: serde, YAML manifests, generated schema</a></li>
-<li><a href="#36-the-cli-clap-derive-and-translated-output">3.6 The CLI: clap derive and translated output</a></li>
-<li><a href="#37-async-and-grpc-and-why-most-of-the-engine-is-synchronous">3.7 Async and gRPC — and why most of the engine is synchronous</a></li>
-<li><a href="#38-concurrency-and-shared-state">3.8 Concurrency and shared state</a></li>
-<li><a href="#39-tests">3.9 Tests</a></li>
-<li><a href="#310-tooling-the-ci-enforces">3.10 Tooling the CI enforces</a></li>
+<li><a href="#35-serialization-serde-yaml-manifests-generated-schema">3.5 序列化：serde、YAML 清单、自动生成的 schema</a></li>
+<li><a href="#36-the-cli-clap-derive-and-translated-output">3.6 CLI：clap 的 derive 与翻译后的输出</a></li>
+<li><a href="#37-async-and-grpc-and-why-most-of-the-engine-is-synchronous">3.7 异步与 gRPC——以及为什么引擎的大部分是同步的</a></li>
+<li><a href="#38-concurrency-and-shared-state">3.8 并发与共享状态</a></li>
+<li><a href="#39-tests">3.9 测试</a></li>
+<li><a href="#310-tooling-the-ci-enforces">3.10 CI 强制执行的工具</a></li>
 </ul>
 </div>
 </aside>

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Releases and stability · Delonix Runtime — 贡献者手册</title>
+<title>发布与稳定性 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,163 +206,157 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a class="on" aria-current="page" href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a class="on" aria-current="page" href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">贡献</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="releases-and-stability">Releases and stability</h1>
-<p><strong>Before you read:</strong> <a href="contributing-workflow.html#version-alignment">Contribution workflow</a> (the version gate) and <a href="publishing-docs.html">Publishing the documentation</a> (what a release regenerates).</p>
-<p>This page is about the other half of a release: what the <code>version</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> promises,
-what happens when a <code>v*</code> tag is pushed, and what the engine guarantees will not break without a
-major version. <a href="publishing-docs.html">Publishing the documentation</a> already covers the docs side of
-a release (what regenerates, what CI checks); this page covers the version number itself and the
-CLI/manifest contract it backs.</p>
-<h2 id="the-version-gate">The version gate<a class="hanchor" href="#the-version-gate" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a> (CI job <code>version</code>, <code>fetch-depth: 0</code> because it needs every tag) allows
-the workspace <code>version</code> in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> to be exactly one of two things:</p>
+<h1 id="releases-and-stability">发布与稳定性</h1>
+<p><strong>阅读前须知：</strong> <a href="contributing-workflow.html#version-alignment">贡献流程</a>（版本门禁）和<a href="publishing-docs.html">发布文档</a>（一次发布会重新生成什么）。</p>
+<p>本页讲的是一次发布的另一半：<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里的 <code>version</code> 承诺了什么、推送一个 <code>v*</code> 标签会
+发生什么，以及引擎保证在没有主版本号变更的情况下不会破坏什么。<a href="publishing-docs.html">发布文档</a>
+已经讲过一次发布中文档那一侧的事情（什么会被重新生成、CI 检查什么）；本页讲的是版本号本身，
+以及它所支撑的 CLI/清单（manifest）契约。</p>
+<h2 id="the-version-gate">版本门禁<a class="hanchor" href="#the-version-gate" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a>（CI 任务 <code>version</code>，用 <code>fetch-depth: 0</code> 是因为它需要每一个标签）
+只允许根目录 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 里工作区（workspace）的 <code>version</code> 恰好是以下两者之一：</p>
 <ol>
-<li><strong>Equal to the newest tag this commit contains.</strong> Ordinary work between releases. Two builds
-   with the same version number are told apart by <code>delonix --version</code>, which prints the distance
-   from that tag: <code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>.</li>
-<li><strong>Greater than the newest contained tag, only in the release commit</strong> — and then
-   <code>docs/releases/v&lt;version&gt;.md</code> must exist, because the release workflow publishes it as the
-   GitHub Release body.</li>
+<li><strong>等于这次提交所包含的最新标签。</strong> 这是发布之间的日常工作状态。两次版本号相同的构建，
+   靠 <code>delonix --version</code> 来区分——它会打印出与那个标签之间的距离：
+   <code>commit: &lt;hash&gt; (+N commits since vX.Y.Z)</code>。</li>
+<li><strong>大于所包含的最新标签，且只在发布提交中如此</strong>——此时 <code>docs/releases/v&lt;version&gt;.md</code>
+   必须存在，因为发布工作流程会把它作为 GitHub Release 的正文发布出去。</li>
 </ol>
-<p>Everything else fails, each with a reason tied to a real failure mode:</p>
+<p>除此之外的一切都会失败，每一种失败都对应一个真实的失败场景：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>What the gate sees</th>
-<th>Why it fails</th>
+<th>门禁看到什么</th>
+<th>为什么失败</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>A newer tag exists that this commit does not contain</td>
-<td>The branch started before that release; merging it as-is undoes what the release already shipped. Merge <code>origin/main</code> in first.</td>
+<td>存在一个更新的标签，而这次提交并不包含它</td>
+<td>这条分支是在那次发布之前开始的；原样合并会撤销那次发布已经发布出去的内容。先合并 <code>origin/main</code>。</td>
 </tr>
 <tr>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> is lower than the newest contained tag</td>
-<td>An older version number would be published over a newer one.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 低于所包含的最新标签</td>
+<td>会把一个更旧的版本号发布到一个更新的版本号之上。</td>
 </tr>
 <tr>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> is higher than the newest contained tag, with no <code>docs/<wbr>releases/<wbr>v&lt;version&gt;.<wbr>md</code></td>
-<td>A bump with no matching tag — sends the <code>delonix-cri</code> download (which is resolved from the running binary's own version, see <code>vmimage.rs</code>) to a release that will never exist.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 高于所包含的最新标签，却没有对应的 <code>docs/<wbr>releases/<wbr>v&lt;version&gt;.<wbr>md</code></td>
+<td>版本号提升了却没有匹配的标签——这会把 <code>delonix-cri</code> 的下载（它是根据正在运行的二进制文件自身的版本号来解析的，见 <code>vmimage.rs</code>）指向一个永远不会存在的发布。</td>
 </tr>
 </tbody>
 </table></div>
-<p>The version is not decoration: besides the <code>delonix-cri</code> download, it is the Docker API's
-<code>ServerVersion</code>, the <code>delonix_version</code> recorded in every resource backup, and what the release
-workflow (below) checks the built binary against before publishing anything.</p>
-<p>Do not bump the version in a feature PR, and do not use a <code>-dev</code> suffix — the gate's first rule
-already covers ordinary work, and a <code>-dev</code> suffix would point the CRI download at a release that
-does not exist.</p>
-<h2 id="what-publishing-a-release-does">What publishing a release does<a class="hanchor" href="#what-publishing-a-release-does" aria-label="#">#</a></h2>
-<p>Pushing the tag publishes <strong>nothing</strong>. Since 2026-09-23 the release workflow is
-<code>workflow_dispatch</code>-only: the tag and the release are two separate decisions, so a tag that
-reaches the remote by accident (<code>git push --tags</code>, <code>push.followTags=true</code>) can no longer put a
-binary in front of the world. A tag with no release is a normal intermediate state here.</p>
+<p>版本号不是装饰：除了 <code>delonix-cri</code> 的下载之外，它还是 Docker API 的 <code>ServerVersion</code>、记录在
+每一份资源备份里的 <code>delonix_version</code>，也是发布工作流程（见下文）在发布任何东西之前用来核对
+构建出的二进制文件的依据。</p>
+<p>不要在一个功能 PR 里提升版本号，也不要用 <code>-dev</code> 后缀——门禁的第一条规则已经覆盖了日常工作，
+而 <code>-dev</code> 后缀会把 CRI 的下载指向一个不存在的发布。</p>
+<h2 id="what-publishing-a-release-does">发布一次版本做了什么<a class="hanchor" href="#what-publishing-a-release-does" aria-label="#">#</a></h2>
+<p>推送标签<strong>什么也不会发布</strong>。自 2026-09-23 起，发布工作流程只能通过 <code>workflow_dispatch</code>
+触发：标签和发布是两个各自独立的决定，所以一个意外到达远端的标签（<code>git push --tags</code>、
+<code>push.followTags=true</code>）再也不能把一个二进制文件推到全世界面前。一个没有对应发布的标签，
+在这里是正常的中间状态。</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">git tag -a v4.4.0 -m &quot;v4.4.0&quot; &amp;&amp; git push origin v4.4.0   # cuts the version
 gh workflow run release.yml -f tag=v4.4.0                 # publishes it
 </code></pre></div>
-<p>A <code>guard</code> job runs first and costs seconds: it refuses a <code>tag</code> that is not shaped <code>vX.Y.Z</code>, one
-that does not exist on the remote, and one that already has a release — the input picks the commit
-to build and names the release, so an unchecked <code>tag: main</code> would have published a release called
-"main". Only then, in one job:</p>
+<p>一个 <code>guard</code> 任务会先运行，只花几秒钟：它会拒绝一个形状不是 <code>vX.Y.Z</code> 的 <code>tag</code>、一个在远端
+不存在的 <code>tag</code>，以及一个已经有发布的 <code>tag</code>——这个输入决定了要构建哪次提交、要给发布起什么
+名字，所以一个未经检查的 <code>tag: main</code> 本会发布出一个叫"main"的发布。只有到这一步之后，才会
+在同一个任务里：</p>
 <ol>
-<li>Builds <code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code> and <code>delonix-mgmt</code> twice — once generic
-   x86-64, once with <code>-C target-cpu=x86-64-v3</code> (AVX2/BMI2/FMA) — on <code>ubuntu-22.04</code> specifically,
-   so the glibc baseline (2.35) stays compatible with RHEL 9 and Debian 12, not just the newest
-   Ubuntu. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> picks the <code>-v3</code> build automatically when the host CPU supports it.
-   A separate <code>build-arm64</code> job builds the same four binaries natively on an aarch64 runner (one
-   per component, no <code>-v3</code> variant), and they are published as <code>&lt;name&gt;-aarch64-linux</code> under the same
-   <code>SHA256SUMS</code>. <code>install.sh</code> installs them on an aarch64 host (#447). The job only runs at release time, so its
-   first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
-   <code>test (arm64)</code> job on every PR.</li>
-<li><strong>Regenerates the user site against this exact release build and fails if <code>docs/</code> differs.</strong>
-   This gate exists because it once did not: a site gap shipped live in v0.48.0, hiding a new
-   command for hours while a parallel CI job was already red about it — the two workflows just
-   were not looking at each other. Running <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> here, before publishing, closes that.</li>
-<li>Builds a checksummed <code>SHA256SUMS</code>, an SPDX 2.3 SBOM (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a>, from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a>,
-   itself hashed into <code>SHA256SUMS</code>), and — when the <code>MINISIGN_SECRET_KEY</code> secret is configured —
-   a minisign signature over <code>SHA256SUMS</code>. <code>SHA256SUMS</code> alone only proves transfer integrity (it
-   comes from the same URL as the binary); the signature proves the release came from this
-   project, since <code>install.sh</code> carries the public key embedded and refuses to install an
-   unsigned release without <code>--insecure-skip-signature</code>. Failing to sign when a key <strong>is</strong>
-   configured is a hard error — it would break every installer's signature check at once.</li>
-<li>Verifies its own binary reports the tag's version (<code>delonix --version | grep &lt;tag&gt;</code>) before
-   publishing anything — the same class of check <code>version_gate.py</code> runs earlier, against the
-   artefact that is actually about to ship.</li>
-<li>Attaches SLSA build provenance (<code>actions/attest-build-provenance</code>, GitHub's own action, kept
-   separate from minisign on purpose: provenance proves <em>where and from which commit</em> something
-   was built, to someone who does not trust the project up front; minisign proves the release is
-   <em>this project's</em>, to someone who already trusts its embedded public key).</li>
-<li>Publishes the GitHub Release, with <code>docs/releases/&lt;tag&gt;.md</code> as its notes when that file
-   exists, or <code>--generate-notes</code> otherwise.</li>
-<li>Checks out <code>main</code> and regenerates <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>) and the
-   handbook's generated facts (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>) and, separately, the handbook <strong>site</strong>
-   (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/dev_docs_site.py</code></a>) — committing whichever changed, <code>[skip ci]</code>, so the docs never
-   trail a release by more than this one commit. A generator failure here is a loud warning, not
-   a failed release: the release itself does not depend on it.</li>
+<li>构建 <code>delonix</code>、<code>delonix-cri</code>、<code>delonix-mcp</code> 和 <code>delonix-mgmt</code> 两次——一次是通用
+   x86-64，一次带上 <code>-C target-cpu=x86-64-v3</code>（AVX2/BMI2/FMA）——特意选在 <code>ubuntu-22.04</code>
+   上构建，好让 glibc 基线版本（2.35）与 RHEL 9 和 Debian 12 保持兼容，而不只是与最新的
+   Ubuntu 兼容。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> 会在宿主机 CPU 支持时自动选用 <code>-v3</code> 版本的构建。一个
+   独立的 <code>build-arm64</code> 任务会在一台 aarch64 运行器上原生构建同样这四个二进制文件（每个
+   组件一个，没有 <code>-v3</code> 变体），以 <code>&lt;name&gt;-aarch64-linux</code> 的形式发布，并放进同一份
+   <code>SHA256SUMS</code> 里。<code>install.sh</code> 会在一台 aarch64 宿主机上安装它们（#447）。这个任务只在
+   发布时运行，所以它第一次执行就是 v4.2.0 那次发布本身；CI 会在每个 PR 上通过 <code>test
+   (arm64)</code> 任务原生运行测试套件。</li>
+<li><strong>针对这次确切的发布构建重新生成用户站点，如果 <code>docs/</code> 有差异就失败。</strong> 这道门禁之所以
+   存在，是因为它曾经不存在：v0.48.0 里就曾经发生过一个站点缺口在上线时随之发布，隐藏了一个
+   新命令好几个小时，而与此同时另一个并行的 CI 任务已经因此报红——只是这两条工作流程谁也没
+   看谁。在这里、在发布之前跑一遍 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>，堵上了这个缺口。</li>
+<li>构建一份带校验和的 <code>SHA256SUMS</code>、一份 SPDX 2.3 的软件物料清单（SBOM，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/sbom.py" target="_blank" rel="noopener"><code>scripts/sbom.py</code></a>，
+   从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a> 生成，它自身也被哈希进 <code>SHA256SUMS</code>），以及——当配置了
+   <code>MINISIGN_SECRET_KEY</code> 密钥时——一份对 <code>SHA256SUMS</code> 的 minisign 签名。<code>SHA256SUMS</code>
+   本身只能证明传输完整性（它来自与二进制文件相同的 URL）；签名证明的是这次发布确实来自
+   本项目，因为 <code>install.sh</code> 内置了公钥，并且在没有 <code>--insecure-skip-signature</code> 的情况下
+   会拒绝安装一个未签名的发布。当密钥<strong>确实</strong>已配置却签名失败时，这是一个硬性错误——因为
+   那会一次性破坏所有安装脚本的签名校验。</li>
+<li>在发布任何东西之前，先验证它自己构建出的二进制文件报告的版本号与标签一致
+   (<code>delonix --version | grep &lt;tag&gt;</code>)——这和 <code>version_gate.py</code> 更早运行过的检查是同一类,
+   只不过这次核对的是真正即将发布出去的那个构件。</li>
+<li>附加 SLSA 构建来源证明（<code>actions/attest-build-provenance</code>，GitHub 自己的动作，故意与
+   minisign 分开：来源证明面向的是那些并不预先信任本项目的人，证明某个东西<em>是在哪里、从哪次
+   提交构建出来的</em>；minisign 面向的是那些已经信任其内置公钥的人，证明这次发布<em>确实属于本
+   项目</em>）。</li>
+<li>发布 GitHub Release：当 <code>docs/releases/&lt;tag&gt;.md</code> 存在时，用它作为发布说明；否则用
+   <code>--generate-notes</code>。</li>
+<li>检出 <code>main</code>，重新生成 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/RELEASES.md" target="_blank" rel="noopener"><code>docs/RELEASES.md</code></a>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>）以及手册生成的
+   事实部分（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>），并单独重新生成手册的<strong>站点</strong>
+   （<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/dev_docs_site.py</code></a>）——把有变化的部分提交上去，带 <code>[skip ci]</code>，这样文档就
+   永远不会比一次发布落后超过这一次提交。生成器在这一步失败只是一个响亮的警告，而不是一次
+   失败的发布：发布本身并不依赖它。</li>
 </ol>
-<p>The <strong>narrative</strong> half of the handbook — the prose on these pages — is not regenerated by CI.
-After a release is published, a maintainer-run review reads what changed since the previous tag
-(commits, release notes) and updates only the pages that change affects, exactly as described in
-<a href="publishing-docs.html#what-happens-at-release-time">Publishing the documentation § What happens at release time</a>.</p>
-<h2 id="what-is-stable-and-where-that-promise-lives">What is stable, and where that promise lives<a class="hanchor" href="#what-is-stable-and-where-that-promise-lives" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> is the actual contract, in the same repository, read by <code>delonix explain</code>
-and generated pages alike — this section only orients you to it, since duplicating its content
-here would give it a second copy to fall out of step with the code. It has applied since v0.42.3
-and, as of v1.0.0, reads as the project's real semver promise rather than a within-<code>0.x</code> note.</p>
-<p><strong>Stable — does not break without a major:</strong></p>
+<p>手册的<strong>叙述</strong>半边——这些页面上的文字——不会由 CI 重新生成。在一次发布发布出去之后，会有一位
+维护者主导的复核，阅读自上一个标签以来发生了什么变化（提交、发布说明），并只更新受影响的
+那些页面，具体做法正如<a href="publishing-docs.html#what-happens-at-release-time">发布文档 § 发布时会发生什么</a>
+所描述的那样。</p>
+<h2 id="what-is-stable-and-where-that-promise-lives">什么是稳定的，以及这个承诺写在哪里<a class="hanchor" href="#what-is-stable-and-where-that-promise-lives" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 才是真正的契约，就在同一个仓库里，被 <code>delonix explain</code> 和生成出来
+的页面共同读取——本节只是把你引导到那里去，因为在这里再复述一遍它的内容,只会多出一份会与
+代码脱节的副本。这条契约自 v0.42.3 起生效，到了 v1.0.0，它读起来就是本项目真正的语义化
+版本承诺,而不再只是一条局限于 <code>0.x</code> 阶段内部的备注。</p>
+<p><strong>稳定——不会在没有主版本号变更的情况下被破坏：</strong></p>
 <ul>
-<li>The container/image lifecycle verbs (<code>container run</code>, <code>ps</code>, <code>stop</code>, <code>exec</code>, …) and image
-  verbs, with Docker/Podman's own names and argument order, and the specific short/long flags
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> lists for <code>run</code>/<code>exec</code>.</li>
-<li>Exit codes (<code>0</code> success, <code>4</code> not found, <code>5</code> conflict, <code>69</code> missing host capability, <code>124</code>
-  timeout, …) and the <code>DX-CDNN</code> dictionary number each failure carries (ADR-0043) — the number
-  identifies <em>which</em> failure and never changes meaning or gets reused; <code>delonix explain DX-4501</code>
-  looks one up.</li>
-<li><code>-o json</code> on every listing command: fields can be added, never removed or retyped (ADR-0005).</li>
-<li>The <strong>manifest schema</strong> for Kinds with a typed spec (<code>Container</code>, <code>Pod</code>, <code>Volume</code>, <code>Network</code>,
-  and the others <code>delonix manifest schema</code> lists): a field is never removed, retyped or
-  repurposed; a new field is always optional with a default that preserves old behaviour; a
-  renamed field keeps the old spelling as an alias; <code>apiVersion: delonix.io/v1</code> keeps loading
-  even after the per-domain groups (<code>compute.delonix.io/v1alpha1</code>, …) became canonical. This is
-  the promise that matters most in practice — it protects what people put in git and review in a
-  PR, not just what they type at a prompt.</li>
+<li>容器/镜像生命周期的动词（<code>container run</code>、<code>ps</code>、<code>stop</code>、<code>exec</code> 等）以及镜像相关的动词，
+  沿用 Docker/Podman 自己的命名和参数顺序，以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 为
+  <code>run</code>/<code>exec</code> 列出的那些具体的短/长标志位。</li>
+<li>退出码（<code>0</code> 成功、<code>4</code> 未找到、<code>5</code> 冲突、<code>69</code> 缺少宿主机能力、<code>124</code> 超时……）以及每次
+  失败所携带的 <code>DX-CDNN</code> 字典编号（ADR-0043）——这个编号标识的是<em>哪一种</em>失败，其含义永远
+  不会改变，也不会被复用；<code>delonix explain DX-4501</code> 可以查到某一个具体编号。</li>
+<li>每一个列表命令上的 <code>-o json</code>：字段只能被新增，绝不会被移除或改变类型（ADR-0005）。</li>
+<li>拥有类型化 spec 的那些 Kind 的<strong>清单 schema</strong>（<code>Container</code>、<code>Pod</code>、<code>Volume</code>、<code>Network</code>,
+  以及 <code>delonix manifest schema</code> 列出的其他那些）：一个字段绝不会被移除、改变类型或挪作
+  他用；新字段永远是可选的，并带有一个能保持旧行为的默认值；一个改了名字的字段会把旧的
+  拼法保留为别名；<code>apiVersion: delonix.io/v1</code> 在按领域划分的分组
+  （<code>compute.delonix.io/v1alpha1</code> 等）成为规范写法之后依然能被加载。这是实践中分量最重的
+  那条承诺——它保护的是人们提交进 git、在 PR 里评审的那些内容，而不只是敲在命令提示符里的
+  那些字符。</li>
 </ul>
-<p><strong>Not stable — can change in any version:</strong> <code>serve cri</code>/<code>serve api</code>/<code>serve docker-api</code> (the local
-management API in particular has no published contract and is explicitly not something to
-automate against — see <a href="crates.html#delonix-mgmt">The crates § <code>delonix-mgmt</code></a> and ADR-0040/0041);
-the <code>cluster</code>/<code>vm</code>/<code>pod</code>/<code>workload</code>/<code>net</code> imperative surfaces (their manifest <strong>schema</strong>, where one
-exists, is covered above — only the verbs and flags around it are not); <code>compose</code>; <code>backup</code>;
-<code>mcp</code>; <code>system</code>/<code>dashboard</code>/<code>completion</code>/<code>init</code>/<code>man</code>/<code>config</code>/<code>explain</code>; the on-disk state format
-under <code>$DELONIX_ROOT</code>; and <code>stack history</code>/<code>stack rollback</code> (ADR-0019 — nothing reads that
-history to decide what exists, so losing it changes nothing the reconciler does).</p>
-<h2 id="how-a-breaking-change-is-made-when-it-has-to-happen">How a breaking change is made, when it has to happen<a class="hanchor" href="#how-a-breaking-change-is-made-when-it-has-to-happen" aria-label="#">#</a></h2>
-<p>The precedent, already applied more than once (the v0.30.0 CLI reorganisation, the v2.0.0
-<code>image list</code>→<code>image ls</code> reversal): <strong>a clean cut, no compatibility alias.</strong> The old spelling fails
-with <code>unrecognized subcommand</code>, loudly, in every version from the break onward — never a silent
-alias that quietly changes behaviour later. <code>docs/cli-stability.md § Como uma quebra é feita</code>
-records a real lesson from doing this: a rename can leave an <em>internal</em> caller behind (the CRI
-server itself kept invoking a removed <code>delonix netns attach</code> for months after the v0.30.0
-reorganisation, breaking rootless pod creation) — grepping the whole workspace for the old
-spelling, not just the docs and the tests, is part of making the cut.</p>
-<p>A breaking change to something this page or <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> marks stable needs an ADR
-first (<a href="contributing-workflow.html#when-to-write-an-adr">Contribution workflow § When to write an ADR</a>),
-because it moves a structural boundary by definition — the same reasoning that applies to a new
-backend or a new privilege boundary applies here too.</p>
+<p><strong>不稳定——可以在任何版本里改变：</strong> <code>serve cri</code>/<code>serve api</code>/<code>serve docker-api</code>（本地管理
+API 尤其没有已发布的契约，明确不是拿来做自动化的对象——见<a href="crates.html#delonix-mgmt">各个 crate § <code>delonix-mgmt</code></a>
+以及 ADR-0040/0041）；<code>cluster</code>/<code>vm</code>/<code>pod</code>/<code>workload</code>/<code>net</code> 这些命令式（imperative）
+接口（它们的清单 <strong>schema</strong>，如果存在的话，上面已经覆盖到了——不稳定的只是围绕它的那些
+动词和标志位）；<code>compose</code>；<code>backup</code>；<code>mcp</code>；<code>system</code>/<code>dashboard</code>/<code>completion</code>/<code>init</code>/
+<code>man</code>/<code>config</code>/<code>explain</code>；<code>$DELONIX_ROOT</code> 下的磁盘状态格式；以及 <code>stack history</code>/
+<code>stack rollback</code>（ADR-0019——没有任何东西会读取这份历史来决定什么存在，所以丢掉它并不会
+改变协调器（reconciler）做的任何事）。</p>
+<h2 id="how-a-breaking-change-is-made-when-it-has-to-happen">一次破坏性变更是如何发生的，当它不得不发生时<a class="hanchor" href="#how-a-breaking-change-is-made-when-it-has-to-happen" aria-label="#">#</a></h2>
+<p>已经不止一次应用过的先例（v0.30.0 的 CLI 重组、v2.0.0 把 <code>image list</code> 改回
+<code>image ls</code>）：<strong>干净利落地切一刀，不留兼容别名。</strong> 旧的拼法会以 <code>unrecognized subcommand</code>
+失败，响亮地失败，从切换那一刻起的每一个版本都是如此——绝不留一个悄悄改变行为、日后才让人
+察觉的静默别名。<code>docs/cli-stability.md § Como uma quebra é feita</code> 记录了做这件事时得到的
+一次真实教训：一次重命名可能会漏掉一个<em>内部</em>调用者（CRI 服务器自己在 v0.30.0 重组之后的
+好几个月里，一直在调用一个已经被移除的 <code>delonix netns attach</code>，破坏了 rootless 下的 pod
+创建）——对整个工作区（workspace）grep 旧的拼法，而不只是文档和测试，是切这一刀的一部分。</p>
+<p>对本页或 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cli-stability.md" target="_blank" rel="noopener"><code>docs/cli-stability.md</code></a> 标记为稳定的东西做破坏性变更，首先需要一份 ADR
+（<a href="contributing-workflow.html#when-to-write-an-adr">贡献流程 § 什么时候要写 ADR</a>），因为
+按定义它移动了一条结构性边界——这与新增一个后端或新增一条特权边界所适用的推理是一样的。</p>
 <hr />
-<p><strong>Next:</strong> <a href="publishing-docs.html">Publishing the documentation</a> — how the site and this handbook are generated, gated and published, and what your PR must regenerate.</p>
-<nav class="pager"><a href="contributing-workflow.html"><span>← 上一页</span>Contribution workflow</a><a class="next" href="publishing-docs.html"><span>下一页 →</span>Publishing the documentation</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/releases-and-stability.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/releases-and-stability.md</code></footer>
+<p><strong>下一篇：</strong> <a href="publishing-docs.html">发布文档</a>——站点和本手册是如何被生成、经过门禁检查并发布的，以及你的 PR 必须重新生成什么。</p>
+<nav class="pager"><a href="contributing-workflow.html"><span>← 上一页</span>贡献流程</a><a class="next" href="publishing-docs.html"><span>下一页 →</span>发布文档</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/releases-and-stability.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/releases-and-stability.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#the-version-gate">The version gate</a></li>
-<li><a href="#what-publishing-a-release-does">What publishing a release does</a></li>
-<li><a href="#what-is-stable-and-where-that-promise-lives">What is stable, and where that promise lives</a></li>
-<li><a href="#how-a-breaking-change-is-made-when-it-has-to-happen">How a breaking change is made, when it has to happen</a></li>
+<li><a href="#the-version-gate">版本门禁</a></li>
+<li><a href="#what-publishing-a-release-does">发布一次版本做了什么</a></li>
+<li><a href="#what-is-stable-and-where-that-promise-lives">什么是稳定的，以及这个承诺写在哪里</a></li>
+<li><a href="#how-a-breaking-change-is-made-when-it-has-to-happen">一次破坏性变更是如何发生的，当它不得不发生时</a></li>
 </ul>
 </div>
 </aside>
