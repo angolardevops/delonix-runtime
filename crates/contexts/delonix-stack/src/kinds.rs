@@ -62,6 +62,7 @@ pub const SECRET: &str = "Secret";
 pub const RUNTIME_POLICY: &str = "RuntimePolicy";
 pub const NETWORK: &str = "Network";
 pub const NETWORK_ROUTE: &str = "NetworkRoute";
+pub const NETWORK_ZONE: &str = "NetworkZone";
 pub const VOLUME: &str = "Volume";
 pub const IMAGE: &str = "Image";
 pub const APP: &str = "App";
@@ -353,6 +354,24 @@ const FACTS: &[KindFacts] = &[
         converges: true,
         teardown: true,
         namespaced: Namespaced::Never,
+        presence: Presence::Registry,
+    },
+    KindFacts {
+        kind: NETWORK_ZONE,
+        plural: "networkzones",
+        short: &["nz"],
+        api_version: "networking.delonix.io/v1alpha1",
+        domain: Domain::NetConnectivity,
+        form: Form::Primary,
+        in_stack: true,
+        stack_group: "networkZones",
+        converges: true,
+        teardown: true,
+        namespaced: Namespaced::Never,
+        // Its own registry (ADR-0049 addendum, mirrors NETWORK_GATEWAY): the
+        // Proxmox cluster this realizes against carries no `delonix.io/stack`
+        // label of its own to stamp — the zone/vnets are PENDING config in
+        // `/cluster/sdn/*`, not a local resource.
         presence: Presence::Registry,
     },
     KindFacts {

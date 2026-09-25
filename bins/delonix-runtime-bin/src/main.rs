@@ -562,6 +562,10 @@ fn run() -> Result<()> {
                       // receives a target. Free when unconfigured, and it does no I/O even
                       // when it is — the node is contacted on first use (ADR-0008).
     cmd::vmbackends::register_configured();
+    // Same target, a second port: `kind: NetworkZone` never names a
+    // provider itself, so this is the only place a Proxmox target becomes
+    // reachable from it (ADR-0049 addendum).
+    cmd::network_zone_providers::register_configured();
     // Same reasoning, one layer over: a remote GatewayProvider (OPNsense) has to be
     // registered before anything selects it by name (ADR-0051).
     cmd::gatewayproviders::register_configured();

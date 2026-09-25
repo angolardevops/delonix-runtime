@@ -929,6 +929,7 @@ version = "4.4.0"
 dependencies = [
  "delonix-compute",
  "delonix-model",
+ "delonix-sdn",
  "delonix-vm",
  "rcgen",
  "reqwest 0.12.28",

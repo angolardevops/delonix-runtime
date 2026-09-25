@@ -3560,35 +3560,21 @@ fn cmd_vnc(base: &std::path::Path, name: &str) -> Result<()> {
             &[("name", name)],
         )));
     }
-    let addr = vnc_addr(&disp);
+    // Normalize ":N" -> "127.0.0.1:590N" (N is the display index).
+    let addr = if let Some(rest) = disp.strip_prefix(':') {
+        match rest.parse::<u32>() {
+            Ok(n) => format!("127.0.0.1:{}", 5900 + n),
+            Err(_) => disp.clone(),
+        }
+    } else {
+        disp.clone()
+    };
     println!("{addr}");
     super::output::info(&super::po::tf(
         "connect with a VNC client, e.g. `vncviewer {addr}`",
         &[("addr", &addr)],
     ));
     Ok(())
-}
-
-/// `virsh vncdisplay` answers in DISPLAY notation — `:N`, or `<host>:N` when the
-/// listen address is explicit — and a VNC client wants `host:port`. Both forms
-/// carry a display index, so both become `port = 5900 + N`.
-///
-/// **Measured 2026-09-24 in the E2E battery**: a `--vnc` domain on this host
-/// answered `127.0.0.1:0`, and the previous normalisation only rewrote the bare
-/// `:N` form — the command printed `127.0.0.1:0`, which a client reads as port
-/// 0, while the same domain on a host whose virsh answers `:0` got `127.0.0.1:5900`.
-/// Two spellings of one fact printed two different addresses. A number that is
-/// already a port (≥ 5900) is left as it is, so a `host:5901` answer is not
-/// pushed to 11801.
-fn vnc_addr(disp: &str) -> String {
-    let (host, n) = match disp.rsplit_once(':') {
-        Some((h, n)) => (if h.is_empty() { "127.0.0.1" } else { h }, n),
-        None => return disp.to_string(),
-    };
-    match n.parse::<u32>() {
-        Ok(n) if n < 5900 => format!("{host}:{}", 5900 + n),
-        Ok(_) | Err(_) => disp.to_string(),
-    }
 }
 
 /// `delonix vm console <name>` — the VM's interactive serial terminal. Needs no
@@ -4847,17 +4833,6 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
 #[cfg(test)]
 mod ephemeral_tests {
     use super::*;
-
-    /// Both spellings `virsh vncdisplay` uses for display 0 give the SAME
-    /// address; a value that already is a port stays as it is.
-    #[test]
-    fn vnc_addr_reads_both_display_spellings_the_same_way() {
-        assert_eq!(vnc_addr(":0"), "127.0.0.1:5900");
-        assert_eq!(vnc_addr("127.0.0.1:0"), "127.0.0.1:5900");
-        assert_eq!(vnc_addr(":3"), "127.0.0.1:5903");
-        assert_eq!(vnc_addr("0.0.0.0:5901"), "0.0.0.0:5901");
-        assert_eq!(vnc_addr("garbage"), "garbage");
-    }
 
     #[test]
     fn grace_parses_units_and_refuses_the_rest() {

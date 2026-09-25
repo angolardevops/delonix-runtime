@@ -63,6 +63,7 @@ const TYPED_KINDS: &[&str] = &[
     k::FIREWALL_POLICY,
     k::NETWORK_ACCESS_RULE,
     k::NETWORK_GATEWAY,
+    k::NETWORK_ZONE,
     k::SERVICE,
     k::IPPOOL,
     k::WORKLOAD,
@@ -254,6 +255,11 @@ fn typed_spec_parts(
             generator.subschema_for::<super::network_gateway::NetworkGatewaySpec>(),
             "NetworkGatewaySpec",
             super::network_gateway::NETWORK_GATEWAY_SPEC_FIELDS,
+        ),
+        k::NETWORK_ZONE => (
+            generator.subschema_for::<super::network_zone::NetworkZoneSpecDoc>(),
+            "NetworkZoneSpecDoc",
+            super::network_zone::NETWORK_ZONE_SPEC_FIELDS,
         ),
         k::WORKLOAD => (
             generator.subschema_for::<super::workload::WorkloadSpec>(),

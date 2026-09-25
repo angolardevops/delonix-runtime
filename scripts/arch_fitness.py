@@ -148,6 +148,12 @@ EXCEPTIONS = {
         "delonix-proxmox -> delonix-vm above (ADR-0051): P4 moves it into a "
         "context crate alongside VmBackend's own move, not before",
     ),
+    ("dep", "delonix-proxmox", "delonix-sdn"): (
+        "P4",
+        "the NetworkZoneProvider port (ADR-0049 addendum) lives in delonix-sdn "
+        "for the same reason GatewayProvider does (ADR-0051): mirrors the "
+        "VmBackend precedent exactly, and moves the same week P4 moves that one",
+    ),
     ("dep", "delonix-scanner", "delonix-oci"): (
         "P4",
         "the scanner reads layers through the OCI adapter instead of through an "
