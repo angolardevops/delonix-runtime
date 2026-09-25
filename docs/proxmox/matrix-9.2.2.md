@@ -20,23 +20,23 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
 - **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to; dnsmasq 2.91 installed and its global service disabled, frr 10.6 present, ifupdown2 3.3`
-- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations) and 2026-09-25T09:40Z (power operations: suspend/resume/reset/reboot/shutdown): each PR's own live run appended after the previous.`
+- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations) and 2026-09-25T09:40Z (power operations: suspend/resume/reset/reboot/shutdown) and 2026-09-25T17:54Z (cold resize: POST config, config and pending read back): each PR's own live run appended after the previous.`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TEST_MOVE_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `the power-operations case passed on its own run (1 passed, 44 s): suspend read back as qmpstatus=paused, resume, reset, a reboot and a plain shutdown of the OS-less guest failing with «VM quit/powerdown failed - got timeout» and the VM still running, then a forceStop shutdown to stopped. Before it, 14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
+- **result**: `the cold-resize case passed on its own run (1 passed, 39 s): refused with DX-5505 while the node ran the VM and the config unchanged, then stopped, POST config forked a qmconfig task that was waited on, config read back cores=2/sockets=1/memory=768, pending empty, and after a start status/current reported cpus=2 and maxmem=768 MiB. Before it, the power-operations case passed on its own run (1 passed, 44 s): suspend read back as qmpstatus=paused, resume, reset, a reboot and a plain shutdown of the OS-less guest failing with «VM quit/powerdown failed - got timeout» and the VM still running, then a forceStop shutdown to stopped. Before it, 14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `3264`
+- **requests**: `3344`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 107 (15.9 % of the schema) — 104 seen in a live trace, 3 not
+- **called**: 108 (16.0 % of the schema) — 105 seen in a live trace, 3 not
 - **unsupported by design**: 363 (each with a written reason)
-- **not yet implemented**: 205
+- **not yet implemented**: 204
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
 |---|---:|---:|---:|---:|---:|
-| qemu | 49 | 2 | 0 | 58 | 109 |
+| qemu | 50 | 2 | 0 | 57 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
 | sdn | 48 | 0 | 0 | 42 | 90 |
 | storage | 2 | 0 | 0 | 23 | 25 |
@@ -130,6 +130,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/qemu/{vmid}/firewall/rules/{pos}` | supported+tested | object | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/firewall/rules/{pos}` | supported+tested | null | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/move_disk` | supported+tested | string | yes |  |
+| GET | `/nodes/{node}/qemu/{vmid}/pending` | supported+tested | array | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/resize` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/snapshot` | supported+tested | array | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/snapshot` | supported+tested | string | yes |  |
@@ -651,7 +652,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/nodes/{node}/qemu/{vmid}/monitor` | not-yet-implemented | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/mtunnel` | not-yet-implemented |  | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/mtunnelwebsocket` | not-yet-implemented | object | yes |  |
-| GET | `/nodes/{node}/qemu/{vmid}/pending` | not-yet-implemented | array | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/remote_migrate` | not-yet-implemented | string | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/rrd` | not-yet-implemented | object | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/rrddata` | not-yet-implemented | array | yes |  |

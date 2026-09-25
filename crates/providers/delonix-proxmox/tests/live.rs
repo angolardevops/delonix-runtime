@@ -2675,3 +2675,107 @@ fn power_operations_round_trip_through_the_node() {
         "the VM is still defined on the node after destroy — an orphan"
     );
 }
+
+/// `vm resize` on Proxmox (`vm.resize.cold`), asserted from what the node
+/// records afterwards (`GET …/config`, `GET …/pending`), never from the
+/// call's answer:
+///
+/// - a VM the NODE runs is refused with the engine's own
+///   `ResizeNeedsStopped` (DX-5505), even though a record could say
+///   `Stopped` — nothing is sent, the config keeps its old numbers;
+/// - stopped, `resize_cold` sets cores, sockets and memory, and `pending`
+///   is empty: the numbers are the ones the VM boots with;
+/// - it boots with them: after `resume` the config still says so and the
+///   node reports the VM's `cpus`/`maxmem` from the new definition.
+#[test]
+fn a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxresize{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let number_at = |v: &serde_json::Value, k: &str| -> Option<u64> {
+        let x = v.get(k)?;
+        x.as_u64()
+            .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+    };
+
+    let err = b
+        .resize_cold(vmdir, &vm, 2, 768)
+        .expect_err("the node runs it: a cold resize must be refused");
+    assert_eq!(err.number(), 5505, "{err}");
+    let c = client.config(vmid).expect("config");
+    assert_eq!(
+        (number_at(&c, "cores"), number_at(&c, "memory")),
+        (Some(1), Some(512)),
+        "a refused resize changed the config: {c}"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.resize_cold(vmdir, &vm, 2, 768)
+        .expect("resize a stopped VM");
+    let c = client.config(vmid).expect("config");
+    assert_eq!(
+        (
+            number_at(&c, "cores"),
+            number_at(&c, "sockets"),
+            number_at(&c, "memory")
+        ),
+        (Some(2), Some(1), Some(768)),
+        "{c}"
+    );
+    let pending = client.pending(vmid).expect("pending");
+    assert!(
+        pending
+            .iter()
+            .all(|e| e.get("pending").is_none() && e.get("delete").is_none()),
+        "a stopped VM's resize was left pending: {pending:?}"
+    );
+
+    b.resume(vmdir, &vm).expect("resume").expect("a started VM");
+    let st = client.current(vmid).expect("status/current");
+    assert_eq!(st.get("status").and_then(|s| s.as_str()), Some("running"));
+    assert_eq!(
+        number_at(&st, "cpus"),
+        Some(2),
+        "it booted with 2 vCPUs: {st}"
+    );
+    assert_eq!(
+        number_at(&st, "maxmem"),
+        Some(768 * 1024 * 1024),
+        "it booted with 768 MiB: {st}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}

@@ -12207,6 +12207,25 @@ msgstr "Pediu-se a um encerramento ou reinício feito pelo convidado que esperas
 msgid "Give a timeout shorter than the client's task deadline (600 seconds by default), or omit it to take the node's own default."
 msgstr "Dá um tempo limite menor do que o prazo de tarefa do cliente (600 segundos por omissão), ou omite-o para ficar com o valor por omissão do próprio nó."
 
+# DX-1536 / DX-5505 — vm resize (vm.resize.cold, ADR-0049 slice 2)
+msgid "invalid VM resize"
+msgstr "redimensionamento de VM inválido"
+
+msgid "`vm resize` needs `--vcpus` and/or `--memory`; vCPUs have to be at least 1 and memory a number with an optional M/G suffix (`512M`, `4G`, `4Gi`). A value that does not parse is refused rather than read as a default."
+msgstr "O `vm resize` precisa de `--vcpus` e/ou `--memory`; os vCPUs têm de ser pelo menos 1 e a memória um número com sufixo M/G opcional (`512M`, `4G`, `4Gi`). Um valor que não se lê é recusado em vez de ser tomado por um valor por omissão."
+
+msgid "Pass `--vcpus <n>` (n ≥ 1) and/or `--memory <size>`, e.g. `--memory 4G`."
+msgstr "Passa `--vcpus <n>` (n ≥ 1) e/ou `--memory <tamanho>`, por exemplo `--memory 4G`."
+
+msgid "the VM must be stopped to resize it"
+msgstr "a VM tem de estar parada para ser redimensionada"
+
+msgid "`vm resize` is a cold resize: it changes the definition a VM boots with. A running or paused guest would not see the change until its next reboot, so the verb refuses instead of reporting a resize that has not happened."
+msgstr "O `vm resize` é um redimensionamento a frio: muda a definição com que a VM arranca. Um convidado a correr ou em pausa só veria a mudança no reinício seguinte, por isso o verbo recusa em vez de reportar um redimensionamento que não aconteceu."
+
+msgid "Run `delonix vm stop <name>`, resize, then `delonix vm start <name>`."
+msgstr "Corre `delonix vm stop <nome>`, redimensiona, e depois `delonix vm start <nome>`."
+
 msgid "The VM has no snapshot with that name on the Proxmox node."
 msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
 
@@ -13861,3 +13880,22 @@ msgstr "reclamá-los: pin, processo de controlo e slirp de cada raiz de estado q
 
 msgid "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n`vm prune` will NOT take these — a bare directory is somebody's data, and that rule once stopped a sweep from destroying 53 GiB of live disks. They are named here because until now nothing named them at all; removing them is your call."
 msgstr "{n} directório(s) em `vms/` ({size}) para onde nenhum registo de VM aponta: {list}\nO `vm prune` NÃO os leva — um directório nu são dados de alguém, e foi essa regra que travou uma varredura de destruir 53 GiB de discos vivos. Ficam aqui nomeados porque até agora nada os nomeava; removê-los é decisão tua."
+
+# vm resize (vm.resize.cold, ADR-0049 slice 2)
+msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot"
+msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque"
+
+msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot.\n\nA cold resize: refused while the VM is running or paused, because a guest that only sees the change after its next reboot has not been resized yet. On libvirt and Cloud Hypervisor the record is the whole definition and `vm start` rebuilds the VM from it; on Proxmox the node's config is changed and read back, and the node is asked too — a VM started from its own UI is refused even if the record says stopped. A value that does not parse (`2GB`) is refused, never read as a default."
+msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque.\n\nUm redimensionamento a frio: recusado enquanto a VM está a correr ou em pausa, porque um convidado que só vê a mudança no reinício seguinte ainda não foi redimensionado. No libvirt e no Cloud Hypervisor o registo é a definição inteira e o `vm start` reconstrói a VM a partir dele; no Proxmox a config do nó é alterada e relida, e o nó também é consultado — uma VM arrancada pela interface dele é recusada mesmo que o registo diga parada. Um valor que não se lê (`2GB`) é recusado, nunca tomado por um valor por omissão."
+
+msgid "New number of vCPUs (at least 1)"
+msgstr "Novo número de vCPUs (pelo menos 1)"
+
+msgid "New memory: a number with an optional M/G suffix (`768M`, `4G`, `4Gi`)"
+msgstr "Nova memória: um número com sufixo M/G opcional (`768M`, `4G`, `4Gi`)"
+
+msgid "give a stopped VM 4 vCPUs and 8 GiB for its next boot"
+msgstr "dar a uma VM parada 4 vCPUs e 8 GiB para o próximo arranque"
+
+msgid "stop, resize the memory only, start again with it"
+msgstr "parar, redimensionar só a memória, e voltar a arrancar com ela"

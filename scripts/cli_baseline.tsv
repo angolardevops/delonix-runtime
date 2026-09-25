@@ -230,6 +230,7 @@
 ~	vm pull
 ~	vm push
 ~	vm reach
+~	vm resize
 =	vm restart
 =	vm snapshot create
 =	vm snapshot ls
