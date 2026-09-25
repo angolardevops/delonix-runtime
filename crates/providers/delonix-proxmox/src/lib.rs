@@ -41,6 +41,7 @@
 //!   that may not be configured at all, and auto-detection is not a place to
 //!   make HTTP requests.
 
+pub mod cluster;
 mod error;
 mod network_zone;
 mod sdn;
@@ -1092,6 +1093,16 @@ impl Client {
         self.send_authed("PUT", path, || self.http.put(&url).form(form))
     }
 
+    /// The whole `GET …/status/current` answer: besides the state, the
+    /// `cpus` and `maxmem` of the definition the running VM booted with —
+    /// the node's own proof that a resize reached the guest, not only its
+    /// config file.
+    pub fn current(&self, vmid: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/status/current", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "status")?;
+        Ok(w.data)
+    }
+
     /// The VM's `status` as the node reports it (`running`, `stopped`, …).
     pub fn status_current(&self, vmid: u32) -> Result<String> {
         let body = self.get(&format!("/nodes/{}/qemu/{vmid}/status/current", self.node))?;
@@ -1262,7 +1273,12 @@ impl Client {
         storage: &str,
         gib: u32,
     ) -> Result<()> {
-        let form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        let mut form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        // Extra disks and NICs ride in the SAME create: one task, and either the
+        // VM exists with all of them or it does not exist. A second `POST
+        // …/config` after the create would be a window where the VM is on the
+        // node without the devices the caller asked for.
+        form.extend(extra_devices_form(cfg, &self.bridge)?);
         let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
         self.task(
             ledger,
@@ -1448,6 +1464,87 @@ impl Client {
         Ok(w.data)
     }
 
+    /// The VM's configuration changes the node has accepted but not applied
+    /// (`GET …/pending`): one entry per key, and an entry carrying `pending`
+    /// or `delete` is a change the guest does not have yet. A running VM puts
+    /// a memory or socket change here until its next reboot, which is why a
+    /// cold resize reads it: an empty pending list is the proof the new
+    /// values are the ones the VM will boot with.
+    pub fn pending(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/pending", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "pending")?;
+        Ok(w.data)
+    }
+
+    /// Gives a STOPPED VM `vcpus` and `memory_mib` for its next boot — the
+    /// cold resize behind `vm resize` (`vm.resize.cold`).
+    ///
+    /// Through `POST …/config`, the node's asynchronous config API, on the
+    /// same task path as [`Self::configure_clone`]: a UPID is waited on, only
+    /// a `null` is taken as applied inline. `sockets=1` goes with `cores`,
+    /// because the node counts vCPUs as sockets × cores and a clone of a
+    /// template with two sockets would otherwise get twice what was asked.
+    ///
+    /// Then read back, never assumed: the config has to carry the numbers
+    /// sent, and `pending` has to be empty. A VM the node still runs puts the
+    /// change in `pending` instead of applying it, and that is an unexpected
+    /// answer here, not a resize.
+    pub fn resize_hardware(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        vcpus: u32,
+        memory_mib: u64,
+    ) -> Result<()> {
+        let cores = vcpus.max(1).to_string();
+        let mem = memory_mib.to_string();
+        let form: Vec<(&str, &str)> = vec![
+            ("cores", cores.as_str()),
+            ("sockets", "1"),
+            ("memory", mem.as_str()),
+        ];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        let cfg = self.config(vmid)?;
+        let got = (
+            config_u64(&cfg, "cores"),
+            config_u64(&cfg, "sockets").or(Some(1)),
+            config_u64(&cfg, "memory"),
+        );
+        if got != (Some(u64::from(vcpus.max(1))), Some(1), Some(memory_mib)) {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} config after resize has cores/sockets/memory {got:?}, \
+                 expected ({}, 1, {memory_mib})",
+                vcpus.max(1)
+            )));
+        }
+        let left: Vec<String> = self
+            .pending(vmid)?
+            .iter()
+            .filter(|e| e.get("pending").is_some() || e.get("delete").is_some())
+            .filter_map(|e| e.get("key").and_then(|k| k.as_str()).map(str::to_string))
+            .collect();
+        if !left.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} holds the resize as PENDING ({}) — the node applies it \
+                 only at the next boot, so the VM is not resized yet",
+                left.join(", ")
+            )));
+        }
+        Ok(())
+    }
+
     /// The VM's boot disk as the node has it: `(key, bytes)` — `scsi0` and
     /// the bytes its `size=` says. Read from [`Self::config`], so it answers
     /// what the node RECORDED, which is the only size a resize can be judged
@@ -1527,6 +1624,24 @@ impl Client {
                 let size = b.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
                 Some((volid, size))
             })
+            .collect())
+    }
+
+    /// The disk volumes `storage` holds for VM `vmid` (`volid`s), read from
+    /// the same `GET …/storage/{storage}/content` route as
+    /// [`Self::list_backups`], with `content=images`. The node filters by
+    /// `vmid` itself. It is how a caller checks that a destroy took EVERY disk
+    /// with it — a VM gone from `qemu/` with a volume left on the storage is
+    /// space nobody will ever reclaim.
+    pub fn list_images(&self, storage: &str, vmid: u32) -> Result<Vec<String>> {
+        let body = self.get(&format!(
+            "/nodes/{}/storage/{storage}/content?content=images&vmid={vmid}",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "content")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|b| Some(b.get("volid")?.as_str()?.to_string()))
             .collect())
     }
 
@@ -1781,6 +1896,88 @@ impl Client {
             || self.put_form(&format!("/nodes/{}/qemu/{vmid}/cloudinit", self.node), &[]),
             None,
         )
+    }
+
+    /// Writes a cloud-init intent into a VM's config and bakes it into the
+    /// drive — `vm cloud-init` on this backend — then proves the guest will
+    /// read it from the node's OWN rendering, never from the call's answer.
+    ///
+    /// `POST …/config` (task path) with `ciuser` and `sshkeys` (percent-encoded
+    /// by us, see [`cloud_init_form`]) and `name` for the hostname — the node's
+    /// cloud-init reads the VM name as the hostname, the same thing create and
+    /// `configure_clone` do; then [`Self::cloudinit_regenerate`]. Then read
+    /// back: [`Self::cloudinit_pending`] must have nothing pending, and
+    /// [`Self::cloudinit_dump`] of the user-data must carry the hostname and
+    /// every key. A key missing from the rendering is an unexpected answer,
+    /// whatever the writes said.
+    pub fn update_cloud_init(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        vm_name: &str,
+        intent: &delonix_vm::CloudInitIntent,
+    ) -> Result<()> {
+        let hostname = intent
+            .hostname
+            .as_deref()
+            .filter(|h| !h.is_empty())
+            .unwrap_or(vm_name)
+            .to_string();
+        let user = intent
+            .ci_user
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .unwrap_or(delonix_vm::cloudinit::DEFAULT_CI_USER)
+            .to_string();
+        let keys = urlencode(&intent.ssh_keys.join("\n"));
+        let mut form: Vec<(&str, &str)> =
+            vec![("name", hostname.as_str()), ("ciuser", user.as_str())];
+        if !intent.ssh_keys.is_empty() {
+            form.push(("sshkeys", keys.as_str()));
+        }
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        self.cloudinit_regenerate(ledger, vmid)?;
+        let left: Vec<String> = self
+            .cloudinit_pending(vmid)?
+            .into_iter()
+            .filter(|k| k.is_pending())
+            .map(|k| k.key)
+            .collect();
+        if !left.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid}'s cloud-init drive still has pending keys after regenerate: {}",
+                left.join(", ")
+            )));
+        }
+        let user_data = self.cloudinit_dump(vmid, "user")?;
+        let mut missing: Vec<String> = Vec::new();
+        if !user_data.contains(&format!("hostname: {hostname}")) {
+            missing.push(format!("hostname {hostname}"));
+        }
+        for (i, k) in intent.ssh_keys.iter().enumerate() {
+            if !user_data.contains(k.as_str()) {
+                missing.push(format!("ssh key #{}", i + 1));
+            }
+        }
+        if !missing.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid}'s rendered user-data does not carry {}",
+                missing.join(", ")
+            )));
+        }
+        Ok(())
     }
 
     pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
@@ -3065,6 +3262,15 @@ impl Client {
     }
 }
 
+/// A numeric config key as the node sends it: a JSON number (`cores`) or a
+/// string (`memory` is a string property since PVE 8, `"2048"`). `None` when
+/// the key is absent or not a number — never zero.
+fn config_u64(cfg: &serde_json::Value, key: &str) -> Option<u64> {
+    let v = cfg.get(key)?;
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+}
+
 /// Reads the UPID out of a task-producing answer.
 ///
 /// Every one of these endpoints answers with a task id and not a result —
@@ -3896,8 +4102,6 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     add(cfg.tpm, "tpm");
     add(cfg.video.is_some(), "video");
     add(!cfg.boot_order.is_empty(), "bootOrder");
-    add(!cfg.extra_disks.is_empty(), "extraDisks");
-    add(!cfg.extra_nics.is_empty(), "extraNics");
     add(!cfg.libvirt_xml_overlay.is_empty(), "libvirtXmlOverlay");
     add(cfg.libvirt_xml.is_some(), "libvirtXml");
     add(cfg.net_mode.is_some(), "netMode");
@@ -3985,6 +4189,149 @@ fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
         out.push(("sshkeys", urlencode(&cfg.ssh_keys.join("\n"))));
     }
     out
+}
+
+/// The node's device slots an extra disk may take, per bus. Static, so the
+/// create form keeps `&'static str` keys. `scsi0` is the boot disk and `ide2`
+/// the cloud-init drive, so neither is offered.
+const VIRTIO_SLOTS: [&str; 16] = [
+    "virtio0", "virtio1", "virtio2", "virtio3", "virtio4", "virtio5", "virtio6", "virtio7",
+    "virtio8", "virtio9", "virtio10", "virtio11", "virtio12", "virtio13", "virtio14", "virtio15",
+];
+const SCSI_SLOTS: [&str; 30] = [
+    "scsi1", "scsi2", "scsi3", "scsi4", "scsi5", "scsi6", "scsi7", "scsi8", "scsi9", "scsi10",
+    "scsi11", "scsi12", "scsi13", "scsi14", "scsi15", "scsi16", "scsi17", "scsi18", "scsi19",
+    "scsi20", "scsi21", "scsi22", "scsi23", "scsi24", "scsi25", "scsi26", "scsi27", "scsi28",
+    "scsi29", "scsi30",
+];
+const SATA_SLOTS: [&str; 6] = ["sata0", "sata1", "sata2", "sata3", "sata4", "sata5"];
+const IDE_SLOTS: [&str; 3] = ["ide0", "ide1", "ide3"];
+/// `net0` is the primary NIC.
+const NET_SLOTS: [&str; 31] = [
+    "net1", "net2", "net3", "net4", "net5", "net6", "net7", "net8", "net9", "net10", "net11",
+    "net12", "net13", "net14", "net15", "net16", "net17", "net18", "net19", "net20", "net21",
+    "net22", "net23", "net24", "net25", "net26", "net27", "net28", "net29", "net30", "net31",
+];
+/// NIC models the node's QEMU offers under these names.
+const NIC_MODELS: [&str; 5] = ["virtio", "e1000", "e1000e", "rtl8139", "vmxnet3"];
+
+/// Translates `extraDisks`/`extraNics` into the node's own device keys, or
+/// refuses by name what has no meaning on a remote node. Pure.
+///
+/// A disk is a NEW one on the node's storage, `<storage>:<gib>` — the same
+/// shape as the boot disk. A local path, a `cdrom`, a libvirt `target` dev and
+/// `readOnly` are refused: the node cannot open a file on this host, and the
+/// other three are libvirt knobs with no Proxmox equivalent this client sets.
+/// A NIC is `netN=<model>[=<mac>],bridge=<bridge>` on a bridge of the node
+/// (the target's default when none is named); a libvirt `network` or a
+/// `user` NIC has nothing to attach to there. No VLAN tag: the target's tag
+/// describes how `net0` is cabled, and a second NIC on another bridge is
+/// exactly the case where it would be wrong.
+fn extra_devices_form(cfg: &VmConfig, default_bridge: &str) -> Result<Vec<(&'static str, String)>> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let (mut virtio, mut scsi, mut sata, mut ide) = (0usize, 0usize, 0usize, 0usize);
+    for (i, d) in cfg.extra_disks.iter().enumerate() {
+        let spec = parse_disk_spec(&d.source)?;
+        let DiskSpec::New { storage, gib } = spec else {
+            return Err(Error::InvalidDiskSpec(format!(
+                "proxmox: extraDisks[{i}] '{}' names a template — an extra disk is a fresh \
+                 `<storage>:<gib>`",
+                d.source
+            )));
+        };
+        let mut bad: Vec<&str> = Vec::new();
+        if !matches!(d.device.as_str(), "" | "disk") {
+            bad.push("device (only `disk`)");
+        }
+        if d.target.is_some() {
+            bad.push("target");
+        }
+        if d.read_only {
+            bad.push("readOnly");
+        }
+        if !matches!(d.format.as_str(), "" | "raw" | "qcow2") {
+            bad.push("format (only `raw` or `qcow2`)");
+        }
+        let (slots, used): (&[&'static str], &mut usize) = match d.bus.as_str() {
+            "" | "virtio" => (&VIRTIO_SLOTS, &mut virtio),
+            "scsi" => (&SCSI_SLOTS, &mut scsi),
+            "sata" => (&SATA_SLOTS, &mut sata),
+            "ide" => (&IDE_SLOTS, &mut ide),
+            _ => {
+                bad.push("bus (virtio, scsi, sata or ide)");
+                (&VIRTIO_SLOTS, &mut virtio)
+            }
+        };
+        if !bad.is_empty() {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraDisks[{i}]: {}",
+                bad.join(", ")
+            )));
+        }
+        let key = *slots.get(*used).ok_or_else(|| {
+            Error::UnsupportedField(format!(
+                "the 'proxmox' backend has no free `{}` slot for extraDisks[{i}]",
+                if d.bus.is_empty() {
+                    "virtio"
+                } else {
+                    d.bus.as_str()
+                }
+            ))
+        })?;
+        *used += 1;
+        let mut value = format!("{storage}:{gib}");
+        if !d.format.is_empty() {
+            value.push_str(&format!(",format={}", d.format));
+        }
+        out.push((key, value));
+    }
+    for (i, n) in cfg.extra_nics.iter().enumerate() {
+        if !matches!(n.kind.as_str(), "" | "bridge") {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraNics[{i}]: kind '{}' (a remote node \
+                 has bridges, not libvirt networks or user-mode NICs — use `bridge`)",
+                n.kind
+            )));
+        }
+        let bridge = n
+            .source
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .unwrap_or(default_bridge);
+        validate_bridge_name(bridge)?;
+        let model = if n.model.is_empty() {
+            "virtio"
+        } else {
+            n.model.as_str()
+        };
+        if !NIC_MODELS.contains(&model) {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraNics[{i}]: model '{model}' (one of {})",
+                NIC_MODELS.join(", ")
+            )));
+        }
+        // The MAC rule is the schema's `mac-addr`, already written once in
+        // `sdn::validate_mac`; only the message names where it came from.
+        let head = match &n.mac {
+            Some(mac) => {
+                sdn::validate_mac(mac).map_err(|_| {
+                    Error::InvalidSdnAddress(format!(
+                        "proxmox: extraNics[{i}] MAC '{mac}' is not XX:XX:XX:XX:XX:XX"
+                    ))
+                })?;
+                format!("{model}={}", mac.to_ascii_uppercase())
+            }
+            None => model.to_string(),
+        };
+        let key = *NET_SLOTS.get(i).ok_or_else(|| {
+            Error::UnsupportedField(format!(
+                "the 'proxmox' backend has no free `net` slot for extraNics[{i}]"
+            ))
+        })?;
+        out.push((key, format!("{head},bridge={bridge}")));
+    }
+    Ok(out)
 }
 
 /// The body of `POST /nodes/<node>/qemu`. Pure, so that "each key goes ONCE"
@@ -4154,6 +4501,22 @@ impl VmBackend for ProxmoxBackend {
         // node's own refusal arrives inside a failed task.
         let spec = parse_disk_spec(disk)?;
         check_fresh_disk_size(&spec, cfg.disk_size_gib)?;
+        // Extra disks/NICs are checked here too, before `next_vmid`: the create
+        // is where they are sent, and a refusal there would come after an id
+        // was asked for. The default bridge does not change whether a NIC is
+        // valid, only where it lands, so any name serves for the check.
+        extra_devices_form(cfg, "vmbr0")?;
+        if matches!(spec, DiskSpec::Template(_))
+            && (!cfg.extra_disks.is_empty() || !cfg.extra_nics.is_empty())
+        {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot add extraDisks/extraNics to a template clone \
+                 ('{disk}'): the template may already hold `scsi1`/`net1`, and writing a slot \
+                 it uses would detach the template's own device without a word. Put the \
+                 devices in the template, or create from `<storage>:<gib>`"
+            ))
+            .into());
+        }
         // The template's config is read only when there is a size to judge:
         // a clone without `diskSize` costs no extra round trip.
         let grow = match (&spec, cfg.disk_size_gib) {
@@ -4323,6 +4686,62 @@ impl VmBackend for ProxmoxBackend {
         let ledger = Ledger::at(vmdir);
         self.client.settle_pending(&ledger, vmid)?;
         Ok(self.client.resume_suspended(&ledger, vmid)?)
+    }
+
+    /// `vm resize` (`vm.resize.cold`): the engine has checked its record, and
+    /// this asks the node too — a record can say `Stopped` about a VM somebody
+    /// started from the node's own UI, and a config change on a running VM
+    /// lands in `pending`, not in the guest. A task still in flight for the VM
+    /// is waited on first, like every other operation here.
+    fn resize_cold(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        vcpus: u32,
+        memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        let ps = self.client.power_state(vmid)?;
+        if ps.status != "stopped" {
+            return Err(delonix_vm::Error::ResizeNeedsStopped(format!(
+                "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+                 is stopped: `vm resize` is a cold resize — stop it first (`delonix vm stop {}`)",
+                vm.name, ps.status, vm.name
+            ))
+            .into());
+        }
+        Ok(self
+            .client
+            .resize_hardware(&ledger, vmid, vcpus, memory_mib)?)
+    }
+
+    /// `vm cloud-init`: the engine has checked its record; the node is asked
+    /// too, because a VM started from the node's own UI would read the old
+    /// drive until its next reboot. A task still in flight is waited on first.
+    fn update_cloud_init(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        intent: &delonix_vm::CloudInitIntent,
+    ) -> delonix_model::Result<()> {
+        let vmid = self.vmid_of(vm)?;
+        let ledger = Ledger::at(vmdir);
+        self.client.settle_pending(&ledger, vmid)?;
+        let ps = self.client.power_state(vmid)?;
+        if ps.status != "stopped" {
+            return Err(delonix_vm::Error::CloudInitNeedsStopped(format!(
+                "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+                 is stopped: the guest reads cloud-init at boot — stop it first (`delonix vm \
+                 stop {}`)",
+                vm.name, ps.status, vm.name
+            ))
+            .into());
+        }
+        Ok(self
+            .client
+            .update_cloud_init(&ledger, vmid, &vm.name, intent)?)
     }
 
     /// Starts the VM this record already names, instead of creating another.
@@ -4642,17 +5061,17 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmResumeSameIdentity => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmClone => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_template_clone_gets_the_disk_size_asked_for" },
         C::VmTemplate => S::Partial { detail: "`POST …/template` is a client call (`mark_template`) the live case uses to make its clone source; no engine verb turns a VM into a template" },
-        C::VmResizeCold => S::NotImplemented,
+        C::VmResizeCold => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size" },
         C::VmHotplug => S::NotImplemented,
-        C::VmExtraDisks => S::UnsupportedByProvider { reason: "refused by name (`refuse_unsupported`); ADR-0049 slice 2 maps disks beyond `config`" },
-        C::VmExtraNics => S::UnsupportedByProvider { reason: "refused by name; one `net0` on the target's bridge/VLAN" },
+        C::VmExtraDisks => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it" },
+        C::VmExtraNics => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it" },
         C::VmDiskResize => S::Partial { detail: "`PUT …/resize` grows a template clone's boot disk to `diskSize` at create (live case); a shrink is refused by name; no engine verb resizes an existing VM" },
         C::VmPciPassthrough => S::UnsupportedByProvider { reason: "`devices` refused by name: the guest is on another machine" },
         C::VmTpm => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
         C::VmCpuModel => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
         C::VmCpuPinning => S::UnsupportedByProvider { reason: "refused by name" },
         C::VmHugepages => S::UnsupportedByProvider { reason: "refused by name" },
-        C::VmCloudInit => S::Partial { detail: "hostname/user/ssh keys map to the node's cloud-init keys through `config`; a `seed` file is refused" },
+        C::VmCloudInit => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it" },
         C::VmRestartPolicyNative => S::UnsupportedByProvider { reason: "the engine's supervisor is not on the node; no policy is set there" },
         C::VmNamespaceIsolation => S::UnsupportedByProvider { reason: "refused before any API call (`vm_namespace_supported`)" },
         C::VmAntispoof => S::RequiresExternalComponent { component: "the node's firewall (`…/firewall`), excluded as administration (ADR-0049 D3)" },
@@ -6210,5 +6629,129 @@ mod tests {
         ))
         .expect("a resposta gravada tem de ser JSON válido");
         assert_eq!(parse_agent_ip(&v).as_deref(), Some("10.0.2.17"));
+    }
+
+    /// `extraDisks`/`extraNics` become the node's device keys, a slot per bus
+    /// in order; what has no meaning on a remote node is refused by name.
+    #[test]
+    fn extra_devices_map_to_node_slots_and_refuse_what_the_node_cannot_open() {
+        use delonix_vm::{ExtraDisk, ExtraNic};
+        let disk = |source: &str, bus: &str| ExtraDisk {
+            source: source.into(),
+            bus: bus.into(),
+            ..Default::default()
+        };
+        let cfg = VmConfig {
+            extra_disks: vec![
+                disk("local-lvm:4", ""),
+                disk("local-lvm:2", "scsi"),
+                disk("local-lvm:1", "virtio"),
+                ExtraDisk {
+                    format: "qcow2".into(),
+                    ..disk("local:3", "sata")
+                },
+            ],
+            extra_nics: vec![
+                ExtraNic::default(),
+                ExtraNic {
+                    kind: "bridge".into(),
+                    source: Some("vmbr1".into()),
+                    model: "e1000".into(),
+                    mac: Some("bc:24:11:00:00:01".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        let f = extra_devices_form(&cfg, "vmbr0").unwrap();
+        assert_eq!(
+            f,
+            vec![
+                ("virtio0", "local-lvm:4".to_string()),
+                ("scsi1", "local-lvm:2".to_string()),
+                ("virtio1", "local-lvm:1".to_string()),
+                ("sata0", "local:3,format=qcow2".to_string()),
+                ("net1", "virtio,bridge=vmbr0".to_string()),
+                ("net2", "e1000=BC:24:11:00:00:01,bridge=vmbr1".to_string()),
+            ]
+        );
+        assert!(extra_devices_form(&VmConfig::default(), "vmbr0")
+            .unwrap()
+            .is_empty());
+
+        let refused = |c: VmConfig| extra_devices_form(&c, "vmbr0").unwrap_err().number();
+        let one_disk = |d: ExtraDisk| VmConfig {
+            extra_disks: vec![d],
+            ..Default::default()
+        };
+        let one_nic = |n: ExtraNic| VmConfig {
+            extra_nics: vec![n],
+            ..Default::default()
+        };
+        assert_eq!(
+            refused(one_disk(disk("/var/lib/x.qcow2", ""))),
+            1522,
+            "a host path"
+        );
+        assert_eq!(refused(one_disk(disk("template:9000", ""))), 1522);
+        for d in [
+            ExtraDisk {
+                device: "cdrom".into(),
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                target: Some("vdb".into()),
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                read_only: true,
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                format: "vmdk".into(),
+                ..disk("local-lvm:1", "")
+            },
+            disk("local-lvm:1", "nvme"),
+        ] {
+            assert_eq!(refused(one_disk(d.clone())), 1524, "{d:?}");
+        }
+        let four_ide = VmConfig {
+            extra_disks: vec![disk("local-lvm:1", "ide"); 4],
+            ..Default::default()
+        };
+        assert_eq!(
+            refused(four_ide),
+            1524,
+            "ide0, ide1, ide3 — ide2 is cloud-init's"
+        );
+        for n in [
+            ExtraNic {
+                kind: "network".into(),
+                ..Default::default()
+            },
+            ExtraNic {
+                kind: "user".into(),
+                ..Default::default()
+            },
+            ExtraNic {
+                model: "ne2k".into(),
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(refused(one_nic(n.clone())), 1524, "{n:?}");
+        }
+        assert_eq!(
+            refused(one_nic(ExtraNic {
+                source: Some("vmbr 1".into()),
+                ..Default::default()
+            })),
+            1520
+        );
+        assert_eq!(
+            refused(one_nic(ExtraNic {
+                mac: Some("bc:24:11".into()),
+                ..Default::default()
+            })),
+            1534
+        );
     }
 }

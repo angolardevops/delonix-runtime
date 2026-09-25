@@ -902,6 +902,48 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
+    /// Change a STOPPED VM's cloud-init — hostname, user, SSH keys — for its next boot.
+    ///
+    /// Refused while the VM runs or is paused: the guest reads cloud-init at
+    /// boot. `--ssh-key` REPLACES the keys the VM had; a flag not given keeps
+    /// its value. On Proxmox the node's config is changed, the cloud-init drive
+    /// regenerated, and the node's own rendering read back. The local backends
+    /// refuse it: their seed is an ISO built at create, and a guest only re-runs
+    /// cloud-init for a new instance id. An appliance image is refused.
+    #[command(name = "cloud-init")]
+    CloudInit {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// New guest hostname (a DNS label).
+        #[arg(long)]
+        hostname: Option<String>,
+        /// Account the keys land on.
+        #[arg(long)]
+        user: Option<String>,
+        /// Authorized public SSH key, `ssh-ed25519 AAAA...` or `@path` to read
+        /// from a file. Repeatable; replaces the VM's keys.
+        #[arg(long = "ssh-key")]
+        ssh_keys: Vec<String>,
+    },
+    /// Change a STOPPED VM's vCPUs and/or memory for its next boot.
+    ///
+    /// A cold resize: refused while the VM is running or paused, because a
+    /// guest that only sees the change after its next reboot has not been
+    /// resized yet. On libvirt and Cloud Hypervisor the record is the whole
+    /// definition and `vm start` rebuilds the VM from it; on Proxmox the node's
+    /// config is changed and read back, and the node is asked too — a VM
+    /// started from its own UI is refused even if the record says stopped.
+    /// A value that does not parse (`2GB`) is refused, never read as a default.
+    Resize {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// New number of vCPUs (at least 1).
+        #[arg(long)]
+        vcpus: Option<u32>,
+        /// New memory: a number with an optional M/G suffix (`768M`, `4G`, `4Gi`).
+        #[arg(long)]
+        memory: Option<String>,
+    },
     /// Reclaim the VM state directory: everything in it no VM record accounts for.
     ///
     /// Stale create locks, sockets, pidfiles and console logs of VMs that are
@@ -2636,6 +2678,45 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Unpause { name } => {
             delonix_vm::unpause(&base, &name)?;
             println!("{name}");
+            Ok(())
+        }
+        VmCmd::CloudInit {
+            name,
+            hostname,
+            user,
+            ssh_keys,
+        } => {
+            let keys = if ssh_keys.is_empty() {
+                None
+            } else {
+                Some(
+                    ssh_keys
+                        .iter()
+                        .map(|k| resolve_ssh_key(k))
+                        .collect::<Result<Vec<String>>>()?,
+                )
+            };
+            let vm = delonix_vm::set_cloud_init(
+                &base,
+                &name,
+                hostname.as_deref(),
+                user.as_deref(),
+                keys,
+            )?;
+            println!(
+                "{name}: hostname {}, {} key(s)",
+                vm.boot.hostname.as_deref().unwrap_or(&name),
+                vm.boot.ssh_keys.len()
+            );
+            Ok(())
+        }
+        VmCmd::Resize {
+            name,
+            vcpus,
+            memory,
+        } => {
+            let vm = delonix_vm::resize(&base, &name, vcpus, memory.as_deref())?;
+            println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
             Ok(())
         }
         VmCmd::Snapshot { action } => match action {

@@ -12207,6 +12207,25 @@ msgstr "Pediu-se a um encerramento ou reinício feito pelo convidado que esperas
 msgid "Give a timeout shorter than the client's task deadline (600 seconds by default), or omit it to take the node's own default."
 msgstr "Dá um tempo limite menor do que o prazo de tarefa do cliente (600 segundos por omissão), ou omite-o para ficar com o valor por omissão do próprio nó."
 
+# DX-1536 / DX-5505 — vm resize (vm.resize.cold, ADR-0049 slice 2)
+msgid "invalid VM resize"
+msgstr "redimensionamento de VM inválido"
+
+msgid "`vm resize` needs `--vcpus` and/or `--memory`; vCPUs have to be at least 1 and memory a number with an optional M/G suffix (`512M`, `4G`, `4Gi`). A value that does not parse is refused rather than read as a default."
+msgstr "O `vm resize` precisa de `--vcpus` e/ou `--memory`; os vCPUs têm de ser pelo menos 1 e a memória um número com sufixo M/G opcional (`512M`, `4G`, `4Gi`). Um valor que não se lê é recusado em vez de ser tomado por um valor por omissão."
+
+msgid "Pass `--vcpus <n>` (n ≥ 1) and/or `--memory <size>`, e.g. `--memory 4G`."
+msgstr "Passa `--vcpus <n>` (n ≥ 1) e/ou `--memory <tamanho>`, por exemplo `--memory 4G`."
+
+msgid "the VM must be stopped to resize it"
+msgstr "a VM tem de estar parada para ser redimensionada"
+
+msgid "`vm resize` is a cold resize: it changes the definition a VM boots with. A running or paused guest would not see the change until its next reboot, so the verb refuses instead of reporting a resize that has not happened."
+msgstr "O `vm resize` é um redimensionamento a frio: muda a definição com que a VM arranca. Um convidado a correr ou em pausa só veria a mudança no reinício seguinte, por isso o verbo recusa em vez de reportar um redimensionamento que não aconteceu."
+
+msgid "Run `delonix vm stop <name>`, resize, then `delonix vm start <name>`."
+msgstr "Corre `delonix vm stop <nome>`, redimensiona, e depois `delonix vm start <nome>`."
+
 msgid "The VM has no snapshot with that name on the Proxmox node."
 msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
 
@@ -13861,6 +13880,91 @@ msgstr "reclamá-los: pin, processo de controlo e slirp de cada raiz de estado q
 
 msgid "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n`vm prune` will NOT take these — a bare directory is somebody's data, and that rule once stopped a sweep from destroying 53 GiB of live disks. They are named here because until now nothing named them at all; removing them is your call."
 msgstr "{n} directório(s) em `vms/` ({size}) para onde nenhum registo de VM aponta: {list}\nO `vm prune` NÃO os leva — um directório nu são dados de alguém, e foi essa regra que travou uma varredura de destruir 53 GiB de discos vivos. Ficam aqui nomeados porque até agora nada os nomeava; removê-los é decisão tua."
+
+# vm resize (vm.resize.cold, ADR-0049 slice 2)
+msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot"
+msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque"
+
+msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot.\n\nA cold resize: refused while the VM is running or paused, because a guest that only sees the change after its next reboot has not been resized yet. On libvirt and Cloud Hypervisor the record is the whole definition and `vm start` rebuilds the VM from it; on Proxmox the node's config is changed and read back, and the node is asked too — a VM started from its own UI is refused even if the record says stopped. A value that does not parse (`2GB`) is refused, never read as a default."
+msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque.\n\nUm redimensionamento a frio: recusado enquanto a VM está a correr ou em pausa, porque um convidado que só vê a mudança no reinício seguinte ainda não foi redimensionado. No libvirt e no Cloud Hypervisor o registo é a definição inteira e o `vm start` reconstrói a VM a partir dele; no Proxmox a config do nó é alterada e relida, e o nó também é consultado — uma VM arrancada pela interface dele é recusada mesmo que o registo diga parada. Um valor que não se lê (`2GB`) é recusado, nunca tomado por um valor por omissão."
+
+msgid "New number of vCPUs (at least 1)"
+msgstr "Novo número de vCPUs (pelo menos 1)"
+
+msgid "New memory: a number with an optional M/G suffix (`768M`, `4G`, `4Gi`)"
+msgstr "Nova memória: um número com sufixo M/G opcional (`768M`, `4G`, `4Gi`)"
+
+msgid "give a stopped VM 4 vCPUs and 8 GiB for its next boot"
+msgstr "dar a uma VM parada 4 vCPUs e 8 GiB para o próximo arranque"
+
+msgid "stop, resize the memory only, start again with it"
+msgstr "parar, redimensionar só a memória, e voltar a arrancar com ela"
+
+# provider describe proxmox --probe (ADR-0049 slice 3, read-only)
+msgid "Contact the configured Proxmox target and measure its cluster (nodes, quorum, shared storage, HA, SDN zones) with read-only requests. Only for `proxmox`: the local providers are measured on every describe"
+msgstr "Contacta o alvo Proxmox configurado e mede o cluster dele (nós, quórum, storage partilhado, HA, zonas SDN) só com pedidos de leitura. Só para `proxmox`: os providers locais são medidos em cada describe"
+
+msgid "--probe applies to a remote provider (proxmox); '{id}' is measured on this host by every describe"
+msgstr "o --probe aplica-se a um provider remoto (proxmox); '{id}' é medido neste host por cada describe"
+
+msgid "no Proxmox target is configured: set DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE and a credential (DELONIX_PROXMOX_SECRET, or DELONIX_PROXMOX_TOKEN_ID with DELONIX_PROXMOX_TOKEN_FILE)"
+msgstr "não há alvo Proxmox configurado: define DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE e uma credencial (DELONIX_PROXMOX_SECRET, ou DELONIX_PROXMOX_TOKEN_ID com DELONIX_PROXMOX_TOKEN_FILE)"
+
+msgid "Cluster of the target, measured now ({url}, node {node}), read-only:"
+msgstr "Cluster do alvo, medido agora ({url}, nó {node}), só leitura:"
+
+msgid "cluster:"
+msgstr "cluster:"
+
+msgid "none — the node is not in a cluster"
+msgstr "nenhum — o nó não está num cluster"
+
+msgid "resource(s)"
+msgstr "recurso(s)"
+
+msgid "What the cluster offers is a fact about the cluster, not engine support: the backend addresses one node and never picks another (ADR-0049 slice 3)."
+msgstr "O que o cluster oferece é um facto sobre o cluster, não suporte do motor: o backend fala com um nó e nunca escolhe outro (ADR-0049, fatia 3)."
+
+msgid "measure the cluster around the configured Proxmox node — nodes, quorum, shared storage, HA — with read-only requests"
+msgstr "medir o cluster à volta do nó Proxmox configurado — nós, quórum, storage partilhado, HA — só com pedidos de leitura"
+
+# DX-1537 / DX-5506 — vm cloud-init (ADR-0049 slice 2)
+msgid "invalid cloud-init change"
+msgstr "alteração de cloud-init inválida"
+
+msgid "`vm cloud-init` needs `--hostname`, `--user` and/or `--ssh-key`; the hostname has to be a DNS label (letters, digits, '-', at most 63), the user a login name, each key one line. An appliance image does not run cloud-init and is refused."
+msgstr "O `vm cloud-init` precisa de `--hostname`, `--user` e/ou `--ssh-key`; o hostname tem de ser uma etiqueta DNS (letras, dígitos, '-', no máximo 63), o utilizador um nome de login, cada chave uma linha. Uma imagem de appliance não corre cloud-init e é recusada."
+
+msgid "Give at least one of the three, in the form the guest accepts — e.g. `--hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub`."
+msgstr "Dá pelo menos um dos três, na forma que o convidado aceita — por exemplo `--hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub`."
+
+msgid "the VM must be stopped to change its cloud-init"
+msgstr "a VM tem de estar parada para mudar o cloud-init"
+
+msgid "The guest reads cloud-init at boot: a running or paused VM would keep the old hostname and keys until its next reboot, so the verb refuses instead of reporting a change that has not reached the guest."
+msgstr "O convidado lê o cloud-init no arranque: uma VM a correr ou em pausa ficaria com o hostname e as chaves antigas até ao reinício seguinte, por isso o verbo recusa em vez de reportar uma mudança que não chegou ao convidado."
+
+msgid "Run `delonix vm stop <name>`, change it, then `delonix vm start <name>`."
+msgstr "Corre `delonix vm stop <nome>`, muda, e depois `delonix vm start <nome>`."
+
+# vm cloud-init (ADR-0049 slice 2)
+msgid "Change a STOPPED VM's cloud-init — hostname, user, SSH keys — for its next boot"
+msgstr "Muda o cloud-init de uma VM PARADA — hostname, utilizador, chaves SSH — para o próximo arranque"
+
+msgid "Change a STOPPED VM's cloud-init — hostname, user, SSH keys — for its next boot.\n\nRefused while the VM runs or is paused: the guest reads cloud-init at boot. `--ssh-key` REPLACES the keys the VM had; a flag not given keeps its value. On Proxmox the node's config is changed, the cloud-init drive regenerated, and the node's own rendering read back. The local backends refuse it: their seed is an ISO built at create, and a guest only re-runs cloud-init for a new instance id. An appliance image is refused."
+msgstr "Muda o cloud-init de uma VM PARADA — hostname, utilizador, chaves SSH — para o próximo arranque.\n\nRecusado enquanto a VM está a correr ou em pausa: o convidado lê o cloud-init no arranque. O `--ssh-key` SUBSTITUI as chaves que a VM tinha; uma flag não dada mantém o valor. No Proxmox a config do nó é alterada, o drive de cloud-init regenerado, e a renderização do próprio nó relida. Os backends locais recusam: o seed deles é um ISO construído no create, e um convidado só volta a correr o cloud-init com um instance id novo. Uma imagem de appliance é recusada."
+
+msgid "New guest hostname (a DNS label)"
+msgstr "Novo hostname do convidado (uma etiqueta DNS)"
+
+msgid "Account the keys land on"
+msgstr "Conta onde as chaves ficam"
+
+msgid "Authorized public SSH key, `ssh-ed25519 AAAA...` or `@path` to read from a file. Repeatable; replaces the VM's keys"
+msgstr "Chave SSH pública autorizada, `ssh-ed25519 AAAA...` ou `@caminho` para ler de um ficheiro. Repetível; substitui as chaves da VM"
+
+msgid "give a stopped VM a new hostname and replace its SSH keys, for its next boot"
+msgstr "dar a uma VM parada um hostname novo e substituir as chaves SSH, para o próximo arranque"
 
 # DX-6508 — NetworkPolicy scope: vm on a Proxmox cluster (ADR-0052)
 msgid "the Proxmox datacenter firewall is off"

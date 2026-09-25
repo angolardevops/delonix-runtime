@@ -784,6 +784,13 @@ impede os outros comandos. Contexto: <a class="src" href="https://github.com/ang
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TOKEN_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:credential_value</code></td>
+<td>Caminho de um ficheiro com o segredo do token de API; preferível ao <code>DELONIX_PROXMOX_TOKEN</code>, que todo o processo filho herda.</td>
+<td>Um caminho.</td>
+<td>Recusado se alguém além do dono o puder ler (<code>chmod 600</code>).</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_USER</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:proxmox_auth</code></td>
 <td>Conta para autenticação por password.</td>

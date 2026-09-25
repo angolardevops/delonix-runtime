@@ -2891,3 +2891,297 @@ fn power_operations_round_trip_through_the_node() {
         "the VM is still defined on the node after destroy — an orphan"
     );
 }
+
+/// `vm resize` on Proxmox (`vm.resize.cold`), asserted from what the node
+/// records afterwards (`GET …/config`, `GET …/pending`), never from the
+/// call's answer:
+///
+/// - a VM the NODE runs is refused with the engine's own
+///   `ResizeNeedsStopped` (DX-5505), even though a record could say
+///   `Stopped` — nothing is sent, the config keeps its old numbers;
+/// - stopped, `resize_cold` sets cores, sockets and memory, and `pending`
+///   is empty: the numbers are the ones the VM boots with;
+/// - it boots with them: after `resume` the config still says so and the
+///   node reports the VM's `cpus`/`maxmem` from the new definition.
+#[test]
+fn a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxresize{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let number_at = |v: &serde_json::Value, k: &str| -> Option<u64> {
+        let x = v.get(k)?;
+        x.as_u64()
+            .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+    };
+
+    let err = b
+        .resize_cold(vmdir, &vm, 2, 768)
+        .expect_err("the node runs it: a cold resize must be refused");
+    assert_eq!(err.number(), 5505, "{err}");
+    let c = client.config(vmid).expect("config");
+    assert_eq!(
+        (number_at(&c, "cores"), number_at(&c, "memory")),
+        (Some(1), Some(512)),
+        "a refused resize changed the config: {c}"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.resize_cold(vmdir, &vm, 2, 768)
+        .expect("resize a stopped VM");
+    let c = client.config(vmid).expect("config");
+    assert_eq!(
+        (
+            number_at(&c, "cores"),
+            number_at(&c, "sockets"),
+            number_at(&c, "memory")
+        ),
+        (Some(2), Some(1), Some(768)),
+        "{c}"
+    );
+    let pending = client.pending(vmid).expect("pending");
+    assert!(
+        pending
+            .iter()
+            .all(|e| e.get("pending").is_none() && e.get("delete").is_none()),
+        "a stopped VM's resize was left pending: {pending:?}"
+    );
+
+    b.resume(vmdir, &vm).expect("resume").expect("a started VM");
+    let st = client.current(vmid).expect("status/current");
+    assert_eq!(st.get("status").and_then(|s| s.as_str()), Some("running"));
+    assert_eq!(
+        number_at(&st, "cpus"),
+        Some(2),
+        "it booted with 2 vCPUs: {st}"
+    );
+    assert_eq!(
+        number_at(&st, "maxmem"),
+        Some(768 * 1024 * 1024),
+        "it booted with 768 MiB: {st}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
+
+/// `extraDisks`/`extraNics` on Proxmox (`vm.disks.extra`/`vm.nics.extra`),
+/// asserted from the node's own config and storage, never from the call's
+/// answer: the extra disks exist on the storage under this VM's id, in the
+/// slots asked for and with the sizes asked for; the extra NICs carry the
+/// model, the fixed MAC and the bridge asked for; and a destroy takes every
+/// disk with it (`storage/.../content?content=images`), not only the boot one.
+#[test]
+fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxextra{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        extra_disks: vec![
+            delonix_vm::ExtraDisk {
+                source: format!("{storage}:1"),
+                ..Default::default()
+            },
+            delonix_vm::ExtraDisk {
+                source: format!("{storage}:2"),
+                bus: "scsi".into(),
+                ..Default::default()
+            },
+        ],
+        extra_nics: vec![
+            delonix_vm::ExtraNic::default(),
+            delonix_vm::ExtraNic {
+                kind: "bridge".into(),
+                source: Some("vmbr0".into()),
+                model: "e1000".into(),
+                mac: Some("BC:24:11:0A:0B:0C".into()),
+            },
+        ],
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+
+    let c = client.config(vmid).expect("config");
+    let key = |k: &str| {
+        c.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let owned = format!("{storage}:vm-{vmid}-disk-");
+    assert!(
+        key("virtio0").starts_with(&owned) && key("virtio0").contains("size=1G"),
+        "virtio0: {c}"
+    );
+    assert!(
+        key("scsi1").starts_with(&owned) && key("scsi1").contains("size=2G"),
+        "scsi1: {c}"
+    );
+    assert!(
+        key("net1").starts_with("virtio=") && key("net1").contains("bridge=vmbr0"),
+        "net1: {c}"
+    );
+    assert!(
+        key("net2").starts_with("e1000=BC:24:11:0A:0B:0C") && key("net2").contains("bridge=vmbr0"),
+        "net2: {c}"
+    );
+    // The cloud-init drive (`vm-<id>-cloudinit`) is on the storage too —
+    // every VM gets one for `ipconfig0` — so the disks are counted by name.
+    let images = client.list_images(&storage, vmid).expect("storage content");
+    let disks: Vec<&String> = images.iter().filter(|v| v.contains("-disk-")).collect();
+    assert_eq!(disks.len(), 3, "boot + two extra disks: {images:?}");
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+    let left = client.list_images(&storage, vmid).expect("storage content");
+    assert!(
+        left.is_empty(),
+        "a destroy left disks on the storage: {left:?}"
+    );
+}
+
+/// `vm cloud-init` on Proxmox (`vm.cloud-init`), asserted from the node's
+/// OWN rendering of the drive (`…/cloudinit/dump?type=user`), never from the
+/// call's answer:
+///
+/// - refused with the engine's DX-5506 while the node runs the VM, and the
+///   rendering keeps the key the VM was created with;
+/// - stopped, the change reaches the drive: the new hostname, the new user
+///   and the new key are in the user-data, the old key is not, and
+///   `…/cloudinit` has nothing pending.
+#[test]
+fn a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    // Real ed25519 public keys, generated for this test only (no private half
+    // is kept): the node validates the key format and refuses an invented one.
+    let old_key =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDoho0AhSdfKD3pWW/u4a2o3709J6q0Pl4kSE2rZ/B5Z dlx-old";
+    let new_key =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFjdrrc1qEToezK50JsCHNdww+KDK9e0S4YQon8PsUys dlx-new";
+    let name = format!("dlxci{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ssh_keys: vec![old_key.into()],
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let intent = delonix_vm::CloudInitIntent {
+        hostname: Some("dlx-renamed".into()),
+        ci_user: Some("ops".into()),
+        ssh_keys: vec![new_key.into()],
+    };
+
+    let err = b
+        .update_cloud_init(vmdir, &vm, &intent)
+        .expect_err("the node runs it: a cloud-init change must be refused");
+    assert_eq!(err.number(), 5506, "{err}");
+    let before = client.cloudinit_dump(vmid, "user").expect("dump user");
+    assert!(
+        before.contains(old_key),
+        "a refused change touched the drive: {before}"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.update_cloud_init(vmdir, &vm, &intent)
+        .expect("cloud-init change on a stopped VM");
+    let after = client.cloudinit_dump(vmid, "user").expect("dump user");
+    assert!(after.contains("hostname: dlx-renamed"), "{after}");
+    assert!(after.contains("user: ops"), "{after}");
+    assert!(after.contains(new_key), "{after}");
+    assert!(!after.contains(old_key), "the old key survived: {after}");
+    let pending = client.cloudinit_pending(vmid).expect("cloudinit pending");
+    assert!(
+        pending.iter().all(|k| !k.is_pending()),
+        "keys left pending after the change: {pending:?}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}

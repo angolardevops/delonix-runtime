@@ -1965,6 +1965,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "provider describe",
         group: "Advanced",
         examples: &[
+            ("measure the cluster around the configured Proxmox node — nodes, quorum, shared storage, HA — with read-only requests", "delonix provider describe proxmox --probe"),
             ("every capability of libvirt on this host, with the reason for each state", "delonix provider describe libvirt"),
             ("the Linux provider is three providers: pick one kind", "delonix provider describe linux --kind network"),
             ("machine-readable", "delonix provider describe cloud-hypervisor -o json"),
@@ -2412,6 +2413,23 @@ pub static ENTRIES: &[Entry] = &[
             ("resume a VM suspended with `pause`, exactly where it left off", "delonix vm unpause dev"),
         ],
         see_also: &["vm pause", "describe"],
+    },
+    Entry {
+        path: "vm cloud-init",
+        group: "Lifecycle",
+        examples: &[
+            ("give a stopped VM a new hostname and replace its SSH keys, for its next boot", "delonix vm cloud-init web-1 --hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub"),
+        ],
+        see_also: &["vm stop", "vm start", "vm resize"],
+    },
+    Entry {
+        path: "vm resize",
+        group: "Lifecycle",
+        examples: &[
+            ("give a stopped VM 4 vCPUs and 8 GiB for its next boot", "delonix vm resize dev --vcpus 4 --memory 8G"),
+            ("stop, resize the memory only, start again with it", "delonix vm stop dev && delonix vm resize dev --memory 4G && delonix vm start dev"),
+        ],
+        see_also: &["vm stop", "vm start", "provider ls"],
     },
     Entry {
         path: "vm prune",

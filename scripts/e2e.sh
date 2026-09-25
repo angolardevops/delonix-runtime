@@ -546,6 +546,11 @@ check "provider matrix é a matriz publicada, byte a byte" ok bash -c \
   "diff <('$BIN' provider matrix) '$(dirname "$0")/../docs/providers/capability-matrix.md' >/dev/null"
 check "provider ls --l18n=pt traduz o cabeçalho" ok bash -c \
   "'$BIN' --l18n=pt provider ls | grep -q 'medidos neste host'"
+# `--probe` (ADR-0049 fatia 3) só existe para o provider remoto: num local
+# seria uma flag que não faz nada, e sem alvo configurado a classe é a do
+# «indisponível» (69) — nunca um 0 com a secção do cluster em falta.
+check "provider describe libvirt --probe recusa (1)" 1 "$BIN" provider describe libvirt --probe
+check "provider describe proxmox --probe sem alvo diz 69" 69 env -u DELONIX_PROXMOX_URL "$BIN" provider describe proxmox --probe
 
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
@@ -2753,6 +2758,13 @@ check "vm create --require de capacidade que o CH não tem recusa (69)" 69 "$BIN
 check "vm create --require de capacidade que o libvirt não tem recusa (69)" 69 "$BIN" vm create "vm-$PFX-req" --disk /nao/existe.qcow2 --backend libvirt --require vm.namespace-isolation
 check "vm create --require: a recusa nomeia a capacidade e o estado" ok bash -c "\"$BIN\" vm create vm-$PFX-req --disk /nao/existe.qcow2 --backend libvirt --require vm.namespace-isolation 2>&1 | grep -q 'vm.namespace-isolation: unsupported-by-provider'"
 check "vm create --require: nenhum registo de VM ficou para trás" fail "$BIN" vm inspect "vm-$PFX-req"
+# `vm resize`: tudo o que se pode recusar recusa-se ANTES de tocar num backend,
+# por isso estas classes medem-se sem hipervisor nenhum.
+check "vm resize sem --vcpus nem --memory recusa (1)" 1 "$BIN" vm resize "vm-$PFX-nada"
+check "vm resize de uma VM inexistente diz 4" 4 "$BIN" vm resize "vm-$PFX-nada" --vcpus 2
+check "vm cloud-init sem nada para mudar recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada"
+check "vm cloud-init com hostname inválido recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname=a.b
+check "vm cloud-init de uma VM inexistente diz 4" 4 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname web-1
 
 ########################################
 section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
@@ -2847,6 +2859,22 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
     # A quebra da v0.51.x tem de falhar ALTO, nunca em silêncio.
     check "a forma antiga 'vm snapshots' já não existe" fail "$BIN" vm snapshots "$SVM"
     check "a forma antiga 'vm restore' já não existe" fail "$BIN" vm restore "$SVM" s1
+
+    # `vm resize` (vm.resize.cold, ADR-0049 slice 2). O rc não prova nada: a
+    # testemunha é o domínio que o `vm start` seguinte DEFINE, lido do virsh.
+    # A recusa com a VM a correr verifica-se pela CLASSE (5) e por o registo não
+    # ter mudado — um resize aceite com a VM viva só tomaria efeito no reinício.
+    check "vm resize com a VM a correr recusa (5)" 5 "$BIN" vm resize "$SVM" --vcpus 2
+    check "vm resize com memória ilegível recusa (1)" 1 "$BIN" vm resize "$SVM" --memory 2GB
+    check "vm stop (resize)" ok "$BIN" vm stop "$SVM"
+    check "vm resize de uma VM parada" ok "$BIN" vm resize "$SVM" --vcpus 2 --memory 384M
+    check "o registo diz 2 vCPU e 384M" ok bash -c \
+      "'$BIN' vm ls -A -o json | python3 -c \"import json,sys; sys.exit(0 if any(v['name']=='$SVM' and v['vcpus']==2 and v['memory']=='384M' for v in json.load(sys.stdin)) else 1)\""
+    check "vm start depois do resize" ok "$BIN" vm start "$SVM"
+    check "o domínio arranca com 2 vCPU" ok bash -c \
+      "virsh -c qemu:///system dumpxml '$SVM' | grep -Eq '<vcpu[^>]*>2</vcpu>'"
+    check "o domínio arranca com 384 MiB" ok bash -c \
+      "virsh -c qemu:///system dumpxml '$SVM' | grep -q \"<memory unit='KiB'>393216</memory>\""
     "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"

@@ -178,6 +178,7 @@ impede os outros comandos. Contexto: `docs/adr/0008-proxmox-vm-backend.md`.
 | `DELONIX_PROXMOX_SECRET` | `cmd/vmbackends.rs:proxmox_auth` | Nome de um `kind: Secret` que guarda a credencial. | Segredo com `tokenId`+`tokenSecret` (preferido) ou `username`+`password`. | Verificada **primeiro**. Preferível às variáveis abaixo, que acabam no histórico da shell e no `ps`. |
 | `DELONIX_PROXMOX_TOKEN_ID` | `cmd/vmbackends.rs:proxmox_auth` | Id do token de API. | `user@realm!tokenname`. | Usada com `DELONIX_PROXMOX_TOKEN`; verificada depois do segredo. |
 | `DELONIX_PROXMOX_TOKEN` | `cmd/vmbackends.rs:proxmox_auth` | Segredo do token de API. | | |
+| `DELONIX_PROXMOX_TOKEN_FILE` | `cmd/vmbackends.rs:credential_value` | Caminho de um ficheiro com o segredo do token de API; preferível ao `DELONIX_PROXMOX_TOKEN`, que todo o processo filho herda. | Um caminho. | Recusado se alguém além do dono o puder ler (`chmod 600`). |
 | `DELONIX_PROXMOX_USER` | `cmd/vmbackends.rs:proxmox_auth` | Conta para autenticação por password. | `root@pam`, … | Usada com `DELONIX_PROXMOX_PASSWORD`; verificada em último lugar. |
 | `DELONIX_PROXMOX_PASSWORD` | `cmd/vmbackends.rs:proxmox_auth` | Password dessa conta. | | |
 | `DELONIX_PROXMOX_INSECURE_TLS` | `cmd/vmbackends.rs:register_proxmox_with` | Salta a verificação do certificado TLS do nó. | `1`, `true` ou `yes` → salta; por omissão verifica. | **Outra máquina a responder em nome do nó recebe a credencial.** Só opt-in, nunca aplicada como recurso depois de um erro de TLS. |

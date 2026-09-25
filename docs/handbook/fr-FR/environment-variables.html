@@ -780,6 +780,13 @@ commandes. Contexte : <a class="src" href="https://github.com/angolardevops/del
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TOKEN_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:credential_value</code></td>
+<td>Chemin d’un fichier contenant le secret du jeton d’API ; préférable à <code>DELONIX_PROXMOX_TOKEN</code>, dont hérite tout processus enfant.</td>
+<td>Un chemin.</td>
+<td>Refusé si quelqu’un d’autre que le propriétaire peut le lire (<code>chmod 600</code>).</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_USER</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:proxmox_auth</code></td>
 <td>Compte pour l’authentification par mot de passe.</td>

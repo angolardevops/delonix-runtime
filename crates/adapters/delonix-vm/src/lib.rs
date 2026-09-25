@@ -62,6 +62,20 @@ pub mod cloudinit;
 pub mod firewall;
 pub mod provider;
 
+/// The whole cloud-init intent a VM boots with — hostname, the account the
+/// keys land on, and the keys — as `vm cloud-init` hands it to a backend:
+/// already merged with what the record had, so the backend writes every value
+/// and never has to guess which ones the caller left out.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CloudInitIntent {
+    /// Guest hostname (`None` = the VM name).
+    pub hostname: Option<String>,
+    /// Account the keys land on (`None` = the default user).
+    pub ci_user: Option<String>,
+    /// Authorized public keys, one per entry.
+    pub ssh_keys: Vec<String>,
+}
+
 /// Configuration to boot a microVM (flat fields, independent of the
 /// `orchestrator` — the CLI translates the `VmSpec` into this).
 #[derive(Debug, Clone, Default)]
@@ -398,16 +412,13 @@ pub fn exists(base: &Path, name: &str) -> bool {
     store(base).map(|s| s.exists(name)).unwrap_or(false)
 }
 
-/// Converts memory (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) to MiB.
-/// `"2G"`/`"512M"`/`"2Gi"`/`"2048"` → MiB.
+/// The memory size `s` names, in MiB, or `None` when it does not parse.
 ///
-/// **Public because every backend has to read the SAME field the same way.**
-/// It was private, so `delonix-proxmox` grew its own copy — and the copy did
-/// not know the k8s `Gi`/`Mi` suffix this one tolerates, so `memory: 2Gi` meant
-/// 2 GiB on libvirt and Cloud Hypervisor and 1 GiB on Proxmox, silently. Same
-/// discipline as `fw_rule_tail` on the network side: one definition, shared by
-/// everyone who reads the format.
-pub fn mem_mib(s: &str) -> u64 {
+/// The one parser of the memory syntax (`512M`, `4G`, the k8s-style `4Gi`, a
+/// bare number of MiB). [`mem_mib`] builds its lenient fallback on top of it;
+/// a verb that must not act on a misread value (`vm resize`) calls this
+/// directly and refuses on `None`. Zero is `None` too: no guest boots in it.
+pub fn parse_mem_mib(s: &str) -> Option<u64> {
     let t = s.trim();
     // Tolerates the k8s-style `i` suffix (Gi/Mi): "2Gi" == "2G", "512Mi" == "512M".
     let t = t.strip_suffix(['i', 'I']).unwrap_or(t);
@@ -418,11 +429,28 @@ pub fn mem_mib(s: &str) -> u64 {
     } else {
         (t, 1)
     };
-    match num.trim().parse::<u64>() {
-        Ok(v) => v * mult,
+    num.trim()
+        .parse::<u64>()
+        .ok()
+        .and_then(|v| v.checked_mul(mult))
+        .filter(|v| *v > 0)
+}
+
+/// Converts memory (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) to MiB.
+/// `"2G"`/`"512M"`/`"2Gi"`/`"2048"` → MiB.
+///
+/// **Public because every backend has to read the SAME field the same way.**
+/// It was private, so `delonix-proxmox` grew its own copy — and the copy did
+/// not know the k8s `Gi`/`Mi` suffix this one tolerates, so `memory: 2Gi` meant
+/// 2 GiB on libvirt and Cloud Hypervisor and 1 GiB on Proxmox, silently. Same
+/// discipline as `fw_rule_tail` on the network side: one definition, shared by
+/// everyone who reads the format.
+pub fn mem_mib(s: &str) -> u64 {
+    match parse_mem_mib(s) {
+        Some(v) => v,
         // Do not degrade silently: a mistyped value ("2GB", "2 Gi") would give
         // roughly half of the requested RAM without warning. Warn and use a safe default.
-        Err(_) => {
+        None => {
             tracing::warn!(value = ?s, "invalid memory value; defaulting to 1024 MiB");
             1024
         }
@@ -918,6 +946,44 @@ pub trait VmBackend {
     /// Resumes a VM suspended with [`VmBackend::pause`]. Default: unsupported.
     fn unpause(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
         Err(unsupported_pause(self.id(), "unpause"))
+    }
+
+    /// `vm resize`: gives a STOPPED VM `vcpus` and `memory_mib` for its next
+    /// boot (`vm.resize.cold`). Called only after the engine has confirmed the
+    /// record says the VM is not running and validated both numbers; the
+    /// engine rewrites the record once this returns `Ok`.
+    ///
+    /// Default: unsupported (fail closed). A backend whose definition is
+    /// rebuilt from the record at every boot overrides it with nothing to do,
+    /// and says so; one that keeps its own definition elsewhere (a remote
+    /// node) changes it there and reads it back.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Err(unsupported_pause(self.id(), "resize"))
+    }
+
+    /// `vm cloud-init`: gives a STOPPED VM this cloud-init intent for its
+    /// next boot, and proves the guest will read it (the backend's own
+    /// rendering, not the call's answer). Called only after the engine has
+    /// validated the intent and confirmed from its record that the VM is
+    /// stopped; the engine rewrites the record once this returns `Ok`.
+    ///
+    /// Default: unsupported (fail closed). The local backends keep it that way
+    /// on purpose: their seed is an ISO built at create, and a guest only
+    /// re-runs cloud-init for a new `instance-id` — changing the seed without
+    /// that would be reported as applied and ignored by the guest.
+    fn update_cloud_init(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _intent: &CloudInitIntent,
+    ) -> delonix_model::Result<()> {
+        Err(unsupported_pause(self.id(), "cloud-init change"))
     }
 
     /// Checked once, right after [`VmBackend::stop`] has already confirmed the
@@ -1716,6 +1782,20 @@ impl VmBackend for CloudHypervisorBackend {
     /// anyone waiting on a boot needs to be told.
     fn ip_is_predicted(&self) -> bool {
         true
+    }
+
+    /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
+    /// This backend keeps no definition of its own between boots — `vm start`
+    /// rebuilds the vmm's command line from the record (`start` → `create(config_from(..))`),
+    /// so the engine rewriting `vcpus`/`memory` there is the whole resize.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Ok(())
     }
 
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
@@ -3768,6 +3848,20 @@ impl VmBackend for LibvirtBackend {
         }
     }
 
+    /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
+    /// This backend keeps no definition of its own between boots — `vm start`
+    /// rebuilds the domain XML from the record (`start` → `create(config_from(..))`),
+    /// so the engine rewriting `vcpus`/`memory` there is the whole resize.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Ok(())
+    }
+
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         libvirt_cleanup(&vm.name)?;
         // The domain XML that `boot` wrote STAYS. It used to be deleted here,
@@ -4913,6 +5007,151 @@ pub fn unpause(base: &Path, name: &str) -> Result<()> {
     backend_for(&vm)?.unpause(&vmdir, &vm)?;
     vm.status = Status::Running;
     Ok(st.save(name, &vm)?)
+}
+
+/// Whether `h` is a DNS label a guest accepts as its hostname: letters,
+/// digits and '-', not at either end, 1 to 63 characters. Pure.
+fn valid_hostname(h: &str) -> bool {
+    (1..=63).contains(&h.len())
+        && h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && !h.starts_with('-')
+        && !h.ends_with('-')
+}
+
+/// Whether `u` is a login name cloud-init can create: a lowercase letter or
+/// '_' first, then lowercase letters, digits, '_' or '-', at most 32. Pure.
+fn valid_login(u: &str) -> bool {
+    let mut b = u.bytes();
+    matches!(b.next(), Some(c) if c.is_ascii_lowercase() || c == b'_')
+        && u.len() <= 32
+        && b.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
+}
+
+/// Changes a STOPPED VM's cloud-init — hostname, user and/or SSH keys — for
+/// its next boot (see [`VmBackend::update_cloud_init`]).
+///
+/// Everything refusable is refused before a backend is asked, with the record
+/// untouched: nothing to change, a hostname that is not a DNS label, a user
+/// that is not a login name, a key that is empty or spans lines, an appliance
+/// (which does not run cloud-init), and a VM that is running or paused. `keys`
+/// REPLACE the record's when given; a field not given keeps its value, and the
+/// backend receives the whole merged intent. The record is rewritten only
+/// after the backend returns `Ok`.
+pub fn set_cloud_init(
+    base: &Path,
+    name: &str,
+    hostname: Option<&str>,
+    ci_user: Option<&str>,
+    keys: Option<Vec<String>>,
+) -> Result<Vm> {
+    let bad = |m: String| Error::InvalidCloudInitChange(m);
+    if hostname.is_none() && ci_user.is_none() && keys.is_none() {
+        return Err(bad(format!(
+            "nothing to change in VM '{name}''s cloud-init: give --hostname, --user and/or --ssh-key"
+        )));
+    }
+    if let Some(h) = hostname.filter(|h| !valid_hostname(h)) {
+        return Err(bad(format!(
+            "hostname '{h}' is not a DNS label (letters, digits, '-', not at either end, at most 63)"
+        )));
+    }
+    if let Some(u) = ci_user.filter(|u| !valid_login(u)) {
+        return Err(bad(format!("user '{u}' is not a login name")));
+    }
+    if let Some(k) = &keys {
+        if k.is_empty() {
+            return Err(bad("give at least one --ssh-key".to_string()));
+        }
+        if let Some((i, _)) = k
+            .iter()
+            .enumerate()
+            .find(|(_, key)| key.trim().is_empty() || key.contains('\n'))
+        {
+            return Err(bad(format!("ssh key #{} is empty or spans lines", i + 1)));
+        }
+    }
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if vm.boot.cloud_init == Some(false) {
+        return Err(bad(format!(
+            "VM '{name}' runs an appliance image, which does not run cloud-init"
+        )));
+    }
+    if matches!(vm.status, Status::Running | Status::Paused) {
+        return Err(Error::CloudInitNeedsStopped(format!(
+            "VM '{name}' is {:?}: the guest reads cloud-init at boot — stop it first (`delonix vm stop {name}`)",
+            vm.status
+        )));
+    }
+    let intent = CloudInitIntent {
+        hostname: hostname
+            .map(str::to_string)
+            .or_else(|| vm.boot.hostname.clone()),
+        ci_user: ci_user
+            .map(str::to_string)
+            .or_else(|| vm.boot.ci_user.clone()),
+        ssh_keys: keys
+            .map(|k| k.into_iter().map(|s| s.trim().to_string()).collect())
+            .unwrap_or_else(|| vm.boot.ssh_keys.clone()),
+    };
+    backend_for(&vm)?.update_cloud_init(&vmdir, &vm, &intent)?;
+    vm.boot.hostname = intent.hostname;
+    vm.boot.ci_user = intent.ci_user;
+    vm.boot.ssh_keys = intent.ssh_keys;
+    st.save(name, &vm)?;
+    Ok(vm)
+}
+
+/// Changes a STOPPED VM's vCPUs and/or memory for its next boot — the cold
+/// resize (`vm.resize.cold`, see [`VmBackend::resize_cold`]).
+///
+/// Everything that can be refused is refused before the backend is asked:
+/// nothing to change, zero vCPUs, a memory value that does not parse (the
+/// lenient [`mem_mib`] would read `2GB` as 1 GiB and this would report it
+/// done), and a VM that is running or paused — a guest that only sees the
+/// change after its next reboot has not been resized yet. The record is
+/// rewritten only after the backend returns `Ok`, so a refused or failed
+/// resize leaves it saying what the VM actually has.
+///
+/// Returns the updated record.
+pub fn resize(base: &Path, name: &str, vcpus: Option<u32>, memory: Option<&str>) -> Result<Vm> {
+    if vcpus.is_none() && memory.is_none() {
+        return Err(Error::InvalidResize(format!(
+            "nothing to resize on VM '{name}': give --vcpus and/or --memory"
+        )));
+    }
+    if vcpus == Some(0) {
+        return Err(Error::InvalidResize(format!(
+            "VM '{name}' cannot have 0 vCPUs"
+        )));
+    }
+    let new_mib = match memory {
+        Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
+            Error::InvalidResize(format!(
+                "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
+            ))
+        })?),
+        None => None,
+    };
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if matches!(vm.status, Status::Running | Status::Paused) {
+        return Err(Error::ResizeNeedsStopped(format!(
+            "VM '{name}' is {:?}: `vm resize` is a cold resize — stop it first (`delonix vm stop {name}`)",
+            vm.status
+        )));
+    }
+    let target_vcpus = vcpus.unwrap_or(vm.vcpus.max(1));
+    let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+    backend_for(&vm)?.resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
+    vm.vcpus = target_vcpus;
+    if let Some(m) = memory {
+        vm.memory = m.trim().to_string();
+    }
+    st.save(name, &vm)?;
+    Ok(vm)
 }
 
 /// Takes a named snapshot of VM `name` (see [`VmBackend::snapshot`]). On libvirt a
@@ -8160,6 +8399,415 @@ Format specific information:
             ..base
         };
         assert!(libvirt_domain_xml(&qxl, "/tmp/x.qcow2", "").contains("type='qxl'"));
+    }
+
+    /// `vm resize`: every refusal happens before the backend is asked and
+    /// leaves the record untouched; a backend failure leaves it untouched too;
+    /// only an `Ok` from the backend rewrites `vcpus`/`memory`. A backend with
+    /// no override refuses by name instead of doing nothing.
+    #[test]
+    fn resize_refuses_before_the_backend_and_writes_the_record_only_on_success() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex;
+        static CALLS: Mutex<Vec<(u32, u64)>> = Mutex::new(Vec::new());
+        static FAIL: AtomicBool = AtomicBool::new(false);
+
+        struct Resizable;
+        impl VmBackend for Resizable {
+            fn id(&self) -> &'static str {
+                "redimensionavel"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn resize_cold(
+                &self,
+                _: &Path,
+                _: &Vm,
+                vcpus: u32,
+                memory_mib: u64,
+            ) -> delonix_model::Result<()> {
+                CALLS.lock().unwrap().push((vcpus, memory_mib));
+                if FAIL.load(Ordering::SeqCst) {
+                    return Err(delonix_model::Error::Invalid("node said no".into()));
+                }
+                Ok(())
+            }
+        }
+        struct NoOverride;
+        impl VmBackend for NoOverride {
+            fn id(&self) -> &'static str {
+                "sem-resize"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "redimensionavel",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Resizable))),
+        })
+        .expect("registar");
+        register_backend(BackendRegistration {
+            id: "sem-resize",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(NoOverride))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-resize-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let save = |name: &str, backend: &str, status: Status| {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+            vm.backend = backend.into();
+            vm.status = status;
+            st.save(name, &vm).unwrap();
+        };
+        save("r", "redimensionavel", Status::Stopped);
+        save("a-correr", "redimensionavel", Status::Running);
+        save("pausada", "redimensionavel", Status::Paused);
+        save("n", "sem-resize", Status::Stopped);
+        let unchanged = |name: &str| {
+            let vm = st.load(name).unwrap();
+            assert_eq!(
+                (vm.vcpus, vm.memory.as_str()),
+                (1, "1G"),
+                "{name}: record changed"
+            );
+        };
+
+        let code_of = |e: Error| e.number();
+        assert_eq!(code_of(resize(&base, "r", None, None).unwrap_err()), 1536);
+        assert_eq!(
+            code_of(resize(&base, "r", Some(0), None).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "r", None, Some("2GB")).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "r", None, Some("0")).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "a-correr", Some(2), None).unwrap_err()),
+            5505
+        );
+        assert_eq!(
+            code_of(resize(&base, "pausada", Some(2), None).unwrap_err()),
+            5505
+        );
+        assert!(resize(&base, "nao-existe", Some(2), None)
+            .unwrap_err()
+            .is_not_found());
+        assert!(
+            CALLS.lock().unwrap().is_empty(),
+            "a refusal reached the backend"
+        );
+        unchanged("r");
+        unchanged("a-correr");
+
+        FAIL.store(true, Ordering::SeqCst);
+        assert!(resize(&base, "r", Some(4), None).is_err());
+        unchanged("r");
+        FAIL.store(false, Ordering::SeqCst);
+
+        // Only memory: vCPUs keep the record's value, and the backend is told both.
+        let vm = resize(&base, "r", None, Some("4Gi")).unwrap();
+        assert_eq!((vm.vcpus, vm.memory.as_str()), (1, "4Gi"));
+        let vm = resize(&base, "r", Some(3), None).unwrap();
+        assert_eq!((vm.vcpus, vm.memory.as_str()), (3, "4Gi"));
+        assert_eq!(st.load("r").unwrap().vcpus, 3);
+        assert_eq!(
+            *CALLS.lock().unwrap(),
+            vec![(4, 1024), (1, 4096), (3, 4096)]
+        );
+
+        let e = resize(&base, "n", Some(2), None).unwrap_err().to_string();
+        assert!(e.contains("resize") && e.contains("sem-resize"), "{e}");
+        unchanged("n");
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends()
+            .write()
+            .unwrap()
+            .retain(|b| b.id != "redimensionavel" && b.id != "sem-resize");
+    }
+
+    #[test]
+    fn parse_mem_mib_refuses_what_mem_mib_would_have_guessed() {
+        assert_eq!(parse_mem_mib("512M"), Some(512));
+        assert_eq!(parse_mem_mib("4G"), Some(4096));
+        assert_eq!(parse_mem_mib("4Gi"), Some(4096));
+        assert_eq!(parse_mem_mib(" 2048 "), Some(2048));
+        for bad in [
+            "2GB",
+            "2 Gi x",
+            "",
+            "G",
+            "0",
+            "0G",
+            "-1G",
+            "99999999999999999999G",
+        ] {
+            assert_eq!(parse_mem_mib(bad), None, "{bad:?}");
+        }
+        assert_eq!(
+            mem_mib("2GB"),
+            1024,
+            "the lenient reader keeps its fallback"
+        );
+    }
+
+    /// `vm cloud-init`: every refusal happens before the backend and leaves
+    /// the record untouched; the backend receives the MERGED intent (a field
+    /// not given keeps the record's value, keys replace); the record changes
+    /// only on `Ok`; a backend with no override refuses by name.
+    #[test]
+    fn set_cloud_init_refuses_first_and_hands_the_backend_the_merged_intent() {
+        use std::sync::Mutex;
+        static GOT: Mutex<Vec<CloudInitIntent>> = Mutex::new(Vec::new());
+
+        struct Ci;
+        impl VmBackend for Ci {
+            fn id(&self) -> &'static str {
+                "com-ci"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn update_cloud_init(
+                &self,
+                _: &Path,
+                _: &Vm,
+                intent: &CloudInitIntent,
+            ) -> delonix_model::Result<()> {
+                GOT.lock().unwrap().push(intent.clone());
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "com-ci",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Ci))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-cloudinit-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let save = |name: &str, backend: &str, status: Status, appliance: bool| {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+            vm.backend = backend.into();
+            vm.status = status;
+            vm.boot.hostname = Some("velho".into());
+            vm.boot.ci_user = Some("delonix".into());
+            vm.boot.ssh_keys = vec!["ssh-ed25519 AAAA velha".into()];
+            if appliance {
+                vm.boot.cloud_init = Some(false);
+            }
+            st.save(name, &vm).unwrap();
+        };
+        save("c", "com-ci", Status::Stopped, false);
+        save("viva", "com-ci", Status::Running, false);
+        save("app", "com-ci", Status::Stopped, true);
+        save("sem", "libvirt", Status::Stopped, false);
+
+        let code_of = |e: Error| e.number();
+        let key = |k: &str| Some(vec![k.to_string()]);
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", Some("-x"), None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", Some("a.b"), None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, Some("Root"), None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, None, Some(vec![])).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, None, key("a\nb")).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "app", Some("h"), None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "viva", Some("h"), None, None).unwrap_err()),
+            5506
+        );
+        assert!(set_cloud_init(&base, "nada", Some("h"), None, None)
+            .unwrap_err()
+            .is_not_found());
+        assert!(
+            GOT.lock().unwrap().is_empty(),
+            "a refusal reached the backend"
+        );
+        assert_eq!(
+            st.load("c").unwrap().boot.hostname.as_deref(),
+            Some("velho")
+        );
+
+        let vm = set_cloud_init(&base, "c", Some("novo"), None, None).unwrap();
+        assert_eq!(vm.boot.hostname.as_deref(), Some("novo"));
+        assert_eq!(
+            vm.boot.ssh_keys,
+            vec!["ssh-ed25519 AAAA velha".to_string()],
+            "keys kept"
+        );
+        let vm = set_cloud_init(
+            &base,
+            "c",
+            None,
+            Some("ops"),
+            key(" ssh-ed25519 AAAA nova "),
+        )
+        .unwrap();
+        assert_eq!(
+            vm.boot.ssh_keys,
+            vec!["ssh-ed25519 AAAA nova".to_string()],
+            "keys replaced, trimmed"
+        );
+        assert_eq!(st.load("c").unwrap().boot.ci_user.as_deref(), Some("ops"));
+        let got = GOT.lock().unwrap().clone();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].hostname.as_deref(), Some("novo"));
+        assert_eq!(
+            got[0].ci_user.as_deref(),
+            Some("delonix"),
+            "merged with the record"
+        );
+        assert_eq!(got[1].hostname.as_deref(), Some("novo"));
+        assert_eq!(got[1].ci_user.as_deref(), Some("ops"));
+
+        let e = set_cloud_init(&base, "sem", Some("h"), None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("cloud-init") && e.contains("libvirt"), "{e}");
+        assert_eq!(
+            st.load("sem").unwrap().boot.hostname.as_deref(),
+            Some("velho")
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "com-ci");
     }
 }
 

@@ -1,17 +1,23 @@
 # ADR-0049: Proxmox API coverage is a measured, versioned matrix — and the runtime is not a cluster proxy
 
-- **Status:** Proposed — the endpoint matrix exists and is reproducible (D1, #474); slice 1
-  (transport, typed errors, task ledger, lost-answer reconciliation, failure injection
-  against a TLS mock) is built and tested (#475), and its lifecycle was run against a live
-  PVE 9.2.2 node with the route trace on (2026-09-23, `docs/proxmox/trace-9.2.2.routes`):
-  **15 of the 18 called routes are `supported+tested`** (the 18th, `DELETE …/snapshot/{snapname}`,
-  entered with the same day's second run — see the addendum at the end); the 3 left are named
-  with the reason in the trace header. Slice 2 has its first operation live (2026-09-24,
-  same node): `disk_size_gib` on a template clone grows the boot disk through `PUT …/resize`,
-  the clone source is made with `POST …/template`, and the trace now says **19 of 20 called
-  routes are `supported+tested`** — only the lost-answer `GET /nodes/{node}/tasks` stays
-  untested live. The rest of slice 2 and slice 3 have no live conformance, and the status does
-  not change before they do
+- **Status:** Proposed — as of 2026-09-25, with each slice's state measured and dated below.
+  **Slice 0** (the versioned matrix, #474) and **slice 1** (transport, typed errors, task
+  ledger, lost-answer reconciliation, TLS-mock failure injection, #475/#477/#478) are done and
+  live. **Slice 2** (VM operations mapped to engine semantics) is done for every operation its
+  row names — resize and templates (#485), backup and restore (#487/#489), disks beyond
+  `config` (#490, #504), guest agent (#491), the node's own per-VM firewall (#492/#496), cloud-init
+  read/regenerate (#495) and change on an existing VM (#509), power operations (#502), cold resize
+  (#503) and the Proxmox SDN layer (#493/#497/#500, `kind: NetworkZone` in #501) — each with a
+  `tests/live.rs` case against a PVE 9.2.2 node, except the guest agent's `agent/exec` and
+  `agent/exec-status`, which need a guest with the agent running and are the 2 of the 3 called
+  routes never seen in a live trace (the third is the lost-answer `GET /nodes/{node}/tasks`,
+  reached only through failure injection). **Slice 3** has its read-only half: cluster
+  discovery (`provider describe proxmox --probe`, #505), measured on the lab node and on
+  `ngola-lda` itself. The route matrix says **112 of 675 routes called (16.6 %), 109 in a live
+  trace** (`docs/proxmox/matrix-9.2.2.md`). What keeps the status at Proposed is slice 3's
+  writes (a migration with an explicitly named target node), which need a lab cluster with
+  shared storage this workspace does not have — see "Slice 3 writes" under D5. Accepting the
+  ADR before them is the owner's call, not a consequence of this record
 - **Date:** 2026-09-23
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0008 (the Proxmox backend as ONE node behind `VmBackend`, and what it
@@ -190,9 +196,34 @@ own, after a spike, or it stays excluded.
 |---|---|---|
 | 0 | Versioned endpoint inventory (this ADR, `scripts/proxmox_api_inventory.py`) | Schema source, release, method/path denominator, states with reasons, called routes read from the source; baseline reproduced by someone else with the docstring command — **done for 9.2.2**; the schema is committed with provenance (`docs/proxmox/api-9.2.2.routes.json`), the matrix is generated (`docs/proxmox/matrix-9.2.2.md`) and gated, and the five states of the brief (`supported+tested` from a route trace of a live run, `supported+untested`, `unsupported-by-design`, `not-yet-implemented`, `not-available-in-version`) replace the three |
 | 1 | Hardened transport and task handle | **Built**: 16 MiB response bound; `Auth`/`Ticket` `Debug` redacted and a test that greps every rendered error, `Debug` and the trace file for the secret; typed status errors (`Unauthorized`/`Forbidden`/`NodeNotFound`/`NodeConflict`/`BadRequest`/`NodeUnavailable`/`ResponseTooLarge`, DX-1526/4504/5504/6506/9515–9517 — the `Node` prefix keeps `arch_fitness.py`'s raw-variant counter from reading a local variant as a raw match on the shared class); a task LEDGER per VM written before the wait and settled after, reconciled before the next operation; a lost answer reconciled through `GET /nodes/{node}/tasks?vmid=…&source=active` and an effect probe, never resent; failure injection against a TLS mock node (14 scenarios: TLS refused/accepted-by-CA, 401 renew-once/token-never, 403/404/409/400/5xx, truncated body, unexpected JSON, stalled answer, oversized body, task failed, task timed out, leftover task, lost answer ×3). **Live run done (2026-09-23)**: `tests/live.rs` walks create → snapshot (RAM) → rollback → stop → resume → stop → destroy against a real PVE 9.2.2 node with the trace on; the committed trace promotes 14 of 17 called routes to `supported+tested` and the gate regenerates the matrix WITH it. Measured there and not assumed: a `stop` submitted within ~30 s of a `start` or a RAM rollback fails on the node's 10 s config lock, the client's lock retry resubmits it (2 logical stops, 4 `qmstop` tasks, 2 failed on the node), and the ledger keeps every one. Still untested live: `clone`/`config` (need a template on the node) and `GET /nodes/{node}/tasks` (lost-answer path, failure injection only) |
-| 2 | VM operations mapped to engine semantics | Resize (`…/resize`), disks and NICs beyond `config`, cloud-init through `config`, per-VM backup and restore (`…/vzdump`, `…/qemu` restore) — each behind a capability name from ADR-0044 D2; contract tests plus a `tests/live.rs` case per operation. **Resize done (2026-09-24)**: `VmConfig.disk_size_gib` was neither read nor refused by this backend (the ADR-0044 D1 class — honoured by the local overlays, dropped here with the command reporting success); it now sizes a template clone's boot disk through `PUT …/resize` after `configure_clone`, is the same number said twice or a refusal next to a fresh `<storage>:<gib>`, and a shrink is refused by name with both sizes BEFORE the clone exists (the node's own «shrinking disks is not supported» arrives inside a failed task). The clone source of the live case is made with `POST …/template` (`mark_template`, a client call — no engine verb yet), which is also what promoted `clone` and `POST …/config` from `supported+untested`. Catalogue: `vm.disk.resize` and `vm.template` are **partial** on purpose (no engine verb resizes an EXISTING VM or marks a template; the local backends declare the same capability `not-implemented` for the same reason), `vm.clone` is supported with the live case as evidence. Still open in this slice: disks/NICs beyond `config`, the rest of cloud-init through `config`, per-VM backup and restore **Proxmox SDN, the layer above zones/vnets/subnets, done (2026-09-25):** IPAM controllers (6 routes), DNS controllers (5), fabrics and fabric nodes (13 cluster routes + the 4 node-side reads), `GET /nodes/{node}/sdn/zones/{zone}/content`, a zone's `dhcp`/`ipam`/`dns` fields, a subnet's `dhcp-range`/`dhcp-dns-server`/`snat`, and IP reservations (`…/vnets/{vnet}/ips`, 3) — 30 routes, all live-tested in one case that applies and reads the vnet back as `available`. Matrix after it: **102 of 675 called (15.1 %), 99 seen live**. Three facts the schema does not state, measured: the node VERIFIES an IPAM/DNS controller by calling its URL before staging it (an unreachable one is a hung request, so the live case runs a stub the node reaches at `DELONIX_PROXMOX_TEST_CALLBACK_ADDR`); the fabrics API answers writes with an empty string, not `null`; `PUT …/ips` moves a MAC to a new IP, never an IP to a new MAC. And one defect in THIS repository found by the same run: the appliance's `proxmox_postinstall.py` rewrote `/etc/network/interfaces` without `source /etc/network/interfaces.d/*`, so every SDN apply on a published image ended `TASK OK` with a warning and realized nothing — fixed in the script; the lab node was patched by hand and given `dnsmasq` |
-| 3 | Cluster-dependent operations | Capability discovery for storage, migration, HA and SDN on the node's cluster; **no implicit node selection**; integration on the supported topology — the three-node `ngola-lda` cluster above is the named target |
+| 2 | VM operations mapped to engine semantics | Resize (`…/resize`), disks and NICs beyond `config`, cloud-init through `config`, per-VM backup and restore (`…/vzdump`, `…/qemu` restore) — each behind a capability name from ADR-0044 D2; contract tests plus a `tests/live.rs` case per operation. **Resize done (2026-09-24)**: `VmConfig.disk_size_gib` was neither read nor refused by this backend (the ADR-0044 D1 class — honoured by the local overlays, dropped here with the command reporting success); it now sizes a template clone's boot disk through `PUT …/resize` after `configure_clone`, is the same number said twice or a refusal next to a fresh `<storage>:<gib>`, and a shrink is refused by name with both sizes BEFORE the clone exists (the node's own «shrinking disks is not supported» arrives inside a failed task). The clone source of the live case is made with `POST …/template` (`mark_template`, a client call — no engine verb yet), which is also what promoted `clone` and `POST …/config` from `supported+untested`. Catalogue: `vm.disk.resize` and `vm.template` are **partial** on purpose (no engine verb resizes an EXISTING VM or marks a template; the local backends declare the same capability `not-implemented` for the same reason), `vm.clone` is supported with the live case as evidence. Still open in this slice: disks/NICs beyond `config`, the rest of cloud-init through `config`, per-VM backup and restore **Proxmox SDN, the layer above zones/vnets/subnets, done (2026-09-25):** IPAM controllers (6 routes), DNS controllers (5), fabrics and fabric nodes (13 cluster routes + the 4 node-side reads), `GET /nodes/{node}/sdn/zones/{zone}/content`, a zone's `dhcp`/`ipam`/`dns` fields, a subnet's `dhcp-range`/`dhcp-dns-server`/`snat`, and IP reservations (`…/vnets/{vnet}/ips`, 3) — 30 routes, all live-tested in one case that applies and reads the vnet back as `available`. Matrix after it: **102 of 675 called (15.1 %), 99 seen live**. Three facts the schema does not state, measured: the node VERIFIES an IPAM/DNS controller by calling its URL before staging it (an unreachable one is a hung request, so the live case runs a stub the node reaches at `DELONIX_PROXMOX_TEST_CALLBACK_ADDR`); the fabrics API answers writes with an empty string, not `null`; `PUT …/ips` moves a MAC to a new IP, never an IP to a new MAC. And one defect in THIS repository found by the same run: the appliance's `proxmox_postinstall.py` rewrote `/etc/network/interfaces` without `source /etc/network/interfaces.d/*`, so every SDN apply on a published image ended `TASK OK` with a warning and realized nothing — fixed in the script; the lab node was patched by hand and given `dnsmasq` **Status 2026-09-25: done** for every operation named here — the PRs are listed in the Status line above, each with a live case; `vm.hotplug` (a running VM) stays not implemented on purpose (a guest without an agent cannot prove it accepted the change). |
+| 3 | Cluster-dependent operations | Capability discovery for storage, migration, HA and SDN on the node's cluster; **no implicit node selection**; integration on the supported topology — the three-node `ngola-lda` cluster above is the named target **Status 2026-09-25: discovery done** (#505, read-only, measured on `ngola-lda`); the writes are not started — see "Slice 3 writes" below. |
 | 4 | Administration contract, if ever | Its own ADR, threat model, per-route permission, audit trail, deny by default — and it sits under ADR-0010: local socket, never remote |
+
+#### Slice 3 writes: what they need before they start
+
+Written 2026-09-25, from what the discovery measured:
+
+- **Scope is migration, not HA.** D3 excludes the cluster's HA policy as administration, and
+  the catalogue says so (`vm.high-availability`: requires an external component). Writing HA
+  resources would contradict D3; it waits for D3 to be revisited by its own decision.
+- **An engine verb that names the target node.** "No implicit node selection" means the caller
+  says where the VM goes; the backend never picks. `vm migrate --host` (ADR-0031) moves a VM
+  between two `delonix` hosts, which is a different operation. **Written down in ADR-0053
+  (Proposed):** a verb of its own, `vm move --node <target> [--live]`, and each VM addressed on
+  the node its handle names — which also finds a VM moved from the Proxmox UI.
+- **A lab cluster, never `ngola-lda`.** Two Proxmox nodes joined in a cluster (`pvecm`), quorate,
+  with a storage that is SHARED and holds VM disks (NFS or Ceph RBD) — the condition the
+  discovery's migration verdict checks. On 2026-09-25 `ngola-lda` has no such storage (its only
+  shared store is PBS, for backups) and one of its three nodes offline, so it could not migrate
+  without copying disks even if touching it were allowed.
+- **Room for it.** A second appliance node, the shared storage and a minimal VM to move are
+  estimated at 6–10 GiB; the development host had 20 GiB free (98 % used) on 2026-09-25, which
+  is why this slice stopped at discovery.
+- **The same proof discipline as slice 2:** a `tests/live.rs` case per operation, asserted from
+  what the node reports after the move (the VM's `node` in `/cluster/resources`, its config
+  readable on the target and gone from the source), a lost-answer case in the failure injection,
+  and the route trace appended with provenance.
 
 Rules that every slice keeps, because each has already cost a bug in this repository:
 
@@ -401,3 +432,145 @@ Kind (unlike D5 slice 2's `tests/live.rs` cases for VM operations) — `sdn.rs`'
 functions ARE live-tested (D5 slice 2, above); what is new and unproven against a real node is
 only the thin adapter (`ensure_zone`/`ensure_vnet`'s presence-check-before-create) and the
 `apply()`/teardown ordering this Kind adds on top.
+
+**Added 2026-09-25 (slice 2, `vm.resize.cold`, live):** the engine had no way to change an
+existing VM — every `VirtualMachine` field was cold, and the catalogue declared `vm.resize.cold`
+`not-implemented` on all three providers. `delonix vm resize <name> [--vcpus N] [--memory M]`
+now changes a STOPPED VM for its next boot, behind a new `VmBackend::resize_cold` whose default
+REFUSES by name (ADR-0044 D3, no quiet no-op). Everything refusable is refused before a backend
+is asked and leaves the record untouched: nothing to change, zero vCPUs, a memory value that does
+not parse (new strict `parse_mem_mib`; the lenient `mem_mib` would read `2GB` as its 1 GiB
+fallback and the verb would report it done) — DX-1536 `vm.invalid_resize` — and a VM that is
+running or paused, DX-5505 `vm.resize_needs_stopped` (conflict): a change a guest only sees at
+its next reboot is not a resize yet. The record is rewritten only after the backend returns `Ok`.
+
+- **libvirt / Cloud Hypervisor**: the record IS the definition (`vm start` →
+  `create(config_from(..))` rebuilds the domain XML / vmm command line), so the override has
+  nothing to do outside the record and says so. libvirt is `supported` on a battery check that
+  reads the domain the next `vm start` defines (`<vcpu>2</vcpu>`, 393216 KiB) — the rc of the
+  resize proves nothing. Cloud Hypervisor stays `partial`: no battery check names it yet.
+- **Proxmox**: the NODE is asked too (`status/current`), because a record can say `Stopped`
+  about a VM somebody started from the node's UI, and a config change on a running VM lands in
+  `…/pending`, not in the guest. Then `POST …/config` (the asynchronous config API, on the task
+  path — measured: it forked a `qmconfig` worker that was waited on) with `sockets=1` next to
+  `cores` (the node counts vCPUs as sockets × cores, so a two-socket template clone would get
+  twice what was asked), read back from `…/config` (memory is a string property on PVE 8+), and
+  `GET …/pending` (the 108th route) must be empty. The live case
+  (`a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size`, 39 s) asserts the refusal while
+  the node runs the VM with the config unchanged, then after stop the new config, an empty
+  pending list, and after start `status/current` reporting `cpus=2` and `maxmem=768 MiB`.
+  Failure injection covers the three outcomes (agree → done; config not read back → unexpected
+  answer; left pending → unexpected answer naming the key). Matrix: 108/675 called (16.0 %), 105
+  in a live trace.
+
+**Not done here**: a hot resize (`vm.hotplug`, running VM) and the reconciler — `VirtualMachine`
+`vcpus`/`memory` stay cold in `stack plan` (a `Replace`); making them hot needs the plan to know
+the VM is stopped, which is its own decision. The rest of cloud-init (`GET/PUT …/cloudinit`,
+regenerating the drive after a key change) needs an engine verb that changes cloud-init on an
+existing VM, which does not exist.
+
+**Added 2026-09-25 (slice 2, `vm.disks.extra` / `vm.nics.extra`, live):** `extraDisks` and
+`extraNics` were refused by name on Proxmox; they are now mapped (`extra_devices_form`, pure) and
+sent in the SAME `POST …/qemu` as the VM, so the VM either exists with every device or not at
+all. An extra disk is a FRESH volume, `<storage>:<gib>` — the boot disk's own shape — in the
+next free slot of its bus (`virtioN`, default; `scsiN` from 1, `scsi0` is the boot disk; `sataN`;
+`ide0`/`ide1`/`ide3`, `ide2` is the cloud-init drive), with `format` passed through when it is
+`raw`/`qcow2`. An extra NIC is `netN=<model>[=<MAC>],bridge=<bridge>` on a bridge of the node (the
+target's default when none is named), model in `virtio`/`e1000`/`e1000e`/`rtl8139`/`vmxnet3`, the
+MAC checked by `sdn::validate_mac`, and no VLAN tag — the target's tag describes how `net0` is
+cabled. Refused by name, before any request: a host path or a template as a disk source
+(DX-1522), `device: cdrom`, a libvirt `target`, `readOnly`, an unknown bus or format, a slot
+overflow, a `network`/`user` NIC or an unknown model (DX-1524), a bad bridge (DX-1520) or MAC
+(DX-1534). **On a template clone both are refused** (DX-1524, checked in `boot` before
+`next_vmid`; failure injection asserts the node sees nothing past the login): the template may
+already hold `scsi1`/`net1`, and writing a slot it uses would detach its own device silently.
+
+The live case (`extra_disks_and_nics_are_created_with_the_vm_and_go_with_it`, 5.7 s) reads the
+node's config back (`virtio0`/`scsi1` as `vm-<id>-disk-N` with `size=1G`/`2G`, `net1` virtio on
+the default bridge, `net2` `e1000=BC:24:11:0A:0B:0C,bridge=vmbr0`), counts the VM's disks on the
+storage (`GET …/storage/{storage}/content?content=images`, the route `list_backups` already
+calls — the cloud-init drive is there too, so disks are counted by name), and after `destroy`
+asserts neither the VM nor any volume is left. Catalogue: both rows `supported` on that case.
+Matrix unchanged at 108/675 — no new route.
+
+**Added 2026-09-25 (slice 3, first part: cluster discovery, read-only):** `delonix provider
+describe proxmox --probe` connects to the configured target — the same `Target` the backend
+registers, now built by one `proxmox_target()` shared by both — and reads its cluster with five
+`GET`s only (`/cluster/status`, `/storage`, `/cluster/ha/status/current`, `/cluster/ha/resources`,
+`/cluster/sdn/zones`; new module `cluster.rs`, `Client::cluster_facts`). `provider ls` still costs
+zero requests (ADR-0050); `--probe` is refused for any provider but `proxmox` (the local ones are
+measured on every describe, exit 1), and with no target configured it answers in the unavailable
+class (69). What it prints:
+
+- **facts**: cluster name and quorum (`None` for a node outside a cluster — measured: such a node
+  answers `/cluster/status` with one `type: node` entry and no `type: cluster` entry), every node
+  with `online` and a `target` mark on EXACTLY the configured node (none if it is not a member —
+  never picked: slice 3's "no implicit node selection"), every storage with type, `shared` (the
+  flag is absent on local storages) and whether it holds VM disks, the CRM master and the number
+  of HA resources, the number of SDN zones;
+- **verdicts** (`cluster_verdicts`, pure) for the five cluster-dependent capabilities — migration
+  cold/live (quorate, two online nodes, a SHARED storage that holds VM disks; a shared backup
+  store does not count), HA (quorate, two nodes, a CRM master), replication (a `zfspool` on two or
+  more nodes), Ceph (`rbd`/`cephfs`). They are facts about the cluster, printed next to the
+  declared state, and change no catalogue row: the engine still does not migrate or manage HA.
+
+Reading the HA status for discovery is not the administration D3 excluded; nothing under
+`/cluster/ha` is written. Measured against the lab node (a node outside any cluster): the trace
+shows the password login and the five reads, nothing else, and every verdict says "not in a
+cluster". Matrix: 112/675 called (16.6 %), 109 in a live trace. `DELONIX_PROXMOX_TOKEN_FILE` (an
+API token in an owner-only file, which `credential_value` always accepted) is now documented.
+
+**Measured against `ngola-lda` itself (2026-09-25)**, node `ngola`, with a token
+`root@pam!delonix-audit` created with privilege separation and only `PVEAuditor` on `/` — so the
+cluster's own permissions, not this code, are what keeps the run read-only. The trace shows
+`GET /nodes` and the five reads, no login POST (a token needs none) and nothing else; exit 0.
+What it found, and it is **not what this ADR's opening section says** (dated 2026-09-23):
+
+- cluster `ngola-lda`, **quorate**, with `ngola` and `delonix03` online and **`delonix02`
+  offline** — running on two of its three nodes;
+- four storages: `pbs-ngola-substrato` (`pbs`, shared, backup only), `local-lvm` and
+  `bkp-delonix03` (`lvmthin`, not shared), `local` (`dir`, no VM disks) — **no `rbd`/`cephfs`
+  storage**, and **0 SDN zones**;
+- no CRM master and 0 HA resources.
+
+So every verdict is "does not": migration because no SHARED storage holds VM disks (the one
+shared store is PBS, for backups), HA because no CRM is master, replication because there is no
+`zfspool`, Ceph because no Ceph storage is defined. The opening section's "with Ceph, SDN (zones,
+VNets, IPAM, fabrics)" is either out of date or describes a Ceph cluster that is not registered
+as a VM storage and SDN config that is not there — this run cannot tell which, and `PVEAuditor`
+(which carries `Datastore.Audit`, `SDN.Audit` and `Sys.Audit`) on `/` with propagation should
+see both. Recorded as measured, not reconciled by guess.
+
+**Still to do in slice 3**: the writes (a migration, an HA resource) — against a lab cluster
+with shared storage, never the production one, which on this measurement could not migrate
+without copying disks anyway.
+
+**Added 2026-09-25 (slice 2, the rest of cloud-init through `config`, live):** the client could
+already write, regenerate and read back the node's cloud-init (`GET`/`PUT …/cloudinit`,
+`…/cloudinit/dump`, all live-tested), but the engine had no way to change an existing VM's
+cloud-init. `delonix vm cloud-init <name> [--hostname H] [--user U] [--ssh-key K|@file]...` now
+changes a STOPPED VM's hostname, user and/or keys for its next boot, behind a new
+`VmBackend::update_cloud_init` whose default refuses by name. The engine hands the backend the
+whole MERGED intent (`CloudInitIntent`: a field not given keeps the record's value, `--ssh-key`
+replaces the keys), and rewrites the record (`boot.hostname`/`ci_user`/`ssh_keys`) only on `Ok`.
+Refused first, record untouched: nothing to change, a hostname that is not a DNS label, a user
+that is not a login name, an empty or multi-line key, an appliance image — DX-1537
+`vm.invalid_cloud_init_change` — and a running or paused VM, DX-5506
+`vm.cloud_init_needs_stopped`.
+
+- **Proxmox**: the node is asked too (a VM started from its UI reads the old drive until its next
+  reboot), then `POST …/config` on the task path with `name` (the node's cloud-init reads the VM
+  name as the hostname), `ciuser` and `sshkeys`, then `PUT …/cloudinit`, and the proof is the
+  node's OWN rendering: `…/cloudinit` has nothing pending and `…/cloudinit/dump?type=user` carries
+  the hostname and every key. Failure injection covers writes that answer done while the
+  rendering lacks a key (an unexpected answer that names it). The live case
+  (`a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it`, 14 s) asserts the refusal while
+  the node runs the VM with the old key still rendered, then the new hostname, user and key
+  rendered and the old key gone. Measured on the way: the node VALIDATES an SSH key's format and
+  answers HTTP 500 «SSH public key validation error» for an invented one — the test uses real
+  ed25519 public keys generated for it. `vm.cloud-init` is `supported` on Proxmox.
+- **libvirt / Cloud Hypervisor**: refused by name, on purpose — their seed is an ISO built at
+  create, and a guest re-runs cloud-init only for a new `instance-id`; rewriting the seed without
+  that would be reported as applied and ignored. `vm.cloud-init` stays `partial` there.
+
+No new route (the matrix stays at 112/675).
