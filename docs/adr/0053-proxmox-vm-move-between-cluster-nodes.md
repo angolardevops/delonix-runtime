@@ -1,8 +1,11 @@
-# ADR-0052: A Proxmox VM moves between the nodes of its cluster with `vm move --node`, and each VM is addressed on its own node
+# ADR-0053: A Proxmox VM moves between the nodes of its cluster with `vm move --node`, and each VM is addressed on its own node
 
 - **Status:** Proposed
 - **Date:** 2026-09-25
 - **Deciders:** Walter Angolar
+- **Numbering:** drafted as ADR-0052 (#511); that number was taken first by
+  `0052-proxmox-vm-firewall-as-a-network-provider.md` (#512), so this record is ADR-0053 without
+  changing what it decides.
 - **Related:** ADR-0008 (the Proxmox backend addresses ONE node, explicitly, and never picks
   one — decision 3 is amended here, see Consequences); ADR-0031 (`vm migrate` is stop-copy-start
   between two `delonix` hosts, and live migration stays out of scope for the local backends);
