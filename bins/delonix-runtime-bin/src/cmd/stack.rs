@@ -2896,10 +2896,10 @@ fn validate_graph_with(
                         ));
                     }
                 }
-                if !matches!(scope, "container" | "network") {
+                if !matches!(scope, "container" | "network" | "vm") {
                     // Message consistent with the apply (which also rejects the scope).
                     issues.push(super::po::tf(
-                        "{kind} '{name}' → invalid scope '{scope}' (use container|network)",
+                        "{kind} '{name}' → invalid scope '{scope}' (use container|network|vm)",
                         &[("kind", &doc.kind), ("name", name), ("scope", scope)],
                     ));
                 } else if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
@@ -2908,6 +2908,16 @@ fn validate_graph_with(
                         if !networks.contains(target) {
                             issues.push(super::po::tf(
                                 "{kind} '{name}' (scope network) → target '{target}' is not a declared or existing Network",
+                                &[("kind", &doc.kind), ("name", name), ("target", target)],
+                            ));
+                        }
+                    } else if scope == "vm" {
+                        // `containers` holds the declared and existing VMs too;
+                        // whether the VM's backend has a firewall is the
+                        // apply's question (ADR-0052), not the graph's.
+                        if !containers.contains(target) {
+                            issues.push(super::po::tf(
+                                "{kind} '{name}' (scope vm) → target '{target}' is not a declared or existing VirtualMachine",
                                 &[("kind", &doc.kind), ("name", name), ("target", target)],
                             ));
                         }

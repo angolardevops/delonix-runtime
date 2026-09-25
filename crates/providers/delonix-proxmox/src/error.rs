@@ -48,6 +48,12 @@ pub enum Error {
     /// HTTP 502/503/504: the API is up, the backend behind it is not.
     #[error("{0}")]
     NodeUnavailable(String),
+    /// A VM firewall was asked for on a cluster whose datacenter-level
+    /// firewall is off, so no rule of a VM would filter anything (ADR-0052).
+    /// Turning it on changes what the NODES accept too, which is the
+    /// operator's decision — this backend never flips it.
+    #[error("{0}")]
+    DatacenterFirewallDisabled(String),
     /// A body past the size this client reads into memory.
     #[error("{0}")]
     ResponseTooLarge(String),
@@ -199,6 +205,7 @@ impl Error {
             Error::NodeNotFound(_) => 4504,
             Error::NodeConflict(_) => 5504,
             Error::NodeUnavailable(_) => 6506,
+            Error::DatacenterFirewallDisabled(_) => 6508,
             Error::Unauthorized(_) => 9515,
             Error::Forbidden(_) => 9516,
             Error::ResponseTooLarge(_) => 9517,
@@ -244,7 +251,9 @@ impl From<Error> for Dx {
         let class = match e {
             Error::SnapshotNotFound(text) | Error::NodeNotFound(text) => Dx::NotFound(text),
             Error::SnapshotTaken(text) | Error::NodeConflict(text) => Dx::Conflict(text),
-            Error::ClientBuild(text) | Error::NodeUnavailable(text) => Dx::Unavailable(text),
+            Error::ClientBuild(text)
+            | Error::NodeUnavailable(text)
+            | Error::DatacenterFirewallDisabled(text) => Dx::Unavailable(text),
             Error::TaskTimeout(text) | Error::LockTimeout(text) => Dx::Timeout(text),
             Error::BadRequest(text) => Dx::Invalid(text),
             Error::Request(text)
@@ -278,6 +287,7 @@ mod tests {
             Error::NodeConflict("proxmox: u returned HTTP 409: x".into()),
             Error::BadRequest("proxmox: u returned HTTP 400: x".into()),
             Error::NodeUnavailable("proxmox: u returned HTTP 503: x".into()),
+            Error::DatacenterFirewallDisabled("proxmox: the datacenter firewall of u is off".into()),
             Error::ResponseTooLarge("proxmox: the answer from /x exceeded 16 MiB".into()),
             Error::Decode("proxmox: could not read the answer from x: y".into()),
             Error::UnexpectedAnswer("proxmox: could not read a VM id from /cluster/nextid: x".into()),
