@@ -2995,3 +2995,106 @@ fn a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size() {
         "the VM is still defined on the node after destroy — an orphan"
     );
 }
+
+/// `extraDisks`/`extraNics` on Proxmox (`vm.disks.extra`/`vm.nics.extra`),
+/// asserted from the node's own config and storage, never from the call's
+/// answer: the extra disks exist on the storage under this VM's id, in the
+/// slots asked for and with the sizes asked for; the extra NICs carry the
+/// model, the fixed MAC and the bridge asked for; and a destroy takes every
+/// disk with it (`storage/.../content?content=images`), not only the boot one.
+#[test]
+fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxextra{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        extra_disks: vec![
+            delonix_vm::ExtraDisk {
+                source: format!("{storage}:1"),
+                ..Default::default()
+            },
+            delonix_vm::ExtraDisk {
+                source: format!("{storage}:2"),
+                bus: "scsi".into(),
+                ..Default::default()
+            },
+        ],
+        extra_nics: vec![
+            delonix_vm::ExtraNic::default(),
+            delonix_vm::ExtraNic {
+                kind: "bridge".into(),
+                source: Some("vmbr0".into()),
+                model: "e1000".into(),
+                mac: Some("BC:24:11:0A:0B:0C".into()),
+            },
+        ],
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+
+    let c = client.config(vmid).expect("config");
+    let key = |k: &str| {
+        c.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let owned = format!("{storage}:vm-{vmid}-disk-");
+    assert!(
+        key("virtio0").starts_with(&owned) && key("virtio0").contains("size=1G"),
+        "virtio0: {c}"
+    );
+    assert!(
+        key("scsi1").starts_with(&owned) && key("scsi1").contains("size=2G"),
+        "scsi1: {c}"
+    );
+    assert!(
+        key("net1").starts_with("virtio=") && key("net1").contains("bridge=vmbr0"),
+        "net1: {c}"
+    );
+    assert!(
+        key("net2").starts_with("e1000=BC:24:11:0A:0B:0C") && key("net2").contains("bridge=vmbr0"),
+        "net2: {c}"
+    );
+    // The cloud-init drive (`vm-<id>-cloudinit`) is on the storage too —
+    // every VM gets one for `ipconfig0` — so the disks are counted by name.
+    let images = client.list_images(&storage, vmid).expect("storage content");
+    let disks: Vec<&String> = images.iter().filter(|v| v.contains("-disk-")).collect();
+    assert_eq!(disks.len(), 3, "boot + two extra disks: {images:?}");
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+    let left = client.list_images(&storage, vmid).expect("storage content");
+    assert!(
+        left.is_empty(),
+        "a destroy left disks on the storage: {left:?}"
+    );
+}

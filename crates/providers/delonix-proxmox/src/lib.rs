@@ -1272,7 +1272,12 @@ impl Client {
         storage: &str,
         gib: u32,
     ) -> Result<()> {
-        let form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        let mut form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        // Extra disks and NICs ride in the SAME create: one task, and either the
+        // VM exists with all of them or it does not exist. A second `POST
+        // …/config` after the create would be a window where the VM is on the
+        // node without the devices the caller asked for.
+        form.extend(extra_devices_form(cfg, &self.bridge)?);
         let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
         self.task(
             ledger,
@@ -1618,6 +1623,24 @@ impl Client {
                 let size = b.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
                 Some((volid, size))
             })
+            .collect())
+    }
+
+    /// The disk volumes `storage` holds for VM `vmid` (`volid`s), read from
+    /// the same `GET …/storage/{storage}/content` route as
+    /// [`Self::list_backups`], with `content=images`. The node filters by
+    /// `vmid` itself. It is how a caller checks that a destroy took EVERY disk
+    /// with it — a VM gone from `qemu/` with a volume left on the storage is
+    /// space nobody will ever reclaim.
+    pub fn list_images(&self, storage: &str, vmid: u32) -> Result<Vec<String>> {
+        let body = self.get(&format!(
+            "/nodes/{}/storage/{storage}/content?content=images&vmid={vmid}",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "content")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|b| Some(b.get("volid")?.as_str()?.to_string()))
             .collect())
     }
 
@@ -3996,8 +4019,6 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     add(cfg.tpm, "tpm");
     add(cfg.video.is_some(), "video");
     add(!cfg.boot_order.is_empty(), "bootOrder");
-    add(!cfg.extra_disks.is_empty(), "extraDisks");
-    add(!cfg.extra_nics.is_empty(), "extraNics");
     add(!cfg.libvirt_xml_overlay.is_empty(), "libvirtXmlOverlay");
     add(cfg.libvirt_xml.is_some(), "libvirtXml");
     add(cfg.net_mode.is_some(), "netMode");
@@ -4085,6 +4106,149 @@ fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
         out.push(("sshkeys", urlencode(&cfg.ssh_keys.join("\n"))));
     }
     out
+}
+
+/// The node's device slots an extra disk may take, per bus. Static, so the
+/// create form keeps `&'static str` keys. `scsi0` is the boot disk and `ide2`
+/// the cloud-init drive, so neither is offered.
+const VIRTIO_SLOTS: [&str; 16] = [
+    "virtio0", "virtio1", "virtio2", "virtio3", "virtio4", "virtio5", "virtio6", "virtio7",
+    "virtio8", "virtio9", "virtio10", "virtio11", "virtio12", "virtio13", "virtio14", "virtio15",
+];
+const SCSI_SLOTS: [&str; 30] = [
+    "scsi1", "scsi2", "scsi3", "scsi4", "scsi5", "scsi6", "scsi7", "scsi8", "scsi9", "scsi10",
+    "scsi11", "scsi12", "scsi13", "scsi14", "scsi15", "scsi16", "scsi17", "scsi18", "scsi19",
+    "scsi20", "scsi21", "scsi22", "scsi23", "scsi24", "scsi25", "scsi26", "scsi27", "scsi28",
+    "scsi29", "scsi30",
+];
+const SATA_SLOTS: [&str; 6] = ["sata0", "sata1", "sata2", "sata3", "sata4", "sata5"];
+const IDE_SLOTS: [&str; 3] = ["ide0", "ide1", "ide3"];
+/// `net0` is the primary NIC.
+const NET_SLOTS: [&str; 31] = [
+    "net1", "net2", "net3", "net4", "net5", "net6", "net7", "net8", "net9", "net10", "net11",
+    "net12", "net13", "net14", "net15", "net16", "net17", "net18", "net19", "net20", "net21",
+    "net22", "net23", "net24", "net25", "net26", "net27", "net28", "net29", "net30", "net31",
+];
+/// NIC models the node's QEMU offers under these names.
+const NIC_MODELS: [&str; 5] = ["virtio", "e1000", "e1000e", "rtl8139", "vmxnet3"];
+
+/// Translates `extraDisks`/`extraNics` into the node's own device keys, or
+/// refuses by name what has no meaning on a remote node. Pure.
+///
+/// A disk is a NEW one on the node's storage, `<storage>:<gib>` — the same
+/// shape as the boot disk. A local path, a `cdrom`, a libvirt `target` dev and
+/// `readOnly` are refused: the node cannot open a file on this host, and the
+/// other three are libvirt knobs with no Proxmox equivalent this client sets.
+/// A NIC is `netN=<model>[=<mac>],bridge=<bridge>` on a bridge of the node
+/// (the target's default when none is named); a libvirt `network` or a
+/// `user` NIC has nothing to attach to there. No VLAN tag: the target's tag
+/// describes how `net0` is cabled, and a second NIC on another bridge is
+/// exactly the case where it would be wrong.
+fn extra_devices_form(cfg: &VmConfig, default_bridge: &str) -> Result<Vec<(&'static str, String)>> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let (mut virtio, mut scsi, mut sata, mut ide) = (0usize, 0usize, 0usize, 0usize);
+    for (i, d) in cfg.extra_disks.iter().enumerate() {
+        let spec = parse_disk_spec(&d.source)?;
+        let DiskSpec::New { storage, gib } = spec else {
+            return Err(Error::InvalidDiskSpec(format!(
+                "proxmox: extraDisks[{i}] '{}' names a template — an extra disk is a fresh \
+                 `<storage>:<gib>`",
+                d.source
+            )));
+        };
+        let mut bad: Vec<&str> = Vec::new();
+        if !matches!(d.device.as_str(), "" | "disk") {
+            bad.push("device (only `disk`)");
+        }
+        if d.target.is_some() {
+            bad.push("target");
+        }
+        if d.read_only {
+            bad.push("readOnly");
+        }
+        if !matches!(d.format.as_str(), "" | "raw" | "qcow2") {
+            bad.push("format (only `raw` or `qcow2`)");
+        }
+        let (slots, used): (&[&'static str], &mut usize) = match d.bus.as_str() {
+            "" | "virtio" => (&VIRTIO_SLOTS, &mut virtio),
+            "scsi" => (&SCSI_SLOTS, &mut scsi),
+            "sata" => (&SATA_SLOTS, &mut sata),
+            "ide" => (&IDE_SLOTS, &mut ide),
+            _ => {
+                bad.push("bus (virtio, scsi, sata or ide)");
+                (&VIRTIO_SLOTS, &mut virtio)
+            }
+        };
+        if !bad.is_empty() {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraDisks[{i}]: {}",
+                bad.join(", ")
+            )));
+        }
+        let key = *slots.get(*used).ok_or_else(|| {
+            Error::UnsupportedField(format!(
+                "the 'proxmox' backend has no free `{}` slot for extraDisks[{i}]",
+                if d.bus.is_empty() {
+                    "virtio"
+                } else {
+                    d.bus.as_str()
+                }
+            ))
+        })?;
+        *used += 1;
+        let mut value = format!("{storage}:{gib}");
+        if !d.format.is_empty() {
+            value.push_str(&format!(",format={}", d.format));
+        }
+        out.push((key, value));
+    }
+    for (i, n) in cfg.extra_nics.iter().enumerate() {
+        if !matches!(n.kind.as_str(), "" | "bridge") {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraNics[{i}]: kind '{}' (a remote node \
+                 has bridges, not libvirt networks or user-mode NICs — use `bridge`)",
+                n.kind
+            )));
+        }
+        let bridge = n
+            .source
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .unwrap_or(default_bridge);
+        validate_bridge_name(bridge)?;
+        let model = if n.model.is_empty() {
+            "virtio"
+        } else {
+            n.model.as_str()
+        };
+        if !NIC_MODELS.contains(&model) {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraNics[{i}]: model '{model}' (one of {})",
+                NIC_MODELS.join(", ")
+            )));
+        }
+        // The MAC rule is the schema's `mac-addr`, already written once in
+        // `sdn::validate_mac`; only the message names where it came from.
+        let head = match &n.mac {
+            Some(mac) => {
+                sdn::validate_mac(mac).map_err(|_| {
+                    Error::InvalidSdnAddress(format!(
+                        "proxmox: extraNics[{i}] MAC '{mac}' is not XX:XX:XX:XX:XX:XX"
+                    ))
+                })?;
+                format!("{model}={}", mac.to_ascii_uppercase())
+            }
+            None => model.to_string(),
+        };
+        let key = *NET_SLOTS.get(i).ok_or_else(|| {
+            Error::UnsupportedField(format!(
+                "the 'proxmox' backend has no free `net` slot for extraNics[{i}]"
+            ))
+        })?;
+        out.push((key, format!("{head},bridge={bridge}")));
+    }
+    Ok(out)
 }
 
 /// The body of `POST /nodes/<node>/qemu`. Pure, so that "each key goes ONCE"
@@ -4254,6 +4418,22 @@ impl VmBackend for ProxmoxBackend {
         // node's own refusal arrives inside a failed task.
         let spec = parse_disk_spec(disk)?;
         check_fresh_disk_size(&spec, cfg.disk_size_gib)?;
+        // Extra disks/NICs are checked here too, before `next_vmid`: the create
+        // is where they are sent, and a refusal there would come after an id
+        // was asked for. The default bridge does not change whether a NIC is
+        // valid, only where it lands, so any name serves for the check.
+        extra_devices_form(cfg, "vmbr0")?;
+        if matches!(spec, DiskSpec::Template(_))
+            && (!cfg.extra_disks.is_empty() || !cfg.extra_nics.is_empty())
+        {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot add extraDisks/extraNics to a template clone \
+                 ('{disk}'): the template may already hold `scsi1`/`net1`, and writing a slot \
+                 it uses would detach the template's own device without a word. Put the \
+                 devices in the template, or create from `<storage>:<gib>`"
+            ))
+            .into());
+        }
         // The template's config is read only when there is a size to judge:
         // a clone without `diskSize` costs no extra round trip.
         let grow = match (&spec, cfg.disk_size_gib) {
@@ -4773,8 +4953,8 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmTemplate => S::Partial { detail: "`POST …/template` is a client call (`mark_template`) the live case uses to make its clone source; no engine verb turns a VM into a template" },
         C::VmResizeCold => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size" },
         C::VmHotplug => S::NotImplemented,
-        C::VmExtraDisks => S::UnsupportedByProvider { reason: "refused by name (`refuse_unsupported`); ADR-0049 slice 2 maps disks beyond `config`" },
-        C::VmExtraNics => S::UnsupportedByProvider { reason: "refused by name; one `net0` on the target's bridge/VLAN" },
+        C::VmExtraDisks => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it" },
+        C::VmExtraNics => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it" },
         C::VmDiskResize => S::Partial { detail: "`PUT …/resize` grows a template clone's boot disk to `diskSize` at create (live case); a shrink is refused by name; no engine verb resizes an existing VM" },
         C::VmPciPassthrough => S::UnsupportedByProvider { reason: "`devices` refused by name: the guest is on another machine" },
         C::VmTpm => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
@@ -6339,5 +6519,129 @@ mod tests {
         ))
         .expect("a resposta gravada tem de ser JSON válido");
         assert_eq!(parse_agent_ip(&v).as_deref(), Some("10.0.2.17"));
+    }
+
+    /// `extraDisks`/`extraNics` become the node's device keys, a slot per bus
+    /// in order; what has no meaning on a remote node is refused by name.
+    #[test]
+    fn extra_devices_map_to_node_slots_and_refuse_what_the_node_cannot_open() {
+        use delonix_vm::{ExtraDisk, ExtraNic};
+        let disk = |source: &str, bus: &str| ExtraDisk {
+            source: source.into(),
+            bus: bus.into(),
+            ..Default::default()
+        };
+        let cfg = VmConfig {
+            extra_disks: vec![
+                disk("local-lvm:4", ""),
+                disk("local-lvm:2", "scsi"),
+                disk("local-lvm:1", "virtio"),
+                ExtraDisk {
+                    format: "qcow2".into(),
+                    ..disk("local:3", "sata")
+                },
+            ],
+            extra_nics: vec![
+                ExtraNic::default(),
+                ExtraNic {
+                    kind: "bridge".into(),
+                    source: Some("vmbr1".into()),
+                    model: "e1000".into(),
+                    mac: Some("bc:24:11:00:00:01".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        let f = extra_devices_form(&cfg, "vmbr0").unwrap();
+        assert_eq!(
+            f,
+            vec![
+                ("virtio0", "local-lvm:4".to_string()),
+                ("scsi1", "local-lvm:2".to_string()),
+                ("virtio1", "local-lvm:1".to_string()),
+                ("sata0", "local:3,format=qcow2".to_string()),
+                ("net1", "virtio,bridge=vmbr0".to_string()),
+                ("net2", "e1000=BC:24:11:00:00:01,bridge=vmbr1".to_string()),
+            ]
+        );
+        assert!(extra_devices_form(&VmConfig::default(), "vmbr0")
+            .unwrap()
+            .is_empty());
+
+        let refused = |c: VmConfig| extra_devices_form(&c, "vmbr0").unwrap_err().number();
+        let one_disk = |d: ExtraDisk| VmConfig {
+            extra_disks: vec![d],
+            ..Default::default()
+        };
+        let one_nic = |n: ExtraNic| VmConfig {
+            extra_nics: vec![n],
+            ..Default::default()
+        };
+        assert_eq!(
+            refused(one_disk(disk("/var/lib/x.qcow2", ""))),
+            1522,
+            "a host path"
+        );
+        assert_eq!(refused(one_disk(disk("template:9000", ""))), 1522);
+        for d in [
+            ExtraDisk {
+                device: "cdrom".into(),
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                target: Some("vdb".into()),
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                read_only: true,
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                format: "vmdk".into(),
+                ..disk("local-lvm:1", "")
+            },
+            disk("local-lvm:1", "nvme"),
+        ] {
+            assert_eq!(refused(one_disk(d.clone())), 1524, "{d:?}");
+        }
+        let four_ide = VmConfig {
+            extra_disks: vec![disk("local-lvm:1", "ide"); 4],
+            ..Default::default()
+        };
+        assert_eq!(
+            refused(four_ide),
+            1524,
+            "ide0, ide1, ide3 — ide2 is cloud-init's"
+        );
+        for n in [
+            ExtraNic {
+                kind: "network".into(),
+                ..Default::default()
+            },
+            ExtraNic {
+                kind: "user".into(),
+                ..Default::default()
+            },
+            ExtraNic {
+                model: "ne2k".into(),
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(refused(one_nic(n.clone())), 1524, "{n:?}");
+        }
+        assert_eq!(
+            refused(one_nic(ExtraNic {
+                source: Some("vmbr 1".into()),
+                ..Default::default()
+            })),
+            1520
+        );
+        assert_eq!(
+            refused(one_nic(ExtraNic {
+                mac: Some("bc:24:11".into()),
+                ..Default::default()
+            })),
+            1534
+        );
     }
 }

@@ -1339,3 +1339,43 @@ fn a_resize_left_pending_is_an_error_that_names_the_key() {
     assert!(err.to_string().contains("memory"), "{err}");
     assert!(err.to_string().contains("PENDING"), "{err}");
 }
+
+// ===========================================================================
+// Extra disks/NICs: refused on a template clone BEFORE anything is asked
+// ===========================================================================
+
+/// A template clone with `extraDisks` is refused before `next_vmid`: the
+/// template may already hold the slot, and writing it would detach the
+/// template's own device. The node sees no request past the login.
+#[test]
+fn extra_devices_on_a_template_clone_are_refused_before_any_request() {
+    use delonix_vm::{CreateStage, ExtraDisk, VmBackend};
+    let node = MockNode::start(script(&[]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let before = node.log().len();
+    let b = delonix_proxmox::ProxmoxBackend::sharing(std::sync::Arc::new(client));
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = VmConfig {
+        name: "x".into(),
+        disk: "template:9000".into(),
+        vcpus: 1,
+        memory: "512M".into(),
+        extra_disks: vec![ExtraDisk {
+            source: "local-lvm:1".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let stage = |_: CreateStage| {};
+    let Err(err) = b.boot(dir.path(), &cfg, &cfg.disk, &stage) else {
+        panic!("a template clone cannot take extra devices");
+    };
+    assert_eq!(err.number(), 1524, "{err}");
+    assert!(err.to_string().contains("template clone"), "{err}");
+    assert_eq!(
+        node.log().len(),
+        before,
+        "the refusal reached the node: {:?}",
+        node.log()
+    );
+}

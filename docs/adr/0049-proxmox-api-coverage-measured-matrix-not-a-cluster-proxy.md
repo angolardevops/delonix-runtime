@@ -437,3 +437,27 @@ its next reboot is not a resize yet. The record is rewritten only after the back
 the VM is stopped, which is its own decision. The rest of cloud-init (`GET/PUT …/cloudinit`,
 regenerating the drive after a key change) needs an engine verb that changes cloud-init on an
 existing VM, which does not exist.
+
+**Added 2026-09-25 (slice 2, `vm.disks.extra` / `vm.nics.extra`, live):** `extraDisks` and
+`extraNics` were refused by name on Proxmox; they are now mapped (`extra_devices_form`, pure) and
+sent in the SAME `POST …/qemu` as the VM, so the VM either exists with every device or not at
+all. An extra disk is a FRESH volume, `<storage>:<gib>` — the boot disk's own shape — in the
+next free slot of its bus (`virtioN`, default; `scsiN` from 1, `scsi0` is the boot disk; `sataN`;
+`ide0`/`ide1`/`ide3`, `ide2` is the cloud-init drive), with `format` passed through when it is
+`raw`/`qcow2`. An extra NIC is `netN=<model>[=<MAC>],bridge=<bridge>` on a bridge of the node (the
+target's default when none is named), model in `virtio`/`e1000`/`e1000e`/`rtl8139`/`vmxnet3`, the
+MAC checked by `sdn::validate_mac`, and no VLAN tag — the target's tag describes how `net0` is
+cabled. Refused by name, before any request: a host path or a template as a disk source
+(DX-1522), `device: cdrom`, a libvirt `target`, `readOnly`, an unknown bus or format, a slot
+overflow, a `network`/`user` NIC or an unknown model (DX-1524), a bad bridge (DX-1520) or MAC
+(DX-1534). **On a template clone both are refused** (DX-1524, checked in `boot` before
+`next_vmid`; failure injection asserts the node sees nothing past the login): the template may
+already hold `scsi1`/`net1`, and writing a slot it uses would detach its own device silently.
+
+The live case (`extra_disks_and_nics_are_created_with_the_vm_and_go_with_it`, 5.7 s) reads the
+node's config back (`virtio0`/`scsi1` as `vm-<id>-disk-N` with `size=1G`/`2G`, `net1` virtio on
+the default bridge, `net2` `e1000=BC:24:11:0A:0B:0C,bridge=vmbr0`), counts the VM's disks on the
+storage (`GET …/storage/{storage}/content?content=images`, the route `list_backups` already
+calls — the cloud-init drive is there too, so disks are counted by name), and after `destroy`
+asserts neither the VM nor any volume is left. Catalogue: both rows `supported` on that case.
+Matrix unchanged at 108/675 — no new route.
