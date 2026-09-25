@@ -1422,3 +1422,127 @@ fn a_cloud_init_change_the_rendering_does_not_carry_is_an_error() {
         sent.body
     );
 }
+
+// ===========================================================================
+// ADR-0053 decisions 2 and 3: each VM on its own node, and a moved VM found
+// ===========================================================================
+
+fn vm_with_handle(handle: &str) -> delonix_compute::Vm {
+    delonix_compute::Vm::new(
+        "v".into(),
+        "local-lvm:1".into(),
+        "local-lvm:1".into(),
+        1,
+        "512M".into(),
+        String::new(),
+        String::new(),
+        String::new(),
+        handle.into(),
+    )
+}
+
+fn backend_on(node: &MockNode) -> delonix_proxmox::ProxmoxBackend {
+    let client = Client::connect_with(&token_target(node), fast()).unwrap();
+    delonix_proxmox::ProxmoxBackend::sharing(Arc::new(client))
+}
+
+const PVE_STATUS: &str = "/nodes/pve/qemu/100/status/current";
+const PVE2_STATUS: &str = "/nodes/pve2/qemu/100/status/current";
+const RESOURCES: &str = "/cluster/resources";
+
+/// Decision 2: the handle's node is the node the VM is addressed on. The
+/// configured node (`pve`, the API entry point) is never asked about it.
+#[test]
+fn a_vm_is_addressed_on_the_node_its_handle_names() {
+    use delonix_vm::VmBackend;
+    let node = MockNode::start(script(&[(
+        "GET",
+        PVE2_STATUS,
+        ok_data(r#"{"status":"running"}"#),
+    )]));
+    let b = backend_on(&node);
+    let vm = vm_with_handle("proxmox:pve2:100");
+    assert!(b.is_running(&vm), "the VM on pve2 is running");
+    assert_eq!(node.count("GET", PVE2_STATUS), 1);
+    assert_eq!(
+        node.count("GET", PVE_STATUS),
+        0,
+        "the configured node was asked"
+    );
+    assert_eq!(
+        node.count("GET", RESOURCES),
+        0,
+        "no search when the handle is right"
+    );
+    assert_eq!(b.current_handle(&vm), None, "nothing moved");
+}
+
+/// Decision 3: the handle's node says the VM does not exist; ONE
+/// `/cluster/resources` read finds it on `pve2`; the call is retried there,
+/// the move is remembered — the next call goes straight to `pve2` — and
+/// `current_handle` gives the engine the new handle to persist.
+#[test]
+fn a_vm_moved_outside_the_engine_is_found_once_and_remembered() {
+    use delonix_vm::VmBackend;
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            PVE_STATUS,
+            Reply::Json(404, r#"{"data":null}"#.into()),
+        ),
+        (
+            "GET",
+            RESOURCES,
+            ok_data(
+                r#"[{"type":"qemu","vmid":100,"node":"pve2"},{"type":"qemu","vmid":101,"node":"pve"}]"#,
+            ),
+        ),
+        ("GET", PVE2_STATUS, ok_data(r#"{"status":"running"}"#)),
+        ("GET", PVE2_STATUS, ok_data(r#"{"status":"stopped"}"#)),
+    ]));
+    let b = backend_on(&node);
+    let vm = vm_with_handle("proxmox:pve:100");
+    assert!(b.is_running(&vm), "found on pve2, running there");
+    assert_eq!(b.current_handle(&vm).as_deref(), Some("proxmox:pve2:100"));
+    assert!(!b.is_running(&vm), "the second answer from pve2");
+    assert_eq!(
+        node.count("GET", PVE_STATUS),
+        1,
+        "the old node is asked once"
+    );
+    assert_eq!(
+        node.count("GET", RESOURCES),
+        1,
+        "one search, then remembered"
+    );
+    assert_eq!(node.count("GET", PVE2_STATUS), 2);
+}
+
+/// A VM the cluster does not list, or lists on two nodes, is not followed:
+/// the original not-found stands (class 4), and nothing is remembered.
+#[test]
+fn a_vm_the_cluster_cannot_place_keeps_its_not_found() {
+    use delonix_vm::VmBackend;
+    for listing in [
+        "[]",
+        r#"[{"type":"qemu","vmid":100,"node":"pve2"},{"type":"qemu","vmid":100,"node":"pve3"}]"#,
+    ] {
+        let node = MockNode::start(script(&[
+            (
+                "GET",
+                PVE_STATUS,
+                Reply::Json(404, r#"{"data":null}"#.into()),
+            ),
+            ("GET", RESOURCES, ok_data(listing)),
+        ]));
+        let b = backend_on(&node);
+        let vm = vm_with_handle("proxmox:pve:100");
+        let dir = tempfile::tempdir().unwrap();
+        let err = b
+            .stop(dir.path(), &vm)
+            .expect_err("a VM nobody can place is not found");
+        assert!(err.is_not_found(), "{listing}: {err}");
+        assert_eq!(b.current_handle(&vm), None, "{listing}: nothing remembered");
+        assert_eq!(node.count("GET", RESOURCES), 1);
+    }
+}

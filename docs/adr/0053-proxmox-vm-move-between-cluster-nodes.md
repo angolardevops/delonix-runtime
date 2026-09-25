@@ -1,6 +1,7 @@
 # ADR-0053: A Proxmox VM moves between the nodes of its cluster with `vm move --node`, and each VM is addressed on its own node
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-09-26, by the owner) — decisions 2 and 3 implemented and tested
+  (see the addendum at the end); decision 1 (`vm move`) waits for the lab cluster decision 6 names
 - **Date:** 2026-09-25
 - **Deciders:** Walter Angolar
 - **Numbering:** drafted as ADR-0052 (#511); that number was taken first by
@@ -147,3 +148,33 @@ speaks the API.
   the configured one; HA stays excluded (ADR-0049 D3); cross-cluster moves (`remote_migrate`)
   are out of scope; and nothing here is measured yet — the two unmeasured behaviours in
   Context are the first lab task.
+
+## Addendum 2026-09-26 — decisions 2 and 3 implemented
+
+**Decision 2.** The backend reads the node from the handle (`handle_parts`, replacing
+`vmid_from_handle`, which took only the id) and every per-VM operation — status, IP, stop,
+destroy, pause/unpause, cold resize, cloud-init change, resume, snapshots, the VM firewall —
+goes through one helper, `on_vm`, that runs it on a client for that node. The client gained
+`for_node(node)`: the same HTTP pool and credential with another node in its paths, no I/O,
+the node name validated; none of the client's existing per-VM calls changed. Creation stays on
+the configured node.
+
+**Decision 3.** When the handle's node answers `NodeNotFound`, `on_vm` reads
+`GET /cluster/resources?type=vm` once (`Client::locate_vm`); exactly one QEMU entry with the
+same id on another node → a warning naming both nodes, the move remembered in the shared client
+(so the next call goes straight there), and the operation retried once there; zero or two
+entries → the original error stands. The engine gained `VmBackend::current_handle` (default
+`None`, no I/O): `status()` — what `vm ls` runs — writes the handle the backend reports into the
+record.
+
+**Tested:** failure injection (VM addressed on its handle's node with the configured node never
+asked; a moved VM found with ONE search, remembered, and its new handle reported; zero or two
+matches keeping the not-found) — verified to fail with decision 2 reverted; an engine test for
+`status()` persisting the reported handle; and live on the single-node lab: the five VM cases
+re-run as a regression (no `/cluster/resources` request, every handle right) plus
+`the_cluster_resource_list_places_a_vm_on_its_node` for the read itself. Matrix: 114/675 called,
+111 in a live trace.
+
+**Not measured:** following a VM to ANOTHER node, and a request for `/nodes/<other>/…` served
+through the configured node's API — both need a second node, which is the lab of decision 6.
+
