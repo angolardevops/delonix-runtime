@@ -58,6 +58,7 @@ const TYPED_KINDS: &[&str] = &[
     k::GATEWAY,
     k::DEPENDENCY,
     k::NETWORK_ROUTE,
+    k::NETWORK_ZONE,
     k::HTTP_ROUTE,
     k::INGRESS,
     k::FIREWALL_POLICY,
@@ -214,6 +215,11 @@ fn typed_spec_parts(
             generator.subschema_for::<super::netroute::NetworkRouteSpec>(),
             "NetworkRouteSpec",
             super::netroute::NETWORK_ROUTE_SPEC_FIELDS,
+        ),
+        k::NETWORK_ZONE => (
+            generator.subschema_for::<super::network_zone::NetworkZoneSpecDoc>(),
+            "NetworkZoneSpecDoc",
+            super::network_zone::NETWORK_ZONE_SPEC_FIELDS,
         ),
         k::SERVICE => (
             generator.subschema_for::<super::service::ServiceSpec>(),

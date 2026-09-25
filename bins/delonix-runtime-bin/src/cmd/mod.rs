@@ -47,6 +47,8 @@ pub mod netns;
 pub mod netroute;
 pub mod network;
 pub mod network_access_rule;
+pub mod network_zone;
+pub mod network_zone_providers;
 pub mod output;
 pub mod pki;
 pub mod po;

@@ -12886,6 +12886,33 @@ msgstr "Um IP fixo dado para ligar um container não está dentro da subnet da r
 msgid "Pass an address inside the network's own subnet (`delonix network inspect <name>`)."
 msgstr "Passa um endereço dentro da própria subnet da rede (`delonix network inspect <name>`)."
 
+msgid "network zone provider registration refused"
+msgstr "registo de provider de zona de rede recusado"
+
+msgid "A process tried to register a NetworkZoneProvider with an empty id, or one whose id/alias already belongs to a different provider."
+msgstr "Um processo tentou registar um NetworkZoneProvider com um id vazio, ou cujo id/alias já pertence a um provider diferente."
+
+msgid "Fix the registration (an internal call error unless a third-party provider crate is involved)."
+msgstr "Corrige o registo (erro de chamada interna, a menos que esteja envolvido um crate de provider de terceiros)."
+
+msgid "no network zone provider configured"
+msgstr "nenhum provider de zona de rede configurado"
+
+msgid "`kind: NetworkZone` was applied but the runtime has no NetworkZoneProvider registered — it names no provider itself, on purpose, so the runtime's own configuration decides."
+msgstr "Foi aplicado um `kind: NetworkZone` mas o runtime não tem nenhum NetworkZoneProvider registado — o próprio Kind não nomeia provider nenhum, de propósito, para a configuração do runtime é que decide."
+
+msgid "Configure DELONIX_PROXMOX_URL (the only provider this build knows about) and its credential."
+msgstr "Configura o DELONIX_PROXMOX_URL (o único provider que esta build conhece) e a sua credencial."
+
+msgid "ambiguous network zone provider"
+msgstr "provider de zona de rede ambíguo"
+
+msgid "More than one NetworkZoneProvider is registered and `kind: NetworkZone` has no field to pick one by name."
+msgstr "Está registado mais de um NetworkZoneProvider e o `kind: NetworkZone` não tem campo para escolher um pelo nome."
+
+msgid "Unregister all but one NetworkZoneProvider target."
+msgstr "Retira o registo de todos os alvos NetworkZoneProvider excepto um."
+
 msgid "no such NetworkRoute"
 msgstr "não existe esse NetworkRoute"
 

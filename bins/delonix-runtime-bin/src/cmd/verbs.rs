@@ -37,6 +37,7 @@ pub(crate) const GET_ROUTES: &[&str] = &[
     kinds::GATEWAY,
     kinds::HTTP_ROUTE,
     kinds::NETWORK_ROUTE,
+    kinds::NETWORK_ZONE,
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
     kinds::IPPOOL,
@@ -64,6 +65,7 @@ pub(crate) const DESCRIBE_ROUTES: &[&str] = &[
     kinds::GATEWAY,
     kinds::SECRET,
     kinds::NETWORK_ROUTE,
+    kinds::NETWORK_ZONE,
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
     kinds::IPPOOL,
@@ -79,6 +81,7 @@ pub(crate) const DELETE_ROUTES: &[&str] = &[
     kinds::CLUSTER,
     kinds::GATEWAY,
     kinds::NETWORK_ROUTE,
+    kinds::NETWORK_ZONE,
     kinds::FIREWALL_POLICY,
     kinds::SERVICE,
     kinds::IPPOOL,
@@ -312,6 +315,7 @@ pub(crate) fn get(
         // the live map. A route has no name someone chose — the PAIR is its
         // identity — so there is nothing else `get` could key on.
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_ls(output),
+        k if k == kinds::NETWORK_ZONE => super::network_zone::cmd_ls(output),
         k if k == kinds::SERVICE => super::service::cmd_ls(output),
         k if k == kinds::IPPOOL => super::ippool::cmd_ls(output),
         // Both directions of every governed container, one row each — the
@@ -388,6 +392,7 @@ pub(crate) fn describe(kind: &str, names: &[String]) -> Result<()> {
             Ok(())
         }
         k if k == kinds::NETWORK_ROUTE => super::netroute::cmd_describe(&n),
+        k if k == kinds::NETWORK_ZONE => super::network_zone::cmd_describe(&n),
         k if k == kinds::SERVICE => super::service::cmd_describe(&n),
         k if k == kinds::IPPOOL => super::ippool::cmd_describe(&n),
         k if k == kinds::FIREWALL_POLICY => super::firewall::cmd_describe_policy(&n),
@@ -487,6 +492,16 @@ pub(crate) fn delete(kind: &str, names: &[String], force: bool) -> Result<()> {
             for n in names {
                 super::netroute::remove_for_replace(n)?;
                 println!("{}", super::po::tf("route {name}: closed", &[("name", n)]));
+            }
+            Ok(())
+        }
+        k if k == kinds::NETWORK_ZONE => {
+            for n in names {
+                super::network_zone::remove_for_replace(n)?;
+                println!(
+                    "{}",
+                    super::po::tf("networkzone {name}: removed", &[("name", n)])
+                );
             }
             Ok(())
         }

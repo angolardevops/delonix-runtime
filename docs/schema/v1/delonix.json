@@ -1338,6 +1338,20 @@
       },
       "type": "object"
     },
+    "NetworkZoneSpecDoc": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: NetworkZone`.",
+      "properties": {
+        "vnets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VNetSpecInput"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
     "NodesSpec": {
       "description": "The nodes of a role. **Unifies the three modes**: `kind`/`vm` say how many\n(`replicas`), `ssh` says which ones (`hosts`) — because there the machines already exist\nand we do not create them.",
       "properties": {
@@ -2481,6 +2495,39 @@
           },
           "type": "array"
         },
+        "networkZones": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkZoneSpecDoc"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "networks": {
           "items": {
             "additionalProperties": false,
@@ -2926,6 +2973,24 @@
       "required": [
         "provider",
         "localPort"
+      ],
+      "type": "object"
+    },
+    "VNetSpecInput": {
+      "properties": {
+        "alias": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -3839,6 +3904,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "NetworkZone"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkZoneSpecDoc"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "HTTPRoute"
           }
         },
@@ -4093,6 +4183,7 @@
         "NetworkAccessRule",
         "NetworkPolicy",
         "NetworkRoute",
+        "NetworkZone",
         "Pod",
         "RuntimePolicy",
         "Secret",

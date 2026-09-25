@@ -9,6 +9,12 @@ repository.workspace = true
 delonix-compute = { workspace = true }
 delonix-model = { workspace = true }
 delonix-vm = { workspace = true }
+# For `NetworkZoneProvider` (ADR-0049 addendum): the trait+registry lives in
+# `delonix-sdn`, the same way `VmBackend` lives in `delonix-vm` today — a
+# second named, phase-tagged exception in `scripts/arch_fitness.py`
+# (`("dep", "delonix-proxmox", "delonix-sdn")`), mirroring
+# `("dep", "delonix-opnsense", "delonix-sdn")` (ADR-0051).
+delonix-sdn = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }

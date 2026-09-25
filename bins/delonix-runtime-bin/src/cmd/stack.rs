@@ -389,6 +389,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::VOLUME => super::volume::desired(doc)?,
                 k::NETWORK => super::network::desired(doc)?,
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
+                k::NETWORK_ZONE => super::network_zone::desired(doc)?,
                 k::SERVICE => super::service::desired(doc)?,
                 k::IPPOOL => super::ippool::desired(doc)?,
                 k::POD => super::pod::desired(doc)?,
@@ -425,6 +426,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
+    out.extend(super::network_zone::actual()?);
     out.extend(super::service::actual()?);
     out.extend(super::ippool::actual()?);
     out.extend(super::pod::actual()?);
@@ -694,6 +696,10 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
+        (
+            k::NETWORK_ZONE,
+            super::network_zone::RECONCILED_NETWORK_ZONE_FIELDS,
+        ),
         (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
         (k::IPPOOL, super::ippool::RECONCILED_IPPOOL_FIELDS),
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
@@ -1330,6 +1336,7 @@ fn presence(
         // names which. Before any of this it fell through to `?`/`unsupported
         // kind` — `stack ls` could not say anything about a path it had opened.
         k::NETWORK_ROUTE => super::netroute::presence_of(doc),
+        k::NETWORK_ZONE => super::network_zone::presence_of(doc),
         k::SERVICE => super::service::presence_of(doc),
         k::IPPOOL => super::ippool::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
@@ -1753,6 +1760,9 @@ fn run_layers(
     // Logo a seguir às redes: uma rota nomeia DUAS que têm de existir, e nada
     // do que vem abaixo depende dela para ser criado.
     layers.run(k::NETWORK_ROUTE, "🔗", || super::netroute::apply(docs))?;
+    // Cluster-native SDN before anything that might attach to it — mirrors
+    // NETWORK's own early position.
+    layers.run(k::NETWORK_ZONE, "🗺", || super::network_zone::apply(docs))?;
     layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
     layers.run(k::APP, "🏗", || super::app::apply(docs))?;
@@ -1863,6 +1873,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::VOLUME => super::volume::remove_for_replace(name),
         k::NETWORK => super::network::remove_for_replace(name),
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
+        k::NETWORK_ZONE => super::network_zone::remove_for_replace(name),
         k::SERVICE => super::service::remove_for_replace(name),
         k::IPPOOL => super::ippool::remove_for_replace(name),
         k::HTTP_ROUTE | k::INGRESS => super::httproute::remove_for_prune(name),
@@ -2130,6 +2141,20 @@ fn converge_and_stamp(
                         })?;
                     super::service::converge_doc(doc)?
                 }
+                // Same shape again: `network_zone::apply_one` already fully
+                // re-ensures the declared zone/vnets, so converging is applying.
+                k::NETWORK_ZONE => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "NetworkZone/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::network_zone::converge_doc(doc)?
+                }
                 k::IPPOOL => {
                     let doc = docs
                         .iter()
@@ -2206,6 +2231,7 @@ fn stamp_all(
             k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
+            k::NETWORK_ZONE => super::network_zone::stamp(&d.name, stack, &d.fields),
             k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
             k::IPPOOL => super::ippool::stamp(&d.name, stack, &d.fields),
             k::HTTP_ROUTE | k::INGRESS => {

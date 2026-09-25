@@ -42,7 +42,10 @@
 //!   make HTTP requests.
 
 mod error;
+mod network_zone;
 mod sdn;
+
+pub use network_zone::{ProxmoxNetworkZoneProvider, ID as NETWORK_ZONE_PROVIDER_ID};
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
@@ -4048,6 +4051,61 @@ pub fn register_with(target: Target, opts: ClientOptions) -> delonix_model::Resu
             }),
         },
     )?)
+}
+
+/// Registers this Proxmox target's cluster-native SDN as a
+/// `delonix_sdn::network_zone::NetworkZoneProvider` (ADR-0049 addendum) — a
+/// SEPARATE registration from [`register_with`]'s `VmBackend` one, with its
+/// own authenticated [`Client`] (Proxmox tickets are cheap to mint, and
+/// sharing one across two registries would tie an unrelated port's lifetime
+/// to this one's). Reuses the SAME [`Target`]/[`Auth`]/[`ClientOptions`]
+/// types — one Proxmox target, two ports, the composition root
+/// (`cmd::network_zone_providers`) reads the same environment for both.
+///
+/// **Nothing here does I/O until the registered factory is actually
+/// selected** — same contract as [`register_with`]. `ledger_dir` is where
+/// the task ledger for the cluster-wide `apply_sdn` reload persists
+/// (`<ledger_dir>/proxmox-tasks.json`, via [`Ledger::at`]): the SDN reload
+/// has no VM directory of its own (it is cluster-scoped, not VM-scoped —
+/// see `sdn.rs`'s own `SDN_VMID` sentinel), so the caller hands in the
+/// directory this provider's OWN registry uses instead.
+pub fn register_network_zone_provider(
+    target: Target,
+    opts: ClientOptions,
+    ledger_dir: std::path::PathBuf,
+) -> delonix_model::Result<()> {
+    validate_target_url(&target.base_url)?;
+    validate_node_name(&target.node)?;
+
+    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
+    delonix_sdn::network_zone::register_network_zone_provider(
+        delonix_sdn::network_zone::NetworkZoneProviderRegistration {
+            id: NETWORK_ZONE_PROVIDER_ID,
+            aliases: &["pve"],
+            new: Box::new(move || {
+                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+                let client = if let Some(c) = slot.as_ref() {
+                    c.clone()
+                } else {
+                    // A failed connect is NOT cached — same reasoning as
+                    // `register_with`: a node down on the first selection
+                    // must not stay "down" for the rest of the process.
+                    let c = std::sync::Arc::new(
+                        Client::connect_with(&target, opts.clone())
+                            .map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
+                    );
+                    *slot = Some(c.clone());
+                    c
+                };
+                Ok(Box::new(ProxmoxNetworkZoneProvider::new(
+                    client,
+                    Ledger::at(&ledger_dir),
+                ))
+                    as Box<dyn delonix_sdn::network_zone::NetworkZoneProvider>)
+            }),
+        },
+    )
+    .map_err(delonix_model::Error::from)
 }
 
 /// What the Proxmox backend says about the capability catalog (ADR-0050).

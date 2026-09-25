@@ -562,6 +562,10 @@ fn run() -> Result<()> {
                       // receives a target. Free when unconfigured, and it does no I/O even
                       // when it is — the node is contacted on first use (ADR-0008).
     cmd::vmbackends::register_configured();
+    // Same target, a second port: `kind: NetworkZone` never names a
+    // provider itself, so this is the only place a Proxmox target becomes
+    // reachable from it (ADR-0049 addendum).
+    cmd::network_zone_providers::register_configured();
     // The VM engine attaches a Cloud Hypervisor guest through this port instead of
     // reaching into the SDN itself (ADR-0040 P3).
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork));

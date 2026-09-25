@@ -329,3 +329,62 @@ template's first sized drive (the boot-disk choice — `boot: order=…`, then `
 lowest-numbered sized drive — is unit-tested against captured configs, not exercised on the
 node), and a resize of a RUNNING clone (the case resizes before the first start, which is where
 `boot` does it).
+
+**Added 2026-09-25 — `kind: NetworkZone`, closing D3's own named gap ("the engine has Kinds and
+provider ports... that a Proxmox provider could serve, and the matrix must keep showing that it
+does not yet").** `sdn.rs`'s zone/vnet/`apply_sdn` client (D5 slice 2, above) had zero Kind
+wiring — callable from Rust, unreachable from a manifest. This closes it with the same
+mechanism ADR-0051 built the same day for OPNsense's `GatewayProvider`: a pluggable
+`NetworkZoneProvider` trait + closure registry in `delonix-sdn` (`crates/adapters/delonix-sdn/
+src/network_zone.rs`), `delonix-proxmox` implementing it against `sdn.rs` unchanged
+(`ProxmoxNetworkZoneProvider`, a thin adapter — every real decision, staged-vs-applied, the id
+format, referential order, already lived in the client), and a new
+`("dep", "delonix-proxmox", "delonix-sdn")` exception in `scripts/arch_fitness.py`, phase-tagged
+identically to `("dep", "delonix-opnsense", "delonix-sdn")`.
+
+**One deliberate difference from `NetworkGateway`: `kind: NetworkZone` carries no `provider`
+field.** The owner's own framing, given directly for this decision: the Kind stays transparent
+to WHICH infrastructure realizes it — `cmd::network_zone_providers::register_configured` reads
+the SAME `DELONIX_PROXMOX_*` configuration `cmd::vmbackends` already reads (one target, two
+ports: `VmBackend` and now `NetworkZoneProvider`) and registers what it finds; resolution
+(`delonix_sdn::network_zone::active_network_zone_provider`) is by COUNT, not by name — zero
+registered refuses naming what to configure, one is used, more than one (unreachable today,
+nothing in this build registers a second) is refused rather than guessed. A tenant applying this
+manifest never learns it runs on Proxmox — the runtime's own configuration decides, not the
+document. This is a genuine, motivated departure from `NetworkGateway`'s `spec.provider: opnsense`
+field, not an oversight: `NetworkGateway` needed a name because more than one gateway provider is
+a real near-term possibility (OPNsense is the first of several perimeter appliances this engine
+could talk to); `NetworkZone` has exactly one provider FAMILY (cluster-native SDN) with, today,
+one real implementation, and the field would exist only to be filled in with the same value every
+time.
+
+`metadata.name` is the zone's own Proxmox SDN id; `spec.vnets[]` (`name`+optional `alias`) is
+exactly what `create_sdn_vnet` accepts — no zone `type` field, because `sdn.rs` only ever creates
+`simple` zones (its own module doc names this scope on purpose) and exposing a field the client
+cannot honour would be the accept-and-drop shape this repo has refused three times over for other
+flags. `apply()` ensures the zone then every declared vnet, and commits ONCE (`PUT /cluster/sdn`)
+— not once per vnet, so a manifest with several vnets pays for one cluster reload. Teardown
+removes vnets before the zone, then commits once — the node itself refuses to delete a zone a
+vnet still references (`Client::delete_sdn_zone`'s own doc comment), the same referential-order
+reason `NetworkGateway` removes rules before aliases. `Presence::Registry`, own `JsonStore` under
+`<root>/network-zones` (mirrors `NetworkGatewayRecord`) — the target is a Proxmox cluster's
+PENDING SDN config, which carries no `delonix.io/stack` label of its own to stamp. No
+update-in-place: `sdn.rs` has no `set_sdn_zone`/`set_sdn_vnet`, only create/delete, the same
+honesty `NetworkGateway` already states for its own alias/rule pair.
+
+Three new DX codes (`DX-1341`/`1342`/`1343`, `network.zone_provider_registration_refused`/
+`no_zone_provider_configured`/`ambiguous_zone_provider`), all `InvalidArgument`-class, chosen
+independently of ADR-0051's own `1341`/`1342` for `GatewayProviderRegistrationRefused`/
+`UnsupportedByGatewayProvider` — the two branches were built the same day, off `origin/main` at
+different points, and the collision is a merge-time renumbering, not a design conflict (recorded
+here so whoever merges second does not have to rediscover it).
+
+**Validated**: `cargo build`/`test`/`clippy -D warnings` clean across `delonix-sdn`,
+`delonix-proxmox`, `delonix-runtime-bin` (973 bin tests, +8 new across the two crates);
+`scripts/arch_fitness.py` and `scripts/lang_ratchet.py` green; `docs/schema/v1/delonix.json`
+regenerated from the code, not hand-edited; `examples/stack.yaml` carries a `networkZones:`
+sample. **Not validated**: no live run against a real Proxmox SDN zone/vnet exists yet for this
+Kind (unlike D5 slice 2's `tests/live.rs` cases for VM operations) — `sdn.rs`'s own client
+functions ARE live-tested (D5 slice 2, above); what is new and unproven against a real node is
+only the thin adapter (`ensure_zone`/`ensure_vnet`'s presence-check-before-create) and the
+`apply()`/teardown ordering this Kind adds on top.

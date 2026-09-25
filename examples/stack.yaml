@@ -85,6 +85,17 @@ spec:
         from: blog-net
         to: blog-back
 
+  # Cluster-native SDN — realized by whichever NetworkZoneProvider the
+  # RUNTIME has configured (today: Proxmox, via DELONIX_PROXMOX_URL), never
+  # named here. Applying this without a provider configured refuses with a
+  # clear error naming what to set (ADR-0049 addendum).
+  networkZones:
+    - name: dc1
+      spec:
+        vnets:
+          - name: prod
+            alias: "Production VLAN"
+
   volumes:
     - name: db-data
       spec:

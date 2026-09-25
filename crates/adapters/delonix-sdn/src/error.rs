@@ -211,6 +211,22 @@ pub enum Error {
     #[error("{0}")]
     IpNotInSubnet(String),
 
+    /// A [`crate::network_zone::NetworkZoneProvider`] registration refused —
+    /// an empty id, or one whose id/alias already belongs to a different
+    /// provider (ADR-0049 addendum, mirrors `GatewayProviderRegistrationRefused`).
+    #[error("{0}")]
+    NetworkZoneProviderRegistrationRefused(String),
+
+    /// `kind: NetworkZone` was applied but nothing registered a
+    /// [`crate::network_zone::NetworkZoneProvider`].
+    #[error("{0}")]
+    NoNetworkZoneProviderConfigured(String),
+
+    /// More than one [`crate::network_zone::NetworkZoneProvider`] is
+    /// registered — `kind: NetworkZone` has no field to disambiguate.
+    #[error("{0}")]
+    AmbiguousNetworkZoneProvider(String),
+
     // ---- not found ----------------------------------------------------
     /// No `NetworkRoute` between the given pair.
     #[error("{0}")]
@@ -343,6 +359,9 @@ impl Error {
             Error::FirewallEncodeFailed(_) => 1338,
             Error::NoFreeIngressPrefix(_) => 1339,
             Error::IpNotInSubnet(_) => 1340,
+            Error::NetworkZoneProviderRegistrationRefused(_) => 1341,
+            Error::NoNetworkZoneProviderConfigured(_) => 1342,
+            Error::AmbiguousNetworkZoneProvider(_) => 1343,
             Error::RouteNotFound(_) => 4301,
             Error::ServiceNotFound(_) => 4302,
             Error::IngressNetworkNotRealized(_) => 4303,
@@ -455,6 +474,16 @@ mod tests {
             Error::FirewallEncodeFailed("x".into()),
             Error::NoFreeIngressPrefix("no free /16 prefixes for ingress networks".into()),
             Error::IpNotInSubnet("IP x does not belong to network y (10.201.0.0/16)".into()),
+            Error::NetworkZoneProviderRegistrationRefused(
+                "network zone provider 'x' cannot claim the name 'y': it already belongs to 'z'"
+                    .into(),
+            ),
+            Error::NoNetworkZoneProviderConfigured(
+                "kind: NetworkZone has no registered provider".into(),
+            ),
+            Error::AmbiguousNetworkZoneProvider(
+                "kind: NetworkZone has 2 registered providers (a, b)".into(),
+            ),
             Error::RouteNotFound("route: a -> b".into()),
             Error::ServiceNotFound("service: default/web".into()),
             Error::IngressNetworkNotRealized("ingress network 'x' does not exist".into()),
