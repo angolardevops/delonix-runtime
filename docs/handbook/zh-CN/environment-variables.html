@@ -781,6 +781,13 @@ commands. Background: <a class="src" href="https://github.com/angolardevops/delo
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TOKEN_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:credential_value</code></td>
+<td>Path to a file holding the API token secret; preferred over <code>DELONIX_PROXMOX_TOKEN</code>, which every child process inherits.</td>
+<td>A path.</td>
+<td>Refused unless only its owner can read it (<code>chmod 600</code>).</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_USER</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:proxmox_auth</code></td>
 <td>Account for password authentication.</td>

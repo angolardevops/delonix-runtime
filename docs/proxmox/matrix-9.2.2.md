@@ -20,18 +20,18 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
 - **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to; dnsmasq 2.91 installed and its global service disabled, frr 10.6 present, ifupdown2 3.3`
-- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations) and 2026-09-25T09:40Z (power operations: suspend/resume/reset/reboot/shutdown) and 2026-09-25T17:54Z (cold resize: POST config, config and pending read back) and 2026-09-25T18:15Z (extra disks and NICs in the create, destroy takes every disk): each PR's own live run appended after the previous.`
+- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations) and 2026-09-25T09:40Z (power operations: suspend/resume/reset/reboot/shutdown) and 2026-09-25T17:54Z (cold resize: POST config, config and pending read back) and 2026-09-25T18:15Z (extra disks and NICs in the create, destroy takes every disk) and 2026-09-25T18:41Z (`delonix provider describe proxmox --probe`: the cluster reads, GET only): each PR's own live run appended after the previous.`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TEST_MOVE_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `the extra-devices case passed on its own run (1 passed, 5.7 s): one create carried virtio0 (1 GiB), scsi1 (2 GiB), net1 (virtio, default bridge) and net2 (e1000, fixed MAC, vmbr0); the config read them back with vm-<id>-disk-N volumes, the storage held the boot disk, both extra disks and the cloud-init drive, and after destroy neither the VM nor any volume was left. Before it, the cold-resize case passed on its own run (1 passed, 39 s): refused with DX-5505 while the node ran the VM and the config unchanged, then stopped, POST config forked a qmconfig task that was waited on, config read back cores=2/sockets=1/memory=768, pending empty, and after a start status/current reported cpus=2 and maxmem=768 MiB. Before it, the power-operations case passed on its own run (1 passed, 44 s): suspend read back as qmpstatus=paused, resume, reset, a reboot and a plain shutdown of the OS-less guest failing with «VM quit/powerdown failed - got timeout» and the VM still running, then a forceStop shutdown to stopped. Before it, 14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
+- **result**: ``provider describe proxmox --probe` against the lab node read /cluster/status, /storage, /cluster/ha/status/current, /cluster/ha/resources and /cluster/sdn/zones — no write besides the password login — and reported a node outside any cluster (no cluster entry, local storage only, no CRM master), so none of migration/HA/replication/Ceph offered. Before it, the extra-devices case passed on its own run (1 passed, 5.7 s): one create carried virtio0 (1 GiB), scsi1 (2 GiB), net1 (virtio, default bridge) and net2 (e1000, fixed MAC, vmbr0); the config read them back with vm-<id>-disk-N volumes, the storage held the boot disk, both extra disks and the cloud-init drive, and after destroy neither the VM nor any volume was left. Before it, the cold-resize case passed on its own run (1 passed, 39 s): refused with DX-5505 while the node ran the VM and the config unchanged, then stopped, POST config forked a qmconfig task that was waited on, config read back cores=2/sockets=1/memory=768, pending empty, and after a start status/current reported cpus=2 and maxmem=768 MiB. Before it, the power-operations case passed on its own run (1 passed, 44 s): suspend read back as qmpstatus=paused, resume, reset, a reboot and a plain shutdown of the OS-less guest failing with «VM quit/powerdown failed - got timeout» and the VM still running, then a forceStop shutdown to stopped. Before it, 14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `3376`
+- **requests**: `3383`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 108 (16.0 % of the schema) — 105 seen in a live trace, 3 not
-- **unsupported by design**: 363 (each with a written reason)
-- **not yet implemented**: 204
+- **called**: 112 (16.6 % of the schema) — 109 seen in a live trace, 3 not
+- **unsupported by design**: 361 (each with a written reason)
+- **not yet implemented**: 202
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
@@ -39,10 +39,10 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | qemu | 50 | 2 | 0 | 57 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
 | sdn | 48 | 0 | 0 | 42 | 90 |
-| storage | 2 | 0 | 0 | 23 | 25 |
+| storage | 3 | 0 | 0 | 22 | 25 |
 | access | 1 | 0 | 42 | 2 | 45 |
 | pools | 0 | 0 | 0 | 7 | 7 |
-| cluster (other) | 1 | 0 | 162 | 11 | 174 |
+| cluster (other) | 4 | 0 | 160 | 10 | 174 |
 | nodes (host) | 3 | 1 | 97 | 61 | 162 |
 | version | 0 | 0 | 0 | 1 | 1 |
 
@@ -53,6 +53,8 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | method | path | state | returns | token | reason |
 |---|---|---|---|---|---|
 | POST | `/access/ticket` | supported+tested | object | no |  |
+| GET | `/cluster/ha/resources` | supported+tested | array | yes |  |
+| GET | `/cluster/ha/status/current` | supported+tested | array | yes |  |
 | GET | `/cluster/nextid` | supported+tested | integer | yes |  |
 | PUT | `/cluster/sdn` | supported+tested | string | yes |  |
 | GET | `/cluster/sdn/dns` | supported+tested | array | yes |  |
@@ -95,6 +97,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/sdn/zones/{zone}` | supported+tested | null | yes |  |
 | GET | `/cluster/sdn/zones/{zone}` | supported+tested |  | yes |  |
 | PUT | `/cluster/sdn/zones/{zone}` | supported+tested | null | yes |  |
+| GET | `/cluster/status` | supported+tested | array | yes |  |
 | GET | `/nodes` | supported+tested | array | yes |  |
 | POST | `/nodes/{node}/qemu` | supported+tested | string | yes |  |
 | DELETE | `/nodes/{node}/qemu/{vmid}` | supported+tested | string | yes |  |
@@ -157,6 +160,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/nodes/{node}/storage/{storage}/content/{volume}` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/tasks/{upid}/status` | supported+tested | object | yes |  |
 | POST | `/nodes/{node}/vzdump` | supported+tested | string | yes |  |
+| GET | `/storage` | supported+tested | array | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/agent/exec` | supported+untested | object | yes |  |
 | GET | `/nodes/{node}/qemu/{vmid}/agent/exec-status` | supported+untested | object | yes |  |
 | GET | `/nodes/{node}/tasks` | supported+untested | array | yes |  |
@@ -279,7 +283,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/ha/groups/{group}` | unsupported-by-design | null | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | GET | `/cluster/ha/groups/{group}` | unsupported-by-design |  | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | PUT | `/cluster/ha/groups/{group}` | unsupported-by-design | null | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
-| GET | `/cluster/ha/resources` | unsupported-by-design | array | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | POST | `/cluster/ha/resources` | unsupported-by-design | null | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | DELETE | `/cluster/ha/resources/{sid}` | unsupported-by-design | null | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | GET | `/cluster/ha/resources/{sid}` | unsupported-by-design | object | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
@@ -293,7 +296,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | PUT | `/cluster/ha/rules/{rule}` | unsupported-by-design | null | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | GET | `/cluster/ha/status` | unsupported-by-design | array | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | POST | `/cluster/ha/status/arm-ha` | unsupported-by-design | null | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
-| GET | `/cluster/ha/status/current` | unsupported-by-design | array | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | POST | `/cluster/ha/status/disarm-ha` | unsupported-by-design | null | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | GET | `/cluster/ha/status/manager_status` | unsupported-by-design | object | yes | HA policy — cluster-dependent, slice 3 capability discovery first |
 | GET | `/cluster/jobs` | unsupported-by-design | array | yes | job scheduling — host administration |
@@ -578,7 +580,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | not-yet-implemented | object | yes |  |
 | PUT | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/status` | not-yet-implemented | array | yes |  |
 | GET | `/cluster/tasks` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/aplinfo` | not-yet-implemented | array | yes |  |
@@ -721,7 +722,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/pools/{poolid}` | not-yet-implemented | null | yes |  |
 | GET | `/pools/{poolid}` | not-yet-implemented | object | yes |  |
 | PUT | `/pools/{poolid}` | not-yet-implemented | null | yes |  |
-| GET | `/storage` | not-yet-implemented | array | yes |  |
 | POST | `/storage` | not-yet-implemented | object | yes |  |
 | DELETE | `/storage/{storage}` | not-yet-implemented | null | yes |  |
 | GET | `/storage/{storage}` | not-yet-implemented | object | yes |  |

@@ -174,6 +174,7 @@ commands. Background: `docs/adr/0008-proxmox-vm-backend.md`.
 | `DELONIX_PROXMOX_SECRET` | `cmd/vmbackends.rs:proxmox_auth` | Name of a `kind: Secret` holding the credential. | Secret with `tokenId`+`tokenSecret` (preferred) or `username`+`password`. | Checked **first**. Preferred over the variables below, which end up in shell history and `ps`. |
 | `DELONIX_PROXMOX_TOKEN_ID` | `cmd/vmbackends.rs:proxmox_auth` | API token id. | `user@realm!tokenname`. | Used with `DELONIX_PROXMOX_TOKEN`; checked after the secret. |
 | `DELONIX_PROXMOX_TOKEN` | `cmd/vmbackends.rs:proxmox_auth` | API token secret. | | |
+| `DELONIX_PROXMOX_TOKEN_FILE` | `cmd/vmbackends.rs:credential_value` | Path to a file holding the API token secret; preferred over `DELONIX_PROXMOX_TOKEN`, which every child process inherits. | A path. | Refused unless only its owner can read it (`chmod 600`). |
 | `DELONIX_PROXMOX_USER` | `cmd/vmbackends.rs:proxmox_auth` | Account for password authentication. | `root@pam`, … | Used with `DELONIX_PROXMOX_PASSWORD`; checked last. |
 | `DELONIX_PROXMOX_PASSWORD` | `cmd/vmbackends.rs:proxmox_auth` | Password for that account. | | |
 | `DELONIX_PROXMOX_INSECURE_TLS` | `cmd/vmbackends.rs:register_proxmox_with` | Skips TLS certificate verification for the node. | `1`, `true` or `yes` → skip; default verify. | **Another machine answering in the node's name receives the credential.** Opt-in only, never applied as a fallback after a TLS error. |

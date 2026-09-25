@@ -1965,6 +1965,7 @@ pub static ENTRIES: &[Entry] = &[
         path: "provider describe",
         group: "Advanced",
         examples: &[
+            ("measure the cluster around the configured Proxmox node — nodes, quorum, shared storage, HA — with read-only requests", "delonix provider describe proxmox --probe"),
             ("every capability of libvirt on this host, with the reason for each state", "delonix provider describe libvirt"),
             ("the Linux provider is three providers: pick one kind", "delonix provider describe linux --kind network"),
             ("machine-readable", "delonix provider describe cloud-hypervisor -o json"),

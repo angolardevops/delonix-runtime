@@ -41,6 +41,7 @@
 //!   that may not be configured at all, and auto-detection is not a place to
 //!   make HTTP requests.
 
+pub mod cluster;
 mod error;
 mod network_zone;
 mod sdn;
