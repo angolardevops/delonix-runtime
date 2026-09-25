@@ -1232,12 +1232,14 @@ pub(crate) struct FwDocSpec {
     /// preserves it; `apply` reads it directly from `doc.spec`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     direction: Option<String>,
-    /// `container` (default) or `network`. In `network` (only `Egress`), the `target`
-    /// is a NETWORK NAME and the per-network egress policy + CIDR/FQDN allowlist +
-    /// L4 rate-limit apply — not per-container L4 rules.
+    /// `container` (default), `network` or `vm`. In `network` (only `Egress`), the
+    /// `target` is a NETWORK NAME and the per-network egress policy + CIDR/FQDN
+    /// allowlist + L4 rate-limit apply — not per-container L4 rules. In `vm`, the
+    /// `target` is a VM NAME and the rules land on the firewall of the node the
+    /// VM runs on — today a Proxmox node; any other backend refuses (ADR-0052).
     #[serde(default)]
     scope: Option<String>,
-    /// `container` (default): container name. `network`: network name.
+    /// `container` (default): container name. `network`: network name. `vm`: VM name.
     target: String,
     /// `allow` or `deny` when no rule matches. Default `deny` (allowlist).
     #[serde(default, rename = "defaultPolicy")]
@@ -1413,6 +1415,33 @@ pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
         "defaultPolicy".into(),
         spec.default_policy.clone().unwrap_or_else(|| "deny".into()),
     );
+    // scope: vm — the node keeps the rules IN ORDER and the first match wins,
+    // so order IS meaning here (unlike the container chain, built from the
+    // set): the keys are not sorted.
+    if spec.scope.as_deref() == Some("vm") {
+        let dir = if spec.direction.as_deref() == Some("egress") {
+            "out"
+        } else {
+            "in"
+        };
+        let policy = vm_policy(&doc.kind, &doc.metadata.name, &spec, dir)?;
+        f.insert(
+            "rules".into(),
+            policy
+                .rules
+                .iter()
+                .map(|r| r.key())
+                .collect::<Vec<_>>()
+                .join(","),
+        );
+        return Ok(super::reconcile::Desired {
+            kind: k::FIREWALL_POLICY.into(),
+            name: doc.metadata.name.clone(),
+            fields: f,
+            converges: true,
+            ownable: false,
+        });
+    }
     let mut keys: Vec<String> = Vec::new();
     for r in &spec.rules {
         // Resolve a workload name to its address, exactly as the apply will —
@@ -1464,6 +1493,12 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         let Ok(spec) = manifest::spec_of::<FwDocSpec>(doc) else {
             continue;
         };
+        if spec.scope.as_deref() == Some("vm") {
+            if let Some(a) = actual_vm(doc, &spec)? {
+                out.push(a);
+            }
+            continue;
+        }
         let Ok(c) = store.load(&spec.target) else {
             continue; // target not created yet — the plan will say Create
         };
@@ -1516,6 +1551,59 @@ pub(crate) fn actual(docs: &[ManifestDoc]) -> Result<Vec<super::reconcile::Actua
         });
     }
     Ok(out)
+}
+
+/// The `scope: vm` side of [`actual`]: read from the VM's node, through the
+/// backend. A VM not created yet is `None` (the plan says Create); any other
+/// failure — the node unreachable, a backend with no VM firewall — is an
+/// error, never an empty policy that would read as "nothing applied yet".
+fn actual_vm(doc: &ManifestDoc, spec: &FwDocSpec) -> Result<Option<super::reconcile::Actual>> {
+    use delonix_vm::firewall::Direction;
+    let direction = match spec.direction.as_deref() {
+        Some("ingress") => Direction::In,
+        Some("egress") => Direction::Out,
+        _ => return Ok(None),
+    };
+    let root = super::util::state_root();
+    if delonix_vm::list(&root)?
+        .iter()
+        .all(|v| v.name != spec.target)
+    {
+        return Ok(None);
+    }
+    let policy = delonix_vm::read_firewall(&root, &spec.target, direction)?;
+    let mut f = std::collections::BTreeMap::new();
+    f.insert("target".into(), spec.target.clone());
+    f.insert(
+        "direction".into(),
+        spec.direction.clone().unwrap_or_default(),
+    );
+    f.insert("scope".into(), "vm".into());
+    f.insert(
+        "defaultPolicy".into(),
+        if policy.default_allow {
+            "allow"
+        } else {
+            "deny"
+        }
+        .into(),
+    );
+    f.insert(
+        "rules".into(),
+        policy
+            .rules
+            .iter()
+            .map(|r| r.key())
+            .collect::<Vec<_>>()
+            .join(","),
+    );
+    Ok(Some(super::reconcile::Actual {
+        kind: k::FIREWALL_POLICY.into(),
+        name: doc.metadata.name.clone(),
+        fields: f,
+        owner: None,
+        last_applied: None,
+    }))
 }
 
 /// Converges a policy: re-apply the document. `apply_fw_doc` already replaces
@@ -1583,9 +1671,9 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
     // Validate the scope explicitly — a typo (`netowrk`) must not fall silently
     // into the container path and fail later with 'container does not exist'.
     let scope = spec.scope.as_deref().unwrap_or("container");
-    if !matches!(scope, "container" | "network") {
+    if !matches!(scope, "container" | "network" | "vm") {
         return Err(Error::Invalid(super::po::tf(
-            "{kind}/{name}: invalid scope '{scope}' (use container|network)",
+            "{kind}/{name}: invalid scope '{scope}' (use container|network|vm)",
             &[
                 ("kind", kind),
                 ("name", &doc.metadata.name),
@@ -1604,6 +1692,24 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
             )));
         }
         return apply_network_egress(kind, &doc.metadata.name, &spec);
+    }
+
+    // scope: vm — the node's OWN firewall for that VM (ADR-0052).
+    if scope == "vm" {
+        let policy = vm_policy(kind, &doc.metadata.name, &spec, dir)?;
+        delonix_vm::apply_firewall(&super::util::state_root(), &spec.target, &policy)?;
+        println!(
+            "{kind}/{}: applied to VM {} on its node's firewall ({} rule(s), default {})",
+            doc.metadata.name,
+            spec.target,
+            policy.rules.len(),
+            if policy.default_allow {
+                "allow"
+            } else {
+                "deny"
+            }
+        );
+        return Ok(());
     }
 
     // Pure spec validation first (no container/lock involved) — fail fast on
@@ -1709,6 +1815,81 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         doc.metadata.name, spec.target
     );
     Ok(())
+}
+
+/// A `scope: vm` document as the engine's VM firewall policy (ADR-0052).
+/// Pure: validates everything before anything is sent.
+///
+/// `fromWorkload`/`toWorkload` are REFUSED here, not resolved: they resolve to
+/// an address on this engine's SDN, and a VM filtered by its node's firewall
+/// does not sit on that SDN — the name would become an address the VM never
+/// sees traffic from, a rule that matches nothing while reading as a peer.
+/// The `scope: network` fields are refused for the same reason they are for a
+/// container: they mean something else.
+fn vm_policy(
+    kind: &str,
+    name: &str,
+    spec: &FwDocSpec,
+    dir: &str,
+) -> Result<delonix_vm::firewall::Policy> {
+    use delonix_vm::firewall::{Direction, Policy, Proto, Rule};
+    if !spec.allow_cidrs.is_empty() || !spec.fqdn_allowlist.is_empty() || spec.rate_limit.is_some()
+    {
+        return Err(Error::Invalid(super::po::tf(
+            "{kind}/{name}: allowCidrs/fqdnAllowlist/rateLimit are only for scope: network",
+            &[("kind", kind), ("name", name)],
+        )));
+    }
+    let default = spec.default_policy.as_deref().unwrap_or("deny");
+    if !matches!(default, "allow" | "deny") {
+        return Err(Error::Invalid(format!(
+            "{kind}/{name}: defaultPolicy must be allow|deny"
+        )));
+    }
+    let mut rules = Vec::new();
+    for r in &spec.rules {
+        if r.from_workload.is_some() || r.to_workload.is_some() {
+            return Err(Error::Invalid(super::po::tf(
+                "{kind}/{name}: fromWorkload/toWorkload name an address on this engine's SDN, \
+                 which a VM filtered by its node's firewall is not on — use from/to with a CIDR",
+                &[("kind", kind), ("name", name)],
+            )));
+        }
+        let proto_s = r.proto.as_deref().unwrap_or("any");
+        let proto = Proto::parse(proto_s)
+            .ok_or_else(|| Error::Invalid(format!("{kind}/{name}: invalid proto '{proto_s}'")))?;
+        if !fw_port_ok(&r.port) {
+            return Err(Error::Invalid(format!(
+                "{kind}/{name}: invalid port '{}'",
+                r.port
+            )));
+        }
+        let peer = r.from.clone().or_else(|| r.to.clone()).unwrap_or_default();
+        if let Err(e) = check_cidr(&peer) {
+            return Err(Error::Invalid(format!("{kind}/{name}: {e}")));
+        }
+        let action = r.action.as_deref().unwrap_or("allow");
+        if !matches!(action, "allow" | "deny") {
+            return Err(Error::Invalid(format!(
+                "{kind}/{name}: action must be allow|deny"
+            )));
+        }
+        rules.push(Rule {
+            allow: action == "allow",
+            proto,
+            port: Some(r.port.clone()).filter(|p| p != "*"),
+            peer: Some(peer).filter(|p| !p.is_empty() && p != "0.0.0.0/0"),
+        });
+    }
+    Ok(Policy {
+        direction: if dir == "in" {
+            Direction::In
+        } else {
+            Direction::Out
+        },
+        default_allow: default == "allow",
+        rules,
+    })
 }
 
 /// Applies a `scope: network` `Egress` — per-network egress policy + CIDR/
@@ -1867,6 +2048,35 @@ fn egress_host(network: &str, hostname: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn vm_spec(yaml: &str) -> FwDocSpec {
+        serde_yaml::from_str(yaml).expect("a FwDocSpec")
+    }
+
+    #[test]
+    fn a_scope_vm_policy_normalises_every_port_and_every_address() {
+        let spec = vm_spec(
+            "scope: vm\ntarget: web\ndirection: ingress\nrules:\n\
+             - {port: '*', from: 0.0.0.0/0}\n\
+             - {proto: tcp, port: '8000-8080', from: 10.0.0.0/8, action: deny}\n",
+        );
+        let p = vm_policy("NetworkPolicy", "p", &spec, "in").unwrap();
+        assert!(!p.default_allow, "a policy with no default denies");
+        assert_eq!(p.rules[0].port, None);
+        assert_eq!(p.rules[0].peer, None);
+        assert_eq!(p.rules[1].key(), "deny|tcp|8000-8080|10.0.0.0/8|");
+    }
+
+    #[test]
+    fn a_scope_vm_policy_refuses_a_workload_name_and_the_network_fields() {
+        let named = vm_spec("scope: vm\ntarget: web\nrules:\n- {port: '22', fromWorkload: db}\n");
+        let e = vm_policy("NetworkPolicy", "p", &named, "in").unwrap_err();
+        assert!(e.to_string().contains("fromWorkload"), "{e}");
+        let net = vm_spec("scope: vm\ntarget: web\nallowCidrs: [10.0.0.0/8]\n");
+        assert!(vm_policy("NetworkPolicy", "p", &net, "out").is_err());
+        let proto = vm_spec("scope: vm\ntarget: web\nrules:\n- {proto: icmp, port: '*'}\n");
+        assert!(vm_policy("NetworkPolicy", "p", &proto, "in").is_err());
+    }
 
     /// The identity `get networkpolicies` prints and `describe`/`delete
     /// networkpolicies` have to parse back — the round-trip `list_all_policies`

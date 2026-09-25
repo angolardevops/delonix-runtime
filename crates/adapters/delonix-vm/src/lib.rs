@@ -59,6 +59,7 @@ pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 
 pub mod capabilities;
 pub mod cloudinit;
+pub mod firewall;
 pub mod provider;
 
 /// Configuration to boot a microVM (flat fields, independent of the
@@ -1013,6 +1014,33 @@ pub trait VmBackend {
         Err(unsupported_snapshot(self.id(), "snapshot rm"))
     }
 
+    /// Replaces what the engine wrote to ONE direction of the VM's own
+    /// firewall with `policy` (ADR-0052). Rules this engine did not write are
+    /// left where they are. Default: unsupported (fail closed). Neither local
+    /// backend answers it today: a Cloud Hypervisor VM has anti-spoofing and
+    /// namespace isolation on its tap but no per-VM rule chain, and a libvirt
+    /// VM lives on `virbr0`, outside the SDN. Saying "applied" there would be
+    /// the worst way a firewall can fail.
+    fn apply_firewall(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _policy: &firewall::Policy,
+    ) -> delonix_model::Result<()> {
+        Err(unsupported_firewall(self.id(), "apply"))
+    }
+    /// Reads back what [`VmBackend::apply_firewall`] would compare against:
+    /// the direction's default verdict and the rules this engine wrote, as
+    /// the node has them. Default: unsupported (fail closed).
+    fn read_firewall(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _direction: firewall::Direction,
+    ) -> delonix_model::Result<firewall::Policy> {
+        Err(unsupported_firewall(self.id(), "read"))
+    }
+
     /// Saves whatever snapshot state STOPPING this VM would otherwise destroy,
     /// and returns the names saved. Called by [`stop`] BEFORE
     /// [`VmBackend::stop`], so a failure here aborts the stop with nothing lost
@@ -1078,6 +1106,15 @@ fn unsupported_pause(backend: &str, op: &str) -> delonix_model::Error {
 fn unsupported_snapshot(backend: &str, op: &str) -> delonix_model::Error {
     Error::UnsupportedByBackend(format!(
         "{op} is not supported on the '{backend}' backend yet — use the libvirt backend"
+    ))
+    .into()
+}
+
+/// Fail-closed error for a backend with no VM firewall of its own (ADR-0052).
+fn unsupported_firewall(backend: &str, op: &str) -> delonix_model::Error {
+    Error::UnsupportedByBackend(format!(
+        "a VM firewall {op} is not supported on the '{backend}' backend — a `NetworkPolicy` with \
+         `scope: vm` needs a backend whose node filters the VM (today: proxmox)"
     ))
     .into()
 }
@@ -5238,6 +5275,26 @@ pub fn delete_snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
     Ok(backend_for(&vm)?.delete_snapshot(&vmdir, &vm, snap)?)
+}
+
+/// Applies one direction of VM `name`'s own firewall (see
+/// [`VmBackend::apply_firewall`]).
+pub fn apply_firewall(base: &Path, name: &str, policy: &firewall::Policy) -> Result<()> {
+    let vmdir = vms_dir(base);
+    let vm = load_vm(base, name)?;
+    Ok(backend_for(&vm)?.apply_firewall(&vmdir, &vm, policy)?)
+}
+
+/// Reads one direction of VM `name`'s own firewall back (see
+/// [`VmBackend::read_firewall`]).
+pub fn read_firewall(
+    base: &Path,
+    name: &str,
+    direction: firewall::Direction,
+) -> Result<firewall::Policy> {
+    let vmdir = vms_dir(base);
+    let vm = load_vm(base, name)?;
+    Ok(backend_for(&vm)?.read_firewall(&vmdir, &vm, direction)?)
 }
 
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a

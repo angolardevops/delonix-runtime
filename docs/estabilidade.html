@@ -402,9 +402,12 @@ que faça <code>awk '{print $3}'</code> sobre elas parte, e isso não conta como
 contrato.</p>
 <p><strong>Para automação há <code>-o json</code></strong>, e é ele que é estável: um array JSON por
 recurso, campos podem ser ACRESCENTADOS mas não removidos nem com o tipo mudado
-(ADR-0005). Verificado a funcionar nos nove comandos de listagem — <code>container
-ps</code>, <code>image ls</code>, <code>volumes ls</code>, <code>network ls</code>, <code>vm ls</code>, <code>pod ls</code>, <code>secret ls</code>,
-<code>storage ls</code>, <code>workload ls</code>. Também <code>inspect</code> e <code>-q</code>/<code>--quiet</code>.</p>
+(ADR-0005). Verificado a funcionar (2026-09-25, v4.4.0) em <code>container ps</code>,
+<code>image ls</code>, <code>volume ls</code>, <code>network ls</code>, <code>vm ls</code>, <code>secret ls</code>, <code>workload ls</code> e no
+verbo genérico <code>get &lt;plural&gt;</code> (<code>get pods</code>, <code>get volumes</code>, …), que é o caminho de
+listagem dos Kinds sem <code>ls</code> próprio — o <code>pod ls</code> já não existe, e o grupo
+<code>storage</code> fundiu-se no <code>volume</code>. Também <code>inspect</code> e <code>-q</code>/<code>--quiet</code>. <strong>Excepção
+medida:</strong> <code>backup ls</code> ainda não aceita <code>-o json</code>.</p>
 <blockquote>
 <p>Uma versão anterior deste documento dizia que <code>-o json</code> estava «por fazer e é a
 lacuna reconhecida aqui». <strong>Estava errado</strong> — existe desde a ADR-0005. É
@@ -471,11 +474,16 @@ scripts/schema-diff.sh v0.46.0 v0.47.0  # entre duas tags
 diferenças — serve directamente como gate de CI. Um campo removido ou com o
 tipo mudado é assinalado como <strong>quebra de contrato</strong>, que é o que esta secção
 promete não acontecer.</p>
-<p><strong>O que fica de fora, e é honesto dizê-lo:</strong> os restantes Kinds
-(<code>Vm</code>, <code>Cluster</code>, <code>ShareVolume</code>, <code>Image</code>, <code>Secret</code>, <code>Ingress</code>,
-<code>FirewallPolicy</code>, <code>HTTPRoute</code>, <code>Tunnel</code>, <code>Workload</code>, <code>Stack</code>) ainda não têm
-schema gerado, e por isso continuam sem promessa. O <code>delonix manifest schema</code>/<code>explain</code>
-diz quais são, em vez de os omitir.</p>
+<p><strong>Todos os Kinds têm hoje schema gerado.</strong> Esta secção dizia que <code>Vm</code>,
+<code>Cluster</code>, <code>ShareVolume</code>, <code>Image</code>, <code>Secret</code>, <code>Ingress</code>, <code>FirewallPolicy</code>,
+<code>HTTPRoute</code>, <code>Tunnel</code>, <code>Workload</code> e <code>Stack</code> não o tinham — deixou de ser
+verdade: <code>delonix explain &lt;Kind&gt;</code> responde para cada Kind que
+<code>delonix api-resources</code> lista (verificado a 2026-09-25, v4.4.0), com os nomes
+canónicos (<code>VirtualMachine</code>, <code>KubernetesCluster</code>, <code>NetworkPolicy</code>, <code>Gateway</code>; os
+nomes antigos <code>Vm</code>/<code>Cluster</code>/<code>FirewallPolicy</code>/<code>Tunnel</code> continuam a resolver como
+alias). <code>ShareVolume</code> já não existe: é um <code>kind: Volume</code> com bloco <code>share:</code>. Se
+um Kind futuro chegar sem schema, o <code>delonix explain</code> recusa-o a dizer que Kinds
+o têm, em vez de o omitir.</p>
 <blockquote>
 <p><strong>Três Kinds deixaram de existir</strong> nesta série, fundidos no que já faziam:
 <code>Egress</code> → <code>FirewallPolicy</code> com <code>direction: egress</code>; <code>Dependency</code> →
