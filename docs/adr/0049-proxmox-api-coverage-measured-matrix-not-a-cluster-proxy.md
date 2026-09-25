@@ -489,7 +489,27 @@ shows the password login and the five reads, nothing else, and every verdict say
 cluster". Matrix: 112/675 called (16.6 %), 109 in a live trace. `DELONIX_PROXMOX_TOKEN_FILE` (an
 API token in an owner-only file, which `credential_value` always accepted) is now documented.
 
-**Still to do in slice 3**: run the probe against `ngola-lda` itself with a `PVEAuditor` token
-(the named target — its measured output replaces the hand-written three-node fixture of the unit
-test as evidence), then the writes (a migration, an HA resource) against a lab cluster, never
-the production one.
+**Measured against `ngola-lda` itself (2026-09-25)**, node `ngola`, with a token
+`root@pam!delonix-audit` created with privilege separation and only `PVEAuditor` on `/` — so the
+cluster's own permissions, not this code, are what keeps the run read-only. The trace shows
+`GET /nodes` and the five reads, no login POST (a token needs none) and nothing else; exit 0.
+What it found, and it is **not what this ADR's opening section says** (dated 2026-09-23):
+
+- cluster `ngola-lda`, **quorate**, with `ngola` and `delonix03` online and **`delonix02`
+  offline** — running on two of its three nodes;
+- four storages: `pbs-ngola-substrato` (`pbs`, shared, backup only), `local-lvm` and
+  `bkp-delonix03` (`lvmthin`, not shared), `local` (`dir`, no VM disks) — **no `rbd`/`cephfs`
+  storage**, and **0 SDN zones**;
+- no CRM master and 0 HA resources.
+
+So every verdict is "does not": migration because no SHARED storage holds VM disks (the one
+shared store is PBS, for backups), HA because no CRM is master, replication because there is no
+`zfspool`, Ceph because no Ceph storage is defined. The opening section's "with Ceph, SDN (zones,
+VNets, IPAM, fabrics)" is either out of date or describes a Ceph cluster that is not registered
+as a VM storage and SDN config that is not there — this run cannot tell which, and `PVEAuditor`
+(which carries `Datastore.Audit`, `SDN.Audit` and `Sys.Audit`) on `/` with propagation should
+see both. Recorded as measured, not reconciled by guess.
+
+**Still to do in slice 3**: the writes (a migration, an HA resource) — against a lab cluster
+with shared storage, never the production one, which on this measurement could not migrate
+without copying disks anyway.
