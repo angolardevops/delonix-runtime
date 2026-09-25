@@ -2766,6 +2766,29 @@ check "vm cloud-init sem nada para mudar recusa (1)" 1 "$BIN" vm cloud-init "vm-
 check "vm cloud-init com hostname inválido recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname=a.b
 check "vm cloud-init de uma VM inexistente diz 4" 4 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname web-1
 
+# ADR-0054 §3: a persisted default the reading process cannot serve used to be
+# dropped in silence, and `vm create` then went to a LOCAL hypervisor. Own root
+# for these checks: they write a machine-wide default, and the VM sections below
+# must not inherit it. `pve.invalid` never resolves (RFC 6761), so nothing is
+# contacted; the ambient DELONIX_PROXMOX_* is unset so a developer shell with a
+# real target cannot turn the xfail into a false XPASS.
+ADR54_ROOT="$OUT/adr54-root"; mkdir -p "$ADR54_ROOT"
+adr54_px() { env DELONIX_ROOT="$ADR54_ROOT" DELONIX_PROXMOX_URL=https://pve.invalid:8006 \
+  DELONIX_PROXMOX_NODE=pve DELONIX_PROXMOX_TOKEN_ID='e2e@pve!t' DELONIX_PROXMOX_TOKEN=x "$BIN" "$@"; }
+adr54_bare() { env -u DELONIX_PROXMOX_URL -u DELONIX_PROXMOX_SECRET -u DELONIX_PROXMOX_TOKEN_ID \
+  -u DELONIX_PROXMOX_TOKEN -u DELONIX_PROXMOX_USER -u DELONIX_PROXMOX_PASSWORD \
+  DELONIX_ROOT="$ADR54_ROOT" "$BIN" "$@"; }
+check "vm default-backend --set proxmox com o alvo no ambiente" ok adr54_px vm default-backend --set proxmox
+# The control: with the target present the request does go to the node — so
+# the two xfails below measure the missing environment and nothing else.
+check "vm create com o alvo no ambiente vai ao nó Proxmox" ok bash -c \
+  "$(declare -f adr54_px); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT'; adr54_px vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1 | grep -q 'pve.invalid'"
+xfail ADR-0054 "vm default-backend sem o alvo no ambiente não diz 'none'" ok bash -c \
+  "$(declare -f adr54_bare); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT'; ! adr54_bare vm default-backend 2>&1 | grep -q '^none'"
+xfail ADR-0054 "vm create sem o alvo no ambiente recusa a nomear o proxmox, não cai no local" ok bash -c \
+  "$(declare -f adr54_bare); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT'; out=\$(adr54_bare vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1); echo \"\$out\"; echo \"\$out\" | grep -qi proxmox && ! echo \"\$out\" | grep -q 'no such VM image'"
+adr54_bare vm default-backend --clear >/dev/null 2>&1 || true
+
 ########################################
 section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
 ########################################

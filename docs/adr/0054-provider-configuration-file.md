@@ -33,8 +33,13 @@ disagree.
    `with_backends`). A default of `proxmox` set from a shell with the variables, read by a
    process without them, returns `None` — and `create_with` falls through to auto-detection
    and creates the VM **locally**, without a word. That is a VM on the wrong hypervisor
-   reported as a success. (Read from the code; not yet reproduced live — the reproduction is
-   the first check of the implementation slice.)
+   reported as a success. **Reproduced live** (binary `4abc81353`, isolated root, nothing
+   contacted — the target is `https://pve.invalid:8006`): `vm default-backend --set proxmox`
+   with the variables writes `proxmox`; read back with them it answers `proxmox`, read back
+   without them it answers `none (auto-detection…)` with **rc=0 and no warning**; and
+   `vm create` without them takes the LOCAL path (`DX-4000 no such VM image`) where with them
+   it goes to the node (`DX-9510 … pve.invalid`). The same run shows Context §2 from the
+   outside: the token warning is printed **twice**, once per parser.
 
 4. **The default is not the one the installer should give.** `auto_detect` walks the
    registry in order, and `cloud-hypervisor` is first; `install.sh` installs Cloud Hypervisor
@@ -186,8 +191,11 @@ node and a production node differ in what their file says, not in how it is read
 
 ## Implementation slices
 
-1. Reproduce Context §3 live (shell sets the default with the variables, a process without
-   them creates locally) and keep it as a check in `scripts/e2e.sh` that fails before slice 2.
+1. **Done.** Context §3 reproduced live, and kept in `scripts/e2e.sh` (section «vm (só o que
+   não precisa de hipervisor)») as two `xfail ADR-0054` checks with a control beside them,
+   in a state root of their own so the default they write never reaches another section.
+   Verified in both directions: 2 XFAIL against this binary, and 2 XPASS — which fails the
+   gate until the mark is removed — when the conditions are met.
 2. `ProviderConfig` (parse, precedence, refusal of inline secrets, one-per-type), the single
    loader feeding both registration sites, D3's fail-closed default. Tests with a map/tempdir,
    never the process environment.
