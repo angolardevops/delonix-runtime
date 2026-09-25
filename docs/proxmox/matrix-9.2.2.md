@@ -19,18 +19,18 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **Untested after this run, and why**: `GET /nodes/{node}/tasks is the lost-answer reconciliation, reached only through failure injection (tests/failure_injection.rs); o_ip_vem_do_agente_de_um_convidado_a_serio needs a hand-prepared guest with qemu-guest-agent (DELONIX_PROXMOX_TEST_AGENT_VMID), not set in this run.`
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
-- **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to; dnsmasq 2.91 installed and its global service disabled, frr 10.6 present, ifupdown2 3.3`
-- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations): each PR's own live run appended after the previous.`
+- **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to; dnsmasq 2.91 installed and its global service disabled, frr 10.6 present, ifupdown2 3.3; for the ADR-0052 run the datacenter firewall was turned on, with a `management` IPSet holding 192.168.122.0/24 — the appliance's /etc/hosts still names the build-time 10.0.2.15, so the node detected only 127.0.0.0/8 as its local network and cut the host off without it`
+- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations): each PR's own live run appended after the previous. And 2026-09-25 (NetworkPolicy `scope: vm`, ADR-0052): the new case once with the datacenter firewall off (the DX-6508 refusal, reads only) and once with it on (the full cycle).`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TEST_MOVE_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
 - **result**: `14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `3193`
+- **requests**: `3307`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 102 (15.1 % of the schema) — 99 seen in a live trace, 3 not
-- **unsupported by design**: 363 (each with a written reason)
+- **called**: 103 (15.3 % of the schema) — 100 seen in a live trace, 3 not
+- **unsupported by design**: 362 (each with a written reason)
 - **not yet implemented**: 210
 - **not available in this version**: 0
 
@@ -42,7 +42,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | storage | 2 | 0 | 0 | 23 | 25 |
 | access | 1 | 0 | 42 | 2 | 45 |
 | pools | 0 | 0 | 0 | 7 | 7 |
-| cluster (other) | 1 | 0 | 162 | 11 | 174 |
+| cluster (other) | 2 | 0 | 161 | 11 | 174 |
 | nodes (host) | 3 | 1 | 97 | 61 | 162 |
 | version | 0 | 0 | 0 | 1 | 1 |
 
@@ -53,6 +53,7 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | method | path | state | returns | token | reason |
 |---|---|---|---|---|---|
 | POST | `/access/ticket` | supported+tested | object | no |  |
+| GET | `/cluster/firewall/options` | supported+tested | object | yes |  |
 | GET | `/cluster/nextid` | supported+tested | integer | yes |  |
 | PUT | `/cluster/sdn` | supported+tested | string | yes |  |
 | GET | `/cluster/sdn/dns` | supported+tested | array | yes |  |
@@ -259,7 +260,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/cluster/firewall/ipset/{name}/{cidr}` | unsupported-by-design | object | yes | cluster firewall — provider administration |
 | PUT | `/cluster/firewall/ipset/{name}/{cidr}` | unsupported-by-design | null | yes | cluster firewall — provider administration |
 | GET | `/cluster/firewall/macros` | unsupported-by-design | array | yes | cluster firewall — provider administration |
-| GET | `/cluster/firewall/options` | unsupported-by-design | object | yes | cluster firewall — provider administration |
 | PUT | `/cluster/firewall/options` | unsupported-by-design | null | yes | cluster firewall — provider administration |
 | GET | `/cluster/firewall/refs` | unsupported-by-design | array | yes | cluster firewall — provider administration |
 | GET | `/cluster/firewall/rules` | unsupported-by-design | array | yes | cluster firewall — provider administration |

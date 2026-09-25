@@ -2518,3 +2518,219 @@ fn sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node()
         "the fabric is still listed after delete+apply"
     );
 }
+
+/// `NetworkPolicy` `scope: vm` through the backend port (ADR-0052): the
+/// engine's policy lands on the node's own per-VM firewall and reads back as
+/// the same policy.
+///
+/// Runs one of two branches, decided by the CLUSTER, never flipped here:
+/// with the datacenter firewall off, `apply_firewall` must refuse with
+/// DX-6508 and leave the VM's firewall exactly as it was; with it on, the
+/// whole cycle runs — the three switches, the rules in policy order above a
+/// hand-made rule that must survive, a re-apply that replaces instead of
+/// appending, and the other direction left alone.
+#[test]
+fn a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back() {
+    use delonix_vm::firewall::{Direction, Policy, Proto, Rule};
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxpol{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let client = b.client();
+    let vm = delonix_compute::Vm::new(
+        name,
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let rule = |allow: bool, proto: Proto, port: Option<&str>, peer: Option<&str>| Rule {
+        allow,
+        proto,
+        port: port.map(str::to_string),
+        peer: peer.map(str::to_string),
+    };
+    let inbound = Policy {
+        direction: Direction::In,
+        default_allow: false,
+        rules: vec![
+            rule(true, Proto::Any, Some("53"), Some("10.0.0.0/8")),
+            rule(true, Proto::Tcp, Some("22"), None),
+            rule(false, Proto::Any, None, Some("192.168.1.0/24")),
+        ],
+    };
+
+    let dc = client
+        .cluster_firewall_options()
+        .expect("datacenter firewall options");
+    if !delonix_proxmox::vm_firewall::datacenter_enabled(&dc) {
+        let err = b
+            .apply_firewall(vmdir, &vm, &inbound)
+            .expect_err("a datacenter firewall that is off must refuse the policy");
+        assert!(
+            matches!(err, delonix_model::Error::Coded { number: 6508, .. }),
+            "expected DX-6508, got: {err}"
+        );
+        let opts = client.firewall_options(vmid).expect("firewall options");
+        assert!(
+            opts.get("enable").is_none() && opts.get("policy_in").is_none(),
+            "the refusal touched the VM's firewall anyway: {opts}"
+        );
+        assert!(
+            client.firewall_rules(vmid).expect("rules").is_empty(),
+            "the refusal wrote rules anyway"
+        );
+    } else {
+        // A rule the engine did not write: it must survive every apply.
+        client
+            .add_firewall_rule(
+                &ledger,
+                vmid,
+                "in",
+                "ACCEPT",
+                &delonix_proxmox::FirewallRuleOpts {
+                    enable: Some(true),
+                    comment: Some("hand-made"),
+                    source: None,
+                    dest: None,
+                    proto: Some("tcp"),
+                    dport: Some("8006"),
+                    sport: None,
+                    iface: None,
+                    macro_name: None,
+                    rule_type: None,
+                    action: None,
+                },
+            )
+            .expect("a hand-made rule");
+
+        b.apply_firewall(vmdir, &vm, &inbound)
+            .expect("apply the inbound policy");
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::In)
+                .expect("read back"),
+            inbound,
+            "the node does not hold the policy that was applied"
+        );
+
+        // The three switches, read from the node, not from what apply said.
+        let opts = client.firewall_options(vmid).expect("firewall options");
+        assert_eq!(
+            opts.get("enable").and_then(|v| v.as_u64()),
+            Some(1),
+            "{opts}"
+        );
+        assert_eq!(
+            opts.get("policy_in").and_then(|v| v.as_str()),
+            Some("DROP"),
+            "{opts}"
+        );
+        let net0 = client.config(vmid).expect("config")["net0"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            net0.contains("firewall=1"),
+            "net0 has no firewall switch: {net0}"
+        );
+        assert!(
+            net0.contains(&boot.mac),
+            "turning the NIC's firewall on changed its MAC: {net0} (was {})",
+            boot.mac
+        );
+
+        // The engine's four node rules sit ABOVE the hand-made one (the first
+        // match wins), and the hand-made one is still there.
+        let rules = client.firewall_rules(vmid).expect("rules");
+        let pos_of = |c: &str| {
+            rules
+                .iter()
+                .filter(|r| r.get("comment").and_then(|x| x.as_str()) == Some(c))
+                .filter_map(|r| r.get("pos").and_then(|p| p.as_u64()))
+                .collect::<Vec<_>>()
+        };
+        let hand = pos_of("hand-made");
+        assert_eq!(hand.len(), 1, "the hand-made rule is gone: {rules:?}");
+        let managed: Vec<u64> = [
+            "delonix-managed:0",
+            "delonix-managed:1",
+            "delonix-managed:2",
+        ]
+        .iter()
+        .flat_map(|c| pos_of(c))
+        .collect();
+        assert_eq!(managed.len(), 4, "any+port is two node rules: {rules:?}");
+        assert!(
+            managed.iter().all(|p| *p < hand[0]),
+            "a managed rule sits below the hand-made one: {rules:?}"
+        );
+
+        // Re-apply a different policy: it REPLACES the engine's rules.
+        let narrower = Policy {
+            direction: Direction::In,
+            default_allow: false,
+            rules: vec![rule(true, Proto::Tcp, Some("443"), None)],
+        };
+        b.apply_firewall(vmdir, &vm, &narrower)
+            .expect("re-apply the inbound policy");
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::In)
+                .expect("read back"),
+            narrower
+        );
+        let rules = client.firewall_rules(vmid).expect("rules");
+        assert_eq!(
+            rules.len(),
+            2,
+            "a re-apply must leave one managed rule and the hand-made one: {rules:?}"
+        );
+
+        // The other direction, and the first one untouched by it.
+        let outbound = Policy {
+            direction: Direction::Out,
+            default_allow: true,
+            rules: vec![rule(false, Proto::Tcp, Some("25"), None)],
+        };
+        b.apply_firewall(vmdir, &vm, &outbound)
+            .expect("apply the outbound policy");
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::Out)
+                .expect("read back"),
+            outbound
+        );
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::In)
+                .expect("read back"),
+            narrower,
+            "an egress policy changed the ingress one"
+        );
+    }
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
