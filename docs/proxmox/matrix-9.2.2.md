@@ -19,26 +19,26 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 - **Untested after this run, and why**: `GET /nodes/{node}/tasks is the lost-answer reconciliation, reached only through failure injection (tests/failure_injection.rs); o_ip_vem_do_agente_de_um_convidado_a_serio needs a hand-prepared guest with qemu-guest-agent (DELONIX_PROXMOX_TEST_AGENT_VMID), not set in this run.`
 - **product**: `Proxmox VE`
 - **version**: `9.2.2`
-- **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to`
-- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497): each PR's own live run appended after the previous.`
+- **node**: `pve — a libvirt VM (pve-lab-475) on the developer host, booted from this repository's appliance image proxmox-ve_9.2.qcow2; storage local-lvm for the VM disk, local for backup archives and for a second target storage move_disk moves the boot disk to; dnsmasq 2.91 installed and its global service disabled, frr 10.6 present, ifupdown2 3.3`
+- **run**: `earlier runs stitched (backup/restore/agent/disk/SDN/cloud-init) and 2026-09-25T00:05Z (firewall aliases/ipsets/log/refs) and 2026-09-24T23:23Z (SDN subnets and the single-item zone/vnet reads, #497) and 2026-09-25T00:05Z (IPAM/DNS controllers, fabrics, DHCP zone/subnet, vnet IP reservations): each PR's own live run appended after the previous.`
 - **command**: `DELONIX_PROXMOX_TEST_URL=https://<node>:8006 DELONIX_PROXMOX_TEST_NODE=pve DELONIX_PROXMOX_TEST_USER=root@pam DELONIX_PROXMOX_TEST_PASS=… DELONIX_PROXMOX_TEST_BACKUP_STORAGE=local DELONIX_PROXMOX_TEST_MOVE_STORAGE=local DELONIX_PROXMOX_TRACE_ROUTES=docs/proxmox/trace-9.2.2.routes cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1`
-- **result**: `13 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the SDN subnet case stages a zone, a vnet and a subnet, reads each back by the single-item routes (cluster and node views), applies, and tears all three down; earlier runs as before.`
+- **result**: `14 passed on the last run (o_ip_vem_do_agente_de_um_convidado_a_serio skipped: no DELONIX_PROXMOX_TEST_AGENT_VMID); the new case stages NetBox/PowerDNS entries the node verifies against a stub at DELONIX_PROXMOX_TEST_CALLBACK_ADDR, an OpenFabric fabric with this node as member, a dnsmasq zone with a ranged subnet, applies, reads the vnet as `available` and the fabric's interface as up, reserves/moves/releases an address in the pve IPAM, and tears everything down. The node needed `dnsmasq` installed and the `source /etc/network/interfaces.d/*` line this repository's appliance rewrite had dropped.`
 - **regenerate**: `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --trace docs/proxmox/trace-9.2.2.routes --markdown > docs/proxmox/matrix-9.2.2.md`
-- **requests**: `2495`
+- **requests**: `3193`
 
 ## Summary
 
 - **denominator**: 675 routes (method, path)
-- **called**: 72 (10.7 % of the schema) — 69 seen in a live trace, 3 not
+- **called**: 102 (15.1 % of the schema) — 99 seen in a live trace, 3 not
 - **unsupported by design**: 363 (each with a written reason)
-- **not yet implemented**: 240
+- **not yet implemented**: 210
 - **not available in this version**: 0
 
 | area | tested | untested | unsupported | not yet | total |
 |---|---:|---:|---:|---:|---:|
 | qemu | 44 | 2 | 0 | 63 | 109 |
 | lxc | 0 | 0 | 62 | 0 | 62 |
-| sdn | 18 | 0 | 0 | 72 | 90 |
+| sdn | 48 | 0 | 0 | 42 | 90 |
 | storage | 2 | 0 | 0 | 23 | 25 |
 | access | 1 | 0 | 42 | 2 | 45 |
 | pools | 0 | 0 | 0 | 7 | 7 |
@@ -55,11 +55,36 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/access/ticket` | supported+tested | object | no |  |
 | GET | `/cluster/nextid` | supported+tested | integer | yes |  |
 | PUT | `/cluster/sdn` | supported+tested | string | yes |  |
+| GET | `/cluster/sdn/dns` | supported+tested | array | yes |  |
+| POST | `/cluster/sdn/dns` | supported+tested | null | yes |  |
+| DELETE | `/cluster/sdn/dns/{dns}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/dns/{dns}` | supported+tested | object | yes |  |
+| PUT | `/cluster/sdn/dns/{dns}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/fabrics/all` | supported+tested | object | yes |  |
+| GET | `/cluster/sdn/fabrics/fabric` | supported+tested | array | yes |  |
+| POST | `/cluster/sdn/fabrics/fabric` | supported+tested | null | yes |  |
+| DELETE | `/cluster/sdn/fabrics/fabric/{id}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/fabrics/fabric/{id}` | supported+tested | object | yes |  |
+| PUT | `/cluster/sdn/fabrics/fabric/{id}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/fabrics/node/{fabric_id}` | supported+tested | array | yes |  |
+| POST | `/cluster/sdn/fabrics/node/{fabric_id}` | supported+tested | null | yes |  |
+| DELETE | `/cluster/sdn/fabrics/node/{fabric_id}/{node_id}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/fabrics/node/{fabric_id}/{node_id}` | supported+tested |  | yes |  |
+| PUT | `/cluster/sdn/fabrics/node/{fabric_id}/{node_id}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/ipams` | supported+tested | array | yes |  |
+| POST | `/cluster/sdn/ipams` | supported+tested | null | yes |  |
+| DELETE | `/cluster/sdn/ipams/{ipam}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/ipams/{ipam}` | supported+tested | object | yes |  |
+| PUT | `/cluster/sdn/ipams/{ipam}` | supported+tested | null | yes |  |
+| GET | `/cluster/sdn/ipams/{ipam}/status` | supported+tested | array | yes |  |
 | GET | `/cluster/sdn/vnets` | supported+tested | array | yes |  |
 | POST | `/cluster/sdn/vnets` | supported+tested | null | yes |  |
 | DELETE | `/cluster/sdn/vnets/{vnet}` | supported+tested | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}` | supported+tested |  | yes |  |
 | PUT | `/cluster/sdn/vnets/{vnet}` | supported+tested | null | yes |  |
+| DELETE | `/cluster/sdn/vnets/{vnet}/ips` | supported+tested | null | yes |  |
+| POST | `/cluster/sdn/vnets/{vnet}/ips` | supported+tested | null | yes |  |
+| PUT | `/cluster/sdn/vnets/{vnet}/ips` | supported+tested | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/subnets` | supported+tested | array | yes |  |
 | POST | `/cluster/sdn/vnets/{vnet}/subnets` | supported+tested | null | yes |  |
 | DELETE | `/cluster/sdn/vnets/{vnet}/subnets/{subnet}` | supported+tested | null | yes |  |
@@ -115,8 +140,13 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | POST | `/nodes/{node}/qemu/{vmid}/status/stop` | supported+tested | string | yes |  |
 | POST | `/nodes/{node}/qemu/{vmid}/template` | supported+tested | string | yes |  |
 | PUT | `/nodes/{node}/qemu/{vmid}/unlink` | supported+tested | null | yes |  |
+| GET | `/nodes/{node}/sdn/fabrics/{fabric}` | supported+tested | array | yes |  |
+| GET | `/nodes/{node}/sdn/fabrics/{fabric}/interfaces` | supported+tested | array | yes |  |
+| GET | `/nodes/{node}/sdn/fabrics/{fabric}/neighbors` | supported+tested | array | yes |  |
+| GET | `/nodes/{node}/sdn/fabrics/{fabric}/routes` | supported+tested | array | yes |  |
 | GET | `/nodes/{node}/sdn/vnets/{vnet}` | supported+tested | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones/{zone}` | supported+tested | array | yes |  |
+| GET | `/nodes/{node}/sdn/zones/{zone}/content` | supported+tested | array | yes |  |
 | GET | `/nodes/{node}/storage/{storage}/content` | supported+tested | array | yes |  |
 | DELETE | `/nodes/{node}/storage/{storage}/content/{volume}` | supported+tested | string | yes |  |
 | GET | `/nodes/{node}/tasks/{upid}/status` | supported+tested | object | yes |  |
@@ -511,31 +541,9 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/sdn/controllers/{controller}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/sdn/controllers/{controller}` | not-yet-implemented |  | yes |  |
 | PUT | `/cluster/sdn/controllers/{controller}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/dns` | not-yet-implemented | array | yes |  |
-| POST | `/cluster/sdn/dns` | not-yet-implemented | null | yes |  |
-| DELETE | `/cluster/sdn/dns/{dns}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/dns/{dns}` | not-yet-implemented | object | yes |  |
-| PUT | `/cluster/sdn/dns/{dns}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/sdn/dry-run` | not-yet-implemented | object | yes |  |
 | GET | `/cluster/sdn/fabrics` | not-yet-implemented | array | yes |  |
-| GET | `/cluster/sdn/fabrics/all` | not-yet-implemented | object | yes |  |
-| GET | `/cluster/sdn/fabrics/fabric` | not-yet-implemented | array | yes |  |
-| POST | `/cluster/sdn/fabrics/fabric` | not-yet-implemented | null | yes |  |
-| DELETE | `/cluster/sdn/fabrics/fabric/{id}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/fabrics/fabric/{id}` | not-yet-implemented | object | yes |  |
-| PUT | `/cluster/sdn/fabrics/fabric/{id}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/sdn/fabrics/node` | not-yet-implemented | array | yes |  |
-| GET | `/cluster/sdn/fabrics/node/{fabric_id}` | not-yet-implemented | array | yes |  |
-| POST | `/cluster/sdn/fabrics/node/{fabric_id}` | not-yet-implemented | null | yes |  |
-| DELETE | `/cluster/sdn/fabrics/node/{fabric_id}/{node_id}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/fabrics/node/{fabric_id}/{node_id}` | not-yet-implemented |  | yes |  |
-| PUT | `/cluster/sdn/fabrics/node/{fabric_id}/{node_id}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/ipams` | not-yet-implemented | array | yes |  |
-| POST | `/cluster/sdn/ipams` | not-yet-implemented | null | yes |  |
-| DELETE | `/cluster/sdn/ipams/{ipam}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/ipams/{ipam}` | not-yet-implemented | object | yes |  |
-| PUT | `/cluster/sdn/ipams/{ipam}` | not-yet-implemented | null | yes |  |
-| GET | `/cluster/sdn/ipams/{ipam}/status` | not-yet-implemented | array | yes |  |
 | DELETE | `/cluster/sdn/lock` | not-yet-implemented | null | yes |  |
 | POST | `/cluster/sdn/lock` | not-yet-implemented | string | yes |  |
 | GET | `/cluster/sdn/prefix-lists` | not-yet-implemented | array | yes |  |
@@ -564,9 +572,6 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | DELETE | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | not-yet-implemented | object | yes |  |
 | PUT | `/cluster/sdn/vnets/{vnet}/firewall/rules/{pos}` | not-yet-implemented | null | yes |  |
-| DELETE | `/cluster/sdn/vnets/{vnet}/ips` | not-yet-implemented | null | yes |  |
-| POST | `/cluster/sdn/vnets/{vnet}/ips` | not-yet-implemented | null | yes |  |
-| PUT | `/cluster/sdn/vnets/{vnet}/ips` | not-yet-implemented | null | yes |  |
 | GET | `/cluster/status` | not-yet-implemented | array | yes |  |
 | GET | `/cluster/tasks` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}` | not-yet-implemented | array | yes |  |
@@ -673,14 +678,9 @@ The `tested` column comes from ONE run against a real node, recorded with `DELON
 | GET | `/nodes/{node}/scan/pbs` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/scan/zfs` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/sdn/fabrics/{fabric}` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/sdn/fabrics/{fabric}/interfaces` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/sdn/fabrics/{fabric}/neighbors` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/sdn/fabrics/{fabric}/routes` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/vnets/{vnet}/mac-vrf` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones/{zone}/bridges` | not-yet-implemented | array | yes |  |
-| GET | `/nodes/{node}/sdn/zones/{zone}/content` | not-yet-implemented | array | yes |  |
 | GET | `/nodes/{node}/sdn/zones/{zone}/ip-vrf` | not-yet-implemented | array | yes |  |
 | POST | `/nodes/{node}/spiceshell` | not-yet-implemented |  | yes |  |
 | POST | `/nodes/{node}/startall` | not-yet-implemented | string | yes |  |

@@ -12189,6 +12189,15 @@ msgstr "Uma subnet SDN é nomeada por uma rede CIDR (um endereço IPv4 ou IPv6 c
 msgid "Give a CIDR like '10.0.0.0/24' or 'fd00::/64', with a prefix length valid for the address family."
 msgstr "Dá um CIDR como '10.0.0.0/24' ou 'fd00::/64', com um comprimento de prefixo válido para a família de endereços."
 
+msgid "invalid Proxmox SDN address"
+msgstr "endereço SDN do Proxmox inválido"
+
+msgid "A plain IPv4/IPv6 address (a DHCP range end, a DNS server, an IPAM reservation, a fabric node's router address) or a MAC address that an SDN field takes did not parse as one, refused before it goes into a request body or a URL."
+msgstr "Um endereço IPv4/IPv6 simples (uma ponta de intervalo DHCP, um servidor DNS, uma reserva no IPAM, o endereço de router de um nó de fabric) ou um endereço MAC que um campo SDN recebe não foi reconhecido como tal, recusado antes de entrar no corpo de um pedido ou num URL."
+
+msgid "Give the address without a prefix length ('10.0.0.50', 'fd00::5'), or the MAC as XX:XX:XX:XX:XX:XX."
+msgstr "Dá o endereço sem comprimento de prefixo ('10.0.0.50', 'fd00::5'), ou o MAC como XX:XX:XX:XX:XX:XX."
+
 msgid "The VM has no snapshot with that name on the Proxmox node."
 msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
 
