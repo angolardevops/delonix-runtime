@@ -61,8 +61,8 @@ o nome à release, por isso um `tag: main` não verificado teria publicado uma r
    Debian 12, não só com o Ubuntu mais recente. O `scripts/install.sh` escolhe a build `-v3`
    automaticamente quando o CPU do host a suporta. Um job `build-arm64` separado constrói os mesmos
    quatro binários nativamente num runner aarch64 (um por componente, sem variante `-v3`), e são
-   publicados como `<name>-aarch64-linux` sob o mesmo `SHA256SUMS`. O `install.sh` ainda não os
-   instala. O job só corre no momento da release, por isso a sua primeira execução foi a própria release
+   publicados como `<name>-aarch64-linux` sob o mesmo `SHA256SUMS`. O `install.sh` instala-os num
+   host aarch64 (#447). O job só corre no momento da release, por isso a sua primeira execução foi a própria release
    v4.2.0; a CI corre a suite de testes nativamente em arm64 no job `test (arm64)` em cada PR.
 2. **Regenera o site do utilizador contra esta build de release exacta e falha se `docs/`
    divergir.** Este gate existe porque uma vez não existia: um buraco no site saiu ao vivo na

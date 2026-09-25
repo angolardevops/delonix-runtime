@@ -164,8 +164,9 @@ Grafana. Para scrape contínuo, o <code>delonix-mgmt</code>/<code>delonix-cri</c
 <code>/metrics</code> (Prometheus — gauges de containers/VMs/memória/rede/disco) e
 <code>GET /v1/dash</code> (o mesmo <code>DashSummary</code> em JSON); os campos caros (rede/disco)
 recalculam em background a cada 30s, o scrape em si fica sempre rápido.</p><p class='lang-en'>A live view of runtime state — containers, VMs, images, networks, storage —
-in one screen, without running <code>ls</code> across 5 different groups. Each group also has its
-own (<code>container dash</code>, <code>vm dash</code>, ...); this is the global aggregate.
+in one screen, without running <code>ls</code> across 5 different groups. <code>--scope
+container|vm|network|volume|image</code> focuses it on one group — it replaced the five
+<code>&lt;group&gt; dash</code> commands that existed before (clean cut, no alias).
 Dynamic KPIs: cgroup slice memory, accumulated rx/tx traffic per container (with an explicit count
 of unmeasured <code>--net host/none</code> containers, never silently summed as zero), disk usage
 by area (images/volumes/VM-images/containers), and real per-container uptime (the <code>UP</code>

@@ -276,8 +276,8 @@ o nome à release, por isso um <code>tag: main</code> não verificado teria publ
    Debian 12, não só com o Ubuntu mais recente. O <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> escolhe a build <code>-v3</code>
    automaticamente quando o CPU do host a suporta. Um job <code>build-arm64</code> separado constrói os mesmos
    quatro binários nativamente num runner aarch64 (um por componente, sem variante <code>-v3</code>), e são
-   publicados como <code>&lt;name&gt;-aarch64-linux</code> sob o mesmo <code>SHA256SUMS</code>. O <code>install.sh</code> ainda não os
-   instala. O job só corre no momento da release, por isso a sua primeira execução foi a própria release
+   publicados como <code>&lt;name&gt;-aarch64-linux</code> sob o mesmo <code>SHA256SUMS</code>. O <code>install.sh</code> instala-os num
+   host aarch64 (#447). O job só corre no momento da release, por isso a sua primeira execução foi a própria release
    v4.2.0; a CI corre a suite de testes nativamente em arm64 no job <code>test (arm64)</code> em cada PR.</li>
 <li><strong>Regenera o site do utilizador contra esta build de release exacta e falha se <code>docs/</code>
    divergir.</strong> Este gate existe porque uma vez não existia: um buraco no site saiu ao vivo na
