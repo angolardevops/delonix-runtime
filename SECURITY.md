@@ -37,8 +37,9 @@ Include, if you can:
 ## What's out of scope
 
 - Denial of service from a container you already control (resource exhaustion inside your own
-  container is expected — cgroup limits are opt-in via `--memory`/`--cpus`, not a security
-  boundary by default)
+  container is expected — the engine does apply a default ceiling to a workload started without
+  `--memory`/`--cpus` (a quarter of its own cgroup slice, when the cgroup is delegated), but that
+  ceiling is resource protection, not a security boundary)
 - Issues that require the attacker to already have root on the host
 - Vulnerabilities in third-party base images you choose to run
 - Missing hardening best-practices with no concrete exploit path

@@ -145,32 +145,31 @@ OOM kills the container, not one process inside it), **and** an aggregate ceilin
 on the parent sized from the host — the thing that stops N containers, none of
 which carry ``-m``, from summing to more than the machine has.
 
-Golden VM images ship known credentials
-=======================================
+Golden VM images ship no password
+=================================
 
-The golden VM images (``delonix vm pull`` / ``delonix image vm build``) are
-built with a **fixed, publicly known password**: ``root`` and a ``delonix``
-user, both with the password ``delonix``, and ``delonix`` has passwordless
-``sudo``. They are in the build recipe in this repository, so treat them as
-public knowledge, not as a secret.
+The golden VM images (``delonix vm pull`` / ``delonix image vm build``) ship
+**no password on any account**: ``root`` and the ``delonix`` user are locked
+(``passwd -l``), and ``delonix`` has passwordless ``sudo``. A password written
+in a public build recipe is not a secret, so none is baked into the published
+artefact.
 
-They exist so that a VM whose network never came up is still reachable from the
-serial console (``delonix vm console <name>``). Everything else authenticates
-with keys: cloud-init injects your ``--ssh-key`` on first boot, and
-``delonix cluster kubeadm`` generates and uses its own.
+Every supported way in authenticates with keys: cloud-init injects your
+``--ssh-key`` on first boot, and ``delonix cluster kubeadm`` generates and uses
+its own. SSH password login is also disabled (``PasswordAuthentication no``,
+``PermitRootLogin prohibit-password``).
 
-Because of that, the images ship with **SSH password login disabled**
-(``PasswordAuthentication no``, ``PermitRootLogin prohibit-password``) — the
-password works on the console, not over the network. If you run one of these
-images anywhere reachable, still do the obvious thing::
+If you need the serial console (``delonix vm console <name>``) to accept a login
+— the case where a VM never got its network — that is your choice, made for
+your image or your VM, never a default:
 
-    # inside the VM, on first login
-    sudo passwd root
-    sudo passwd delonix
+.. code-block:: bash
 
-Or build your own golden with your own accounts::
+   # at build time, only for the image you build
+   delonix image vm build --root-password '<your password>' ...
 
-    delonix image vm build --extra-run "passwd -l root" ...
+   # or per VM, in the cloud-init user-data you pass with --user-data
+   #   chpasswd: { expire: false, users: [{name: root, password: <...>, type: text}] }
 
 Highlights
 ==========
@@ -315,7 +314,7 @@ Manual alternative (binary only — you install the runtime deps yourself):
    curl -fL -o ~/.local/bin/delonix \
      https://github.com/angolardevops/delonix-runtime/releases/latest/download/delonix-x86_64-linux
    chmod +x ~/.local/bin/delonix
-   echo 'source <(delonix completion bash)' >> ~/.bashrc
+   echo 'source <(delonix completion shell bash)' >> ~/.bashrc
 
 Quickstart
 ==========
@@ -373,7 +372,7 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
    * - ``build``
      - Build an image from a Dockerfile or Delonixfile (no daemon, no BuildKit).
    * - ``volume``
-     - Named volumes, bind mounts, network shares and per-tenant slices: create (including ``--type nfs|cifs|webdav`` and ``--parent``), ls, describe, inspect, snapshot, prune, rm.
+     - Named volumes, bind mounts, network shares and per-tenant slices: create (including ``--driver nfs|cifs|smb|webdav --opt key=value`` and ``--parent``), ls, describe, inspect, snapshot, prune, rm.
    * - ``secret``
      - Encrypted-at-rest secret vault — the producer of ``run --secret``: create, set, unset, ls, inspect, rotate, rotate-key, apply.
    * - ``policy``
@@ -398,12 +397,10 @@ shortnames, apiVersion, and the FORM of each Kind (``primary``, ``sugar → X``,
      - Model Context Protocol server — a LOCAL, tenancy-free AI control surface: ``serve``, ``capabilities`` (the tool risk table), ``doctor``.
    * - ``hosts``
      - The service names of exposed containers in the operator's ``/etc/hosts`` (ADR-0048, not stable): ``sync`` publishes ``<name>.<ns>.svc.delonix.internal`` in a delimited block and keeps it current (needs root; without it the command refuses and prints the block), ``--print`` shows it, ``--off`` removes it.
-   * - ``compatibility``
-     - What this engine covers of another tool's surface — served, refused with a reason, never in silence. ``docker`` today (the same table ``serve docker-api --matrix`` publishes, plus ``-o json``); ``compose``/``cri``/``oci`` are future work.
    * - ``system``
-     - The engine itself: events, info, features, doctor, resources, metrics, df, prune (GC), backup/restore of the whole node, boot (systemd persistence across reboots), namespace, monitor, thermal, regulate, virt, setup.
+     - The engine itself: events, info, features, doctor, resources, metrics, df, prune (GC), ``snapshot create``/``snapshot restore`` of the whole node, boot (systemd persistence across reboots), namespace, monitor, thermal, regulate, virt, setup.
    * - ``dashboard``
-     - Interactive htop-style TUI — RAM/network/disk KPIs, per-container uptime, ``--json`` for scripts/Grafana. Each resource group also has its own ``dash``.
+     - Interactive htop-style TUI — RAM/network/disk KPIs, per-container uptime, ``--json`` for scripts/Grafana; ``--scope container|vm|network|volume|image`` focuses it on one resource group.
    * - ``config``
      - A small, local preference (e.g. ``output``) — never a remote context: get, set, unset.
    * - ``completion`` · ``man`` · ``version``
