@@ -513,3 +513,33 @@ see both. Recorded as measured, not reconciled by guess.
 **Still to do in slice 3**: the writes (a migration, an HA resource) — against a lab cluster
 with shared storage, never the production one, which on this measurement could not migrate
 without copying disks anyway.
+
+**Added 2026-09-25 (slice 2, the rest of cloud-init through `config`, live):** the client could
+already write, regenerate and read back the node's cloud-init (`GET`/`PUT …/cloudinit`,
+`…/cloudinit/dump`, all live-tested), but the engine had no way to change an existing VM's
+cloud-init. `delonix vm cloud-init <name> [--hostname H] [--user U] [--ssh-key K|@file]...` now
+changes a STOPPED VM's hostname, user and/or keys for its next boot, behind a new
+`VmBackend::update_cloud_init` whose default refuses by name. The engine hands the backend the
+whole MERGED intent (`CloudInitIntent`: a field not given keeps the record's value, `--ssh-key`
+replaces the keys), and rewrites the record (`boot.hostname`/`ci_user`/`ssh_keys`) only on `Ok`.
+Refused first, record untouched: nothing to change, a hostname that is not a DNS label, a user
+that is not a login name, an empty or multi-line key, an appliance image — DX-1537
+`vm.invalid_cloud_init_change` — and a running or paused VM, DX-5506
+`vm.cloud_init_needs_stopped`.
+
+- **Proxmox**: the node is asked too (a VM started from its UI reads the old drive until its next
+  reboot), then `POST …/config` on the task path with `name` (the node's cloud-init reads the VM
+  name as the hostname), `ciuser` and `sshkeys`, then `PUT …/cloudinit`, and the proof is the
+  node's OWN rendering: `…/cloudinit` has nothing pending and `…/cloudinit/dump?type=user` carries
+  the hostname and every key. Failure injection covers writes that answer done while the
+  rendering lacks a key (an unexpected answer that names it). The live case
+  (`a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it`, 14 s) asserts the refusal while
+  the node runs the VM with the old key still rendered, then the new hostname, user and key
+  rendered and the old key gone. Measured on the way: the node VALIDATES an SSH key's format and
+  answers HTTP 500 «SSH public key validation error» for an invented one — the test uses real
+  ed25519 public keys generated for it. `vm.cloud-init` is `supported` on Proxmox.
+- **libvirt / Cloud Hypervisor**: refused by name, on purpose — their seed is an ISO built at
+  create, and a guest re-runs cloud-init only for a new `instance-id`; rewriting the seed without
+  that would be reported as applied and ignored. `vm.cloud-init` stays `partial` there.
+
+No new route (the matrix stays at 112/675).

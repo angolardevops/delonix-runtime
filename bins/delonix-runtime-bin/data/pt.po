@@ -13927,3 +13927,41 @@ msgstr "O que o cluster oferece é um facto sobre o cluster, não suporte do mot
 
 msgid "measure the cluster around the configured Proxmox node — nodes, quorum, shared storage, HA — with read-only requests"
 msgstr "medir o cluster à volta do nó Proxmox configurado — nós, quórum, storage partilhado, HA — só com pedidos de leitura"
+
+# DX-1537 / DX-5506 — vm cloud-init (ADR-0049 slice 2)
+msgid "invalid cloud-init change"
+msgstr "alteração de cloud-init inválida"
+
+msgid "`vm cloud-init` needs `--hostname`, `--user` and/or `--ssh-key`; the hostname has to be a DNS label (letters, digits, '-', at most 63), the user a login name, each key one line. An appliance image does not run cloud-init and is refused."
+msgstr "O `vm cloud-init` precisa de `--hostname`, `--user` e/ou `--ssh-key`; o hostname tem de ser uma etiqueta DNS (letras, dígitos, '-', no máximo 63), o utilizador um nome de login, cada chave uma linha. Uma imagem de appliance não corre cloud-init e é recusada."
+
+msgid "Give at least one of the three, in the form the guest accepts — e.g. `--hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub`."
+msgstr "Dá pelo menos um dos três, na forma que o convidado aceita — por exemplo `--hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub`."
+
+msgid "the VM must be stopped to change its cloud-init"
+msgstr "a VM tem de estar parada para mudar o cloud-init"
+
+msgid "The guest reads cloud-init at boot: a running or paused VM would keep the old hostname and keys until its next reboot, so the verb refuses instead of reporting a change that has not reached the guest."
+msgstr "O convidado lê o cloud-init no arranque: uma VM a correr ou em pausa ficaria com o hostname e as chaves antigas até ao reinício seguinte, por isso o verbo recusa em vez de reportar uma mudança que não chegou ao convidado."
+
+msgid "Run `delonix vm stop <name>`, change it, then `delonix vm start <name>`."
+msgstr "Corre `delonix vm stop <nome>`, muda, e depois `delonix vm start <nome>`."
+
+# vm cloud-init (ADR-0049 slice 2)
+msgid "Change a STOPPED VM's cloud-init — hostname, user, SSH keys — for its next boot"
+msgstr "Muda o cloud-init de uma VM PARADA — hostname, utilizador, chaves SSH — para o próximo arranque"
+
+msgid "Change a STOPPED VM's cloud-init — hostname, user, SSH keys — for its next boot.\n\nRefused while the VM runs or is paused: the guest reads cloud-init at boot. `--ssh-key` REPLACES the keys the VM had; a flag not given keeps its value. On Proxmox the node's config is changed, the cloud-init drive regenerated, and the node's own rendering read back. The local backends refuse it: their seed is an ISO built at create, and a guest only re-runs cloud-init for a new instance id. An appliance image is refused."
+msgstr "Muda o cloud-init de uma VM PARADA — hostname, utilizador, chaves SSH — para o próximo arranque.\n\nRecusado enquanto a VM está a correr ou em pausa: o convidado lê o cloud-init no arranque. O `--ssh-key` SUBSTITUI as chaves que a VM tinha; uma flag não dada mantém o valor. No Proxmox a config do nó é alterada, o drive de cloud-init regenerado, e a renderização do próprio nó relida. Os backends locais recusam: o seed deles é um ISO construído no create, e um convidado só volta a correr o cloud-init com um instance id novo. Uma imagem de appliance é recusada."
+
+msgid "New guest hostname (a DNS label)"
+msgstr "Novo hostname do convidado (uma etiqueta DNS)"
+
+msgid "Account the keys land on"
+msgstr "Conta onde as chaves ficam"
+
+msgid "Authorized public SSH key, `ssh-ed25519 AAAA...` or `@path` to read from a file. Repeatable; replaces the VM's keys"
+msgstr "Chave SSH pública autorizada, `ssh-ed25519 AAAA...` ou `@caminho` para ler de um ficheiro. Repetível; substitui as chaves da VM"
+
+msgid "give a stopped VM a new hostname and replace its SSH keys, for its next boot"
+msgstr "dar a uma VM parada um hostname novo e substituir as chaves SSH, para o próximo arranque"

@@ -2882,3 +2882,90 @@ fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
         "a destroy left disks on the storage: {left:?}"
     );
 }
+
+/// `vm cloud-init` on Proxmox (`vm.cloud-init`), asserted from the node's
+/// OWN rendering of the drive (`…/cloudinit/dump?type=user`), never from the
+/// call's answer:
+///
+/// - refused with the engine's DX-5506 while the node runs the VM, and the
+///   rendering keeps the key the VM was created with;
+/// - stopped, the change reaches the drive: the new hostname, the new user
+///   and the new key are in the user-data, the old key is not, and
+///   `…/cloudinit` has nothing pending.
+#[test]
+fn a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    // Real ed25519 public keys, generated for this test only (no private half
+    // is kept): the node validates the key format and refuses an invented one.
+    let old_key =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDoho0AhSdfKD3pWW/u4a2o3709J6q0Pl4kSE2rZ/B5Z dlx-old";
+    let new_key =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFjdrrc1qEToezK50JsCHNdww+KDK9e0S4YQon8PsUys dlx-new";
+    let name = format!("dlxci{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ssh_keys: vec![old_key.into()],
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let intent = delonix_vm::CloudInitIntent {
+        hostname: Some("dlx-renamed".into()),
+        ci_user: Some("ops".into()),
+        ssh_keys: vec![new_key.into()],
+    };
+
+    let err = b
+        .update_cloud_init(vmdir, &vm, &intent)
+        .expect_err("the node runs it: a cloud-init change must be refused");
+    assert_eq!(err.number(), 5506, "{err}");
+    let before = client.cloudinit_dump(vmid, "user").expect("dump user");
+    assert!(
+        before.contains(old_key),
+        "a refused change touched the drive: {before}"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.update_cloud_init(vmdir, &vm, &intent)
+        .expect("cloud-init change on a stopped VM");
+    let after = client.cloudinit_dump(vmid, "user").expect("dump user");
+    assert!(after.contains("hostname: dlx-renamed"), "{after}");
+    assert!(after.contains("user: ops"), "{after}");
+    assert!(after.contains(new_key), "{after}");
+    assert!(!after.contains(old_key), "the old key survived: {after}");
+    let pending = client.cloudinit_pending(vmid).expect("cloudinit pending");
+    assert!(
+        pending.iter().all(|k| !k.is_pending()),
+        "keys left pending after the change: {pending:?}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}

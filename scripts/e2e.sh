@@ -2762,6 +2762,9 @@ check "vm create --require: nenhum registo de VM ficou para trás" fail "$BIN" v
 # por isso estas classes medem-se sem hipervisor nenhum.
 check "vm resize sem --vcpus nem --memory recusa (1)" 1 "$BIN" vm resize "vm-$PFX-nada"
 check "vm resize de uma VM inexistente diz 4" 4 "$BIN" vm resize "vm-$PFX-nada" --vcpus 2
+check "vm cloud-init sem nada para mudar recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada"
+check "vm cloud-init com hostname inválido recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname=a.b
+check "vm cloud-init de uma VM inexistente diz 4" 4 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname web-1
 
 ########################################
 section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"

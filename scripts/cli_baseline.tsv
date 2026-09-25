@@ -216,6 +216,7 @@
 ~	vm apply
 →	vm bridge
 ~	vm build
+~	vm cloud-init
 =	vm console
 ~	vm convert
 ~	vm create
