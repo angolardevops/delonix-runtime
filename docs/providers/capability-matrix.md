@@ -6,9 +6,9 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 
 ## compute
 
-- **cloud-hypervisor**: 12 of 69 — 12 supported, 17 partial, 28 unsupported-by-provider, 2 requires-external-component, 10 not-implemented
-- **libvirt**: 15 of 69 — 15 supported, 24 partial, 17 unsupported-by-provider, 2 requires-external-component, 11 not-implemented
-- **proxmox**: 17 of 69 — 17 supported, 11 partial, 25 unsupported-by-provider, 4 requires-external-component, 12 not-implemented
+- **cloud-hypervisor**: 12 of 69 — 12 supported, 18 partial, 28 unsupported-by-provider, 2 requires-external-component, 9 not-implemented
+- **libvirt**: 16 of 69 — 16 supported, 24 partial, 17 unsupported-by-provider, 2 requires-external-component, 10 not-implemented
+- **proxmox**: 18 of 69 — 18 supported, 11 partial, 25 unsupported-by-provider, 4 requires-external-component, 11 not-implemented
 - **linux**: 11 of 69 — 11 supported, 9 partial, 46 unsupported-by-provider, 3 not-implemented
 
 | domain | capability | cloud-hypervisor | libvirt | proxmox | linux |
@@ -27,7 +27,7 @@ This is the DECLARED view — every host assumed complete. `delonix provider ls`
 |  | `vm.resume-same-identity` | supported — check:CH: vm start | supported — check:vm start depois do stop de uma VM pausada | supported — live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.clone` | not-implemented | not-implemented | supported — live:crates/providers/delonix-proxmox/tests/live.rs::a_template_clone_gets_the_disk_size_asked_for | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.template` | not-implemented | not-implemented | partial — `POST …/template` is a client call (`mark_template`) the live case uses to make its clone source; no engine verb turns a VM into a template | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
-|  | `vm.resize.cold` | not-implemented | not-implemented | not-implemented | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
+|  | `vm.resize.cold` | partial — `vm resize` rewrites vcpus/memory in the record and `vm start` rebuilds the vmm command line from it; no battery check yet | supported — check:o domínio arranca com 2 vCPU | supported — live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.hotplug` | not-implemented | not-implemented | not-implemented | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.disks.extra` | unsupported-by-provider — the CH command line carries one root disk and the seed; `extraDisks` are refused for this backend | partial — `extraDisks` reach the domain XML (unit-tested target letters); never booted in the battery | unsupported-by-provider — refused by name (`refuse_unsupported`); ADR-0049 slice 2 maps disks beyond `config` | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |
 |  | `vm.nics.extra` | unsupported-by-provider — one tap on the SDN; `extraNics` are refused for this backend | partial — `extraNics` (network/bridge/user) reach the domain XML; never booted in the battery | unsupported-by-provider — refused by name; one `net0` on the target's bridge/VLAN | unsupported-by-provider — a container provider; VMs are libvirt's, Cloud Hypervisor's or Proxmox's |

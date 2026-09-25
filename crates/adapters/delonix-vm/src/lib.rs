@@ -398,16 +398,13 @@ pub fn exists(base: &Path, name: &str) -> bool {
     store(base).map(|s| s.exists(name)).unwrap_or(false)
 }
 
-/// Converts memory (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) to MiB.
-/// `"2G"`/`"512M"`/`"2Gi"`/`"2048"` → MiB.
+/// The memory size `s` names, in MiB, or `None` when it does not parse.
 ///
-/// **Public because every backend has to read the SAME field the same way.**
-/// It was private, so `delonix-proxmox` grew its own copy — and the copy did
-/// not know the k8s `Gi`/`Mi` suffix this one tolerates, so `memory: 2Gi` meant
-/// 2 GiB on libvirt and Cloud Hypervisor and 1 GiB on Proxmox, silently. Same
-/// discipline as `fw_rule_tail` on the network side: one definition, shared by
-/// everyone who reads the format.
-pub fn mem_mib(s: &str) -> u64 {
+/// The one parser of the memory syntax (`512M`, `4G`, the k8s-style `4Gi`, a
+/// bare number of MiB). [`mem_mib`] builds its lenient fallback on top of it;
+/// a verb that must not act on a misread value (`vm resize`) calls this
+/// directly and refuses on `None`. Zero is `None` too: no guest boots in it.
+pub fn parse_mem_mib(s: &str) -> Option<u64> {
     let t = s.trim();
     // Tolerates the k8s-style `i` suffix (Gi/Mi): "2Gi" == "2G", "512Mi" == "512M".
     let t = t.strip_suffix(['i', 'I']).unwrap_or(t);
@@ -418,11 +415,28 @@ pub fn mem_mib(s: &str) -> u64 {
     } else {
         (t, 1)
     };
-    match num.trim().parse::<u64>() {
-        Ok(v) => v * mult,
+    num.trim()
+        .parse::<u64>()
+        .ok()
+        .and_then(|v| v.checked_mul(mult))
+        .filter(|v| *v > 0)
+}
+
+/// Converts memory (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) to MiB.
+/// `"2G"`/`"512M"`/`"2Gi"`/`"2048"` → MiB.
+///
+/// **Public because every backend has to read the SAME field the same way.**
+/// It was private, so `delonix-proxmox` grew its own copy — and the copy did
+/// not know the k8s `Gi`/`Mi` suffix this one tolerates, so `memory: 2Gi` meant
+/// 2 GiB on libvirt and Cloud Hypervisor and 1 GiB on Proxmox, silently. Same
+/// discipline as `fw_rule_tail` on the network side: one definition, shared by
+/// everyone who reads the format.
+pub fn mem_mib(s: &str) -> u64 {
+    match parse_mem_mib(s) {
+        Some(v) => v,
         // Do not degrade silently: a mistyped value ("2GB", "2 Gi") would give
         // roughly half of the requested RAM without warning. Warn and use a safe default.
-        Err(_) => {
+        None => {
             tracing::warn!(value = ?s, "invalid memory value; defaulting to 1024 MiB");
             1024
         }
@@ -918,6 +932,25 @@ pub trait VmBackend {
     /// Resumes a VM suspended with [`VmBackend::pause`]. Default: unsupported.
     fn unpause(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
         Err(unsupported_pause(self.id(), "unpause"))
+    }
+
+    /// `vm resize`: gives a STOPPED VM `vcpus` and `memory_mib` for its next
+    /// boot (`vm.resize.cold`). Called only after the engine has confirmed the
+    /// record says the VM is not running and validated both numbers; the
+    /// engine rewrites the record once this returns `Ok`.
+    ///
+    /// Default: unsupported (fail closed). A backend whose definition is
+    /// rebuilt from the record at every boot overrides it with nothing to do,
+    /// and says so; one that keeps its own definition elsewhere (a remote
+    /// node) changes it there and reads it back.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Err(unsupported_pause(self.id(), "resize"))
     }
 
     /// Checked once, right after [`VmBackend::stop`] has already confirmed the
@@ -1716,6 +1749,20 @@ impl VmBackend for CloudHypervisorBackend {
     /// anyone waiting on a boot needs to be told.
     fn ip_is_predicted(&self) -> bool {
         true
+    }
+
+    /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
+    /// This backend keeps no definition of its own between boots — `vm start`
+    /// rebuilds the vmm's command line from the record (`start` → `create(config_from(..))`),
+    /// so the engine rewriting `vcpus`/`memory` there is the whole resize.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Ok(())
     }
 
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
@@ -3768,6 +3815,20 @@ impl VmBackend for LibvirtBackend {
         }
     }
 
+    /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
+    /// This backend keeps no definition of its own between boots — `vm start`
+    /// rebuilds the domain XML from the record (`start` → `create(config_from(..))`),
+    /// so the engine rewriting `vcpus`/`memory` there is the whole resize.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Ok(())
+    }
+
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         libvirt_cleanup(&vm.name)?;
         // The domain XML that `boot` wrote STAYS. It used to be deleted here,
@@ -4913,6 +4974,57 @@ pub fn unpause(base: &Path, name: &str) -> Result<()> {
     backend_for(&vm)?.unpause(&vmdir, &vm)?;
     vm.status = Status::Running;
     Ok(st.save(name, &vm)?)
+}
+
+/// Changes a STOPPED VM's vCPUs and/or memory for its next boot — the cold
+/// resize (`vm.resize.cold`, see [`VmBackend::resize_cold`]).
+///
+/// Everything that can be refused is refused before the backend is asked:
+/// nothing to change, zero vCPUs, a memory value that does not parse (the
+/// lenient [`mem_mib`] would read `2GB` as 1 GiB and this would report it
+/// done), and a VM that is running or paused — a guest that only sees the
+/// change after its next reboot has not been resized yet. The record is
+/// rewritten only after the backend returns `Ok`, so a refused or failed
+/// resize leaves it saying what the VM actually has.
+///
+/// Returns the updated record.
+pub fn resize(base: &Path, name: &str, vcpus: Option<u32>, memory: Option<&str>) -> Result<Vm> {
+    if vcpus.is_none() && memory.is_none() {
+        return Err(Error::InvalidResize(format!(
+            "nothing to resize on VM '{name}': give --vcpus and/or --memory"
+        )));
+    }
+    if vcpus == Some(0) {
+        return Err(Error::InvalidResize(format!(
+            "VM '{name}' cannot have 0 vCPUs"
+        )));
+    }
+    let new_mib = match memory {
+        Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
+            Error::InvalidResize(format!(
+                "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
+            ))
+        })?),
+        None => None,
+    };
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if matches!(vm.status, Status::Running | Status::Paused) {
+        return Err(Error::ResizeNeedsStopped(format!(
+            "VM '{name}' is {:?}: `vm resize` is a cold resize — stop it first (`delonix vm stop {name}`)",
+            vm.status
+        )));
+    }
+    let target_vcpus = vcpus.unwrap_or(vm.vcpus.max(1));
+    let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+    backend_for(&vm)?.resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
+    vm.vcpus = target_vcpus;
+    if let Some(m) = memory {
+        vm.memory = m.trim().to_string();
+    }
+    st.save(name, &vm)?;
+    Ok(vm)
 }
 
 /// Takes a named snapshot of VM `name` (see [`VmBackend::snapshot`]). On libvirt a
@@ -8160,6 +8272,230 @@ Format specific information:
             ..base
         };
         assert!(libvirt_domain_xml(&qxl, "/tmp/x.qcow2", "").contains("type='qxl'"));
+    }
+
+    /// `vm resize`: every refusal happens before the backend is asked and
+    /// leaves the record untouched; a backend failure leaves it untouched too;
+    /// only an `Ok` from the backend rewrites `vcpus`/`memory`. A backend with
+    /// no override refuses by name instead of doing nothing.
+    #[test]
+    fn resize_refuses_before_the_backend_and_writes_the_record_only_on_success() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex;
+        static CALLS: Mutex<Vec<(u32, u64)>> = Mutex::new(Vec::new());
+        static FAIL: AtomicBool = AtomicBool::new(false);
+
+        struct Resizable;
+        impl VmBackend for Resizable {
+            fn id(&self) -> &'static str {
+                "redimensionavel"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn resize_cold(
+                &self,
+                _: &Path,
+                _: &Vm,
+                vcpus: u32,
+                memory_mib: u64,
+            ) -> delonix_model::Result<()> {
+                CALLS.lock().unwrap().push((vcpus, memory_mib));
+                if FAIL.load(Ordering::SeqCst) {
+                    return Err(delonix_model::Error::Invalid("node said no".into()));
+                }
+                Ok(())
+            }
+        }
+        struct NoOverride;
+        impl VmBackend for NoOverride {
+            fn id(&self) -> &'static str {
+                "sem-resize"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "redimensionavel",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Resizable))),
+        })
+        .expect("registar");
+        register_backend(BackendRegistration {
+            id: "sem-resize",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(NoOverride))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-resize-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let save = |name: &str, backend: &str, status: Status| {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+            vm.backend = backend.into();
+            vm.status = status;
+            st.save(name, &vm).unwrap();
+        };
+        save("r", "redimensionavel", Status::Stopped);
+        save("a-correr", "redimensionavel", Status::Running);
+        save("pausada", "redimensionavel", Status::Paused);
+        save("n", "sem-resize", Status::Stopped);
+        let unchanged = |name: &str| {
+            let vm = st.load(name).unwrap();
+            assert_eq!(
+                (vm.vcpus, vm.memory.as_str()),
+                (1, "1G"),
+                "{name}: record changed"
+            );
+        };
+
+        let code_of = |e: Error| e.number();
+        assert_eq!(code_of(resize(&base, "r", None, None).unwrap_err()), 1536);
+        assert_eq!(
+            code_of(resize(&base, "r", Some(0), None).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "r", None, Some("2GB")).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "r", None, Some("0")).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "a-correr", Some(2), None).unwrap_err()),
+            5505
+        );
+        assert_eq!(
+            code_of(resize(&base, "pausada", Some(2), None).unwrap_err()),
+            5505
+        );
+        assert!(resize(&base, "nao-existe", Some(2), None)
+            .unwrap_err()
+            .is_not_found());
+        assert!(
+            CALLS.lock().unwrap().is_empty(),
+            "a refusal reached the backend"
+        );
+        unchanged("r");
+        unchanged("a-correr");
+
+        FAIL.store(true, Ordering::SeqCst);
+        assert!(resize(&base, "r", Some(4), None).is_err());
+        unchanged("r");
+        FAIL.store(false, Ordering::SeqCst);
+
+        // Only memory: vCPUs keep the record's value, and the backend is told both.
+        let vm = resize(&base, "r", None, Some("4Gi")).unwrap();
+        assert_eq!((vm.vcpus, vm.memory.as_str()), (1, "4Gi"));
+        let vm = resize(&base, "r", Some(3), None).unwrap();
+        assert_eq!((vm.vcpus, vm.memory.as_str()), (3, "4Gi"));
+        assert_eq!(st.load("r").unwrap().vcpus, 3);
+        assert_eq!(
+            *CALLS.lock().unwrap(),
+            vec![(4, 1024), (1, 4096), (3, 4096)]
+        );
+
+        let e = resize(&base, "n", Some(2), None).unwrap_err().to_string();
+        assert!(e.contains("resize") && e.contains("sem-resize"), "{e}");
+        unchanged("n");
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends()
+            .write()
+            .unwrap()
+            .retain(|b| b.id != "redimensionavel" && b.id != "sem-resize");
+    }
+
+    #[test]
+    fn parse_mem_mib_refuses_what_mem_mib_would_have_guessed() {
+        assert_eq!(parse_mem_mib("512M"), Some(512));
+        assert_eq!(parse_mem_mib("4G"), Some(4096));
+        assert_eq!(parse_mem_mib("4Gi"), Some(4096));
+        assert_eq!(parse_mem_mib(" 2048 "), Some(2048));
+        for bad in [
+            "2GB",
+            "2 Gi x",
+            "",
+            "G",
+            "0",
+            "0G",
+            "-1G",
+            "99999999999999999999G",
+        ] {
+            assert_eq!(parse_mem_mib(bad), None, "{bad:?}");
+        }
+        assert_eq!(
+            mem_mib("2GB"),
+            1024,
+            "the lenient reader keeps its fallback"
+        );
     }
 }
 

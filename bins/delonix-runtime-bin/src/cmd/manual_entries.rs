@@ -2414,6 +2414,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["vm pause", "describe"],
     },
     Entry {
+        path: "vm resize",
+        group: "Lifecycle",
+        examples: &[
+            ("give a stopped VM 4 vCPUs and 8 GiB for its next boot", "delonix vm resize dev --vcpus 4 --memory 8G"),
+            ("stop, resize the memory only, start again with it", "delonix vm stop dev && delonix vm resize dev --memory 4G && delonix vm start dev"),
+        ],
+        see_also: &["vm stop", "vm start", "provider ls"],
+    },
+    Entry {
         path: "vm prune",
         group: "Maintenance",
         examples: &[

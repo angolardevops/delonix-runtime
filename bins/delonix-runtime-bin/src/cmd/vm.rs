@@ -902,6 +902,25 @@ pub enum VmCmd {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
     },
+    /// Change a STOPPED VM's vCPUs and/or memory for its next boot.
+    ///
+    /// A cold resize: refused while the VM is running or paused, because a
+    /// guest that only sees the change after its next reboot has not been
+    /// resized yet. On libvirt and Cloud Hypervisor the record is the whole
+    /// definition and `vm start` rebuilds the VM from it; on Proxmox the node's
+    /// config is changed and read back, and the node is asked too — a VM
+    /// started from its own UI is refused even if the record says stopped.
+    /// A value that does not parse (`2GB`) is refused, never read as a default.
+    Resize {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// New number of vCPUs (at least 1).
+        #[arg(long)]
+        vcpus: Option<u32>,
+        /// New memory: a number with an optional M/G suffix (`768M`, `4G`, `4Gi`).
+        #[arg(long)]
+        memory: Option<String>,
+    },
     /// Reclaim the VM state directory: everything in it no VM record accounts for.
     ///
     /// Stale create locks, sockets, pidfiles and console logs of VMs that are
@@ -2636,6 +2655,15 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Unpause { name } => {
             delonix_vm::unpause(&base, &name)?;
             println!("{name}");
+            Ok(())
+        }
+        VmCmd::Resize {
+            name,
+            vcpus,
+            memory,
+        } => {
+            let vm = delonix_vm::resize(&base, &name, vcpus, memory.as_deref())?;
+            println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
             Ok(())
         }
         VmCmd::Snapshot { action } => match action {

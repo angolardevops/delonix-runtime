@@ -106,6 +106,11 @@ pub enum Error {
     /// as "unsupported" it would send the caller shopping for a provider.
     #[error("{0}")]
     UnknownCapability(String),
+    /// `vm resize` asked for nothing, for zero vCPUs, or for a memory value that
+    /// does not parse. Refused before the backend is asked: the lenient
+    /// `mem_mib` would read "2GB" as its 1 GiB fallback and report success.
+    #[error("{0}")]
+    InvalidResize(String),
 
     // ---- not found ----------------------------------------------------
     /// There is no VM with the given name. Converts directly into the shared
@@ -126,6 +131,11 @@ pub enum Error {
     /// A snapshot name this VM already has.
     #[error("{0}")]
     SnapshotTaken(String),
+    /// `vm resize` on a VM that is running or paused: this verb is the COLD
+    /// resize (`vm.resize.cold`), and a change a running guest does not see
+    /// until its next reboot would be reported as done when it is not.
+    #[error("{0}")]
+    ResizeNeedsStopped(String),
 
     // ---- unavailable ------------------------------------------------------
     /// A named backend this build knows about but has not configured (e.g.
@@ -241,10 +251,12 @@ impl Error {
             Error::LiveBackupNeedsLibvirt(_) => 1514,
             Error::NotRunningForOp(_) => 1515,
             Error::UnknownCapability(_) => 1527,
+            Error::InvalidResize(_) => 1536,
             Error::VmNotFound(_) => 4501,
             Error::SnapshotNotFound(_) => 4502,
             Error::RecordConflict(_) => 5501,
             Error::SnapshotTaken(_) => 5502,
+            Error::ResizeNeedsStopped(_) => 5505,
             Error::BackendNotConfigured(_) => 6501,
             Error::NoBackendAvailable(_) => 6502,
             Error::NoFirmware(_) => 6503,
@@ -288,7 +300,9 @@ impl From<Error> for Dx {
         let number = e.number();
         let class = match e {
             Error::SnapshotNotFound(text) => Dx::NotFound(text),
-            Error::RecordConflict(text) | Error::SnapshotTaken(text) => Dx::Conflict(text),
+            Error::RecordConflict(text)
+            | Error::SnapshotTaken(text)
+            | Error::ResizeNeedsStopped(text) => Dx::Conflict(text),
             Error::BackendNotConfigured(text)
             | Error::NoBackendAvailable(text)
             | Error::NoFirmware(text)

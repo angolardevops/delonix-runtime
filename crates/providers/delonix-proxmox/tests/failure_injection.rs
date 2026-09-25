@@ -1257,3 +1257,85 @@ fn slow_task() -> ClientOptions {
         ..fast()
     }
 }
+
+// ===========================================================================
+// Cold resize: POST …/config, then read back config and pending
+// ===========================================================================
+
+const RCONFIG: &str = "/nodes/pve/qemu/100/config";
+const RPENDING: &str = "/nodes/pve/qemu/100/pending";
+
+/// Applied inline (`null`), config carries the numbers sent (memory as the
+/// string PVE 8+ uses), nothing pending: done — and the form says
+/// `sockets=1`, so a two-socket template clone does not get twice the vCPUs.
+#[test]
+fn a_resize_is_done_only_when_config_and_pending_agree() {
+    let node = MockNode::start(script(&[
+        ("POST", RCONFIG, ok_data("null")),
+        (
+            "GET",
+            RCONFIG,
+            ok_data(r#"{"cores":2,"sockets":1,"memory":"768"}"#),
+        ),
+        ("GET", RPENDING, ok_data(r#"[{"key":"cores","value":2}]"#)),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .expect("config and pending agree");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == RCONFIG)
+        .unwrap();
+    assert_eq!(sent.body, "cores=2&sockets=1&memory=768");
+}
+
+/// A config that does not carry what was sent is an unexpected answer, not
+/// a resize — whatever the POST said.
+#[test]
+fn a_resize_whose_config_does_not_read_back_is_an_error() {
+    let node = MockNode::start(script(&[
+        ("POST", RCONFIG, ok_data("null")),
+        (
+            "GET",
+            RCONFIG,
+            ok_data(r#"{"cores":1,"sockets":2,"memory":"512"}"#),
+        ),
+        ("GET", RPENDING, ok_data("[]")),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .expect_err("the node did not record the new size");
+    assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
+}
+
+/// A VM the node still runs holds the change as PENDING until its next
+/// boot. That is not a resize, and it is said as one: the key is named.
+#[test]
+fn a_resize_left_pending_is_an_error_that_names_the_key() {
+    let node = MockNode::start(script(&[
+        ("POST", RCONFIG, ok_data("null")),
+        (
+            "GET",
+            RCONFIG,
+            ok_data(r#"{"cores":2,"sockets":1,"memory":"768"}"#),
+        ),
+        (
+            "GET",
+            RPENDING,
+            ok_data(r#"[{"key":"memory","value":"512","pending":"768"}]"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .expect_err("a pending change is not applied");
+    assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
+    assert!(err.to_string().contains("memory"), "{err}");
+    assert!(err.to_string().contains("PENDING"), "{err}");
+}

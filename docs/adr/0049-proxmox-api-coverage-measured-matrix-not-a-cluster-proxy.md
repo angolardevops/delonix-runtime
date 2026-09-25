@@ -401,3 +401,39 @@ Kind (unlike D5 slice 2's `tests/live.rs` cases for VM operations) — `sdn.rs`'
 functions ARE live-tested (D5 slice 2, above); what is new and unproven against a real node is
 only the thin adapter (`ensure_zone`/`ensure_vnet`'s presence-check-before-create) and the
 `apply()`/teardown ordering this Kind adds on top.
+
+**Added 2026-09-25 (slice 2, `vm.resize.cold`, live):** the engine had no way to change an
+existing VM — every `VirtualMachine` field was cold, and the catalogue declared `vm.resize.cold`
+`not-implemented` on all three providers. `delonix vm resize <name> [--vcpus N] [--memory M]`
+now changes a STOPPED VM for its next boot, behind a new `VmBackend::resize_cold` whose default
+REFUSES by name (ADR-0044 D3, no quiet no-op). Everything refusable is refused before a backend
+is asked and leaves the record untouched: nothing to change, zero vCPUs, a memory value that does
+not parse (new strict `parse_mem_mib`; the lenient `mem_mib` would read `2GB` as its 1 GiB
+fallback and the verb would report it done) — DX-1536 `vm.invalid_resize` — and a VM that is
+running or paused, DX-5505 `vm.resize_needs_stopped` (conflict): a change a guest only sees at
+its next reboot is not a resize yet. The record is rewritten only after the backend returns `Ok`.
+
+- **libvirt / Cloud Hypervisor**: the record IS the definition (`vm start` →
+  `create(config_from(..))` rebuilds the domain XML / vmm command line), so the override has
+  nothing to do outside the record and says so. libvirt is `supported` on a battery check that
+  reads the domain the next `vm start` defines (`<vcpu>2</vcpu>`, 393216 KiB) — the rc of the
+  resize proves nothing. Cloud Hypervisor stays `partial`: no battery check names it yet.
+- **Proxmox**: the NODE is asked too (`status/current`), because a record can say `Stopped`
+  about a VM somebody started from the node's UI, and a config change on a running VM lands in
+  `…/pending`, not in the guest. Then `POST …/config` (the asynchronous config API, on the task
+  path — measured: it forked a `qmconfig` worker that was waited on) with `sockets=1` next to
+  `cores` (the node counts vCPUs as sockets × cores, so a two-socket template clone would get
+  twice what was asked), read back from `…/config` (memory is a string property on PVE 8+), and
+  `GET …/pending` (the 108th route) must be empty. The live case
+  (`a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size`, 39 s) asserts the refusal while
+  the node runs the VM with the config unchanged, then after stop the new config, an empty
+  pending list, and after start `status/current` reporting `cpus=2` and `maxmem=768 MiB`.
+  Failure injection covers the three outcomes (agree → done; config not read back → unexpected
+  answer; left pending → unexpected answer naming the key). Matrix: 108/675 called (16.0 %), 105
+  in a live trace.
+
+**Not done here**: a hot resize (`vm.hotplug`, running VM) and the reconciler — `VirtualMachine`
+`vcpus`/`memory` stay cold in `stack plan` (a `Replace`); making them hot needs the plan to know
+the VM is stopped, which is its own decision. The rest of cloud-init (`GET/PUT …/cloudinit`,
+regenerating the drive after a key change) needs an engine verb that changes cloud-init on an
+existing VM, which does not exist.
