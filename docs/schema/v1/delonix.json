@@ -800,14 +800,14 @@
         },
         "scope": {
           "default": null,
-          "description": "`container` (default) or `network`. In `network` (only `Egress`), the `target`\nis a NETWORK NAME and the per-network egress policy + CIDR/FQDN allowlist +\nL4 rate-limit apply — not per-container L4 rules.",
+          "description": "`container` (default), `network` or `vm`. In `network` (only `Egress`), the\n`target` is a NETWORK NAME and the per-network egress policy + CIDR/FQDN\nallowlist + L4 rate-limit apply — not per-container L4 rules. In `vm`, the\n`target` is a VM NAME and the rules land on the firewall of the node the\nVM runs on — today a Proxmox node; any other backend refuses (ADR-0052).",
           "type": [
             "string",
             "null"
           ]
         },
         "target": {
-          "description": "`container` (default): container name. `network`: network name.",
+          "description": "`container` (default): container name. `network`: network name. `vm`: VM name.",
           "type": "string"
         }
       },
