@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 22 crates.
+[README.md](README.md) para a arquitectura dos 23 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -239,7 +239,7 @@ temporária deixa de ser permanente. Hoje são dez, e cada uma diz a sua fase (o
 crates/foundation/   delonix-model, delonix-net-rules
 crates/contexts/     delonix-stack, delonix-compute, delonix-node, delonix-security-runtime
 crates/adapters/     delonix-linux, delonix-sdn, delonix-oci, delonix-scanner, delonix-state, delonix-volume, delonix-vm, delonix-telemetry
-crates/providers/    delonix-proxmox, delonix-truenas
+crates/providers/    delonix-proxmox, delonix-truenas, delonix-opnsense
 crates/interfaces/   delonix-cri, delonix-mgmt, delonix-mcp
 bins/                delonix-runtime-bin, delonix-mcp-bin, delonix-mgmt-bin
 ```
@@ -6308,8 +6308,43 @@ segredo do token em qualquer `{:?}`.
   `<vmdir>/proxmox-tasks.json`, e com `/tmp` uma corrida herdava o livro da anterior. Os
   workers `qmsnapshot`/`qmrollback` foram vistos no nó real, não só no mock.
 
+- **A camada acima das zonas/vnets/subnets do SDN nativo (2026-09-25)**: controladores de IPAM
+  (`/cluster/sdn/ipams`, 6 rotas) e de DNS (`/cluster/sdn/dns`, 5), fabrics e os seus nós
+  (`/cluster/sdn/fabrics/*`, 13, mais as 4 leituras do lado do nó), o `content` de uma zona no
+  nó, os campos `dhcp`/`ipam`/`dns` de uma zona (`ZoneOptions`), o `dhcp-range`/
+  `dhcp-dns-server`/`snat` de uma subnet (`SubnetOptions`) e as reservas de IP
+  (`…/vnets/{vnet}/ips`, 3) — 30 rotas, todas vistas ao vivo num só caso; matriz em **102/675
+  (15,1 %), 99 ao vivo**. Três factos medidos que o schema não diz: (1) **o nó VERIFICA um
+  controlador de IPAM/DNS chamando o URL dele** antes de o guardar (`GET <url>/ipam/aggregates/`
+  com `Authorization: token …` para o NetBox, `GET <url>` com `X-API-Key` para o PowerDNS) — um
+  URL inalcançável é um pedido pendurado, não uma entrada, e por isso o `live.rs` levanta um
+  stub HTTP e dá ao nó `DELONIX_PROXMOX_TEST_CALLBACK_ADDR` para lá chegar; (2) **a API de
+  fabrics (Rust, PVE 9) responde às escritas com `""`**, não `null` — o `upid_or_done` passou a
+  ler as duas como «feito em linha»; (3) **`PUT …/ips` move um MAC para um IP novo**, nunca um
+  IP para um MAC novo — o handler (`Ips.pm`, lido no próprio nó) procura o IP antigo pelo MAC,
+  e chamá-lo ao contrário dá «can't find any subnet for ip » com o IP VAZIO; a primeira versão
+  do teste fez exactamente isso. E o `DELETE …/ips` leva os parâmetros na query string: com
+  corpo o proxy responde 501 antes do handler. O `dhcp-range` vai como
+  `start-address=…,end-address=…` num campo por intervalo (a forma nua é recusada).
+- **Um apply «TASK OK» não é uma rede realizada — e o defeito era nosso.** O `content` da zona
+  respondia `status: error, vnet is not generated` depois de um apply OK: o
+  `proxmox_postinstall.py` do appliance reescrevia o `/etc/network/interfaces` **sem**
+  `source /etc/network/interfaces.d/*`, e o reload do PVE avisava («missing 'source
+  /etc/network/interfaces.d/sdn' directive for SDN support!») e terminava OK sem criar bridge
+  nenhuma. Ou seja, **todos os applies das corridas anteriores (#493, #497) foram aceites e
+  nunca realizados no nó** — os testes só asseguravam o estado pendente e o veredicto da tarefa.
+  Corrigido no script; o nó de laboratório levou a linha à mão, mais `dnsmasq` (necessário ao
+  `dhcp=dnsmasq`; o `frr` já lá estava). O caso novo assere `available` no `content` e a
+  interface `dummy_<fabric>` de pé nas `interfaces` do fabric — é o gate que faltava.
+- **Placeholders com o nome do schema, ou o inventário não conta.** `{fabric_id}`/`{node_id}`
+  (não `{fabric}`/`{node}`) e um `let path = format!(…)` imediatamente antes do envio — o
+  scanner lê o verbo do statement seguinte ao literal, e um `push_str` pelo meio torna a rota
+  «não classificada» e contada como não chamada. O #497 já tinha pago o mesmo com `{id}`.
+
 **Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
-— a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; o
+— a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; um fabric
+com mais de um nó, OSPF, um NetBox/PowerDNS a sério atrás dos controladores e um lease DHCP entregue
+a um convidado ficam por medir; o
 `ip()` pelo agente continua a precisar de um convidado preparado
 (`DELONIX_PROXMOX_TEST_AGENT_VMID`); e o porquê de o lock ficar preso ~25 s depois de um
 `qmstart` num convidado sem SO não foi isolado — só medido.
@@ -6528,6 +6563,53 @@ falhado colado a seguir ao texto (2 KB de `thread … panicked`), pré-existente
 `main`. Removida nesta passagem; um `msgid` que ninguém procura não faz mal, mas é
 lixo no catálogo.
 
+### As linhas `partial` do libvirt e do CH passaram a `supported` com checks reais (2026-09-24)
+
+O ADR-0050 dizia que a matriz de VM tinha mais `partial` do que `supported`
+porque a bateria só exercitava snapshots, pause e stop/start. Esta passagem
+escreveu os checks que faltavam — libvirt passa de 15 para **25** `supported`
+(14 `partial`), o Cloud Hypervisor de 12 para **19** (10 `partial`) — e cada
+linha promovida cita pelo TÍTULO um check de `scripts/e2e.sh` que o gate de
+evidência confirma existir. Duas secções: «vm: o que o relatório libvirt declara
+supported, medido (ADR-0050)» arranca uma VM por manifesto (`kind:
+VirtualMachine` com `extraDisks`/`extraNics`/`cpuModel`/`cpuTopology`/
+`cpuAffinity`/`vnc`/`ip`) e lê o domínio VIVO — `domblklist`, `domiflist`,
+`dumpxml`, `net-dumpxml` — nunca o XML que o motor escreveu; a secção CH ganhou
+pause/resume lidos ao api-socket do VMM, restart pelo PID, backup/restore com a
+VM parada, `vm rm`, e o anti-spoof lido no ruleset DENTRO do holder. O convidado
+é um qcow2 vazio de propósito: o que precisa de um SO dentro (cloud-init, IP
+observado, agente) continua `partial` com a razão escrita. 78/78 ao vivo com
+root isolado (`OUT=/tmp/dlxpe`, curto — o root da scratchpad tinha 145 bytes e
+o CH recusa um socket UNIX acima de 107).
+
+**Três defeitos reais, e nenhum era visível a ler o código — os três só a
+bateria os mostrou, na primeira corrida:**
+
+1. **Uma VM CH na namespace `default` não tinha anti-spoof nem estava em
+   `@dlxall`.** A linha `vmtap` ia na forma curta (sem IP) para `default`, «para
+   um holder antigo continuar a servi-la», e a auditoria #3 — que fechou o
+   anti-spoof «do tap» — só cobria as VMs COM namespace. Medido no holder:
+   zero regras `saddr !=` para o tap, e o IP fora do set que toda a regra de
+   corte cross-namespace consulta; um container `default` recebe as duas coisas
+   do `do_attach`. Corrigido em `vmtap_line`: a forma longa vai sempre que há
+   lease, `default` incluído (o holder aceita seis tokens desde a v0.40.0). **O
+   teste `vmtap_line_mantem_a_forma_curta_sem_namespace` codificava o bug** —
+   afirmava a forma curta para `default` com lease — e foi reescrito.
+2. **`backup create vm` de uma VM libvirt a correr falhava com um segundo
+   disco**: `--disk-only` faz snapshot de TODOS os discos a não ser que cada um
+   seja nomeado, por isso o libvirt pedia um overlay pré-criado para o `vdb`
+   («missing existing file for disk vdb») — e deixava o overlay do `vda` que
+   nós pré-criámos para trás. `backup_disk_live` passa a mandar `snapshot=no`
+   por cada outro disco e apaga o ficheiro encenado se o snapshot falhar.
+3. **`vm vnc` imprimia `127.0.0.1:0`** quando o `virsh vncdisplay` respondia na
+   forma `host:N` — só a forma `:N` era normalizada para `5900+N`. Duas grafias
+   do mesmo facto davam dois endereços; `vnc_addr` (pura, testada) lê as duas.
+
+**Um `partial` que ficou por razão medida**: `vm.tpm` no libvirt — neste host
+(Ubuntu 24.04, libvirt 10.0) o QEMU morre em `swtpm.sock: Permission denied`.
+É a posse do socket do swtpm no HOST, não o motor; a linha di-lo em vez de
+fingir uma sonda.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
@@ -6545,7 +6627,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (22 crates)
+## Arquitetura (23 crates)
 
 | Crate | Responsabilidade |
 |---|---|
@@ -6562,6 +6644,7 @@ antes de qualquer commit:
 | `delonix-vm` | microVMs declarativas — trait `VmBackend` + o **registo** de backends (Cloud Hypervisor e libvirt vêm semeados; um terceiro entra por `register_backend`) |
 | `delonix-proxmox` | backend `VmBackend` remoto contra a API de UM nó Proxmox VE (ADR-0008). Fora do `delonix-vm` porque um cliente HTTP não entra num crate de motor; registado pelo `-bin`, que é quem conhece o alvo |
 | `delonix-truenas` | provisionar dataset/quota/partilha numa NAS pela API (ADR-0009) — mesma razão de crate à parte |
+| `delonix-opnsense` | `GatewayProvider` remoto contra a API REST de UMA appliance OPNsense (ADR-0051). Fora do `delonix-sdn` pela mesma razão que o `delonix-proxmox` está fora do `delonix-vm` — um cliente HTTP não entra num crate de motor; registado pelo `-bin` (`cmd::gatewayproviders`), que é quem conhece o alvo |
 | `delonix-volume` | volumes nomeados e bind mounts |
 | `delonix-cri` | servidor CRI (`runtime.v1`) — permite ao Delonix servir de runtime a um `kubelet` |
 | `delonix-mgmt` | API de gestão LOCAL (HTTP+JSON num socket unix, só o próprio uid) para um control-plane externo, mais o registo Prometheus partilhado e os spans OpenTelemetry. Não é remota, e o `cli-stability.md` diz que não se deve construir automação sobre ela — ver ADR-0010 |

@@ -1960,3 +1960,561 @@ fn sdn_subnet_and_the_single_item_zone_vnet_routes_are_staged_applied_and_torn_d
         "the zone is still listed after delete+apply: {zones_after:?}"
     );
 }
+
+/// A stand-in for the external controller an IPAM or DNS entry names: the
+/// node VERIFIES both on create and on update by calling the URL, so a live
+/// case for those routes needs something at the other end that answers. This
+/// answers `200` with an empty JSON collection to anything and keeps the
+/// request lines and the two auth headers the node is known to send, which
+/// is what the test asserts on. Bound on every interface at an ephemeral
+/// port; the node reaches it at `DELONIX_PROXMOX_TEST_CALLBACK_ADDR`.
+struct ControllerStub {
+    port: u16,
+    seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl ControllerStub {
+    fn start() -> ControllerStub {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("0.0.0.0:0").expect("bind the stub");
+        let port = listener.local_addr().expect("stub addr").port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut buf = [0u8; 8192];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let mut line = head.lines().next().unwrap_or("").to_string();
+                for h in head.lines() {
+                    let lower = h.to_ascii_lowercase();
+                    if lower.starts_with("authorization:") || lower.starts_with("x-api-key:") {
+                        line.push_str(" | ");
+                        line.push_str(h.trim());
+                    }
+                }
+                log.lock().expect("stub log").push(line);
+                let body = br#"{"results":[],"count":0}"#;
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = s.write_all(body);
+            }
+        });
+        ControllerStub { port, seen }
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.seen.lock().expect("stub log").clone()
+    }
+}
+
+/// The layer above zones/vnets/subnets, against a real node: IPAM and DNS
+/// controllers (with a stub at the other end of their URL, because the node
+/// calls it), a fabric and its node member, a DHCP-serving zone with a
+/// DHCP range on its subnet, the apply that makes the zone and the fabric
+/// real, the node-side fabric reads that only answer once it is, and IP
+/// reservations in the `pve` IPAM — which act on the RUNNING subnet, so
+/// they come after the apply. Everything staged here is torn down and a
+/// second apply proves the node ends as it started.
+///
+/// The controller half needs `DELONIX_PROXMOX_TEST_CALLBACK_ADDR` (the
+/// address the NODE can reach this host at); without it that half is
+/// skipped and the rest still runs. No SKIP line: a print in a library
+/// crate's tests is counted debt.
+#[test]
+fn sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node() {
+    use delonix_proxmox::{DhcpRange, FabricProtocol, IpamKind, SubnetOptions, ZoneOptions};
+    let Some(t) = target() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    let node = t.node.clone();
+
+    let suffix = std::process::id() % 1_000_000;
+    let ipam = format!("i{suffix}");
+    let dns = format!("n{suffix}");
+    let fabric = format!("f{suffix}");
+    let zone = format!("d{suffix}");
+    let vnet = format!("e{suffix}");
+    let cidr = "10.88.0.0/24";
+
+    // --- IPAM and DNS controllers, verified by the node against the stub ---
+    if let Ok(callback) = std::env::var("DELONIX_PROXMOX_TEST_CALLBACK_ADDR") {
+        let stub = ControllerStub::start();
+        let base = format!("http://{callback}:{}", stub.port);
+
+        client
+            .create_sdn_ipam(
+                &ledger,
+                &ipam,
+                IpamKind::Netbox,
+                &format!("{base}/api"),
+                "tok-one",
+                None,
+            )
+            .expect("create the NetBox IPAM entry");
+        let obj = client.sdn_ipam(&ipam).expect("read the IPAM entry back");
+        assert_eq!(
+            obj.get("type").and_then(|v| v.as_str()),
+            Some("netbox"),
+            "{obj}"
+        );
+        assert_eq!(
+            obj.get("token").and_then(|v| v.as_str()),
+            Some("tok-one"),
+            "{obj}"
+        );
+        client
+            .update_sdn_ipam(&ledger, &ipam, None, Some("tok-two"), None)
+            .expect("update the IPAM token");
+        let obj = client
+            .sdn_ipam(&ipam)
+            .expect("read the IPAM entry after the update");
+        assert_eq!(
+            obj.get("token").and_then(|v| v.as_str()),
+            Some("tok-two"),
+            "{obj}"
+        );
+        assert!(
+            client
+                .sdn_ipams()
+                .expect("list IPAMs")
+                .iter()
+                .any(|i| { i.get("ipam").and_then(|v| v.as_str()) == Some("pve") }),
+            "the built-in pve IPAM is always listed"
+        );
+        client
+            .delete_sdn_ipam(&ledger, &ipam)
+            .expect("delete the IPAM entry");
+        assert!(
+            !client
+                .sdn_ipams()
+                .expect("list IPAMs after delete")
+                .iter()
+                .any(|i| { i.get("ipam").and_then(|v| v.as_str()) == Some(ipam.as_str()) }),
+            "the IPAM entry is still listed after its delete"
+        );
+
+        client
+            .create_sdn_dns(
+                &ledger,
+                &dns,
+                &format!("{base}/api/v1/servers/localhost"),
+                "key-one",
+                Some(300),
+            )
+            .expect("create the PowerDNS entry");
+        let obj = client.sdn_dns(&dns).expect("read the DNS entry back");
+        assert_eq!(
+            obj.get("ttl").and_then(serde_json::Value::as_u64),
+            Some(300),
+            "{obj}"
+        );
+        client
+            .update_sdn_dns(&ledger, &dns, None, None, Some(600))
+            .expect("update the DNS ttl");
+        let obj = client
+            .sdn_dns(&dns)
+            .expect("read the DNS entry after the update");
+        assert_eq!(
+            obj.get("ttl").and_then(serde_json::Value::as_u64),
+            Some(600),
+            "{obj}"
+        );
+        client
+            .delete_sdn_dns(&ledger, &dns)
+            .expect("delete the DNS entry");
+        assert!(
+            !client
+                .sdn_dns_controllers()
+                .expect("list DNS after delete")
+                .iter()
+                .any(|d| { d.get("dns").and_then(|v| v.as_str()) == Some(dns.as_str()) }),
+            "the DNS entry is still listed after its delete"
+        );
+
+        // The node did call the controllers: that is the fact this half exists
+        // to prove, and the one a caller has to know (an unreachable URL is a
+        // hung request, not a staged entry).
+        let seen = stub.requests();
+        assert!(
+            seen.iter()
+                .any(|l| l.contains("/api/ipam/aggregates/") && l.contains("token tok-one")),
+            "the node did not verify the NetBox entry on create: {seen:?}"
+        );
+        assert!(
+            seen.iter()
+                .any(|l| l.contains("/api/ipam/aggregates/") && l.contains("token tok-two")),
+            "the node did not verify the NetBox entry on update: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|l| l.contains("/api/v1/servers/localhost")
+                && l.to_ascii_lowercase().contains("x-api-key: key-one")),
+            "the node did not verify the PowerDNS entry: {seen:?}"
+        );
+    }
+
+    // --- a fabric and its node member, staged ---
+    client
+        .create_sdn_fabric(
+            &ledger,
+            &fabric,
+            FabricProtocol::OpenFabric,
+            Some("10.99.0.0/24"),
+            Some(3),
+            None,
+        )
+        .expect("create the fabric");
+    let f = client.sdn_fabric(&fabric).expect("read the fabric back");
+    assert_eq!(
+        f.get("protocol").and_then(|v| v.as_str()),
+        Some("openfabric"),
+        "{f}"
+    );
+    assert_eq!(
+        f.get("hello_interval").and_then(serde_json::Value::as_u64),
+        Some(3),
+        "{f}"
+    );
+    client
+        .update_sdn_fabric(&ledger, &fabric, FabricProtocol::OpenFabric, Some(5), None)
+        .expect("update the fabric's hello interval");
+    let f = client
+        .sdn_fabric(&fabric)
+        .expect("read the fabric after the update");
+    assert_eq!(
+        f.get("hello_interval").and_then(serde_json::Value::as_u64),
+        Some(5),
+        "{f}"
+    );
+    client
+        .create_sdn_fabric_node(
+            &ledger,
+            &fabric,
+            &node,
+            FabricProtocol::OpenFabric,
+            Some("10.99.0.1"),
+            &[],
+        )
+        .expect("add this node to the fabric");
+    let n = client
+        .sdn_fabric_node(&fabric, &node)
+        .expect("read the fabric node back");
+    assert_eq!(
+        n.get("ip").and_then(|v| v.as_str()),
+        Some("10.99.0.1"),
+        "{n}"
+    );
+    client
+        .update_sdn_fabric_node(
+            &ledger,
+            &fabric,
+            &node,
+            FabricProtocol::OpenFabric,
+            Some("10.99.0.2"),
+        )
+        .expect("update the fabric node's address");
+    let n = client
+        .sdn_fabric_node(&fabric, &node)
+        .expect("read the fabric node after the update");
+    assert_eq!(
+        n.get("ip").and_then(|v| v.as_str()),
+        Some("10.99.0.2"),
+        "{n}"
+    );
+    let nodes = client
+        .sdn_fabric_nodes(&fabric)
+        .expect("list the fabric's nodes");
+    assert!(
+        nodes
+            .iter()
+            .any(|x| x.get("node_id").and_then(|v| v.as_str()) == Some(node.as_str())),
+        "{nodes:?}"
+    );
+    let all = client.sdn_fabrics_all().expect("fabrics/all");
+    assert!(
+        all.get("fabrics")
+            .and_then(|v| v.as_array())
+            .is_some_and(|fs| {
+                fs.iter()
+                    .any(|x| x.get("id").and_then(|v| v.as_str()) == Some(fabric.as_str()))
+            }),
+        "fabrics/all does not list the fabric: {all}"
+    );
+    let index = client
+        .sdn_fabric_node_index(&fabric)
+        .expect("node-side fabric index");
+    assert!(
+        index
+            .iter()
+            .any(|e| e.get("subdir").and_then(|v| v.as_str()) == Some("routes")),
+        "{index:?}"
+    );
+
+    // --- a DHCP-serving zone with a ranged subnet, staged ---
+    client
+        .create_sdn_zone_with(
+            &ledger,
+            &zone,
+            &ZoneOptions {
+                dhcp_dnsmasq: true,
+                ipam: Some("pve"),
+                ..Default::default()
+            },
+        )
+        .expect("create the DHCP zone");
+    let z = client.sdn_zone(&zone).expect("read the zone back");
+    assert_eq!(
+        z.get("dhcp").and_then(|v| v.as_str()),
+        Some("dnsmasq"),
+        "{z}"
+    );
+    client
+        .create_sdn_vnet(&ledger, &vnet, &zone, None)
+        .expect("create the vnet");
+    let range1 = [DhcpRange {
+        start: "10.88.0.100".into(),
+        end: "10.88.0.150".into(),
+    }];
+    client
+        .create_sdn_subnet_with(
+            &ledger,
+            &vnet,
+            &zone,
+            cidr,
+            &SubnetOptions {
+                gateway: Some("10.88.0.1"),
+                dhcp_ranges: &range1,
+                dhcp_dns_server: Some("10.88.0.1"),
+                snat: None,
+            },
+        )
+        .expect("create the subnet with a DHCP range");
+    let sub = client
+        .sdn_vnet_subnet(&vnet, &zone, cidr)
+        .expect("read the subnet back");
+    assert_eq!(
+        sub.pointer("/dhcp-range/0/start-address")
+            .and_then(|v| v.as_str()),
+        Some("10.88.0.100"),
+        "the DHCP range did not reach the node: {sub}"
+    );
+    assert_eq!(
+        sub.get("dhcp-dns-server").and_then(|v| v.as_str()),
+        Some("10.88.0.1"),
+        "{sub}"
+    );
+    let range2 = [DhcpRange {
+        start: "10.88.0.110".into(),
+        end: "10.88.0.160".into(),
+    }];
+    client
+        .update_sdn_subnet_with(
+            &ledger,
+            &vnet,
+            &zone,
+            cidr,
+            &SubnetOptions {
+                dhcp_ranges: &range2,
+                ..Default::default()
+            },
+        )
+        .expect("change the DHCP range");
+    let sub = client
+        .sdn_vnet_subnet(&vnet, &zone, cidr)
+        .expect("read the subnet after the range update");
+    assert_eq!(
+        sub.pointer("/dhcp-range/0/end-address")
+            .and_then(|v| v.as_str()),
+        Some("10.88.0.160"),
+        "the changed DHCP range did not reach the node: {sub}"
+    );
+
+    // --- apply: the zone, the subnet's dnsmasq and the fabric's FRR become real ---
+    client.apply_sdn(&ledger).expect("apply the pending config");
+    let read_ledger = || -> Vec<serde_json::Value> {
+        serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(dir.path().join("proxmox-tasks.json"))
+                .expect("the ledger was written"),
+        )
+        .expect("the ledger is JSON")
+        .as_array()
+        .expect("the ledger is a list")
+        .clone()
+    };
+    let last_apply = |entries: &[serde_json::Value]| -> serde_json::Value {
+        entries
+            .iter()
+            .rev()
+            .find(|e| e.get("action").and_then(|a| a.as_str()) == Some("apply-sdn"))
+            .expect("an apply-sdn task in the ledger")
+            .clone()
+    };
+    let applied = last_apply(&read_ledger());
+    assert_eq!(
+        applied.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "{applied}"
+    );
+
+    // Node-side fabric reads answer only for a RUNNING fabric — this is that,
+    // and the interface list is the proof the fabric is real on this node
+    // (its dummy loopback), not just present in the running config.
+    let ifaces = client
+        .sdn_fabric_interfaces(&fabric)
+        .expect("fabric interfaces after apply");
+    let dummy = format!("dummy_{fabric}");
+    assert!(
+        ifaces
+            .iter()
+            .any(|i| i.get("name").and_then(|v| v.as_str()) == Some(dummy.as_str())),
+        "the fabric's own interface is not up on the node: {ifaces:?}"
+    );
+    let neigh = client
+        .sdn_fabric_neighbors(&fabric)
+        .expect("fabric neighbours after apply");
+    assert!(
+        neigh.is_empty(),
+        "a single node has no neighbour: {neigh:?}"
+    );
+    client
+        .sdn_fabric_routes(&fabric)
+        .expect("fabric routes after apply");
+    // `status: "available"` is the assertion that matters: an apply can end
+    // `TASK OK` and realize nothing (see the module doc comment of `sdn.rs`
+    // for the case this repository's own appliance image hit), and only this
+    // route says which of the two happened.
+    let content = client
+        .sdn_zone_content(&zone)
+        .expect("the zone's content on this node");
+    let entry = content
+        .iter()
+        .find(|c| c.get("vnet").and_then(|v| v.as_str()) == Some(vnet.as_str()))
+        .unwrap_or_else(|| {
+            panic!("the applied zone does not list its vnet on the node: {content:?}")
+        });
+    assert_eq!(
+        entry.get("status").and_then(|v| v.as_str()),
+        Some("available"),
+        "the vnet is in the zone but not realized on the node: {entry}"
+    );
+
+    // --- IP reservations, against the now-running subnet ---
+    client
+        .sdn_vnet_ip_add(
+            &ledger,
+            &vnet,
+            &zone,
+            "10.88.0.50",
+            Some("BC:24:11:00:00:01"),
+        )
+        .expect("reserve an address");
+    let held = client.sdn_ipam_status("pve").expect("pve IPAM status");
+    let entry = held
+        .iter()
+        .find(|e| e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.50"))
+        .unwrap_or_else(|| panic!("the reservation is not in the pve IPAM: {held:?}"));
+    assert!(
+        entry
+            .get("mac")
+            .and_then(|v| v.as_str())
+            .is_some_and(|m| m.eq_ignore_ascii_case("BC:24:11:00:00:01")),
+        "{entry}"
+    );
+    client
+        .sdn_vnet_ip_update(
+            &ledger,
+            &vnet,
+            &zone,
+            "BC:24:11:00:00:01",
+            "10.88.0.51",
+            None,
+        )
+        .expect("move the MAC's reservation to another address");
+    let held = client
+        .sdn_ipam_status("pve")
+        .expect("pve IPAM status after the update");
+    assert!(
+        held.iter().any(|e| {
+            e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.51")
+                && e.get("mac")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|m| m.eq_ignore_ascii_case("BC:24:11:00:00:01"))
+        }),
+        "the new address did not reach the IPAM: {held:?}"
+    );
+    assert!(
+        !held
+            .iter()
+            .any(|e| e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.50")),
+        "the old address survived the move: {held:?}"
+    );
+    client
+        .sdn_vnet_ip_delete(
+            &ledger,
+            &vnet,
+            &zone,
+            "10.88.0.51",
+            Some("BC:24:11:00:00:01"),
+        )
+        .expect("release the address");
+    let held = client
+        .sdn_ipam_status("pve")
+        .expect("pve IPAM status after the delete");
+    assert!(
+        !held
+            .iter()
+            .any(|e| e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.51")),
+        "the reservation survived its delete: {held:?}"
+    );
+
+    // --- teardown, and the apply that makes the node forget all of it ---
+    client
+        .delete_sdn_subnet(&ledger, &vnet, &zone, cidr)
+        .expect("delete the subnet");
+    client
+        .delete_sdn_vnet(&ledger, &vnet)
+        .expect("delete the vnet");
+    client
+        .delete_sdn_zone(&ledger, &zone)
+        .expect("delete the zone");
+    client
+        .delete_sdn_fabric_node(&ledger, &fabric, &node)
+        .expect("remove the node from the fabric");
+    client
+        .delete_sdn_fabric(&ledger, &fabric)
+        .expect("delete the fabric");
+    client
+        .apply_sdn(&ledger)
+        .expect("apply the pending deletions");
+    let applied = last_apply(&read_ledger());
+    assert_eq!(
+        applied.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "{applied}"
+    );
+    assert!(
+        !client
+            .sdn_zones()
+            .expect("zones after cleanup")
+            .iter()
+            .any(|z| z.get("zone").and_then(|v| v.as_str()) == Some(zone.as_str())),
+        "the zone is still listed after delete+apply"
+    );
+    assert!(
+        !client
+            .sdn_fabrics()
+            .expect("fabrics after cleanup")
+            .iter()
+            .any(|f| f.get("id").and_then(|v| v.as_str()) == Some(fabric.as_str())),
+        "the fabric is still listed after delete+apply"
+    );
+}

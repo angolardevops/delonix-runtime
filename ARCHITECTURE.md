@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (22 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (23 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 22 crates)
+## C4 — Nível 3: Componentes (os 23 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-model` é a raiz comum.
@@ -152,6 +152,7 @@ graph TB
     RULES["delonix-net-rules<br>regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,<br>IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS"]
     PVE["delonix-proxmox<br>backend VmBackend REMOTO contra a API de UM no Proxmox VE<br>(ADR-0008) — fora do delonix-vm por trazer cliente HTTP"]
     NAS["delonix-truenas<br>provisiona dataset, quota, permissoes e export numa NAS<br>pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte"]
+    OPN["delonix-opnsense<br>GatewayProvider REMOTO contra a API REST de UMA appliance OPNsense<br>(ADR-0051) — fora do delonix-sdn por trazer cliente HTTP"]
     MODEL["delonix-model<br>modelo partilhado PURO (foundation, ADR-0040) —<br>o Error e o dicionario DX-CDNN, Status, ContainerFw,<br>typestate, o modelo do segredo e os nomes gerados"]
     STACK["delonix-stack<br>contexto Stack (ADR-0040): tabela de Kinds,<br>reconciliador de 3 vias, Condition, revisões"]
     COMPUTE["delonix-compute<br>contexto Compute (ADR-0040): a especificacao<br>de execucao unica (RunOpts) que as entradas traduzem"]
@@ -170,6 +171,7 @@ graph TB
     BIN --> SEC
     BIN --> PVE
     BIN --> NAS
+    BIN --> OPN
     MCPBIN --> MCP
     MGMTBIN --> MGMT
     BIN --> MODEL
@@ -196,6 +198,7 @@ graph TB
 
     NET --> RULES
     PVE --> VM2
+    OPN --> NET
     STATECRATE --> MODEL
     COMPUTE --> NODECTX
     COMPUTE --> MODEL
@@ -230,6 +233,7 @@ graph TB
     STATECRATE --> NODECTX
     STATECRATE --> COMPUTE
     NAS --> MODEL
+    OPN --> MODEL
     VM2 --> NODECTX
     VM2 --> MODEL
     VOL --> NODECTX
@@ -280,16 +284,18 @@ Notas de leitura do grafo (todas verificadas):
   salto de rede — e um modo de falha novo — para calcular o que os dois lados já sabem
   calcular; e duas implementações que TÊM de concordar são duas que um dia não
   concordam. O `delonix-sdn` re-exporta tudo, portanto nenhum consumidor mudou.
-- **`delonix-proxmox` e `delonix-truenas` estão fora dos crates de motor de propósito, e
-  pela mesma razão escrita nos dois `Cargo.toml`**: trazem um cliente HTTP (`reqwest`),
-  e um crate de motor não cresce um. O `delonix-vm` tem quatro dependências e o
-  `delonix-volume` três — meter lá o cliente para falar com UM alvo remoto trocaria isso
-  por uma árvore que todo o motor passa a arrastar. Por isso o backend Proxmox
-  (ADR-0008) implementa o `VmBackend` a partir de fora e **regista-se** (`register_backend`),
-  e quem conhece o alvo é o `-bin`, não o motor.
-- **Nada depende de `delonix-proxmox` nem de `delonix-truenas` a não ser o `-bin`** — são
-  folhas do grafo, e é o que permite que um alvo remoto mal configurado avise e siga em
-  vez de parar um `container ls`.
+- **`delonix-proxmox`, `delonix-truenas` e `delonix-opnsense` estão fora dos crates de
+  motor de propósito, e pela mesma razão escrita nos três `Cargo.toml`**: trazem um
+  cliente HTTP (`reqwest`), e um crate de motor não cresce um. O `delonix-vm` tem quatro
+  dependências, o `delonix-volume` três e o `delonix-sdn` cinco — meter lá o cliente para
+  falar com UM alvo remoto trocaria isso por uma árvore que todo o motor passa a
+  arrastar. Por isso o backend Proxmox (ADR-0008) implementa o `VmBackend` e o
+  `GatewayProvider` do OPNsense (ADR-0051) implementa o trait de `delonix-sdn`, os dois a
+  partir de fora, e **registam-se** (`register_backend`/`register_gateway_provider`), com
+  o alvo conhecido só pelo `-bin`, não pelo motor.
+- **Nada depende de `delonix-proxmox`, `delonix-truenas` nem `delonix-opnsense` a não ser
+  o `-bin`** — são folhas do grafo, e é o que permite que um alvo remoto mal configurado
+  avise e siga em vez de parar um `container ls`.
 - **`delonix-mcp` fica fora dos oito crates de motor dependency-clean, pela MESMA razão
   do `delonix-mgmt`** (ADR-0025): traz o SDK MCP oficial (`rmcp`) e o seu próprio
   runtime `tokio`, e nenhum crate de motor depende dele. Depende de `delonix-mgmt`

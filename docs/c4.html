@@ -149,7 +149,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (22 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (23 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -301,7 +301,7 @@ leitura — <code>reconcile_status</code> (<code>crates/adapters/delonix-linux/s
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 22 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 23 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-model</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
@@ -321,6 +321,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     RULES[&quot;delonix-net-rules&lt;br&gt;regras de rede PURAS, ZERO dependencias — Cidr, nome de bridge,&lt;br&gt;IPAM dentro de um prefixo, leitura de taxas; partilhado com o PaaS&quot;]
     PVE[&quot;delonix-proxmox&lt;br&gt;backend VmBackend REMOTO contra a API de UM no Proxmox VE&lt;br&gt;(ADR-0008) — fora do delonix-vm por trazer cliente HTTP&quot;]
     NAS[&quot;delonix-truenas&lt;br&gt;provisiona dataset, quota, permissoes e export numa NAS&lt;br&gt;pela API do TrueNAS (ADR-0009) — mesma razao de crate a parte&quot;]
+    OPN[&quot;delonix-opnsense&lt;br&gt;GatewayProvider REMOTO contra a API REST de UMA appliance OPNsense&lt;br&gt;(ADR-0051) — fora do delonix-sdn por trazer cliente HTTP&quot;]
     MODEL[&quot;delonix-model&lt;br&gt;modelo partilhado PURO (foundation, ADR-0040) —&lt;br&gt;o Error e o dicionario DX-CDNN, Status, ContainerFw,&lt;br&gt;typestate, o modelo do segredo e os nomes gerados&quot;]
     STACK[&quot;delonix-stack&lt;br&gt;contexto Stack (ADR-0040): tabela de Kinds,&lt;br&gt;reconciliador de 3 vias, Condition, revisões&quot;]
     COMPUTE[&quot;delonix-compute&lt;br&gt;contexto Compute (ADR-0040): a especificacao&lt;br&gt;de execucao unica (RunOpts) que as entradas traduzem&quot;]
@@ -339,6 +340,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN --&gt; SEC
     BIN --&gt; PVE
     BIN --&gt; NAS
+    BIN --&gt; OPN
     MCPBIN --&gt; MCP
     MGMTBIN --&gt; MGMT
     BIN --&gt; MODEL
@@ -365,6 +367,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
 
     NET --&gt; RULES
     PVE --&gt; VM2
+    OPN --&gt; NET
     STATECRATE --&gt; MODEL
     COMPUTE --&gt; NODECTX
     COMPUTE --&gt; MODEL
@@ -399,6 +402,7 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     STATECRATE --&gt; NODECTX
     STATECRATE --&gt; COMPUTE
     NAS --&gt; MODEL
+    OPN --&gt; MODEL
     VM2 --&gt; NODECTX
     VM2 --&gt; MODEL
     VOL --&gt; NODECTX
@@ -448,16 +452,18 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
   salto de rede — e um modo de falha novo — para calcular o que os dois lados já sabem
   calcular; e duas implementações que TÊM de concordar são duas que um dia não
   concordam. O <code>delonix-sdn</code> re-exporta tudo, portanto nenhum consumidor mudou.</li>
-<li><strong><code>delonix-proxmox</code> e <code>delonix-truenas</code> estão fora dos crates de motor de propósito, e
-  pela mesma razão escrita nos dois <code>Cargo.toml</code></strong>: trazem um cliente HTTP (<code>reqwest</code>),
-  e um crate de motor não cresce um. O <code>delonix-vm</code> tem quatro dependências e o
-  <code>delonix-volume</code> três — meter lá o cliente para falar com UM alvo remoto trocaria isso
-  por uma árvore que todo o motor passa a arrastar. Por isso o backend Proxmox
-  (ADR-0008) implementa o <code>VmBackend</code> a partir de fora e <strong>regista-se</strong> (<code>register_backend</code>),
-  e quem conhece o alvo é o <code>-bin</code>, não o motor.</li>
-<li><strong>Nada depende de <code>delonix-proxmox</code> nem de <code>delonix-truenas</code> a não ser o <code>-bin</code></strong> — são
-  folhas do grafo, e é o que permite que um alvo remoto mal configurado avise e siga em
-  vez de parar um <code>container ls</code>.</li>
+<li><strong><code>delonix-proxmox</code>, <code>delonix-truenas</code> e <code>delonix-opnsense</code> estão fora dos crates de
+  motor de propósito, e pela mesma razão escrita nos três <code>Cargo.toml</code></strong>: trazem um
+  cliente HTTP (<code>reqwest</code>), e um crate de motor não cresce um. O <code>delonix-vm</code> tem quatro
+  dependências, o <code>delonix-volume</code> três e o <code>delonix-sdn</code> cinco — meter lá o cliente para
+  falar com UM alvo remoto trocaria isso por uma árvore que todo o motor passa a
+  arrastar. Por isso o backend Proxmox (ADR-0008) implementa o <code>VmBackend</code> e o
+  <code>GatewayProvider</code> do OPNsense (ADR-0051) implementa o trait de <code>delonix-sdn</code>, os dois a
+  partir de fora, e <strong>registam-se</strong> (<code>register_backend</code>/<code>register_gateway_provider</code>), com
+  o alvo conhecido só pelo <code>-bin</code>, não pelo motor.</li>
+<li><strong>Nada depende de <code>delonix-proxmox</code>, <code>delonix-truenas</code> nem <code>delonix-opnsense</code> a não ser
+  o <code>-bin</code></strong> — são folhas do grafo, e é o que permite que um alvo remoto mal configurado
+  avise e siga em vez de parar um <code>container ls</code>.</li>
 <li><strong><code>delonix-mcp</code> fica fora dos oito crates de motor dependency-clean, pela MESMA razão
   do <code>delonix-mgmt</code></strong> (ADR-0025): traz o SDK MCP oficial (<code>rmcp</code>) e o seu próprio
   runtime <code>tokio</code>, e nenhum crate de motor depende dele. Depende de <code>delonix-mgmt</code>

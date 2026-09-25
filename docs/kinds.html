@@ -1589,6 +1589,17 @@ spec:
         from: blog-net
         to: blog-back
 
+  # Cluster-native SDN — realized by whichever NetworkZoneProvider the
+  # RUNTIME has configured (today: Proxmox, via DELONIX_PROXMOX_URL), never
+  # named here. Applying this without a provider configured refuses with a
+  # clear error naming what to set (ADR-0049 addendum).
+  networkZones:
+    - name: dc1
+      spec:
+        vnets:
+          - name: prod
+            alias: &quot;Production VLAN&quot;
+
   volumes:
     - name: db-data
       spec:
@@ -1697,6 +1708,24 @@ spec:
         proto: tcp
         port: &quot;9113&quot;
         from: 10.0.0.0/8
+
+  # A perimeter alias+rule on an external GatewayProvider (ADR-0051) —
+  # `provider: opnsense` must already be registered (DELONIX_OPNSENSE_URL and
+  # a credential, `cmd::gatewayproviders`) before `stack apply` reaches here.
+  networkGateways:
+    - name: block-untrusted
+      spec:
+        provider: opnsense
+        aliases:
+          - name: trusted-net
+            kind: network
+            content: [&quot;10.0.0.0/24&quot;]
+            description: internal trusted range
+        rules:
+          - description: allow-trusted-to-web
+            source: trusted-net
+            destination: 10.0.0.0/8
+            protocol: TCP
 
   # Native L7 reverse proxy, same engine as `ingress:` (both merge into one proxy).
   httpRoutes:

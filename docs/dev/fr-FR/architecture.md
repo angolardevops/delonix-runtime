@@ -445,6 +445,8 @@ Exceptions déclarées (chacune nomme la phase de l'ADR-0040 qui la supprime) :
 - `delonix-linux` → `delonix-state` — supprimée en **P4a**
 - `delonix-mcp` → `delonix-mgmt` — supprimée en **P5**
 - `delonix-oci` → `delonix-state` — supprimée en **P4**
+- `delonix-opnsense` → `delonix-sdn` — supprimée en **P4**
+- `delonix-proxmox` → `delonix-sdn` — supprimée en **P4**
 - `delonix-proxmox` → `delonix-vm` — supprimée en **P4**
 - `delonix-scanner` → `delonix-oci` — supprimée en **P4**
 - `delonix-sdn` → `delonix-state` — supprimée en **P4**
@@ -666,6 +668,7 @@ flowchart TB
     delonix_volume["delonix-volume"]
   end
   subgraph provider["Providers"]
+    delonix_opnsense["delonix-opnsense"]
     delonix_proxmox["delonix-proxmox"]
     delonix_truenas["delonix-truenas"]
   end
@@ -724,8 +727,11 @@ flowchart TB
   delonix_oci --> delonix_model
   delonix_oci --> delonix_node
   delonix_oci --> delonix_state
+  delonix_opnsense --> delonix_model
+  delonix_opnsense --> delonix_sdn
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
+  delonix_proxmox --> delonix_sdn
   delonix_proxmox --> delonix_vm
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
@@ -733,6 +739,7 @@ flowchart TB
   delonix_runtime_bin --> delonix_model
   delonix_runtime_bin --> delonix_node
   delonix_runtime_bin --> delonix_oci
+  delonix_runtime_bin --> delonix_opnsense
   delonix_runtime_bin --> delonix_proxmox
   delonix_runtime_bin --> delonix_scanner
   delonix_runtime_bin --> delonix_sdn
@@ -777,6 +784,7 @@ flowchart TB
   class delonix_net_rules store
   class delonix_node block
   class delonix_oci block
+  class delonix_opnsense external
   class delonix_proxmox external
   class delonix_runtime_bin engine
   class delonix_scanner block
