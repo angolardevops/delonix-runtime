@@ -8,8 +8,11 @@ et ainsi de suite (`delonix api-resources` les liste tous). En ajouter un touche
 simple bras de `match` : la table qui décrit ce qu'EST le Kind, le code qui l'applique, et le
 câblage du réconciliateur qui permet à `stack plan`/`apply` de le traiter comme n'importe quel
 autre Kind. Cette page parcourt cela dans l'ordre, avec un Kind réel — **`Service`** (ADR-0032) —
-comme exemple travaillé de bout en bout, car c'est le Kind ajouté le plus récemment et chaque
-fichier cité ci-dessous est lu depuis l'arbre, pas depuis le souvenir d'une ancienne disposition.
+comme exemple travaillé de bout en bout. Ce n'est pas le Kind le plus récent (`IPPool`,
+`NetworkGateway`, `NetworkZone` et `RuntimePolicy` sont venus après), mais c'est celui qui
+parcourt tous les chemins à la fois : primaire, convergent, supprimable, avec namespace et doté
+de son propre registre. Chaque fichier cité ci-dessous est lu depuis l'arbre, pas depuis le
+souvenir d'une ancienne disposition.
 
 ## La table unique à laquelle un Kind doit répondre
 
@@ -37,6 +40,7 @@ KindFacts {
     domain: Domain::NetConnectivity,
     form: Form::Primary,
     in_stack: true,
+    stack_group: "services",
     converges: true,
     teardown: true,
     namespaced: Namespaced::Always,
