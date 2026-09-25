@@ -2518,3 +2518,160 @@ fn sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node()
         "the fabric is still listed after delete+apply"
     );
 }
+
+/// The power operations beyond start/stop, each asserted from what the node
+/// reports afterwards (`GET …/status/current`), never from the call's answer:
+///
+/// - `pause`/`unpause` (the backend's, i.e. `vm pause`) are the node's
+///   `…/status/suspend`/`…/status/resume`. A suspended VM still answers
+///   `status: running` — only `qmpstatus` says `paused`, so that is what is
+///   asserted, and `is_running` has to keep answering true for it (the
+///   engine's record says `Paused`, not gone).
+/// - `reset` leaves the VM running.
+/// - `reboot` and a plain `shutdown` of a guest with NO operating system —
+///   this case's 1 GiB empty disk ignores ACPI — FAIL after their timeout,
+///   and the VM is still running: «asked and it did not go down» is an
+///   error, never a success.
+/// - `shutdown` with `force_stop` stops it anyway.
+///
+/// The ledger is read at the end: every task that was meant to succeed did,
+/// and the only failures are the two the guest caused.
+#[test]
+fn power_operations_round_trip_through_the_node() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxpower{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let state = || client.power_state(vmid).expect("status/current");
+
+    b.pause(vmdir, &vm).expect("pause (…/status/suspend)");
+    let s = state();
+    assert_eq!(
+        s.status, "running",
+        "a suspended VM still reads running: {s:?}"
+    );
+    assert!(
+        s.is_paused(),
+        "qmpstatus must say paused after a suspend: {s:?}"
+    );
+    assert!(
+        b.is_running(&vm),
+        "a paused VM is not gone — the engine keeps its record as Paused"
+    );
+
+    b.unpause(vmdir, &vm).expect("unpause (…/status/resume)");
+    let s = state();
+    assert!(
+        s.status == "running" && !s.is_paused(),
+        "running again after a resume: {s:?}"
+    );
+
+    client.reset(&ledger, vmid).expect("reset");
+    assert_eq!(state().status, "running", "a reset leaves the VM running");
+
+    let short = Some(std::time::Duration::from_secs(5));
+    let err = client
+        .reboot(&ledger, vmid, short)
+        .expect_err("a guest with no OS ignores ACPI: the reboot must fail");
+    assert!(
+        matches!(err, delonix_proxmox::Error::TaskFailed(_)),
+        "a task failure, not a transport error: {err:?}"
+    );
+    assert_eq!(
+        state().status,
+        "running",
+        "a failed reboot leaves it running"
+    );
+
+    let err = client
+        .shutdown(&ledger, vmid, short, false)
+        .expect_err("a guest with no OS ignores ACPI: the shutdown must fail");
+    assert!(
+        err.to_string().contains("powerdown failed"),
+        "the node's own reason is carried: {err}"
+    );
+    assert_eq!(
+        state().status,
+        "running",
+        "a failed shutdown leaves it running"
+    );
+
+    client
+        .shutdown(&ledger, vmid, short, true)
+        .expect("forceStop pulls the plug after the timeout");
+    let s = state();
+    assert_eq!(s.status, "stopped", "{s:?}");
+    assert!(!b.is_running(&vm));
+
+    let entries: Vec<serde_json::Value> = serde_json::from_str(
+        &std::fs::read_to_string(vmdir.join("proxmox-tasks.json")).expect("the ledger"),
+    )
+    .expect("ledger JSON");
+    let state_of = |e: &serde_json::Value| {
+        e.pointer("/state/state")
+            .or_else(|| e.get("state"))
+            .and_then(|s| s.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    for want in ["suspend", "resume", "reset"] {
+        let last = entries
+            .iter()
+            .rev()
+            .find(|e| e.get("action").and_then(|a| a.as_str()) == Some(want))
+            .unwrap_or_else(|| panic!("no `{want}` task in the ledger: {entries:?}"));
+        assert_eq!(state_of(last), "ok", "`{want}` did not succeed: {last}");
+    }
+    let failed: Vec<&str> = entries
+        .iter()
+        .filter(|e| state_of(e) == "failed")
+        .filter(|e| {
+            !e.pointer("/state/reason")
+                .and_then(|r| r.as_str())
+                .is_some_and(|r| r.contains("can't lock file"))
+        })
+        .filter_map(|e| e.get("action").and_then(|a| a.as_str()))
+        .collect();
+    assert_eq!(
+        failed,
+        ["reboot", "shutdown"],
+        "only the two the guest caused may fail: {entries:?}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}

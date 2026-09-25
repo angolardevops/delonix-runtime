@@ -12198,6 +12198,15 @@ msgstr "Um endereço IPv4/IPv6 simples (uma ponta de intervalo DHCP, um servidor
 msgid "Give the address without a prefix length ('10.0.0.50', 'fd00::5'), or the MAC as XX:XX:XX:XX:XX:XX."
 msgstr "Dá o endereço sem comprimento de prefixo ('10.0.0.50', 'fd00::5'), ou o MAC como XX:XX:XX:XX:XX:XX."
 
+msgid "invalid Proxmox shutdown timeout"
+msgstr "tempo limite de encerramento do Proxmox inválido"
+
+msgid "A guest-driven shutdown or reboot was asked to wait longer than this client waits for any node task, so the client would give up while the node was still inside the task."
+msgstr "Pediu-se a um encerramento ou reinício feito pelo convidado que esperasse mais do que este cliente espera por qualquer tarefa do nó, por isso o cliente desistiria com o nó ainda dentro da tarefa."
+
+msgid "Give a timeout shorter than the client's task deadline (600 seconds by default), or omit it to take the node's own default."
+msgstr "Dá um tempo limite menor do que o prazo de tarefa do cliente (600 segundos por omissão), ou omite-o para ficar com o valor por omissão do próprio nó."
+
 msgid "The VM has no snapshot with that name on the Proxmox node."
 msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
 
