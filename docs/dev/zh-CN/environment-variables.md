@@ -1,4 +1,4 @@
-<!-- translated-from: environment-variables.md sha256:3855f2d4ef81cc85cc55513b3a85bc5486b6b34ce52173806777537c2814cdc5 -->
+<!-- translated-from: environment-variables.md sha256:89a40a69d327ce2599cf5b5695e2cc96151828496b52fecabe7e4b62bdc71387 -->
 # 环境变量（`DELONIX_*`）
 
 **阅读前须知：** 《克隆、构建与测试》里的[隔离引擎的状态](build-and-test.md#isolating-the-engines-state)。
@@ -143,6 +143,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_PROXMOX_SECRET` | `cmd/vmbackends.rs:proxmox_auth` | 一个持有凭据的 `kind: Secret` 的名字。 | 带有 `tokenId`+`tokenSecret`（优先）或 `username`+`password` 的 Secret。 | **最先**被检查。比下面那些变量优先，因为那些最终会留在 shell 历史和 `ps` 里。 |
 | `DELONIX_PROXMOX_TOKEN_ID` | `cmd/vmbackends.rs:proxmox_auth` | API token id。 | `user@realm!tokenname`。 | 和 `DELONIX_PROXMOX_TOKEN` 一起用；在 secret 之后被检查。 |
 | `DELONIX_PROXMOX_TOKEN` | `cmd/vmbackends.rs:proxmox_auth` | API token 的密钥。 | | |
+| `DELONIX_PROXMOX_TOKEN_FILE` | `cmd/vmbackends.rs:credential_value` | 存放 API token 密钥的文件路径；优先于 `DELONIX_PROXMOX_TOKEN`，因为后者会被每个子进程继承。 | 一个路径。 | 除非只有属主可读（`chmod 600`），否则拒绝。 |
 | `DELONIX_PROXMOX_USER` | `cmd/vmbackends.rs:proxmox_auth` | 用密码认证的账号。 | `root@pam`，…… | 和 `DELONIX_PROXMOX_PASSWORD` 一起用；最后被检查。 |
 | `DELONIX_PROXMOX_PASSWORD` | `cmd/vmbackends.rs:proxmox_auth` | 该账号的密码。 | | |
 | `DELONIX_PROXMOX_INSECURE_TLS` | `cmd/vmbackends.rs:register_proxmox_with` | 跳过对这个节点的 TLS 证书校验。 | `1`、`true` 或 `yes` → 跳过；默认要校验。 | **冒充这个节点应答的另一台机器会拿到凭据。** 只能主动选择加入，绝不会在 TLS 出错后作为回退被应用。 |

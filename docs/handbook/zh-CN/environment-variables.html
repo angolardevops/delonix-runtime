@@ -751,9 +751,9 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <tr>
 <td><code>DELONIX_PROXMOX_TOKEN_FILE</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:credential_value</code></td>
-<td>Path to a file holding the API token secret; preferred over <code>DELONIX_PROXMOX_TOKEN</code>, which every child process inherits.</td>
-<td>A path.</td>
-<td>Refused unless only its owner can read it (<code>chmod 600</code>).</td>
+<td>存放 API token 密钥的文件路径；优先于 <code>DELONIX_PROXMOX_TOKEN</code>，因为后者会被每个子进程继承。</td>
+<td>一个路径。</td>
+<td>除非只有属主可读（<code>chmod 600</code>），否则拒绝。</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_USER</code></td>

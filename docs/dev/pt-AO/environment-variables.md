@@ -1,4 +1,4 @@
-<!-- translated-from: environment-variables.md sha256:3855f2d4ef81cc85cc55513b3a85bc5486b6b34ce52173806777537c2814cdc5 -->
+<!-- translated-from: environment-variables.md sha256:89a40a69d327ce2599cf5b5695e2cc96151828496b52fecabe7e4b62bdc71387 -->
 # Variáveis de ambiente (`DELONIX_*`)
 
 **Antes de leres:** [Isolar o estado do motor](build-and-test.md#isolating-the-engines-state) em Clonar, construir e testar.
