@@ -99,6 +99,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         k::INGRESS => cmd::httproute::ingress_spec_with_defaults(doc),
         k::FIREWALL_POLICY => cmd::firewall::spec_with_defaults(doc),
         k::NETWORK_ACCESS_RULE => cmd::network_access_rule::spec_with_defaults(doc),
+        k::NETWORK_GATEWAY => cmd::network_gateway::spec_with_defaults(doc),
         k::NETWORK_ZONE => cmd::network_zone::spec_with_defaults(doc),
         k::CONTAINER if doc.spec.get("containers").is_some() => {
             cmd::container::pod_spec_with_defaults(doc)
@@ -399,10 +400,11 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
         k::NETWORK_ACCESS_RULE => {
             Some(crate::cmd::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS)
         }
+        k::NETWORK_GATEWAY => Some(crate::cmd::network_gateway::NETWORK_GATEWAY_SPEC_FIELDS),
+        k::NETWORK_ZONE => Some(crate::cmd::network_zone::NETWORK_ZONE_SPEC_FIELDS),
         k::HTTP_ROUTE => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
         k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
-        k::NETWORK_ZONE => Some(crate::cmd::network_zone::NETWORK_ZONE_SPEC_FIELDS),
         k::SERVICE => Some(crate::cmd::service::SERVICE_SPEC_FIELDS),
         k::IPPOOL => Some(crate::cmd::ippool::IPPOOL_SPEC_FIELDS),
         k::GATEWAY => Some(crate::cmd::tunnel::TUNNEL_SPEC_FIELDS),
@@ -1466,6 +1468,7 @@ spec: { image: nginx }
                 "{ target: c, direction: ingress, port: '80' }",
                 "NetworkAccessRule",
             ),
+            "networkGateways" => ("{ provider: opnsense }", "NetworkGateway"),
             "httpRoutes" => ("{ rules: [] }", "HTTPRoute"),
             "gateways" => ("{ provider: pinggy, localPort: 80 }", "Gateway"),
             // Lowered on the way out: a Workload into the Kind its `type` names,

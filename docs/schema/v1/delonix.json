@@ -816,6 +816,60 @@
       ],
       "type": "object"
     },
+    "GatewayAliasSpec": {
+      "properties": {
+        "content": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "description": {
+          "default": "",
+          "type": "string"
+        },
+        "kind": {
+          "description": "`host` or `network` — the two shapes `delonix_sdn::gateway::AliasKind`\nknows (ADR-0051 Phase 1: the only two a v1 client needs).",
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "content"
+      ],
+      "type": "object"
+    },
+    "GatewayRuleSpec": {
+      "properties": {
+        "description": {
+          "description": "The rule's identity on the appliance — there is no other stable name\nfor one (ADR-0051 Phase 0/2: OPNsense's own docs use `description`\nas the find-or-create key).",
+          "type": "string"
+        },
+        "destination": {
+          "type": "string"
+        },
+        "protocol": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "source",
+        "destination"
+      ],
+      "type": "object"
+    },
     "HostAlias": {
       "description": "k8s `hostAliases[]` entry: one IP, N hostnames.",
       "properties": {
@@ -1266,6 +1320,34 @@
         "target",
         "direction",
         "port"
+      ],
+      "type": "object"
+    },
+    "NetworkGatewaySpec": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: NetworkGateway`.",
+      "properties": {
+        "aliases": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GatewayAliasSpec"
+          },
+          "type": "array"
+        },
+        "provider": {
+          "description": "The registered `GatewayProvider` id (`opnsense`, or `native` — though\nthe native provider refuses every alias/rule operation by design,\nADR-0051 Phase 2, so naming it here always fails at apply time; the\nengine does not special-case that away, since a manifest that names\nthe wrong provider deserves that exact error).",
+          "type": "string"
+        },
+        "rules": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/GatewayRuleSpec"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "provider"
       ],
       "type": "object"
     },
@@ -2453,6 +2535,39 @@
               },
               "spec": {
                 "$ref": "#/$defs/NetworkAccessRuleSpec"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "networkGateways": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkGatewaySpec"
               }
             },
             "required": [
@@ -3904,31 +4019,6 @@
       "if": {
         "properties": {
           "kind": {
-            "const": "NetworkZone"
-          }
-        },
-        "required": [
-          "kind"
-        ]
-      },
-      "then": {
-        "properties": {
-          "apiVersion": {
-            "enum": [
-              "networking.delonix.io/v1alpha1",
-              "delonix.io/v1"
-            ]
-          },
-          "spec": {
-            "$ref": "#/$defs/NetworkZoneSpecDoc"
-          }
-        }
-      }
-    },
-    {
-      "if": {
-        "properties": {
-          "kind": {
             "const": "HTTPRoute"
           }
         },
@@ -4021,6 +4111,56 @@
           },
           "spec": {
             "$ref": "#/$defs/NetworkAccessRuleSpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "NetworkGateway"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkGatewaySpec"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "NetworkZone"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkZoneSpecDoc"
           }
         }
       }
@@ -4181,6 +4321,7 @@
         "KubernetesCluster",
         "Network",
         "NetworkAccessRule",
+        "NetworkGateway",
         "NetworkPolicy",
         "NetworkRoute",
         "NetworkZone",

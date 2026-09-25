@@ -389,7 +389,6 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::VOLUME => super::volume::desired(doc)?,
                 k::NETWORK => super::network::desired(doc)?,
                 k::NETWORK_ROUTE => super::netroute::desired(doc)?,
-                k::NETWORK_ZONE => super::network_zone::desired(doc)?,
                 k::SERVICE => super::service::desired(doc)?,
                 k::IPPOOL => super::ippool::desired(doc)?,
                 k::POD => super::pod::desired(doc)?,
@@ -398,6 +397,8 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::VM => super::vm::desired(doc)?,
                 k::FIREWALL_POLICY => super::firewall::desired(doc)?,
                 k::NETWORK_ACCESS_RULE => super::network_access_rule::desired(doc)?,
+                k::NETWORK_GATEWAY => super::network_gateway::desired(doc)?,
+                k::NETWORK_ZONE => super::network_zone::desired(doc)?,
                 k::HTTP_ROUTE | k::INGRESS => super::httproute::desired(doc)?,
                 k::GATEWAY => super::tunnel::desired(doc)?,
                 _ => reconcile::Desired {
@@ -426,7 +427,6 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::volume::actual()?);
     out.extend(super::network::actual()?);
     out.extend(super::netroute::actual()?);
-    out.extend(super::network_zone::actual()?);
     out.extend(super::service::actual()?);
     out.extend(super::ippool::actual()?);
     out.extend(super::pod::actual()?);
@@ -435,6 +435,8 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::vm::actual()?);
     out.extend(super::firewall::actual(docs)?);
     out.extend(super::network_access_rule::actual(docs)?);
+    out.extend(super::network_gateway::actual()?);
+    out.extend(super::network_zone::actual()?);
     out.extend(super::httproute::actual(docs)?);
     out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
@@ -696,10 +698,6 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (k::VOLUME, super::volume::RECONCILED_VOLUME_FIELDS),
         (k::NETWORK, super::network::RECONCILED_NETWORK_FIELDS),
         (k::NETWORK_ROUTE, super::netroute::RECONCILED_ROUTE_FIELDS),
-        (
-            k::NETWORK_ZONE,
-            super::network_zone::RECONCILED_NETWORK_ZONE_FIELDS,
-        ),
         (k::SERVICE, super::service::RECONCILED_SERVICE_FIELDS),
         (k::IPPOOL, super::ippool::RECONCILED_IPPOOL_FIELDS),
         (k::IMAGE, super::image::RECONCILED_IMAGE_FIELDS),
@@ -709,6 +707,14 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (
             k::NETWORK_ACCESS_RULE,
             super::network_access_rule::RECONCILED_NETWORK_ACCESS_RULE_FIELDS,
+        ),
+        (
+            k::NETWORK_GATEWAY,
+            super::network_gateway::RECONCILED_NETWORK_GATEWAY_FIELDS,
+        ),
+        (
+            k::NETWORK_ZONE,
+            super::network_zone::RECONCILED_NETWORK_ZONE_FIELDS,
         ),
         (k::HTTP_ROUTE, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         (k::INGRESS, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
@@ -1336,9 +1342,10 @@ fn presence(
         // names which. Before any of this it fell through to `?`/`unsupported
         // kind` — `stack ls` could not say anything about a path it had opened.
         k::NETWORK_ROUTE => super::netroute::presence_of(doc),
-        k::NETWORK_ZONE => super::network_zone::presence_of(doc),
         k::SERVICE => super::service::presence_of(doc),
         k::IPPOOL => super::ippool::presence_of(doc),
+        k::NETWORK_GATEWAY => super::network_gateway::presence_of(doc),
+        k::NETWORK_ZONE => super::network_zone::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
@@ -1777,6 +1784,9 @@ fn run_layers(
     layers.run(k::NETWORK_ACCESS_RULE, "🎯", || {
         super::network_access_rule::apply(docs)
     })?;
+    layers.run(k::NETWORK_GATEWAY, "🛰", || {
+        super::network_gateway::apply(docs)
+    })?;
     // HTTPRoute LAST: it needs the backend containers already created (with IP) to
     // resolve the routes; brings up/reloads the L7 reverse-proxy.
     layers.run(k::HTTP_ROUTE, "🔀", || super::httproute::apply(docs))?;
@@ -1873,13 +1883,14 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::VOLUME => super::volume::remove_for_replace(name),
         k::NETWORK => super::network::remove_for_replace(name),
         k::NETWORK_ROUTE => super::netroute::remove_for_replace(name),
-        k::NETWORK_ZONE => super::network_zone::remove_for_replace(name),
         k::SERVICE => super::service::remove_for_replace(name),
         k::IPPOOL => super::ippool::remove_for_replace(name),
         k::HTTP_ROUTE | k::INGRESS => super::httproute::remove_for_prune(name),
         k::POD => super::pod::remove_pod(name, true),
         k::VM => super::vm::remove_for_replace(name),
         k::NETWORK_ACCESS_RULE => super::network_access_rule::remove_for_replace(name),
+        k::NETWORK_GATEWAY => super::network_gateway::remove_for_replace(name),
+        k::NETWORK_ZONE => super::network_zone::remove_for_replace(name),
         // Unreachable: the guard above already refused everything outside
         // the `teardown` column. Kept so flipping that column without an arm
         // here fails instead of silently doing nothing.
@@ -2141,6 +2152,20 @@ fn converge_and_stamp(
                         })?;
                     super::service::converge_doc(doc)?
                 }
+                // Same shape again: `network_gateway::apply_one` already fully
+                // re-ensures the declared aliases/rules, so converging is applying.
+                k::NETWORK_GATEWAY => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "NetworkGateway/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::network_gateway::converge_doc(doc)?
+                }
                 // Same shape again: `network_zone::apply_one` already fully
                 // re-ensures the declared zone/vnets, so converging is applying.
                 k::NETWORK_ZONE => {
@@ -2231,8 +2256,9 @@ fn stamp_all(
             k::VOLUME => super::volume::stamp(&d.name, stack, &d.fields),
             k::NETWORK => super::network::stamp(&d.name, stack, &d.fields),
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
-            k::NETWORK_ZONE => super::network_zone::stamp(&d.name, stack, &d.fields),
             k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
+            k::NETWORK_GATEWAY => super::network_gateway::stamp(&d.name, stack, &d.fields),
+            k::NETWORK_ZONE => super::network_zone::stamp(&d.name, stack, &d.fields),
             k::IPPOOL => super::ippool::stamp(&d.name, stack, &d.fields),
             k::HTTP_ROUTE | k::INGRESS => {
                 super::httproute::stamp(&d.kind, &d.name, stack, &d.fields)

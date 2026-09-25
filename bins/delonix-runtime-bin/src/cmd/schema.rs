@@ -58,11 +58,12 @@ const TYPED_KINDS: &[&str] = &[
     k::GATEWAY,
     k::DEPENDENCY,
     k::NETWORK_ROUTE,
-    k::NETWORK_ZONE,
     k::HTTP_ROUTE,
     k::INGRESS,
     k::FIREWALL_POLICY,
     k::NETWORK_ACCESS_RULE,
+    k::NETWORK_GATEWAY,
+    k::NETWORK_ZONE,
     k::SERVICE,
     k::IPPOOL,
     k::WORKLOAD,
@@ -216,11 +217,6 @@ fn typed_spec_parts(
             "NetworkRouteSpec",
             super::netroute::NETWORK_ROUTE_SPEC_FIELDS,
         ),
-        k::NETWORK_ZONE => (
-            generator.subschema_for::<super::network_zone::NetworkZoneSpecDoc>(),
-            "NetworkZoneSpecDoc",
-            super::network_zone::NETWORK_ZONE_SPEC_FIELDS,
-        ),
         k::SERVICE => (
             generator.subschema_for::<super::service::ServiceSpec>(),
             "ServiceSpec",
@@ -254,6 +250,16 @@ fn typed_spec_parts(
             generator.subschema_for::<super::network_access_rule::NetworkAccessRuleSpec>(),
             "NetworkAccessRuleSpec",
             super::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS,
+        ),
+        k::NETWORK_GATEWAY => (
+            generator.subschema_for::<super::network_gateway::NetworkGatewaySpec>(),
+            "NetworkGatewaySpec",
+            super::network_gateway::NETWORK_GATEWAY_SPEC_FIELDS,
+        ),
+        k::NETWORK_ZONE => (
+            generator.subschema_for::<super::network_zone::NetworkZoneSpecDoc>(),
+            "NetworkZoneSpecDoc",
+            super::network_zone::NETWORK_ZONE_SPEC_FIELDS,
         ),
         k::WORKLOAD => (
             generator.subschema_for::<super::workload::WorkloadSpec>(),

@@ -566,6 +566,9 @@ fn run() -> Result<()> {
     // provider itself, so this is the only place a Proxmox target becomes
     // reachable from it (ADR-0049 addendum).
     cmd::network_zone_providers::register_configured();
+    // Same reasoning, one layer over: a remote GatewayProvider (OPNsense) has to be
+    // registered before anything selects it by name (ADR-0051).
+    cmd::gatewayproviders::register_configured();
     // The VM engine attaches a Cloud Hypervisor guest through this port instead of
     // reaching into the SDN itself (ADR-0040 P3).
     delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork));

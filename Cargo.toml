@@ -15,6 +15,7 @@ members = [
     "crates/contexts/delonix-security-runtime",
     "crates/providers/delonix-truenas",
     "crates/providers/delonix-proxmox",
+    "crates/providers/delonix-opnsense",
     "crates/interfaces/delonix-mcp",
     "crates/foundation/delonix-model",
     "crates/contexts/delonix-stack",
@@ -51,6 +52,7 @@ delonix-state = { path = "crates/adapters/delonix-state" }
 delonix-security-runtime = { path = "crates/contexts/delonix-security-runtime" }
 delonix-truenas = { path = "crates/providers/delonix-truenas" }
 delonix-proxmox = { path = "crates/providers/delonix-proxmox" }
+delonix-opnsense = { path = "crates/providers/delonix-opnsense" }
 delonix-mcp = { path = "crates/interfaces/delonix-mcp" }
 delonix-model = { path = "crates/foundation/delonix-model" }
 delonix-stack = { path = "crates/contexts/delonix-stack" }

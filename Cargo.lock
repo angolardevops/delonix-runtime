@@ -908,6 +908,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "delonix-opnsense"
+version = "4.4.0"
+dependencies = [
+ "delonix-model",
+ "delonix-sdn",
+ "rcgen",
+ "reqwest 0.12.28",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.19",
+ "tracing",
+]
+
+[[package]]
 name = "delonix-proxmox"
 version = "4.4.0"
 dependencies = [
@@ -939,6 +955,7 @@ dependencies = [
  "delonix-model",
  "delonix-node",
  "delonix-oci",
+ "delonix-opnsense",
  "delonix-proxmox",
  "delonix-scanner",
  "delonix-sdn",
