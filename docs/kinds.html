@@ -3701,6 +3701,133 @@ spec:
   target: web
   direction: egress
   port: &quot;53&quot;</code></pre></details>
+<h2 id='runtimepolicy'>RuntimePolicy</h2>
+<p class='lang-pt'>O tecto de admissão do PRÓPRIO nó (grupo <code>security.delonix.io</code>): recusar <code>--privileged</code>, rede do host, <code>:latest</code>, registos fora da lista, passthrough de dispositivos numa VM. É o mesmo <code>policy.json</code> que <code>container run</code> e <code>vm create</code> já consultam antes de criar seja o que for. Singleton do nó: um manifesto declara no máximo um. Converge como qualquer Kind, mas tirá-lo do manifesto <strong>não</strong> o remove — só <code>delonix policy unset</code> o faz.</p><p class='lang-en'>The node's OWN admission ceiling (group <code>security.delonix.io</code>): refuse <code>--privileged</code>, host networking, <code>:latest</code>, unlisted registries, device passthrough into a VM. It is the same <code>policy.json</code> that <code>container run</code> and <code>vm create</code> already check before creating anything. A node singleton: a manifest declares at most one. It converges like any Kind, but dropping it from the manifest does <strong>not</strong> remove it — only <code>delonix policy unset</code> does.</p>
+<pre><code># Complete reference for `kind: RuntimePolicy` (M04, `docs/roadmap/
+# 13-improvements-traceability.md`) — the node&#x27;s own admission ceiling, given
+# a manifest form. `stack apply` writes/updates `&lt;root&gt;/policy.json`, the SAME
+# file `container run`/`vm create` already check before anything is created.
+#
+# A node-wide SINGLETON: whatever `metadata.name` says, `apply` always writes
+# the one `policy.json` — a manifest may declare at most one `RuntimePolicy`
+# document (a second one is refused by `stack validate`/`apply`, before either
+# is applied).
+#
+# Converges like any other Kind — a changed field is really applied, and
+# `delonix get runtimepolicies` / `delonix describe runtimepolicy &lt;name&gt;` show
+# what is in effect. What it does NOT do is come down on its own: removing this
+# document from the manifest and running `stack apply --prune` (or `stack
+# destroy`) leaves the ceiling exactly as it was — see the module doc of
+# `bins/delonix-runtime-bin/src/cmd/policy.rs`. The only way to lower it is
+# `delonix policy unset`, which asks for confirmation (or `--force`).
+#
+# spec fields — every field defaults to &quot;no opinion&quot;, so a policy states only
+# what it wants to restrict:
+#   mode                     `enforce` (refuse, default) or `warn` (allow, and
+#                            report what would have been refused).
+#   denyPrivileged           refuse `container run --privileged`.
+#   denyHostNetwork          refuse `--net host`, this engine&#x27;s DEFAULT network mode.
+#   denyLatestTag            refuse a container image reference with no tag or `:latest`.
+#   allowedRegistries        only these registries may be pulled from. Empty = no opinion.
+#   denyDevicePassthrough    refuse `vm create --device` (VFIO PCI passthrough) — the
+#                            VM equivalent of `--privileged`, and then some: it gives
+#                            the guest DMA to host hardware.
+#   denyLatestVmImage        refuse a VM disk image reference with no tag or `:latest`.
+#                            Separate from `denyLatestTag` on purpose: a `vm --vmfile`
+#                            build tags its output `&lt;name&gt;:latest` by default.
+#   allowedImageUrlHosts     hosts a `vm create --url-img` qcow2 may be fetched from.
+#                            Empty = no opinion (TLS alone, per the CLI&#x27;s own `--help`).
+#
+# `delonix explain RuntimePolicy` prints this from the generated schema.
+---
+apiVersion: security.delonix.io/v1alpha1
+kind: RuntimePolicy
+metadata: { name: node-ceiling }
+spec:
+  mode: enforce
+  denyPrivileged: true
+  denyHostNetwork: true
+  denyLatestTag: true
+  allowedRegistries: [ghcr.io, docker.io]
+  denyDevicePassthrough: true
+  denyLatestVmImage: true
+  allowedImageUrlHosts: [cloud.debian.org]</code></pre>
+<h2 id='ippool'>IPPool</h2>
+<p class='lang-pt'>Um livro de reservas de endereços DO HOST que as rotas reclamam: uma rota com <code>spec.pool</code> segura UM endereço do pool enquanto for declarada e responde nesse endereço em vez do loopback. Só IPv4; com <code>announce: local</code> o endereço já tem de estar numa interface deste host. Um pool com um endereço reservado não se remove nem encolhe.</p><p class='lang-en'>A reservation ledger of HOST addresses that routes claim: a route with <code>spec.pool</code> holds ONE address of the pool for as long as it is declared, and answers on that address instead of loopback. IPv4 only; with <code>announce: local</code> the address must already be on an interface of this host. A pool with a leased address cannot be removed or shrunk.</p>
+<pre><code># Complete reference for `kind: IPPool` (ADR-0046, D3) — a reservation ledger of HOST
+# addresses that routes claim. A route with `spec.pool: &lt;name&gt;` holds ONE address of the
+# pool for as long as it is declared, is reachable on that address instead of loopback,
+# and (with `hosts: [host]`) has its names pointed at it in the operator&#x27;s /etc/hosts.
+#
+# spec fields:
+#   addresses  a single address, a range `a.b.c.d-e.f.g.h`, or a CIDR (a CIDR wider than
+#              /31 leaves out its network and broadcast address). IPv4 only.
+#   announce   `local` (default): the address must ALREADY be on an interface of this
+#              host — the apply checks it and stops when it is not. `l2` (the engine adds
+#              it and announces it) is planned and refused.
+#   interface  only with `announce: l2`.
+#
+# The ledger is observable: `delonix get ippools`, `delonix describe ippools edge`.
+# A pool cannot be removed, and its addresses cannot shrink under a lease, while a route
+# holds an address — remove or change the route first. 127.0.0.10-12 are used here
+# because every 127/8 address is on the loopback and needs no setup.
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: IPPool
+metadata: { name: edge }
+spec:
+  addresses: [&quot;127.0.0.10-127.0.0.12&quot;]
+  announce: local</code></pre>
+<h2 id='networkzone'>NetworkZone</h2>
+<p class='lang-pt'>Uma zona da SDN do próprio Proxmox VE e as vnets dentro dela. O documento não nomeia a infraestrutura: realiza-o o provider de zonas configurado (hoje um nó Proxmox registado por <code>DELONIX_PROXMOX_*</code>); sem nenhum, o <code>apply</code> recusa. Sem actualização no lugar: o <code>apply</code> garante as vnets listadas, e o teardown remove as vnets, depois a zona.</p><p class='lang-en'>A zone of Proxmox VE's own SDN and the vnets inside it. The document never names the infrastructure: the configured zone provider realizes it (today a Proxmox node registered through <code>DELONIX_PROXMOX_*</code>); with none, <code>apply</code> refuses. No update in place: <code>apply</code> ensures the listed vnets, and teardown removes the vnets, then the zone.</p>
+<pre><code># kind: NetworkZone — a zone of Proxmox VE&#x27;s own SDN and the vnets inside it
+# (ADR-0049 addendum). The document never names the infrastructure: it is
+# realized by the zone provider the runtime has configured, which today is a
+# Proxmox node registered through DELONIX_PROXMOX_URL/_NODE and a credential
+# (see &quot;Remote providers&quot; in the README). With no provider configured, `apply`
+# refuses; `manifest validate` does not need one.
+#
+# metadata.name is the zone&#x27;s SDN id on the node — a lowercase letter and up to
+# seven more lowercase letters or digits; the provider checks the exact format.
+# There is no update in place: `apply` ensures every vnet listed is present, and
+# a vnet dropped from the list stays until the whole zone is torn down
+# (`stack apply --prune`, `stack destroy`, or `--replace NetworkZone/&lt;name&gt;`),
+# which removes the vnets, then the zone, then commits once.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkZone
+metadata: { name: lab }
+spec:
+  vnets:
+    - { name: labnet1, alias: &quot;lab network 1&quot; }
+    - { name: labnet2 }</code></pre>
+<h2 id='networkgateway'>NetworkGateway</h2>
+<p class='lang-pt'>Aliases e regras de filtro numa firewall de perímetro (ADR-0051), hoje o OPNsense, registado por <code>DELONIX_OPNSENSE_URL</code> e um par key/secret de API. Aliases entram antes das regras e saem depois delas; a identidade de uma regra é a sua <code>description</code>. Uma alteração ao spec é remover e voltar a aplicar.</p><p class='lang-en'>Aliases and filter rules on a perimeter firewall (ADR-0051), today OPNsense, registered through <code>DELONIX_OPNSENSE_URL</code> and an API key/secret pair. Aliases go in before rules and come out after them; a rule's identity is its <code>description</code>. A spec change is a remove and re-apply.</p>
+<pre><code># kind: NetworkGateway — aliases and filter rules on a perimeter firewall
+# appliance (ADR-0051). `spec.provider` names a registered gateway provider:
+# `opnsense`, registered through DELONIX_OPNSENSE_URL and a credential — a
+# generated API key/secret pair (DELONIX_OPNSENSE_CREDENTIAL names a
+# `kind: Secret` with `key` and `secret`); an account&#x27;s password is refused by
+# the appliance. `manifest validate` does not contact it.
+#
+# Aliases are applied before rules and removed after them, because the
+# appliance checks a rule&#x27;s source against its alias table. A rule&#x27;s identity
+# on the appliance is its `description`. There is no update in place: a changed
+# spec is removed and applied again.
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: edge }
+spec:
+  provider: opnsense
+  aliases:
+    - name: delonix_web
+      kind: host            # host | network
+      content: [&quot;10.20.0.10&quot;, &quot;10.20.0.11&quot;]
+      description: web tier
+  rules:
+    - description: office to web tier
+      source: 192.168.1.0/24   # an alias name, a CIDR, or any
+      destination: delonix_web
+      protocol: TCP            # omit for any protocol</code></pre>
 <footer><span class='lang-pt'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Referência gerada do <code>--help</code> real do binário por <code>docs/gen.py</code>.</span><span class='lang-en'>Delonix Engine · Apache-2.0 · <a href="https://github.com/angolardevops/delonix-runtime">angolardevops/delonix-runtime</a> · Reference generated from the real <code>--help</code> of the binary by <code>docs/gen.py</code>.</span></footer>
 </main>
 <aside class="toc" id="pagetoc"><div class="toc-inner"><h5><span class='lang-pt'>Nesta página</span><span class='lang-en'>On this page</span></h5><nav id="toc-nav"></nav></div></aside>
