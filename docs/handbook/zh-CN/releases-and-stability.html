@@ -275,7 +275,7 @@ to build and names the release, so an unchecked <code>tag: main</code> would hav
    Ubuntu. <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/install.sh" target="_blank" rel="noopener"><code>scripts/install.sh</code></a> picks the <code>-v3</code> build automatically when the host CPU supports it.
    A separate <code>build-arm64</code> job builds the same four binaries natively on an aarch64 runner (one
    per component, no <code>-v3</code> variant), and they are published as <code>&lt;name&gt;-aarch64-linux</code> under the same
-   <code>SHA256SUMS</code>. <code>install.sh</code> does not install them yet. The job only runs at release time, so its
+   <code>SHA256SUMS</code>. <code>install.sh</code> installs them on an aarch64 host (#447). The job only runs at release time, so its
    first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
    <code>test (arm64)</code> job on every PR.</li>
 <li><strong>Regenerates the user site against this exact release build and fails if <code>docs/</code> differs.</strong>

@@ -59,7 +59,7 @@ to build and names the release, so an unchecked `tag: main` would have published
    Ubuntu. `scripts/install.sh` picks the `-v3` build automatically when the host CPU supports it.
    A separate `build-arm64` job builds the same four binaries natively on an aarch64 runner (one
    per component, no `-v3` variant), and they are published as `<name>-aarch64-linux` under the same
-   `SHA256SUMS`. `install.sh` does not install them yet. The job only runs at release time, so its
+   `SHA256SUMS`. `install.sh` installs them on an aarch64 host (#447). The job only runs at release time, so its
    first execution was the v4.2.0 release itself; CI runs the test suite natively on arm64 in the
    `test (arm64)` job on every PR.
 2. **Regenerates the user site against this exact release build and fails if `docs/` differs.**
