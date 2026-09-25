@@ -1052,6 +1052,38 @@ fn the_secret_reaches_no_error_no_debug_output_and_no_trace_file() {
     assert!(traced.contains(&format!("GET {CONFIG}\n")), "{traced}");
 }
 
+/// ADR-0052: a `scope: vm` policy on a cluster whose DATACENTER firewall is
+/// off is refused with DX-6508 — and refused BEFORE anything is written. The
+/// node's answer here is the one measured on PVE 9.2.2 for a cluster that
+/// never had it on: a bare `digest`, no `enable` key at all.
+#[test]
+fn a_vm_policy_on_a_cluster_with_its_firewall_off_is_refused_before_any_write() {
+    let node = MockNode::start(script(&[(
+        "GET",
+        "/cluster/firewall/options",
+        ok_data(r#"{"digest":"da39a3ee5e6b4b0d3255bfef95601890afd80709"}"#),
+    )]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let policy = delonix_vm::firewall::Policy {
+        direction: delonix_vm::firewall::Direction::In,
+        default_allow: false,
+        rules: vec![],
+    };
+    let err = delonix_proxmox::vm_firewall::apply(&client, &Ledger::at(dir.path()), 100, &policy)
+        .expect_err("a datacenter firewall that is off must refuse");
+    assert_eq!(err.number(), 6508, "{err}");
+    let writes: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.method != "GET" && !s.path.ends_with("/access/ticket"))
+        .collect();
+    assert!(
+        writes.is_empty(),
+        "the refusal wrote to the node: {writes:?}"
+    );
+}
+
 // ===========================================================================
 // Power operations: shutdown, reboot, reset, suspend, resume
 // ===========================================================================

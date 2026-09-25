@@ -1,0 +1,44 @@
+# `kind: NetworkPolicy` with `scope: vm` — the firewall of the node a VM runs on
+# (ADR-0052). Today that is a Proxmox node; a libvirt or Cloud Hypervisor VM
+# refuses the policy with the reason, instead of accepting it.
+#
+# Needs a registered Proxmox target (DELONIX_PROXMOX_URL/_NODE and a credential)
+# and the cluster's DATACENTER firewall already on — the engine never turns that
+# switch on, because it also changes what the cluster's own nodes accept.
+#
+# Same contract as a container policy: one document is the whole desired state
+# of one direction. Rules are evaluated IN ORDER on the node (first match wins),
+# above any rule an operator added by hand, which is never touched.
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: VirtualMachine
+metadata: { name: web-vm }
+spec:
+  backend: proxmox
+  disk: "local-lvm:8"
+  vcpus: 2
+  memory: 2G
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: web-vm-in }
+spec:
+  scope: vm
+  target: web-vm
+  direction: ingress
+  defaultPolicy: deny
+  rules:
+    - { proto: tcp, port: "22", from: 10.0.0.0/8, note: "ssh from the admin network" }
+    - { proto: tcp, port: "443" }
+    - { port: "53", from: 10.0.0.0/8 }   # any protocol + a port = TCP and UDP
+---
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkPolicy
+metadata: { name: web-vm-out }
+spec:
+  scope: vm
+  target: web-vm
+  direction: egress
+  defaultPolicy: allow
+  rules:
+    - { proto: tcp, port: "25", action: deny, note: "no direct mail out" }

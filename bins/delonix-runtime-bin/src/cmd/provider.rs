@@ -73,12 +73,13 @@ fn parse_kind(s: &str) -> std::result::Result<ProviderKind, String> {
 
 /// Every provider report, MEASURED on this host. Order: the VM backends in
 /// registry order (the auto-detection preference), then the Linux provider's
-/// three kinds. A Proxmox target that is not registered in this process still
+/// three kinds with Proxmox's network report after the Linux one. A Proxmox target that is not registered in this process still
 /// appears, declared and unavailable, so the list is the same set of names on
 /// every host — a reader compares hosts by state, not by which rows exist.
 pub fn measured_reports() -> Vec<ProviderReport> {
     let mut out = delonix_vm::provider_reports();
-    if !out.iter().any(|r| r.id == "proxmox") {
+    let proxmox_configured = out.iter().any(|r| r.id == "proxmox");
+    if !proxmox_configured {
         out.push(delonix_proxmox::capability_report(false));
     }
     out.push(delonix_linux::provider_report::report(
@@ -86,6 +87,12 @@ pub fn measured_reports() -> Vec<ProviderReport> {
     ));
     out.push(delonix_sdn::provider_report::report(
         &delonix_sdn::provider_report::SdnHost::probe(),
+    ));
+    // The node's own per-VM firewall (ADR-0052): the second network
+    // provider, next to the Linux one. Same configured flag as the VM backend
+    // — it is the same target, answering a different port.
+    out.push(delonix_proxmox::network_capability_report(
+        proxmox_configured,
     ));
     out.push(delonix_volume::provider_report::report(
         &delonix_volume::provider_report::StorageHost::probe(),
@@ -103,6 +110,7 @@ pub fn declared_reports() -> Vec<ProviderReport> {
         delonix_proxmox::capability_report(true),
         delonix_linux::provider_report::report(&delonix_linux::provider_report::LinuxHost::ASSUMED),
         delonix_sdn::provider_report::report(&delonix_sdn::provider_report::SdnHost::ASSUMED),
+        delonix_proxmox::network_capability_report(true),
         delonix_volume::provider_report::report(
             &delonix_volume::provider_report::StorageHost::ASSUMED,
         ),
