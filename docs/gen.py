@@ -1836,8 +1836,9 @@ connections/conntrack; <code>system events</code> the event stream.""",
     "dash": {
         "tagline": "Summary/KPI dashboard (htop-style TUI) — RAM/network/disk, per-container uptime, JSON and Prometheus.",
         "intro": """A live view of runtime state — containers, VMs, images, networks, storage —
-in one screen, without running <code>ls</code> across 5 different groups. Each group also has its
-own (<code>container dash</code>, <code>vm dash</code>, ...); this is the global aggregate.
+in one screen, without running <code>ls</code> across 5 different groups. <code>--scope
+container|vm|network|volume|image</code> focuses it on one group — it replaced the five
+<code>&lt;group&gt; dash</code> commands that existed before (clean cut, no alias).
 Dynamic KPIs: cgroup slice memory, accumulated rx/tx traffic per container (with an explicit count
 of unmeasured <code>--net host/none</code> containers, never silently summed as zero), disk usage
 by area (images/volumes/VM-images/containers), and real per-container uptime (the <code>UP</code>

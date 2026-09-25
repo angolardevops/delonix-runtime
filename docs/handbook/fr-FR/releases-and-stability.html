@@ -278,7 +278,7 @@ aurait publié une release appelée « main ». Ensuite seulement, en un seul 
    quand le CPU de l'hôte le prend en charge.
    Un job <code>build-arm64</code> distinct construit nativement les quatre mêmes binaires sur un runner aarch64 (un par
    composant, sans variante <code>-v3</code>), et ils sont publiés sous le nom <code>&lt;name&gt;-aarch64-linux</code> avec le même
-   <code>SHA256SUMS</code>. <code>install.sh</code> ne les installe pas encore. Le job ne s'exécute qu'au moment de la release, donc sa
+   <code>SHA256SUMS</code>. <code>install.sh</code> les installe sur un hôte aarch64 (#447). Le job ne s'exécute qu'au moment de la release, donc sa
    première exécution a été la release v4.2.0 elle-même ; la CI exécute la suite de tests nativement sur arm64
    dans le job <code>test (arm64)</code> à chaque PR.</li>
 <li><strong>Régénère le site utilisateur contre ce build de release exact et échoue si <code>docs/</code>
