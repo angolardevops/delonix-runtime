@@ -537,6 +537,11 @@ fn build_one_stage(
                             cur_id = cid;
                             cur_rootfs = crootfs;
                             chain_hash = new_hash;
+                            // A cache hit is a step that succeeded. Skipping the
+                            // `p.ok()` below left it to the next `step`/`Drop`,
+                            // which close an open step as FAILED: a clean rebuild
+                            // printed ✗ on every cached instruction and exited 0.
+                            p.ok();
                             continue;
                         }
                     }
@@ -588,6 +593,11 @@ fn build_one_stage(
                             cur_id = cid;
                             cur_rootfs = crootfs;
                             chain_hash = new_hash;
+                            // A cache hit is a step that succeeded. Skipping the
+                            // `p.ok()` below left it to the next `step`/`Drop`,
+                            // which close an open step as FAILED: a clean rebuild
+                            // printed ✗ on every cached instruction and exited 0.
+                            p.ok();
                             continue;
                         }
                     }
@@ -726,9 +736,16 @@ fn work_launch(rootfs: &str) -> delonix_compute::launch::Launch {
 /// unconditionally, after the step loop ends (success OR failure: a
 /// `RUN`/`COPY` failing partway through must not leak a still-running
 /// container).
+///
+/// Stopped with NO grace period. Its PID 1 is `sleep infinity`, which ignores
+/// SIGTERM, so the 5 s it used to be given were always spent in full: measured,
+/// 5.4 s of an incremental rebuild's 7.1 s sat between the last `RUN` and the
+/// packaging, paid once per stage and again on every cache hit after a miss.
+/// It is a throwaway container whose writes are already on disk; there is
+/// nothing for a grace period to protect.
 fn retire_container(store: &Store, container: &mut Option<Container>) {
     if let Some(mut c) = container.take() {
-        let _ = runtime::stop(store, &mut c, 5);
+        let _ = runtime::stop(store, &mut c, 0);
     }
 }
 
