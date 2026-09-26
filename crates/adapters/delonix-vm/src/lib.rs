@@ -764,7 +764,8 @@ const KNOWN_UNREGISTERED: &[(&str, &str)] = &[(
     "the Proxmox backend (crate `delonix-proxmox`) needs a node to talk to, so it is only \
      available once one is configured. Set `DELONIX_PROXMOX_URL`, `DELONIX_PROXMOX_NODE` and a \
      credential (`DELONIX_PROXMOX_TOKEN`, or a `kind: Secret` named by \
-     `DELONIX_PROXMOX_SECRET`) — see docs/adr/0008-proxmox-vm-backend.md",
+     `DELONIX_PROXMOX_SECRET`), or a `type: proxmox` entry in the node's providers file \
+     (`/etc/delonix/providers.yaml`, ADR-0054) — see docs/adr/0008-proxmox-vm-backend.md",
 )];
 
 fn unknown_backend(name: &str) -> Error {
@@ -984,9 +985,39 @@ pub fn backend_manages_own_storage(want: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-/// The backend chosen ONCE instead of per-command: `DELONIX_VM_BACKEND`
-/// (session-wide) and then the persisted default ([`set_default_backend`],
-/// machine-wide). `None` when neither is set.
+/// The default provider the NODE declares, set once at startup by whoever
+/// read the node's providers file (ADR-0054 D1-D3) — the composition root, not
+/// this crate, which never reads a configuration file. `Ok(None)`: the file
+/// names no default. `Err`: the file exists and could not be read, which makes
+/// every choice that would have used it fail instead of guessing.
+static CONFIGURED_DEFAULT: std::sync::OnceLock<std::result::Result<Option<String>, String>> =
+    std::sync::OnceLock::new();
+
+/// Records the node's configured default provider (ADR-0054). The first call
+/// wins; a process reads its providers file once.
+pub fn set_configured_default_backend(value: std::result::Result<Option<String>, String>) {
+    let _ = CONFIGURED_DEFAULT.set(value.map(|o| o.map(|n| n.trim().to_lowercase())));
+}
+
+/// What [`set_configured_default_backend`] recorded, if anything — for a
+/// caller that reports the default (`vm default-backend`) and has to say where
+/// it came from.
+pub fn configured_default_backend() -> Option<&'static std::result::Result<Option<String>, String>>
+{
+    CONFIGURED_DEFAULT.get()
+}
+
+/// The backend chosen ONCE instead of per-command, in the order ADR-0054 D3
+/// fixes: `DELONIX_VM_BACKEND` (session-wide), then the node's configured
+/// default ([`set_configured_default_backend`]), then the persisted legacy
+/// default ([`set_default_backend`]). `Ok(None)` when none is set.
+///
+/// **A default the process cannot serve is not dropped.** The name is
+/// returned as written, so selecting it fails with the reason
+/// (`BackendNotConfigured` for a provider this process has no target for)
+/// instead of falling through to auto-detection and creating the VM on a
+/// LOCAL hypervisor — measured before this existed: a default of `proxmox`
+/// read by a process without the target created locally, rc=0 (ADR-0054 §3).
 ///
 /// Public because [`create_with`] is no longer the only place that needs the
 /// answer, and two copies of a precedence rule is how they start to disagree.
@@ -994,11 +1025,19 @@ pub fn backend_manages_own_storage(want: Option<&str>) -> bool {
 /// that asks it without threading this through gets the local backend even on a
 /// machine standing-configured for Proxmox — and then goes on to prepare a
 /// local overlay for a guest that will run somewhere else entirely.
-pub fn standing_backend_choice(base: &Path) -> Option<String> {
-    std::env::var("DELONIX_VM_BACKEND")
+pub fn standing_backend_choice(base: &Path) -> Result<Option<String>> {
+    if let Some(v) = std::env::var("DELONIX_VM_BACKEND")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .or_else(|| get_default_backend(base))
+    {
+        return Ok(Some(v));
+    }
+    match CONFIGURED_DEFAULT.get() {
+        Some(Err(why)) => return Err(Error::BackendNotConfigured(why.clone())),
+        Some(Ok(Some(name))) => return Ok(Some(name.clone())),
+        _ => {}
+    }
+    Ok(get_default_backend(base))
 }
 
 /// Validates and normalizes a backend name for external callers (the CLI's
@@ -1017,12 +1056,21 @@ fn default_backend_file(base: &Path) -> PathBuf {
 }
 
 /// The persisted default backend, if one was set with [`set_default_backend`].
-/// Best-effort: a missing or unreadable file is `None`, never an error — this
-/// is a convenience default, not a requirement, and a corrupt/stale file must
-/// not block `vm create` (fall through to auto-detection instead).
+/// A missing or unreadable file is `None`. A name this process has not
+/// registered is returned AS WRITTEN, never dropped: dropping it is what made
+/// a `proxmox` default fall through to a local hypervisor in a process without
+/// the target (ADR-0054 §3). Selecting it then fails with the reason.
 pub fn get_default_backend(base: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(default_backend_file(base)).ok()?;
-    canonical_backend_name(raw.trim()).map(str::to_string)
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(
+        canonical_backend_name(raw)
+            .map(str::to_string)
+            .unwrap_or_else(|| raw.to_lowercase()),
+    )
 }
 
 /// Persists the default backend used when neither `--backend` nor
@@ -3901,7 +3949,7 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
             // choice, just made once instead of per-command; a backend
             // requested this way that can't actually boot the VM (e.g. the
             // volumes/9p case above) still fails loud at boot, never silently.
-            let standing_choice = standing_backend_choice(base);
+            let standing_choice = standing_backend_choice(base)?;
             let want = match cfg.backend.as_deref().or(standing_choice.as_deref()) {
                 Some(b) => Some(b.to_string()),
                 None if !cfg.volumes.is_empty() => Some("libvirt".to_string()),
@@ -6251,6 +6299,13 @@ Format specific information:
         assert_eq!(get_default_backend(&dir), None);
         // Clearing an already-cleared default is not an error.
         clear_default_backend(&dir).unwrap();
+
+        // ADR-0054 §3: a name this process has not registered is kept, not
+        // dropped — so selecting it fails instead of falling through to a
+        // local hypervisor.
+        std::fs::write(default_backend_file(&dir), "Nave-Remota\n").unwrap();
+        assert_eq!(get_default_backend(&dir).as_deref(), Some("nave-remota"));
+        assert!(select_backend(get_default_backend(&dir).as_deref()).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }

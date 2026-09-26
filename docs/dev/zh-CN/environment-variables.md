@@ -31,7 +31,7 @@
 | Docker API 的 socket | `--addr` > `DELONIX_DOCKER_ADDR` > `unix:///run/delonix-docker.sock` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` |
 | 输出语言 | `--l18n` > `DELONIX_L18N` > 英文 | `bins/delonix-runtime-bin/src/cmd/po.rs:peek_lang` |
 | VM 控制台的转义键 | `--escape` > `DELONIX_CONSOLE_ESCAPE` > `^]` | `bins/delonix-runtime-bin/src/cmd/vm.rs:resolve_escape` |
-| VM 的 backend | `--backend`（或镜像自带的 `HYPERVISOR`） > `DELONIX_VM_BACKEND` > `vm default-backend --set` > 自动检测 | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` |
+| VM 的 backend | `--backend`（或镜像自带的 `HYPERVISOR`） > `DELONIX_VM_BACKEND` > providers 文件中的 `defaultProvider`（ADR-0054） > `vm default-backend --set` > 自动检测（仅在没有 providers 文件时） | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` |
 | 已发布端口绑定的地址 | `-p <ip>:<host>:<container>` 里的地址 > `DELONIX_PUBLISH_ADDR` > `127.0.0.1` | `crates/adapters/delonix-sdn/src/lib.rs:publish_bind_addr` |
 | `image scan --update` 用的 CVE 数据源 | `--feed` > `DELONIX_ADVISORY_FEED` > 报错 | `bins/delonix-runtime-bin/src/cmd/scan.rs:cmd_scan_update` |
 | 日志过滤器 | `DELONIX_LOG` > `RUST_LOG` > `info` | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` |
@@ -74,6 +74,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_API_ADDR` | `bins/delonix-mgmt-bin/src/main.rs:run`；由 `cmd/serve.rs:run` 转发 | 本地管理 API（`delonix serve api`）的 socket。 | `unix://<path>`。默认 `unix:///run/delonix-mgmt.sock`。 | `--addr` 优先。这个 API 仅限本地（调用方的 uid）。 |
 | `DELONIX_DOCKER_ADDR` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` | Docker Engine API 切片（`delonix serve docker-api`）的 socket。 | `unix://<path>`（`unix://` 前缀可省略）。默认 `unix:///run/delonix-docker.sock`。 | `--addr` 优先。 |
 | `DELONIX_VM_BACKEND` | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` | 当某条命令没有点名 backend 时，整个会话范围内用的 VM backend。 | 一个 backend 名字（`libvirt`、`cloud-hypervisor`，或者一个已注册的远端 backend，比如 `proxmox`）。空白会被忽略。 | 优先级低于 `--backend` 和镜像自带的 `HYPERVISOR`，高于 `delonix vm default-backend --set` 设的机器级默认值。跟显式选择一样，它会覆盖能力启发式判断，并且如果这个 backend 跑不了这个 VM，可能会在启动很晚的时候才失败。 |
+| `DELONIX_PROVIDERS_CONFIG` | `cmd/providers_config.rs:locate_with` | 节点 providers 文件的路径（ADR-0054），优先于 `$XDG_CONFIG_HOME/delonix/providers.yaml` 和 `/etc/delonix/providers.yaml`。 | 一个路径。 | 必须指向已存在的文件——绝不退回到其他文件。找到的第一个文件就是配置；文件从不合并。无法读取的文件会让不带 `--backend` 的 VM 请求失败，而不是猜测一个 provider。 |
 | `DELONIX_NO_CGROUP_WARN` | `crates/adapters/delonix-linux/src/lib.rs`（关于缺少 cgroup 委派的警告，以及 `warn_if_unprotected_memory`）、`bins/delonix-runtime-bin/src/cmd/kindmode.rs` | 让「缺少 cgroup 委派」和「容器在任何地方都没有内存上限」这两类警告不再出现。 | 设置（任意值）→ 静默。 | 引擎自己会**设置**它（`cmd/util.rs:silence_cgroup_warning`、`cmd/kindmode.rs`），这样 re-exec 出来的子进程就不会重复父进程已经打印过的警告。自己手动设置它会掩盖一个真实的情况：限制没有被强制执行。 |
 | `DELONIX_POLICY_LINT` | `bins/delonix-runtime-bin/src/cmd/policy.rs:show_lints` | 让每条命令一次的 runtime-policy 警告（`warning: runtime policy [...]`）静默。 | `0` → 静默；其他任何值或未设置 → 显示。 | 给那些已经读过警告、并且另有决定的人用的。 |
 | `DELONIX_NO_AUTO_RECOVER` | `bins/delonix-runtime-bin/src/cmd/netns.rs:reconcile_after_respawn` | 在网络 holder 被重建之后，只报告那些被搁浅的容器和重启它们的命令，而不自动重启它们。 | 设置（任意值）→ 只报告。 | 给那些想自己选时机重启数据库的宿主机用的。 |
@@ -146,6 +147,7 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_PROXMOX_TOKEN_FILE` | `cmd/vmbackends.rs:credential_value` | 存放 API token 密钥的文件路径；优先于 `DELONIX_PROXMOX_TOKEN`，因为后者会被每个子进程继承。 | 一个路径。 | 除非只有属主可读（`chmod 600`），否则拒绝。 |
 | `DELONIX_PROXMOX_USER` | `cmd/vmbackends.rs:proxmox_auth` | 用密码认证的账号。 | `root@pam`，…… | 和 `DELONIX_PROXMOX_PASSWORD` 一起用；最后被检查。 |
 | `DELONIX_PROXMOX_PASSWORD` | `cmd/vmbackends.rs:proxmox_auth` | 该账号的密码。 | | |
+| `DELONIX_PROXMOX_PASSWORD_FILE` | `cmd/vmbackends.rs:credential_value` | 存放该密码的文件路径；优先于 `DELONIX_PROXMOX_PASSWORD`。 | 一个路径。 | 除非只有属主可读（`chmod 600`），否则拒绝。providers 文件中的 `passwordFile` 会映射到它。 |
 | `DELONIX_PROXMOX_INSECURE_TLS` | `cmd/vmbackends.rs:register_proxmox_with` | 跳过对这个节点的 TLS 证书校验。 | `1`、`true` 或 `yes` → 跳过；默认要校验。 | **冒充这个节点应答的另一台机器会拿到凭据。** 只能主动选择加入，绝不会在 TLS 出错后作为回退被应用。 |
 | `DELONIX_PROXMOX_BRIDGE` | `cmd/vmbackends.rs:register_proxmox_with` | 这个节点上 VM 网卡的默认网桥。 | 一个网桥的名字；这个 backend 的默认值是 `vmbr0`。 | 每个 VM 自己的 `bridge:` 优先。 |
 | `DELONIX_PROXMOX_VLAN` | `cmd/vmbackends.rs:parse_vlan` | 这个节点上 VM 网卡的默认 VLAN 标签。 | 1–4094。超出范围是一个**错误**，绝不会被悄悄丢弃。 | |
