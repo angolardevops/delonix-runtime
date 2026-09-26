@@ -4602,6 +4602,56 @@ pub fn resize(base: &Path, name: &str, vcpus: Option<u32>, memory: Option<&str>)
     Ok(vm)
 }
 
+/// Moves VM `name` to `target`, another node of its cluster (`vm move --node`,
+/// ADR-0053 decision 1; see [`VmBackend::move_to_node`]).
+///
+/// The target is always the caller's: there is no default and no selection.
+/// Refused before the backend is asked: an empty target, and a power state
+/// that does not match `live` as the record says it — `--live` on a stopped
+/// VM, no `--live` on a running one, and a paused VM either way (unpause it or
+/// stop it first). The backend asks its node the same question again, because
+/// a record can be out of date. The record takes the handle the backend
+/// returns only after the move is proved, so a refused or failed move leaves
+/// it naming the node the VM is still on.
+///
+/// Returns the updated record.
+pub fn move_to_node(base: &Path, name: &str, target: &str, live: bool) -> Result<Vm> {
+    let target = target.trim();
+    if target.is_empty() {
+        return Err(Error::InvalidMoveTarget(format!(
+            "no node to move VM '{name}' to: give `--node <node>`"
+        )));
+    }
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if let Some(why) = move_power_refusal(&vm.status, live) {
+        return Err(Error::MoveRefused(format!("VM '{name}' {why}")));
+    }
+    let handle = backend_for(&vm)?.move_to_node(&vmdir, &vm, target, live)?;
+    vm.api_socket = handle;
+    st.save(name, &vm).map_err(state_err)?;
+    Ok(vm)
+}
+
+/// Why a move of a VM in `status` is refused for `live`, or `None`. Pure.
+fn move_power_refusal(status: &Status, live: bool) -> Option<String> {
+    match (status, live) {
+        (Status::Paused, _) => Some(
+            "is paused: a move needs it running (`--live`) or stopped — unpause it or stop it first"
+                .into(),
+        ),
+        (Status::Running, false) => Some(
+            "is running: move it with `--live`, or stop it first for an offline move".into(),
+        ),
+        (Status::Running, true) => None,
+        (_, true) => Some(
+            "is not running: `--live` moves a running VM — drop `--live` for an offline move".into(),
+        ),
+        (_, false) => None,
+    }
+}
+
 /// Takes a named snapshot of VM `name` (see [`VmBackend::snapshot`]). On libvirt a
 /// running VM's snapshot is a system checkpoint (memory + disk).
 pub fn snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
@@ -7849,6 +7899,211 @@ Format specific information:
             ..base
         };
         assert!(libvirt_domain_xml(&qxl, "/tmp/x.qcow2", "").contains("type='qxl'"));
+    }
+
+    /// `vm move --node`: an empty target and a power state that does not
+    /// match `--live` are refused before the backend is asked; a backend
+    /// failure leaves the record naming the node the VM is still on; only an
+    /// `Ok` writes the handle the backend returns. A backend with no cluster
+    /// refuses by name and names `vm migrate`.
+    #[test]
+    fn move_refuses_before_the_backend_and_writes_the_handle_only_on_success() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex;
+        static CALLS: Mutex<Vec<(String, bool)>> = Mutex::new(Vec::new());
+        static FAIL: AtomicBool = AtomicBool::new(false);
+
+        struct Movable;
+        impl VmBackend for Movable {
+            fn id(&self) -> &'static str {
+                "movivel"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn move_to_node(
+                &self,
+                _: &Path,
+                _: &Vm,
+                target: &str,
+                live: bool,
+            ) -> delonix_model::Result<String> {
+                CALLS.lock().unwrap().push((target.to_string(), live));
+                if FAIL.load(Ordering::SeqCst) {
+                    return Err(delonix_model::Error::Invalid("node said no".into()));
+                }
+                Ok(format!("fake:{target}:7"))
+            }
+        }
+        struct NoCluster;
+        impl VmBackend for NoCluster {
+            fn id(&self) -> &'static str {
+                "sem-cluster"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+        }
+        for (id, new) in [
+            (
+                "movivel",
+                Box::new(|| Ok(Box::new(Movable) as Box<dyn VmBackend>)) as BackendFactory,
+            ),
+            (
+                "sem-cluster",
+                Box::new(|| Ok(Box::new(NoCluster) as Box<dyn VmBackend>)) as BackendFactory,
+            ),
+        ] {
+            register_backend(BackendRegistration {
+                id,
+                aliases: &[],
+                auto_selectable: false,
+                report: crate::capabilities::undeclared("fake"),
+                new,
+            })
+            .expect("registar");
+        }
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-move-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let save = |name: &str, backend: &str, status: Status| {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                "fake:a:7".into(),
+            );
+            vm.backend = backend.into();
+            vm.status = status;
+            st.save(name, &vm).unwrap();
+        };
+        save("parada", "movivel", Status::Stopped);
+        save("a-correr", "movivel", Status::Running);
+        save("pausada", "movivel", Status::Paused);
+        save("n", "sem-cluster", Status::Stopped);
+        let handle = |name: &str| st.load(name).unwrap().api_socket;
+
+        let code_of = |e: Error| e.number();
+        assert_eq!(
+            code_of(move_to_node(&base, "parada", " ", false).unwrap_err()),
+            1538
+        );
+        assert_eq!(
+            code_of(move_to_node(&base, "parada", "b", true).unwrap_err()),
+            5507
+        );
+        assert_eq!(
+            code_of(move_to_node(&base, "a-correr", "b", false).unwrap_err()),
+            5507
+        );
+        assert_eq!(
+            code_of(move_to_node(&base, "pausada", "b", true).unwrap_err()),
+            5507
+        );
+        assert_eq!(
+            code_of(move_to_node(&base, "pausada", "b", false).unwrap_err()),
+            5507
+        );
+        assert!(move_to_node(&base, "nao-existe", "b", false)
+            .unwrap_err()
+            .is_not_found());
+        assert!(
+            CALLS.lock().unwrap().is_empty(),
+            "a refusal reached the backend"
+        );
+        for n in ["parada", "a-correr", "pausada"] {
+            assert_eq!(handle(n), "fake:a:7", "{n}: record changed");
+        }
+
+        FAIL.store(true, Ordering::SeqCst);
+        assert!(move_to_node(&base, "parada", "b", false).is_err());
+        assert_eq!(
+            handle("parada"),
+            "fake:a:7",
+            "a failed move rewrote the handle"
+        );
+        FAIL.store(false, Ordering::SeqCst);
+
+        let vm = move_to_node(&base, "parada", "b", false).unwrap();
+        assert_eq!(vm.api_socket, "fake:b:7");
+        assert_eq!(handle("parada"), "fake:b:7");
+        let vm = move_to_node(&base, "a-correr", "b", true).unwrap();
+        assert_eq!(vm.api_socket, "fake:b:7");
+        assert_eq!(
+            *CALLS.lock().unwrap(),
+            vec![
+                ("b".to_string(), false),
+                ("b".to_string(), false),
+                ("b".to_string(), true)
+            ]
+        );
+
+        let e = move_to_node(&base, "n", "b", false).unwrap_err();
+        assert_eq!(e.number(), 1501, "{e}");
+        let e = e.to_string();
+        assert!(e.contains("sem-cluster") && e.contains("vm migrate"), "{e}");
+        assert_eq!(handle("n"), "fake:a:7");
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends()
+            .write()
+            .unwrap()
+            .retain(|b| b.id != "movivel" && b.id != "sem-cluster");
     }
 
     /// `vm resize`: every refusal happens before the backend is asked and
