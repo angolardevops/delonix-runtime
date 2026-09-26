@@ -1574,8 +1574,7 @@ pub fn pull_from_registry_with_creds_full(
         },
         created_unix: now_unix(),
     };
-    store.enforce_tag_uniqueness(&image)?;
-    store.save(&image)?;
+    store.save_if_changed(&image)?;
     Ok(image)
 }
 
