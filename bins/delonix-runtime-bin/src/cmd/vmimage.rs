@@ -1762,17 +1762,20 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: Option<&str>) -
         }
     };
     let target = target.as_str();
-    let data = std::fs::read(store.qcow2_path(name)).map_err(|e| {
+    let qcow2 = store.qcow2_path(name);
+    // Checked here for the message; the push itself reads the file as it
+    // uploads it (streamed from disk — a VM image never goes through memory).
+    std::fs::metadata(&qcow2).map_err(|e| {
         Error::Invalid(format!(
             "{} '{name}': {e}",
             super::po::t("could not read the qcow2 of")
         ))
     })?;
-    let digest = delonix_oci::registry::push_oci_artifact_with_annotations(
+    let digest = delonix_oci::registry::push_oci_artifact_file(
         &state_root(),
         target,
         VM_IMAGE_MEDIA_TYPE,
-        &data,
+        &qcow2,
         &annotations_of(&img),
     )?;
     println!("{digest}");
