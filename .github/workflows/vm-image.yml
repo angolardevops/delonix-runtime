@@ -61,7 +61,13 @@ jobs:
       - name: Ferramentas de build da golden
         run: |
           sudo apt-get update
-          sudo apt-get install -y protobuf-compiler libguestfs-tools qemu-utils cloud-image-utils
+          sudo apt-get install -y protobuf-compiler libguestfs-tools qemu-utils cloud-image-utils \
+            qemu-system-x86 ovmf
+          # KVM for the boot probe below; without it the probe falls back to TCG (slower, same verdict).
+          if [ -e /dev/kvm ]; then
+            echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules && sudo udevadm trigger --name-match=kvm
+          fi
           # O supermin/libguestfs precisa de ler o kernel do host (runners: 0600).
           sudo chmod 0644 /boot/vmlinuz-* || true
       - name: Instala toolchain fixada
@@ -162,6 +168,14 @@ jobs:
               --no-k8s
           fi
           ./target/release/delonix image --vm ls
+      # A build that exits 0 is not a disk that boots: the 1.36 tag published on
+      # 2026-08-24 stopped at `grub rescue>` under SeaBIOS and nothing here noticed.
+      # Boot the artefact under both firmwares, on the bus a Proxmox template uses,
+      # and refuse to push unless the kernel is reached. See scripts/vm_boot_probe.sh.
+      - name: Boot probe (SeaBIOS and OVMF) before publishing
+        run: |
+          img="${DELONIX_ROOT:-${XDG_DATA_HOME:-$HOME/.local/share}/delonix}/vm-images/$(echo '${{ steps.vars.outputs.tag }}' | tr ':' '_').qcow2"
+          scripts/vm_boot_probe.sh "$img" both
       - name: Login no ghcr e push
         env:
           # Um PAT com `write:packages` (secret GHCR_TOKEN) tem precedência; sem
