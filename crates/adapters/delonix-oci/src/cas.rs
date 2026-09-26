@@ -16,6 +16,23 @@ pub fn sha256_hex(data: &[u8]) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+/// sha256 of a file in hexadecimal, read in 1 MiB chunks — never the whole
+/// file in memory.
+pub fn sha256_file(path: &Path) -> Result<String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
 /// Strips the `sha256:` prefix from a digest.
 pub fn strip(digest: &str) -> &str {
     digest.strip_prefix("sha256:").unwrap_or(digest)
@@ -209,6 +226,29 @@ impl StreamingBlob {
         }
     }
 
+    /// Reopens a partial download left by an earlier process and continues
+    /// after its last byte. The prefix is hashed again on the way in — the
+    /// hasher's state died with that process — which costs one read of what is
+    /// already on disk, far less than downloading it again.
+    pub fn resume(path: &Path) -> Result<Self> {
+        use std::io::Read;
+        let mut file = fs::OpenOptions::new().read(true).append(true).open(path)?;
+        let mut hasher = Sha256::new();
+        let mut len = 0u64;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            len += n as u64;
+        }
+        // Append mode: every write lands at the end, and after a truncate
+        // (the server ignored the `Range`) the end is zero again.
+        Ok(Self::spawn(file, hasher, len))
+    }
+
     /// Bytes received so far — what a resumed download continues from.
     pub fn len(&self) -> u64 {
         self.len
@@ -289,6 +329,26 @@ mod tests {
             None => blob.finish().expect_err("a full disk must fail the blob"),
         };
         assert!(err.to_string().to_lowercase().contains("space"), "{err}");
+    }
+
+    /// A partial left by an earlier process continues where it stopped: the
+    /// prefix is hashed again and the rest is appended after it, so the file
+    /// and the digest are those of the whole blob.
+    #[test]
+    fn a_resumed_blob_continues_after_the_prefix_on_disk() {
+        let dir = std::env::temp_dir().join(format!("delonix-cas-resume-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("img.download");
+        let whole: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        let cut = 1_234_567;
+        fs::write(&path, &whole[..cut]).unwrap();
+
+        let mut blob = StreamingBlob::resume(&path).unwrap();
+        assert_eq!(blob.len(), cut as u64);
+        blob.append(&whole[cut..]).unwrap();
+        assert_eq!(blob.finish().unwrap(), sha256_hex(&whole));
+        assert_eq!(fs::read(&path).unwrap(), whole);
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
