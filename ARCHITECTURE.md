@@ -2,7 +2,7 @@
 
 Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 **Delonix Engine**: motor de containers e microVMs **daemonless, rootless-first,
-kernel-native**, em Rust (23 crates, workspace `crates/`). Este documento é canónico
+kernel-native**, em Rust (25 crates, workspace `crates/`). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.
@@ -129,7 +129,7 @@ de PID) e reclassifica `Running`→`Crashed`/`Paused`. O CRI chama-o em
 
 ---
 
-## C4 — Nível 3: Componentes (os 23 crates)
+## C4 — Nível 3: Componentes (os 25 crates)
 
 Setas = dependências **reais**, confirmadas nos `Cargo.toml` de `crates/*/` e nos
 `use delonix_*` dos `src/`. Não há ciclos; `delonix-model` é a raiz comum.
@@ -158,6 +158,8 @@ graph TB
     COMPUTE["delonix-compute<br>contexto Compute (ADR-0040): a especificacao<br>de execucao unica (RunOpts) que as entradas traduzem"]
     MGMTBIN["delonix-mgmt-bin<br>o executavel delonix-mgmt, que `delonix serve api` executa (P3m)"]
     MCPBIN["delonix-mcp-bin<br>o executavel delonix-mcp, que `delonix mcp` executa (P3l)"]
+    NODEAPI["delonix-node-api<br>o contrato de no delonix.node.v1 SERVIDO: gRPC e HTTP/JSON<br>dos mesmos .proto num socket unix, so o proprio uid;<br>hoje ListProviders (ADR-0050 D5), o resto UNIMPLEMENTED"]
+    NODEAPIBIN["delonix-node-api-bin<br>o executavel delonix-node-api, que `delonix serve node-api` executa"]
     MCP["delonix-mcp<br>servidor MCP (ADR-0025) — superficie de IA LOCAL, sem inquilino<br>stdio-only; tools chamam Store/dominio, nunca shell arbitrario"]
 
     BIN --> RT
@@ -174,6 +176,17 @@ graph TB
     BIN --> OPN
     MCPBIN --> MCP
     MGMTBIN --> MGMT
+    NODEAPIBIN --> NODEAPI
+    NODEAPIBIN --> NODECTX
+    NODEAPIBIN --> TEL
+    NODEAPI --> VM2
+    NODEAPI --> PVE
+    NODEAPI --> RT
+    NODEAPI --> NET
+    NODEAPI --> VOL
+    NODEAPI --> COMPUTE
+    NODEAPI --> NODECTX
+    NODEAPI --> MODEL
     BIN --> MODEL
     BIN --> STACK
     BIN --> COMPUTE
@@ -294,7 +307,8 @@ Notas de leitura do grafo (todas verificadas):
   partir de fora, e **registam-se** (`register_backend`/`register_gateway_provider`), com
   o alvo conhecido só pelo `-bin`, não pelo motor.
 - **Nada depende de `delonix-proxmox`, `delonix-truenas` nem `delonix-opnsense` a não ser
-  o `-bin`** — são folhas do grafo, e é o que permite que um alvo remoto mal configurado
+  o `-bin` e, no caso do `delonix-proxmox`, o `delonix-node-api`** (que o lista entre os
+  providers do nó, como o `delonix provider ls` faz) — são folhas do grafo, e é o que permite que um alvo remoto mal configurado
   avise e siga em vez de parar um `container ls`.
 - **`delonix-mcp` fica fora dos oito crates de motor dependency-clean, pela MESMA razão
   do `delonix-mgmt`** (ADR-0025): traz o SDK MCP oficial (`rmcp`) e o seu próprio

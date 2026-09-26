@@ -12,11 +12,13 @@ use crate::proto::v1::{Capability, Condition, ConditionStatus, ProviderInfo};
 use delonix_compute::capability::{HealthStatus, ProviderReport, CATALOG_VERSION};
 
 /// Every provider this node knows, MEASURED on this host: the VM backends of
-/// the registry (plus Proxmox unconfigured when nobody registered it), and
-/// the Linux provider three times — compute, network, storage.
+/// the registry (plus Proxmox unconfigured when nobody registered it), the
+/// Linux provider three times — compute, network, storage — and Proxmox's own
+/// per-VM firewall as the second network provider.
 pub fn measured_reports() -> Vec<ProviderReport> {
     let mut out = delonix_vm::provider_reports();
-    if !out.iter().any(|r| r.id == "proxmox") {
+    let proxmox_configured = out.iter().any(|r| r.id == "proxmox");
+    if !proxmox_configured {
         out.push(delonix_proxmox::capability_report(false));
     }
     out.push(delonix_linux::provider_report::report(
@@ -24,6 +26,11 @@ pub fn measured_reports() -> Vec<ProviderReport> {
     ));
     out.push(delonix_sdn::provider_report::report(
         &delonix_sdn::provider_report::SdnHost::probe(),
+    ));
+    // The node's own per-VM firewall (ADR-0052): the second network provider,
+    // with the same configured flag as the VM backend — one target, two ports.
+    out.push(delonix_proxmox::network_capability_report(
+        proxmox_configured,
     ));
     out.push(delonix_volume::provider_report::report(
         &delonix_volume::provider_report::StorageHost::probe(),
@@ -41,6 +48,7 @@ pub fn declared_reports() -> Vec<ProviderReport> {
         delonix_proxmox::capability_report(true),
         delonix_linux::provider_report::report(&delonix_linux::provider_report::LinuxHost::ASSUMED),
         delonix_sdn::provider_report::report(&delonix_sdn::provider_report::SdnHost::ASSUMED),
+        delonix_proxmox::network_capability_report(true),
         delonix_volume::provider_report::report(
             &delonix_volume::provider_report::StorageHost::ASSUMED,
         ),

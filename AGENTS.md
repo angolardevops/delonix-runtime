@@ -2,7 +2,7 @@
 
 Motor de **containers e microVMs daemonless, rootless-first, kernel-native, em Rust**.
 Repositório **público** (`angolardevops/delonix-runtime`, Apache-2.0) — ver
-[README.md](README.md) para a arquitectura dos 23 crates.
+[README.md](README.md) para a arquitectura dos 25 crates.
 
 ## Identidade e fronteira do motor (ler primeiro)
 
@@ -6672,7 +6672,7 @@ antes de qualquer commit:
    genuína. Decidir QUANDO e PARA QUEM publicar portas numa frota multi-inquilino não é do
    motor.
 
-## Arquitetura (23 crates)
+## Arquitetura (25 crates)
 
 | Crate | Responsabilidade |
 |---|---|

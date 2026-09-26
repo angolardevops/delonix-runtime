@@ -524,8 +524,10 @@ section "provider ls / describe / matrix (ADR-0050): a matriz medida, não afirm
 # nunca vem sem evidência, e que a matriz publicada é a gerada — o teste
 # unitário do bin compara o ficheiro, este check confirma-o contra o binário.
 check "provider ls" ok "$BIN" provider ls
-check "provider ls -o json é um array com os 6 providers" ok bash -c \
-  "'$BIN' provider ls -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert len(v)==6, len(v)'"
+# The count comes from `provider matrix`, not a literal: ADR-0052 added a seventh
+# provider and a `==6` written here went red on every run after it.
+check "provider ls -o json lista os mesmos providers que a matriz" ok bash -c \
+  "n=\$('$BIN' provider matrix | grep -c '^- \*\*'); '$BIN' provider ls -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); n=int(sys.argv[1]); assert n>0 and len(v)==n, (len(v), n)' \"\$n\""
 check "provider ls -o json: cada capacidade leva name/supported/state/detail" ok bash -c \
   "'$BIN' provider ls -o json | python3 -c '
 import json,sys
@@ -537,7 +539,7 @@ for p in json.load(sys.stdin):
         assert c[\"state\"] != \"supported\" or c[\"detail\"], (p[\"id\"], c[\"name\"])
 '"
 check "provider ls --kind network só traz a rede" ok bash -c \
-  "'$BIN' provider ls --kind network -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert [p[\"kind\"] for p in v]==[\"network\"], v'"
+  "'$BIN' provider ls --kind network -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v and all(p[\"kind\"]==\"network\" for p in v), [p[\"kind\"] for p in v]'"
 check "provider describe libvirt" ok "$BIN" provider describe libvirt
 check "provider describe linux --kind storage" ok "$BIN" provider describe linux --kind storage
 check "provider describe de um provider inexistente diz 4" 4 "$BIN" provider describe naoexiste

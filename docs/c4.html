@@ -149,7 +149,7 @@ main{padding:1.4rem 1.2rem 4rem;max-width:none}}
 <h1>Arquitectura — Delonix Engine</h1>
 <p>Modelo C4 (Contexto → Contentores → Componentes) e system design funcional do
 <strong>Delonix Engine</strong>: motor de containers e microVMs <strong>daemonless, rootless-first,
-kernel-native</strong>, em Rust (23 crates, workspace <code>crates/</code>). Este documento é canónico
+kernel-native</strong>, em Rust (25 crates, workspace <code>crates/</code>). Este documento é canónico
 e mantido contra o código — cada afirmação estrutural tem a referência do
 crate/ficheiro onde foi confirmada. Onde há limites, eles aparecem nos diagramas,
 não escondidos em rodapés.</p>
@@ -301,7 +301,7 @@ leitura — <code>reconcile_status</code> (<code>crates/adapters/delonix-linux/s
 de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused</code>. O CRI chama-o em
 <code>load_reconciled</code> antes de responder ao kubelet.</p>
 <hr />
-<h2>C4 — Nível 3: Componentes (os 23 crates)</h2>
+<h2>C4 — Nível 3: Componentes (os 25 crates)</h2>
 <p>Setas = dependências <strong>reais</strong>, confirmadas nos <code>Cargo.toml</code> de <code>crates/*/</code> e nos
 <code>use delonix_*</code> dos <code>src/</code>. Não há ciclos; <code>delonix-model</code> é a raiz comum.</p>
 <pre class="mermaid">graph TB
@@ -327,6 +327,8 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     COMPUTE[&quot;delonix-compute&lt;br&gt;contexto Compute (ADR-0040): a especificacao&lt;br&gt;de execucao unica (RunOpts) que as entradas traduzem&quot;]
     MGMTBIN[&quot;delonix-mgmt-bin&lt;br&gt;o executavel delonix-mgmt, que `delonix serve api` executa (P3m)&quot;]
     MCPBIN[&quot;delonix-mcp-bin&lt;br&gt;o executavel delonix-mcp, que `delonix mcp` executa (P3l)&quot;]
+    NODEAPI[&quot;delonix-node-api&lt;br&gt;o contrato de no delonix.node.v1 SERVIDO: gRPC e HTTP/JSON&lt;br&gt;dos mesmos .proto num socket unix, so o proprio uid;&lt;br&gt;hoje ListProviders (ADR-0050 D5), o resto UNIMPLEMENTED&quot;]
+    NODEAPIBIN[&quot;delonix-node-api-bin&lt;br&gt;o executavel delonix-node-api, que `delonix serve node-api` executa&quot;]
     MCP[&quot;delonix-mcp&lt;br&gt;servidor MCP (ADR-0025) — superficie de IA LOCAL, sem inquilino&lt;br&gt;stdio-only; tools chamam Store/dominio, nunca shell arbitrario&quot;]
 
     BIN --&gt; RT
@@ -343,6 +345,17 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
     BIN --&gt; OPN
     MCPBIN --&gt; MCP
     MGMTBIN --&gt; MGMT
+    NODEAPIBIN --&gt; NODEAPI
+    NODEAPIBIN --&gt; NODECTX
+    NODEAPIBIN --&gt; TEL
+    NODEAPI --&gt; VM2
+    NODEAPI --&gt; PVE
+    NODEAPI --&gt; RT
+    NODEAPI --&gt; NET
+    NODEAPI --&gt; VOL
+    NODEAPI --&gt; COMPUTE
+    NODEAPI --&gt; NODECTX
+    NODEAPI --&gt; MODEL
     BIN --&gt; MODEL
     BIN --&gt; STACK
     BIN --&gt; COMPUTE
@@ -462,7 +475,8 @@ de PID) e reclassifica <code>Running</code>→<code>Crashed</code>/<code>Paused<
   partir de fora, e <strong>registam-se</strong> (<code>register_backend</code>/<code>register_gateway_provider</code>), com
   o alvo conhecido só pelo <code>-bin</code>, não pelo motor.</li>
 <li><strong>Nada depende de <code>delonix-proxmox</code>, <code>delonix-truenas</code> nem <code>delonix-opnsense</code> a não ser
-  o <code>-bin</code></strong> — são folhas do grafo, e é o que permite que um alvo remoto mal configurado
+  o <code>-bin</code> e, no caso do <code>delonix-proxmox</code>, o <code>delonix-node-api</code></strong> (que o lista entre os
+  providers do nó, como o <code>delonix provider ls</code> faz) — são folhas do grafo, e é o que permite que um alvo remoto mal configurado
   avise e siga em vez de parar um <code>container ls</code>.</li>
 <li><strong><code>delonix-mcp</code> fica fora dos oito crates de motor dependency-clean, pela MESMA razão
   do <code>delonix-mgmt</code></strong> (ADR-0025): traz o SDK MCP oficial (<code>rmcp</code>) e o seu próprio
