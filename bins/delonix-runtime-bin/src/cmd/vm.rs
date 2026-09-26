@@ -4135,7 +4135,11 @@ pub(crate) fn cmd_describe(base: &std::path::Path, names: &[String]) -> Result<(
         if i > 0 {
             println!();
         }
-        describe_one(&vm);
+        // The guest's own answer (`vm.guest-agent`) is asked only of a running
+        // VM, and a failure to ask is shown in its block, never fatal: the
+        // rest of the description is the engine's record and stands on its own.
+        let guest = delonix_vm::guest_info(base, name);
+        describe_one(&vm, &guest);
     }
     Ok(())
 }
@@ -4170,7 +4174,10 @@ fn file_size(path: &str) -> Option<u64> {
     std::fs::metadata(path).ok().map(|m| m.len())
 }
 
-fn describe_one(vm: &delonix_compute::Vm) {
+fn describe_one(
+    vm: &delonix_compute::Vm,
+    guest: &delonix_vm::Result<Option<delonix_vm::GuestInfo>>,
+) {
     let mut d = output::Describe::new();
     d.field("Name", &vm.name);
     d.field("Status", fmt_vm_status(&vm.status));
@@ -4211,6 +4218,42 @@ fn describe_one(vm: &delonix_compute::Vm) {
     }
     d.sub("TAP", if vm.tap.is_empty() { "<none>" } else { &vm.tap });
     d.sub("MAC", &vm.mac);
+
+    if vm.status == delonix_model::records::Status::Running {
+        d.section("Guest");
+        match guest {
+            Ok(Some(g)) => {
+                d.sub("OS", g.os.as_deref().unwrap_or("<not reported>"));
+                d.sub_opt("Kernel", g.kernel.as_deref());
+                d.sub_opt("Hostname", g.hostname.as_deref());
+                d.sub(
+                    "Agent",
+                    g.agent_version
+                        .as_deref()
+                        .map(|v| format!("qemu-guest-agent {v}"))
+                        .unwrap_or_else(|| "answering".into()),
+                );
+                for f in &g.filesystems {
+                    let size = match (f.used_bytes, f.total_bytes) {
+                        (Some(u), Some(t)) => {
+                            format!(" {} / {}", output::fmt_size(u), output::fmt_size(t))
+                        }
+                        _ => String::new(),
+                    };
+                    d.sub(
+                        "Filesystem",
+                        format!("{} ({}){size}", f.mountpoint, f.fstype),
+                    );
+                }
+            }
+            Ok(None) => {
+                d.sub("Agent", "<none> — this backend or guest runs no agent");
+            }
+            Err(e) => {
+                d.sub("Agent", format!("<unavailable> — {e}"));
+            }
+        }
+    }
 
     d.field("API socket", &vm.api_socket);
     d.print();

@@ -1718,3 +1718,67 @@ fn a_move_is_sent_once_waited_on_and_proved_on_the_node() {
     );
     assert_eq!(b.current_handle(&vm_with_handle(&handle)), None);
 }
+
+// ===========================================================================
+// Quiesced backup (vm.backup.quiesced)
+// ===========================================================================
+
+const VZDUMP: &str = "/nodes/pve/vzdump";
+const AGENT_PING: &str = "/nodes/pve/qemu/100/agent/ping";
+const BACKUPS: &str = "/nodes/pve/storage/local/content";
+
+/// No agent answering: refused before the backup — the node never sees a
+/// `vzdump`, and the refusal is DX-6509.
+#[test]
+fn a_quiesced_backup_without_an_agent_never_starts() {
+    let node = MockNode::start(script(&[
+        ("GET", PVE_STATUS, ok_data(r#"{"status":"running"}"#)),
+        (
+            "POST",
+            AGENT_PING,
+            Reply::Json(
+                500,
+                r#"{"message":"QEMU guest agent is not running\n","data":null}"#.into(),
+            ),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .backup_vm_quiesced(&delonix_proxmox::Ledger::at(dir.path()), 100, "local")
+        .expect_err("no agent");
+    assert_eq!(delonix_model::Error::from(err).number(), 6509);
+    assert_eq!(node.count("POST", VZDUMP), 0, "the backup was started");
+}
+
+/// The backup ran, but its log shows no freeze: that is NOT a quiesced
+/// backup, whatever `agent=1` says — DX-6509, with the task named.
+#[test]
+fn a_backup_whose_log_shows_no_freeze_is_not_reported_quiesced() {
+    const BACKUP_UPID: &str = "UPID:pve:00001111:00002222:6AB70000:vzdump:100:root@pam:";
+    let node = MockNode::start(script(&[
+        ("GET", PVE_STATUS, ok_data(r#"{"status":"running"}"#)),
+        ("POST", AGENT_PING, ok_data("{}")),
+        ("GET", BACKUPS, ok_data("[]")),
+        ("POST", VZDUMP, ok_data(&format!("\"{BACKUP_UPID}\""))),
+        (
+            "GET",
+            &format!("/nodes/pve/tasks/{BACKUP_UPID}/log"),
+            ok_data(
+                r#"[{"n":1,"t":"INFO: backup mode: snapshot"},{"n":2,"t":"INFO: Finished Backup of VM 100"}]"#,
+            ),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .backup_vm_quiesced(&delonix_proxmox::Ledger::at(dir.path()), 100, "local")
+        .expect_err("no freeze in the log");
+    let shown = err.to_string();
+    assert_eq!(delonix_model::Error::from(err).number(), 6509, "{shown}");
+    assert!(
+        shown.contains("no filesystem freeze") && shown.contains(BACKUP_UPID),
+        "{shown}"
+    );
+    assert_eq!(node.count("POST", VZDUMP), 1);
+}

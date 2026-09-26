@@ -13,7 +13,7 @@
   routes never seen in a live trace (the third is the lost-answer `GET /nodes/{node}/tasks`,
   reached only through failure injection). **Slice 3** has its read-only half: cluster
   discovery (`provider describe proxmox --probe`, #505), measured on the lab node and on
-  `ngola-lda` itself. The route matrix says **117 of 675 routes called (17.3 %), 114 in a live
+  `ngola-lda` itself. The route matrix says **122 of 675 routes called (18.1 %), 121 in a live
   trace** (`docs/proxmox/matrix-9.2.2.md`). Slice 3's first write, a migration with an
   explicitly named target node, is done on a two-node lab cluster with shared storage
   (`vm move --node`, ADR-0053, 2026-09-26); HA resources stay excluded by D3. Accepting the
@@ -576,3 +576,36 @@ that is not a login name, an empty or multi-line key, an appliance image — DX-
   that would be reported as applied and ignored. `vm.cloud-init` stays `partial` there.
 
 No new route (the matrix stays at 112/675).
+
+**Added 2026-09-26 (the guest agent, live):** the agent routes are closed — every one of the 27
+is either called for an engine verb or excluded with its reason, none left `not-yet-implemented`.
+
+- **Called (9, all in a live trace):** `get-osinfo`, `get-host-name`, `get-fsinfo` and `info`
+  answer `VmBackend::guest_info` — `vm describe` gains a *Guest* block (OS, kernel, hostname,
+  agent version, filesystems with sizes), `Ok(None)` when the VM does not run or runs no agent,
+  never a field filled from anywhere but the guest (`vm.guest-agent`: supported). `fsfreeze-status`
+  and the task log (`GET …/tasks/{upid}/log`) prove `Client::backup_vm_quiesced`
+  (`vm.backup.quiesced`: supported): the VM must run and its agent answer before the backup, the
+  node's backup log must carry `issuing guest-agent 'fs-freeze' command` and `… 'fs-thaw'
+  command` (measured on PVE 9.2.2 — the node freezes around a snapshot-mode `vzdump` by itself),
+  and the guest must report `thawed` afterwards; otherwise DX-6509
+  `vm.proxmox_backup_not_quiesced`, and a backup that ran keeps its archive, which is still
+  crash-consistent. `exec`/`exec-status`, `ping` and `network-get-interfaces` were already
+  called; the prepared guest finally let `exec` and the IP run live.
+- **Excluded (18), each with its reason in `scripts/proxmox_api_inventory.py`:**
+  `set-user-password` (the engine gives SSH keys through cloud-init and never handles a password),
+  `file-read`/`file-write` (arbitrary guest file access; `exec` is the one guest command channel
+  kept), `suspend-*` (the engine's pause is the node's vCPU suspend), `fsfreeze-freeze`/`-thaw`
+  (the backup freezes and thaws by itself; a freeze of the engine's own would open a window where
+  a crash leaves the guest frozen), `shutdown` (the node's `status/shutdown` already goes through
+  the agent), `fstrim`, and the remainder — the raw passthrough and guest inventory — which is the
+  proxy D3 rules out.
+- **Measured, not guessed:** the answer shapes of the five reads (Debian 12,
+  qemu-guest-agent 7.2.22) are the unit tests' fixtures; the coverage scanner reads the HTTP verb
+  from the call's statement, so the reads send `self.get(&format!(…))` at each call site — an
+  earlier cut built `agent/{cmd}` from a variable, which the scanner read as a route no schema
+  has, and two of the real reads were classified only by a serde `.get(` sharing their statement.
+- **Found on the way, not fixed here:** a nested guest on the lab node's `vmbr0` got no network,
+  because the engine's libvirt `delonix-antispoof` filter (always on, no opt-out) drops frames
+  with a MAC other than the node VM's. The lab uses a NAT bridge `vmbr1` inside the node instead;
+  letting a hypervisor VM bridge its guests is a security decision of its own.
