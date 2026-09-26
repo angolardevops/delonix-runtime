@@ -115,6 +115,10 @@ pub enum Error {
     /// cannot take, or of an appliance that does not run cloud-init.
     #[error("{0}")]
     InvalidCloudInitChange(String),
+    /// `vm move --node` named a node the VM cannot go to: not a member of its
+    /// cluster, offline, or the node it is already on (ADR-0053 decision 4).
+    #[error("{0}")]
+    InvalidMoveTarget(String),
 
     // ---- not found ----------------------------------------------------
     /// There is no VM with the given name. Converts directly into the shared
@@ -145,6 +149,12 @@ pub enum Error {
     /// instead of reported as applied.
     #[error("{0}")]
     CloudInitNeedsStopped(String),
+    /// `vm move` refused before it started: the VM is in the wrong power state
+    /// for the move asked, or the node's own precheck says the target cannot
+    /// host it (local disks, a storage the target lacks, a local device) —
+    /// ADR-0053 decision 4. A refusal, never a partial move.
+    #[error("{0}")]
+    MoveRefused(String),
 
     // ---- unavailable ------------------------------------------------------
     /// A named backend this build knows about but has not configured (e.g.
@@ -250,12 +260,14 @@ impl Error {
             Error::UnknownCapability(_) => 1527,
             Error::InvalidResize(_) => 1536,
             Error::InvalidCloudInitChange(_) => 1537,
+            Error::InvalidMoveTarget(_) => 1538,
             Error::VmNotFound(_) => 4501,
             Error::SnapshotNotFound(_) => 4502,
             Error::RecordConflict(_) => 5501,
             Error::SnapshotTaken(_) => 5502,
             Error::ResizeNeedsStopped(_) => 5505,
             Error::CloudInitNeedsStopped(_) => 5506,
+            Error::MoveRefused(_) => 5507,
             Error::BackendNotConfigured(_) => 6501,
             Error::NoBackendAvailable(_) => 6502,
             Error::NoFirmware(_) => 6503,
@@ -302,7 +314,8 @@ impl From<Error> for Dx {
             Error::RecordConflict(text)
             | Error::SnapshotTaken(text)
             | Error::ResizeNeedsStopped(text)
-            | Error::CloudInitNeedsStopped(text) => Dx::Conflict(text),
+            | Error::CloudInitNeedsStopped(text)
+            | Error::MoveRefused(text) => Dx::Conflict(text),
             Error::BackendNotConfigured(text)
             | Error::NoBackendAvailable(text)
             | Error::NoFirmware(text)
@@ -370,6 +383,8 @@ mod tests {
                 "a VM 'x' created by `vm run` (direct-QEMU) already exists".into(),
             ),
             Error::SnapshotTaken("VM 'x' already has a snapshot named 's1'".into()),
+            Error::InvalidMoveTarget("node 'pve9' is not a member of the VM's cluster".into()),
+            Error::MoveRefused("VM 'x' has local disks the target would have to copy".into()),
             Error::BackendNotConfigured(
                 "VM backend 'proxmox' is not available in this build: y".into(),
             ),

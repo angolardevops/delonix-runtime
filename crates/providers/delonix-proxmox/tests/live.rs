@@ -3243,3 +3243,238 @@ fn the_cluster_resource_list_places_a_vm_on_its_node() {
         "the VM is still defined on the node after destroy — an orphan"
     );
 }
+
+/// The cluster half of the live cases: the node a VM moves to and a storage
+/// every node shares (ADR-0053 decision 6 — a lab cluster, never production).
+///
+/// Both unset skips the two move cases, silently like the other cases here
+/// (a print in a test is library-print debt, `scripts/arch_fitness.py`); the
+/// run that promotes `vm.migration.*` sets both.
+fn move_env() -> Option<(String, String)> {
+    let to = std::env::var("DELONIX_PROXMOX_TEST_MOVE_NODE").ok()?;
+    let shared = std::env::var("DELONIX_PROXMOX_TEST_SHARED_STORAGE").ok()?;
+    Some((to, shared))
+}
+
+/// A record for what `boot` just made — the handle is what the engine keeps.
+fn record_of(
+    name: &str,
+    cfg: &VmConfig,
+    boot: &delonix_compute::vm_backend::Boot,
+) -> delonix_compute::Vm {
+    delonix_compute::Vm::new(
+        name.to_string(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    )
+}
+
+/// `vm move --node` offline (`vm.migration.cold`, ADR-0053), asserted from the
+/// cluster and not from the call's answer:
+/// - refused before anything moves, with the class the ADR names: the node
+///   the VM is on (DX-1538), a node that is not a member (DX-1538), a VM
+///   running on the node when the move is offline (DX-5507), and a VM whose
+///   disk is on a storage the target does not share (DX-5507, the volume
+///   named) — and after each, the cluster still lists the VM where it was;
+/// - a stopped VM on the shared storage moves: `/cluster/resources` lists it
+///   on the target, its config is readable there, and the returned handle
+///   names the target;
+/// - the moved VM is then driven through its NEW handle — started and
+///   stopped on the target, through the configured node's API (the
+///   behaviour ADR-0053 marked "not measured": a request for
+///   `/nodes/<other>/…` served for a cluster member).
+#[test]
+fn a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there() {
+    let Some(t) = target() else {
+        return;
+    };
+    let Some((to, shared)) = move_env() else {
+        return;
+    };
+    let local =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+    let pid = std::process::id() % 10000;
+
+    // A VM on LOCAL storage: the node's precheck lists its disk, and the move
+    // is refused by name before the node is asked to copy anything.
+    let lname = format!("dlxmvlocal{pid}");
+    let lcfg = VmConfig {
+        name: lname.clone(),
+        disk: format!("{local}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let lboot = b
+        .boot(vmdir, &lcfg, &lcfg.disk, &stage)
+        .expect("boot local");
+    let lvm = record_of(&lname, &lcfg, &lboot);
+    b.stop(vmdir, &lvm).expect("stop local");
+    let lvmid: u32 = lboot
+        .api_socket
+        .rsplit(':')
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    let err = b
+        .move_to_node(vmdir, &lvm, &to, false)
+        .expect_err("a VM with a local disk must not move");
+    assert_eq!(err.number(), 5507, "{err}");
+    assert!(
+        err.to_string().contains(&local),
+        "the refusal names the volume: {err}"
+    );
+    assert_eq!(
+        client.locate_vm(lvmid).unwrap().as_deref(),
+        Some(t.node.as_str())
+    );
+    b.destroy(vmdir, &lvm).expect("destroy local");
+
+    let name = format!("dlxmvcold{pid}");
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{shared}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let mut vm = record_of(&name, &cfg, &boot);
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+
+    let err = b
+        .move_to_node(vmdir, &vm, &t.node, false)
+        .expect_err("same node");
+    assert_eq!(err.number(), 1538, "{err}");
+    let err = b
+        .move_to_node(vmdir, &vm, "nosuchnode", false)
+        .expect_err("not a member");
+    assert_eq!(err.number(), 1538, "{err}");
+    let err = b
+        .move_to_node(vmdir, &vm, &to, false)
+        .expect_err("it runs on the node: an offline move must be refused");
+    assert_eq!(err.number(), 5507, "{err}");
+    assert_eq!(
+        client.locate_vm(vmid).unwrap().as_deref(),
+        Some(t.node.as_str())
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    let handle = b
+        .move_to_node(vmdir, &vm, &to, false)
+        .expect("move offline");
+    assert_eq!(handle, format!("proxmox:{to}:{vmid}"));
+    assert_eq!(
+        client.locate_vm(vmid).unwrap().as_deref(),
+        Some(to.as_str()),
+        "the cluster does not list the VM on the target"
+    );
+    client
+        .for_node(&to)
+        .unwrap()
+        .config(vmid)
+        .expect("the config is readable on the target");
+    vm.api_socket = handle;
+
+    b.resume(vmdir, &vm)
+        .expect("start on the target")
+        .expect("a started VM");
+    assert!(b.is_running(&vm), "not running on the target after start");
+    b.stop(vmdir, &vm).expect("stop on the target");
+    assert!(!b.is_running(&vm));
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
+}
+
+/// `vm move --node --live` (`vm.migration.live`, ADR-0053) on a disk every
+/// node shares: the VM moves while running and is running on the target;
+/// `--live` on a stopped VM is refused (DX-5507); and the VM moves BACK live
+/// — the second move settles the ledger's first `qmigrate`, whose worker is
+/// on the other node, through the task's own node (a status read aimed at
+/// the wrong node answered "no such task").
+#[test]
+fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
+    let Some(t) = target() else {
+        return;
+    };
+    let Some((to, shared)) = move_env() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxmvlive{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{shared}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let mut vm = record_of(&name, &cfg, &boot);
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+
+    b.stop(vmdir, &vm).expect("stop");
+    let err = b
+        .move_to_node(vmdir, &vm, &to, true)
+        .expect_err("--live on a stopped VM");
+    assert_eq!(err.number(), 5507, "{err}");
+    b.resume(vmdir, &vm).expect("start").expect("a started VM");
+
+    let handle = b.move_to_node(vmdir, &vm, &to, true).expect("move live");
+    assert_eq!(handle, format!("proxmox:{to}:{vmid}"));
+    assert_eq!(
+        client.locate_vm(vmid).unwrap().as_deref(),
+        Some(to.as_str())
+    );
+    let st = client
+        .for_node(&to)
+        .unwrap()
+        .status_current(vmid)
+        .expect("status");
+    assert_eq!(st, "running", "a live move must leave it running");
+    vm.api_socket = handle;
+
+    let back = b
+        .move_to_node(vmdir, &vm, &t.node, true)
+        .expect("move back live");
+    assert_eq!(back, format!("proxmox:{}:{vmid}", t.node));
+    assert_eq!(
+        client.locate_vm(vmid).unwrap().as_deref(),
+        Some(t.node.as_str())
+    );
+    assert_eq!(client.status_current(vmid).unwrap(), "running");
+    vm.api_socket = back;
+
+    let ledger = std::fs::read_to_string(vmdir.join("proxmox-tasks.json")).expect("the ledger");
+    // At least two: a move the node's config lock turned away is retried,
+    // and the ledger keeps both attempts (see `Client::task`).
+    assert!(
+        ledger.matches("\"migrate\"").count() >= 2,
+        "two moves, at least two ledger entries: {ledger}"
+    );
+    assert!(
+        !ledger.contains("\"submitted\""),
+        "a move was left unsettled in the ledger: {ledger}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
+}
