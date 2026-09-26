@@ -111,6 +111,8 @@ pub struct LibvirtExt {
     pub net_mode: Option<String>,
     /// A DHCP reservation on the libvirt network (`nat` mode only).
     pub static_ip: Option<String>,
+    /// Opts out of the anti-spoofing nwfilter on the primary NIC (ADR-0055).
+    pub allow_mac_spoofing: bool,
     pub machine: Option<String>,
     pub cpu_model: Option<String>,
     pub cpu_topology: Option<CpuTopology>,

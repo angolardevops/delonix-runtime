@@ -847,6 +847,9 @@ Options:
       --ip &lt;IP&gt;
           Static IP (libvirt nat mode): DHCP reservation on the libvirt network
 
+      --allow-mac-spoofing
+          libvirt nat/bridge only: do NOT attach the anti-spoofing filter to this VM&#x27;s NIC, so the guest may send frames with any source MAC (a nested hypervisor&#x27;s guests on a bridge need it). Weakens isolation on the L2; off by default, persisted, shown by `vm describe` (ADR-0055)
+
       --vnc
           VNC graphical console (libvirt backend only — Cloud Hypervisor has no display)
 
@@ -884,6 +887,10 @@ EXAMPLES:
   # isolated from other namespaces — only cloud-hypervisor puts the tap in the
   # SDN where that is enforced
   delonix vm create nas --backend cloud-hypervisor --namespace teamA
+
+  # a hypervisor whose own guests bridge onto the network — drops the MAC/ARP
+  # anti-spoofing filter for THIS VM only, and `vm describe` says so
+  delonix vm create pve1 --disk proxmox-ve:9.2 --backend libvirt --net-mode nat --allow-mac-spoofing
 
 SEE ALSO:
   delonix vm ls · delonix vm console · delonix vm start · delonix image vm

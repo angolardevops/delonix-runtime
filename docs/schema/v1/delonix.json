@@ -3252,6 +3252,12 @@
       "additionalProperties": false,
       "description": "`spec` for `kind: VirtualMachine` — mirrors `delonix_vm::VmConfig` (minus `name`, which\ncomes from `metadata.name`).",
       "properties": {
+        "allowMacSpoofing": {
+          "default": false,
+          "description": "Opt THIS VM out of the libvirt anti-spoofing filter on its primary NIC\n(libvirt, `netMode: nat|bridge` only). The guest may then send frames\nwith any source MAC — what a hypervisor-in-a-VM needs for its own guests\non a bridge, and what a hostile guest needs to impersonate a neighbour.\nOff by default; refused where there is no filter (ADR-0055).",
+          "type": "boolean"
+        },
+        "allow_mac_spoofing": {},
         "backend": {
           "type": [
             "string",

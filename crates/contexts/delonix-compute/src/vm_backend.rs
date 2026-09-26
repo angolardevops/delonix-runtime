@@ -165,6 +165,19 @@ pub struct VmConfig {
     /// reservation (`<host mac=… ip=…/>`) on the libvirt network, so the guest
     /// needs NO cloud-init network config. Must belong to the network's subnet.
     pub static_ip: Option<String>,
+    /// Opts THIS VM out of the libvirt anti-spoofing filter (`delonix-antispoof`:
+    /// `no-mac-spoofing` + `no-arp-mac-spoofing`) on its primary NIC. `false` —
+    /// the default, and what every `..Default::default()` caller gets — keeps
+    /// the filter. `true` lets the guest emit frames with ANY source MAC and
+    /// answer ARP for any address, which is what a hypervisor-in-a-VM needs for
+    /// its own guests to reach the network over a bridge (ADR-0055), and what a
+    /// hostile guest needs to impersonate a neighbour on the same L2.
+    ///
+    /// Only meaningful where the filter is: the libvirt backend in `nat`/
+    /// `network`/`bridge` mode. Anywhere else it is REFUSED at `create`, never
+    /// accepted and ignored. Persisted in the record (`VmBootSpec`), because
+    /// `vm start` rebuilds the NIC from it.
+    pub allow_mac_spoofing: bool,
     /// Catalog capabilities the backend MUST mark usable on this host, by name
     /// (`vm.snapshot.memory`, `vm.namespace-isolation`, … — `delonix provider
     /// ls` lists them). Resolved with [`Capability::from_name`] before any

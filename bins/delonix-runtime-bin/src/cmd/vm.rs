@@ -145,6 +145,13 @@ pub(crate) struct VmSpec {
     /// Static IP (libvirt `nat` mode): DHCP reservation on the libvirt network.
     #[serde(default)]
     ip: Option<String>,
+    /// Opt THIS VM out of the libvirt anti-spoofing filter on its primary NIC
+    /// (libvirt, `netMode: nat|bridge` only). The guest may then send frames
+    /// with any source MAC — what a hypervisor-in-a-VM needs for its own guests
+    /// on a bridge, and what a hostile guest needs to impersonate a neighbour.
+    /// Off by default; refused where there is no filter (ADR-0055).
+    #[serde(default, rename = "allowMacSpoofing", alias = "allow_mac_spoofing")]
+    allow_mac_spoofing: bool,
     /// HTTP/S services listening inside the guest, published by name (ADR-0046).
     /// Lowered at load into a synthetic `kind: HTTPRoute` named `<vm>-expose`; the
     /// key never reaches the VM apply. See [`super::vm_expose`].
@@ -274,6 +281,8 @@ pub(crate) const VM_SPEC_FIELDS: &[&str] = &[
     "volumes",
     "vnc",
     "ip",
+    "allowMacSpoofing",
+    "allow_mac_spoofing",
     "machine",
     "cpuModel",
     "cpu_model",
@@ -372,7 +381,7 @@ const VM_GROUPS: &[(&str, &[(&str, &str)])] = &[
 ];
 
 /// Sub-keys accepted inside the grouped `network:` mapping.
-const VM_NETWORK_KEYS: &[&str] = &["name", "mode", "bridge", "staticIp"];
+const VM_NETWORK_KEYS: &[&str] = &["name", "mode", "bridge", "staticIp", "allowMacSpoofing"];
 
 /// Sub-keys inside a grouped spec that the hoist does not know — and therefore
 /// throws away.
@@ -432,6 +441,7 @@ fn normalize_vm_spec(mut v: serde_yaml::Value) -> serde_yaml::Value {
         hoist(m, &net, "mode", "netMode");
         hoist(m, &net, "bridge", "bridge");
         hoist(m, &net, "staticIp", "ip");
+        hoist(m, &net, "allowMacSpoofing", "allowMacSpoofing");
     }
     for (group, pairs) in VM_GROUPS {
         if let Some(Value::Mapping(g)) = m.get(*group).cloned() {
@@ -610,6 +620,9 @@ pub enum VmCmd {
         /// Static IP (libvirt nat mode): DHCP reservation on the libvirt network.
         #[arg(long)]
         ip: Option<String>,
+        /// libvirt nat/bridge only: do NOT attach the anti-spoofing filter to this VM's NIC, so the guest may send frames with any source MAC (a nested hypervisor's guests on a bridge need it). Weakens isolation on the L2; off by default, persisted, shown by `vm describe` (ADR-0055)
+        #[arg(long = "allow-mac-spoofing")]
+        allow_mac_spoofing: bool,
         /// VNC graphical console (libvirt backend only — Cloud Hypervisor has no display).
         #[arg(long)]
         vnc: bool,
@@ -1992,6 +2005,7 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             volumes: vm_volumes,
             vnc: spec.vnc,
             static_ip: spec.ip,
+            allow_mac_spoofing: spec.allow_mac_spoofing,
             machine: spec.machine,
             cpu_model: spec.cpu_model,
             cpu_topology: spec.cpu_topology.map(|t| delonix_vm::CpuTopology {
@@ -2027,7 +2041,8 @@ pub fn apply(docs: &[ManifestDoc], base_dir: &std::path::Path) -> Result<()> {
             libvirt_xml_overlay: spec.libvirt_xml_overlay,
             libvirt_xml: spec.libvirt_xml,
         };
-        delonix_vm::create(&base, &cfg)?;
+        let vm = delonix_vm::create(&base, &cfg)?;
+        warn_if_mac_spoofing_allowed(&vm);
         println!("{}", super::po::tf("vm/{name}: ensured", &[("name", name)]));
     }
     Ok(())
@@ -2124,6 +2139,7 @@ pub fn run(action: VmCmd) -> Result<()> {
             net_mode,
             bridge,
             ip,
+            allow_mac_spoofing,
             vnc,
             console,
             wait,
@@ -2314,6 +2330,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                 volumes: vec![],
                 vnc,
                 static_ip: ip,
+                allow_mac_spoofing,
                 // Advanced libvirt knobs are declarative-only (`kind: VirtualMachine`), not CLI flags.
                 ..Default::default()
             };
@@ -2366,6 +2383,7 @@ pub fn run(action: VmCmd) -> Result<()> {
                     return Err(e.into());
                 }
             };
+            warn_if_mac_spoofing_allowed(&vm);
             // "started" and not "is up": everything that has happened by this
             // point is that the VMM process exists. Whether the guest booted is
             // what `--wait` goes and finds out, and it is the only thing
@@ -4170,6 +4188,32 @@ fn file_size(path: &str) -> Option<u64> {
     std::fs::metadata(path).ok().map(|m| m.len())
 }
 
+/// Says, on stderr, that a VM was created WITHOUT the anti-spoofing filter
+/// (ADR-0055). Reads the RECORD, not the request, so it speaks for what was
+/// actually persisted — the same thing `vm start` will rebuild.
+fn warn_if_mac_spoofing_allowed(vm: &delonix_compute::Vm) {
+    if vm.boot.allow_mac_spoofing {
+        output::warn(&super::po::tf(
+            "vm/{name}: anti-spoofing is OFF (--allow-mac-spoofing) — this guest may send frames with any source MAC and answer ARP for any address on its L2",
+            &[("name", &vm.name)],
+        ));
+    }
+}
+
+/// The `Antispoof` line of `vm describe`. **Pure.** `None` where the
+/// libvirt filter never applies (another backend, or a user-mode NIC without a
+/// tap), so the line is not a claim about a control that is not there.
+fn antispoof_describe(vm: &delonix_compute::Vm) -> Option<String> {
+    if vm.backend != "libvirt" || !matches!(vm.tap.as_str(), "nat" | "network" | "bridge") {
+        return None;
+    }
+    Some(if vm.boot.allow_mac_spoofing {
+        super::po::t("OFF — allowMacSpoofing (any source MAC; ADR-0055)").to_string()
+    } else {
+        super::po::t("on (delonix-antispoof: MAC + ARP)").to_string()
+    })
+}
+
 fn describe_one(vm: &delonix_compute::Vm) {
     let mut d = output::Describe::new();
     d.field("Name", &vm.name);
@@ -4211,6 +4255,7 @@ fn describe_one(vm: &delonix_compute::Vm) {
     }
     d.sub("TAP", if vm.tap.is_empty() { "<none>" } else { &vm.tap });
     d.sub("MAC", &vm.mac);
+    d.sub_opt("Antispoof", antispoof_describe(vm));
 
     d.field("API socket", &vm.api_socket);
     d.print();
@@ -4576,9 +4621,10 @@ mod tests {
     }
 
     use super::{
-        fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime, looks_like_address, manifest, normalize_vm_spec,
-        parse_ip_gateways, parse_ss_binds, resolve_vm_defaults, unconverged_fields_condition,
-        vm_cluster_member, vm_role, ManifestDoc, VmSpec, RECONCILED_VM_FIELDS,
+        antispoof_describe, fmt_vm_gpu, fmt_vm_status, fmt_vm_uptime, looks_like_address, manifest,
+        normalize_vm_spec, parse_ip_gateways, parse_ss_binds, resolve_vm_defaults,
+        unconverged_fields_condition, vm_cluster_member, vm_role, vm_spec_of, ManifestDoc, VmSpec,
+        RECONCILED_VM_FIELDS, VM_SPEC_FIELDS,
     };
     use delonix_model::records::Status;
 
@@ -4773,6 +4819,49 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert_eq!(canon.net_mode.as_deref(), Some("nat"));
     }
 
+    /// ADR-0055: the opt-out is off unless written, both spellings read, and a
+    /// typo is not silently the filtered default (it lands in the unknown-field
+    /// warning, which reads `VM_SPEC_FIELDS`).
+    #[test]
+    fn allow_mac_spoofing_is_an_explicit_opt_out() {
+        let off: VmSpec = vm_spec_of(&vm_doc("disk: d\n")).unwrap();
+        assert!(!off.allow_mac_spoofing);
+        for key in ["allowMacSpoofing", "allow_mac_spoofing"] {
+            let on: VmSpec = vm_spec_of(&vm_doc(&format!("disk: d\n{key}: true\n"))).unwrap();
+            assert!(on.allow_mac_spoofing, "{key}");
+            assert!(VM_SPEC_FIELDS.contains(&key));
+        }
+        assert!(!VM_SPEC_FIELDS.contains(&"allowMacSpoof"));
+    }
+
+    /// `vm describe` shows the state of the filter only where it can exist, and
+    /// says OFF in words when the VM opted out.
+    #[test]
+    fn describe_shows_antispoof_only_where_it_exists() {
+        let mut vm = delonix_compute::Vm::new(
+            "lab".into(),
+            "/d".into(),
+            "/o".into(),
+            1,
+            "1G".into(),
+            "ingress".into(),
+            "bridge".into(),
+            "52:54:00:00:00:01".into(),
+            String::new(),
+        );
+        vm.backend = "libvirt".into();
+        let on = antispoof_describe(&vm).unwrap();
+        assert!(on.starts_with("on"), "{on}");
+        vm.boot.allow_mac_spoofing = true;
+        let off = antispoof_describe(&vm).unwrap();
+        assert!(off.starts_with("OFF"), "{off}");
+        vm.tap = "user".into();
+        assert_eq!(antispoof_describe(&vm), None);
+        vm.tap = "bridge".into();
+        vm.backend = "cloud-hypervisor".into();
+        assert_eq!(antispoof_describe(&vm), None);
+    }
+
     /// Builds a `kind: Vm` document from a spec body, for the tests below.
     fn vm_doc(spec: &str) -> ManifestDoc {
         ManifestDoc {
@@ -4860,6 +4949,7 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
              \x20 mode: nat\n\
              \x20 bridge: br0\n\
              \x20 staticIp: 192.168.122.50\n\
+             \x20 allowMacSpoofing: true\n\
              boot:\n\
              \x20 kernel: /boot/vmlinuz\n\
              \x20 cmdline: console=ttyS0\n\
@@ -4883,6 +4973,7 @@ LISTEN 0 1 192.168.122.1:9000 0.0.0.0:*";
         assert_eq!(spec.net_mode.as_deref(), Some("nat"));
         assert_eq!(spec.bridge.as_deref(), Some("br0"));
         assert_eq!(spec.ip.as_deref(), Some("192.168.122.50"));
+        assert!(spec.allow_mac_spoofing);
         assert_eq!(spec.kernel.as_deref(), Some("/boot/vmlinuz"));
         assert_eq!(spec.cmdline.as_deref(), Some("console=ttyS0"));
         assert_eq!(spec.hostname.as_deref(), Some("node1"));

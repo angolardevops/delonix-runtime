@@ -83,6 +83,19 @@ The VM takes the image's recorded vCPU and memory unless you pass `--vcpus` or
 *Credentials* section and the one for this product): they are documented there
 once, next to the scripts that set them.
 
+**Guests of the Proxmox VE node on `vmbr0`.** On libvirt in `nat`/`bridge` mode every VM's
+NIC carries the `delonix-antispoof` filter, which drops frames whose source MAC is not the
+VM's own — and a nested guest bridged onto `vmbr0` sends exactly those, so it gets no DHCP
+lease. To let THIS node bridge its guests, opt it out when you create it (the other VMs keep
+the filter, and `delonix describe vm` shows `Antispoof: OFF`):
+
+```bash
+delonix vm create pve1 --disk proxmox-ve:9.2 --backend libvirt --net-mode nat --allow-mac-spoofing
+```
+
+It is a trust decision about that guest: it can then impersonate any MAC on its L2. See
+[ADR-0055](../../docs/adr/0055-vm-antispoof-explicit-per-vm-opt-out.md).
+
 ## 6. Publish it
 
 ```bash

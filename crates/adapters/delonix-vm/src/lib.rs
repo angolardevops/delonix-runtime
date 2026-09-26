@@ -2816,7 +2816,7 @@ fn libvirt_interface_xml(cfg: &VmConfig, mac: &str) -> String {
     let mac = xml_escape(mac);
     let model = &format!(
         "      <model type='virtio'/>\n{}    </interface>\n",
-        libvirt_filterref_xml(cfg.net_mode.as_deref())
+        libvirt_filterref_xml(cfg.net_mode.as_deref(), cfg.allow_mac_spoofing)
     )[..];
     match cfg.net_mode.as_deref().unwrap_or("user") {
         "nat" | "network" => {
@@ -2980,10 +2980,47 @@ fn antispoof_applies(net_mode: Option<&str>) -> bool {
     matches!(net_mode, Some("nat") | Some("network") | Some("bridge"))
 }
 
+/// Whether this VM's NIC gets the filter: it can attach ([`antispoof_applies`])
+/// and the VM did not opt out (`VmConfig::allow_mac_spoofing`, ADR-0055).
+/// **Pure.** The one predicate both the XML and `boot` read, so "the filterref
+/// is emitted" and "the filter is ensured first" cannot disagree.
+fn antispoof_wanted(net_mode: Option<&str>, allow_mac_spoofing: bool) -> bool {
+    antispoof_applies(net_mode) && !allow_mac_spoofing
+}
+
+/// Refuses `allow_mac_spoofing` where there is no filter to opt out of.
+/// **Pure.**
+///
+/// The filter only exists on a libvirt NIC with a tap. Anywhere else the flag
+/// would be accepted and change nothing — and an opt-out of a security
+/// control that silently does nothing is the same lie as an opt-in that does
+/// nothing: the operator reads the record, sees «spoofing allowed», and
+/// diagnoses the wrong thing.
+fn check_allow_mac_spoofing(cfg: &VmConfig, backend_id: &str) -> Result<()> {
+    if !cfg.allow_mac_spoofing {
+        return Ok(());
+    }
+    if backend_id != "libvirt" {
+        return Err(Error::RequiresLibvirtBackend(format!(
+            "--allow-mac-spoofing opts out of the libvirt anti-spoofing filter ('{ANTISPOOF_FILTER}'), \
+             and the '{backend_id}' backend has none to opt out of — refusing rather than record an \
+             opt-out that changes nothing. Use `--backend libvirt`, or drop the flag"
+        )));
+    }
+    if !antispoof_applies(cfg.net_mode.as_deref()) {
+        return Err(Error::RequiresLibvirtBackend(format!(
+            "--allow-mac-spoofing needs a NIC with a tap (`--net-mode nat|bridge`): in '{}' mode \
+             there is no filter to opt out of, so the flag would change nothing",
+            cfg.net_mode.as_deref().unwrap_or("user")
+        )));
+    }
+    Ok(())
+}
+
 /// The `<filterref>` block for this NIC, or empty. **Pure** — tested without a
 /// daemon.
-fn libvirt_filterref_xml(net_mode: Option<&str>) -> &'static str {
-    if antispoof_applies(net_mode) {
+fn libvirt_filterref_xml(net_mode: Option<&str>, allow_mac_spoofing: bool) -> &'static str {
+    if antispoof_wanted(net_mode, allow_mac_spoofing) {
         ANTISPOOF_FILTERREF
     } else {
         ""
@@ -3162,8 +3199,18 @@ impl VmBackend for LibvirtBackend {
         // have. So the filter has to exist first, and a failure here has to
         // abort — see `ensure_antispoof_filter` for why the alternative (drop
         // the filterref and boot anyway) is the one thing not on the table.
-        if antispoof_applies(cfg.net_mode.as_deref()) {
+        //
+        // A VM that opted out (ADR-0055) emits no filterref, so the filter is
+        // not needed — and not ensured, so an opt-out VM does not fail on a
+        // daemon that cannot define it. It still says so, every boot: the
+        // record is the durable trace, this is the one in the journal.
+        if antispoof_wanted(cfg.net_mode.as_deref(), cfg.allow_mac_spoofing) {
             ensure_antispoof_filter(uri)?;
+        } else if cfg.allow_mac_spoofing {
+            tracing::warn!(
+                vm = %cfg.name,
+                "anti-spoofing filter '{ANTISPOOF_FILTER}' NOT attached (allow_mac_spoofing, ADR-0055): this guest may emit frames with any source MAC"
+            );
         }
         let mut xml = libvirt_domain_xml(cfg, &overlay_abs, &mac);
         if uri == "qemu:///session" {
@@ -3976,6 +4023,9 @@ libvirt+qemu"
 
     // Namespace isolation is enforceable only where the VM is on OUR dataplane.
     // Refuse rather than accept-and-ignore — see `vm_namespace_supported`.
+    // The anti-spoofing opt-out exists only where the filter does (ADR-0055).
+    check_allow_mac_spoofing(cfg, backend.id())?;
+
     let ns = vm_namespace_of(cfg);
     if ns != "default" && !vm_namespace_supported(backend.id()) {
         return Err(Error::NamespaceUnsupported(format!(
@@ -4983,6 +5033,7 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         vnc,
         serial_capture,
         static_ip,
+        allow_mac_spoofing,
         machine,
         cpu_model,
         cpu_topology,
@@ -5011,6 +5062,7 @@ fn boot_spec_of(cfg: &VmConfig) -> VmBootSpec {
         vnc: *vnc,
         serial_capture: *serial_capture,
         static_ip: static_ip.clone(),
+        allow_mac_spoofing: *allow_mac_spoofing,
         machine: machine.clone(),
         cpu_model: cpu_model.clone(),
         cpu_topology: cpu_topology.clone(),
@@ -5070,6 +5122,7 @@ fn config_from(vm: &Vm) -> VmConfig {
         vnc: b.vnc,
         serial_capture: b.serial_capture,
         static_ip: b.static_ip.clone(),
+        allow_mac_spoofing: b.allow_mac_spoofing,
         machine: b.machine.clone(),
         cpu_model: b.cpu_model.clone(),
         cpu_topology: b.cpu_topology.clone(),
@@ -6036,6 +6089,7 @@ Format specific information:
             volumes: vec![],
             vnc: false,
             static_ip: None,
+            allow_mac_spoofing: false,
             ..Default::default()
         }
     }
@@ -6187,6 +6241,7 @@ Format specific information:
             volumes: vec![],
             vnc: false,
             static_ip: None,
+            allow_mac_spoofing: false,
             ..Default::default()
         }
     }
@@ -6436,21 +6491,70 @@ Format specific information:
         // nat/network/bridge give the guest a tap — libvirt has something to
         // apply the filter to.
         assert_eq!(
-            super::libvirt_filterref_xml(Some("nat")),
+            super::libvirt_filterref_xml(Some("nat"), false),
             super::ANTISPOOF_FILTERREF
         );
         assert_eq!(
-            super::libvirt_filterref_xml(Some("network")),
+            super::libvirt_filterref_xml(Some("network"), false),
             super::ANTISPOOF_FILTERREF
         );
         assert_eq!(
-            super::libvirt_filterref_xml(Some("bridge")),
+            super::libvirt_filterref_xml(Some("bridge"), false),
             super::ANTISPOOF_FILTERREF
         );
         // `user` (SLIRP/passt) has no tap. Emitting there would be accepted and
         // ignored — exactly what this repo has already corrected three times.
-        assert_eq!(super::libvirt_filterref_xml(Some("user")), "");
-        assert_eq!(super::libvirt_filterref_xml(None), "");
+        assert_eq!(super::libvirt_filterref_xml(Some("user"), false), "");
+        assert_eq!(super::libvirt_filterref_xml(None, false), "");
+    }
+
+    #[test]
+    fn an_opted_out_nic_carries_no_filterref() {
+        // ADR-0055: the opt-out removes the ONE line and nothing else.
+        for mode in ["nat", "network", "bridge", "user"] {
+            assert_eq!(super::libvirt_filterref_xml(Some(mode), true), "", "{mode}");
+        }
+        let mut cfg = test_vm_cfg("128M");
+        cfg.net_mode = Some("bridge".into());
+        cfg.bridge = Some("br0".into());
+        let mac = super::mac_for("t");
+        let on = super::libvirt_interface_xml(&cfg, &mac);
+        cfg.allow_mac_spoofing = true;
+        let off = super::libvirt_interface_xml(&cfg, &mac);
+        assert!(on.contains("filterref"));
+        assert!(!off.contains("filterref"));
+        assert_eq!(on.replace(super::ANTISPOOF_FILTERREF, ""), off);
+    }
+
+    #[test]
+    fn the_filter_stays_on_unless_asked() {
+        // The default of the struct every caller builds with
+        // `..Default::default()` must be the FILTERED one.
+        assert!(!VmConfig::default().allow_mac_spoofing);
+        assert!(!super::VmBootSpec::default().allow_mac_spoofing);
+        assert!(super::antispoof_wanted(Some("bridge"), false));
+        assert!(!super::antispoof_wanted(Some("bridge"), true));
+    }
+
+    #[test]
+    fn the_opt_out_is_refused_where_there_is_no_filter() {
+        let mut cfg = test_vm_cfg("128M");
+        cfg.allow_mac_spoofing = true;
+        cfg.net_mode = Some("bridge".into());
+        assert!(super::check_allow_mac_spoofing(&cfg, "libvirt").is_ok());
+        // Another backend has no nwfilter to opt out of.
+        for b in ["cloud-hypervisor", "proxmox"] {
+            let e = super::check_allow_mac_spoofing(&cfg, b).unwrap_err();
+            assert!(matches!(e, Error::RequiresLibvirtBackend(_)), "{b}");
+        }
+        // Nor does a user-mode NIC, which has no tap.
+        for mode in [None, Some("user")] {
+            cfg.net_mode = mode.map(Into::into);
+            assert!(super::check_allow_mac_spoofing(&cfg, "libvirt").is_err());
+        }
+        // Without the flag nothing is checked, whatever the backend.
+        cfg.allow_mac_spoofing = false;
+        assert!(super::check_allow_mac_spoofing(&cfg, "proxmox").is_ok());
     }
 
     #[test]
@@ -6724,6 +6828,7 @@ Format specific information:
             seed: Some("/seed.iso".into()),
             hugepages: true,
             static_ip: Some("192.168.122.50".into()),
+            allow_mac_spoofing: true,
             vnc: true,
             tpm: true,
             machine: Some("q35".into()),
@@ -6775,6 +6880,9 @@ Format specific information:
         assert_eq!(back.seed.as_deref(), Some("/seed.iso"));
         assert!(back.hugepages);
         assert_eq!(back.static_ip.as_deref(), Some("192.168.122.50"));
+        // ADR-0055: an opt-out lost on restart would bring the NIC back
+        // filtered and take the nested guests' network with it.
+        assert!(back.allow_mac_spoofing);
         assert!(back.vnc);
         assert!(back.tpm);
         assert_eq!(back.machine.as_deref(), Some("q35"));
