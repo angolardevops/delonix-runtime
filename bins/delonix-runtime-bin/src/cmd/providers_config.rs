@@ -42,18 +42,22 @@ pub const API_VERSION: &str = "config.delonix.io/v1";
 pub const SYSTEM_PATH: &str = "/etc/delonix/providers.yaml";
 
 /// The parsed file.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ProviderConfig {
+    /// The format version; this build reads only `config.delonix.io/v1`.
+    #[schemars(extend("const" = "config.delonix.io/v1"))]
     pub api_version: String,
+    /// The provider a request that names none goes to.
     #[serde(default)]
     pub default_provider: Option<String>,
+    /// One entry per provider type this node has.
     #[serde(default)]
     pub providers: Vec<ProviderEntry>,
 }
 
 /// One provider. Tagged by `type`, the same name `--backend` and a VM record use.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ProviderEntry {
     Libvirt(LocalEntry),
@@ -78,7 +82,7 @@ impl ProviderEntry {
 }
 
 /// A local provider: listing it declares it; there is nothing to configure.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct LocalEntry {
     /// Reserved: defaults to the type; a different name is refused until a
@@ -88,7 +92,7 @@ pub struct LocalEntry {
 }
 
 /// A Proxmox VE node reached through its API, as the vendor documents it.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ProxmoxEntry {
     #[serde(default)]
@@ -104,7 +108,7 @@ pub struct ProxmoxEntry {
 
 /// The credential, by reference only. The two value fields exist so they are
 /// refused BY NAME, with the accepted forms, instead of as an unknown field.
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct ProxmoxAuth {
     #[serde(default)]
@@ -117,13 +121,17 @@ pub struct ProxmoxAuth {
     pub username: Option<String>,
     #[serde(default)]
     pub password_file: Option<String>,
+    // Out of the schema: they exist only to be refused by name, and the
+    // schema's `additionalProperties: false` already underlines them.
     #[serde(default)]
+    #[schemars(skip)]
     token_secret: Option<serde_yaml::Value>,
     #[serde(default)]
+    #[schemars(skip)]
     password: Option<serde_yaml::Value>,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct Tls {
     #[serde(default)]
@@ -132,7 +140,7 @@ pub struct Tls {
     pub insecure_skip_verify: bool,
 }
 
-#[derive(Debug, Default, Deserialize)]
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub struct Network {
     #[serde(default)]
@@ -310,6 +318,171 @@ pub fn install_default() {
     delonix_vm::set_configured_default_backend(value);
 }
 
+/// The user-scope path (`$XDG_CONFIG_HOME` or `~/.config`), whether or not it exists.
+pub fn user_path_with(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    env("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .or_else(|| env("HOME").map(|h| PathBuf::from(h).join(".config")))
+        .map(|d| d.join("delonix/providers.yaml"))
+}
+
+/// Existing files D2's order skips because `chosen` wins — listed so an
+/// operator who edits the wrong one is told which file is actually read.
+pub fn ignored_with(
+    env: &dyn Fn(&str) -> Option<String>,
+    system: &Path,
+    chosen: &Path,
+) -> Vec<PathBuf> {
+    let mut all: Vec<PathBuf> = Vec::new();
+    all.extend(env("DELONIX_PROVIDERS_CONFIG").map(PathBuf::from));
+    all.extend(user_path_with(env));
+    all.push(system.to_path_buf());
+    all.into_iter()
+        .filter(|p| p.is_file() && p != chosen)
+        .collect()
+}
+
+fn process_env(k: &str) -> Option<String> {
+    std::env::var(k).ok().filter(|v| !v.trim().is_empty())
+}
+
+/// [`ignored_with`] for this process.
+pub fn ignored(chosen: &Path) -> Vec<PathBuf> {
+    ignored_with(&process_env, Path::new(SYSTEM_PATH), chosen)
+}
+
+/// The file a write goes to: the one this process reads, or — when none exists
+/// yet — the system file for root and the user file for everyone else, the
+/// same split `install.sh` makes.
+pub fn write_target() -> Result<PathBuf> {
+    if let Ok(Some((p, _))) = loaded() {
+        return Ok(p.clone());
+    }
+    if let Some(p) = process_env("DELONIX_PROVIDERS_CONFIG") {
+        return Ok(PathBuf::from(p));
+    }
+    if delonix_node::is_rootless() {
+        user_path_with(&process_env).ok_or_else(|| {
+            Error::Invalid(
+                po::t("neither XDG_CONFIG_HOME nor HOME is set: no user providers file to write")
+                    .into(),
+            )
+        })
+    } else {
+        Ok(PathBuf::from(SYSTEM_PATH))
+    }
+}
+
+/// Everything [`parse`] checks, plus what the file POINTS AT — the token file
+/// (and that only its owner reads it), the CA, the secret, the URL and node
+/// syntax — through the same reader registration uses. Nothing is contacted.
+pub fn validate(cfg: &ProviderConfig, origin: &Path) -> Result<()> {
+    let listed: Vec<&str> = cfg.providers.iter().map(|p| p.type_name()).collect();
+    if let Some(d) = &cfg.default_provider {
+        let local = matches!(d.as_str(), "libvirt" | "cloud-hypervisor");
+        if !local && !listed.contains(&d.as_str()) {
+            return Err(Error::Invalid(po::tf(
+                "{path}: defaultProvider '{name}' has no entry in this file, so no process can \
+                 serve it",
+                &[("path", &origin.display().to_string()), ("name", d)],
+            )));
+        }
+    }
+    for p in &cfg.providers {
+        if let ProviderEntry::Proxmox(px) = p {
+            let keys = proxmox_keys(px);
+            let lookup = |k: &str| keys.get(k).cloned();
+            let (target, opts) = super::vmbackends::proxmox_target_with(&lookup)?
+                .ok_or_else(|| Error::Invalid(format!("{}: proxmox entry", origin.display())))?;
+            delonix_proxmox::registration(target, opts)?;
+        }
+    }
+    Ok(())
+}
+
+/// The content `install.sh` writes, for a file that does not exist yet.
+fn fresh_content(provider: &str) -> String {
+    format!(
+        "# The node's VM providers (ADR-0054).\napiVersion: {API_VERSION}\ndefaultProvider: \
+         {provider}\nproviders:\n  - type: {provider}\n"
+    )
+}
+
+/// `content` with its top-level `defaultProvider:` set to `value` (or removed
+/// for `None`). Every other line — comments included — is kept as written:
+/// the operator's file is edited, never regenerated.
+pub fn with_default(content: &str, value: Option<&str>) -> String {
+    let mut lines: Vec<String> = content
+        .lines()
+        .filter(|l| !l.starts_with("defaultProvider:"))
+        .map(str::to_string)
+        .collect();
+    if let Some(v) = value {
+        let at = lines
+            .iter()
+            .position(|l| l.starts_with("apiVersion:"))
+            .map(|i| i + 1)
+            .unwrap_or(0);
+        lines.insert(at, format!("defaultProvider: {v}"));
+    }
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// Sets (or, with `None`, removes) the default provider in `path`. The result
+/// is parsed before it is written, so a write never leaves a file this build
+/// would refuse; the write is atomic and the file keeps its mode (0644 when new).
+pub fn set_default_in(path: &Path, value: Option<&str>) -> Result<()> {
+    let (content, mode) = match std::fs::read_to_string(path) {
+        Ok(c) => {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(path)?.permissions().mode() & 0o7777;
+            (with_default(&c, value), mode)
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => match value {
+            None => return Ok(()),
+            Some(v) => (fresh_content(v), 0o644),
+        },
+        Err(e) => return Err(e.into()),
+    };
+    parse(&content, path)?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)
+            .map_err(|e| Error::Invalid(format!("{}: {e}", dir.display())))?;
+    }
+    delonix_state::write_atomic_mode(path, content.as_bytes(), Some(mode)).map_err(|e| {
+        Error::Invalid(po::tf(
+            "could not write {path}: {err} — a system file needs root (sudo), or point \
+             DELONIX_PROVIDERS_CONFIG at a file you can write",
+            &[
+                ("path", &path.display().to_string()),
+                ("err", &e.to_string()),
+            ],
+        ))
+    })?;
+    Ok(())
+}
+
+/// The JSON Schema of the file, generated from the types [`parse`] reads —
+/// published as `docs/schema/v1/providers.json`, and a test keeps the two equal.
+pub fn schema() -> serde_json::Value {
+    let generator = schemars::generate::SchemaSettings::draft2020_12().into_generator();
+    let root = generator.into_root_schema_for::<ProviderConfig>();
+    let mut v = serde_json::to_value(root).unwrap_or(serde_json::Value::Null);
+    if let Some(o) = v.as_object_mut() {
+        o.insert(
+            "$id".into(),
+            "https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json".into(),
+        );
+        o.insert(
+            "title".into(),
+            "Delonix providers file (config.delonix.io/v1)".into(),
+        );
+    }
+    v
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,5 +630,170 @@ providers:
             Some("https://other:8006")
         );
         assert_eq!(from_env("DELONIX_PROXMOX_NODE"), None);
+    }
+
+    fn scratch(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "delonix-pc-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    #[test]
+    fn setting_the_default_keeps_every_other_line_including_comments() {
+        let before = "# written by hand\napiVersion: config.delonix.io/v1\ndefaultProvider: libvirt\n# a proxmox node\nproviders:\n  - type: libvirt\n";
+        let after = with_default(before, Some("cloud-hypervisor"));
+        assert_eq!(
+            after,
+            "# written by hand\napiVersion: config.delonix.io/v1\ndefaultProvider: cloud-hypervisor\n# a proxmox node\nproviders:\n  - type: libvirt\n"
+        );
+        let cleared = with_default(before, None);
+        assert!(!cleared.contains("defaultProvider"));
+        assert!(cleared.contains("# a proxmox node"));
+        // A file without the line gets it right after apiVersion.
+        let added = with_default("apiVersion: config.delonix.io/v1\n", Some("libvirt"));
+        assert_eq!(
+            added,
+            "apiVersion: config.delonix.io/v1\ndefaultProvider: libvirt\n"
+        );
+    }
+
+    #[test]
+    fn set_default_in_creates_edits_clears_and_keeps_the_mode() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("set");
+        let f = d.join("sub/providers.yaml");
+        set_default_in(&f, None).unwrap();
+        assert!(!f.exists(), "clearing a missing file must not create one");
+        set_default_in(&f, Some("libvirt")).unwrap();
+        let first = std::fs::read_to_string(&f).unwrap();
+        assert!(first.contains("defaultProvider: libvirt"));
+        assert_eq!(
+            std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        parse(&first, &f).unwrap();
+
+        std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o640)).unwrap();
+        set_default_in(&f, Some("cloud-hypervisor")).unwrap();
+        assert!(std::fs::read_to_string(&f)
+            .unwrap()
+            .contains("defaultProvider: cloud-hypervisor"));
+        assert_eq!(
+            std::fs::metadata(&f).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+
+        set_default_in(&f, None).unwrap();
+        assert!(!std::fs::read_to_string(&f)
+            .unwrap()
+            .contains("defaultProvider"));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn set_default_in_refuses_to_write_a_file_this_build_would_refuse() {
+        let d = scratch("bad");
+        let f = d.join("providers.yaml");
+        let bad = "apiVersion: config.delonix.io/v2\n";
+        std::fs::write(&f, bad).unwrap();
+        assert!(set_default_in(&f, Some("libvirt")).is_err());
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), bad, "left untouched");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn validate_refuses_a_default_without_an_entry_and_a_readable_token() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("val");
+        let origin = d.join("providers.yaml");
+        let nopx = parse(
+            "apiVersion: config.delonix.io/v1\ndefaultProvider: proxmox\nproviders:\n  - type: libvirt\n",
+            &origin,
+        )
+        .unwrap();
+        let e = validate(&nopx, &origin).unwrap_err().to_string();
+        assert!(e.contains("proxmox"), "{e}");
+
+        let local = parse(
+            "apiVersion: config.delonix.io/v1\ndefaultProvider: libvirt\n",
+            &origin,
+        )
+        .unwrap();
+        validate(&local, &origin).unwrap();
+
+        let token = d.join("token");
+        std::fs::write(&token, "x").unwrap();
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let px = format!(
+            "apiVersion: config.delonix.io/v1\ndefaultProvider: proxmox\nproviders:\n  - type: proxmox\n    url: https://pve.invalid:8006\n    node: pve\n    auth:\n      tokenId: 'a@pve!t'\n      tokenSecretFile: {}\n",
+            token.display()
+        );
+        let cfg = parse(&px, &origin).unwrap();
+        let e = validate(&cfg, &origin).unwrap_err().to_string();
+        assert!(e.contains("chmod 600"), "{e}");
+        std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+        validate(&cfg, &origin).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_file_the_precedence_skips_is_listed_as_ignored() {
+        let d = scratch("ign");
+        let system = d.join("etc.yaml");
+        let xdg = d.join("xdg");
+        std::fs::create_dir_all(xdg.join("delonix")).unwrap();
+        let user = xdg.join("delonix/providers.yaml");
+        std::fs::write(&system, "x").unwrap();
+        std::fs::write(&user, "x").unwrap();
+        let xdg_s = xdg.display().to_string();
+        let env = |k: &str| (k == "XDG_CONFIG_HOME").then(|| xdg_s.clone());
+        assert_eq!(ignored_with(&env, &system, &user), vec![system.clone()]);
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    /// `docs/schema/v1/providers.json` is what an editor fetches, so it has to
+    /// BE the generated one. Regenerate with:
+    ///
+    /// ```text
+    /// delonix provider config schema > docs/schema/v1/providers.json
+    /// ```
+    #[test]
+    fn the_published_providers_schema_is_the_generated_one() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../docs/schema/v1/providers.json"
+        );
+        let published: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(path).expect("docs/schema/v1/providers.json is missing"),
+        )
+        .expect("the published providers schema is not valid JSON");
+        assert_eq!(
+            published,
+            schema(),
+            "the published providers schema is stale — regenerate it with \
+             `delonix provider config schema > docs/schema/v1/providers.json`"
+        );
+    }
+
+    /// The schema is as strict as the parser: an unknown key, a wrong
+    /// `apiVersion` and an inline secret are all outside it.
+    #[test]
+    fn the_providers_schema_is_as_strict_as_the_parser() {
+        let s = schema();
+        assert_eq!(s["additionalProperties"], serde_json::Value::Bool(false));
+        assert_eq!(s["properties"]["apiVersion"]["const"], API_VERSION);
+        let text = s.to_string();
+        assert!(
+            !text.contains("tokenSecret\""),
+            "an inline secret must not be offered"
+        );
+        assert!(text.contains("tokenSecretFile"));
+        assert!(text.contains("\"proxmox\""));
     }
 }
