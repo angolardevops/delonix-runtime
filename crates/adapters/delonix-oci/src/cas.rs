@@ -5,7 +5,9 @@
 use crate::Result;
 use sha2::{Digest, Sha256};
 use std::fs;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 /// Computes the sha256 of `data` in hexadecimal (without the `sha256:` prefix).
 pub fn sha256_hex(data: &[u8]) -> String {
@@ -51,11 +53,42 @@ impl Cas {
         let hex = sha256_hex(data);
         let dst = self.dir().join(&hex);
         if !dst.exists() {
-            let tmp = self.dir().join(format!(".{hex}.tmp"));
+            let tmp = self.tmp_path();
             fs::write(&tmp, data)?;
-            fs::rename(&tmp, &dst)?;
+            self.adopt(&tmp, &hex)?;
         }
         Ok(format!("sha256:{hex}"))
+    }
+
+    /// A fresh, unique scratch path inside the store — on the same
+    /// filesystem, so the final `rename` is atomic. The name was `.<hex>.tmp`,
+    /// shared by every process: two pulls of the same layer wrote the same
+    /// file at once.
+    pub fn tmp_path(&self) -> PathBuf {
+        static SEQ: AtomicU64 = AtomicU64::new(0);
+        let n = SEQ.fetch_add(1, Ordering::Relaxed);
+        self.dir()
+            .join(format!(".dl-{}-{n}.tmp", std::process::id()))
+    }
+
+    /// Moves a scratch file written by this process into place as the blob
+    /// `hex`. The caller has already checked that the content hashes to
+    /// `hex`; if the blob is there already (another writer won the race) the
+    /// scratch file is dropped, since the content is identical by definition.
+    pub fn adopt(&self, tmp: &Path, hex: &str) -> Result<()> {
+        if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+            let _ = fs::remove_file(tmp);
+            return Err(crate::Error::DigestMismatch(format!(
+                "not a sha256 digest: {hex}"
+            )));
+        }
+        let dst = self.dir().join(hex);
+        if dst.exists() {
+            let _ = fs::remove_file(tmp);
+            return Ok(());
+        }
+        fs::rename(tmp, &dst)?;
+        Ok(())
     }
 
     /// Reads the content of a blob by its digest.
@@ -84,6 +117,68 @@ impl Cas {
     pub fn verify(&self, digest: &str) -> Result<bool> {
         let data = self.read(digest)?;
         Ok(sha256_hex(&data) == strip(digest))
+    }
+}
+
+/// A blob being written to disk as it arrives, hashed on the way through.
+/// Each byte is written once and never held whole in memory — the download
+/// path buffered every layer in a `Vec` first, so the RSS of a pull was the
+/// sum of the layers in flight and nothing reached the disk until the last
+/// byte had arrived.
+pub struct StreamingBlob {
+    file: fs::File,
+    hasher: Sha256,
+    len: u64,
+}
+
+impl StreamingBlob {
+    /// Creates `path` (it must not exist: a scratch path from
+    /// [`Cas::tmp_path`], never a blob's final name).
+    pub fn create(path: &Path) -> Result<Self> {
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        Ok(Self {
+            file,
+            hasher: Sha256::new(),
+            len: 0,
+        })
+    }
+
+    /// Bytes written so far — what a resumed download continues from.
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    /// `true` before the first byte.
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Starts over from zero, for when the server ignored a `Range` request
+    /// and is sending the whole blob again.
+    pub fn reset(&mut self) -> Result<()> {
+        use std::io::Seek;
+        self.file.set_len(0)?;
+        self.file.rewind()?;
+        self.hasher = Sha256::new();
+        self.len = 0;
+        Ok(())
+    }
+
+    /// Appends the next chunk.
+    pub fn append(&mut self, bytes: &[u8]) -> Result<()> {
+        self.file.write_all(bytes)?;
+        self.hasher.update(bytes);
+        self.len += bytes.len() as u64;
+        Ok(())
+    }
+
+    /// Flushes and returns the hex sha256 of everything written.
+    pub fn finish(mut self) -> Result<String> {
+        self.file.flush()?;
+        Ok(format!("{:x}", self.hasher.finalize()))
     }
 }
 
