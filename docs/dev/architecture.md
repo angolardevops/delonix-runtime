@@ -438,7 +438,6 @@ Declared exceptions (each one names the ADR-0040 phase that removes it):
 - `delonix-oci` → `delonix-state` — removed in **P4**
 - `delonix-opnsense` → `delonix-sdn` — removed in **P4**
 - `delonix-proxmox` → `delonix-sdn` — removed in **P4**
-- `delonix-proxmox` → `delonix-vm` — removed in **P4**
 - `delonix-scanner` → `delonix-oci` — removed in **P4**
 - `delonix-sdn` → `delonix-state` — removed in **P4**
 - `delonix-vm` → `delonix-state` — removed in **P4**
@@ -724,7 +723,6 @@ flowchart TB
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
   delonix_proxmox --> delonix_sdn
-  delonix_proxmox --> delonix_vm
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt

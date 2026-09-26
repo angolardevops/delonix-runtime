@@ -59,7 +59,7 @@ pub use error::{Error, Result};
 // used to live in this file did not know the k8s `Gi`/`Mi` suffix the engine
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
 // 1 GiB here — silently, which is the failure this repo treats as its worst.
-use delonix_vm::{mem_mib, Boot, CreateStage, VmBackend, VmConfig};
+use delonix_compute::vm_backend::{mem_mib, Boot, CreateStage, VmBackend, VmConfig};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -1972,7 +1972,7 @@ impl Client {
         ledger: &Ledger,
         vmid: u32,
         vm_name: &str,
-        intent: &delonix_vm::CloudInitIntent,
+        intent: &delonix_compute::vm_backend::CloudInitIntent,
     ) -> Result<()> {
         let hostname = intent
             .hostname
@@ -1984,7 +1984,7 @@ impl Client {
             .ci_user
             .as_deref()
             .filter(|u| !u.is_empty())
-            .unwrap_or(delonix_vm::cloudinit::DEFAULT_CI_USER)
+            .unwrap_or(delonix_compute::vm_backend::DEFAULT_CI_USER)
             .to_string();
         let keys = urlencode(&intent.ssh_keys.join("\n"));
         let mut form: Vec<(&str, &str)> =
@@ -4240,7 +4240,7 @@ fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
             cfg.ci_user
                 .as_deref()
                 .filter(|u| !u.is_empty())
-                .unwrap_or(delonix_vm::cloudinit::DEFAULT_CI_USER)
+                .unwrap_or(delonix_compute::vm_backend::DEFAULT_CI_USER)
                 .to_string(),
         ));
         out.push(("sshkeys", urlencode(&cfg.ssh_keys.join("\n"))));
@@ -4826,12 +4826,14 @@ impl VmBackend for ProxmoxBackend {
             Ok((c.power_state(vmid)?, vmid))
         })?;
         if ps.status != "stopped" {
-            return Err(delonix_vm::Error::ResizeNeedsStopped(format!(
-                "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+            return Err(
+                delonix_compute::vm_error::Error::ResizeNeedsStopped(format!(
+                    "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
                  is stopped: `vm resize` is a cold resize — stop it first (`delonix vm stop {}`)",
-                vm.name, ps.status, vm.name
-            ))
-            .into());
+                    vm.name, ps.status, vm.name
+                ))
+                .into(),
+            );
         }
         Ok(self.on_vm(vm, |c, _| {
             c.resize_hardware(&ledger, vmid, vcpus, memory_mib)
@@ -4845,7 +4847,7 @@ impl VmBackend for ProxmoxBackend {
         &self,
         vmdir: &Path,
         vm: &Vm,
-        intent: &delonix_vm::CloudInitIntent,
+        intent: &delonix_compute::vm_backend::CloudInitIntent,
     ) -> delonix_model::Result<()> {
         let ledger = Ledger::at(vmdir);
         let (ps, vmid) = self.on_vm(vm, |c, vmid| {
@@ -4853,13 +4855,15 @@ impl VmBackend for ProxmoxBackend {
             Ok((c.power_state(vmid)?, vmid))
         })?;
         if ps.status != "stopped" {
-            return Err(delonix_vm::Error::CloudInitNeedsStopped(format!(
-                "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+            return Err(
+                delonix_compute::vm_error::Error::CloudInitNeedsStopped(format!(
+                    "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
                  is stopped: the guest reads cloud-init at boot — stop it first (`delonix vm \
                  stop {}`)",
-                vm.name, ps.status, vm.name
-            ))
-            .into());
+                    vm.name, ps.status, vm.name
+                ))
+                .into(),
+            );
         }
         Ok(self.on_vm(vm, |c, _| {
             c.update_cloud_init(&ledger, vmid, &vm.name, intent)
@@ -4945,7 +4949,7 @@ impl VmBackend for ProxmoxBackend {
         &self,
         vmdir: &Path,
         vm: &Vm,
-        policy: &delonix_vm::firewall::Policy,
+        policy: &delonix_compute::vm_firewall::Policy,
     ) -> delonix_model::Result<()> {
         let ledger = Ledger::at(vmdir);
         Ok(self.on_vm(vm, |c, vmid| vm_firewall::apply(c, &ledger, vmid, policy))?)
@@ -4955,8 +4959,8 @@ impl VmBackend for ProxmoxBackend {
         &self,
         _vmdir: &Path,
         vm: &Vm,
-        direction: delonix_vm::firewall::Direction,
-    ) -> delonix_model::Result<delonix_vm::firewall::Policy> {
+        direction: delonix_compute::vm_firewall::Direction,
+    ) -> delonix_model::Result<delonix_compute::vm_firewall::Policy> {
         Ok(self.on_vm(vm, |c, vmid| vm_firewall::read(c, vmid, direction))?)
     }
 
@@ -4971,14 +4975,18 @@ impl VmBackend for ProxmoxBackend {
     }
 }
 
-/// Registers this backend under the name `proxmox`, against `target`.
+/// This backend's registry entry under the name `proxmox`, against `target` —
+/// validated, not yet registered.
 ///
-/// **This is the caller ADR-0008's decision 2 was waiting for.** The registry
-/// takes a closure precisely because a remote backend needs configuration, and
+/// **The composition root registers it** (`delonix_vm::register_backend`),
+/// which is what ADR-0008 decision 2 describes and what lets this crate depend
+/// on the `VmBackend` port in `delonix-compute` without depending on the
+/// adapter that holds the registry (P4b.2, `docs/discovery/61`).
+/// The registry closure is why a remote backend can be registered at all:
 /// `fn() -> Box<dyn VmBackend>` had nowhere to receive an endpoint, a node name
 /// and a credential.
 ///
-/// **Connects once, lazily.** Registering does no I/O — a node that is
+/// **Connects once, lazily.** Nothing here does I/O — a node that is
 /// unreachable costs nothing until somebody selects the backend — and the
 /// authenticated client is then SHARED by every later lookup. Without that,
 /// `vm ls` over ten VMs would authenticate ten times, because the engine builds
@@ -4986,47 +4994,42 @@ impl VmBackend for ProxmoxBackend {
 ///
 /// Never auto-selectable: auto-detection asks `available()`, and the only
 /// honest answer here costs a network round trip to a node nobody named.
-pub fn register(target: Target) -> delonix_model::Result<()> {
-    register_with(target, ClientOptions::default())
-}
-
-/// [`register`] with the client's bounds and trace chosen by the caller — the
-/// composition root, which is where the environment is read.
-pub fn register_with(target: Target, opts: ClientOptions) -> delonix_model::Result<()> {
+pub fn registration(
+    target: Target,
+    opts: ClientOptions,
+) -> delonix_model::Result<delonix_compute::vm_backend::BackendRegistration> {
     // Fail on a malformed target HERE, at registration, rather than at the
     // first `vm create`: the operator is looking at the configuration now.
     validate_target_url(&target.base_url)?;
     validate_node_name(&target.node)?;
 
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    Ok(delonix_vm::register_backend(
-        delonix_vm::BackendRegistration {
-            id: "proxmox",
-            aliases: &["pve"],
-            auto_selectable: false,
-            report: Box::new(|| capability_report(true)),
-            new: Box::new(move || {
-                let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(c) = slot.as_ref() {
-                    return Ok(Box::new(ProxmoxBackend::sharing(c.clone())));
-                }
-                // A failed connect is NOT cached: a node that was down when the
-                // first VM was listed must not stay "down" for the rest of the
-                // process.
-                let c = std::sync::Arc::new(
-                    Client::connect_with(&target, opts.clone())
-                        .map_err(|e| delonix_vm::Error::Engine(delonix_model::Error::from(e)))?,
-                );
-                *slot = Some(c.clone());
-                Ok(Box::new(ProxmoxBackend::sharing(c)))
-            }),
-        },
-    )?)
+    Ok(delonix_compute::vm_backend::BackendRegistration {
+        id: "proxmox",
+        aliases: &["pve"],
+        auto_selectable: false,
+        report: Box::new(|| capability_report(true)),
+        new: Box::new(move || {
+            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(c) = slot.as_ref() {
+                return Ok(Box::new(ProxmoxBackend::sharing(c.clone())));
+            }
+            // A failed connect is NOT cached: a node that was down when the
+            // first VM was listed must not stay "down" for the rest of the
+            // process.
+            let c =
+                std::sync::Arc::new(Client::connect_with(&target, opts.clone()).map_err(|e| {
+                    delonix_compute::vm_error::Error::Engine(delonix_model::Error::from(e))
+                })?);
+            *slot = Some(c.clone());
+            Ok(Box::new(ProxmoxBackend::sharing(c)))
+        }),
+    })
 }
 
 /// Registers this Proxmox target's cluster-native SDN as a
 /// `delonix_sdn::network_zone::NetworkZoneProvider` (ADR-0049 addendum) — a
-/// SEPARATE registration from [`register_with`]'s `VmBackend` one, with its
+/// SEPARATE registration from [`registration`]'s `VmBackend` one, with its
 /// own authenticated [`Client`] (Proxmox tickets are cheap to mint, and
 /// sharing one across two registries would tie an unrelated port's lifetime
 /// to this one's). Reuses the SAME [`Target`]/[`Auth`]/[`ClientOptions`]
@@ -5034,7 +5037,7 @@ pub fn register_with(target: Target, opts: ClientOptions) -> delonix_model::Resu
 /// (`cmd::network_zone_providers`) reads the same environment for both.
 ///
 /// **Nothing here does I/O until the registered factory is actually
-/// selected** — same contract as [`register_with`]. `ledger_dir` is where
+/// selected** — same contract as [`registration`]. `ledger_dir` is where
 /// the task ledger for the cluster-wide `apply_sdn` reload persists
 /// (`<ledger_dir>/proxmox-tasks.json`, via [`Ledger::at`]): the SDN reload
 /// has no VM directory of its own (it is cluster-scoped, not VM-scoped —
@@ -5059,7 +5062,7 @@ pub fn register_network_zone_provider(
                     c.clone()
                 } else {
                     // A failed connect is NOT cached — same reasoning as
-                    // `register_with`: a node down on the first selection
+                    // `registration`: a node down on the first selection
                     // must not stay "down" for the rest of the process.
                     let c = std::sync::Arc::new(
                         Client::connect_with(&target, opts.clone())
@@ -6000,7 +6003,7 @@ mod tests {
             (
                 "volumes",
                 VmConfig {
-                    volumes: vec![delonix_vm::VmVolume {
+                    volumes: vec![delonix_compute::VmVolume {
                         source: "/data".into(),
                         tag: "data".into(),
                         mount_path: "/data".into(),
@@ -6799,7 +6802,7 @@ mod tests {
     /// in order; what has no meaning on a remote node is refused by name.
     #[test]
     fn extra_devices_map_to_node_slots_and_refuse_what_the_node_cannot_open() {
-        use delonix_vm::{ExtraDisk, ExtraNic};
+        use delonix_compute::{ExtraDisk, ExtraNic};
         let disk = |source: &str, bus: &str| ExtraDisk {
             source: source.into(),
             bus: bus.into(),

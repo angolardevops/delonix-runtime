@@ -11,7 +11,7 @@ use delonix_sdn::network_zone::{EnsureOutcome, NetworkZoneProvider, NetworkZoneS
 
 /// The canonical id this provider registers under, and the only one
 /// [`crate::register_network_zone_provider`] uses (`"pve"` as an alias, the
-/// same pair [`crate::register_with`] registers the `VmBackend` under).
+/// same pair [`crate::registration`] registers the `VmBackend` under).
 pub const ID: &str = "proxmox";
 
 /// The [`NetworkZoneProvider`] this crate exists to provide: Proxmox's

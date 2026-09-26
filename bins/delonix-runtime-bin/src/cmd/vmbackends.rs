@@ -56,7 +56,8 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
     let Some((target, opts)) = proxmox_target_with(lookup)? else {
         return Ok(());
     };
-    delonix_proxmox::register_with(target, opts)
+    delonix_vm::register_backend(delonix_proxmox::registration(target, opts)?)?;
+    Ok(())
 }
 
 /// The configured Proxmox target, read from the environment — the SAME one
