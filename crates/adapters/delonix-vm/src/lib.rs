@@ -895,6 +895,16 @@ pub trait VmBackend {
     /// Current IP of the VM (may change/resolve later via DHCP).
     fn ip(&self, vm: &Vm) -> Option<String>;
 
+    /// The handle this backend now knows the VM by, when it differs from the
+    /// one in the record — `None` when nothing changed or the backend cannot
+    /// tell. Never does I/O: it reports what an earlier call in this process
+    /// already learnt (a remote backend that found a VM moved to another node
+    /// of its cluster, ADR-0053 decision 3), so [`status`] can persist it
+    /// without a round trip per VM on every `vm ls`. Default: `None`.
+    fn current_handle(&self, _vm: &Vm) -> Option<String> {
+        None
+    }
+
     /// Is [`VmBackend::ip`] a PREDICTION rather than an OBSERVATION?
     ///
     /// Default `false`: libvirt reads a real DHCP lease, so an address there is
@@ -5683,7 +5693,17 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // change too, and the old `was_running != is_running` saw both sides as
         // "not running" and left `Paused` on disk while `vm ls` said `Stopped`
         // — so `vm unpause` went on to aim at a VM that no longer existed.
-        adopted || vm.ip != old_ip || vm.status != old_status
+        // A remote backend that found the VM on another node of its cluster
+        // (ADR-0053 decision 3) says so here; the record takes the new handle,
+        // or every later command would ask the old node again.
+        let relocated = match backend.current_handle(vm) {
+            Some(h) if h != vm.api_socket => {
+                vm.api_socket = h;
+                true
+            }
+            _ => false,
+        };
+        adopted || relocated || vm.ip != old_ip || vm.status != old_status
     })
     .map_err(Into::into)
 }
@@ -8808,6 +8828,92 @@ Format specific information:
 
         let _ = std::fs::remove_dir_all(&base);
         backends().write().unwrap().retain(|b| b.id != "com-ci");
+    }
+
+    /// ADR-0053 decision 3, the engine half: when the backend reports that it
+    /// now knows the VM by another handle (it found it on another node of its
+    /// cluster), `status()` — what `vm ls` runs — writes that handle to the
+    /// record, so later commands stop asking the old node. A backend that
+    /// reports nothing leaves the record alone.
+    #[test]
+    fn status_persists_the_handle_a_backend_relocated_the_vm_to() {
+        struct Moved;
+        impl VmBackend for Moved {
+            fn id(&self) -> &'static str {
+                "movido"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn current_handle(&self, vm: &Vm) -> Option<String> {
+                (vm.name == "m").then(|| "remote:novo:7".to_string())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "movido",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Moved))),
+        })
+        .expect("registar");
+        let base = std::env::temp_dir().join(format!(
+            "delonix-relocated-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        for name in ["m", "fica"] {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                "remote:velho:7".into(),
+            );
+            vm.backend = "movido".into();
+            vm.status = Status::Stopped;
+            st.save(name, &vm).unwrap();
+        }
+        assert_eq!(status(&base, "m").unwrap().api_socket, "remote:novo:7");
+        assert_eq!(
+            st.load("m").unwrap().api_socket,
+            "remote:novo:7",
+            "persisted"
+        );
+        assert_eq!(status(&base, "fica").unwrap().api_socket, "remote:velho:7");
+        assert_eq!(st.load("fica").unwrap().api_socket, "remote:velho:7");
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "movido");
     }
 }
 

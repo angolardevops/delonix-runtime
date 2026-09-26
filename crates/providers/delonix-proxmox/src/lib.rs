@@ -247,7 +247,7 @@ impl CloudInitPendingKey {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Ticket {
     ticket: String,
     #[serde(rename = "CSRFPreventionToken")]
@@ -920,11 +920,67 @@ pub struct Client {
     vlan: Option<u16>,
     task_timeout: Duration,
     trace_routes: Option<PathBuf>,
+    /// VMs found on another node of the cluster than their handle said
+    /// (ADR-0053 decision 3), `vmid -> node`, learnt in this process. Shared by
+    /// every backend handed this client, so a VM relocated once is addressed on
+    /// its node by the next call without a second search, and the engine can
+    /// persist the new handle (`VmBackend::current_handle`).
+    relocated: std::sync::Mutex<std::collections::HashMap<u32, String>>,
 }
 
 impl Client {
     pub fn connect(target: &Target) -> Result<Self> {
         Self::connect_with(target, ClientOptions::default())
+    }
+
+    /// The node this client addresses.
+    pub fn node(&self) -> &str {
+        &self.node
+    }
+
+    /// The same authenticated client, addressing `node` — another member of
+    /// the target's cluster (ADR-0053 decision 2: an existing VM is addressed
+    /// on the node its handle names). Shares the HTTP pool and the credential,
+    /// takes a copy of the current ticket, and does no I/O: the node's API
+    /// serves `/nodes/<other>/…` for a cluster member. Creating a VM stays on
+    /// the configured node — this is never used to pick one.
+    pub fn for_node(&self, node: &str) -> Result<Client> {
+        validate_node_name(node)?;
+        let ticket = self.ticket.read().map(|t| t.clone()).unwrap_or_default();
+        Ok(Client {
+            http: self.http.clone(),
+            base: self.base.clone(),
+            node: node.to_string(),
+            auth: self.auth.clone(),
+            ticket: std::sync::RwLock::new(ticket),
+            bridge: self.bridge.clone(),
+            vlan: self.vlan,
+            task_timeout: self.task_timeout,
+            trace_routes: self.trace_routes.clone(),
+            relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
+        })
+    }
+
+    /// Where the cluster says VM `vmid` is: `GET /cluster/resources?type=vm`,
+    /// the QEMU entries with that id. `Some(node)` only for exactly ONE match —
+    /// none, or two (an id the cluster should never show twice), is `None`,
+    /// and the caller keeps its original error. Reads where a VM already is;
+    /// never chooses where one should go (ADR-0053 decision 3).
+    pub fn locate_vm(&self, vmid: u32) -> Result<Option<String>> {
+        let body = self.get("/cluster/resources?type=vm")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "cluster resources")?;
+        Ok(located_node(&w.data, vmid))
+    }
+
+    /// The node a VM was found on in this process, if it moved.
+    fn relocated_node(&self, vmid: u32) -> Option<String> {
+        self.relocated.lock().ok()?.get(&vmid).cloned()
+    }
+
+    fn remember_relocation(&self, vmid: u32, node: &str) {
+        if let Ok(mut m) = self.relocated.lock() {
+            m.insert(vmid, node.to_string());
+        }
     }
 
     pub fn connect_with(target: &Target, opts: ClientOptions) -> Result<Self> {
@@ -963,6 +1019,7 @@ impl Client {
             vlan: target.vlan,
             task_timeout: opts.task_timeout,
             trace_routes: opts.trace_routes,
+            relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
         };
         me.login()?;
         // Prove the credential AND the node name before anything is created:
@@ -4396,13 +4453,31 @@ fn create_form(
     form
 }
 
-/// The vmid out of the handle `boot` stored (`proxmox:<node>:<vmid>`). Pure, so
-/// the "not ours" case is testable without a node.
-fn vmid_from_handle(handle: &str) -> Option<u32> {
-    handle
-        .strip_prefix("proxmox:")
-        .and_then(|r| r.rsplit_once(':'))
-        .and_then(|(_, id)| id.parse().ok())
+/// The one node `/cluster/resources?type=vm` lists QEMU VM `vmid` on, or
+/// `None` for zero or more than one match. Pure.
+fn located_node(entries: &[serde_json::Value], vmid: u32) -> Option<String> {
+    let nodes: Vec<&str> = entries
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()).unwrap_or("qemu") == "qemu")
+        .filter(|e| e.get("vmid").and_then(|v| v.as_u64()) == Some(u64::from(vmid)))
+        .filter_map(|e| e.get("node").and_then(|n| n.as_str()))
+        .collect();
+    match nodes.as_slice() {
+        [one] => Some(one.to_string()),
+        _ => None,
+    }
+}
+
+/// The node and the vmid out of the handle `boot` stored
+/// (`proxmox:<node>:<vmid>`), or `None` for a handle this backend did not
+/// write. Pure.
+fn handle_parts(handle: &str) -> Option<(String, u32)> {
+    let rest = handle.strip_prefix("proxmox:")?;
+    let (node, id) = rest.rsplit_once(':')?;
+    if node.is_empty() {
+        return None;
+    }
+    Some((node.to_string(), id.parse().ok()?))
 }
 
 // ===========================================================================
@@ -4427,20 +4502,59 @@ impl ProxmoxBackend {
         self.client.clone()
     }
 
-    /// The node-side id of a VM this backend created, out of the handle `boot`
-    /// stored (`proxmox:<node>:<vmid>`).
-    ///
-    /// NOT the name: two VMs on a node may share one, and every `qm` call takes
-    /// the id. A record without the handle was not created by this backend —
-    /// saying so beats guessing an id.
-    fn vmid_of(&self, vm: &Vm) -> Result<u32> {
-        vmid_from_handle(&vm.api_socket).ok_or_else(|| {
+    /// The client for the node this VM is on, and its vmid (ADR-0053
+    /// decision 2): the node its handle names — or the node an earlier call in
+    /// this process found it on — instead of the configured node, which is
+    /// only the API entry point and where new VMs are created.
+    fn vm_client(&self, vm: &Vm) -> Result<(std::sync::Arc<Client>, u32)> {
+        let (handle_node, vmid) = handle_parts(&vm.api_socket).ok_or_else(|| {
             Error::NoHandle(format!(
                 "VM '{}' has no Proxmox handle in its record (found {:?}) — it was not created \
                  by this backend",
                 vm.name, vm.api_socket
             ))
-        })
+        })?;
+        let node = self.client.relocated_node(vmid).unwrap_or(handle_node);
+        if node == self.client.node {
+            return Ok((self.client.clone(), vmid));
+        }
+        Ok((std::sync::Arc::new(self.client.for_node(&node)?), vmid))
+    }
+
+    /// Runs `f` against the VM's node, and follows the VM once if it moved
+    /// (ADR-0053 decision 3): when the node answers `NodeNotFound`, one
+    /// `/cluster/resources` read looks for the SAME vmid; found on exactly one
+    /// other node, the move is logged, remembered for this process (and for
+    /// `current_handle`), and `f` runs again there. Otherwise the original
+    /// error stands. It reads where a VM is; it never picks where one goes.
+    fn on_vm<T>(&self, vm: &Vm, f: impl Fn(&Client, u32) -> Result<T>) -> Result<T> {
+        let (c, vmid) = self.vm_client(vm)?;
+        match f(&c, vmid) {
+            Err(Error::NodeNotFound(msg)) => {
+                let Some(found) = self.client.locate_vm(vmid)? else {
+                    return Err(Error::NodeNotFound(msg));
+                };
+                if found == c.node {
+                    return Err(Error::NodeNotFound(msg));
+                }
+                tracing::warn!(
+                    vm = %vm.name,
+                    vmid,
+                    from = %c.node,
+                    to = %found,
+                    "proxmox: the VM is not on the node its record names; the cluster lists it on \
+                     another node — following it"
+                );
+                self.client.remember_relocation(vmid, &found);
+                let moved = if found == self.client.node {
+                    self.client.clone()
+                } else {
+                    std::sync::Arc::new(self.client.for_node(&found)?)
+                };
+                f(&moved, vmid)
+            }
+            other => other,
+        }
     }
 }
 
@@ -4591,13 +4705,17 @@ impl VmBackend for ProxmoxBackend {
     }
 
     fn is_running(&self, vm: &Vm) -> bool {
-        let Ok(vmid) = self.vmid_of(vm) else {
-            return false;
-        };
-        self.client
-            .status_current(vmid)
+        self.on_vm(vm, |c, vmid| c.status_current(vmid))
             .map(|s| s == "running")
             .unwrap_or(false)
+    }
+
+    /// The handle the VM is known by after this process found it on another
+    /// node (ADR-0053 decision 3) — read from the shared client, no I/O.
+    fn current_handle(&self, vm: &Vm) -> Option<String> {
+        let (node, vmid) = handle_parts(&vm.api_socket)?;
+        let now = self.client.relocated_node(vmid)?;
+        (now != node).then(|| format!("proxmox:{now}:{vmid}"))
     }
 
     /// The guest's IPv4, asked of the QEMU guest agent.
@@ -4616,12 +4734,11 @@ impl VmBackend for ProxmoxBackend {
     /// permissions" both show up as an empty IP column, and the second one is
     /// worth being able to find.
     fn ip(&self, vm: &Vm) -> Option<String> {
-        let vmid = self.vmid_of(vm).ok()?;
-        let body = self
-            .client
+        let (c, vmid) = self.vm_client(vm).ok()?;
+        let body = c
             .get(&format!(
                 "/nodes/{}/qemu/{vmid}/agent/network-get-interfaces",
-                self.client.node
+                c.node
             ))
             .map_err(|e| {
                 tracing::debug!(vm = %vm.name, error = %e, "proxmox: no address from the guest agent");
@@ -4649,13 +4766,14 @@ impl VmBackend for ProxmoxBackend {
     /// VM destroyed the guest's data on a plain `vm stop`. Freeing everything
     /// is now [`Self::destroy`], which is what `vm rm` calls.
     fn stop(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        if self.is_running(vm) {
-            self.client.stop(&ledger, vmid)?;
-        }
-        Ok(())
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            if c.status_current(vmid)? == "running" {
+                c.stop(&ledger, vmid)?;
+            }
+            Ok(())
+        })?)
     }
 
     /// Powers off AND removes the VM from the node — the record is going away,
@@ -4664,9 +4782,9 @@ impl VmBackend for ProxmoxBackend {
     /// The order matters: a running VM cannot be destroyed, and asking anyway
     /// gets a task failure that reads like a bug.
     fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         self.stop(vmdir, vm)?;
-        Ok(self.client.destroy(&Ledger::at(vmdir), vmid)?)
+        let ledger = Ledger::at(vmdir);
+        Ok(self.on_vm(vm, |c, vmid| c.destroy(&ledger, vmid))?)
     }
 
     /// `vm pause`: the node's `…/status/suspend`, vCPUs stopped with memory
@@ -4674,18 +4792,20 @@ impl VmBackend for ProxmoxBackend {
     /// never the `todisk` hibernation. A task still in flight for the VM is
     /// waited on first, like every other operation here.
     fn pause(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.suspend(&ledger, vmid)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.suspend(&ledger, vmid)
+        })?)
     }
 
     /// `vm unpause`: the node's `…/status/resume` on a suspended VM.
     fn unpause(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.resume_suspended(&ledger, vmid)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.resume_suspended(&ledger, vmid)
+        })?)
     }
 
     /// `vm resize` (`vm.resize.cold`): the engine has checked its record, and
@@ -4700,10 +4820,11 @@ impl VmBackend for ProxmoxBackend {
         vcpus: u32,
         memory_mib: u64,
     ) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        let ps = self.client.power_state(vmid)?;
+        let (ps, vmid) = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            Ok((c.power_state(vmid)?, vmid))
+        })?;
         if ps.status != "stopped" {
             return Err(delonix_vm::Error::ResizeNeedsStopped(format!(
                 "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
@@ -4712,9 +4833,9 @@ impl VmBackend for ProxmoxBackend {
             ))
             .into());
         }
-        Ok(self
-            .client
-            .resize_hardware(&ledger, vmid, vcpus, memory_mib)?)
+        Ok(self.on_vm(vm, |c, _| {
+            c.resize_hardware(&ledger, vmid, vcpus, memory_mib)
+        })?)
     }
 
     /// `vm cloud-init`: the engine has checked its record; the node is asked
@@ -4726,10 +4847,11 @@ impl VmBackend for ProxmoxBackend {
         vm: &Vm,
         intent: &delonix_vm::CloudInitIntent,
     ) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        let ps = self.client.power_state(vmid)?;
+        let (ps, vmid) = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            Ok((c.power_state(vmid)?, vmid))
+        })?;
         if ps.status != "stopped" {
             return Err(delonix_vm::Error::CloudInitNeedsStopped(format!(
                 "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
@@ -4739,9 +4861,9 @@ impl VmBackend for ProxmoxBackend {
             ))
             .into());
         }
-        Ok(self
-            .client
-            .update_cloud_init(&ledger, vmid, &vm.name, intent)?)
+        Ok(self.on_vm(vm, |c, _| {
+            c.update_cloud_init(&ledger, vmid, &vm.name, intent)
+        })?)
     }
 
     /// Starts the VM this record already names, instead of creating another.
@@ -4755,16 +4877,24 @@ impl VmBackend for ProxmoxBackend {
     /// `Ok(None)` when the node no longer has that vmid — the VM was removed
     /// outside this engine, and creating one is then the honest answer.
     fn resume(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<Option<Boot>> {
-        let Ok(vmid) = self.vmid_of(vm) else {
+        if handle_parts(&vm.api_socket).is_none() {
             // No handle: not created by this backend. Let the caller create.
             return Ok(None);
-        };
-        let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        if !self.client.vm_exists(vmid)? {
-            return Ok(None);
         }
-        self.client.start(&ledger, vmid)?;
+        let ledger = Ledger::at(vmdir);
+        // `vm_exists` answers `false` for a VM that moved — `on_vm` follows a
+        // `NodeNotFound`, so the existence check is the node's own config read.
+        let started = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.config(vmid)?;
+            c.start(&ledger, vmid)?;
+            Ok(true)
+        });
+        match started {
+            Ok(_) => {}
+            Err(Error::NodeNotFound(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        }
         Ok(Some(Boot {
             pid: None,
             tap: String::new(),
@@ -4776,19 +4906,21 @@ impl VmBackend for ProxmoxBackend {
     }
 
     fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.snapshot(&ledger, vmid, name)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.snapshot(&ledger, vmid, name)
+        })?)
     }
 
     fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.rollback(&ledger, vmid, name)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.rollback(&ledger, vmid, name)
+        })?)
     }
 
     // `_vmdir` porque o Proxmox não tem disco local nosso: os instantâneos
@@ -4796,15 +4928,16 @@ impl VmBackend for ProxmoxBackend {
     // trait quando os verbos passaram a servir uma VM PARADA (v0.52.0), e serve
     // os backends que leem o overlay em disco — este não é um deles.
     fn snapshots(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<Vec<String>> {
-        Ok(self.client.snapshots(self.vmid_of(vm)?)?)
+        Ok(self.on_vm(vm, |c, vmid| c.snapshots(vmid))?)
     }
 
     fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.delete_snapshot(&ledger, vmid, name)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.delete_snapshot(&ledger, vmid, name)
+        })?)
     }
 
     /// The node's own per-VM firewall (ADR-0052) — see [`vm_firewall`].
@@ -4814,9 +4947,8 @@ impl VmBackend for ProxmoxBackend {
         vm: &Vm,
         policy: &delonix_vm::firewall::Policy,
     ) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         let ledger = Ledger::at(vmdir);
-        Ok(vm_firewall::apply(&self.client, &ledger, vmid, policy)?)
+        Ok(self.on_vm(vm, |c, vmid| vm_firewall::apply(c, &ledger, vmid, policy))?)
     }
 
     fn read_firewall(
@@ -4825,8 +4957,7 @@ impl VmBackend for ProxmoxBackend {
         vm: &Vm,
         direction: delonix_vm::firewall::Direction,
     ) -> delonix_model::Result<delonix_vm::firewall::Policy> {
-        let vmid = self.vmid_of(vm)?;
-        Ok(vm_firewall::read(&self.client, vmid, direction)?)
+        Ok(self.on_vm(vm, |c, vmid| vm_firewall::read(c, vmid, direction))?)
     }
 
     /// The address is OBSERVED: it comes from the guest agent
@@ -5555,6 +5686,7 @@ mod tests {
             vlan: None,
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
+            relocated: Default::default(),
         };
         let e = cli.cloudinit_dump(100, "bogus").unwrap_err();
         assert!(e.is_invalid_argument(), "{e}");
@@ -6124,6 +6256,7 @@ mod tests {
             vlan,
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
+            relocated: Default::default(),
         };
         let cfg = VmConfig::default();
         assert_eq!(cli(None, None).net0_arg(&cfg), "virtio,bridge=vmbr0");
@@ -6591,17 +6724,48 @@ mod tests {
         // Two VMs on a node may share a name; every `qm` call takes the id.
         // A record with no handle was not created by this backend — saying so
         // beats guessing an id and acting on somebody else's VM.
-        assert!(vmid_from_handle("").is_none());
-        assert!(
-            vmid_from_handle("/run/x.sock").is_none(),
-            "a libvirt/CH record"
+        assert!(handle_parts("").is_none());
+        assert!(handle_parts("/run/x.sock").is_none(), "a libvirt/CH record");
+        assert!(handle_parts("proxmox:pve:").is_none());
+        assert!(handle_parts("proxmox:pve:abc").is_none());
+        assert!(handle_parts("proxmox::101").is_none(), "no node, no handle");
+        // The NODE is read now too (ADR-0053 decision 2): it is the node the
+        // VM is addressed on, not the configured one.
+        assert_eq!(handle_parts("proxmox:pve:101"), Some(("pve".into(), 101)));
+        assert_eq!(handle_parts("proxmox:pve2:7"), Some(("pve2".into(), 7)));
+        // The id is the LAST field; what is left is the node, validated when a
+        // client is built for it (`for_node`), never trusted blindly.
+        assert_eq!(handle_parts("proxmox:a:b:7"), Some(("a:b".into(), 7)));
+    }
+
+    /// `/cluster/resources?type=vm` names ONE node for a vmid, or the lookup
+    /// gives up: zero matches, two matches, and LXC entries with the same id
+    /// all leave the caller's original error standing (ADR-0053 decision 3).
+    #[test]
+    fn a_moved_vm_is_located_only_on_exactly_one_node() {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"type":"qemu","vmid":100,"node":"pve2","name":"a"},
+                {"type":"qemu","vmid":101,"node":"pve","name":"b"},
+                {"type":"lxc","vmid":102,"node":"pve3"},
+                {"type":"qemu","vmid":103,"node":"pve"},
+                {"type":"qemu","vmid":103,"node":"pve2"}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(located_node(&entries, 100).as_deref(), Some("pve2"));
+        assert_eq!(located_node(&entries, 101).as_deref(), Some("pve"));
+        assert_eq!(
+            located_node(&entries, 102),
+            None,
+            "an LXC container is not a VM"
         );
-        assert!(vmid_from_handle("proxmox:pve:").is_none());
-        assert!(vmid_from_handle("proxmox:pve:abc").is_none());
-        assert_eq!(vmid_from_handle("proxmox:pve:101"), Some(101));
-        // A node name with a colon still yields the id: the parse takes the LAST
-        // field.
-        assert_eq!(vmid_from_handle("proxmox:a:b:7"), Some(7));
+        assert_eq!(
+            located_node(&entries, 103),
+            None,
+            "listed twice: do not guess"
+        );
+        assert_eq!(located_node(&entries, 999), None);
     }
 
     /// O parser contra uma resposta REAL, e não contra uma escrita à mão.

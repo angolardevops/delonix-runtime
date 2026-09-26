@@ -3185,3 +3185,61 @@ fn a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it() {
         "the VM is still defined on the node after destroy — an orphan"
     );
 }
+
+/// `locate_vm` (ADR-0053 decision 3) against a real node: the cluster's
+/// resource list places a VM this backend created on its node, and an id
+/// nobody has is not placed anywhere. On a single node this proves the READ;
+/// following a VM to ANOTHER node needs a second node and is not measured here.
+#[test]
+fn the_cluster_resource_list_places_a_vm_on_its_node() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+    let name = format!("dlxloc{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    assert_eq!(
+        client
+            .locate_vm(vmid)
+            .expect("cluster resources")
+            .as_deref(),
+        Some(t.node.as_str()),
+        "the VM is listed on the node that created it"
+    );
+    assert_eq!(
+        client.locate_vm(999_999).expect("cluster resources"),
+        None,
+        "an id nobody has is placed nowhere"
+    );
+    assert_eq!(b.current_handle(&vm), None, "nothing moved");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
