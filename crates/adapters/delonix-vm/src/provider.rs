@@ -66,6 +66,7 @@ pub fn spec_to_config(spec: &VmSpec, ext: &Extensions, provider_id: &str) -> VmC
     if let Some(lv) = &ext.libvirt {
         cfg.net_mode = lv.net_mode.clone();
         cfg.static_ip = lv.static_ip.clone();
+        cfg.allow_mac_spoofing = lv.allow_mac_spoofing;
         cfg.machine = lv.machine.clone();
         cfg.cpu_model = lv.cpu_model.clone();
         cfg.cpu_topology = lv.cpu_topology.clone();

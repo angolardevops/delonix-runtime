@@ -989,6 +989,13 @@ pub struct VmBootSpec {
     /// Static IP — libvirt `nat` mode only (a DHCP reservation).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub static_ip: Option<String>,
+    /// The per-VM opt-out of the libvirt anti-spoofing filter (ADR-0055).
+    /// Persisted because `vm start` REBUILDS the NIC from this record: a VM that
+    /// lost it on restart would come back filtered and its nested guests would
+    /// go dark, and one that gained it would come back unfiltered. Absent (the
+    /// default, and every record written before this existed) = filtered.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub allow_mac_spoofing: bool,
     /// Machine type (`<os><type machine=…>`), default `q35`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub machine: Option<String>,
@@ -1186,6 +1193,26 @@ pub const DELONIX_SLICE: &str = "/sys/fs/cgroup/delonix.slice";
 
 #[cfg(test)]
 mod tests {
+    /// ADR-0055: a record written before the anti-spoofing opt-out existed
+    /// reads as FILTERED, a filtered VM does not grow the key on disk, and an
+    /// opted-out one keeps it across the round trip `vm start` depends on.
+    #[test]
+    fn the_antispoof_opt_out_is_absent_by_default_and_survives_a_round_trip() {
+        let b: super::VmBootSpec = serde_json::from_str("{}").unwrap();
+        assert!(!b.allow_mac_spoofing);
+        assert!(!serde_json::to_string(&b)
+            .unwrap()
+            .contains("allow_mac_spoofing"));
+        let on = super::VmBootSpec {
+            allow_mac_spoofing: true,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&on).unwrap();
+        assert!(json.contains("\"allow_mac_spoofing\":true"));
+        let back: super::VmBootSpec = serde_json::from_str(&json).unwrap();
+        assert!(back.allow_mac_spoofing);
+    }
+
     use super::*;
 
     /// A container record written before `annotations` existed must still

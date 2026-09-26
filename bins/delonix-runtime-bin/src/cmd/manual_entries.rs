@@ -2422,6 +2422,7 @@ pub static ENTRIES: &[Entry] = &[
             ("with your key and hostname applied on the first boot, by cloud-init", "delonix vm create dev --ssh-key @$HOME/.ssh/id_ed25519.pub --hostname dev --wait"),
             ("a Kubernetes node on libvirt, on a NAT network so the IP is visible and routable", "delonix vm create k8s-cp1 --disk delonix-vm-k8s:1.34 --backend libvirt --net-mode nat --vcpus 2 --memory 4G"),
             ("isolated from other namespaces — only cloud-hypervisor puts the tap in the SDN where that is enforced", "delonix vm create nas --backend cloud-hypervisor --namespace teamA"),
+            ("a hypervisor whose own guests bridge onto the network — drops the MAC/ARP anti-spoofing filter for THIS VM only, and `vm describe` says so", "delonix vm create pve1 --disk proxmox-ve:9.2 --backend libvirt --net-mode nat --allow-mac-spoofing"),
         ],
         see_also: &["vm ls", "vm console", "vm start", "image vm pull"],
     },
