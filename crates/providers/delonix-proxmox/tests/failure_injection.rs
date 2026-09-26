@@ -1547,3 +1547,174 @@ fn a_vm_the_cluster_cannot_place_keeps_its_not_found() {
         assert_eq!(node.count("GET", RESOURCES), 1);
     }
 }
+
+// ===========================================================================
+// vm move --node (ADR-0053 decisions 1, 4 and 5)
+// ===========================================================================
+
+const MIGRATE: &str = "/nodes/pve/qemu/100/migrate";
+const TWO_NODES: &str = r#"[{"node":"pve","status":"online"},{"node":"pve2","status":"online"}]"#;
+
+/// The node answers for a scenario: the node list (read at connect and again
+/// by the move), the VM's power state, and whatever else the case needs.
+fn move_node(power: &str, nodes: &str, extra: Vec<(&str, &str, Reply)>) -> MockNode {
+    let mut entries = vec![
+        ("GET", "/nodes", ok_data(nodes)),
+        ("GET", "/nodes", ok_data(nodes)),
+        ("GET", PVE_STATUS, ok_data(power)),
+    ];
+    entries.extend(extra);
+    MockNode::start(script(&entries))
+}
+
+/// Every refusal is decided before the node is asked to move anything —
+/// and one on the target itself before the precheck is even sent. Checked
+/// against what the node RECEIVED, never against the error alone.
+#[test]
+fn a_refused_move_never_sends_the_migrate() {
+    use delonix_compute::vm_backend::VmBackend;
+    let stopped = r#"{"status":"stopped","qmpstatus":"stopped"}"#;
+    let running = r#"{"status":"running","qmpstatus":"running"}"#;
+    let local = ok_data(
+        r#"{"allowed_nodes":["pve2"],"local_disks":[{"volid":"local-lvm:vm-100-disk-0"}],
+            "local_resources":[],"not_allowed_nodes":{"pve2":{}},"running":0}"#,
+    );
+    let offline = r#"[{"node":"pve","status":"online"},{"node":"pve2","status":"offline"}]"#;
+    let cases: Vec<(&str, MockNode, &str, bool, u16, bool)> = vec![
+        (
+            "the node it is on",
+            move_node(stopped, TWO_NODES, vec![]),
+            "pve",
+            false,
+            1538,
+            false,
+        ),
+        (
+            "not a member",
+            move_node(stopped, TWO_NODES, vec![]),
+            "pve3",
+            false,
+            1538,
+            false,
+        ),
+        (
+            "offline",
+            move_node(stopped, offline, vec![]),
+            "pve2",
+            false,
+            1538,
+            false,
+        ),
+        (
+            "running, offline move",
+            move_node(running, TWO_NODES, vec![]),
+            "pve2",
+            false,
+            5507,
+            false,
+        ),
+        (
+            "stopped, --live",
+            move_node(stopped, TWO_NODES, vec![]),
+            "pve2",
+            true,
+            5507,
+            false,
+        ),
+        (
+            "a local disk",
+            move_node(stopped, TWO_NODES, vec![("GET", MIGRATE, local)]),
+            "pve2",
+            false,
+            5507,
+            true,
+        ),
+    ];
+    for (what, node, target, live, number, prechecked) in cases {
+        let b = backend_on(&node);
+        let dir = tempfile::tempdir().unwrap();
+        let vm = vm_with_handle("proxmox:pve:100");
+        let err = b
+            .move_to_node(dir.path(), &vm, target, live)
+            .expect_err(what);
+        assert_eq!(err.number(), number, "{what}: {err}");
+        assert_eq!(node.count("POST", MIGRATE), 0, "{what}: the move was sent");
+        assert_eq!(
+            node.count("GET", MIGRATE),
+            usize::from(prechecked),
+            "{what}: precheck count"
+        );
+        if what == "a local disk" {
+            assert!(err.to_string().contains("local-lvm:vm-100-disk-0"), "{err}");
+        }
+    }
+}
+
+/// The move is sent once, with the target and `online` asked; its UPID is
+/// waited on and kept in the ledger; and it is PROVED on the node before the
+/// new handle is returned — the cluster lists the VM on the target, its
+/// config is on the target and gone from the source.
+#[test]
+fn a_move_is_sent_once_waited_on_and_proved_on_the_node() {
+    use delonix_compute::vm_backend::VmBackend;
+    const MIGRATE_UPID: &str = "UPID:pve:00000971:00004697:6AB793FE:qmigrate:100:root@pam:";
+    let node = move_node(
+        r#"{"status":"stopped","qmpstatus":"stopped"}"#,
+        TWO_NODES,
+        vec![
+            (
+                "GET",
+                MIGRATE,
+                ok_data(
+                    r#"{"allowed_nodes":["pve2"],"local_disks":[],"local_resources":[],
+                        "not_allowed_nodes":{"pve2":{}},"running":0}"#,
+                ),
+            ),
+            ("POST", MIGRATE, ok_data(&format!("\"{MIGRATE_UPID}\""))),
+            (
+                "GET",
+                RESOURCES,
+                ok_data(r#"[{"type":"qemu","vmid":100,"node":"pve2"}]"#),
+            ),
+            ("GET", "/nodes/pve2/qemu/100/config", ok_data(r#"{"name":"v"}"#)),
+            (
+                "GET",
+                CONFIG,
+                Reply::Json(
+                    500,
+                    r#"{"data":null,"message":"Configuration file 'nodes/pve/qemu-server/100.conf' does not exist"}"#
+                        .into(),
+                ),
+            ),
+        ],
+    );
+    let b = backend_on(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let vm = vm_with_handle("proxmox:pve:100");
+    let handle = b
+        .move_to_node(dir.path(), &vm, "pve2", false)
+        .expect("move");
+    assert_eq!(handle, "proxmox:pve2:100");
+    let sent: Vec<_> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.method == "POST" && s.path == MIGRATE)
+        .collect();
+    assert_eq!(sent.len(), 1, "the move is sent exactly once");
+    assert!(
+        sent[0].body.contains("target=pve2") && sent[0].body.contains("online=0"),
+        "{}",
+        sent[0].body
+    );
+    assert_eq!(
+        node.count("GET", RESOURCES),
+        1,
+        "the cluster is asked where it is"
+    );
+    let ledger = std::fs::read_to_string(dir.path().join("proxmox-tasks.json")).unwrap();
+    assert!(
+        ledger.contains(MIGRATE_UPID) && ledger.contains("\"ok\""),
+        "{ledger}"
+    );
+    assert_eq!(b.current_handle(&vm_with_handle(&handle)), None);
+}

@@ -13,10 +13,10 @@
   routes never seen in a live trace (the third is the lost-answer `GET /nodes/{node}/tasks`,
   reached only through failure injection). **Slice 3** has its read-only half: cluster
   discovery (`provider describe proxmox --probe`, #505), measured on the lab node and on
-  `ngola-lda` itself. The route matrix says **112 of 675 routes called (16.6 %), 109 in a live
-  trace** (`docs/proxmox/matrix-9.2.2.md`). What keeps the status at Proposed is slice 3's
-  writes (a migration with an explicitly named target node), which need a lab cluster with
-  shared storage this workspace does not have — see "Slice 3 writes" under D5. Accepting the
+  `ngola-lda` itself. The route matrix says **117 of 675 routes called (17.3 %), 114 in a live
+  trace** (`docs/proxmox/matrix-9.2.2.md`). Slice 3's first write, a migration with an
+  explicitly named target node, is done on a two-node lab cluster with shared storage
+  (`vm move --node`, ADR-0053, 2026-09-26); HA resources stay excluded by D3. Accepting the
   ADR before them is the owner's call, not a consequence of this record
 - **Date:** 2026-09-23
 - **Deciders:** Walter Angolar
@@ -210,7 +210,7 @@ Written 2026-09-25, from what the discovery measured:
 - **An engine verb that names the target node.** "No implicit node selection" means the caller
   says where the VM goes; the backend never picks. `vm migrate --host` (ADR-0031) moves a VM
   between two `delonix` hosts, which is a different operation. **Written down in ADR-0053
-  (Proposed):** a verb of its own, `vm move --node <target> [--live]`, and each VM addressed on
+  (Accepted, implemented 2026-09-26):** a verb of its own, `vm move --node <target> [--live]`, and each VM addressed on
   the node its handle names — which also finds a VM moved from the Proxmox UI.
 - **A lab cluster, never `ngola-lda`.** Two Proxmox nodes joined in a cluster (`pvecm`), quorate,
   with a storage that is SHARED and holds VM disks (NFS or Ceph RBD) — the condition the
@@ -543,7 +543,9 @@ see both. Recorded as measured, not reconciled by guess.
 
 **Still to do in slice 3**: the writes (a migration, an HA resource) — against a lab cluster
 with shared storage, never the production one, which on this measurement could not migrate
-without copying disks anyway.
+without copying disks anyway. **Done 2026-09-26 for the migration**: `vm move --node [--live]`
+(ADR-0053, second addendum), live on a two-node lab cluster with an NFS storage; HA resources
+remain out by D3.
 
 **Added 2026-09-25 (slice 2, the rest of cloud-init through `config`, live):** the client could
 already write, regenerate and read back the node's cloud-init (`GET`/`PUT …/cloudinit`,

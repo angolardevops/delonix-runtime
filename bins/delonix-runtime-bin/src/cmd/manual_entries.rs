@@ -2405,7 +2405,16 @@ pub static ENTRIES: &[Entry] = &[
             ("pin the SSH identity and a non-default port", "delonix vm migrate dev --host 10.0.0.20 --network ingress --ssh-key ~/.ssh/id_ed25519 --ssh-port 2222"),
             ("remove the source once the target confirms the VM was created there", "delonix vm migrate dev --host 10.0.0.20 --network ingress --remove-source"),
         ],
-        see_also: &["vm stop", "vm create", "image vm import", "vm ssh"],
+        see_also: &["vm stop", "vm create", "image vm import", "vm ssh", "vm move"],
+    },
+    Entry {
+        path: "vm move",
+        group: "Lifecycle",
+        examples: &[
+            ("move a stopped Proxmox VM to another node of its cluster — same VM, same id", "delonix vm move web-1 --node pve2"),
+            ("move it while it runs, on a storage the whole cluster shares", "delonix vm move web-1 --node pve2 --live"),
+        ],
+        see_also: &["vm migrate", "provider describe", "vm ls"],
     },
     Entry {
         path: "vm pause",

@@ -1148,6 +1148,20 @@ variable when the program runs.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_MOVE_NODE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>The node of the same cluster the <code>vm move</code> live cases move a VM to (ADR-0053). Needs a lab cluster of two nodes — never production.</td>
+<td>Unset: the two move cases skip.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_SHARED_STORAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>A storage every node of the cluster shares (NFS, Ceph RBD), where the move cases put the VM's disk — a disk on local storage is refused, not copied.</td>
+<td>Unset: the two move cases skip.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_CALLBACK_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node</code></a></td>
 <td>The address the NODE can reach this host at: the test starts a stub HTTP server and gives the node <code>http:/<wbr>/<wbr>&lt;addr&gt;:&lt;port&gt;/<wbr>…</code> as the URL of an IPAM and a DNS controller, because the node verifies both by calling them.</td>
