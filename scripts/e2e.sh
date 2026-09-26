@@ -2788,7 +2788,10 @@ adr54_file() { local f="$1"; shift; adr54_env DELONIX_PROVIDERS_CONFIG="$f" "$BI
 adr54_fns="$(declare -f adr54_env adr54_px adr54_bare adr54_file); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT' ADR54_EMPTY='$ADR54_EMPTY'"
 
 # §3, the legacy default: set where the target exists, read where it does not.
-check "vm default-backend --set proxmox com o alvo no ambiente" ok adr54_px vm default-backend --set proxmox
+# Written directly: `--set` writes the providers file since slice 3, and this
+# case is the per-root legacy default the engine still reads as a fallback.
+printf 'proxmox\n' >"$ADR54_ROOT/vm-default-backend"
+check "o default antigo (por root) está escrito" ok test -s "$ADR54_ROOT/vm-default-backend"
 # The control: with the target present the request does go to the node — so
 # the two checks after it measure the missing target and nothing else.
 check "vm create com o alvo no ambiente vai ao nó Proxmox" ok bash -c \
@@ -2833,6 +2836,41 @@ check "providers.yaml: a recusa do segredo inline nomeia a forma certa" ok bash 
 check "providers.yaml: DELONIX_PROVIDERS_CONFIG para um ficheiro inexistente recusa" fail adr54_file "$OUT/adr54-nao-existe.yaml" vm create "vm-$PFX-adr54" --disk /nao/existe.qcow2
 check "providers.yaml: um ficheiro inválido não impede comandos sem VM" ok adr54_file "$ADR54_INLINE" container ls
 check "vm create com ficheiro recusado não deixou registo" fail adr54_bare vm inspect "vm-$PFX-adr54"
+
+# Slice 3: `provider config show|validate`, and `--set` editing the file.
+check "provider config validate: o ficheiro completo é válido" ok adr54_env "$BIN" provider config validate -f "$ADR54_FULL"
+check "provider config validate: default sem entrada recusa (1)" 1 adr54_env "$BIN" provider config validate -f "$ADR54_NOPX"
+check "provider config validate: segredo inline recusa (1)" 1 adr54_env "$BIN" provider config validate -f "$ADR54_INLINE"
+chmod 644 "$ADR54_TOKEN"
+check "provider config validate: token legível por outros recusa" 1 adr54_env "$BIN" provider config validate -f "$ADR54_FULL"
+chmod 600 "$ADR54_TOKEN"
+printf 'SEGREDO-e2e-%s' "$PFX" >"$ADR54_TOKEN"
+check "provider config show: nomeia o ficheiro, o default e o proxmox" ok bash -c \
+  "$adr54_fns; out=\$(adr54_file '$ADR54_FULL' provider config show 2>&1); echo \"\$out\" | grep -q '$ADR54_FULL' && echo \"\$out\" | grep -q 'proxmox (file)' && echo \"\$out\" | grep -q 'pve.invalid'"
+check "provider config show: o valor do token nunca aparece (tabela e json)" ok bash -c \
+  "$adr54_fns; ! { adr54_file '$ADR54_FULL' provider config show; adr54_file '$ADR54_FULL' provider config show -o json; } 2>&1 | grep -q 'SEGREDO-e2e'"
+ADR54_SET="$OUT/adr54-set.yaml"
+printf '# kept by --set\napiVersion: config.delonix.io/v1\nproviders:\n  - type: libvirt\n' >"$ADR54_SET"
+# The legacy default present again, so the check below measures the move.
+printf 'proxmox\n' >"$ADR54_ROOT/vm-default-backend"
+check "vm default-backend --set escreve o defaultProvider no ficheiro" ok adr54_file "$ADR54_SET" vm default-backend --set libvirt
+check "--set manteve o comentário do operador e escreveu a linha" ok bash -c \
+  "grep -qx '# kept by --set' '$ADR54_SET' && grep -qx 'defaultProvider: libvirt' '$ADR54_SET'"
+check "--set moveu o default antigo (o ficheiro por root foi retirado)" fail test -e "$ADR54_ROOT/vm-default-backend"
+check "vm default-backend --clear tira a linha" ok bash -c \
+  "$adr54_fns; adr54_file '$ADR54_SET' vm default-backend --clear >/dev/null && ! grep -q defaultProvider '$ADR54_SET'"
+ADR54_SCHEMA="$OUT/adr54-schema.json"
+check "provider config schema emite o schema" ok bash -c "$adr54_fns; adr54_env \"\$BIN\" provider config schema >'$ADR54_SCHEMA'"
+# Strict like the parser: closed at the top, the version pinned, and the inline
+# secret — which the parser refuses by name — never offered as a key.
+check "provider config schema: estrito, versão fixa, sem segredo inline" ok python3 -c '
+import json, sys
+s = json.load(open(sys.argv[1]))
+auth = s["$defs"]["ProxmoxAuth"]["properties"]
+assert s["additionalProperties"] is False
+assert s["properties"]["apiVersion"]["const"] == "config.delonix.io/v1"
+assert "tokenSecretFile" in auth and "tokenSecret" not in auth and "password" not in auth
+' "$ADR54_SCHEMA"
 
 ########################################
 section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"
