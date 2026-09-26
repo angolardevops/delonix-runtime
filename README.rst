@@ -314,6 +314,11 @@ covered by this — download it first and check it against the signed
 Flags (pass after ``bash -s --``):
 
 - ``--no-vm`` skips the microVM stack; ``--no-tune`` skips kernel tuning.
+- ``--vm-provider <libvirt|cloud-hypervisor>`` is the node's default VM
+  provider (default ``libvirt``), written to ``/etc/delonix/providers.yaml``
+  (``~/.config/delonix/`` with ``--user``) only when that file does not exist
+  yet — an existing file, written by hand or by your provisioning, is never
+  rewritten. A Proxmox VE node is added to that same file (ADR-0054).
 - ``--no-gpu`` skips accelerator setup (the NVIDIA CDI spec, the ``render``
   group). It is on by default and does nothing on a host without a GPU.
 - ``--no-delegate`` does not write the cgroup delegation drop-in for

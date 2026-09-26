@@ -17,6 +17,10 @@
 #
 # Flags:
 #   --no-vm        não instala as dependências de VMs (libvirt/qemu/cloud-init)
+#   --vm-provider <libvirt|cloud-hypervisor>
+#                  the node's default VM provider, written to providers.yaml
+#                  (ADR-0054) when that file does not exist yet. Default: libvirt.
+#                  An existing file is never rewritten.
 #   --no-tune      não aplica o tuning de kernel (sysctls/módulos)
 #   --no-gpu       não configura aceleradores (CDI da NVIDIA, grupo render).
 #                  Por omissão é LIGADO, e só faz algo se houver GPU.
@@ -87,6 +91,8 @@ REPO="angolardevops/delonix-runtime"
 MINISIGN_PUBKEY="RWSiOqlKAnVVB+pJLQxgYHq/kdN6RbBQdlL5gOcZ6H/xkwSAPIqTo+GB"
 VERSION="latest"
 WITH_VM=1
+# The node's default VM provider (ADR-0054), written to providers.yaml.
+VM_PROVIDER=libvirt
 # Delegação de cgroup ligada POR OMISSÃO: sem ela `-m`/`--cpus`/`--pids-limit`
 # são silenciosamente inertes e um nó Kubernetes nem arranca. Instalar um motor
 # de containers cujos limites não pegam é entregar metade do produto.
@@ -138,6 +144,37 @@ stepok(){ printf '[%s] %s: %sOK%s\n' "$1" "$2" "$C_OK" "$C_0"; }
 warn()  { printf '%swarning%s %s\n' "$C_WARN" "$C_0" "$*" >&2; }
 die()   { printf '%serror%s %s\n' "$C_ERR" "$C_0" "$*" >&2; exit 1; }
 
+# write_providers_config <path> <default-provider> <privilege-prefix>
+# Writes the node's providers file (ADR-0054) ONLY if it does not exist: a file
+# the operator already has — written by hand or by their provisioning — is
+# never rewritten. `set -C` (noclobber) makes the shell refuse an existing path
+# at the moment of writing, symlink included, not just in the test before it.
+# Returns 0 when it wrote, 3 when the file was already there, 1 on failure.
+write_providers_config() {
+  _pc_path="$1"; _pc_provider="$2"; _pc_priv="$3"
+  if [ -e "$_pc_path" ] || [ -L "$_pc_path" ]; then return 3; fi
+  $_pc_priv mkdir -p "$(dirname "$_pc_path")" || return 1
+  printf '%s\n' \
+    "# The node's VM providers (ADR-0054), written by install.sh. A later install" \
+    "# never rewrites this file. To add a Proxmox VE node, append an entry:" \
+    "#   - type: proxmox" \
+    "#     url: https://<node>:8006" \
+    "#     node: <node name>" \
+    "#     auth: { tokenId: 'user@realm!token', tokenSecretFile: /etc/delonix/proxmox.token }" \
+    "apiVersion: config.delonix.io/v1" \
+    "defaultProvider: $_pc_provider" \
+    "providers:" \
+    "  - type: $_pc_provider" \
+    | $_pc_priv sh -c 'set -C; cat > "$1"' _ "$_pc_path" 2>/dev/null
+  _pc_rc=$?
+  if [ "$_pc_rc" -ne 0 ]; then
+    [ -e "$_pc_path" ] && return 3
+    return 1
+  fi
+  $_pc_priv chmod 0644 "$_pc_path" || return 1
+  return 0
+}
+
 # Pergunta sim/não com o DEFAULT sim (Enter = sim): `ask_yn <pergunta>` → 0 = sim.
 # Lê do /dev/tty e não do stdin, porque `curl … | bash` põe o script no stdin.
 # Sem terminal nenhum (CI, ssh sem tty) a resposta é NÃO: o instalador não altera
@@ -184,6 +221,7 @@ spin() {
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-vm)      WITH_VM=0 ;;
+    --vm-provider) shift; VM_PROVIDER="${1:?--vm-provider requires libvirt or cloud-hypervisor}" ;;
     --no-tune)    WITH_TUNE=0 ;;
     --no-gpu)     WITH_GPU=0 ;;
     --no-editor-plugin) WITH_EDITOR_PLUGIN=0 ;;
@@ -203,6 +241,14 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# Refused here, before anything on the host is touched: a typo must not leave
+# a providers.yaml naming a provider that does not exist.
+case "$VM_PROVIDER" in
+  libvirt|cloud-hypervisor) ;;
+  ch) VM_PROVIDER=cloud-hypervisor ;;
+  *) die "--vm-provider must be libvirt or cloud-hypervisor, not '$VM_PROVIDER'" ;;
+esac
 
 # ---------------------------------------------------------------- pré-condições
 [ "$(uname -s)" = Linux ] || die "Delonix Runtime is Linux-only."
@@ -808,6 +854,32 @@ if [ "$WITH_VM" = 1 ]; then
   if [ ! -e /dev/kvm ]; then
     warn "/dev/kvm does not exist — hardware virtualization is off (enable VT-x/AMD-V in the BIOS) or you are in a VM without nested virt"
   fi
+
+  # The default VM provider, stated in a file the node and every process on
+  # it read (ADR-0054), instead of left to registration order.
+  if [ "$USER_INSTALL" = 1 ]; then
+    if [ "$(id -u)" -ne 0 ] && [ -n "${XDG_CONFIG_HOME:-}" ]; then
+      PROVIDERS_FILE="$XDG_CONFIG_HOME/delonix/providers.yaml"
+    else
+      PROVIDERS_FILE="$REAL_HOME/.config/delonix/providers.yaml"
+    fi
+    _pc_priv=""
+  else
+    PROVIDERS_FILE=/etc/delonix/providers.yaml
+    _pc_priv="$SUDO"
+  fi
+  _pc_rc=0
+  write_providers_config "$PROVIDERS_FILE" "$VM_PROVIDER" "$_pc_priv" || _pc_rc=$?
+  case "$_pc_rc" in
+    0)
+      # A --user install run as root wrote into the user's home as root.
+      if [ "$USER_INSTALL" = 1 ] && [ "$(id -u)" -eq 0 ] && [ -n "${SUDO_USER:-}" ]; then
+        chown -R "$REAL_USER": "$(dirname "$PROVIDERS_FILE")" 2>/dev/null || true
+      fi
+      stepok vm "providers.yaml (default provider: $VM_PROVIDER) at $PROVIDERS_FILE" ;;
+    3) step vm providers.yaml "kept the existing $PROVIDERS_FILE (never rewritten)" ;;
+    *) warn "could not write $PROVIDERS_FILE — VMs fall back to auto-detection until it exists" ;;
+  esac
 fi
 
 # ------------------------------------------------- tuning de kernel (opt-out)
@@ -1606,6 +1678,22 @@ fi
 check "user namespaces"                unshare -r -n true
 if [ "$WITH_VM" = 1 ]; then
   check "VM backend (cloud-hypervisor or virsh)" sh -c 'command -v cloud-hypervisor || command -v virsh'
+fi
+
+# The default provider as the INSTALLED binary reads it from the file — not the
+# file's text, which proves only that a file was written. A binary older than
+# ADR-0054 answers `none (auto-detection…)`: said, not failed, because the
+# file takes effect as soon as that binary is upgraded.
+if [ "$WITH_VM" = 1 ] && [ -n "${PROVIDERS_FILE:-}" ] && [ -r "${PROVIDERS_FILE:-}" ] && [ -x "$BIN_DIR/delonix" ]; then
+  _pc_want=$(sed -n 's/^defaultProvider:[[:space:]]*//p' "$PROVIDERS_FILE" | head -1)
+  _pc_got=$(DELONIX_PROVIDERS_CONFIG="$PROVIDERS_FILE" "$BIN_DIR/delonix" vm default-backend 2>/dev/null | head -1)
+  if [ -n "$_pc_want" ] && [ "$_pc_got" = "$_pc_want" ]; then
+    stepok verify "default VM provider ($_pc_want, from $PROVIDERS_FILE)"
+  elif printf '%s' "$_pc_got" | grep -q '^none'; then
+    warn "this delonix predates providers.yaml (ADR-0054) — $PROVIDERS_FILE takes effect after upgrading it"
+  else
+    printf '[verify] %s: %sFAILED%s (the binary answers %s)\n' "default VM provider ($_pc_want)" "$C_ERR" "$C_0" "${_pc_got:-nothing}"; FAIL=1
+  fi
 fi
 
 # Testa a delegação DE VERDADE — cria um cgroup filho e tenta activar os
