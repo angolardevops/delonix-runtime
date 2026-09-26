@@ -100,6 +100,17 @@ EXCLUDED: list[tuple[str, str]] = [
     ("/nodes/{node}/replication", "replication status — cluster-dependent, slice 3"),
     ("/nodes/{node}/vzdump", "node-level dump — slice 2 covers per-VM backup through it, not yet called"),
     ("/nodes/{node}/lxc", "LXC — needs its own container-boundary decision before any route (ADR-0049 D4)"),
+    # The guest agent: what serves an engine verb is called (describe's guest block,
+    # the quiesced backup, exec, the IP); the rest is excluded one by one, then the
+    # remainder, because an agent passthrough is the proxy ADR-0049 D3 rules out.
+    ("/nodes/{node}/qemu/{vmid}/agent/set-user-password", "sets a password inside the guest — the engine gives a guest SSH keys through cloud-init (`vm cloud-init`) and never handles a password"),
+    ("/nodes/{node}/qemu/{vmid}/agent/file-", "reads or writes an arbitrary file inside the guest — outside the engine's VM contract; `agent/exec` is the one guest command channel it keeps"),
+    ("/nodes/{node}/qemu/{vmid}/agent/suspend-", "guest-driven hibernation — the engine's pause is the node's vCPU suspend (`vm pause`), which keeps the guest's memory"),
+    ("/nodes/{node}/qemu/{vmid}/agent/fsfreeze-freeze", "the node's snapshot-mode backup freezes and thaws the guest itself (the quiesced backup proves it from the task log); a separate freeze from the engine would open a window where a crash leaves the guest frozen"),
+    ("/nodes/{node}/qemu/{vmid}/agent/fsfreeze-thaw", "same as fsfreeze-freeze: the backup thaws the guest itself, and the engine reads `fsfreeze-status` afterwards to prove it"),
+    ("/nodes/{node}/qemu/{vmid}/agent/shutdown", "the node's own `status/shutdown` already goes through the agent when `agent=1` (`vm stop` of a guest that answers)"),
+    ("/nodes/{node}/qemu/{vmid}/agent/fstrim", "discards free blocks — storage housekeeping with no engine verb"),
+    ("/nodes/{node}/qemu/{vmid}/agent", "raw agent passthrough and guest inventory (users, time, timezone, vCPUs, memory blocks) — no engine verb reads them, and a passthrough is the proxy ADR-0049 D3 rules out"),
 ]
 
 AREAS: list[tuple[str, str]] = [

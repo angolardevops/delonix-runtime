@@ -3478,3 +3478,159 @@ fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
     b.destroy(vmdir, &vm).expect("destroy");
     assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
 }
+
+/// The prepared agent guest (`DELONIX_PROXMOX_TEST_AGENT_VMID`) as a record
+/// the backend can address: running, on the configured node.
+fn agent_guest(t: &Target) -> Option<(u32, delonix_compute::Vm)> {
+    let vmid: u32 = std::env::var("DELONIX_PROXMOX_TEST_AGENT_VMID")
+        .ok()?
+        .parse()
+        .expect("DELONIX_PROXMOX_TEST_AGENT_VMID is not a number");
+    let mut vm = delonix_compute::Vm::new(
+        "agent-guest".into(),
+        String::new(),
+        String::new(),
+        1,
+        "768M".into(),
+        String::new(),
+        String::new(),
+        String::new(),
+        format!("proxmox:{}:{vmid}", t.node),
+    );
+    vm.status = delonix_model::records::Status::Running;
+    Some((vmid, vm))
+}
+
+/// `vm describe`'s guest block (`vm.guest-agent`), from a real agent: the OS
+/// and kernel, the hostname, the agent's version and the mounted filesystems
+/// come back, and the hostname is the SAME one the guest's own
+/// `/etc/hostname` holds, read through `agent/exec` — the block is the
+/// guest's answer, not a field filled from anywhere else.
+#[test]
+fn the_guest_agent_reports_the_os_hostname_and_filesystems() {
+    let Some(t) = target() else {
+        return;
+    };
+    let Some((vmid, vm)) = agent_guest(&t) else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let g = b
+        .guest_info(&vm)
+        .expect("guest info")
+        .expect("the prepared guest runs an agent");
+    assert!(g.os.as_deref().is_some_and(|o| !o.is_empty()), "{g:?}");
+    assert!(g.kernel.is_some() && g.agent_version.is_some(), "{g:?}");
+    let root = g
+        .filesystems
+        .iter()
+        .find(|f| f.mountpoint == "/")
+        .unwrap_or_else(|| panic!("no root filesystem reported: {g:?}"));
+    assert!(
+        matches!((root.used_bytes, root.total_bytes), (Some(u), Some(t)) if u > 0 && u < t),
+        "{root:?}"
+    );
+    let AgentExecStatus::Finished {
+        exit_code, stdout, ..
+    } = b
+        .client()
+        .agent_exec_wait(
+            vmid,
+            &["/bin/cat", "/etc/hostname"],
+            std::time::Duration::from_secs(30),
+        )
+        .expect("agent exec")
+    else {
+        panic!("agent exec still running past its deadline");
+    };
+    assert_eq!(exit_code, 0);
+    assert_eq!(g.hostname.as_deref(), Some(stdout.trim()), "{g:?}");
+}
+
+/// `vm.backup.quiesced`: a backup of the running agent guest is taken with
+/// its filesystem frozen — proved from the node's own task log (the freeze
+/// and the thaw) and the guest reporting `thawed` afterwards, and the archive
+/// is on the storage. A running VM with no agent is refused with DX-6509
+/// BEFORE any backup runs: its archive count does not change.
+#[test]
+fn a_backup_of_a_running_vm_is_taken_with_its_filesystem_frozen() {
+    let Some(t) = target() else {
+        return;
+    };
+    let Some((vmid, _)) = agent_guest(&t) else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let backups =
+        std::env::var("DELONIX_PROXMOX_TEST_BACKUP_STORAGE").unwrap_or_else(|_| "local".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+
+    // A running VM without an agent: refused, nothing archived.
+    let name = format!("dlxnoagent{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b
+        .boot(dir.path(), &cfg, &cfg.disk, &|_: CreateStage| {})
+        .expect("boot");
+    let bare: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let before = client.list_backups(&backups, bare).expect("list").len();
+    let err = client
+        .backup_vm_quiesced(&ledger, bare, &backups)
+        .expect_err("no agent: the backup cannot be quiesced");
+    let err = delonix_model::Error::from(err);
+    assert_eq!(err.number(), 6509, "{err}");
+    assert_eq!(
+        client.list_backups(&backups, bare).expect("list").len(),
+        before
+    );
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    b.destroy(dir.path(), &vm)
+        .expect("destroy the agentless VM");
+
+    let before: Vec<String> = client
+        .list_backups(&backups, vmid)
+        .expect("list")
+        .into_iter()
+        .map(|(v, _)| v)
+        .collect();
+    client
+        .backup_vm_quiesced(&ledger, vmid, &backups)
+        .expect("a quiesced backup of the agent guest");
+    let after: Vec<String> = client
+        .list_backups(&backups, vmid)
+        .expect("list")
+        .into_iter()
+        .map(|(v, _)| v)
+        .collect();
+    let new: Vec<&String> = after.iter().filter(|v| !before.contains(v)).collect();
+    assert_eq!(new.len(), 1, "exactly one new archive: {after:?}");
+    assert_eq!(
+        client
+            .fsfreeze_status(vmid)
+            .expect("fsfreeze-status")
+            .as_deref(),
+        Some("thawed")
+    );
+    client
+        .delete_backup(&ledger, vmid, &backups, new[0])
+        .expect("delete the test archive");
+}
