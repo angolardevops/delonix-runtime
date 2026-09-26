@@ -952,9 +952,11 @@ pub enum VmCmd {
     /// picked for you. Without `--live` the VM must be stopped; with it, the
     /// VM must be running and keeps running. Refused before anything moves
     /// when the target is not an online member of the cluster, or when the
-    /// node's precheck says it cannot host the VM — a disk on storage the
-    /// target does not share is refused, not copied. To relocate a VM to
-    /// another delonix host, use `vm migrate`.
+    /// node's precheck says it cannot host the VM. A disk on storage the
+    /// target does not share is refused unless `--with-local-disks` asks
+    /// the node to copy it, onto `--target-storage` when the target lacks
+    /// the source one; a local CD-ROM is always refused. To relocate a VM
+    /// to another delonix host, use `vm migrate`.
     Move {
         #[arg(add = ArgValueCandidates::new(super::complete::vms))]
         name: String,
@@ -964,6 +966,15 @@ pub enum VmCmd {
         /// Move the VM while it runs (online migration).
         #[arg(long)]
         live: bool,
+        /// Let the node copy disks the target does not share (a full copy
+        /// offline, a block mirror with `--live`); without it they are
+        /// refused.
+        #[arg(long)]
+        with_local_disks: bool,
+        /// The target's storage the copied disks land on (default: each
+        /// disk's own storage id). Needs `--with-local-disks`.
+        #[arg(long)]
+        target_storage: Option<String>,
     },
     /// Reclaim the VM state directory: everything in it no VM record accounts for.
     ///
@@ -2786,8 +2797,19 @@ pub fn run(action: VmCmd) -> Result<()> {
             println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
             Ok(())
         }
-        VmCmd::Move { name, node, live } => {
-            let vm = delonix_vm::move_to_node(&base, &name, &node, live)?;
+        VmCmd::Move {
+            name,
+            node,
+            live,
+            with_local_disks,
+            target_storage,
+        } => {
+            let opts = delonix_vm::MoveOptions {
+                live,
+                with_local_disks,
+                target_storage,
+            };
+            let vm = delonix_vm::move_to_node(&base, &name, &node, &opts)?;
             println!("{name}: {}", vm.api_socket);
             Ok(())
         }
