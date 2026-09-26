@@ -6651,8 +6651,8 @@ sabia calcular (`delonix provider ls -o json`).
   contrato está registado no socket. Um `GET /v1/node` dá 404 do router, não um 200 vazio.
 - **Provado**: cliente gRPC gerado a chamar o servidor real pelo socket unix (com o
   filtro por kind, a recusa `INVALID_ARGUMENT` de um kind desconhecido e o `UNIMPLEMENTED`
-  do `GetNodeInfo`); a rota JSON por `oneshot`; os 6 providers no socket iguais aos da
-  CLI, na bateria. **Não validado**: socket activation (ADR-0040 P5), as rotas de
+  do `GetNodeInfo`); a rota JSON por `oneshot`; os providers no socket iguais aos da
+  CLI, na bateria (7 desde o ADR-0052, medido a 2026-09-26). **Não validado**: socket activation (ADR-0040 P5), as rotas de
   documentação do passo C, e um cliente de outra linguagem contra o OpenAPI.
 
 ## Regra de ouro: o motor compila e responde sozinho
