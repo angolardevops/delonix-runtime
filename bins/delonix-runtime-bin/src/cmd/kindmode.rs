@@ -1287,8 +1287,13 @@ pub(crate) fn load(
         // name the manifests never mention pins the wrong thing.
         let ref_name = containerd_ref(r);
         p.step(&format!("{} {ref_name}", super::po::t("Packing")), "📦");
-        let tar = dir.join(format!(".load-{}.tar", image.short_id()));
-        delonix_oci::write_oci_archive(images, &image, &ref_name, &tar)?;
+        // The archive is a full second copy of the image on disk. The guard
+        // removes it on EVERY exit — a failed pack (a half-written tar) and a
+        // `?` out of `node_exec_capture` used to leave it behind, and the store
+        // root already hit disk-pressure on this host once.
+        let guard = RemoveOnDrop(dir.join(format!(".load-{}.tar", image.short_id())));
+        let tar = &guard.0;
+        delonix_oci::write_oci_archive(images, &image, &ref_name, tar)?;
         p.ok();
 
         for node in &running {
@@ -1320,7 +1325,6 @@ pub(crate) fn load(
             if code != 0 {
                 // The open step closes with ✗ on drop (see `Progress::drop`) —
                 // no explicit failure call needed, and none exists.
-                let _ = std::fs::remove_file(&tar);
                 return Err(Error::Invalid(super::po::tf(
                     "`ctr images import` failed on node '{node}' (exit {code}): {out}",
                     &[
@@ -1332,15 +1336,21 @@ pub(crate) fn load(
             }
             p.ok();
         }
-        // The archive is a full second copy of the image on disk — never leave it
-        // behind (the store root already hit disk-pressure on this host once).
-        let _ = std::fs::remove_file(&tar);
     }
     eprintln!(
         "{}",
         super::po::t("images available to the kubelet — use `imagePullPolicy: IfNotPresent`")
     );
     Ok(())
+}
+
+/// Removes the file it names when it goes out of scope, whatever the exit path.
+struct RemoveOnDrop(std::path::PathBuf);
+
+impl Drop for RemoveOnDrop {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
 }
 
 /// Removes a kind cluster: stops and deletes the nodes with the cluster label.
@@ -2104,6 +2114,24 @@ fn remove_kubecontext(cluster: &str) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `cluster load` packs a full copy of the image next to the cluster. The
+    /// guard must remove it on EVERY exit, including an early `?` — a failed
+    /// pack or `ctr` call used to leave the archive behind.
+    #[test]
+    fn the_load_archive_is_removed_on_an_early_return() {
+        let dir = std::env::temp_dir().join(format!("delonix-load-guard-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(".load-x.tar");
+        let run = || -> std::io::Result<()> {
+            let guard = RemoveOnDrop(path.clone());
+            std::fs::write(&guard.0, b"partial")?;
+            Err(std::io::Error::other("ctr import failed"))
+        };
+        assert!(run().is_err());
+        assert!(!path.exists(), "the archive survived the failure");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     /// Real shape of `kubectl get --raw=/readyz?verbose` on a healthy node —
     /// captured, not guessed, since a wrong shape here would make `cluster
