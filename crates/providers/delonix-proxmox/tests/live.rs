@@ -3329,18 +3329,53 @@ fn a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there() {
         .parse()
         .unwrap();
     let err = b
-        .move_to_node(vmdir, &lvm, &to, false)
+        .move_to_node(vmdir, &lvm, &to, &mv(false))
         .expect_err("a VM with a local disk must not move");
     assert_eq!(err.number(), 5507, "{err}");
     assert!(
         err.to_string().contains(&local),
         "the refusal names the volume: {err}"
     );
+    assert!(
+        err.to_string().contains("--with-local-disks"),
+        "the refusal names the flag: {err}"
+    );
     assert_eq!(
         client.locate_vm(lvmid).unwrap().as_deref(),
         Some(t.node.as_str())
     );
+
+    // Asked for, the same move copies the disk — onto the shared storage,
+    // named with `--target-storage` because the target may lack the source
+    // one — and the VM's disk on the target lives there.
+    let copy = delonix_compute::vm_backend::MoveOptions {
+        with_local_disks: true,
+        target_storage: Some(shared.clone()),
+        ..Default::default()
+    };
+    let lhandle = b
+        .move_to_node(vmdir, &lvm, &to, &copy)
+        .expect("move copying the local disk");
+    assert_eq!(lhandle, format!("proxmox:{to}:{lvmid}"));
+    assert_eq!(
+        client.locate_vm(lvmid).unwrap().as_deref(),
+        Some(to.as_str()),
+        "the cluster does not list the copied VM on the target"
+    );
+    let moved = client
+        .for_node(&to)
+        .unwrap()
+        .config(lvmid)
+        .expect("the config is readable on the target");
+    let moved = serde_json::to_string(&moved).unwrap();
+    assert!(
+        moved.contains(&format!("{shared}:")) && !moved.contains(&format!("{local}:")),
+        "the disk was not copied onto {shared}: {moved}"
+    );
+    let mut lvm = lvm;
+    lvm.api_socket = lhandle;
     b.destroy(vmdir, &lvm).expect("destroy local");
+    assert_eq!(client.locate_vm(lvmid).unwrap(), None, "an orphan was left");
 
     let name = format!("dlxmvcold{pid}");
     let cfg = VmConfig {
@@ -3355,15 +3390,15 @@ fn a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there() {
     let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
 
     let err = b
-        .move_to_node(vmdir, &vm, &t.node, false)
+        .move_to_node(vmdir, &vm, &t.node, &mv(false))
         .expect_err("same node");
     assert_eq!(err.number(), 1538, "{err}");
     let err = b
-        .move_to_node(vmdir, &vm, "nosuchnode", false)
+        .move_to_node(vmdir, &vm, "nosuchnode", &mv(false))
         .expect_err("not a member");
     assert_eq!(err.number(), 1538, "{err}");
     let err = b
-        .move_to_node(vmdir, &vm, &to, false)
+        .move_to_node(vmdir, &vm, &to, &mv(false))
         .expect_err("it runs on the node: an offline move must be refused");
     assert_eq!(err.number(), 5507, "{err}");
     assert_eq!(
@@ -3373,7 +3408,7 @@ fn a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there() {
 
     b.stop(vmdir, &vm).expect("stop");
     let handle = b
-        .move_to_node(vmdir, &vm, &to, false)
+        .move_to_node(vmdir, &vm, &to, &mv(false))
         .expect("move offline");
     assert_eq!(handle, format!("proxmox:{to}:{vmid}"));
     assert_eq!(
@@ -3433,12 +3468,14 @@ fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
 
     b.stop(vmdir, &vm).expect("stop");
     let err = b
-        .move_to_node(vmdir, &vm, &to, true)
+        .move_to_node(vmdir, &vm, &to, &mv(true))
         .expect_err("--live on a stopped VM");
     assert_eq!(err.number(), 5507, "{err}");
     b.resume(vmdir, &vm).expect("start").expect("a started VM");
 
-    let handle = b.move_to_node(vmdir, &vm, &to, true).expect("move live");
+    let handle = b
+        .move_to_node(vmdir, &vm, &to, &mv(true))
+        .expect("move live");
     assert_eq!(handle, format!("proxmox:{to}:{vmid}"));
     assert_eq!(
         client.locate_vm(vmid).unwrap().as_deref(),
@@ -3453,7 +3490,7 @@ fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
     vm.api_socket = handle;
 
     let back = b
-        .move_to_node(vmdir, &vm, &t.node, true)
+        .move_to_node(vmdir, &vm, &t.node, &mv(true))
         .expect("move back live");
     assert_eq!(back, format!("proxmox:{}:{vmid}", t.node));
     assert_eq!(
@@ -3477,4 +3514,12 @@ fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
 
     b.destroy(vmdir, &vm).expect("destroy");
     assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
+}
+
+/// A plain move: live or offline, no disk copy.
+fn mv(live: bool) -> delonix_compute::vm_backend::MoveOptions {
+    delonix_compute::vm_backend::MoveOptions {
+        live,
+        ..Default::default()
+    }
 }

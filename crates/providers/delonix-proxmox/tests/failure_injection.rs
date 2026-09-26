@@ -1635,7 +1635,7 @@ fn a_refused_move_never_sends_the_migrate() {
         let dir = tempfile::tempdir().unwrap();
         let vm = vm_with_handle("proxmox:pve:100");
         let err = b
-            .move_to_node(dir.path(), &vm, target, live)
+            .move_to_node(dir.path(), &vm, target, &mv(live))
             .expect_err(what);
         assert_eq!(err.number(), number, "{what}: {err}");
         assert_eq!(node.count("POST", MIGRATE), 0, "{what}: the move was sent");
@@ -1645,9 +1645,153 @@ fn a_refused_move_never_sends_the_migrate() {
             "{what}: precheck count"
         );
         if what == "a local disk" {
-            assert!(err.to_string().contains("local-lvm:vm-100-disk-0"), "{err}");
+            let msg = err.to_string();
+            assert!(msg.contains("local-lvm:vm-100-disk-0"), "{msg}");
+            assert!(
+                msg.contains("--with-local-disks"),
+                "the refusal names the flag: {msg}"
+            );
         }
     }
+}
+
+/// A local CD-ROM is refused even when disk copying is asked for — the node
+/// never copies one — and so is a malformed `--target-storage`, both before
+/// the node is asked to move anything.
+#[test]
+fn a_disk_copying_move_refuses_a_cdrom_and_a_bad_storage_id() {
+    use delonix_compute::vm_backend::{MoveOptions, VmBackend};
+    let stopped = r#"{"status":"stopped","qmpstatus":"stopped"}"#;
+    let cdrom = ok_data(
+        r#"{"allowed_nodes":["pve2"],"local_disks":[
+              {"volid":"local:iso/debian.iso","cdrom":1},
+              {"volid":"local-lvm:vm-100-disk-0","cdrom":0}],
+            "local_resources":[],"not_allowed_nodes":{"pve2":{}},"running":0}"#,
+    );
+    let copy = MoveOptions {
+        with_local_disks: true,
+        ..Default::default()
+    };
+    let node = move_node(stopped, TWO_NODES, vec![("GET", MIGRATE, cdrom)]);
+    let b = backend_on(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let vm = vm_with_handle("proxmox:pve:100");
+    let err = b
+        .move_to_node(dir.path(), &vm, "pve2", &copy)
+        .expect_err("a local CD-ROM is refused");
+    assert_eq!(err.number(), 5507, "{err}");
+    let msg = err.to_string();
+    assert!(msg.contains("local:iso/debian.iso"), "{msg}");
+    assert!(
+        !msg.contains("vm-100-disk-0"),
+        "a disk is not a CD-ROM: {msg}"
+    );
+    assert_eq!(node.count("POST", MIGRATE), 0, "the move was sent");
+
+    let node = move_node(stopped, TWO_NODES, vec![]);
+    let b = backend_on(&node);
+    let bad = MoveOptions {
+        with_local_disks: true,
+        target_storage: Some("-oops".into()),
+        ..Default::default()
+    };
+    let err = b
+        .move_to_node(dir.path(), &vm, "pve2", &bad)
+        .expect_err("a malformed storage id is refused");
+    assert_eq!(err.number(), 1538, "{err}");
+    assert_eq!(node.count("GET", MIGRATE), 0, "refused before the precheck");
+    assert_eq!(node.count("POST", MIGRATE), 0, "the move was sent");
+}
+
+/// With disk copying asked and a target storage named, the move goes ahead
+/// even though the precheck says the target lacks the SOURCE storage — the
+/// mapping is what `targetstorage` is for, and the node checks it — and the
+/// request carries both parameters.
+#[test]
+fn a_disk_copying_move_sends_the_copy_and_the_target_storage() {
+    use delonix_compute::vm_backend::{MoveOptions, VmBackend};
+    const MIGRATE_UPID: &str = "UPID:pve:00000972:00004698:6AB793FF:qmigrate:100:root@pam:";
+    let node = move_node(
+        r#"{"status":"stopped","qmpstatus":"stopped"}"#,
+        TWO_NODES,
+        vec![
+            (
+                "GET",
+                MIGRATE,
+                ok_data(
+                    r#"{"allowed_nodes":[],"local_disks":[{"volid":"local-lvm:vm-100-disk-0"}],
+                        "local_resources":[],
+                        "not_allowed_nodes":{"pve2":{"unavailable_storages":["local-lvm"]}},
+                        "running":0}"#,
+                ),
+            ),
+            ("POST", MIGRATE, ok_data(&format!("\"{MIGRATE_UPID}\""))),
+            (
+                "GET",
+                RESOURCES,
+                ok_data(r#"[{"type":"qemu","vmid":100,"node":"pve2"}]"#),
+            ),
+            ("GET", "/nodes/pve2/qemu/100/config", ok_data(r#"{"name":"v"}"#)),
+            (
+                "GET",
+                CONFIG,
+                Reply::Json(
+                    500,
+                    r#"{"data":null,"message":"Configuration file 'nodes/pve/qemu-server/100.conf' does not exist"}"#
+                        .into(),
+                ),
+            ),
+        ],
+    );
+    let b = backend_on(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let vm = vm_with_handle("proxmox:pve:100");
+    let opts = MoveOptions {
+        with_local_disks: true,
+        target_storage: Some("nfs-lab".into()),
+        ..Default::default()
+    };
+    let handle = b
+        .move_to_node(dir.path(), &vm, "pve2", &opts)
+        .expect("move");
+    assert_eq!(handle, "proxmox:pve2:100");
+    let sent: Vec<_> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.method == "POST" && s.path == MIGRATE)
+        .collect();
+    assert_eq!(sent.len(), 1, "the move is sent exactly once");
+    let body = &sent[0].body;
+    assert!(body.contains("with-local-disks=1"), "{body}");
+    assert!(body.contains("targetstorage=nfs-lab"), "{body}");
+
+    // Without a target storage the same precheck is a refusal that says
+    // how to map the disks.
+    let node = move_node(
+        r#"{"status":"stopped","qmpstatus":"stopped"}"#,
+        TWO_NODES,
+        vec![(
+            "GET",
+            MIGRATE,
+            ok_data(
+                r#"{"allowed_nodes":[],"local_disks":[{"volid":"local-lvm:vm-100-disk-0"}],
+                    "local_resources":[],
+                    "not_allowed_nodes":{"pve2":{"unavailable_storages":["local-lvm"]}},
+                    "running":0}"#,
+            ),
+        )],
+    );
+    let b = backend_on(&node);
+    let copy = MoveOptions {
+        with_local_disks: true,
+        ..Default::default()
+    };
+    let err = b
+        .move_to_node(dir.path(), &vm, "pve2", &copy)
+        .expect_err("an unmapped target is refused");
+    assert_eq!(err.number(), 5507, "{err}");
+    assert!(err.to_string().contains("--target-storage"), "{err}");
+    assert_eq!(node.count("POST", MIGRATE), 0, "the move was sent");
 }
 
 /// The move is sent once, with the target and `online` asked; its UPID is
@@ -1692,7 +1836,7 @@ fn a_move_is_sent_once_waited_on_and_proved_on_the_node() {
     let dir = tempfile::tempdir().unwrap();
     let vm = vm_with_handle("proxmox:pve:100");
     let handle = b
-        .move_to_node(dir.path(), &vm, "pve2", false)
+        .move_to_node(dir.path(), &vm, "pve2", &mv(false))
         .expect("move");
     assert_eq!(handle, "proxmox:pve2:100");
     let sent: Vec<_> = node
@@ -1717,4 +1861,12 @@ fn a_move_is_sent_once_waited_on_and_proved_on_the_node() {
         "{ledger}"
     );
     assert_eq!(b.current_handle(&vm_with_handle(&handle)), None);
+}
+
+/// A plain move: live or offline, no disk copy.
+fn mv(live: bool) -> delonix_compute::vm_backend::MoveOptions {
+    delonix_compute::vm_backend::MoveOptions {
+        live,
+        ..Default::default()
+    }
 }

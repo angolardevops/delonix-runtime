@@ -305,6 +305,21 @@ pub struct Boot {
     pub lease_floor: Option<String>,
 }
 
+/// How `vm move --node` moves a VM ([`VmBackend::move_to_node`]).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MoveOptions {
+    /// Online: the VM keeps running while it moves.
+    pub live: bool,
+    /// Let the node copy disks the target does not share (a full copy
+    /// offline, a block mirror live). Without it such disks are refused —
+    /// a copy is a different cost and a different failure window, and the
+    /// caller has to ask for it (ADR-0053).
+    pub with_local_disks: bool,
+    /// The target's storage the copied disks land on; `None` keeps each
+    /// disk's storage id. Only with `with_local_disks`.
+    pub target_storage: Option<String>,
+}
+
 /// The virtualization mechanism behind a microVM. Allows having Cloud
 /// Hypervisor and libvirt/KVM side by side (chosen per VM).
 pub trait VmBackend {
@@ -411,10 +426,12 @@ pub trait VmBackend {
 
     /// `vm move --node`: moves the VM to `target`, another node of the SAME
     /// cluster (ADR-0053 decision 1) — the same VM and the same record, only
-    /// its node changes. `live` asks for an online move (the VM keeps
-    /// running). Called after the engine has checked from its record that
-    /// the power state matches `live`; returns the handle the VM is known by
-    /// on `target`, which the engine writes to the record.
+    /// its node changes. `opts.live` asks for an online move (the VM keeps
+    /// running); `opts.with_local_disks` lets the node copy disks the target
+    /// does not share instead of refusing them. Called after the engine has
+    /// checked from its record that the power state matches `opts.live`;
+    /// returns the handle the VM is known by on `target`, which the engine
+    /// writes to the record.
     ///
     /// Default: unsupported (fail closed). A local backend has no cluster: it
     /// refuses with the verb that relocates a VM between hosts (`vm migrate`,
@@ -424,7 +441,7 @@ pub trait VmBackend {
         _vmdir: &Path,
         _vm: &Vm,
         _target: &str,
-        _live: bool,
+        _opts: &MoveOptions,
     ) -> delonix_model::Result<String> {
         Err(Error::UnsupportedByBackend(format!(
             "moving a VM between nodes is not supported on the '{}' backend: it has no cluster \

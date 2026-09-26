@@ -2387,9 +2387,29 @@ impl Client {
     /// waited on and kept in the ledger, and a lost answer is settled by the
     /// source node's task list and then by where the cluster lists the VM —
     /// never by sending the move again.
-    pub fn migrate(&self, ledger: &Ledger, vmid: u32, target: &str, online: bool) -> Result<()> {
+    ///
+    /// `with_local_disks` lets the node copy disks the target does not share
+    /// (`with-local-disks=1`: a full copy offline, a block mirror online), and
+    /// `target_storage` names the target's storage they land on
+    /// (`targetstorage`); both are sent only when asked.
+    pub fn migrate(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        target: &str,
+        online: bool,
+        with_local_disks: bool,
+        target_storage: Option<&str>,
+    ) -> Result<()> {
         validate_node_name(target)?;
         let online = if online { "1" } else { "0" };
+        let mut form: Vec<(&str, &str)> = vec![("target", target), ("online", online)];
+        if with_local_disks {
+            form.push(("with-local-disks", "1"));
+        }
+        if let Some(storage) = target_storage {
+            form.push(("targetstorage", storage));
+        }
         self.task(
             ledger,
             vmid,
@@ -2397,7 +2417,7 @@ impl Client {
             || {
                 self.post_form(
                     &format!("/nodes/{}/qemu/{vmid}/migrate", self.node),
-                    &[("target", target), ("online", online)],
+                    &form,
                     true,
                 )
             },
@@ -4571,6 +4591,15 @@ fn task_log_error_line(lines: &[serde_json::Value]) -> Option<String> {
         .next_back()
 }
 
+/// A Proxmox storage id as the node accepts one: a letter, then letters,
+/// digits, `-`, `_` or `.`, at most 63 characters. Pure.
+fn valid_storage_id(s: &str) -> bool {
+    let mut chars = s.chars();
+    s.len() <= 63
+        && chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
 /// The node a task runs on, out of its UPID (`UPID:<node>:…`), or `None` for
 /// a string that is not a UPID or names a node that is not a valid node name
 /// — the ledger is a file on disk, and what it holds goes into a URL. Pure.
@@ -4602,8 +4631,11 @@ pub struct MigratePrecheck {
     /// The target is listed in `allowed_nodes`.
     pub target_allowed: bool,
     /// Volumes on storages the target does not share (`local_disks`): a
-    /// move would have to copy them.
+    /// move would have to copy them. CD-ROMs are listed apart.
     pub local_disks: Vec<String>,
+    /// Local CD-ROM media (`local_disks` entries with `cdrom: 1`): the node
+    /// does not copy a CD-ROM even with `with-local-disks`.
+    pub local_cdroms: Vec<String>,
     /// Devices bound to the source node (`local_resources`: USB, PCI…).
     pub local_resources: Vec<String>,
     /// The storages the target lacks, when the node says so
@@ -4627,16 +4659,12 @@ fn parse_migrate_precheck(data: &serde_json::Value, target: &str) -> MigratePrec
     let truthy = |v: Option<&serde_json::Value>| {
         v.is_some_and(|x| x.as_bool().unwrap_or(false) || x.as_u64().is_some_and(|n| n != 0))
     };
-    MigratePrecheck {
-        running: truthy(data.get("running")),
-        target_allowed: strings(data.get("allowed_nodes"))
-            .iter()
-            .any(|n| n == target),
-        local_disks: data
-            .get("local_disks")
+    let local_volumes = |cdroms: bool| -> Vec<String> {
+        data.get("local_disks")
             .and_then(|a| a.as_array())
             .map(|a| {
                 a.iter()
+                    .filter(|d| truthy(d.get("cdrom")) == cdroms)
                     .map(|d| {
                         d.get("volid")
                             .and_then(|v| v.as_str())
@@ -4645,7 +4673,15 @@ fn parse_migrate_precheck(data: &serde_json::Value, target: &str) -> MigratePrec
                     })
                     .collect()
             })
-            .unwrap_or_default(),
+            .unwrap_or_default()
+    };
+    MigratePrecheck {
+        running: truthy(data.get("running")),
+        target_allowed: strings(data.get("allowed_nodes"))
+            .iter()
+            .any(|n| n == target),
+        local_disks: local_volumes(false),
+        local_cdroms: local_volumes(true),
         local_resources: data
             .get("local_resources")
             .and_then(|a| a.as_array())
@@ -5022,10 +5058,21 @@ impl VmBackend for ProxmoxBackend {
         vmdir: &Path,
         vm: &Vm,
         target: &str,
-        live: bool,
+        opts: &delonix_compute::vm_backend::MoveOptions,
     ) -> delonix_model::Result<String> {
         use delonix_compute::vm_error::Error as VmError;
         validate_node_name(target)?;
+        let live = opts.live;
+        let target_storage = opts.target_storage.as_deref().map(str::trim);
+        if let Some(st) = target_storage {
+            if !valid_storage_id(st) {
+                return Err(VmError::InvalidMoveTarget(format!(
+                    "'{st}' is not a Proxmox storage id (a letter, then letters, digits, '-', '_' \
+                     or '.')"
+                ))
+                .into());
+            }
+        }
         let ledger = Ledger::at(vmdir);
         let (source, vmid, ps) = self.on_vm(vm, |c, vmid| {
             c.settle_pending(&ledger, vmid)?;
@@ -5082,10 +5129,19 @@ impl VmBackend for ProxmoxBackend {
             std::sync::Arc::new(self.client.for_node(&source)?)
         };
         let pre = src.migrate_precheck(vmid, target)?;
-        if !pre.local_disks.is_empty() {
+        if !pre.local_cdroms.is_empty() {
+            return Err(VmError::MoveRefused(format!(
+                "VM '{}' has local CD-ROM media ({}), which the node never copies: eject it \
+                 (`qm set <vmid> --ide2 none,media=cdrom`) or put the image on a shared storage",
+                vm.name,
+                pre.local_cdroms.join(", ")
+            ))
+            .into());
+        }
+        if !pre.local_disks.is_empty() && !opts.with_local_disks {
             return Err(VmError::MoveRefused(format!(
                 "VM '{}' has disks on storage node '{target}' does not share ({}): a move would \
-                 copy them, which `vm move` does not do (ADR-0053) — put them on a storage the \
+                 copy them — ask for it with `--with-local-disks`, or put them on a storage the \
                  cluster shares",
                 vm.name,
                 pre.local_disks.join(", ")
@@ -5100,11 +5156,19 @@ impl VmBackend for ProxmoxBackend {
             ))
             .into());
         }
-        if !pre.target_allowed {
+        // A target that lacks the source storage is still reachable when the
+        // copied disks are mapped to one it has: that is what
+        // `targetstorage` exists for, and the node checks the mapping itself.
+        let mapped = opts.with_local_disks && target_storage.is_some();
+        if !pre.target_allowed && !mapped {
             let why = if pre.unavailable_storages.is_empty() {
                 String::from("the node's precheck does not list it among the allowed targets")
             } else {
-                format!("it lacks storage {}", pre.unavailable_storages.join(", "))
+                format!(
+                    "it lacks storage {} — with `--with-local-disks`, `--target-storage` maps \
+                     the copied disks to one it has",
+                    pre.unavailable_storages.join(", ")
+                )
             };
             return Err(VmError::MoveRefused(format!(
                 "VM '{}' cannot move to node '{target}': {why}",
@@ -5112,7 +5176,14 @@ impl VmBackend for ProxmoxBackend {
             ))
             .into());
         }
-        src.migrate(&ledger, vmid, target, live)?;
+        src.migrate(
+            &ledger,
+            vmid,
+            target,
+            live,
+            opts.with_local_disks,
+            target_storage,
+        )?;
 
         // The proof is the node's, never the task's answer alone (ADR-0053 D5).
         let listed = self.client.locate_vm(vmid)?;

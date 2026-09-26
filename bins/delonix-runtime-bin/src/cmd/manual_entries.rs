@@ -2449,6 +2449,7 @@ pub static ENTRIES: &[Entry] = &[
         examples: &[
             ("move a stopped Proxmox VM to another node of its cluster — same VM, same id", "delonix vm move web-1 --node pve2"),
             ("move it while it runs, on a storage the whole cluster shares", "delonix vm move web-1 --node pve2 --live"),
+            ("copy a VM's local disk to the target node, onto a storage the target has", "delonix vm move web-1 --node pve2 --with-local-disks --target-storage nfs-lab"),
         ],
         see_also: &["vm migrate", "provider describe", "vm ls"],
     },

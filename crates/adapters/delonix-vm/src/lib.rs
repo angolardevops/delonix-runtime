@@ -62,7 +62,7 @@ pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 /// it without depending on this adapter. Re-exported: no caller changes.
 pub use delonix_compute::vm_backend::{
     mem_mib, parse_mem_mib, BackendFactory, BackendRegistration, Boot, CloudInitIntent,
-    CreateStage, DestroyStage, ReportFactory, VmBackend, VmConfig,
+    CreateStage, DestroyStage, MoveOptions, ReportFactory, VmBackend, VmConfig,
 };
 
 pub mod capabilities;
@@ -4610,25 +4610,42 @@ pub fn resize(base: &Path, name: &str, vcpus: Option<u32>, memory: Option<&str>)
 /// that does not match `live` as the record says it — `--live` on a stopped
 /// VM, no `--live` on a running one, and a paused VM either way (unpause it or
 /// stop it first). The backend asks its node the same question again, because
-/// a record can be out of date. The record takes the handle the backend
-/// returns only after the move is proved, so a refused or failed move leaves
-/// it naming the node the VM is still on.
+/// a record can be out of date. A target storage without `--with-local-disks`
+/// is refused too: it names where COPIED disks land, and without the flag
+/// nothing is copied. The record takes the handle the backend returns only
+/// after the move is proved, so a refused or failed move leaves it naming the
+/// node the VM is still on.
 ///
 /// Returns the updated record.
-pub fn move_to_node(base: &Path, name: &str, target: &str, live: bool) -> Result<Vm> {
+pub fn move_to_node(base: &Path, name: &str, target: &str, opts: &MoveOptions) -> Result<Vm> {
     let target = target.trim();
     if target.is_empty() {
         return Err(Error::InvalidMoveTarget(format!(
             "no node to move VM '{name}' to: give `--node <node>`"
         )));
     }
+    match opts.target_storage.as_deref().map(str::trim) {
+        Some("") => {
+            return Err(Error::InvalidMoveTarget(format!(
+                "an empty target storage for VM '{name}': name a storage of node '{target}'"
+            )))
+        }
+        Some(_) if !opts.with_local_disks => {
+            return Err(Error::InvalidMoveTarget(format!(
+                "`--target-storage` names where copied disks land, and without \
+                 `--with-local-disks` VM '{name}' has none copied"
+            )))
+        }
+        _ => {}
+    }
+    let live = opts.live;
     let vmdir = vms_dir(base);
     let st = store(base)?;
     let mut vm = load_vm(base, name)?;
     if let Some(why) = move_power_refusal(&vm.status, live) {
         return Err(Error::MoveRefused(format!("VM '{name}' {why}")));
     }
-    let handle = backend_for(&vm)?.move_to_node(&vmdir, &vm, target, live)?;
+    let handle = backend_for(&vm)?.move_to_node(&vmdir, &vm, target, opts)?;
     vm.api_socket = handle;
     st.save(name, &vm).map_err(state_err)?;
     Ok(vm)
@@ -7947,9 +7964,9 @@ Format specific information:
                 _: &Path,
                 _: &Vm,
                 target: &str,
-                live: bool,
+                opts: &MoveOptions,
             ) -> delonix_model::Result<String> {
-                CALLS.lock().unwrap().push((target.to_string(), live));
+                CALLS.lock().unwrap().push((target.to_string(), opts.live));
                 if FAIL.load(Ordering::SeqCst) {
                     return Err(delonix_model::Error::Invalid("node said no".into()));
                 }
@@ -8038,28 +8055,52 @@ Format specific information:
         save("n", "sem-cluster", Status::Stopped);
         let handle = |name: &str| st.load(name).unwrap().api_socket;
 
+        let offline = MoveOptions::default();
+        let online = MoveOptions {
+            live: true,
+            ..Default::default()
+        };
         let code_of = |e: Error| e.number();
+        // A target storage names where COPIED disks land: without
+        // `--with-local-disks` nothing is copied, and an empty one names nothing.
+        let storage_only = MoveOptions {
+            target_storage: Some("fast".into()),
+            ..Default::default()
+        };
         assert_eq!(
-            code_of(move_to_node(&base, "parada", " ", false).unwrap_err()),
+            code_of(move_to_node(&base, "parada", "b", &storage_only).unwrap_err()),
+            1538
+        );
+        let empty_storage = MoveOptions {
+            with_local_disks: true,
+            target_storage: Some(" ".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            code_of(move_to_node(&base, "parada", "b", &empty_storage).unwrap_err()),
             1538
         );
         assert_eq!(
-            code_of(move_to_node(&base, "parada", "b", true).unwrap_err()),
+            code_of(move_to_node(&base, "parada", " ", &offline).unwrap_err()),
+            1538
+        );
+        assert_eq!(
+            code_of(move_to_node(&base, "parada", "b", &online).unwrap_err()),
             5507
         );
         assert_eq!(
-            code_of(move_to_node(&base, "a-correr", "b", false).unwrap_err()),
+            code_of(move_to_node(&base, "a-correr", "b", &offline).unwrap_err()),
             5507
         );
         assert_eq!(
-            code_of(move_to_node(&base, "pausada", "b", true).unwrap_err()),
+            code_of(move_to_node(&base, "pausada", "b", &online).unwrap_err()),
             5507
         );
         assert_eq!(
-            code_of(move_to_node(&base, "pausada", "b", false).unwrap_err()),
+            code_of(move_to_node(&base, "pausada", "b", &offline).unwrap_err()),
             5507
         );
-        assert!(move_to_node(&base, "nao-existe", "b", false)
+        assert!(move_to_node(&base, "nao-existe", "b", &offline)
             .unwrap_err()
             .is_not_found());
         assert!(
@@ -8071,7 +8112,7 @@ Format specific information:
         }
 
         FAIL.store(true, Ordering::SeqCst);
-        assert!(move_to_node(&base, "parada", "b", false).is_err());
+        assert!(move_to_node(&base, "parada", "b", &offline).is_err());
         assert_eq!(
             handle("parada"),
             "fake:a:7",
@@ -8079,10 +8120,10 @@ Format specific information:
         );
         FAIL.store(false, Ordering::SeqCst);
 
-        let vm = move_to_node(&base, "parada", "b", false).unwrap();
+        let vm = move_to_node(&base, "parada", "b", &offline).unwrap();
         assert_eq!(vm.api_socket, "fake:b:7");
         assert_eq!(handle("parada"), "fake:b:7");
-        let vm = move_to_node(&base, "a-correr", "b", true).unwrap();
+        let vm = move_to_node(&base, "a-correr", "b", &online).unwrap();
         assert_eq!(vm.api_socket, "fake:b:7");
         assert_eq!(
             *CALLS.lock().unwrap(),
@@ -8093,7 +8134,7 @@ Format specific information:
             ]
         );
 
-        let e = move_to_node(&base, "n", "b", false).unwrap_err();
+        let e = move_to_node(&base, "n", "b", &offline).unwrap_err();
         assert_eq!(e.number(), 1501, "{e}");
         let e = e.to_string();
         assert!(e.contains("sem-cluster") && e.contains("vm migrate"), "{e}");
