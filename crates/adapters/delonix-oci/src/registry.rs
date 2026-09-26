@@ -1087,16 +1087,14 @@ pub fn pull_from_registry_with_creds_full(
     // AGENTS.md ("cluster kubeadm" section) for the real-world symptom this
     // fixes (a kubeadm rate-limiter timeout while every core image
     // re-downloaded on every VM boot).
-    let config_digest_str = manifest.config().digest().to_string();
-    if !store.cas().has(&config_digest_str) {
-        let config_bytes = c.blob(&config_digest_str)?;
-        if sha256_hex(&config_bytes) != manifest.config().digest().digest() {
-            return Err(Error::DigestMismatch("config digest mismatch".into()));
-        }
-        store.cas().write(&config_bytes)?;
-    }
-    let config_digest = config_digest_str;
-    let config_bytes = store.cas().read(&config_digest)?;
+    //
+    // The config is fetched ALONGSIDE the layers, not before them: it is a
+    // few KiB, but fetching it first put a full round-trip (and, on a loaded
+    // disk, a multi-second write — measured 2.5s for 5.6 KiB) in front of
+    // every layer download.
+    let config_digest = manifest.config().digest().to_string();
+    let config_expected = manifest.config().digest().digest().to_string();
+    let need_config = !store.cas().has(&config_digest);
 
     // 3) layers (ignores "foreign"/Windows layers) — same CAS-first check.
     let real_layers: Vec<&Descriptor> = manifest
@@ -1117,7 +1115,7 @@ pub fn pull_from_registry_with_creds_full(
         .cloned()
         .collect();
 
-    if !missing.is_empty() {
+    if !missing.is_empty() || need_config {
         // LAYERS IN PARALLEL, and this is the difference between a pull that
         // saturates a link and one that does not. Measured on this host, same
         // origin, same total bytes: one connection 0.46 MiB/s, four in parallel
@@ -1135,8 +1133,24 @@ pub fn pull_from_registry_with_creds_full(
         let done_layers = std::sync::atomic::AtomicUsize::new(0);
         let next = std::sync::Mutex::new(missing.clone().into_iter());
         let errors = std::sync::Mutex::new(Vec::<String>::new());
+        let config_result = std::sync::Mutex::new(None::<Result<()>>);
 
         std::thread::scope(|scope| {
+            if need_config {
+                let mut cc = c.clone();
+                let (config_digest, config_expected, config_result) =
+                    (&config_digest, &config_expected, &config_result);
+                let store = &store;
+                scope.spawn(move || {
+                    let res = cc.blob(config_digest).and_then(|bytes| {
+                        if sha256_hex(&bytes) != *config_expected {
+                            return Err(Error::DigestMismatch("config digest mismatch".into()));
+                        }
+                        store.cas().write(&bytes).map(|_| ())
+                    });
+                    *config_result.lock().unwrap() = Some(res);
+                });
+            }
             for _ in 0..workers {
                 // A clone per worker: `blob` takes `&mut self` only to renew an
                 // expired token, and a clone starts with the one already
@@ -1198,6 +1212,9 @@ pub fn pull_from_registry_with_creds_full(
             }
         });
 
+        if let Some(Err(e)) = config_result.into_inner().unwrap() {
+            return Err(e);
+        }
         // Every failure, not just the first: a pull that dies on three layers
         // and names one sends the reader looking at the wrong thing.
         let errs = errors.into_inner().unwrap();
@@ -1206,12 +1223,14 @@ pub fn pull_from_registry_with_creds_full(
         }
     }
 
+    let config_bytes = store.cas().read(&config_digest)?;
+
     // 4) assemble and store — read the runtime config (Cmd/Env/Entrypoint/User/WorkingDir)
     // from the OCI config blob (`oci_spec::image::ImageConfiguration`).
     let oci_config: ImageConfiguration = serde_json::from_slice(&config_bytes)?;
     let inner = oci_config.config().clone().unwrap_or_default();
     let repo_tags = store.merged_tags(&config_digest, reference);
-    let image = Image {
+    let image = crate::image::Image {
         id: config_digest,
         repo_tags,
         layers,
@@ -1257,12 +1276,23 @@ pub fn build_manifest(store: &ImageStore, image: &Image) -> Result<(Vec<u8>, Str
 /// layer descriptors, mediaType detected by magic number). Shared by
 /// [`build_manifest`] (serving) and [`push_to_registry`] (publishing).
 fn docker_manifest(store: &ImageStore, image: &Image) -> Result<ImageManifest> {
-    let config_data = store.cas().read(&image.id)?;
-    let config_desc = descriptor(DOCKER_CONFIG_MEDIA_TYPE, config_data.len(), &image.id)?;
+    // Size from the file's metadata and the media type from its first bytes:
+    // reading every layer whole just to learn those two facts made a push (and
+    // `write_oci_archive`) read each layer from disk twice.
+    let cas = store.cas();
+    let config_desc = descriptor(
+        DOCKER_CONFIG_MEDIA_TYPE,
+        cas.size(&image.id)? as usize,
+        &image.id,
+    )?;
     let mut layer_descs = Vec::with_capacity(image.layers.len());
     for dg in &image.layers {
-        let data = store.cas().read(dg)?;
-        layer_descs.push(descriptor(layer_media_type(&data), data.len(), dg)?);
+        let head = cas.head(dg, 4)?;
+        layer_descs.push(descriptor(
+            layer_media_type(&head),
+            cas.size(dg)? as usize,
+            dg,
+        )?);
     }
     ImageManifestBuilder::default()
         .schema_version(2u32)
@@ -1276,11 +1306,10 @@ fn docker_manifest(store: &ImageStore, image: &Image) -> Result<ImageManifest> {
 pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Result<String> {
     let image = store.resolve(source)?;
     let (host, repo, refr) = parse_reference(target);
-    let http = reqwest::blocking::Client::builder()
-        .user_agent("delonix/0.1")
-        .timeout(Duration::from_secs(300))
-        .build()
-        .map_err(reg_err)?;
+    // A layer is a transfer of unknown size, like a VM artifact: a fixed
+    // whole-request ceiling (it was 300s here) failed every layer that could
+    // not move in five minutes, however healthy the link. See `transfer_client`.
+    let http = transfer_client()?;
     let creds = crate::auth::lookup(store.root(), &host);
     let mut c = Client {
         http,
@@ -2271,6 +2300,139 @@ mod tests {
         assert_eq!(img1.id, img2.id);
 
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let p = std::env::temp_dir().join(format!(
+            "delonix-oci-{tag}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&p).unwrap();
+        p
+    }
+
+    /// The manifest of a push is now built from each blob's SIZE (metadata)
+    /// and its first four bytes, instead of reading every layer whole a second
+    /// time. This proves the descriptors did not change: the three media types
+    /// are still sniffed correctly, the sizes are the real ones, and the image
+    /// survives a push → pull round trip byte for byte.
+    #[test]
+    fn push_manifest_from_metadata_round_trips() {
+        let (port, _gets, _handle) = serve_anon_registry();
+        let src = scratch("push-meta-src");
+        let store = crate::ImageStore::open(&src).unwrap();
+        let config =
+            br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#;
+        let id = store.cas().write(config).unwrap();
+        let blobs: [&[u8]; 3] = [
+            &[0x1f, 0x8b, 0x08, 0x00, 1, 2, 3],
+            &[0x28, 0xb5, 0x2f, 0xfd, 9, 9],
+            b"plain-tar-bytes",
+        ];
+        let layers: Vec<String> = blobs
+            .iter()
+            .map(|b| store.cas().write(b).unwrap())
+            .collect();
+        let image = crate::image::Image {
+            id: id.clone(),
+            repo_tags: vec!["local/meta:t".into()],
+            layers: layers.clone(),
+            config: crate::image::ImageConfig::default(),
+            created_unix: 0,
+        };
+        store.save(&image).unwrap();
+
+        let (bytes, _) = crate::registry::build_manifest(&store, &image).unwrap();
+        let m: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(m["config"]["size"], config.len());
+        let want = [
+            "application/vnd.docker.image.rootfs.diff.tar.gzip",
+            "application/vnd.oci.image.layer.v1.tar+zstd",
+            "application/vnd.oci.image.layer.v1.tar",
+        ];
+        for (i, l) in m["layers"].as_array().unwrap().iter().enumerate() {
+            assert_eq!(l["mediaType"], want[i], "layer {i}");
+            assert_eq!(l["size"], blobs[i].len(), "layer {i}");
+            assert_eq!(l["digest"], layers[i], "layer {i}");
+        }
+
+        let target = format!("127.0.0.1:{port}/meta:t");
+        crate::registry::push_to_registry(&store, "local/meta:t", &target).expect("push");
+        let dst = scratch("push-meta-dst");
+        let store2 = crate::ImageStore::open(&dst).unwrap();
+        let pulled = pull_from_registry_with_creds(&store2, &target, None).expect("pull");
+        assert_eq!(pulled.id, id);
+        assert_eq!(pulled.layers, layers);
+        for (i, dg) in layers.iter().enumerate() {
+            assert_eq!(store2.cas().read(dg).unwrap(), blobs[i]);
+        }
+        let _ = std::fs::remove_dir_all(&src);
+        let _ = std::fs::remove_dir_all(&dst);
+    }
+
+    /// The config is now fetched on its own thread alongside the layers. Its
+    /// digest check must have come along: a registry serving a config whose
+    /// bytes do not hash to the manifest's digest is refused, and nothing is
+    /// recorded as an image.
+    #[test]
+    fn a_tampered_config_is_refused_on_the_parallel_path() {
+        let (port, _gets, _handle) = serve_anon_registry();
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "tamper");
+        let real =
+            br#"{"architecture":"amd64","os":"linux","rootfs":{"type":"layers","diff_ids":[]}}"#;
+        let config_digest = format!("sha256:{}", sha256_hex(real));
+        // The registry stores OTHER bytes under the real config's digest.
+        c.push_blob(&config_digest, b"{\"evil\":true}").unwrap();
+        let layer = b"layer-bytes".to_vec();
+        let layer_digest = format!("sha256:{}", sha256_hex(&layer));
+        c.push_blob(&layer_digest, &layer).unwrap();
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {"mediaType": "application/vnd.oci.image.config.v1+json",
+                       "size": real.len(), "digest": config_digest},
+            "layers": [{"mediaType": "application/vnd.oci.image.layer.v1.tar",
+                        "size": layer.len(), "digest": layer_digest}],
+        });
+        c.push_manifest(
+            "t",
+            &serde_json::to_vec(&manifest).unwrap(),
+            "application/vnd.oci.image.manifest.v1+json",
+        )
+        .unwrap();
+
+        let tmp = scratch("tamper");
+        let store = crate::ImageStore::open(&tmp).unwrap();
+        let err =
+            pull_from_registry_with_creds(&store, &format!("127.0.0.1:{port}/tamper:t"), None)
+                .expect_err("a config that does not match its digest must be refused");
+        assert!(err.to_string().contains("config digest mismatch"), "{err}");
+        assert!(!store.cas().has(&config_digest));
+        assert!(store.list().unwrap().is_empty());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// Gate for the fixed 300s whole-request ceiling on container-image
+    /// pushes: every layer that could not move in five minutes failed, however
+    /// healthy the link. The push must use the transfer client, like the VM
+    /// artifact path already did.
+    #[test]
+    fn container_push_uses_the_transfer_client() {
+        let src = include_str!("registry.rs");
+        let start = src.find("pub fn push_to_registry(").unwrap();
+        let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
+        assert!(
+            body.contains("transfer_client()"),
+            "push_to_registry must use transfer_client"
+        );
+        assert!(
+            !body.contains(".timeout("),
+            "push_to_registry must not set its own ceiling"
+        );
     }
 
     /// Security-audit finding: `blob_with_progress` used to trust the registry's raw
