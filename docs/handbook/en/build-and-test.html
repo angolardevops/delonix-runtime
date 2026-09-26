@@ -398,6 +398,11 @@ pgrep -a delonix
 <td>skipped with <code>--no-vm</code></td>
 </tr>
 <tr>
+<td>Default VM provider</td>
+<td><code>providers.yaml</code> with <code>defaultProvider: libvirt</code> (ADR-0054): <code>/etc/delonix/</code>, or <code>~/.config/delonix/</code> with <code>--user</code>; written only if absent, never rewritten</td>
+<td><code>--vm-provider cloud-hypervisor</code> changes the default; skipped with <code>--no-vm</code></td>
+</tr>
+<tr>
 <td>Kernel tuning</td>
 <td><code>/<wbr>etc/<wbr>modules-load.<wbr>d/<wbr>delonix.<wbr>conf</code>, <code>/<wbr>etc/<wbr>sysctl.<wbr>d/<wbr>99-delonix.<wbr>conf</code></td>
 <td>skipped with <code>--no-tune</code></td>

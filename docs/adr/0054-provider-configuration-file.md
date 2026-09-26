@@ -216,7 +216,16 @@ node and a production node differ in what their file says, not in how it is read
    that is slice 5, with the node contract.
 3. `provider config show|validate`, `vm default-backend` on the file, `pt.po` entries, the
    schema of the file published next to the manifest schema.
-4. `install.sh` (D6) and its idempotence check (a second run leaves an edited file byte-equal).
+4. **Done.** `install.sh --vm-provider <libvirt|cloud-hypervisor>` (default `libvirt`) writes
+   `/etc/delonix/providers.yaml` (`~/.config/delonix/` with `--user`) inside the VM block, so
+   `--no-vm` writes nothing, and ONLY when the file is absent — `set -C` refuses an existing
+   path, symlink included, at the moment of writing. An unknown provider is refused right
+   after argument parsing, before the host is touched. The installer's verification asks the
+   INSTALLED binary for the default (`vm default-backend` against that file) and compares it
+   with the file's `defaultProvider`; a binary older than this ADR is warned about, not
+   failed. `scripts/test_install_providers.py` extracts the function from the script itself:
+   a second run leaves an edited file byte-equal, a symlink is neither followed nor replaced
+   (3 of its 7 tests fail with the guard removed).
 5. The node contract's optional provider field (D5), in `delonix-node-api` once it lands.
 6. `provider-lifecycle.sh` runs each provider **from the file alone**, with no `--backend`
    and no `DELONIX_PROXMOX_*` in the environment — the proof that a caller need not know.
