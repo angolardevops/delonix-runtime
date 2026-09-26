@@ -14155,3 +14155,13 @@ msgstr "move uma VM Proxmox parada para outro nó do seu cluster — a mesma VM,
 
 msgid "move it while it runs, on a storage the whole cluster shares"
 msgstr "move-a enquanto corre, num storage partilhado por todo o cluster"
+
+# DX-6509 — quiesced backup on Proxmox (vm.backup.quiesced, ADR-0049)
+msgid "the backup could not be taken with the guest's filesystem frozen"
+msgstr "não foi possível fazer o backup com o sistema de ficheiros do convidado congelado"
+
+msgid "A quiesced backup freezes the guest's filesystems through the QEMU guest agent for the instant the disk is copied, so the archive holds a consistent filesystem. The guest was not running, its agent did not answer, or the node's own backup log did not show the freeze and the thaw — and a backup that cannot be shown to be quiesced is not reported as one."
+msgstr "Um backup consistente congela os sistemas de ficheiros do convidado através do agente QEMU no instante em que o disco é copiado, para que o arquivo guarde um sistema de ficheiros coerente. O convidado não estava a correr, o agente não respondeu, ou o log do backup do próprio nó não mostrou o congelamento e o descongelamento — e um backup que não se consegue provar consistente não é reportado como tal."
+
+msgid "Install and start `qemu-guest-agent` in the guest and set `agent=1` on the VM; for a stopped VM, a plain backup is already consistent."
+msgstr "Instala e arranca o `qemu-guest-agent` no convidado e define `agent=1` na VM; para uma VM parada, um backup simples já é consistente."

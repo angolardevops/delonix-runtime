@@ -62,7 +62,7 @@ pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 /// it without depending on this adapter. Re-exported: no caller changes.
 pub use delonix_compute::vm_backend::{
     mem_mib, parse_mem_mib, BackendFactory, BackendRegistration, Boot, CloudInitIntent,
-    CreateStage, DestroyStage, ReportFactory, VmBackend, VmConfig,
+    CreateStage, DestroyStage, GuestFilesystem, GuestInfo, ReportFactory, VmBackend, VmConfig,
 };
 
 pub mod capabilities;
@@ -4634,6 +4634,18 @@ pub fn move_to_node(base: &Path, name: &str, target: &str, live: bool) -> Result
     Ok(vm)
 }
 
+/// What the guest of VM `name` reports about itself through its agent
+/// (`vm.guest-agent`, see [`VmBackend::guest_info`]). `Ok(None)` when the
+/// record says the VM is not running — there is no guest to ask — or the
+/// backend has no agent answer to give.
+pub fn guest_info(base: &Path, name: &str) -> Result<Option<GuestInfo>> {
+    let vm = load_vm(base, name)?;
+    if vm.status != Status::Running {
+        return Ok(None);
+    }
+    Ok(backend_for(&vm)?.guest_info(&vm)?)
+}
+
 /// Why a move of a VM in `status` is refused for `live`, or `None`. Pure.
 fn move_power_refusal(status: &Status, live: bool) -> Option<String> {
     match (status, live) {
@@ -7899,6 +7911,94 @@ Format specific information:
             ..base
         };
         assert!(libvirt_domain_xml(&qxl, "/tmp/x.qcow2", "").contains("type='qxl'"));
+    }
+
+    /// `guest_info`: a VM the record says is not running is never asked
+    /// about (there is no guest), a running one returns the backend's answer
+    /// as it is, and a backend with no guest channel answers `None`.
+    #[test]
+    fn guest_info_asks_only_a_running_vm_and_returns_the_backends_answer() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static ASKED: AtomicUsize = AtomicUsize::new(0);
+        struct Talks;
+        impl VmBackend for Talks {
+            fn id(&self) -> &'static str {
+                "fala"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                true
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn guest_info(&self, _: &Vm) -> delonix_model::Result<Option<GuestInfo>> {
+                ASKED.fetch_add(1, Ordering::SeqCst);
+                Ok(Some(GuestInfo {
+                    hostname: Some("g1".into()),
+                    ..Default::default()
+                }))
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "fala",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Talks))),
+        })
+        .expect("registar");
+        let base = std::env::temp_dir().join(format!(
+            "delonix-guest-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        for (name, status) in [("parada", Status::Stopped), ("viva", Status::Running)] {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+            vm.backend = "fala".into();
+            vm.status = status;
+            st.save(name, &vm).unwrap();
+        }
+        assert_eq!(guest_info(&base, "parada").unwrap(), None);
+        assert_eq!(ASKED.load(Ordering::SeqCst), 0, "a stopped VM was asked");
+        let g = guest_info(&base, "viva").unwrap().expect("an answer");
+        assert_eq!(g.hostname.as_deref(), Some("g1"));
+        assert_eq!(ASKED.load(Ordering::SeqCst), 1);
+        assert!(guest_info(&base, "nao-existe").unwrap_err().is_not_found());
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "fala");
     }
 
     /// `vm move --node`: an empty target and a power state that does not

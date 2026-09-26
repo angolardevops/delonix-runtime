@@ -305,6 +305,31 @@ pub struct Boot {
     pub lease_floor: Option<String>,
 }
 
+/// What a guest reports about itself through its agent ([`VmBackend::guest_info`]).
+/// Every field is what the guest SAID — `None` or empty when it did not say.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct GuestInfo {
+    /// The OS's own name for itself (`PRETTY_NAME`, e.g. `Debian GNU/Linux 12 (bookworm)`).
+    pub os: Option<String>,
+    /// The running kernel release (`6.1.0-52-cloud-amd64`).
+    pub kernel: Option<String>,
+    /// The guest's hostname.
+    pub hostname: Option<String>,
+    /// The agent's own version.
+    pub agent_version: Option<String>,
+    /// Mounted filesystems, as the guest lists them.
+    pub filesystems: Vec<GuestFilesystem>,
+}
+
+/// One mounted filesystem inside the guest.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct GuestFilesystem {
+    pub mountpoint: String,
+    pub fstype: String,
+    pub used_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+}
+
 /// The virtualization mechanism behind a microVM. Allows having Cloud
 /// Hypervisor and libvirt/KVM side by side (chosen per VM).
 pub trait VmBackend {
@@ -407,6 +432,17 @@ pub trait VmBackend {
         _memory_mib: u64,
     ) -> delonix_model::Result<()> {
         Err(unsupported_pause(self.id(), "resize"))
+    }
+
+    /// What the guest says about itself through its agent — OS, kernel,
+    /// hostname, filesystems (`vm.guest-agent`), for `vm describe`.
+    ///
+    /// `Ok(None)` is an answer, not a failure: the VM is not running, the
+    /// guest runs no agent, or this backend has no channel into the guest at
+    /// all (the default). A backend that has one reads it and says what it
+    /// read; it never fills a field it did not get from the guest.
+    fn guest_info(&self, _vm: &Vm) -> delonix_model::Result<Option<GuestInfo>> {
+        Ok(None)
     }
 
     /// `vm move --node`: moves the VM to `target`, another node of the SAME

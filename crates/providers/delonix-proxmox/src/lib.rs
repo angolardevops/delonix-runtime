@@ -59,7 +59,9 @@ pub use error::{Error, Result};
 // used to live in this file did not know the k8s `Gi`/`Mi` suffix the engine
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
 // 1 GiB here — silently, which is the failure this repo treats as its worst.
-use delonix_compute::vm_backend::{mem_mib, Boot, CreateStage, VmBackend, VmConfig};
+use delonix_compute::vm_backend::{
+    mem_mib, Boot, CreateStage, GuestFilesystem, GuestInfo, VmBackend, VmConfig,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -1730,6 +1732,155 @@ impl Client {
     /// BEFORE the request is sent — a lost answer is reconciled against that
     /// baseline, never against a bare "does one exist" that a second run
     /// could satisfy by accident.
+    /// One agent read, its `result` — `Ok(None)` when the node says the
+    /// agent is not running, which is the ordinary state of a guest without
+    /// one (see [`Client::agent_ping`]).
+    ///
+    /// Takes the ANSWER of a `self.get(&format!(…))` written out at each
+    /// call site, not a path: the coverage matrix finds the routes this crate
+    /// calls by reading its `format!` literals and the HTTP verb in the same
+    /// statement (`scripts/proxmox_api_inventory.py`). A path assembled from a
+    /// variable (`agent/{cmd}`) read as a route no schema has, and a helper
+    /// that sent the request itself left the verb invisible at the call —
+    /// two of the reads were classified only by a serde `.get(` that happened
+    /// to share their statement, and the third not at all.
+    fn agent_answer(&self, got: Result<String>, what: &str) -> Result<Option<serde_json::Value>> {
+        match got {
+            Ok(body) => {
+                let w: Wrapped<serde_json::Value> = parse(&body, what)?;
+                Ok(Some(
+                    w.data
+                        .get("result")
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null),
+                ))
+            }
+            Err(e) if is_agent_not_running(&e) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// What the guest of VM `vmid` says about itself: `get-osinfo`,
+    /// `get-host-name`, `get-fsinfo` and the agent's `info` (its version).
+    /// `Ok(None)` when the agent is not running. A read the agent answers
+    /// with nothing leaves its field empty; nothing is filled in.
+    pub fn guest_info(&self, vmid: u32) -> Result<Option<GuestInfo>> {
+        let node = &self.node;
+        let Some(os) = self.agent_answer(
+            self.get(&format!("/nodes/{node}/qemu/{vmid}/agent/get-osinfo")),
+            "get-osinfo",
+        )?
+        else {
+            return Ok(None);
+        };
+        let (os, kernel) = parse_guest_osinfo(&os);
+        let hostname = self
+            .agent_answer(
+                self.get(&format!("/nodes/{node}/qemu/{vmid}/agent/get-host-name")),
+                "get-host-name",
+            )?
+            .and_then(|h| h.get("host-name")?.as_str().map(str::to_string));
+        let filesystems = self
+            .agent_answer(
+                self.get(&format!("/nodes/{node}/qemu/{vmid}/agent/get-fsinfo")),
+                "get-fsinfo",
+            )?
+            .map(|v| parse_guest_fsinfo(&v))
+            .unwrap_or_default();
+        let agent_version = self
+            .agent_answer(
+                self.get(&format!("/nodes/{node}/qemu/{vmid}/agent/info")),
+                "agent info",
+            )?
+            .and_then(|i| i.get("version")?.as_str().map(str::to_string));
+        Ok(Some(GuestInfo {
+            os,
+            kernel,
+            hostname,
+            agent_version,
+            filesystems,
+        }))
+    }
+
+    /// The guest's filesystem freeze state (`POST …/agent/fsfreeze-status`):
+    /// `thawed` or `frozen`, or `None` when the agent is not running.
+    ///
+    /// **Not a node task, and not a write**: the agent answers inline, and
+    /// `fsfreeze-status` only reads the state — the route is a POST because
+    /// every agent command is (see `allowed_outside_task` in the test module).
+    pub fn fsfreeze_status(&self, vmid: u32) -> Result<Option<String>> {
+        match self.post_form(
+            &format!("/nodes/{}/qemu/{vmid}/agent/fsfreeze-status", self.node),
+            &[],
+            true,
+        ) {
+            Ok(body) => {
+                let w: Wrapped<serde_json::Value> = parse(&body, "fsfreeze-status")?;
+                Ok(w.data
+                    .get("result")
+                    .and_then(|r| r.as_str())
+                    .map(str::to_string))
+            }
+            Err(e) if is_agent_not_running(&e) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// A backup of a RUNNING VM taken with its filesystems frozen by the
+    /// guest agent for the instant the disk is copied (`vm.backup.quiesced`).
+    ///
+    /// The node does the freezing itself: `vzdump --mode snapshot` on a VM
+    /// with `agent=1` and a live agent issues `fs-freeze` before and
+    /// `fs-thaw` after. What this adds is the PROOF, so a backup is never
+    /// reported quiesced on the strength of `agent=1` alone: the VM runs and
+    /// its agent answers before anything starts, the node's own log of the
+    /// backup task carries both lines (measured on PVE 9.2.2: `issuing
+    /// guest-agent 'fs-freeze' command` and `… 'fs-thaw' command`), and the
+    /// guest reports `thawed` afterwards. A backup that ran but cannot be
+    /// shown quiesced is an error that names the archive's VM — the archive
+    /// is kept, because it is still a crash-consistent backup.
+    pub fn backup_vm_quiesced(&self, ledger: &Ledger, vmid: u32, storage: &str) -> Result<()> {
+        if self.status_current(vmid)? != "running" {
+            return Err(Error::BackupNotQuiesced(format!(
+                "proxmox: VM {vmid} is not running: there is no filesystem to freeze — a stopped \
+                 VM's backup is consistent without one"
+            )));
+        }
+        if !self.agent_ping(vmid)? {
+            return Err(Error::BackupNotQuiesced(format!(
+                "proxmox: VM {vmid}'s guest agent does not answer: the backup would be only \
+                 crash-consistent"
+            )));
+        }
+        self.backup_vm(ledger, vmid, storage)?;
+        let upid = ledger
+            .records()
+            .into_iter()
+            .rev()
+            .find(|r| r.vmid == vmid && r.action == TaskKind::Backup.action())
+            .map(|r| r.upid)
+            .ok_or_else(|| {
+                Error::BackupNotQuiesced(format!(
+                    "proxmox: the backup of VM {vmid} finished but no task of it is in the ledger \
+                     — its log cannot be read to show the freeze"
+                ))
+            })?;
+        let log = self.task_log(&upid)?;
+        if let Some(why) = quiesce_gap(&log) {
+            return Err(Error::BackupNotQuiesced(format!(
+                "proxmox: the backup of VM {vmid} ({upid}) ran, but {why} — the archive is only \
+                 crash-consistent"
+            )));
+        }
+        match self.fsfreeze_status(vmid)?.as_deref() {
+            Some("thawed") => Ok(()),
+            other => Err(Error::BackupNotQuiesced(format!(
+                "proxmox: after the backup of VM {vmid} the guest reports its filesystem as \
+                 {other:?}, not thawed"
+            ))),
+        }
+    }
+
     pub fn backup_vm(&self, ledger: &Ledger, vmid: u32, storage: &str) -> Result<()> {
         let before = self.list_backups(storage, vmid)?.len();
         let vmid_s = vmid.to_string();
@@ -3372,6 +3523,23 @@ impl Client {
         task_log_error_line(&w.data)
     }
 
+    /// A task's whole log (`GET …/tasks/{upid}/log`), line by line, read on
+    /// the node its UPID names — for a caller that has to PROVE something
+    /// the task did (a quiesced backup), so an unreadable log is an error
+    /// here, never an empty list.
+    pub fn task_log(&self, upid: &str) -> Result<Vec<String>> {
+        let node = upid_node(upid).unwrap_or(&self.node);
+        let body = self.get(&format!(
+            "/nodes/{node}/tasks/{}/log?limit=5000",
+            urlencode(upid)
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "task log")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|l| l.get("t")?.as_str().map(str::to_string))
+            .collect())
+    }
+
     /// Waits for a Proxmox task (`UPID:…`) to finish, and reports ITS verdict.
     ///
     /// Returning when the POST succeeds would report a VM created before
@@ -4554,6 +4722,56 @@ fn located_node(entries: &[serde_json::Value], vmid: u32) -> Option<String> {
     }
 }
 
+/// The OS name (`pretty-name`, else `name`) and kernel release out of the
+/// agent's `get-osinfo`. Pure.
+fn parse_guest_osinfo(v: &serde_json::Value) -> (Option<String>, Option<String>) {
+    let s = |k: &str| v.get(k).and_then(|x| x.as_str()).map(str::to_string);
+    (s("pretty-name").or_else(|| s("name")), s("kernel-release"))
+}
+
+/// The mounted filesystems out of the agent's `get-fsinfo`, in the guest's
+/// order; an entry without a mountpoint is skipped. Pure.
+fn parse_guest_fsinfo(v: &serde_json::Value) -> Vec<GuestFilesystem> {
+    v.as_array()
+        .map(|a| {
+            a.iter()
+                .filter_map(|f| {
+                    Some(GuestFilesystem {
+                        mountpoint: f.get("mountpoint")?.as_str()?.to_string(),
+                        fstype: f
+                            .get("type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("")
+                            .to_string(),
+                        used_bytes: f.get("used-bytes").and_then(|b| b.as_u64()),
+                        total_bytes: f.get("total-bytes").and_then(|b| b.as_u64()),
+                    })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Why a backup task's log does not show a quiesced backup, or `None` when it
+/// does: the freeze line AND the thaw line, as PVE 9.2.2 writes them, and no
+/// line saying either failed. Pure.
+fn quiesce_gap(log: &[String]) -> Option<String> {
+    let has = |needle: &str| log.iter().any(|l| l.contains(needle));
+    if let Some(bad) = log.iter().find(|l| {
+        (l.contains("fs-freeze") || l.contains("fs-thaw") || l.contains("guest-agent"))
+            && (l.contains("ERROR") || l.contains("failed") || l.contains("problems"))
+    }) {
+        return Some(format!("the log reports a failed freeze: {}", bad.trim()));
+    }
+    if !has("issuing guest-agent 'fs-freeze' command") {
+        return Some("its log shows no filesystem freeze".into());
+    }
+    if !has("issuing guest-agent 'fs-thaw' command") {
+        return Some("its log shows a freeze but no thaw".into());
+    }
+    None
+}
+
 /// The last line of a task log that carries the node's `ERROR:` marker, with
 /// the timestamp the node prefixes cut off. Pure.
 ///
@@ -5004,6 +5222,18 @@ impl VmBackend for ProxmoxBackend {
         Ok(self.on_vm(vm, |c, vmid| {
             c.settle_pending(&ledger, vmid)?;
             c.resume_suspended(&ledger, vmid)
+        })?)
+    }
+
+    /// `vm describe`'s guest block (`vm.guest-agent`): the agent's own reads,
+    /// asked of the VM's node. `Ok(None)` when the VM is not running there or
+    /// its agent is not running.
+    fn guest_info(&self, vm: &Vm) -> delonix_model::Result<Option<GuestInfo>> {
+        Ok(self.on_vm(vm, |c, vmid| {
+            if c.status_current(vmid)? != "running" {
+                return Ok(None);
+            }
+            c.guest_info(vmid)
         })?)
     }
 
@@ -5564,7 +5794,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmSnapshotDelete => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmSnapshotPersistent => S::Partial { detail: "snapshots live on the node; the live case lists `live1` back from the node right after taking it, but deletes it BEFORE the stop, so nothing asserts a snapshot is still there after a stop/start" },
         C::VmBackupDisk => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_backup_lands_on_the_storage_and_comes_off_it" },
-        C::VmBackupQuiesced => S::NotImplemented,
+        C::VmBackupQuiesced => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_backup_of_a_running_vm_is_taken_with_its_filesystem_frozen" },
         C::VmBackupRestore => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_deleted_vm_comes_back_from_its_own_backup" },
         C::VmMigrationCold => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there" },
         C::VmMigrationLive => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_moves_live_on_shared_storage_and_keeps_running" },
@@ -5572,7 +5802,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmHighAvailability => S::RequiresExternalComponent { component: "cluster HA policy (ADR-0049 D3: excluded as administration)" },
         C::VmConsoleSerial => S::NotImplemented,
         C::VmConsoleVnc => S::NotImplemented,
-        C::VmGuestAgent => S::Partial { detail: "`agent=1` is set and `agent/network-get-interfaces` read; a guest without the agent answers `None`" },
+        C::VmGuestAgent => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::the_guest_agent_reports_the_os_hostname_and_filesystems" },
         C::VmIpObserved => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::o_ip_vem_do_agente_de_um_convidado_a_serio" },
         C::MetricsPrometheus => S::NotImplemented,
         C::MetricsPerWorkloadNetwork => S::NotImplemented,
@@ -6488,6 +6718,11 @@ mod tests {
                  — there is no UPID to wait on",
             ),
             (
+                "fsfreeze_status",
+                "reads the guest's freeze state through the agent, which answers inline; the \
+                 route is a POST only because every agent command is",
+            ),
+            (
                 "agent_exec",
                 "starts a process inside the guest and answers its pid inline; the pid is \
                  polled by agent_exec_status, which is a plain read and not a write at all",
@@ -7126,6 +7361,79 @@ mod tests {
         assert_eq!(p.unavailable_storages, vec!["fast-ssd".to_string()]);
         assert_eq!(p.local_resources, vec!["usb0".to_string()]);
         assert!(!parse_migrate_precheck(&serde_json::json!({}), "pve2").target_allowed);
+    }
+
+    /// The agent's answers as PVE 9.2.2 relayed them from a Debian 12 guest
+    /// (qemu-guest-agent 7.2.22, lab VM 200, 2026-09-26).
+    #[test]
+    fn the_guest_agent_answers_are_read_as_the_node_gave_them() {
+        let os = serde_json::json!({
+            "id": "debian", "kernel-release": "6.1.0-52-cloud-amd64",
+            "kernel-version": "#1 SMP PREEMPT_DYNAMIC Debian 6.1.180-1 (2026-08-03)",
+            "machine": "x86_64", "name": "Debian GNU/Linux",
+            "pretty-name": "Debian GNU/Linux 12 (bookworm)", "version": "12 (bookworm)",
+            "version-id": "12"
+        });
+        assert_eq!(
+            parse_guest_osinfo(&os),
+            (
+                Some("Debian GNU/Linux 12 (bookworm)".into()),
+                Some("6.1.0-52-cloud-amd64".into())
+            )
+        );
+        assert_eq!(
+            parse_guest_osinfo(&serde_json::json!({"name": "Windows"})),
+            (Some("Windows".into()), None)
+        );
+        let fs = serde_json::json!([
+            {"disk": [{"bus-type": "scsi", "dev": "/dev/sda15"}], "mountpoint": "/boot/efi",
+             "name": "sda15", "total-bytes": 129718272u64, "type": "vfat", "used-bytes": 12353536u64},
+            {"disk": [{"bus-type": "scsi", "dev": "/dev/sda1"}], "mountpoint": "/",
+             "name": "sda1", "total-bytes": 2790285312u64, "type": "ext4", "used-bytes": 983298048u64},
+            {"name": "no-mount", "type": "swap"}
+        ]);
+        let got = parse_guest_fsinfo(&fs);
+        assert_eq!(got.len(), 2, "an entry without a mountpoint is skipped");
+        assert_eq!(
+            got[1],
+            GuestFilesystem {
+                mountpoint: "/".into(),
+                fstype: "ext4".into(),
+                used_bytes: Some(983298048),
+                total_bytes: Some(2790285312)
+            }
+        );
+        assert!(parse_guest_fsinfo(&serde_json::json!(null)).is_empty());
+    }
+
+    /// The backup log as the node wrote it for that guest, and what does NOT
+    /// count as quiesced.
+    #[test]
+    fn a_backup_is_quiesced_only_when_its_log_shows_the_freeze_and_the_thaw() {
+        let l = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let measured = l(&[
+            "INFO: starting new backup job: vzdump 200 --remove 0 --storage local --mode snapshot",
+            "INFO: backup mode: snapshot",
+            "INFO: issuing guest-agent 'fs-freeze' command",
+            "INFO: issuing guest-agent 'fs-thaw' command",
+            "INFO: Finished Backup of VM 200 (00:01:15)",
+        ]);
+        assert_eq!(quiesce_gap(&measured), None);
+        let no_agent = l(&[
+            "INFO: backup mode: snapshot",
+            "INFO: Finished Backup of VM 200",
+        ]);
+        assert!(quiesce_gap(&no_agent)
+            .unwrap()
+            .contains("no filesystem freeze"));
+        let no_thaw = l(&["INFO: issuing guest-agent 'fs-freeze' command"]);
+        assert!(quiesce_gap(&no_thaw).unwrap().contains("no thaw"));
+        let failed = l(&[
+            "INFO: issuing guest-agent 'fs-freeze' command",
+            "ERROR: guest-agent 'fs-freeze' command failed - got timeout",
+            "INFO: issuing guest-agent 'fs-thaw' command",
+        ]);
+        assert!(quiesce_gap(&failed).unwrap().contains("failed freeze"));
     }
 
     /// The log line that says WHY a migration aborted, as the node wrote it
