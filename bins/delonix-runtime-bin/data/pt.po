@@ -14119,3 +14119,39 @@ msgstr "Imprime o JSON Schema do ficheiro de providers.\n\nO mesmo schema public
 
 msgid "the JSON Schema of the providers file, for an editor or a CI check"
 msgstr "o JSON Schema do ficheiro de providers, para um editor ou um check de CI"
+# DX-1538 / DX-5507 — vm move --node (vm.migration.cold/live, ADR-0053)
+msgid "invalid node to move the VM to"
+msgstr "nó inválido para onde mover a VM"
+
+msgid "`vm move --node` names the node of the VM's cluster the VM goes to. The name has to be a member of that cluster, online, and not the node the VM is already on; the engine never picks one."
+msgstr "O `vm move --node` nomeia o nó do cluster da VM para onde ela vai. Esse nome tem de ser um membro do cluster, estar online e não ser o nó onde a VM já está; o motor nunca escolhe um por ti."
+
+msgid "Pass another member of the cluster that is online — the node's own list is `pvecm nodes`, or `delonix provider describe proxmox --probe`."
+msgstr "Passa outro membro do cluster que esteja online — a lista do próprio nó é `pvecm nodes`, ou `delonix provider describe proxmox --probe`."
+
+msgid "the VM cannot be moved as asked"
+msgstr "a VM não pode ser movida como foi pedido"
+
+msgid "`vm move` was refused before it started: the VM is in the wrong power state for the move asked (`--live` needs it running, a move without `--live` needs it stopped), or the node's own precheck says the target cannot host it — local disks the target would have to copy, a storage the target does not have, or a local device."
+msgstr "O `vm move` foi recusado antes de começar: a VM está no estado de energia errado para o que foi pedido (o `--live` precisa dela a correr, sem `--live` precisa dela parada), ou a pré-verificação do próprio nó diz que o destino não a pode receber — discos locais que o destino teria de copiar, um storage que o destino não tem, ou um dispositivo local."
+
+msgid "Stop or start the VM to match `--live`; for a precheck refusal, put the VM's disks on a storage the whole cluster shares, or remove the local device."
+msgstr "Pára ou arranca a VM de acordo com o `--live`; numa recusa da pré-verificação, põe os discos da VM num storage partilhado por todo o cluster, ou retira o dispositivo local."
+
+msgid "Move a VM to another node of its cluster — same VM, same record"
+msgstr "Move uma VM para outro nó do seu cluster — a mesma VM, o mesmo registo"
+
+msgid "Move a VM to another node of its cluster — same VM, same record.\n\nProxmox only: the node does the move, and the VM keeps its id and its record; only the node changes. The target is always yours — nothing is picked for you. Without `--live` the VM must be stopped; with it, the VM must be running and keeps running. Refused before anything moves when the target is not an online member of the cluster, or when the node's precheck says it cannot host the VM — a disk on storage the target does not share is refused, not copied. To relocate a VM to another delonix host, use `vm migrate`."
+msgstr "Move uma VM para outro nó do seu cluster — a mesma VM, o mesmo registo.\n\nSó Proxmox: é o nó que faz a movimentação, e a VM mantém o id e o registo; só o nó muda. O destino é sempre escolhido por ti — nada é escolhido em teu lugar. Sem `--live` a VM tem de estar parada; com ele, tem de estar a correr e continua a correr. É recusado antes de qualquer movimentação quando o destino não é um membro online do cluster, ou quando a pré-verificação do nó diz que ele não pode receber a VM — um disco num storage que o destino não partilha é recusado, não é copiado. Para levar uma VM para outro host delonix, usa o `vm migrate`."
+
+msgid "The node of the VM's cluster to move it to"
+msgstr "O nó do cluster da VM para onde a mover"
+
+msgid "Move the VM while it runs (online migration)"
+msgstr "Move a VM enquanto corre (migração a quente)"
+
+msgid "move a stopped Proxmox VM to another node of its cluster — same VM, same id"
+msgstr "move uma VM Proxmox parada para outro nó do seu cluster — a mesma VM, o mesmo id"
+
+msgid "move it while it runs, on a storage the whole cluster shares"
+msgstr "move-a enquanto corre, num storage partilhado por todo o cluster"

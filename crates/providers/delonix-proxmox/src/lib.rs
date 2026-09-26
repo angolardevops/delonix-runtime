@@ -441,6 +441,10 @@ enum TaskKind {
     /// Proxmox's `qmrestore`, the same route [`Client::create_vm`] calls,
     /// asked a different question.
     Restore,
+    /// `POST …/migrate` — moves the VM to another node of the cluster
+    /// (`vm move --node`, ADR-0053). The worker runs on the SOURCE node, and a
+    /// live move also forks a `qmstart` on the target (measured on PVE 9.2.2).
+    Migrate,
     /// `POST …/move_disk` — moves one disk to a different storage, or
     /// re-formats it in place.
     MoveDisk,
@@ -588,6 +592,7 @@ impl TaskKind {
             TaskKind::Backup => "backup",
             TaskKind::DeleteBackup => "delete-backup",
             TaskKind::Restore => "restore",
+            TaskKind::Migrate => "migrate",
             TaskKind::MoveDisk => "move-disk",
             TaskKind::Unlink => "unlink",
             TaskKind::RegenerateCloudInit => "regenerate-cloudinit",
@@ -687,6 +692,7 @@ impl TaskKind {
             // `qmrestore` (read from a live PVE 9.2.2 task log,
             // `docs/proxmox/trace-9.2.2.routes`, not assumed).
             TaskKind::Restore => "qmrestore",
+            TaskKind::Migrate => "qmigrate",
             // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
             // not assumed — confirms the original `qmclone`/`qmtemplate`-analogy guess.
             TaskKind::MoveDisk => "qmmove",
@@ -2347,6 +2353,58 @@ impl Client {
             .collect())
     }
 
+    /// The members of the cluster this client's API entry point belongs to
+    /// (`GET /nodes`), with whether each is online. A standalone node lists
+    /// only itself.
+    pub fn cluster_nodes(&self) -> Result<Vec<ClusterNode>> {
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&self.get("/nodes")?, "/nodes")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|n| {
+                Some(ClusterNode {
+                    name: n.get("node")?.as_str()?.to_string(),
+                    online: n.get("status").and_then(|s| s.as_str()) == Some("online"),
+                })
+            })
+            .collect())
+    }
+
+    /// The node's own migration precheck for VM `vmid` to `target` — a plain
+    /// read, sent before anything moves (ADR-0053 decision 4).
+    pub fn migrate_precheck(&self, vmid: u32, target: &str) -> Result<MigratePrecheck> {
+        validate_node_name(target)?;
+        let body = self.get(&format!(
+            "/nodes/{}/qemu/{vmid}/migrate?target={}",
+            self.node,
+            urlencode(target)
+        ))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "migrate precheck")?;
+        Ok(parse_migrate_precheck(&w.data, target))
+    }
+
+    /// Moves VM `vmid` from this client's node to `target` (`POST
+    /// …/migrate`), online when `online`. On the task path: the UPID is
+    /// waited on and kept in the ledger, and a lost answer is settled by the
+    /// source node's task list and then by where the cluster lists the VM —
+    /// never by sending the move again.
+    pub fn migrate(&self, ledger: &Ledger, vmid: u32, target: &str, online: bool) -> Result<()> {
+        validate_node_name(target)?;
+        let online = if online { "1" } else { "0" };
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Migrate,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/migrate", self.node),
+                    &[("target", target), ("online", online)],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.locate_vm(vmid)?.as_deref() == Some(target))),
+        )
+    }
+
     pub fn destroy(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
         // `purge` drops the VM from backup jobs, replication and HA, and
         // `destroy-unreferenced-disks` removes disks the config no longer
@@ -3245,11 +3303,12 @@ impl Client {
 
     /// One look at a task: `None` while it runs, else its verdict.
     fn task_status(&self, upid: &str) -> Result<(String, Option<std::result::Result<(), String>>)> {
-        let body = self.get(&format!(
-            "/nodes/{}/tasks/{}/status",
-            self.node,
-            urlencode(upid)
-        ))?;
+        // The UPID names the node the worker runs on, which is not always
+        // this client's: a `qmigrate` stays on the SOURCE node, and the next
+        // operation on the moved VM settles the ledger through a client for
+        // the TARGET. Asking this client's node would answer "no such task".
+        let node = upid_node(upid).unwrap_or(&self.node);
+        let body = self.get(&format!("/nodes/{node}/tasks/{}/status", urlencode(upid)))?;
         let t: Wrapped<TaskStatus> = parse(&body, "task status")?;
         let verdict = task_verdict(&t.data.status, t.data.exitstatus.as_deref());
         Ok((t.data.status, verdict))
@@ -3290,6 +3349,29 @@ impl Client {
         Ok(())
     }
 
+    /// The last `ERROR:` line of a failed task's own log (`GET
+    /// …/tasks/{upid}/log`), or `None` when there is none or the log cannot
+    /// be read — never an error of its own: it only adds the reason to a
+    /// failure already known.
+    ///
+    /// Needed because a task's exit status is not always its reason. Measured
+    /// on PVE 9.2.2: a `qmigrate` turned away by the VM's config lock ends
+    /// with the exit status `migration aborted`, and only the log says `can't
+    /// lock file '/var/lock/qemu-server/lock-<vmid>.conf' - got timeout` — so
+    /// the lock retry ([`with_lock_retry`]), which reads the error text, never
+    /// fired, and a move right after a start failed every time.
+    fn task_error_line(&self, upid: &str) -> Option<String> {
+        let node = upid_node(upid).unwrap_or(&self.node);
+        let body = self
+            .get(&format!(
+                "/nodes/{node}/tasks/{}/log?limit=1000",
+                urlencode(upid)
+            ))
+            .ok()?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "task log").ok()?;
+        task_log_error_line(&w.data)
+    }
+
     /// Waits for a Proxmox task (`UPID:…`) to finish, and reports ITS verdict.
     ///
     /// Returning when the POST succeeds would report a VM created before
@@ -3302,7 +3384,11 @@ impl Client {
             match verdict {
                 Some(Ok(())) => return Ok(()),
                 Some(Err(why)) => {
-                    return Err(Error::TaskFailed(format!("proxmox: task failed: {why}")))
+                    let why = match self.task_error_line(upid) {
+                        Some(line) if !why.contains(&line) => format!("{why}: {line}"),
+                        _ => why,
+                    };
+                    return Err(Error::TaskFailed(format!("proxmox: task failed: {why}")));
                 }
                 None => {}
             }
@@ -4468,6 +4554,119 @@ fn located_node(entries: &[serde_json::Value], vmid: u32) -> Option<String> {
     }
 }
 
+/// The last line of a task log that carries the node's `ERROR:` marker, with
+/// the timestamp the node prefixes cut off. Pure.
+///
+/// The node ends every failed log with a summary, `TASK ERROR: <exit
+/// status>`, which also contains `ERROR:` and repeats what the exit status
+/// already said. Taking it would add nothing — and `wait_task` drops a line
+/// the exit status already contains, so the reason (the lock) never reached
+/// the retry. The summary is skipped; the line wanted is the body's.
+fn task_log_error_line(lines: &[serde_json::Value]) -> Option<String> {
+    lines
+        .iter()
+        .filter_map(|l| l.get("t")?.as_str())
+        .filter(|t| !t.trim_start().starts_with("TASK "))
+        .filter_map(|t| t.find("ERROR:").map(|i| t[i..].trim().to_string()))
+        .next_back()
+}
+
+/// The node a task runs on, out of its UPID (`UPID:<node>:…`), or `None` for
+/// a string that is not a UPID or names a node that is not a valid node name
+/// — the ledger is a file on disk, and what it holds goes into a URL. Pure.
+fn upid_node(upid: &str) -> Option<&str> {
+    let mut parts = upid.split(':');
+    if parts.next()? != "UPID" {
+        return None;
+    }
+    let node = parts.next()?;
+    validate_node_name(node).ok()?;
+    Some(node)
+}
+
+/// One member of the cluster, as `GET /nodes` lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterNode {
+    pub name: String,
+    /// `status == "online"`. A node the answer does not describe as online
+    /// is offline here — never assumed up.
+    pub online: bool,
+}
+
+/// What the node's own migration precheck says about moving a VM to one
+/// target (`GET /nodes/{node}/qemu/{vmid}/migrate?target=<t>`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct MigratePrecheck {
+    /// The VM is running on the source node.
+    pub running: bool,
+    /// The target is listed in `allowed_nodes`.
+    pub target_allowed: bool,
+    /// Volumes on storages the target does not share (`local_disks`): a
+    /// move would have to copy them.
+    pub local_disks: Vec<String>,
+    /// Devices bound to the source node (`local_resources`: USB, PCI…).
+    pub local_resources: Vec<String>,
+    /// The storages the target lacks, when the node says so
+    /// (`not_allowed_nodes.<target>.unavailable_storages`).
+    pub unavailable_storages: Vec<String>,
+}
+
+/// Reads the precheck's answer. Measured on PVE 9.2.2: an allowed target is
+/// ALSO a key of `not_allowed_nodes`, with an empty object — so being a key
+/// there proves nothing, and only `allowed_nodes` decides. Pure.
+fn parse_migrate_precheck(data: &serde_json::Value, target: &str) -> MigratePrecheck {
+    let strings = |v: Option<&serde_json::Value>| -> Vec<String> {
+        v.and_then(|a| a.as_array())
+            .map(|a| {
+                a.iter()
+                    .filter_map(|x| x.as_str().map(str::to_string))
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let truthy = |v: Option<&serde_json::Value>| {
+        v.is_some_and(|x| x.as_bool().unwrap_or(false) || x.as_u64().is_some_and(|n| n != 0))
+    };
+    MigratePrecheck {
+        running: truthy(data.get("running")),
+        target_allowed: strings(data.get("allowed_nodes"))
+            .iter()
+            .any(|n| n == target),
+        local_disks: data
+            .get("local_disks")
+            .and_then(|a| a.as_array())
+            .map(|a| {
+                a.iter()
+                    .map(|d| {
+                        d.get("volid")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("<unnamed volume>")
+                            .to_string()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        local_resources: data
+            .get("local_resources")
+            .and_then(|a| a.as_array())
+            .map(|a| {
+                a.iter()
+                    .map(|r| {
+                        r.as_str()
+                            .map(str::to_string)
+                            .unwrap_or_else(|| r.to_string())
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
+        unavailable_storages: strings(
+            data.get("not_allowed_nodes")
+                .and_then(|m| m.get(target))
+                .and_then(|t| t.get("unavailable_storages")),
+        ),
+    }
+}
+
 /// The node and the vmid out of the handle `boot` stored
 /// (`proxmox:<node>:<vmid>`), or `None` for a handle this backend did not
 /// write. Pure.
@@ -4806,6 +5005,144 @@ impl VmBackend for ProxmoxBackend {
             c.settle_pending(&ledger, vmid)?;
             c.resume_suspended(&ledger, vmid)
         })?)
+    }
+
+    /// `vm move --node` (ADR-0053 decisions 1, 4 and 5). Everything that can
+    /// be refused is refused before the node is asked to move anything: a
+    /// target that is not a member of the cluster, is offline, or is the node
+    /// the VM is on; a power state (as the NODE reports it, not only the
+    /// record) that does not match `live`; and what the node's own precheck
+    /// says — local disks the target would have to copy, a local device, a
+    /// storage the target lacks. Then `POST …/migrate` on the task path, and
+    /// the move is proved on the node: the cluster lists the VM on the
+    /// target, its config is readable there and not on the source, and a
+    /// live move left it running.
+    fn move_to_node(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        target: &str,
+        live: bool,
+    ) -> delonix_model::Result<String> {
+        use delonix_compute::vm_error::Error as VmError;
+        validate_node_name(target)?;
+        let ledger = Ledger::at(vmdir);
+        let (source, vmid, ps) = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            Ok((c.node.clone(), vmid, c.power_state(vmid)?))
+        })?;
+        if target == source {
+            return Err(VmError::InvalidMoveTarget(format!(
+                "VM '{}' (vmid {vmid}) is already on node '{source}'",
+                vm.name
+            ))
+            .into());
+        }
+        let nodes = self.client.cluster_nodes()?;
+        match nodes.iter().find(|n| n.name == target) {
+            None => {
+                let names: Vec<&str> = nodes.iter().map(|n| n.name.as_str()).collect();
+                return Err(VmError::InvalidMoveTarget(format!(
+                    "node '{target}' is not a member of VM '{}''s cluster (members: {})",
+                    vm.name,
+                    names.join(", ")
+                ))
+                .into());
+            }
+            Some(n) if !n.online => {
+                return Err(VmError::InvalidMoveTarget(format!(
+                    "node '{target}' is offline: VM '{}' cannot move to it",
+                    vm.name
+                ))
+                .into());
+            }
+            Some(_) => {}
+        }
+        if ps.is_paused() {
+            return Err(VmError::MoveRefused(format!(
+                "VM '{}' is paused on node '{source}': unpause it or stop it before moving it",
+                vm.name
+            ))
+            .into());
+        }
+        let running = ps.status == "running";
+        if running != live {
+            let why = if running {
+                "is running on the node although the record says it is stopped: move it with \
+                 `--live`, or stop it first"
+            } else {
+                "is stopped on the node although the record says it is running: drop `--live` \
+                 for an offline move"
+            };
+            return Err(VmError::MoveRefused(format!("VM '{}' {why}", vm.name)).into());
+        }
+        let src = if source == self.client.node {
+            self.client.clone()
+        } else {
+            std::sync::Arc::new(self.client.for_node(&source)?)
+        };
+        let pre = src.migrate_precheck(vmid, target)?;
+        if !pre.local_disks.is_empty() {
+            return Err(VmError::MoveRefused(format!(
+                "VM '{}' has disks on storage node '{target}' does not share ({}): a move would \
+                 copy them, which `vm move` does not do (ADR-0053) — put them on a storage the \
+                 cluster shares",
+                vm.name,
+                pre.local_disks.join(", ")
+            ))
+            .into());
+        }
+        if !pre.local_resources.is_empty() {
+            return Err(VmError::MoveRefused(format!(
+                "VM '{}' uses devices bound to node '{source}' ({}): remove them before moving it",
+                vm.name,
+                pre.local_resources.join(", ")
+            ))
+            .into());
+        }
+        if !pre.target_allowed {
+            let why = if pre.unavailable_storages.is_empty() {
+                String::from("the node's precheck does not list it among the allowed targets")
+            } else {
+                format!("it lacks storage {}", pre.unavailable_storages.join(", "))
+            };
+            return Err(VmError::MoveRefused(format!(
+                "VM '{}' cannot move to node '{target}': {why}",
+                vm.name
+            ))
+            .into());
+        }
+        src.migrate(&ledger, vmid, target, live)?;
+
+        // The proof is the node's, never the task's answer alone (ADR-0053 D5).
+        let listed = self.client.locate_vm(vmid)?;
+        if listed.as_deref() != Some(target) {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: the move of VM {vmid} to '{target}' finished, but the cluster lists it \
+                 on {listed:?} — the record keeps naming '{source}'"
+            ))
+            .into());
+        }
+        let dst = if target == self.client.node {
+            self.client.clone()
+        } else {
+            std::sync::Arc::new(self.client.for_node(target)?)
+        };
+        dst.config(vmid)?;
+        if src.config(vmid).is_ok() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} moved to '{target}', but '{source}' still has its config"
+            ))
+            .into());
+        }
+        if live && dst.status_current(vmid)? != "running" {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} moved live to '{target}' but is not running there"
+            ))
+            .into());
+        }
+        self.client.remember_relocation(vmid, target);
+        Ok(format!("proxmox:{target}:{vmid}"))
     }
 
     /// `vm resize` (`vm.resize.cold`): the engine has checked its record, and
@@ -5229,8 +5566,8 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmBackupDisk => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_backup_lands_on_the_storage_and_comes_off_it" },
         C::VmBackupQuiesced => S::NotImplemented,
         C::VmBackupRestore => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_deleted_vm_comes_back_from_its_own_backup" },
-        C::VmMigrationCold => S::NotImplemented,
-        C::VmMigrationLive => S::RequiresExternalComponent { component: "a Proxmox cluster with shared storage; the engine addresses ONE node (ADR-0008) and never picks the target" },
+        C::VmMigrationCold => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there" },
+        C::VmMigrationLive => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_running_vm_moves_live_on_shared_storage_and_keeps_running" },
         C::VmReplication => S::RequiresExternalComponent { component: "cluster replication jobs (ADR-0049 D3: excluded as administration)" },
         C::VmHighAvailability => S::RequiresExternalComponent { component: "cluster HA policy (ADR-0049 D3: excluded as administration)" },
         C::VmConsoleSerial => S::NotImplemented,
@@ -6744,6 +7081,95 @@ mod tests {
     /// `/cluster/resources?type=vm` names ONE node for a vmid, or the lookup
     /// gives up: zero matches, two matches, and LXC entries with the same id
     /// all leave the caller's original error standing (ADR-0053 decision 3).
+    /// The precheck's answer as PVE 9.2.2 gave it on the lab cluster
+    /// (2026-09-26): a VM with a disk on `local-lvm`, target `pve2`. The
+    /// target is in `allowed_nodes` AND a key of `not_allowed_nodes` with an
+    /// empty object — reading "is a key there" as "refused" would refuse every
+    /// move.
+    #[test]
+    fn the_migrate_precheck_is_read_as_the_node_answered_it() {
+        let measured = serde_json::json!({
+            "allowed_nodes": ["pve2"],
+            "has-dbus-vmstate": 1,
+            "local_disks": [{
+                "cdrom": 0, "drivename": "scsi0", "is_attached": 1, "is_cloudinit": 0,
+                "is_tpmstate": 0, "is_unused": 0, "is_vmstate": 0, "replicate": 1,
+                "shared": 0, "size": 1073741824u64, "volid": "local-lvm:vm-9001-disk-0"
+            }],
+            "local_resources": [],
+            "mapped-resource-info": {},
+            "mapped-resources": [],
+            "not_allowed_nodes": {"pve2": {}},
+            "running": 0
+        });
+        let p = parse_migrate_precheck(&measured, "pve2");
+        assert!(p.target_allowed && !p.running);
+        assert_eq!(p.local_disks, vec!["local-lvm:vm-9001-disk-0".to_string()]);
+        assert!(p.local_resources.is_empty() && p.unavailable_storages.is_empty());
+
+        // The shared-storage case, measured too: nothing local, running.
+        let shared = serde_json::json!({
+            "allowed_nodes": ["pve2"], "local_disks": [], "local_resources": [],
+            "not_allowed_nodes": {"pve2": {}}, "running": 1
+        });
+        let p = parse_migrate_precheck(&shared, "pve2");
+        assert!(p.target_allowed && p.running && p.local_disks.is_empty());
+
+        // A target the node refuses: absent from `allowed_nodes`, with the
+        // storages it lacks named.
+        let refused = serde_json::json!({
+            "allowed_nodes": [], "local_disks": [], "local_resources": ["usb0"],
+            "not_allowed_nodes": {"pve3": {"unavailable_storages": ["fast-ssd"]}}, "running": 0
+        });
+        let p = parse_migrate_precheck(&refused, "pve3");
+        assert!(!p.target_allowed);
+        assert_eq!(p.unavailable_storages, vec!["fast-ssd".to_string()]);
+        assert_eq!(p.local_resources, vec!["usb0".to_string()]);
+        assert!(!parse_migrate_precheck(&serde_json::json!({}), "pve2").target_allowed);
+    }
+
+    /// The log line that says WHY a migration aborted, as the node wrote it
+    /// (PVE 9.2.2, a move right after a start) — the text the lock retry reads.
+    #[test]
+    fn a_failed_tasks_reason_is_read_from_its_log() {
+        let measured = serde_json::json!([
+            {"n": 1, "t": "trying to acquire lock..."},
+            {"n": 2, "t": "2026-09-26 11:03:39 ERROR: migration aborted (duration 00:00:10): can't lock file '/var/lock/qemu-server/lock-100.conf' - got timeout"},
+            {"n": 3, "t": "TASK ERROR: migration aborted"}
+        ]);
+        // The WHOLE log, summary line included: the reason comes from the
+        // body, never from the `TASK ERROR:` summary the exit status repeats.
+        let line = task_log_error_line(measured.as_array().unwrap()).unwrap();
+        assert!(line.contains("can't lock file"), "{line}");
+        let why = "migration aborted";
+        assert!(
+            !why.contains(&line),
+            "wait_task would drop this line: {line}"
+        );
+        let e = Error::TaskFailed(format!("proxmox: task failed: {why}: {line}"));
+        assert!(is_lock_timeout(&e), "{e}");
+        assert_eq!(task_log_error_line(&[]), None);
+        assert_eq!(
+            task_log_error_line(&[serde_json::json!({"n": 1, "t": "TASK ERROR: x"})]),
+            None,
+            "the summary alone says nothing the exit status did not"
+        );
+    }
+
+    /// A task's status is read on the node its UPID names — a `qmigrate`
+    /// stays on the source. What cannot go into a URL is refused.
+    #[test]
+    fn the_node_of_a_task_comes_from_its_upid() {
+        assert_eq!(
+            upid_node("UPID:pve2:00000971:00004697:6AB793FE:qmigrate:9001:root@pam:"),
+            Some("pve2")
+        );
+        assert_eq!(upid_node("UPID::0:0"), None);
+        assert_eq!(upid_node("UPID:../x:0"), None);
+        assert_eq!(upid_node("pve2:qmigrate"), None);
+        assert_eq!(upid_node(""), None);
+    }
+
     #[test]
     fn a_moved_vm_is_located_only_on_exactly_one_node() {
         let entries: Vec<serde_json::Value> = serde_json::from_str(

@@ -409,6 +409,31 @@ pub trait VmBackend {
         Err(unsupported_pause(self.id(), "resize"))
     }
 
+    /// `vm move --node`: moves the VM to `target`, another node of the SAME
+    /// cluster (ADR-0053 decision 1) — the same VM and the same record, only
+    /// its node changes. `live` asks for an online move (the VM keeps
+    /// running). Called after the engine has checked from its record that
+    /// the power state matches `live`; returns the handle the VM is known by
+    /// on `target`, which the engine writes to the record.
+    ///
+    /// Default: unsupported (fail closed). A local backend has no cluster: it
+    /// refuses with the verb that relocates a VM between hosts (`vm migrate`,
+    /// ADR-0031) named in the message.
+    fn move_to_node(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _target: &str,
+        _live: bool,
+    ) -> delonix_model::Result<String> {
+        Err(Error::UnsupportedByBackend(format!(
+            "moving a VM between nodes is not supported on the '{}' backend: it has no cluster \
+             — to relocate a VM to another delonix host use `delonix vm migrate`",
+            self.id()
+        ))
+        .into())
+    }
+
     /// `vm cloud-init`: gives a STOPPED VM this cloud-init intent for its
     /// next boot, and proves the guest will read it (the backend's own
     /// rendering, not the call's answer). Called only after the engine has
