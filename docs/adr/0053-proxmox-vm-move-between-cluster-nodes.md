@@ -239,3 +239,34 @@ Matrix: 117/675 called, 114 in a live trace.
 **Still out, as decided:** a VM with local disks is refused, not copied (the lab measured that
 `--with-local-disks` works — an NBD mirror, 21 s for 1 GiB — so a later flag is feasible); no
 creation on another node; HA excluded; no cross-cluster move.
+
+## Addendum 2026-09-26 — local disks copied, only when asked
+
+Decision 4 refused a VM with local disks because copying them is a cost the caller had not asked
+for. It now stays refused by default, and `--with-local-disks` is the ask: the node copies them
+(`with-local-disks=1` — a full copy offline, an NBD block mirror with `--live`, the path the lab
+measured at 21 s for 1 GiB). `--target-storage <id>` sends `targetstorage`, naming the target's
+storage the copies land on; without it each disk keeps its storage id.
+
+- **Carried as `MoveOptions`** (`live`, `with_local_disks`, `target_storage`) through
+  `VmBackend::move_to_node`, instead of a growing list of booleans. The engine refuses an empty
+  `--target-storage` and one given without `--with-local-disks` (DX-1538) before the backend is
+  asked; the Proxmox backend refuses a storage id the node would not accept (DX-1538) before the
+  precheck.
+- **A local CD-ROM is always refused** (DX-5507): the precheck lists it in `local_disks` with
+  `cdrom: 1`, and the node never copies one, flag or not. It is now parsed apart
+  (`MigratePrecheck::local_cdroms`), so the refusal names the medium and says to eject it, and a
+  disk refusal never names an ISO.
+- **A target outside `allowed_nodes` goes ahead when the copies are mapped.** The node lists a
+  target as not allowed when it lacks the SOURCE storage (`unavailable_storages`), which is
+  exactly what `targetstorage` answers; with both flags the move is sent and the node checks the
+  mapping itself. Without a target storage the refusal says `--target-storage` would map them.
+
+**Tested:** engine (the two target-storage refusals), failure injection
+(`a_disk_copying_move_refuses_a_cdrom_and_a_bad_storage_id`,
+`a_disk_copying_move_sends_the_copy_and_the_target_storage` — both parameters in the form the node
+received, and the unmapped refusal; the local-disk refusal now names the flag), and battery
+checks for the CLI refusals. **Not run live in this change**: the lab nodes were held by another
+session. The live case `a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there` now
+copies its local-disk VM onto the shared storage and asserts the target's config names it; it
+runs when the lab is free, and until then this addendum claims no live result.

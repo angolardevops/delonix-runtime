@@ -2800,6 +2800,12 @@ check "vm resize de uma VM inexistente diz 4" 4 "$BIN" vm resize "vm-$PFX-nada" 
 # antes de qualquer backend.
 check "vm move com destino vazio recusa (1)" 1 "$BIN" vm move "vm-$PFX-nada" --node ""
 check "vm move de uma VM inexistente diz 4" 4 "$BIN" vm move "vm-$PFX-nada" --node pve2
+# `--target-storage` só faz sentido com `--with-local-disks`, e um vazio não é
+# um storage: as duas recusas são do motor, antes de tocar no backend (1538).
+check "vm move --target-storage sem --with-local-disks recusa (1)" 1 \
+  "$BIN" vm move "vm-$PFX-nada" --node pve2 --target-storage nfs-lab
+check "vm move --target-storage vazio recusa (1)" 1 \
+  "$BIN" vm move "vm-$PFX-nada" --node pve2 --with-local-disks --target-storage ""
 check "vm cloud-init sem nada para mudar recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada"
 check "vm cloud-init com hostname inválido recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname=a.b
 check "vm cloud-init de uma VM inexistente diz 4" 4 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname web-1
