@@ -1,0 +1,48 @@
+[package]
+name = "delonix-node-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The node API of the Delonix Runtime: gRPC and HTTP/JSON of delonix.node.v1 on a local unix socket (ADR-0040 P5)."
+repository.workspace = true
+
+# The node contract served (ADR-0040 D4, ADR-0042): gRPC and HTTP/JSON from the
+# same `proto/delonix/node/v1` files, on one unix socket, for the calling uid
+# only. The generated code lives here, not in a `delonix-node-proto` crate: a
+# crate of generated code with one consumer is the dead scaffolding ADR-0040 P1
+# refuses, and the CRI keeps its stubs the same way (`delonix_cri::cri`).
+
+[dependencies]
+delonix-compute = { workspace = true }
+delonix-node = { workspace = true }
+delonix-model = { workspace = true }
+delonix-vm = { workspace = true }
+delonix-proxmox = { workspace = true }
+delonix-linux = { workspace = true }
+delonix-sdn = { workspace = true }
+delonix-volume = { workspace = true }
+tonic = { workspace = true }
+prost = { workspace = true }
+pbjson = { workspace = true }
+pbjson-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "macros", "sync"] }
+tokio-stream = { workspace = true }
+hyper = { workspace = true, features = ["server", "http1", "http2"] }
+hyper-util = { workspace = true, features = ["tokio", "server", "http1", "http2"] }
+tower = { workspace = true, features = ["util"] }
+libc = { workspace = true }
+tracing = { workspace = true }
+
+[build-dependencies]
+tonic-build = { workspace = true }
+pbjson-build = { workspace = true }
+
+[dev-dependencies]
+tower = { workspace = true, features = ["util"] }
+http-body-util = { workspace = true }
+
+[lints]
+workspace = true

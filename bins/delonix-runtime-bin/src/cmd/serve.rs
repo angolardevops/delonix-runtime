@@ -30,6 +30,15 @@ pub enum ServeCmd {
         #[arg(long)]
         addr: Option<String>,
     },
+    /// Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.
+    ///
+    /// The versioned node contract (ADR-0040). Today it serves `ListProviders`; the
+    /// rest of the contract answers UNIMPLEMENTED with the step that brings it.
+    NodeApi {
+        /// Socket address (default: `$DELONIX_NODE_API_ADDR` or `unix:///run/delonix-node.sock`).
+        #[arg(long)]
+        addr: Option<String>,
+    },
     /// Serve a slice of the Docker Engine API on a unix socket.
     ///
     /// `docker version`/`ps`/`images`/`info`/lifecycle mutations via
@@ -84,6 +93,17 @@ pub fn run(action: ServeCmd) -> Result<()> {
             let env: Vec<(&str, String)> =
                 addr.into_iter().map(|a| ("DELONIX_API_ADDR", a)).collect();
             exec_server("delonix-mgmt", &args, &env, "install.sh")
+        }
+        ServeCmd::NodeApi { addr } => {
+            let args: Vec<String> = addr
+                .iter()
+                .flat_map(|a| ["--addr".into(), a.clone()])
+                .collect();
+            let env: Vec<(&str, String)> = addr
+                .into_iter()
+                .map(|a| ("DELONIX_NODE_API_ADDR", a))
+                .collect();
+            exec_server("delonix-node-api", &args, &env, "install.sh")
         }
         ServeCmd::DockerApi { addr, matrix } => {
             if matrix {

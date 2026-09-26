@@ -1137,10 +1137,12 @@ comprendre pourquoi.</p>
     delonix_cri[&quot;delonix-cri&quot;]
     delonix_mcp[&quot;delonix-mcp&quot;]
     delonix_mgmt[&quot;delonix-mgmt&quot;]
+    delonix_node_api[&quot;delonix-node-api&quot;]
   end
   subgraph bin[&quot;Binaries&quot;]
     delonix_mcp_bin[&quot;delonix-mcp-bin&quot;]
     delonix_mgmt_bin[&quot;delonix-mgmt-bin&quot;]
+    delonix_node_api_bin[&quot;delonix-node-api-bin&quot;]
     delonix_runtime_bin[&quot;delonix-runtime-bin&quot;]
   end
   delonix_compute --&gt; delonix_model
@@ -1184,6 +1186,17 @@ comprendre pourquoi.</p>
   delonix_mgmt_bin --&gt; delonix_node
   delonix_mgmt_bin --&gt; delonix_telemetry
   delonix_node --&gt; delonix_model
+  delonix_node_api --&gt; delonix_compute
+  delonix_node_api --&gt; delonix_linux
+  delonix_node_api --&gt; delonix_model
+  delonix_node_api --&gt; delonix_node
+  delonix_node_api --&gt; delonix_proxmox
+  delonix_node_api --&gt; delonix_sdn
+  delonix_node_api --&gt; delonix_vm
+  delonix_node_api --&gt; delonix_volume
+  delonix_node_api_bin --&gt; delonix_node
+  delonix_node_api_bin --&gt; delonix_node_api
+  delonix_node_api_bin --&gt; delonix_telemetry
   delonix_oci --&gt; delonix_compute
   delonix_oci --&gt; delonix_model
   delonix_oci --&gt; delonix_node
@@ -1243,6 +1256,8 @@ comprendre pourquoi.</p>
   class delonix_model store
   class delonix_net_rules store
   class delonix_node block
+  class delonix_node_api iface
+  class delonix_node_api_bin engine
   class delonix_oci block
   class delonix_opnsense external
   class delonix_proxmox external

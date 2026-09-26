@@ -487,11 +487,12 @@ if [ "$WITH_BINARY" = 1 ]; then
       || die "could not install delonix-cri to $BIN_DIR — sudo failed or the destination isn't writable"
     stepok binary "delonix-cri -> $BIN_DIR/delonix-cri"
   fi
-  # `delonix mcp` and `delonix serve api` run the `delonix-mcp` and `delonix-mgmt`
-  # next to `delonix` (ADR-0040 D2.4 as amended): installed by default, so the
+  # `delonix mcp`, `delonix serve api` and `delonix serve node-api` run the
+  # `delonix-mcp`, `delonix-mgmt` and `delonix-node-api` next to `delonix`
+  # (ADR-0040 D2.4 as amended): installed by default, so the
   # commands work after a plain install. A release from before the split has no
   # such asset — a warning, not a failure.
-  for SERVER in delonix-mcp:mcp delonix-mgmt:"serve api"; do
+  for SERVER in delonix-mcp:mcp delonix-mgmt:"serve api" delonix-node-api:"serve node-api"; do
     SNAME=${SERVER%%:*}; SCMD=${SERVER#*:}
     dl_server() { fetch_asset "$SNAME" > "$TMP/.asset-$SNAME"; }
     if spin binary "$SNAME" "downloading..." dl_server; then
@@ -585,7 +586,7 @@ if [ "$WITH_BINARY" = 1 ]; then
   # (medido: um `delonix-cri` em ~/.local/bin ao lado de um `delonix` novo em
   # /usr/local/bin). NÃO se corre `--version` aqui: o `delonix-cri` ignora-o e
   # ARRANCA o servidor. Compara-se o conteúdo, que não executa nada.
-  for SIB in delonix-cri delonix-mcp delonix-mgmt; do
+  for SIB in delonix-cri delonix-mcp delonix-mgmt delonix-node-api; do
     for OTHER in $(type -ap "$SIB" 2>/dev/null | awk '!seen[$0]++'); do
       [ "$OTHER" = "$BIN_DIR/$SIB" ] && continue
       if [ -f "$BIN_DIR/$SIB" ] && cmp -s "$OTHER" "$BIN_DIR/$SIB"; then continue; fi

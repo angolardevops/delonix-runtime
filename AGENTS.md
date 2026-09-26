@@ -6575,6 +6575,51 @@ bateria os mostrou, na primeira corrida:**
 É a posse do socket do swtpm no HOST, não o motor; a linha di-lo em vez de
 fingir uma sonda.
 
+## O contrato de nó passou a ter servidor: `delonix-node-api` e o `ListProviders` (ADR-0050 D5, 2026-09-25)
+
+Até aqui o `proto/delonix/node/v1` era um contrato sem um único produtor em Rust —
+o `delonix-cri` fala CRI, o `delonix-mgmt` fala a sua API própria, e o ADR-0042
+dizia que o passo C esperava «pelo servidor a ser construído noutra sessão».
+Esta fatia constrói-o à medida do que já tinha consumidor: `NodeService.
+ListProviders`, que é o D5 do ADR-0050 e o único RPC cuja resposta o motor já
+sabia calcular (`delonix provider ls -o json`).
+
+- **Um crate, não dois.** O ADR-0040 desenhava `delonix-node-proto` + `delonix-node-api`,
+  ambos em `interfaces/`; o gate de direcção recusa uma interface a depender de outra, e
+  um crate de código gerado com UM consumidor é o andaime morto que o P1 do mesmo ADR
+  já recusara. Os stubs ficam em `delonix_node_api::proto::v1`, como o CRI guarda os seus
+  em `delonix_cri::cri`. Quando houver um segundo consumidor (a suite de conformidade
+  fora do crate, um cliente), extrai-se.
+- **As duas codificações saem dos MESMOS ficheiros.** tonic/prost para o gRPC; `pbjson`
+  para o JSON proto3 de todas as mensagens, com `preserve_proto_field_names` porque o
+  OpenAPI publicado é gerado com `naming=proto` — sem isso o `catalog_version` do
+  `openapi.yaml` chegava como `catalogVersion` no socket. **Armadilha do build**: o
+  `tonic_build` já mapeia `.google.protobuf` para `prost_types`; para o `pbjson_types`
+  (que traz o serde dos well-known types) é preciso `compile_well_known_types(true)`
+  ANTES do `extern_path`, senão «duplicate extern Protobuf path».
+- **Um socket, dois protocolos**: o acceptor é o do `delonix-mgmt` (0600 + `SO_PEERCRED`
+  por ligação) com o `hyper_util::server::conn::auto`, que fala HTTP/1.1 para as rotas
+  JSON e HTTP/2 em prior knowledge para o gRPC. O router é um `axum::Router` com a rota
+  `GET /v1/providers` fundida com o `tonic::service::Routes::into_axum_router()`.
+- **O contrato ganhou dois campos aditivos** — `Capability.state` e
+  `ProviderInfo.catalog_version` — porque o `supported` booleano sozinho perdia a
+  classificação de seis estados que o ADR-0050 existe para publicar. `buf breaking`
+  contra a v4.4.0 verde; `openapi.yaml` regenerado pelo `contract_gate.py --update`.
+- **A composição dos providers está escrita duas vezes, e a segunda cópia tem guarda.**
+  O servidor não pode depender do composition root da CLI (`cmd/provider.rs`), por isso
+  repete a lista; o teste `the_declared_providers_are_the_published_matrix` compara o
+  conjunto (kind, id) do servidor com o que a CLI publicou em
+  `docs/providers/capability-matrix.md`, e a bateria faz `diff` entre o JSON do socket e
+  o `provider ls -o json` no mesmo host.
+- **O que NÃO é servido di-lo**: `GetNodeInfo`/`GetHealth`/`GetCapacity`/`WatchEvents`
+  respondem `UNIMPLEMENTED` com o passo do ADR-0042 que os traz; nenhum outro serviço do
+  contrato está registado no socket. Um `GET /v1/node` dá 404 do router, não um 200 vazio.
+- **Provado**: cliente gRPC gerado a chamar o servidor real pelo socket unix (com o
+  filtro por kind, a recusa `INVALID_ARGUMENT` de um kind desconhecido e o `UNIMPLEMENTED`
+  do `GetNodeInfo`); a rota JSON por `oneshot`; os 6 providers no socket iguais aos da
+  CLI, na bateria. **Não validado**: socket activation (ADR-0040 P5), as rotas de
+  documentação do passo C, e um cliente de outra linguagem contra o OpenAPI.
+
 ## Regra de ouro: o motor compila e responde sozinho
 
 A fronteira está em «Identidade e fronteira do motor», no topo. As consequências práticas,
@@ -6617,6 +6662,8 @@ antes de qualquer commit:
 | `delonix-mcp` | servidor Model Context Protocol (ADR-0025) — superfície de controlo de IA LOCAL e sem inquilino, `stdio`-only nesta fase; as tools chamam a `Store`/os crates de domínio, nunca constroem shell arbitrário |
 | `delonix-mcp-bin` | o executável `delonix-mcp` (P3l, ADR-0040 D2.4 emendado): `delonix mcp` faz `exec` dele, e o utilizador e a configuração de um cliente de IA só nomeiam `delonix`. Compõe uma só interface, o `delonix-mcp` |
 | `delonix-mgmt-bin` | o executável `delonix-mgmt` (P3m): `delonix serve api` faz `exec` dele. O `delonix` continua a ligar o crate `delonix-mgmt`, mas só pelo coleccionador `dashstats` (usado pelo `dash` e pelo `system`), que sai para a camada de aplicação na P5 |
+| `delonix-node-api` | o contrato de nó `delonix.node.v1` SERVIDO (ADR-0040 P5, ADR-0042 passo C): gRPC e HTTP/JSON dos mesmos `.proto`, num socket unix local, só o próprio uid. Hoje serve `NodeService.ListProviders` (ADR-0050 D5); o resto do `NodeService` responde UNIMPLEMENTED a nomear o passo que o traz. Os stubs gerados (prost/tonic) e o JSON proto3 (`pbjson`, nomes proto) vivem aqui, como os do CRI |
+| `delonix-node-api-bin` | o executável `delonix-node-api`: `delonix serve node-api` faz `exec` dele, com `--addr`/`DELONIX_NODE_API_ADDR` (omissão `unix:///run/delonix-node.sock`) |
 | `delonix-security-runtime` | as decisões de segurança do nó: a política (`policy.json`), o **único** ponto de admissão — container **e** VM —, o `SecurityEvent`, o score explicável e a redacção de segredos. Puro: três dependências, sem sensores, sem daemon e **sem noção de inquilino** (guarda-rio #2, imposto por teste) — ver ADR-0026 |
 
 ## Histórico

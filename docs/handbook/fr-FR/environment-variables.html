@@ -260,6 +260,11 @@ script et dans <a href="build-and-test.html">Cloner, compiler et tester</a>, pas
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-mgmt-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-mgmt-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
 </tr>
 <tr>
+<td>Socket de l’API de nœud</td>
+<td><code>--addr</code> &gt; <code>DELONIX_NODE_API_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a></td>
+</tr>
+<tr>
 <td>Socket de l’API Docker</td>
 <td><code>--addr</code> &gt; <code>DELONIX_DOCKER_ADDR</code> &gt; <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-docker.<wbr>sock</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>dockerapi.<wbr>rs:run</code></a></td>
@@ -443,6 +448,13 @@ et la façon de démonter l’infra isolée, se trouvent dans
 <td>Socket de l’API de gestion locale (<code>delonix serve api</code>).</td>
 <td><code>unix://&lt;path&gt;</code>. Défaut <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-mgmt.<wbr>sock</code>.</td>
 <td><code>--addr</code> l’emporte. L’API est uniquement locale (l’uid appelant).</td>
+</tr>
+<tr>
+<td><code>DELONIX_NODE_API_ADDR</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-node-api-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr>src/<wbr>main.<wbr>rs:run</code></a> ; transmise par <code>cmd/serve.rs:run</code></td>
+<td>Socket de l’API de nœud (<code>delonix serve node-api</code>, le contrat <code>delonix.node.v1</code> en gRPC et HTTP/JSON).</td>
+<td><code>unix://&lt;path&gt;</code>. Défaut <code>unix:/<wbr>/<wbr>/<wbr>run/<wbr>delonix-node.<wbr>sock</code>.</td>
+<td><code>--addr</code> l’emporte. Uniquement locale (l’uid appelant).</td>
 </tr>
 <tr>
 <td><code>DELONIX_DOCKER_ADDR</code></td>

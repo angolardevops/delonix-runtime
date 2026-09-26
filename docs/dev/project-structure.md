@@ -51,10 +51,11 @@ Start at the root and follow the dependencies inward:
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
 │   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
-│   └── interfaces/               CRI, local management API, MCP server
+│   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
+│   ├── delonix-node-api-bin/     the `delonix-node-api` binary
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -116,10 +117,11 @@ The crate list, each crate's layer and who depends on whom are generated facts i
 | `crates/contexts/` | Bounded contexts with the use cases: Compute, with the `Container` and `Vm` records (`delonix-compute`), the node's own helpers — event log, host and process checks, server dispatch (`delonix-node`) —, Stack — Kinds, reconciler, revisions (`delonix-stack`) — and the node's security decisions (`delonix-security-runtime`). | Features that change what the engine decides. | [The crates](crates.md) |
 | `crates/adapters/` | Mechanisms on this node: Linux namespaces/cgroups (`delonix-linux`), OCI images (`delonix-oci`), networking and firewall (`delonix-sdn`), microVMs (`delonix-vm`), volumes (`delonix-volume`), persisted state and the secret vault (`delonix-state`), vulnerability scanning (`delonix-scanner`), logging/metrics/tracing (`delonix-telemetry`). | Features that touch the kernel, disk or a local tool. | [The crates](crates.md), [Cloud native primer](cloud-native-primer.md) |
 | `crates/providers/` | Remote systems behind a port: a Proxmox VE node as a `VmBackend` (`delonix-proxmox`) and TrueNAS provisioning (`delonix-truenas`). | Changes to a provider integration; a new provider enters here as a port implementation. | `docs/adr/0008-proxmox-vm-backend.md` |
-| `crates/interfaces/` | Servers that expose the engine: the Kubernetes CRI (`delonix-cri`, which also ships the `delonix-cri` binary), the local management API (`delonix-mgmt`) and the MCP server (`delonix-mcp`). | Changes to one of those protocols. | [Cloud native standards](cloud-native-standards.md) |
+| `crates/interfaces/` | Servers that expose the engine: the Kubernetes CRI (`delonix-cri`, which also ships the `delonix-cri` binary), the local management API (`delonix-mgmt`), the node contract server (`delonix-node-api`) and the MCP server (`delonix-mcp`). | Changes to one of those protocols. | [Cloud native standards](cloud-native-standards.md) |
 | `bins/` | Binary crates. Each composes one interface (enforced by `arch_fitness.py`). | Every CLI-visible feature. | [Architecture](architecture.md) |
 | `bins/delonix-runtime-bin/` | The `delonix` CLI: `src/main.rs`, one module per command group in `src/cmd/`, the Portuguese message catalogue `data/pt.po`, the `init` project templates in `templates/`, `build.rs`, and `tests/architecture.rs`. | Every feature with a command, flag or message. | [Coding conventions](coding-conventions.md) |
 | `bins/delonix-mgmt-bin/` | The `delonix-mgmt` binary: a thin `main.rs` over `delonix-mgmt`. | Rarely; the logic lives in the interface crate. | [The crates](crates.md) |
+| `bins/delonix-node-api-bin/` | The `delonix-node-api` binary: a thin `main.rs` over `delonix-node-api` (the node contract on a unix socket, ADR-0040 P5). | Rarely; the logic lives in the interface crate. | `docs/adr/0050-libvirt-linux-providers-capability-catalog.md` |
 | `bins/delonix-mcp-bin/` | The `delonix-mcp` binary: a thin `main.rs` over `delonix-mcp`. | Rarely; the logic lives in the interface crate. | `docs/adr/0025-mcp-local-ai-control-surface.md` |
 | `proto/` | The node contract `delonix.node.v1` (`proto/delonix/node/v1/*.proto`), marked draft; source of truth for gRPC and HTTP/JSON and of `docs/api/openapi.yaml`. Checked by `scripts/contract_gate.py` (format, lint, breaking changes, HTTP mappings, OpenAPI). | Contract changes, reviewed carefully — breaking changes against the last tag fail. | `proto/README.md`, ADR-0040 |
 | `tests/` | Out-of-tree compatibility checks, not cargo tests: `tests/compat/cri-conformance.sh` (the `critest` suite) and `tests/compat/docker_api_smoke.py`. Cargo integration tests live in each crate's own `tests/`. | Whoever works on CRI or Docker API compatibility. | `docs/cri-conformance.md`, [Clone, build and test](build-and-test.md) |

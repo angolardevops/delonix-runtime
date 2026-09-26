@@ -42,6 +42,7 @@ GROUP_PATH = {
     "cri": ("serve", "cri"),
     "api": ("serve", "api"),
     "docker-api": ("serve", "docker-api"),
+    "node-api": ("serve", "node-api"),
     "kube": ("cluster", "kube"),
 }
 
@@ -210,6 +211,7 @@ SOURCE_FILES = {
     "system": "system.rs",
     "dash": "dash.rs",
     "docker-api": "dockerapi.rs",
+    "node-api": "serve.rs",
     "kube": "kube.rs",
     "netns": "netns.rs",
     "completion": "complete.rs",
@@ -1413,13 +1415,14 @@ firewall por-container. Só alcançável por manifesto (<code>kind: L4Guard</cod
     },
     "serve": {
         "title": "delonix serve",
-        "tagline": "Serve um endpoint de protocolo num socket unix — cri, api, docker-api.",
+        "tagline": "Serve um endpoint de protocolo num socket unix — cri, api, node-api, docker-api.",
         "intro": """Os três "fala este protocolo por um socket": <code>serve cri</code> (o
 endpoint <code>runtime.v1</code> que um <code>kubelet</code> consome directamente, substituindo
 containerd/CRI-O), <code>serve api</code> (a API de gestão LOCAL, HTTP+JSON, para um
-control-plane externo) e <code>serve docker-api</code> (a fatia da Docker Engine API que basta
+control-plane externo), <code>serve node-api</code> (o contrato de nó <code>delonix.node.v1</code>,
+gRPC + HTTP/JSON) e <code>serve docker-api</code> (a fatia da Docker Engine API que basta
 para <code>docker version/ps/create/start/stop/rm</code> via <code>DOCKER_HOST=unix://…</code>).
-Os três correm em primeiro plano, um processo por invocação — sem daemon residente.""",
+Todos correm em primeiro plano, um processo por invocação — sem daemon residente.""",
         "subs": {},
     },
     "api": {
@@ -1429,6 +1432,18 @@ Os três correm em primeiro plano, um processo por invocação — sem daemon re
 métricas Prometheus incluídas. É LOCAL por desenho (só o próprio uid alcança o socket) e o
 <code>docs/cli-stability.md</code> pede para não se construir automação em cima dela sem ler o
 ADR-0010 primeiro: não é uma API remota nem multi-tenant.""",
+        "subs": {},
+    },
+    "node-api": {
+        "title": "delonix serve node-api",
+        "tagline": "O contrato de nó (gRPC + HTTP/JSON do delonix.node.v1) num socket unix.",
+        "intro": """O contrato versionado <code>proto/delonix/node/v1</code> servido pelo binário
+<code>delonix-node-api</code> (ADR-0040 P5): gRPC e HTTP/JSON dos MESMOS ficheiros, num socket
+unix local, só para o próprio uid. Hoje serve <code>NodeService.ListProviders</code> —
+<code>GET /v1/providers[?kind=]</code> devolve os mesmos providers e capacidades que
+<code>delonix provider ls -o json</code> (ADR-0050 D5); os restantes RPCs do serviço respondem
+<code>UNIMPLEMENTED</code> a nomear o passo do ADR-0042 que os traz. O OpenAPI gerado está em
+<code>docs/api/openapi.yaml</code>.""",
         "subs": {},
     },
     "manifest": {
@@ -1939,13 +1954,14 @@ per-container firewall. Only reachable via manifest (<code>kind: L4Guard</code>)
 version; <code>net l4guard status</code> shows whether it is active, with its drop counters.""",
     },
     "serve": {
-        "tagline": "Serve a protocol endpoint on a unix socket — cri, api, docker-api.",
-        "intro": """The three "speak this protocol over a socket" commands: <code>serve cri</code>
+        "tagline": "Serve a protocol endpoint on a unix socket — cri, api, node-api, docker-api.",
+        "intro": """The "speak this protocol over a socket" commands: <code>serve cri</code>
 (the <code>runtime.v1</code> endpoint a <code>kubelet</code> talks to directly, replacing
 containerd/CRI-O), <code>serve api</code> (the LOCAL management API, HTTP+JSON, for an external
-control plane) and <code>serve docker-api</code> (the slice of the Docker Engine API that covers
+control plane), <code>serve node-api</code> (the node contract <code>delonix.node.v1</code>, gRPC +
+HTTP/JSON) and <code>serve docker-api</code> (the slice of the Docker Engine API that covers
 <code>docker version/ps/create/start/stop/rm</code> via <code>DOCKER_HOST=unix://…</code>). All
-three run in the foreground, one process per invocation — no resident daemon.""",
+run in the foreground, one process per invocation — no resident daemon.""",
     },
     "api": {
         "tagline": "The LOCAL management API (HTTP+JSON) on a unix socket, for an external control plane.",
@@ -1953,6 +1969,16 @@ three run in the foreground, one process per invocation — no resident daemon."
 Prometheus metrics included. LOCAL by design (only the owning uid reaches the socket), and
 <code>docs/cli-stability.md</code> asks that no automation be built on top of it without reading
 ADR-0010 first: it is not a remote or multi-tenant API.""",
+    },
+    "node-api": {
+        "tagline": "The node contract (gRPC + HTTP/JSON of delonix.node.v1) on a unix socket.",
+        "intro": """The versioned contract <code>proto/delonix/node/v1</code> served by the
+<code>delonix-node-api</code> binary (ADR-0040 P5): gRPC and HTTP/JSON from the SAME files, on a
+local unix socket, for the owning uid only. Today it serves <code>NodeService.ListProviders</code>
+— <code>GET /v1/providers[?kind=]</code> returns the same providers and capabilities as
+<code>delonix provider ls -o json</code> (ADR-0050 D5); the service's other RPCs answer
+<code>UNIMPLEMENTED</code> naming the ADR-0042 step that brings them. The generated OpenAPI is
+<code>docs/api/openapi.yaml</code>.""",
     },
     "manifest": {
         "tagline": "Work on a manifest without touching the host — render with defaults filled in.",

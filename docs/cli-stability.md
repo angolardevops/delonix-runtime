@@ -306,7 +306,7 @@ diz quais são, em vez de os omitir.
 
 ## NÃO estável — pode mudar em qualquer versão
 
-* **`serve cri`, `serve api`, `serve docker-api`** — superfícies de protocolo
+* **`serve cri`, `serve api`, `serve node-api`, `serve docker-api`** — superfícies de protocolo
   em construção. O `docker-api` publica a sua cobertura em
   `delonix serve docker-api --matrix`, e é essa tabela que diz o que existe
   hoje, não esta promessa. A **API de gestão** (`serve api`) é local (socket

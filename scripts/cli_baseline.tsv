@@ -181,6 +181,7 @@
 ~	serve api
 =	serve cri
 =	serve docker-api
+~	serve node-api
 ~	stack apply
 ~	stack describe
 ~	stack destroy

@@ -1,0 +1,19 @@
+[package]
+name = "delonix-node-api-bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# `delonix-node-api` — the node API's own executable (ADR-0040 D2.4 as amended,
+# P5). People reach it as `delonix serve node-api`, which runs this binary.
+[[bin]]
+name = "delonix-node-api"
+path = "src/main.rs"
+
+[dependencies]
+delonix-node = { workspace = true }
+delonix-node-api = { workspace = true }
+delonix-telemetry = { workspace = true }
+
+[lints]
+workspace = true

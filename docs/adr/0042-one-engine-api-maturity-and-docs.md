@@ -1,6 +1,6 @@
 # ADR-0042: One engine API — one version number, Richardson maturity, published docs
 
-- **Status:** Accepted (2026-09-17) — steps A and B delivered (#388, #389); step C and onwards wait for the node API server being built in another session, and follow this ADR when they land
+- **Status:** Accepted (2026-09-17) — steps A and B delivered (#388, #389); step C started 2026-09-25: `delonix-node-api` exists on the socket and serves `NodeService.ListProviders` as gRPC and HTTP/JSON (ADR-0050 D5); health/info/capacity and the three doc endpoints are still to come. **Transcoding spike result**: the proto3 JSON of every message is generated from the same files (`pbjson`, proto field names = the OpenAPI's `naming=proto`); the HTTP route of a `google.api.http` annotation is written by hand per RPC for now (one exists), and a generic transcoder over the annotations is the next slice of C. The `delonix-node-proto` crate is not split out: with one consumer it would be the dead scaffolding ADR-0040 P1 refuses, so the stubs live in `delonix_node_api::proto` as the CRI's do
 - **Date:** 2026-09-17
 - **Deciders:** Walter (owner)
 - **Builds on, does not reopen:** ADR-0040 D4 (one contract in `proto/delonix/node/v1`, gRPC

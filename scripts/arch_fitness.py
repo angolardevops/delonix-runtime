@@ -75,6 +75,8 @@ LAYERS = {
     "delonix-runtime-bin": BIN,  # → delonix-cli (interfaces) + bins/delonix (P2)
     "delonix-mcp-bin": BIN,  # `delonix-mcp`, run by `delonix mcp` (ADR-0040 D2.4 amended)
     "delonix-mgmt-bin": BIN,  # `delonix-mgmt`, run by `delonix serve api`
+    "delonix-node-api": INTERFACE,  # the node contract on the socket (ADR-0040 P5); replaces delonix-mgmt
+    "delonix-node-api-bin": BIN,  # `delonix-node-api`, run by `delonix serve node-api`
 }
 
 # Which layers each layer may depend on. The direction, in one place.
@@ -350,6 +352,12 @@ def count(
         if only and not rel.startswith(only):
             continue
         if pattern is RAW_VARIANT_MATCH and rel.startswith(RAW_VARIANT_SKIP):
+            continue
+        # A build script speaks to cargo through stdout (`cargo:rerun-if-changed=…`);
+        # that is the protocol, not a library writing to a terminal. Measured
+        # 2026-09-25: the CRI's `build.rs` was the one false positive in the count,
+        # and a second proto-building crate would have read as new debt.
+        if pattern is PRINTS and f.name == "build.rs":
             continue
         n = len(pattern.findall(f.read_text(encoding="utf-8", errors="replace")))
         if n:

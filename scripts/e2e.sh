@@ -547,6 +547,38 @@ check "provider matrix é a matriz publicada, byte a byte" ok bash -c \
 check "provider ls --l18n=pt traduz o cabeçalho" ok bash -c \
   "'$BIN' --l18n=pt provider ls | grep -q 'medidos neste host'"
 
+# ADR-0050 D5: the same providers through the node CONTRACT. `serve node-api`
+# runs the sibling `delonix-node-api` (built beside the CLI in this checkout);
+# what the check reads is the JSON on the socket, and it has to be the same set
+# of providers `provider ls` lists — measured on this host by the same probes.
+NODESOCK="/tmp/dlxe2e-node-$$.sock"
+NODEBIN="$(dirname "$BIN")/delonix-node-api"
+if [[ -x "$NODEBIN" ]]; then
+  "$BIN" serve node-api --addr "unix://$NODESOCK" >"$OUT/node-api.log" 2>&1 &
+  NODEPID=$!
+  for _ in $(seq 100); do [[ -S "$NODESOCK" ]] && break; sleep 0.05; done
+  check "serve node-api: o socket existe e é 0600" ok bash -c \
+    "[[ -S '$NODESOCK' ]] && [[ \$(stat -c %a '$NODESOCK') == 600 ]]"
+  check "GET /v1/providers responde com os mesmos providers que provider ls" ok bash -c \
+    "diff <(curl -s --unix-socket '$NODESOCK' http://localhost/v1/providers | python3 -c 'import json,sys; print(sorted(p[\"kind\"]+\"/\"+p[\"id\"] for p in json.load(sys.stdin)[\"providers\"]))') \
+          <('$BIN' provider ls -o json | python3 -c 'import json,sys; print(sorted(p[\"kind\"]+\"/\"+p[\"id\"] for p in json.load(sys.stdin)))')"
+  check "GET /v1/providers: cada capacidade leva name/supported/state/detail e o catalog_version" ok bash -c \
+    "curl -s --unix-socket '$NODESOCK' http://localhost/v1/providers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(set(c)>={\"name\",\"supported\",\"state\",\"detail\"} for p in d[\"providers\"] for c in p[\"capabilities\"]); assert all(p[\"catalog_version\"] for p in d[\"providers\"])'"
+  check "GET /v1/providers?kind=network só traz a rede" ok bash -c \
+    "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=network' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert d and all(p[\"kind\"]==\"network\" for p in d)'"
+  check "GET /v1/providers?kind=ceph é 400 com google.rpc.Status code 3" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph') == 400 ]] && curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph' | grep -q '\"code\":3'"
+  # BUG REAL, medido na 1.ª corrida deste check: o fallback do router do tonic
+  # respondia a QUALQUER caminho desconhecido com 200 + `grpc-status: 12` e corpo
+  # vazio — um cliente REST lia «servido, sem nada». Agora é 404 com um
+  # google.rpc.Status (code 5); só um chamador gRPC recebe o UNIMPLEMENTED de fio.
+  check "GET /v1/node (sem handler ainda) é 404 com code 5, nunca um 200 vazio" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' http://localhost/v1/node) == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/node | grep -q '\"code\":5'"
+  kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
+else
+  skip "node API pelo contrato (ADR-0050 D5)" "sem delonix-node-api ao lado de $BIN (cargo build -p delonix-node-api-bin)"
+fi
+
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################
 check "container describe de inexistente recusa" fail "$BIN" container describe naoexiste-$PFX

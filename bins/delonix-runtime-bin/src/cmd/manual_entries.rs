@@ -1906,6 +1906,15 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["serve cri", "dashboard", "system info"],
     },
     Entry {
+        path: "serve node-api",
+        group: "Advanced",
+        examples: &[
+            ("the node contract on the default unix socket — gRPC and HTTP/JSON of delonix.node.v1", "delonix serve node-api"),
+            ("a socket of your own, then read the providers as JSON", "delonix serve node-api --addr unix:///tmp/delonix-node.sock"),
+        ],
+        see_also: &["serve api", "provider ls", "system info"],
+    },
+    Entry {
         path: "serve cri",
         group: "Advanced",
         examples: &[

@@ -254,10 +254,11 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
 │   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
-│   └── interfaces/               CRI, local management API, MCP server
+│   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
+│   ├── delonix-node-api-bin/     the `delonix-node-api` binary
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -464,7 +465,7 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a></td>
-<td>Servidores que expõem o motor: o CRI do Kubernetes (<code>delonix-cri</code>, que também produz o binário <code>delonix-cri</code>), a API de gestão local (<code>delonix-mgmt</code>) e o servidor MCP (<code>delonix-mcp</code>).</td>
+<td>Servidores que expõem o motor: o CRI do Kubernetes (<code>delonix-cri</code>, que também produz o binário <code>delonix-cri</code>), a API de gestão local (<code>delonix-mgmt</code>), o servidor do contrato de nó (<code>delonix-node-api</code>) e o servidor MCP (<code>delonix-mcp</code>).</td>
 <td>Mudanças a um desses protocolos.</td>
 <td><a href="cloud-native-standards.html">Padrões cloud native</a></td>
 </tr>
@@ -485,6 +486,12 @@ procurar, mas partes dele estão desactualizadas; confirma no código o que ele 
 <td>O binário <code>delonix-mgmt</code>: um <code>main.rs</code> fino sobre o <code>delonix-mgmt</code>.</td>
 <td>Raramente; a lógica vive no crate de interface.</td>
 <td><a href="crates.html">Os crates</a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-node-api-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr></code></a></td>
+<td>O binário <code>delonix-node-api</code>: um <code>main.rs</code> fino sobre o <code>delonix-node-api</code> (o contrato de nó num socket unix, ADR-0040 P5).</td>
+<td>Raramente; a lógica vive no crate de interface.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0050-libvirt-linux-providers-capability-catalog.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0050-libvirt-linux-providers-capability-catalog.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/</code></a></td>

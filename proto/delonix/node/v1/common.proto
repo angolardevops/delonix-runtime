@@ -71,6 +71,10 @@ message Capability {
   string name = 1; // e.g. "vm.snapshot.memory", "vm.live-migration", "net.overlay.encrypted"
   bool supported = 2;
   string detail = 3;
+  // One of the catalog's states (ADR-0050 D2): "supported" | "partial" |
+  // "unsupported-by-provider" | "requires-external-component" | "not-implemented" |
+  // "unavailable-on-host". `supported` above is the boolean reading of it.
+  string state = 4;
 }
 
 message ProviderInfo {
@@ -79,6 +83,8 @@ message ProviderInfo {
   bool available = 3;
   repeated Capability capabilities = 4;
   Condition health = 5;
+  // The version of the capability catalog the names are drawn from (ADR-0050 D1).
+  string catalog_version = 6;
 }
 
 message PageRequest {
