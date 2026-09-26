@@ -202,11 +202,43 @@ impl ImageStore {
 
     /// Persists an image (atomic write).
     pub fn save(&self, img: &Image) -> Result<()> {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let p = self.record_path(&img.id);
-        let tmp = p.with_extension("tmp");
+        // One scratch name per writer: two pulls of the same image in parallel
+        // (or two layers' threads recording it) used to share `<id>.tmp`, and one
+        // could rename the other's half-written file into place.
+        let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let tmp = p.with_extension(format!("{}-{n}.tmp", std::process::id()));
         fs::write(&tmp, serde_json::to_vec_pretty(img)?)?;
-        fs::rename(&tmp, &p)?;
+        if let Err(e) = fs::rename(&tmp, &p) {
+            let _ = fs::remove_file(&tmp);
+            return Err(e.into());
+        }
         Ok(())
+    }
+
+    /// Records `img` unless the record on disk already says the same thing,
+    /// ignoring `created_unix`. A warm pull re-resolves an image that is already
+    /// here; rewriting its record changed nothing but the timestamp, and cost a
+    /// scan of every other record to re-check tag uniqueness. Returns whether it
+    /// wrote. When it does write, the tag still moves off any other image.
+    pub fn save_if_changed(&self, img: &Image) -> Result<bool> {
+        let unchanged = fs::read(self.record_path(&img.id))
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Image>(&b).ok())
+            .is_some_and(|mut old| {
+                old.created_unix = img.created_unix;
+                match (serde_json::to_value(&old), serde_json::to_value(img)) {
+                    (Ok(a), Ok(b)) => a == b,
+                    _ => false,
+                }
+            });
+        if unchanged {
+            return Ok(false);
+        }
+        self.enforce_tag_uniqueness(img)?;
+        self.save(img)?;
+        Ok(true)
     }
 
     /// Lists all images, from newest to oldest.
@@ -307,3 +339,77 @@ pub fn normalise_tag(name: &str) -> String {
 
 /// The current instant in Unix seconds.
 pub use delonix_node::now_unix;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn store(tag: &str) -> (ImageStore, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("delonix-image-save-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        (ImageStore::open(&dir).unwrap(), dir)
+    }
+
+    fn image(id: &str, tags: &[&str], created: u64) -> Image {
+        Image {
+            id: id.into(),
+            repo_tags: tags.iter().map(|t| t.to_string()).collect(),
+            layers: vec!["sha256:aa".into()],
+            config: ImageConfig::default(),
+            created_unix: created,
+        }
+    }
+
+    /// A warm pull records the same image again with a new `created_unix`.
+    /// Nothing else changed, so nothing is written — the record on disk keeps
+    /// its bytes.
+    #[test]
+    fn an_unchanged_record_is_not_rewritten() {
+        let (s, dir) = store("same");
+        assert!(s
+            .save_if_changed(&image("sha256:01", &["a:1"], 100))
+            .unwrap());
+        let path = s.record_path("sha256:01");
+        let before = fs::read(&path).unwrap();
+        assert!(!s
+            .save_if_changed(&image("sha256:01", &["a:1"], 200))
+            .unwrap());
+        assert_eq!(fs::read(&path).unwrap(), before);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// A record that DID change is written, and the tag still moves off any
+    /// other image that held it — the check the fast path skips only when
+    /// there is nothing to move.
+    #[test]
+    fn a_changed_record_is_written_and_its_tag_still_moves() {
+        let (s, dir) = store("moved");
+        s.save_if_changed(&image("sha256:01", &["app:v1"], 1))
+            .unwrap();
+        assert!(s
+            .save_if_changed(&image("sha256:02", &["app:v1"], 2))
+            .unwrap());
+        assert_eq!(s.resolve("app:v1").unwrap().id, "sha256:02");
+        assert!(
+            !s.record_path("sha256:01").exists(),
+            "the image left with no tag must be gone"
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// `save` leaves no scratch file behind.
+    #[test]
+    fn save_leaves_no_scratch_file() {
+        let (s, dir) = store("tmp");
+        s.save(&image("sha256:01", &["a:1"], 1)).unwrap();
+        let stray: Vec<_> = fs::read_dir(dir.join("images"))
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(stray.is_empty(), "{stray:?}");
+        let _ = fs::remove_dir_all(&dir);
+    }
+}
