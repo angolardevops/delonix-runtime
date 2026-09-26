@@ -41,10 +41,13 @@ disagree.
    it goes to the node (`DX-9510 … pve.invalid`). The same run shows Context §2 from the
    outside: the token warning is printed **twice**, once per parser.
 
-4. **The default is not the one the installer should give.** `auto_detect` walks the
-   registry in order, and `cloud-hypervisor` is first; `install.sh` installs Cloud Hypervisor
-   on x86-64 where it can. So a fresh install defaults to Cloud Hypervisor, not libvirt, and
-   nothing on the node says so — the choice is an accident of registration order.
+4. **The default is not one the node states.** With no `--backend`, `create_with` prefers
+   libvirt for a cloud image (no kernel) when libvirt is installed, and otherwise walks the
+   registry in order, where `cloud-hypervisor` is first — so a direct-kernel VM on a host
+   with both lands on Cloud Hypervisor. Each rule is reasonable; none is written anywhere an
+   operator reads, and a control plane cannot learn from the node which one applies.
+   *(Corrected 2026-09-26: the first version of this paragraph said a fresh install
+   defaults to Cloud Hypervisor, which the code does not do for a cloud image.)*
 
 The consequence for anyone driving the engine through the CLI or the node contract: to get a
 predictable provider they must name it on every call, which means they must know it. A caller
@@ -61,8 +64,7 @@ apiVersion: config.delonix.io/v1
 defaultProvider: libvirt            # what serves a request that names no provider
 
 providers:
-  - type: libvirt                   # local: nothing to configure; listed = enabled
-    uri: qemu:///system             # optional; default is the engine's own choice
+  - type: libvirt                   # local: nothing to configure; listed = declared
 
   - type: proxmox
     url: https://pve.example:8006   # the API endpoint the vendor documents
@@ -196,9 +198,22 @@ node and a production node differ in what their file says, not in how it is read
    in a state root of their own so the default they write never reaches another section.
    Verified in both directions: 2 XFAIL against this binary, and 2 XPASS — which fails the
    gate until the mark is removed — when the conditions are met.
-2. `ProviderConfig` (parse, precedence, refusal of inline secrets, one-per-type), the single
-   loader feeding both registration sites, D3's fail-closed default. Tests with a map/tempdir,
-   never the process environment.
+2. **Done.** `cmd/providers_config.rs` in the composition root: parse (`deny_unknown_fields`,
+   `apiVersion` checked, one entry per type, `name` reserved, an inline `tokenSecret`/
+   `password` refused by name), D2's location order with the first file winning, and the
+   Proxmox entry translated into the `DELONIX_PROXMOX_*` keys so the ONE existing parser
+   (`vmbackends::proxmox_target_with`) reads both sources — `network_zone_providers` now
+   calls it instead of its own copy, which is deleted. D4: `DELONIX_PROXMOX_URL` in the
+   environment replaces the file's entry as a whole. D3 in the engine:
+   `set_configured_default_backend` (the engine never opens the file), a default the
+   process cannot serve returned as written instead of dropped, so selecting it fails in
+   the unavailable class (69) naming the provider; an unreadable file fails every choice
+   that would have used it. The two slice-1 `xfail`s are ordinary checks now, and the
+   battery gained the file cases (default + target from the file alone, a default with
+   no entry, an inline secret, a missing explicit path, and a bad file not stopping
+   `container ls`). `uri:` on a libvirt entry is refused as unknown in this version.
+   Other binaries (`delonix-mgmt`, `delonix-mcp`, `delonix-cri`) do not read the file yet —
+   that is slice 5, with the node contract.
 3. `provider config show|validate`, `vm default-backend` on the file, `pt.po` entries, the
    schema of the file published next to the manifest schema.
 4. `install.sh` (D6) and its idempotence check (a second run leaves an edited file byte-equal).

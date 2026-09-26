@@ -46,7 +46,25 @@ pub fn register_configured() {
 
 /// `Ok(())` with nothing done when no Proxmox target is configured.
 fn register_proxmox() -> Result<()> {
-    register_proxmox_with(&|key| nonempty(std::env::var(key).ok()))
+    register_proxmox_with(&*configured_lookup()?)
+}
+
+/// The Proxmox configuration this process reads (ADR-0054 D4): the
+/// environment as a whole when it carries `DELONIX_PROXMOX_URL`, else the
+/// node's providers file. The ONE source both registrations — this one and
+/// `network_zone_providers` — read, so the same node is never configured two
+/// ways in one process.
+pub(crate) fn configured_lookup() -> Result<super::providers_config::Lookup<'static>> {
+    let file = match super::providers_config::loaded() {
+        Ok(f) => f.as_ref().map(|(_, cfg)| cfg),
+        // The file could not be read: the environment can still carry a
+        // target (a CI job), and `install_default` has already said why.
+        Err(_) => None,
+    };
+    Ok(super::providers_config::proxmox_lookup_with(
+        |key: &str| nonempty(std::env::var(key).ok()),
+        file,
+    ))
 }
 
 /// [`register_proxmox`] with the configuration read through `lookup`, so a test can
@@ -66,10 +84,10 @@ fn register_proxmox_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> 
 /// is configured.
 pub(crate) fn proxmox_target(
 ) -> Result<Option<(delonix_proxmox::Target, delonix_proxmox::ClientOptions)>> {
-    proxmox_target_with(&|key| nonempty(std::env::var(key).ok()))
+    proxmox_target_with(&*configured_lookup()?)
 }
 
-fn proxmox_target_with(
+pub(crate) fn proxmox_target_with(
     lookup: &dyn Fn(&str) -> Option<String>,
 ) -> Result<Option<(delonix_proxmox::Target, delonix_proxmox::ClientOptions)>> {
     let Some(url) = lookup("DELONIX_PROXMOX_URL") else {

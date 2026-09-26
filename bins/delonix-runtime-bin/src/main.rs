@@ -561,6 +561,10 @@ fn run() -> Result<()> {
                       // asked for one: `create_with` resolves the backend itself and never
                       // receives a target. Free when unconfigured, and it does no I/O even
                       // when it is — the node is contacted on first use (ADR-0008).
+                      // The node's providers file (ADR-0054): its default provider reaches the
+                      // engine before anything asks the engine to pick one, and the Proxmox
+                      // target in it is what the two registrations below read.
+    cmd::providers_config::install_default();
     cmd::vmbackends::register_configured();
     // Same target, a second port: `kind: NetworkZone` never names a
     // provider itself, so this is the only place a Proxmox target becomes

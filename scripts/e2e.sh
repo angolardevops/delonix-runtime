@@ -2766,28 +2766,69 @@ check "vm cloud-init sem nada para mudar recusa (1)" 1 "$BIN" vm cloud-init "vm-
 check "vm cloud-init com hostname inválido recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname=a.b
 check "vm cloud-init de uma VM inexistente diz 4" 4 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname web-1
 
-# ADR-0054 §3: a persisted default the reading process cannot serve used to be
-# dropped in silence, and `vm create` then went to a LOCAL hypervisor. Own root
-# for these checks: they write a machine-wide default, and the VM sections below
-# must not inherit it. `pve.invalid` never resolves (RFC 6761), so nothing is
-# contacted; the ambient DELONIX_PROXMOX_* is unset so a developer shell with a
-# real target cannot turn the xfail into a false XPASS.
+# ADR-0054: the node's providers file and the default provider. Own root and
+# own providers file for every call: these checks write a machine-wide default,
+# and a providers file on this host (`/etc/delonix/providers.yaml`, or one under
+# `~/.config`) would otherwise decide the outcome — DELONIX_PROVIDERS_CONFIG wins
+# over both. `pve.invalid` never resolves (RFC 6761), so nothing is contacted.
 ADR54_ROOT="$OUT/adr54-root"; mkdir -p "$ADR54_ROOT"
-adr54_px() { env DELONIX_ROOT="$ADR54_ROOT" DELONIX_PROXMOX_URL=https://pve.invalid:8006 \
+ADR54_EMPTY="$OUT/adr54-empty.yaml"
+printf 'apiVersion: config.delonix.io/v1\n' >"$ADR54_EMPTY"
+adr54_env() { env -u DELONIX_PROXMOX_URL -u DELONIX_PROXMOX_SECRET -u DELONIX_PROXMOX_TOKEN_ID \
+  -u DELONIX_PROXMOX_TOKEN -u DELONIX_PROXMOX_USER -u DELONIX_PROXMOX_PASSWORD -u DELONIX_VM_BACKEND \
+  DELONIX_ROOT="$ADR54_ROOT" "$@"; }
+adr54_px() { adr54_env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" DELONIX_PROXMOX_URL=https://pve.invalid:8006 \
   DELONIX_PROXMOX_NODE=pve DELONIX_PROXMOX_TOKEN_ID='e2e@pve!t' DELONIX_PROXMOX_TOKEN=x "$BIN" "$@"; }
-adr54_bare() { env -u DELONIX_PROXMOX_URL -u DELONIX_PROXMOX_SECRET -u DELONIX_PROXMOX_TOKEN_ID \
-  -u DELONIX_PROXMOX_TOKEN -u DELONIX_PROXMOX_USER -u DELONIX_PROXMOX_PASSWORD \
-  DELONIX_ROOT="$ADR54_ROOT" "$BIN" "$@"; }
+adr54_bare() { adr54_env DELONIX_PROVIDERS_CONFIG="$ADR54_EMPTY" "$BIN" "$@"; }
+adr54_file() { local f="$1"; shift; adr54_env DELONIX_PROVIDERS_CONFIG="$f" "$BIN" "$@"; }
+adr54_fns="$(declare -f adr54_env adr54_px adr54_bare adr54_file); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT' ADR54_EMPTY='$ADR54_EMPTY'"
+
+# §3, the legacy default: set where the target exists, read where it does not.
 check "vm default-backend --set proxmox com o alvo no ambiente" ok adr54_px vm default-backend --set proxmox
 # The control: with the target present the request does go to the node — so
-# the two xfails below measure the missing environment and nothing else.
+# the two checks after it measure the missing target and nothing else.
 check "vm create com o alvo no ambiente vai ao nó Proxmox" ok bash -c \
-  "$(declare -f adr54_px); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT'; adr54_px vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1 | grep -q 'pve.invalid'"
-xfail ADR-0054 "vm default-backend sem o alvo no ambiente não diz 'none'" ok bash -c \
-  "$(declare -f adr54_bare); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT'; ! adr54_bare vm default-backend 2>&1 | grep -q '^none'"
-xfail ADR-0054 "vm create sem o alvo no ambiente recusa a nomear o proxmox, não cai no local" ok bash -c \
-  "$(declare -f adr54_bare); BIN='$BIN' ADR54_ROOT='$ADR54_ROOT'; out=\$(adr54_bare vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1); echo \"\$out\"; echo \"\$out\" | grep -qi proxmox && ! echo \"\$out\" | grep -q 'no such VM image'"
+  "$adr54_fns; adr54_px vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1 | grep -q 'pve.invalid'"
+check "vm default-backend sem o alvo diz proxmox, não 'none'" ok bash -c \
+  "$adr54_fns; ! adr54_bare vm default-backend 2>&1 | grep -q '^none'"
+# Was an xfail until slice 2: the default used to be dropped and the VM went
+# to a LOCAL hypervisor. Now it is refused in the unavailable class, naming it.
+check "vm create sem o alvo recusa (69) em vez de cair no local" 69 adr54_bare vm create "vm-$PFX-adr54" --disk /nao/existe.qcow2
+check "vm create sem o alvo: a recusa nomeia o proxmox e não é o disco local" ok bash -c \
+  "$adr54_fns; out=\$(adr54_bare vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1); echo \"\$out\" | grep -qi proxmox && ! echo \"\$out\" | grep -q 'no such VM image'"
 adr54_bare vm default-backend --clear >/dev/null 2>&1 || true
+
+# D1/D3: the default and the target come from the FILE, with no DELONIX_PROXMOX_*
+# anywhere in the environment — the node decides, the caller names nothing.
+ADR54_TOKEN="$OUT/adr54-token"; printf 'x' >"$ADR54_TOKEN"; chmod 600 "$ADR54_TOKEN"
+ADR54_FULL="$OUT/adr54-full.yaml"
+cat >"$ADR54_FULL" <<YAML
+apiVersion: config.delonix.io/v1
+defaultProvider: proxmox
+providers:
+  - type: libvirt
+  - type: proxmox
+    url: https://pve.invalid:8006
+    node: pve
+    auth:
+      tokenId: 'e2e@pve!t'
+      tokenSecretFile: $ADR54_TOKEN
+YAML
+check "providers.yaml: o default e o alvo do ficheiro levam o create ao nó" ok bash -c \
+  "$adr54_fns; adr54_file '$ADR54_FULL' vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1 | grep -q 'pve.invalid'"
+check "providers.yaml: vm default-backend diz proxmox" ok bash -c \
+  "$adr54_fns; adr54_file '$ADR54_FULL' vm default-backend 2>/dev/null | grep -qx proxmox"
+ADR54_NOPX="$OUT/adr54-nopx.yaml"
+printf 'apiVersion: config.delonix.io/v1\ndefaultProvider: proxmox\nproviders:\n  - type: libvirt\n' >"$ADR54_NOPX"
+check "providers.yaml: default sem entrada proxmox recusa (69), nunca local" 69 adr54_file "$ADR54_NOPX" vm create "vm-$PFX-adr54" --disk /nao/existe.qcow2
+ADR54_INLINE="$OUT/adr54-inline.yaml"
+printf 'apiVersion: config.delonix.io/v1\ndefaultProvider: proxmox\nproviders:\n  - type: proxmox\n    url: https://pve.invalid:8006\n    node: pve\n    auth:\n      tokenId: a@pve!t\n      tokenSecret: plain\n' >"$ADR54_INLINE"
+check "providers.yaml: um segredo inline é recusado e o create não corre" 69 adr54_file "$ADR54_INLINE" vm create "vm-$PFX-adr54" --disk /nao/existe.qcow2
+check "providers.yaml: a recusa do segredo inline nomeia a forma certa" ok bash -c \
+  "$adr54_fns; adr54_file '$ADR54_INLINE' vm create vm-$PFX-adr54 --disk /nao/existe.qcow2 2>&1 | grep -q tokenSecretFile"
+check "providers.yaml: DELONIX_PROVIDERS_CONFIG para um ficheiro inexistente recusa" fail adr54_file "$OUT/adr54-nao-existe.yaml" vm create "vm-$PFX-adr54" --disk /nao/existe.qcow2
+check "providers.yaml: um ficheiro inválido não impede comandos sem VM" ok adr54_file "$ADR54_INLINE" container ls
+check "vm create com ficheiro recusado não deixou registo" fail adr54_bare vm inspect "vm-$PFX-adr54"
 
 ########################################
 section "vm: o snapshot sobrevive a um stop/start (precisa de hipervisor)"

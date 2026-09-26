@@ -13985,3 +13985,28 @@ msgstr "{kind}/{name}: allowCidrs/fqdnAllowlist/rateLimit são só para scope: n
 
 msgid "{kind}/{name}: fromWorkload/toWorkload name an address on this engine's SDN, which a VM filtered by its node's firewall is not on — use from/to with a CIDR"
 msgstr "{kind}/{name}: fromWorkload/toWorkload nomeiam um endereço na SDN deste motor, onde uma VM filtrada pela firewall do seu nó não está — usa from/to com um CIDR"
+
+# The node's providers file (ADR-0054)
+msgid "{path}: apiVersion '{got}' is not one this build reads (expected '{want}')"
+msgstr "{path}: o apiVersion '{got}' não é um que esta build leia (esperado '{want}')"
+
+msgid "{path}: provider type '{type}' is listed twice — one entry per type in this version (two targets of one type are a later phase of ADR-0054)"
+msgstr "{path}: o tipo de provider '{type}' aparece duas vezes — uma entrada por tipo nesta versão (dois alvos do mesmo tipo são uma fase posterior do ADR-0054)"
+
+msgid "{path}: `name: {name}` is reserved — it must equal the type ('{type}') until a node can carry two providers of one type"
+msgstr "{path}: `name: {name}` está reservado — tem de ser igual ao tipo ('{type}') até um nó poder ter dois providers do mesmo tipo"
+
+msgid "{path}: a secret VALUE is never written in this file — use `tokenSecretFile` (a 0600 file) or `secretRef` (a `kind: Secret`), or `passwordFile` for a password"
+msgstr "{path}: o VALOR de um segredo nunca se escreve neste ficheiro — usa `tokenSecretFile` (um ficheiro 0600) ou `secretRef` (um `kind: Secret`), ou `passwordFile` para uma password"
+
+msgid "DELONIX_PROVIDERS_CONFIG names '{path}', which is not a file"
+msgstr "o DELONIX_PROVIDERS_CONFIG nomeia '{path}', que não é um ficheiro"
+
+msgid "the node's providers file could not be read, so there is no default VM provider to use: {err}"
+msgstr "não foi possível ler o ficheiro de providers do nó, por isso não há provider de VM por omissão a usar: {err}"
+
+msgid "warning: {why}"
+msgstr "aviso: {why}"
+
+msgid "warning: '{name}' is the default VM provider, but this process has no configuration for it — `vm create` without --backend will refuse"
+msgstr "aviso: '{name}' é o provider de VM por omissão, mas este processo não tem configuração para ele — o `vm create` sem --backend vai recusar"
