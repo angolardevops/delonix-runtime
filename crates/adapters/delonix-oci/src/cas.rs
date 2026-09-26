@@ -125,10 +125,30 @@ impl Cas {
 /// path buffered every layer in a `Vec` first, so the RSS of a pull was the
 /// sum of the layers in flight and nothing reached the disk until the last
 /// byte had arrived.
+///
+/// The disk writes happen on a THREAD of their own. Measured: writing from the
+/// download thread made a pull of `node:22` about twice as slow on a disk
+/// under I/O pressure — every blocked `write(2)` stalled the socket read that
+/// followed it, the TCP window shrank and the sender backed off. The network
+/// now only waits for the disk when [`STREAM_QUEUE`] blocks of
+/// [`STREAM_BUF`] are already queued, which also caps the memory per blob.
 pub struct StreamingBlob {
-    file: fs::File,
+    tx: Option<std::sync::mpsc::SyncSender<WriteOp>>,
+    writer: Option<std::thread::JoinHandle<std::io::Result<()>>>,
+    pending: Vec<u8>,
     hasher: Sha256,
     len: u64,
+}
+
+/// Bytes a [`StreamingBlob`] gathers before handing one block to its writer.
+const STREAM_BUF: usize = 1 << 20;
+/// Blocks that may wait for the disk before the download waits too.
+const STREAM_QUEUE: usize = 16;
+
+enum WriteOp {
+    Data(Vec<u8>),
+    /// Start the file over: the server ignored a `Range` request.
+    Truncate,
 }
 
 impl StreamingBlob {
@@ -139,14 +159,57 @@ impl StreamingBlob {
             .write(true)
             .create_new(true)
             .open(path)?;
-        Ok(Self {
-            file,
-            hasher: Sha256::new(),
-            len: 0,
-        })
+        Ok(Self::spawn(file, Sha256::new(), 0))
     }
 
-    /// Bytes written so far — what a resumed download continues from.
+    fn spawn(mut file: fs::File, hasher: Sha256, len: u64) -> Self {
+        let (tx, rx) = std::sync::mpsc::sync_channel::<WriteOp>(STREAM_QUEUE);
+        let writer = std::thread::spawn(move || -> std::io::Result<()> {
+            use std::io::Seek;
+            for op in rx {
+                match op {
+                    WriteOp::Data(block) => file.write_all(&block)?,
+                    WriteOp::Truncate => {
+                        file.set_len(0)?;
+                        file.rewind()?;
+                    }
+                }
+            }
+            file.flush()
+        });
+        Self {
+            tx: Some(tx),
+            writer: Some(writer),
+            pending: Vec::with_capacity(STREAM_BUF),
+            hasher,
+            len,
+        }
+    }
+
+    /// Hands one operation to the writer. A closed channel means the writer
+    /// stopped on an I/O error; that error is what is returned.
+    fn send(&mut self, op: WriteOp) -> Result<()> {
+        let sent = self.tx.as_ref().is_some_and(|tx| tx.send(op).is_ok());
+        if sent {
+            Ok(())
+        } else {
+            Err(self.stop_writer().err().unwrap_or_else(|| {
+                std::io::Error::other("blob writer stopped unexpectedly").into()
+            }))
+        }
+    }
+
+    /// Closes the channel and waits for the writer, returning its outcome.
+    fn stop_writer(&mut self) -> Result<()> {
+        self.tx = None;
+        match self.writer.take().map(|h| h.join()) {
+            None | Some(Ok(Ok(()))) => Ok(()),
+            Some(Ok(Err(e))) => Err(e.into()),
+            Some(Err(_)) => Err(std::io::Error::other("blob writer panicked").into()),
+        }
+    }
+
+    /// Bytes received so far — what a resumed download continues from.
     pub fn len(&self) -> u64 {
         self.len
     }
@@ -159,9 +222,9 @@ impl StreamingBlob {
     /// Starts over from zero, for when the server ignored a `Range` request
     /// and is sending the whole blob again.
     pub fn reset(&mut self) -> Result<()> {
-        use std::io::Seek;
-        self.file.set_len(0)?;
-        self.file.rewind()?;
+        // What is still pending belongs to the attempt being thrown away.
+        self.pending.clear();
+        self.send(WriteOp::Truncate)?;
         self.hasher = Sha256::new();
         self.len = 0;
         Ok(())
@@ -169,16 +232,34 @@ impl StreamingBlob {
 
     /// Appends the next chunk.
     pub fn append(&mut self, bytes: &[u8]) -> Result<()> {
-        self.file.write_all(bytes)?;
         self.hasher.update(bytes);
         self.len += bytes.len() as u64;
+        self.pending.extend_from_slice(bytes);
+        if self.pending.len() >= STREAM_BUF {
+            let block = std::mem::replace(&mut self.pending, Vec::with_capacity(STREAM_BUF));
+            self.send(WriteOp::Data(block))?;
+        }
         Ok(())
     }
 
-    /// Flushes and returns the hex sha256 of everything written.
+    /// Writes what is left, waits for the disk, and returns the hex sha256
+    /// of everything written.
     pub fn finish(mut self) -> Result<String> {
-        self.file.flush()?;
-        Ok(format!("{:x}", self.hasher.finalize()))
+        if !self.pending.is_empty() {
+            let block = std::mem::take(&mut self.pending);
+            self.send(WriteOp::Data(block))?;
+        }
+        self.stop_writer()?;
+        let hasher = std::mem::take(&mut self.hasher);
+        Ok(format!("{:x}", hasher.finalize()))
+    }
+}
+
+impl Drop for StreamingBlob {
+    /// A download that failed still stops its writer before the caller
+    /// removes the scratch file.
+    fn drop(&mut self) {
+        let _ = self.stop_writer();
     }
 }
 
