@@ -135,18 +135,12 @@ EXCEPTIONS = {
         "P4",
         "the adapter writes its own files with the state layer's atomic write; P4 hands it the StateRepository port that owns those files",
     ),
-    ("dep", "delonix-proxmox", "delonix-vm"): (
-        "P4",
-        "the VmBackend port lives in the same crate as the Cloud Hypervisor and "
-        "libvirt adapters; P4 moves the port into the compute context and each "
-        "backend into its own provider crate",
-    ),
     ("dep", "delonix-opnsense", "delonix-sdn"): (
         "P4",
         "the GatewayProvider port lives in the same crate as the native nftables "
         "dataplane, by the same reasoning and the same exception as "
-        "delonix-proxmox -> delonix-vm above (ADR-0051): P4 moves it into a "
-        "context crate alongside VmBackend's own move, not before",
+        "delonix-proxmox -> delonix-vm had (ADR-0051), which P4b.2 closed by "
+        "moving VmBackend into the compute context; this one moves the same way",
     ),
     ("dep", "delonix-proxmox", "delonix-sdn"): (
         "P4",
