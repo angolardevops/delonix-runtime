@@ -2762,6 +2762,10 @@ check "vm create --require: nenhum registo de VM ficou para trás" fail "$BIN" v
 # por isso estas classes medem-se sem hipervisor nenhum.
 check "vm resize sem --vcpus nem --memory recusa (1)" 1 "$BIN" vm resize "vm-$PFX-nada"
 check "vm resize de uma VM inexistente diz 4" 4 "$BIN" vm resize "vm-$PFX-nada" --vcpus 2
+# `vm move --node` (ADR-0053): o destino vazio e a VM inexistente recusam-se
+# antes de qualquer backend.
+check "vm move com destino vazio recusa (1)" 1 "$BIN" vm move "vm-$PFX-nada" --node ""
+check "vm move de uma VM inexistente diz 4" 4 "$BIN" vm move "vm-$PFX-nada" --node pve2
 check "vm cloud-init sem nada para mudar recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada"
 check "vm cloud-init com hostname inválido recusa (1)" 1 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname=a.b
 check "vm cloud-init de uma VM inexistente diz 4" 4 "$BIN" vm cloud-init "vm-$PFX-nada" --hostname web-1
@@ -2939,6 +2943,10 @@ if command -v virsh >/dev/null && command -v qemu-img >/dev/null \
       "virsh -c qemu:///system dumpxml '$SVM' | grep -Eq '<vcpu[^>]*>2</vcpu>'"
     check "o domínio arranca com 384 MiB" ok bash -c \
       "virsh -c qemu:///system dumpxml '$SVM' | grep -q \"<memory unit='KiB'>393216</memory>\""
+    # `vm move --node` é do Proxmox (ADR-0053): o libvirt não tem cluster e
+    # recusa pelo nome, a apontar para o `vm migrate` — nunca um no-op.
+    check "vm move no libvirt recusa e nomeia o vm migrate" ok bash -c \
+      "out=\$('$BIN' vm move '$SVM' --node pve2 --live 2>&1); rc=\$?; [ \$rc -eq 1 ] && printf '%s' \"\$out\" | grep -q 'vm migrate'"
     "$BIN" delete vm "$SVM" -f >/dev/null 2>&1
   else
     skip "vm: snapshot sobrevive a stop/start" "o vm create falhou neste host"

@@ -944,6 +944,26 @@ pub enum VmCmd {
         #[arg(long)]
         memory: Option<String>,
     },
+    /// Move a VM to another node of its cluster — same VM, same record.
+    ///
+    /// Proxmox only: the node does the move, and the VM keeps its id and its
+    /// record; only the node changes. The target is always yours — nothing is
+    /// picked for you. Without `--live` the VM must be stopped; with it, the
+    /// VM must be running and keeps running. Refused before anything moves
+    /// when the target is not an online member of the cluster, or when the
+    /// node's precheck says it cannot host the VM — a disk on storage the
+    /// target does not share is refused, not copied. To relocate a VM to
+    /// another delonix host, use `vm migrate`.
+    Move {
+        #[arg(add = ArgValueCandidates::new(super::complete::vms))]
+        name: String,
+        /// The node of the VM's cluster to move it to.
+        #[arg(long)]
+        node: String,
+        /// Move the VM while it runs (online migration).
+        #[arg(long)]
+        live: bool,
+    },
     /// Reclaim the VM state directory: everything in it no VM record accounts for.
     ///
     /// Stale create locks, sockets, pidfiles and console logs of VMs that are
@@ -2742,6 +2762,11 @@ pub fn run(action: VmCmd) -> Result<()> {
         } => {
             let vm = delonix_vm::resize(&base, &name, vcpus, memory.as_deref())?;
             println!("{name}: {} vCPU, {}", vm.vcpus, vm.memory);
+            Ok(())
+        }
+        VmCmd::Move { name, node, live } => {
+            let vm = delonix_vm::move_to_node(&base, &name, &node, live)?;
+            println!("{name}: {}", vm.api_socket);
             Ok(())
         }
         VmCmd::Snapshot { action } => match action {
