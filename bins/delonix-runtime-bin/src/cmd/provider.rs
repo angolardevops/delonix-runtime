@@ -62,6 +62,39 @@ pub enum ProviderCmd {
     /// is probed: every host is assumed complete, so the states are the
     /// providers' own claims — and each `supported` names its evidence.
     Matrix,
+    /// The node's providers file (ADR-0054): what it says, and whether it is valid.
+    #[command(subcommand)]
+    Config(ConfigCmd),
+}
+
+#[derive(Subcommand)]
+pub enum ConfigCmd {
+    /// The provider configuration this process reads, with where each value comes from.
+    ///
+    /// The file (and any file the precedence ignores), the default provider and
+    /// its source, and every provider with its settings. A secret is never
+    /// printed: only where it comes from — a file path, a `kind: Secret` name,
+    /// or the environment.
+    Show {
+        #[arg(short = 'o', long = "output", value_enum, default_value_t)]
+        output: super::output::OutputFormat,
+    },
+    /// Checks a providers file without registering or contacting anything.
+    ///
+    /// The format, a default provider that has an entry, and what the file
+    /// points at: the token file (readable only by its owner), the CA, the
+    /// secret, the URL and node syntax. Exit 0 when valid, 1 when not.
+    Validate {
+        /// The file to check. Omitted: the file this process would read.
+        #[arg(short = 'f', long = "file")]
+        file: Option<std::path::PathBuf>,
+    },
+    /// Prints the JSON Schema of the providers file.
+    ///
+    /// The same schema published as `docs/schema/v1/providers.json`, generated
+    /// from the types the engine reads — an editor that loads it underlines a
+    /// misspelt key before `provider config validate` is ever run.
+    Schema,
 }
 
 fn parse_kind(s: &str) -> std::result::Result<ProviderKind, String> {
@@ -124,6 +157,14 @@ pub fn declared_reports() -> Vec<ProviderReport> {
 
 pub fn run(cmd: ProviderCmd) -> Result<()> {
     match cmd {
+        ProviderCmd::Config(ConfigCmd::Show { output }) => config_show(output),
+        ProviderCmd::Config(ConfigCmd::Validate { file }) => config_validate(file),
+        ProviderCmd::Config(ConfigCmd::Schema) => {
+            let text = serde_json::to_string_pretty(&super::providers_config::schema())
+                .map_err(|e| Error::Invalid(format!("json output: {e}")))?;
+            println!("{text}");
+            Ok(())
+        }
         ProviderCmd::Ls { kind, output } => {
             let reports: Vec<ProviderReport> = measured_reports()
                 .into_iter()
@@ -137,6 +178,22 @@ pub fn run(cmd: ProviderCmd) -> Result<()> {
                 }
                 super::output::OutputFormat::Table => {
                     print_ls(&reports);
+                    // D2: a file the precedence skips is said, on one line —
+                    // editing it would change nothing, and nothing else says so.
+                    if let Ok(Some((chosen, _))) = super::providers_config::loaded() {
+                        for p in super::providers_config::ignored(chosen) {
+                            eprintln!(
+                                "{}",
+                                super::po::tf(
+                                    "note: {path} exists but {chosen} is the providers file read here",
+                                    &[
+                                        ("path", &p.display().to_string()),
+                                        ("chosen", &chosen.display().to_string()),
+                                    ]
+                                )
+                            );
+                        }
+                    }
                     Ok(())
                 }
             }
@@ -536,6 +593,189 @@ pub fn matrix_markdown(reports: &[ProviderReport]) -> String {
         out.push('\n');
     }
     out
+}
+
+/// Where the credential of a Proxmox target comes from, never its value.
+fn auth_source(lookup: &dyn Fn(&str) -> Option<String>) -> (String, String) {
+    if let Some(name) = lookup("DELONIX_PROXMOX_SECRET") {
+        return ("secret".into(), format!("kind: Secret '{name}'"));
+    }
+    if let Some(id) = lookup("DELONIX_PROXMOX_TOKEN_ID") {
+        let from = match lookup("DELONIX_PROXMOX_TOKEN_FILE") {
+            Some(f) => format!("file {f}"),
+            None if lookup("DELONIX_PROXMOX_TOKEN").is_some() => {
+                super::po::t("the environment (redacted)").to_string()
+            }
+            None => super::po::t("nowhere — the token is missing").to_string(),
+        };
+        return ("api-token".into(), format!("{id}, secret from {from}"));
+    }
+    if let Some(user) = lookup("DELONIX_PROXMOX_USER") {
+        return (
+            "password".into(),
+            super::po::tf(
+                "{user} — a password, weaker than an API token",
+                &[("user", &user)],
+            ),
+        );
+    }
+    ("none".into(), super::po::t("no credential").to_string())
+}
+
+fn config_show(output: super::output::OutputFormat) -> Result<()> {
+    use super::providers_config as pc;
+    let loaded = pc::loaded();
+    let (file, cfg) = match loaded {
+        Ok(Some((p, c))) => (Some(p.clone()), Some(c)),
+        Ok(None) => (None, None),
+        Err(e) => return Err(Error::Invalid(e.to_string())),
+    };
+    let ignored: Vec<String> = file
+        .as_ref()
+        .map(|f| {
+            pc::ignored(f)
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let env = |k: &str| std::env::var(k).ok().filter(|v| !v.trim().is_empty());
+    let (default, default_source) = if let Some(v) = env("DELONIX_VM_BACKEND") {
+        (Some(v), "environment (DELONIX_VM_BACKEND)".to_string())
+    } else if let Some(v) = cfg.and_then(|c| c.default_provider.clone()) {
+        (Some(v), "file".to_string())
+    } else if let Some(v) = delonix_vm::get_default_backend(&super::util::state_root()) {
+        (Some(v), "legacy vm default-backend".to_string())
+    } else {
+        (None, "auto-detection".to_string())
+    };
+
+    // One row per provider: the local ones the file lists, and the Proxmox
+    // target from wherever this process takes it (D4).
+    let mut rows: Vec<serde_json::Value> = Vec::new();
+    for p in cfg.map(|c| c.providers.as_slice()).unwrap_or(&[]) {
+        match p {
+            pc::ProviderEntry::Libvirt(_) => {
+                rows.push(serde_json::json!({"type": "libvirt", "source": "file"}))
+            }
+            pc::ProviderEntry::CloudHypervisor(_) => {
+                rows.push(serde_json::json!({"type": "cloud-hypervisor", "source": "file"}))
+            }
+            pc::ProviderEntry::Proxmox(_) => {}
+        }
+    }
+    let px_lookup = super::vmbackends::configured_lookup()?;
+    if px_lookup("DELONIX_PROXMOX_URL").is_some() {
+        let source = if env("DELONIX_PROXMOX_URL").is_some() {
+            "environment"
+        } else {
+            "file"
+        };
+        let (auth_kind, auth) = auth_source(&*px_lookup);
+        rows.push(serde_json::json!({
+            "type": "proxmox",
+            "source": source,
+            "url": px_lookup("DELONIX_PROXMOX_URL"),
+            "node": px_lookup("DELONIX_PROXMOX_NODE"),
+            "auth": auth_kind,
+            "credential": auth,
+            "caFile": px_lookup("DELONIX_PROXMOX_CA_FILE"),
+            "insecureSkipVerify": px_lookup("DELONIX_PROXMOX_INSECURE_TLS").is_some(),
+            "bridge": px_lookup("DELONIX_PROXMOX_BRIDGE"),
+            "vlan": px_lookup("DELONIX_PROXMOX_VLAN"),
+        }));
+    }
+
+    match output {
+        super::output::OutputFormat::Json => {
+            let doc = serde_json::json!({
+                "file": file.as_ref().map(|f| f.display().to_string()),
+                "ignored": ignored,
+                "defaultProvider": default,
+                "defaultSource": default_source,
+                "providers": rows,
+            });
+            let text = serde_json::to_string_pretty(&doc)
+                .map_err(|e| Error::Invalid(format!("json output: {e}")))?;
+            println!("{text}");
+            Ok(())
+        }
+        super::output::OutputFormat::Table => {
+            let none = super::po::t("none — the providers file does not exist").to_string();
+            println!(
+                "{:<18}{}",
+                super::po::t("File:"),
+                file.as_ref()
+                    .map(|f| f.display().to_string())
+                    .unwrap_or(none)
+            );
+            for i in &ignored {
+                println!(
+                    "{:<18}{}",
+                    super::po::t("Ignored:"),
+                    super::po::tf("{path} (another file wins)", &[("path", i)])
+                );
+            }
+            println!(
+                "{:<18}{} ({})",
+                super::po::t("Default provider:"),
+                default.as_deref().unwrap_or("-"),
+                default_source
+            );
+            println!("{}", super::po::t("Providers:"));
+            if rows.is_empty() {
+                println!("  -");
+            }
+            for r in &rows {
+                let t = r["type"].as_str().unwrap_or("?");
+                let src = r["source"].as_str().unwrap_or("?");
+                println!(
+                    "  {t:<18}{}",
+                    super::po::tf("from {source}", &[("source", src)])
+                );
+                for key in ["url", "node", "credential", "caFile", "bridge", "vlan"] {
+                    if let Some(v) = r.get(key).and_then(|v| v.as_str()) {
+                        println!("    {key:<16}{v}");
+                    }
+                }
+                if r["insecureSkipVerify"].as_bool() == Some(true) {
+                    println!(
+                        "    {:<16}{}",
+                        "tls",
+                        super::po::t("certificate NOT verified (insecureSkipVerify)")
+                    );
+                }
+            }
+            Ok(())
+        }
+    }
+}
+
+fn config_validate(file: Option<std::path::PathBuf>) -> Result<()> {
+    use super::providers_config as pc;
+    let path = match file {
+        Some(f) => f,
+        None => match pc::loaded() {
+            Ok(Some((p, _))) => p.clone(),
+            Ok(None) => return Err(Error::Invalid(
+                super::po::t(
+                    "there is no providers file to validate (none of the three locations exists)",
+                )
+                .into(),
+            )),
+            Err(e) => return Err(Error::Invalid(e.to_string())),
+        },
+    };
+    let content = std::fs::read_to_string(&path)
+        .map_err(|e| Error::Invalid(format!("{}: {e}", path.display())))?;
+    let cfg = pc::parse(&content, &path)?;
+    pc::validate(&cfg, &path)?;
+    println!(
+        "{}",
+        super::po::tf("{path}: valid", &[("path", &path.display().to_string())])
+    );
+    Ok(())
 }
 
 #[cfg(test)]

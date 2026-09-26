@@ -4326,11 +4326,11 @@ msgstr ""
 "detecção do próprio motor. Sem flag nenhuma, imprime o que está fixado "
 "(`none` = decide a auto-detecção)."
 
-msgid "Set the persisted default (`cloud-hypervisor` or `libvirt`)."
-msgstr "Fixa o valor persistido (`cloud-hypervisor` ou `libvirt`)."
+msgid "Set `defaultProvider` in the providers file (`libvirt`, `cloud-hypervisor`, or a configured `proxmox`)."
+msgstr "Fixa o `defaultProvider` no ficheiro de providers (`libvirt`, `cloud-hypervisor`, ou um `proxmox` configurado)."
 
-msgid "Clear the persisted default (fall back to auto-detection)."
-msgstr "Limpa o valor persistido (volta à auto-detecção)."
+msgid "Remove `defaultProvider` from the providers file."
+msgstr "Tira o `defaultProvider` do ficheiro de providers."
 
 msgid ""
 "Register an existing disk image under a name, so `vm create --disk <name>` "
@@ -8141,8 +8141,8 @@ msgstr "Converte um disco de VM para o formato que outro ecossistema importa.\n\
 msgid "Get or set the default VM backend."
 msgstr "Lê ou fixa o backend de VM por omissão."
 
-msgid "Get or set the default VM backend.\n\nUsed by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given — above the engine's own auto-detection heuristic. With no flag, prints the current default (`none` if auto-detection decides)."
-msgstr "Lê ou fixa o backend de VM por omissão.\n\nUsado pelo `vm create` quando não vem nem `--backend` nem `DELONIX_VM_BACKEND` — acima da heurística de auto-detecção do próprio motor. Sem flag nenhuma, imprime o que está fixado (`none` = decide a auto-detecção)."
+msgid "Get or set the default VM backend.\n\nUsed by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND` is given. It lives in the node's providers file (`defaultProvider`, ADR-0054): `--set` edits that line and nothing else in the file. With no flag, prints the current default (`none` if auto-detection decides)."
+msgstr "Lê ou fixa o backend de VM por omissão.\n\nUsado pelo `vm create` quando não vem nem `--backend` nem `DELONIX_VM_BACKEND`. Vive no ficheiro de providers do nó (`defaultProvider`, ADR-0054): o `--set` edita essa linha e mais nada no ficheiro. Sem flag nenhuma, imprime o que está fixado (`none` = decide a auto-detecção)."
 
 msgid "SSH into a VM by NAME, or straight to an address."
 msgstr "Entra por SSH numa VM pelo NOME, ou directamente num endereço."
@@ -14010,3 +14010,112 @@ msgstr "aviso: {why}"
 
 msgid "warning: '{name}' is the default VM provider, but this process has no configuration for it — `vm create` without --backend will refuse"
 msgstr "aviso: '{name}' é o provider de VM por omissão, mas este processo não tem configuração para ele — o `vm create` sem --backend vai recusar"
+
+# provider config show|validate, vm default-backend on the file (ADR-0054)
+msgid "The node's providers file (ADR-0054): what it says, and whether it is valid."
+msgstr "O ficheiro de providers do nó (ADR-0054): o que diz, e se é válido."
+
+msgid "The provider configuration this process reads, with where each value comes from."
+msgstr "A configuração de providers que este processo lê, com a origem de cada valor."
+
+msgid "The provider configuration this process reads, with where each value comes from.\n\nThe file (and any file the precedence ignores), the default provider and its source, and every provider with its settings. A secret is never printed: only where it comes from — a file path, a `kind: Secret` name, or the environment."
+msgstr "A configuração de providers que este processo lê, com a origem de cada valor.\n\nO ficheiro (e qualquer ficheiro que a precedência ignora), o provider por omissão e a sua origem, e cada provider com as suas definições. Um segredo nunca é impresso: só de onde vem — um caminho de ficheiro, o nome de um `kind: Secret`, ou o ambiente."
+
+msgid "Checks a providers file without registering or contacting anything."
+msgstr "Verifica um ficheiro de providers sem registar nem contactar nada."
+
+msgid "Checks a providers file without registering or contacting anything.\n\nThe format, a default provider that has an entry, and what the file points at: the token file (readable only by its owner), the CA, the secret, the URL and node syntax. Exit 0 when valid, 1 when not."
+msgstr "Verifica um ficheiro de providers sem registar nem contactar nada.\n\nO formato, um provider por omissão que tenha entrada, e aquilo para que o ficheiro aponta: o ficheiro do token (legível só pelo dono), a CA, o segredo, a sintaxe do URL e do nó. Sai 0 se for válido, 1 se não."
+
+msgid "The file to check. Omitted: the file this process would read."
+msgstr "O ficheiro a verificar. Omitido: o ficheiro que este processo leria."
+
+msgid "the environment (redacted)"
+msgstr "o ambiente (oculto)"
+
+msgid "nowhere — the token is missing"
+msgstr "lado nenhum — falta o token"
+
+msgid "{user} — a password, weaker than an API token"
+msgstr "{user} — uma password, mais fraca que um API token"
+
+msgid "no credential"
+msgstr "sem credencial"
+
+msgid "none — the providers file does not exist"
+msgstr "nenhum — o ficheiro de providers não existe"
+
+msgid "File:"
+msgstr "Ficheiro:"
+
+msgid "Ignored:"
+msgstr "Ignorado:"
+
+msgid "{path} (another file wins)"
+msgstr "{path} (ganha outro ficheiro)"
+
+msgid "Default provider:"
+msgstr "Provider por omissão:"
+
+msgid "Providers:"
+msgstr "Providers:"
+
+msgid "from {source}"
+msgstr "de {source}"
+
+msgid "certificate NOT verified (insecureSkipVerify)"
+msgstr "certificado NÃO verificado (insecureSkipVerify)"
+
+msgid "there is no providers file to validate (none of the three locations exists)"
+msgstr "não há ficheiro de providers para validar (nenhum dos três sítios existe)"
+
+msgid "{path}: valid"
+msgstr "{path}: válido"
+
+msgid "{path}: defaultProvider '{name}' has no entry in this file, so no process can serve it"
+msgstr "{path}: o defaultProvider '{name}' não tem entrada neste ficheiro, logo nenhum processo o pode servir"
+
+msgid "neither XDG_CONFIG_HOME nor HOME is set: no user providers file to write"
+msgstr "nem XDG_CONFIG_HOME nem HOME estão definidos: não há ficheiro de providers do utilizador para escrever"
+
+msgid "could not write {path}: {err} — a system file needs root (sudo), or point DELONIX_PROVIDERS_CONFIG at a file you can write"
+msgstr "não foi possível escrever {path}: {err} — um ficheiro de sistema precisa de root (sudo), ou aponta o DELONIX_PROVIDERS_CONFIG para um ficheiro que possas escrever"
+
+msgid "default provider cleared in {path} (falls back to auto-detection)"
+msgstr "provider por omissão retirado de {path} (volta à auto-detecção)"
+
+msgid "default provider set to {backend} in {path}"
+msgstr "provider por omissão fixado em {backend} em {path}"
+
+msgid "note: this default comes from the legacy per-root setting — `vm default-backend --set` moves it into the providers file"
+msgstr "nota: este default vem da definição antiga por root — o `vm default-backend --set` passa-o para o ficheiro de providers"
+
+msgid "which providers file this node reads, its default provider and where each value comes from"
+msgstr "que ficheiro de providers este nó lê, o provider por omissão e de onde vem cada valor"
+
+msgid "the same, machine-readable (secrets are never included)"
+msgstr "o mesmo, legível por máquina (os segredos nunca vão incluídos)"
+
+msgid "check the file this process reads, and what it points at, without contacting any node"
+msgstr "verifica o ficheiro que este processo lê, e aquilo para que aponta, sem contactar nó nenhum"
+
+msgid "check a file before installing it"
+msgstr "verifica um ficheiro antes de o instalar"
+
+msgid "note: {path} exists but {chosen} is the providers file read here"
+msgstr "nota: {path} existe, mas o ficheiro de providers lido aqui é {chosen}"
+
+msgid "what the node's providers file says, and where each value comes from"
+msgstr "o que diz o ficheiro de providers do nó, e de onde vem cada valor"
+
+msgid "check a providers file without contacting any node"
+msgstr "verifica um ficheiro de providers sem contactar nó nenhum"
+
+msgid "Prints the JSON Schema of the providers file."
+msgstr "Imprime o JSON Schema do ficheiro de providers."
+
+msgid "Prints the JSON Schema of the providers file.\n\nThe same schema published as `docs/schema/v1/providers.json`, generated from the types the engine reads — an editor that loads it underlines a misspelt key before `provider config validate` is ever run."
+msgstr "Imprime o JSON Schema do ficheiro de providers.\n\nO mesmo schema publicado em `docs/schema/v1/providers.json`, gerado a partir dos tipos que o motor lê — um editor que o carregue sublinha uma chave mal escrita antes de alguém correr o `provider config validate`."
+
+msgid "the JSON Schema of the providers file, for an editor or a CI check"
+msgstr "o JSON Schema do ficheiro de providers, para um editor ou um check de CI"

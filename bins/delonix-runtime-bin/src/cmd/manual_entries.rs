@@ -1973,6 +1973,42 @@ pub static ENTRIES: &[Entry] = &[
         see_also: &["provider ls", "provider matrix", "compatibility docker"],
     },
     Entry {
+        path: "provider config",
+        group: "Advanced",
+        examples: &[
+            ("what the node's providers file says, and where each value comes from", "delonix provider config show"),
+            ("check a providers file without contacting any node", "delonix provider config validate -f ./providers.yaml"),
+            ("the JSON Schema of the providers file, for an editor or a CI check", "delonix provider config schema"),
+        ],
+        see_also: &["vm default-backend", "provider ls"],
+    },
+    Entry {
+        path: "provider config schema",
+        group: "Advanced",
+        examples: &[
+            ("the JSON Schema of the providers file, for an editor or a CI check", "delonix provider config schema > providers.schema.json"),
+        ],
+        see_also: &["provider config validate", "manifest schema"],
+    },
+    Entry {
+        path: "provider config show",
+        group: "Advanced",
+        examples: &[
+            ("which providers file this node reads, its default provider and where each value comes from", "delonix provider config show"),
+            ("the same, machine-readable (secrets are never included)", "delonix provider config show -o json"),
+        ],
+        see_also: &["provider config validate", "vm default-backend", "provider ls"],
+    },
+    Entry {
+        path: "provider config validate",
+        group: "Advanced",
+        examples: &[
+            ("check the file this process reads, and what it points at, without contacting any node", "delonix provider config validate"),
+            ("check a file before installing it", "delonix provider config validate -f ./providers.yaml"),
+        ],
+        see_also: &["provider config show", "vm default-backend"],
+    },
+    Entry {
         path: "provider matrix",
         group: "Advanced",
         examples: &[

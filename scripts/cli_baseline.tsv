@@ -166,6 +166,9 @@
 =	pod logs
 ~	pod port-forward
 ~	policy unset
+~	provider config schema
+~	provider config show
+~	provider config validate
 ~	provider describe
 ~	provider ls
 ~	provider matrix

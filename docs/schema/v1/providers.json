@@ -1,0 +1,205 @@
+{
+  "$defs": {
+    "Network": {
+      "additionalProperties": false,
+      "properties": {
+        "bridge": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "vlan": {
+          "default": null,
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProviderEntry": {
+      "description": "One provider. Tagged by `type`, the same name `--backend` and a VM record use.",
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A local provider: listing it declares it; there is nothing to configure.",
+          "properties": {
+            "name": {
+              "default": null,
+              "description": "Reserved: defaults to the type; a different name is refused until a\nnode can carry two providers of one type.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "libvirt",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A local provider: listing it declares it; there is nothing to configure.",
+          "properties": {
+            "name": {
+              "default": null,
+              "description": "Reserved: defaults to the type; a different name is refused until a\nnode can carry two providers of one type.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "cloud-hypervisor",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A Proxmox VE node reached through its API, as the vendor documents it.",
+          "properties": {
+            "auth": {
+              "$ref": "#/$defs/ProxmoxAuth"
+            },
+            "name": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "network": {
+              "$ref": "#/$defs/Network"
+            },
+            "node": {
+              "type": "string"
+            },
+            "tls": {
+              "$ref": "#/$defs/Tls"
+            },
+            "type": {
+              "const": "proxmox",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url",
+            "node",
+            "auth"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "ProxmoxAuth": {
+      "additionalProperties": false,
+      "description": "The credential, by reference only. The two value fields exist so they are\nrefused BY NAME, with the accepted forms, instead of as an unknown field.",
+      "properties": {
+        "passwordFile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secretRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokenId": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "tokenSecretFile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "username": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Tls": {
+      "additionalProperties": false,
+      "properties": {
+        "caFile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "insecureSkipVerify": {
+          "default": false,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "The parsed file.",
+  "properties": {
+    "apiVersion": {
+      "const": "config.delonix.io/v1",
+      "description": "The format version; this build reads only `config.delonix.io/v1`.",
+      "type": "string"
+    },
+    "defaultProvider": {
+      "default": null,
+      "description": "The provider a request that names none goes to.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "providers": {
+      "description": "One entry per provider type this node has.",
+      "items": {
+        "$ref": "#/$defs/ProviderEntry"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "apiVersion"
+  ],
+  "title": "Delonix providers file (config.delonix.io/v1)",
+  "type": "object"
+}
