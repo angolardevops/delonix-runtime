@@ -182,6 +182,7 @@ contract's <code>ProviderInfo</code>. <strong>Not stable</strong> — see
 <div class='help'><pre><code>Usage: delonix provider [OPTIONS] &lt;COMMAND&gt;
 
 Commands:
+  config    The node&#x27;s providers file (ADR-0054): what it says, and whether it is valid
   describe  Every capability of ONE provider, with its state and the reason
   ls        Every provider this build knows, probed on this host
   matrix    The declared matrix, host-independent, as Markdown
@@ -195,7 +196,7 @@ Options:
           Print help (see a summary with &#x27;-h&#x27;)
 
 COMMAND MAP:
-  Advanced  ls · describe · matrix
+  Advanced  ls · describe · matrix · config
 
 EXAMPLES:
   # what each provider can do on this host, counted per state

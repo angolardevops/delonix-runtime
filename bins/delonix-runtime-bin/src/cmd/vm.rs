@@ -692,13 +692,14 @@ pub enum VmCmd {
     /// Get or set the default VM backend.
     ///
     /// Used by `vm create` when neither `--backend` nor `DELONIX_VM_BACKEND`
-    /// is given — above the engine's own auto-detection heuristic. With no
-    /// flag, prints the current default (`none` if auto-detection decides).
+    /// is given. It lives in the node's providers file (`defaultProvider`,
+    /// ADR-0054): `--set` edits that line and nothing else in the file. With
+    /// no flag, prints the current default (`none` if auto-detection decides).
     DefaultBackend {
-        /// Set the persisted default (`cloud-hypervisor` or `libvirt`).
+        /// Set `defaultProvider` in the providers file (`libvirt`, `cloud-hypervisor`, or a configured `proxmox`).
         #[arg(long)]
         set: Option<String>,
-        /// Clear the persisted default (fall back to auto-detection).
+        /// Remove `defaultProvider` from the providers file.
         #[arg(long)]
         clear: bool,
     },
@@ -2456,17 +2457,30 @@ pub fn run(action: VmCmd) -> Result<()> {
         VmCmd::Build(args) => super::vmimage::run(super::vmimage::VmImageCmd::Build(args)),
         VmCmd::DefaultBackend { set, clear } => {
             if clear {
+                let target = super::providers_config::write_target()?;
+                super::providers_config::set_default_in(&target, None)?;
+                // The legacy default would otherwise answer in its place.
                 delonix_vm::clear_default_backend(&base)?;
                 println!(
                     "{}",
-                    super::po::t("default backend cleared (falls back to auto-detection)")
+                    super::po::tf(
+                        "default provider cleared in {path} (falls back to auto-detection)",
+                        &[("path", &target.display().to_string())]
+                    )
                 );
             } else if let Some(backend) = set {
-                delonix_vm::set_default_backend(&base, &backend)?;
-                let canon = delonix_vm::get_default_backend(&base).unwrap_or(backend);
+                let canon = delonix_vm::valid_backend_name(&backend)?;
+                let target = super::providers_config::write_target()?;
+                super::providers_config::set_default_in(&target, Some(canon))?;
+                // Moved, not copied: the legacy file would be one more place
+                // for the answer to live, and it loses to this one anyway.
+                delonix_vm::clear_default_backend(&base)?;
                 println!(
                     "{}",
-                    super::po::tf("default backend set to {backend}", &[("backend", &canon)])
+                    super::po::tf(
+                        "default provider set to {backend} in {path}",
+                        &[("backend", canon), ("path", &target.display().to_string())]
+                    )
                 );
             } else {
                 // The node's providers file wins over the legacy default
@@ -2476,9 +2490,17 @@ pub fn run(action: VmCmd) -> Result<()> {
                     Some(Err(why)) => return Err(Error::Invalid(why.clone())),
                     _ => None,
                 };
-                let current = from_file
-                    .clone()
-                    .or_else(|| delonix_vm::get_default_backend(&base));
+                let legacy = delonix_vm::get_default_backend(&base);
+                if from_file.is_none() && legacy.is_some() {
+                    eprintln!(
+                        "{}",
+                        super::po::t(
+                            "note: this default comes from the legacy per-root setting — \
+                             `vm default-backend --set` moves it into the providers file"
+                        )
+                    );
+                }
+                let current = from_file.clone().or(legacy);
                 if let Some(name) = &current {
                     // Named but not usable here: say so, instead of printing a
                     // name `vm create` would then refuse without warning.

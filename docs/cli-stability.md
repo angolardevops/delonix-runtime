@@ -312,6 +312,40 @@ o têm, em vez de o omitir.
 > aviso de depreciação — a regra do «corte limpo» aplica-se a comandos, e um
 > manifesto em git merece um degrau em vez de um erro.
 
+## O ficheiro de providers do nó — `config.delonix.io/v1`
+
+O `providers.yaml` (ADR-0054) diz que providers de VM o nó tem, como o motor
+chega a cada um e qual serve um pedido que não nomeia nenhum. Procura-se por
+esta ordem, e **o primeiro ficheiro que existe ganha, sem fusão**:
+`DELONIX_PROVIDERS_CONFIG`, `$XDG_CONFIG_HOME/delonix/providers.yaml` (ou
+`~/.config/…`), `/etc/delonix/providers.yaml`.
+
+É um formato publicado, com a mesma promessa que o schema dos manifestos dentro
+do `0.x`: **uma chave nunca é removida nem muda de significado, uma chave nova é
+sempre opcional, e `apiVersion: config.delonix.io/v1` só muda com um `v2`** que
+não sai sem o `v1` continuar a ser lido.
+
+A verdade é o schema, gerado dos tipos que o motor lê:
+**`delonix provider config schema`**, publicado em
+[`schema/v1/providers.json`](schema/v1/providers.json), com o mesmo teste a
+falhar se o publicado deixar de ser o gerado. O schema recusa uma chave
+desconhecida, outra versão, um tipo de provider que não existe e um segredo
+escrito no próprio ficheiro (`tokenSecret`, `password` — só por referência:
+`tokenSecretFile`, `passwordFile`, `secretRef`).
+
+O schema diz se o ficheiro está **bem escrito**; o
+**`delonix provider config validate`** diz se ele **serve**: um
+`defaultProvider` sem entrada no ficheiro, um ficheiro de token legível por
+outros utilizadores, uma CA que não existe. Nenhum dos dois contacta um nó.
+
+```yaml
+# yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json
+apiVersion: config.delonix.io/v1
+defaultProvider: libvirt
+providers:
+  - type: libvirt
+```
+
 ## NÃO estável — pode mudar em qualquer versão
 
 * **`serve cri`, `serve api`, `serve node-api`, `serve docker-api`** — superfícies de protocolo

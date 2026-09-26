@@ -325,7 +325,7 @@ delonix vm convert minha-base --to vdi         # VirtualBox
 delonix vm convert minha-base --to vhdx        # Hyper-V / Azure</code></pre></div><div class="ex"><div class="cap">Comprimir — só `qcow2` e `vmdk` o sabem fazer; nos outros é recusado com a lista, em vez de entregue ao qemu-img para falhar lá</div><pre><code>delonix vm convert minha-base --to qcow2 --compress</code></pre></div>
 <h2 id='default-backend'><code>vm default-backend</code></h2>
 <p class='intro'>Get or set the default VM backend.</p>
-<p class='intro'>Used by <code>vm create</code> when neither <code>--backend</code> nor <code>DELONIX_VM_BACKEND</code> is given — above the engine&#x27;s own auto-detection heuristic. With no flag, prints the current default (<code>none</code> if auto-detection decides).</p>
+<p class='intro'>Used by <code>vm create</code> when neither <code>--backend</code> nor <code>DELONIX_VM_BACKEND</code> is given. It lives in the node&#x27;s providers file (<code>defaultProvider</code>, ADR-0054): <code>--set</code> edits that line and nothing else in the file. With no flag, prints the current default (<code>none</code> if auto-detection decides).</p>
 <div class='help'><pre><code>Usage: delonix vm default-backend [OPTIONS]
 
 Options:
@@ -333,10 +333,10 @@ Options:
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
 
       --set &lt;SET&gt;
-          Set the persisted default (`cloud-hypervisor` or `libvirt`)
+          Set `defaultProvider` in the providers file (`libvirt`, `cloud-hypervisor`, or a configured `proxmox`)
 
       --clear
-          Clear the persisted default (fall back to auto-detection)
+          Remove `defaultProvider` from the providers file
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
