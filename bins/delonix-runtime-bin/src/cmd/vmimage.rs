@@ -1641,19 +1641,22 @@ pub(crate) fn official_distro_base(
             super::output::progress_bar(&label, done, total);
         }
     };
-    let (data, annotations) = delonix_oci::registry::pull_oci_artifact_with_meta(
+    // Straight to disk, verified and renamed into place — never the whole
+    // image in memory, and resumable if this process dies mid-download.
+    let pulled = delonix_oci::registry::pull_oci_artifact_to_file(
         &state_root(),
         &source,
+        &path,
         Some(&on_progress),
     )
     .ok()?;
     super::output::progress_done();
-    std::fs::write(&path, &data).ok()?;
+    let annotations = pulled.annotations;
     let img = VmImage {
         name: local.clone(),
         tag: source.clone(),
-        digest: format!("sha256:{}", hex_sha256(&data)),
-        size: data.len() as u64,
+        digest: pulled.digest,
+        size: pulled.size,
         ubuntu_release: None,
         k8s_version: None,
         created_unix: now_unix(),
@@ -2079,20 +2082,23 @@ pub(crate) fn cmd_pull(store: &VmImageStore, source: &str, name: Option<String>)
             super::output::progress_bar(&label, done, total);
         }
     };
-    let (data, annotations) = delonix_oci::registry::pull_oci_artifact_with_meta(
+    let name = name.unwrap_or_else(|| source.rsplit('/').next().unwrap_or(source).to_string());
+    // Straight to the image's final path through a verified, resumable
+    // partial: the blob used to be held whole in memory, hashed twice, and
+    // written in place — a crash mid-write left a truncated qcow2 behind.
+    let pulled = delonix_oci::registry::pull_oci_artifact_to_file(
         &state_root(),
         source,
+        &store.qcow2_path(&name),
         Some(&on_progress),
     )?;
     super::output::progress_done();
-    let name = name.unwrap_or_else(|| source.rsplit('/').next().unwrap_or(source).to_string());
-    let digest = format!("sha256:{}", hex_sha256(&data));
-    std::fs::write(store.qcow2_path(&name), &data)?;
+    let annotations = pulled.annotations;
     let img = VmImage {
         name: name.clone(),
         tag: source.to_string(),
-        digest,
-        size: data.len() as u64,
+        digest: pulled.digest,
+        size: pulled.size,
         ubuntu_release: None,
         k8s_version: None,
         created_unix: now_unix(),

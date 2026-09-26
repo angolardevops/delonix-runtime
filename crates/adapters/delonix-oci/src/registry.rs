@@ -1756,6 +1756,152 @@ pub fn pull_oci_artifact_with_meta(
     Ok((data, annotations))
 }
 
+/// What [`pull_oci_artifact_to_file`] left on disk.
+#[derive(Debug)]
+pub struct PulledArtifact {
+    /// `sha256:<hex>` of the blob — verified against the manifest.
+    pub digest: String,
+    /// Size in bytes.
+    pub size: u64,
+    /// The manifest annotations (see [`pull_oci_artifact_with_meta`]).
+    pub annotations: BTreeMap<String, String>,
+    /// `false` when `dest` already held exactly this blob and nothing was
+    /// downloaded.
+    pub downloaded: bool,
+}
+
+/// Pulls a single-blob artifact (a VM image) STRAIGHT TO `dest`, never
+/// holding it in memory. [`pull_oci_artifact_with_meta`] buffered the whole
+/// blob (GiBs for an appliance), hashed it twice, and wrote it in place, so a
+/// crash mid-write left a truncated qcow2 under the final name.
+///
+/// - The blob streams into `<dest>.<digest12>.download`, hashed on the way
+///   through, and is renamed onto `dest` only once it matches the manifest.
+///   The digest is in the partial's name so a partial of an EARLIER version
+///   of the tag is never stitched onto this one.
+/// - A partial left by an earlier process is RESUMED: its prefix is hashed
+///   again and the download continues by `Range` — on a slow link, an
+///   interrupted pull no longer starts over in the next process.
+/// - When `dest` already holds this exact blob (same size and digest),
+///   nothing is downloaded.
+/// - A digest mismatch deletes the partial (bad bytes are never resumed); a
+///   transport failure keeps it for the next attempt.
+pub fn pull_oci_artifact_to_file(
+    root: &std::path::Path,
+    source: &str,
+    dest: &std::path::Path,
+    progress: Option<&dyn Fn(u64, Option<u64>)>,
+) -> Result<PulledArtifact> {
+    let (host, repo, refr) = parse_reference(source);
+    let http = transfer_client()?;
+    let creds = crate::auth::lookup(root, &host);
+    let mut c = Client {
+        http,
+        host,
+        repo,
+        token: None,
+        creds,
+    };
+
+    let accept = "application/vnd.oci.image.manifest.v1+json";
+    let url = c.manifest_url(&refr);
+    let manifest_bytes = read_capped(c.fetch(&url, accept)?, MAX_MANIFEST_BYTES, "manifest")?;
+    // Same pin check as the in-memory path: a compromised registry must not be
+    // able to swap the whole manifest under a `@sha256:` reference.
+    verify_manifest_digest(&refr, &manifest_bytes)?;
+    let manifest: ImageManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| Error::Registry(format!("invalid artifact manifest: {e}")))?;
+    let layer = manifest
+        .layers()
+        .first()
+        .ok_or_else(|| Error::Registry("artifact manifest has no layers".into()))?;
+    let layer_digest = layer.digest().to_string();
+    let hex = crate::cas::strip(&layer_digest).to_string();
+    if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return Err(Error::Registry(format!(
+            "artifact layer is not a sha256 blob: {layer_digest}"
+        )));
+    }
+    let size = layer.size();
+    // Read after the manifest checks, like the in-memory path; they are only
+    // returned once the blob itself has been verified.
+    let annotations: BTreeMap<String, String> = manifest
+        .annotations()
+        .clone()
+        .unwrap_or_default()
+        .into_iter()
+        .collect();
+
+    if std::fs::metadata(dest)
+        .map(|m| m.len() == size)
+        .unwrap_or(false)
+        && crate::cas::sha256_file(dest)? == hex
+    {
+        return Ok(PulledArtifact {
+            digest: layer_digest,
+            size,
+            annotations,
+            downloaded: false,
+        });
+    }
+
+    let dir = dest.parent().unwrap_or(std::path::Path::new("."));
+    let fname = dest
+        .file_name()
+        .ok_or_else(|| Error::Registry(format!("not a file path: {}", dest.display())))?
+        .to_string_lossy()
+        .into_owned();
+    let partial = dir.join(format!("{fname}.{}.download", &hex[..12]));
+    // Partials of other versions of this same file: never resumable into
+    // this blob, and a GiB each.
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let n = e.file_name().to_string_lossy().into_owned();
+            if n.starts_with(&format!("{fname}."))
+                && n.ends_with(".download")
+                && e.path() != partial
+            {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+
+    let mut sink = match crate::cas::StreamingBlob::resume(&partial) {
+        Ok(mut s) => {
+            if s.len() > size {
+                s.reset()?;
+            } else if !s.is_empty() {
+                tracing::info!(
+                    have = s.len(),
+                    size,
+                    "resuming {source} from a partial download"
+                );
+            }
+            s
+        }
+        Err(_) => crate::cas::StreamingBlob::create(&partial)?,
+    };
+    // A partial that is already whole (the process died between the last
+    // byte and the rename) needs no request at all.
+    if sink.len() < size || size == 0 {
+        c.fetch_blob_into(&layer_digest, progress, Client::MAX_BLOB_BYTES, &mut sink)?;
+    }
+    let got = sink.finish()?;
+    if got != hex {
+        let _ = std::fs::remove_file(&partial);
+        return Err(Error::DigestMismatch(format!(
+            "artifact corrupted or tampered: expected digest {layer_digest}, got sha256:{got}"
+        )));
+    }
+    std::fs::rename(&partial, dest)?;
+    Ok(PulledArtifact {
+        digest: layer_digest,
+        size,
+        annotations,
+        downloaded: true,
+    })
+}
+
 /// Minimal mock of an ANONYMOUS OCI registry (no 401 challenge — like a
 /// public `ghcr.io` or a local registry without auth): stores blobs/manifests
 /// in memory and serves them back. Enough for a real round-trip of
@@ -2524,6 +2670,128 @@ mod tests {
             !body.contains(".timeout("),
             "push_to_registry must not set its own ceiling"
         );
+    }
+
+    fn artifact_fixture(
+        tag: &str,
+        payload: &[u8],
+    ) -> (
+        u16,
+        std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        String,
+        std::path::PathBuf,
+    ) {
+        let (port, gets, _h) = serve_anon_registry();
+        let dir = scratch(tag);
+        let target = format!("127.0.0.1:{port}/vm:{tag}");
+        push_oci_artifact(
+            &dir,
+            &target,
+            "application/vnd.delonix.vmimage.v1.qcow2",
+            payload,
+        )
+        .unwrap();
+        (port, gets, target, dir)
+    }
+
+    fn leftovers(dir: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".download"))
+            .collect()
+    }
+
+    /// A VM image pulled to a file: whole and verified, and a second pull of
+    /// the same blob to the same path downloads nothing at all.
+    #[test]
+    fn a_vm_artifact_streams_to_its_file_and_is_not_pulled_twice() {
+        let payload: Vec<u8> = (0..200_000u32).map(|i| (i % 253) as u8).collect();
+        let (_p, gets, target, dir) = artifact_fixture("to-file", &payload);
+        let dest = dir.join("img.qcow2");
+
+        let a = crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        assert!(a.downloaded);
+        assert_eq!(a.size, payload.len() as u64);
+        assert_eq!(a.digest, format!("sha256:{}", sha256_hex(&payload)));
+        assert_eq!(std::fs::read(&dest).unwrap(), payload);
+        assert!(leftovers(&dir).is_empty());
+
+        let before = gets.load(std::sync::atomic::Ordering::SeqCst);
+        let b = crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        assert!(!b.downloaded, "the file already held this exact blob");
+        assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), before);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A partial left WHOLE by a process that died before the rename is
+    /// finished without a single request; one of another version of the tag
+    /// is removed; a corrupt one is started over and still ends up correct.
+    #[test]
+    fn a_partial_from_an_earlier_process_is_resumed_or_discarded() {
+        let payload: Vec<u8> = (0..150_000u32).map(|i| (i % 241) as u8).collect();
+        let hex = sha256_hex(&payload);
+        let (_p, gets, target, dir) = artifact_fixture("resume-file", &payload);
+        let dest = dir.join("img.qcow2");
+        let partial = dir.join(format!("img.qcow2.{}.download", &hex[..12]));
+        let stale = dir.join("img.qcow2.aaaaaaaaaaaa.download");
+
+        std::fs::write(&partial, &payload).unwrap();
+        std::fs::write(&stale, b"an older version").unwrap();
+        let before = gets.load(std::sync::atomic::Ordering::SeqCst);
+        crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        assert_eq!(gets.load(std::sync::atomic::Ordering::SeqCst), before);
+        assert_eq!(std::fs::read(&dest).unwrap(), payload);
+        assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
+
+        std::fs::remove_file(&dest).unwrap();
+        std::fs::write(&partial, vec![0xEEu8; 1000]).unwrap();
+        crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), payload);
+        assert!(leftovers(&dir).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Bytes that do not hash to the manifest's digest: refused, nothing under
+    /// the final name, and no partial kept to be "resumed" later.
+    #[test]
+    fn a_tampered_vm_artifact_leaves_nothing_on_disk() {
+        let (port, _gets, _h) = serve_anon_registry();
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "vm");
+        let promised = b"the image the publisher signed".to_vec();
+        let digest = format!("sha256:{}", sha256_hex(&promised));
+        c.push_blob(&digest, b"what a compromised registry serves")
+            .unwrap();
+        c.push_blob(&format!("sha256:{}", sha256_hex(b"{}")), b"{}")
+            .unwrap();
+        let manifest = serde_json::json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {"mediaType": "application/vnd.oci.empty.v1+json",
+                       "size": 2, "digest": format!("sha256:{}", sha256_hex(b"{}"))},
+            "layers": [{"mediaType": "application/vnd.delonix.vmimage.v1.qcow2",
+                        "size": promised.len(), "digest": digest}],
+        });
+        c.push_manifest(
+            "bad",
+            &serde_json::to_vec(&manifest).unwrap(),
+            "application/vnd.oci.image.manifest.v1+json",
+        )
+        .unwrap();
+        let dir = scratch("vm-tamper");
+        let dest = dir.join("img.qcow2");
+        let err = crate::registry::pull_oci_artifact_to_file(
+            &dir,
+            &format!("127.0.0.1:{port}/vm:bad"),
+            &dest,
+            None,
+        )
+        .unwrap_err();
+        assert!(matches!(err, crate::Error::DigestMismatch(_)), "{err}");
+        assert!(!dest.exists());
+        assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Security-audit finding: `blob_with_progress` used to trust the registry's raw
