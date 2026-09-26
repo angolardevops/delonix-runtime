@@ -28,7 +28,7 @@
 
 use crate::error::{Error, Result};
 use crate::{Client, FirewallRuleOpts, Ledger};
-use delonix_vm::firewall::{Direction, Policy, Proto, Rule};
+use delonix_compute::vm_firewall::{Direction, Policy, Proto, Rule};
 
 /// The comment prefix that marks a rule as written by this engine.
 pub const MANAGED: &str = "delonix-managed";

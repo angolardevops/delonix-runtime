@@ -17,11 +17,11 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use delonix_compute::vm_backend::VmConfig;
 use delonix_proxmox::{
     AgentExecStatus, Auth, Client, ClientOptions, Error, Ledger, Target, TaskState,
     MAX_RESPONSE_BYTES,
 };
-use delonix_vm::VmConfig;
 
 // ===========================================================================
 // The mock node
@@ -687,7 +687,7 @@ fn a_lost_answer_finds_the_running_task_instead_of_resending() {
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let ledger = Ledger::at(dir.path());
-    let cfg = delonix_vm::VmConfig {
+    let cfg = delonix_compute::vm_backend::VmConfig {
         name: "delonix-test-lost".into(),
         ..Default::default()
     };
@@ -821,7 +821,7 @@ fn a_lost_answer_with_nothing_on_the_node_stays_a_transport_error() {
     ]));
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let cfg = delonix_vm::VmConfig {
+    let cfg = delonix_compute::vm_backend::VmConfig {
         name: "delonix-test-lost".into(),
         ..Default::default()
     };
@@ -1065,8 +1065,8 @@ fn a_vm_policy_on_a_cluster_with_its_firewall_off_is_refused_before_any_write() 
     )]));
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let policy = delonix_vm::firewall::Policy {
-        direction: delonix_vm::firewall::Direction::In,
+    let policy = delonix_compute::vm_firewall::Policy {
+        direction: delonix_compute::vm_firewall::Direction::In,
         default_allow: false,
         rules: vec![],
     };
@@ -1349,7 +1349,8 @@ fn a_resize_left_pending_is_an_error_that_names_the_key() {
 /// template's own device. The node sees no request past the login.
 #[test]
 fn extra_devices_on_a_template_clone_are_refused_before_any_request() {
-    use delonix_vm::{CreateStage, ExtraDisk, VmBackend};
+    use delonix_compute::vm_backend::{CreateStage, VmBackend};
+    use delonix_compute::ExtraDisk;
     let node = MockNode::start(script(&[]));
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let before = node.log().len();
@@ -1401,7 +1402,7 @@ fn a_cloud_init_change_the_rendering_does_not_carry_is_an_error() {
     ]));
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let intent = delonix_vm::CloudInitIntent {
+    let intent = delonix_compute::vm_backend::CloudInitIntent {
         hostname: Some("web-1".into()),
         ci_user: Some("ops".into()),
         ssh_keys: vec!["ssh-ed25519 AAAA k1".into()],
@@ -1454,7 +1455,7 @@ const RESOURCES: &str = "/cluster/resources";
 /// configured node (`pve`, the API entry point) is never asked about it.
 #[test]
 fn a_vm_is_addressed_on_the_node_its_handle_names() {
-    use delonix_vm::VmBackend;
+    use delonix_compute::vm_backend::VmBackend;
     let node = MockNode::start(script(&[(
         "GET",
         PVE2_STATUS,
@@ -1483,7 +1484,7 @@ fn a_vm_is_addressed_on_the_node_its_handle_names() {
 /// `current_handle` gives the engine the new handle to persist.
 #[test]
 fn a_vm_moved_outside_the_engine_is_found_once_and_remembered() {
-    use delonix_vm::VmBackend;
+    use delonix_compute::vm_backend::VmBackend;
     let node = MockNode::start(script(&[
         (
             "GET",
@@ -1522,7 +1523,7 @@ fn a_vm_moved_outside_the_engine_is_found_once_and_remembered() {
 /// the original not-found stands (class 4), and nothing is remembered.
 #[test]
 fn a_vm_the_cluster_cannot_place_keeps_its_not_found() {
-    use delonix_vm::VmBackend;
+    use delonix_compute::vm_backend::VmBackend;
     for listing in [
         "[]",
         r#"[{"type":"qemu","vmid":100,"node":"pve2"},{"type":"qemu","vmid":100,"node":"pve3"}]"#,

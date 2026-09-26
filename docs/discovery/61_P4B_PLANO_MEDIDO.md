@@ -127,3 +127,29 @@ o custo real das fatias 3 e 4 (o entrançado orquestração↔backends só se me
 desfazê-lo), e se `delonix-linux`/`-mgmt`/`-mcp` chegam aos use cases por `pub use` ou
 precisam de mudar de importação — os quatro símbolos são os mesmos, por isso deve ser
 `pub use`.
+
+## Adenda P4b.2 (2026-09-26) — o que se moveu, e o registo que ficou para a P4b.4
+
+**Feito.** Para `delonix-compute`: `vm_backend` (`VmConfig`, `CloudInitIntent`, `Boot`,
+`CreateStage`/`DestroyStage`, o trait `VmBackend` com os três `unsupported_*`,
+`BackendFactory`/`ReportFactory`/`BackendRegistration`, `mem_mib`/`parse_mem_mib`,
+`DEFAULT_CI_USER`), `vm_error` (o `Error`/`Result` inteiros, com o `From<Error> for Dx`) e
+`vm_firewall`. O `delonix-vm` re-exporta tudo pelos nomes de sempre; nenhum chamador do
+`-bin`, do `delonix-linux`, da `mgmt` ou do MCP mudou uma linha. O `delonix-proxmox` passou a
+depender só de `delonix-compute`, e a excepção `("dep", "delonix-proxmox", "delonix-vm")`
+saiu do `arch_fitness.py` (10 → 9 excepções).
+
+**O desvio ao plano, e porquê.** O plano punha o REGISTO (o `static`, `register_backend`,
+`select_backend*`, `auto_detect`) nesta fatia. Medido ao cortar: o registo é semeado com
+`CloudHypervisorBackend` e `LibvirtBackend`, que só saem do `delonix-vm` na P4b.4. Movê-lo
+agora obrigava a um gancho de sementeira entre crates, ou a deixar a ordem da auto-detecção
+depender de quem regista primeiro. O portão desta fatia não precisa dele: o Proxmox deixa de
+registar-se sozinho e devolve um `BackendRegistration` (`delonix_proxmox::registration`), que
+a raiz de composição (`cmd/vmbackends.rs`) regista — a forma que o ADR-0008 descreve. O
+registo desce na P4b.4, quando os dois locais também forem registados pela composição e não
+houver sementeira nenhuma para transportar.
+
+**Duas conversões ficaram no adapter**, por regra de órfãos: `From<cloudinit::Error>` (o tipo
+de origem é do `delonix-vm`, fica como `impl`) e `From<delonix_state::Error>` (os dois tipos
+são agora de outros crates, logo passou a função `state_err`, chamada nos 14 sítios que
+faziam `?` sobre o `JsonStore`).

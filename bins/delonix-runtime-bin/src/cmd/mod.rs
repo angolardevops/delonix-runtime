@@ -57,6 +57,7 @@ pub mod po;
 pub mod pod;
 pub mod policy;
 pub mod provider;
+pub mod providers_config;
 pub mod provision;
 pub mod prune;
 pub mod rbackup;

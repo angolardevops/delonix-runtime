@@ -156,6 +156,7 @@ pgrep -a delonix
 | AppArmor | 当用户命名空间限制启用时，为 `<目录>/delonix` 写 profile | 总是执行（限制开启时） |
 | 旧版 Debian | 当 `kernel.unprivileged_userns_clone` 为 `0` 时把它设为 `1` | 总是执行（需要时） |
 | 虚拟机依赖 | libvirt、qemu、cloud-init 工具链；Cloud Hypervisor 及其固件从上游下载 | 用 `--no-vm` 跳过 |
+| 默认 VM provider | 带 `defaultProvider: libvirt` 的 `providers.yaml`（ADR-0054）：`/etc/delonix/`，或配合 `--user` 写到 `~/.config/delonix/`；仅在不存在时写入，从不改写 | `--vm-provider cloud-hypervisor` 改变默认值；用 `--no-vm` 跳过 |
 | 内核调优 | `/etc/modules-load.d/delonix.conf`、`/etc/sysctl.d/99-delonix.conf` | 用 `--no-tune` 跳过 |
 | cgroup 委派 | `user@.service` 的 drop-in，只在尚未被委派时才写 | 用 `--no-delegate` 跳过 |
 | 加速器 | NVIDIA CDI 和 `render` 组，只在存在 GPU 时才配置 | 用 `--no-gpu` 跳过 |

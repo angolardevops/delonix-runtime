@@ -2449,7 +2449,32 @@ pub fn run(action: VmCmd) -> Result<()> {
                     super::po::tf("default backend set to {backend}", &[("backend", &canon)])
                 );
             } else {
-                match delonix_vm::get_default_backend(&base) {
+                // The node's providers file wins over the legacy default
+                // (ADR-0054 D3), so it is what this command reports first.
+                let from_file = match delonix_vm::configured_default_backend() {
+                    Some(Ok(Some(name))) => Some(name.clone()),
+                    Some(Err(why)) => return Err(Error::Invalid(why.clone())),
+                    _ => None,
+                };
+                let current = from_file
+                    .clone()
+                    .or_else(|| delonix_vm::get_default_backend(&base));
+                if let Some(name) = &current {
+                    // Named but not usable here: say so, instead of printing a
+                    // name `vm create` would then refuse without warning.
+                    if delonix_vm::valid_backend_name(name).is_err() {
+                        eprintln!(
+                            "{}",
+                            super::po::tf(
+                                "warning: '{name}' is the default VM provider, but this process \
+                                 has no configuration for it — `vm create` without --backend will \
+                                 refuse",
+                                &[("name", name)]
+                            )
+                        );
+                    }
+                }
+                match current {
                     Some(b) => println!("{b}"),
                     None => println!(
                         "{}",

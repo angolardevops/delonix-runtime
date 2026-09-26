@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Guide du contributeur"><div class="group"><div class="gtitle">Vue d&#x27;ensemble</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manuel du contributeur</span></a></div><div class="group"><div class="gtitle">Démarrer</div><a href="start-here.html"><span class="n">01</span><span>Commencer ici</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS et cloud native — où s’inscrit le moteur</span></a></div><div class="group"><div class="gtitle">Fondamentaux</div><a href="linux-foundations.html"><span class="n">03</span><span>Fondations Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Initiation au cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Initiation à Rust pour cette base de code</span></a></div><div class="group"><div class="gtitle">Préparer et compiler</div><a href="environment.html"><span class="n">06</span><span>Préparer votre environnement</span></a><a href="build-and-test.html"><span class="n">07</span><span>Cloner, compiler et tester</span></a></div><div class="group"><div class="gtitle">Architecture</div><a href="project-structure.html"><span class="n">08</span><span>Structure du projet</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>Les crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>Entretien de conception de système — le Delonix Engine</span></a></div><div class="group"><div class="gtitle">Images et microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile et VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construire des microVMs</span></a></div><div class="group"><div class="gtitle">Exploiter et diagnostiquer</div><a href="troubleshooting.html"><span class="n">14</span><span>Dépannage</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Comment les noms atteignent /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuer</div><a href="coding-conventions.html"><span class="n">16</span><span>Conventions de code</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Ajouter un Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Flux de contribution</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases et stabilité</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publier la documentation</span></a></div><div class="group"><div class="gtitle">Référence</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Standards cloud native, couche par couche</span></a><a class="on" aria-current="page" href="environment-variables.html"><span class="n">22</span><span>Variables d’environnement (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossaire</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Référence</p>
-<h1 id="environment-variables-delonix_">Variables d’environnement (<code>DELONIX_*</code>)</h1>
+<div class="notice" role="note"><span>Cette traduction peut être en retard sur la page anglaise, modifiée depuis la traduction. <a href="../en/environment-variables.html">Lire la page en anglais</a></span></div><h1 id="environment-variables-delonix_">Variables d’environnement (<code>DELONIX_*</code>)</h1>
 <p><strong>Avant de lire :</strong> <a href="build-and-test.html#isolating-the-engines-state">Isoler l'état du moteur</a> dans Cloner, construire et tester.</p>
 <p>Cette page recense chaque nom <code>DELONIX_*</code> qui apparaît dans le code du moteur, avec l’endroit où il est lu,
 ce qu’il change, et s’il vous arrivera un jour de le définir. C’est une référence : lisez la section qui
@@ -276,7 +276,7 @@ script et dans <a href="build-and-test.html">Cloner, compiler et tester</a>, pas
 </tr>
 <tr>
 <td>Backend de VM</td>
-<td><code>--backend</code> (ou le <code>HYPERVISOR</code> de l’image) &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend --set</code> &gt; détection automatique</td>
+<td><code>--backend</code> (ou le <code>HYPERVISOR</code> de l’image) &gt; <code>DELONIX_VM_BACKEND</code> &gt; le <code>defaultProvider</code> du fichier de providers (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; détection automatique (seulement sans fichier de providers)</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -457,6 +457,13 @@ et la façon de démonter l’infra isolée, se trouvent dans
 <td>Backend de VM valable pour toute la session lorsqu’une commande n’en nomme pas.</td>
 <td>Un nom de backend (<code>libvirt</code>, <code>cloud-hypervisor</code>, ou un backend distant enregistré comme <code>proxmox</code>). Une valeur vide est ignorée.</td>
 <td>En dessous de <code>--backend</code> et du <code>HYPERVISOR</code> de l’image, au-dessus du défaut de la machine défini par <code>delonix vm default-backend --set</code>. Comme un choix explicite, elle outrepasse l’heuristique de capacité et peut échouer tardivement au démarrage si le backend ne peut pas exécuter la VM.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROVIDERS_CONFIG</code></td>
+<td><code>cmd/<wbr>providers_config.<wbr>rs:locate_with</code></td>
+<td>Chemin du fichier de providers du nœud (ADR-0054), avant <code>$XDG_CONFIG_HOME/<wbr>delonix/<wbr>providers.<wbr>yaml</code> et <code>/<wbr>etc/<wbr>delonix/<wbr>providers.<wbr>yaml</code>.</td>
+<td>Un chemin.</td>
+<td>Doit désigner un fichier existant — ne se rabat jamais sur un autre. Le premier fichier trouvé est la configuration ; les fichiers ne sont jamais fusionnés. Un fichier illisible fait échouer une requête de VM sans <code>--backend</code> au lieu de deviner un provider.</td>
 </tr>
 <tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
@@ -799,6 +806,13 @@ commandes. Contexte : <a class="src" href="https://github.com/angolardevops/del
 <td>Mot de passe de ce compte.</td>
 <td></td>
 <td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_PASSWORD_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:credential_value</code></td>
+<td>Chemin d’un fichier contenant ce mot de passe ; préféré à <code>DELONIX_PROXMOX_PASSWORD</code>.</td>
+<td>Un chemin.</td>
+<td>Refusé s’il n’est pas lisible par son seul propriétaire (<code>chmod 600</code>). Le <code>passwordFile</code> du fichier de providers s’y traduit.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_INSECURE_TLS</code></td>

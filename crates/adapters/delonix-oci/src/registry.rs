@@ -537,6 +537,58 @@ impl Client {
         progress: Option<&dyn Fn(u64, Option<u64>)>,
         max_bytes: u64,
     ) -> Result<Vec<u8>> {
+        let mut sink = MemSink {
+            buf: Vec::new(),
+            max: max_bytes,
+        };
+        self.fetch_blob_into(digest, progress, max_bytes, &mut sink)?;
+        Ok(sink.buf)
+    }
+
+    /// Downloads a blob straight into the CAS: streamed to a scratch file in
+    /// the store, hashed on the way through, and renamed into place only once
+    /// the content hashes to `digest`. Nothing is buffered whole — the RSS of
+    /// a layer in flight is one read chunk, not the layer — and the write to
+    /// disk overlaps the download instead of starting after the last byte.
+    ///
+    /// A digest mismatch is [`Error::DigestMismatch`] and nothing is left in
+    /// the store; the scratch file is removed on every failure.
+    fn blob_into_cas(
+        &mut self,
+        cas: &crate::cas::Cas,
+        digest: &str,
+        progress: Option<&dyn Fn(u64, Option<u64>)>,
+    ) -> Result<()> {
+        let tmp = cas.tmp_path();
+        let result = (|| {
+            let mut sink = crate::cas::StreamingBlob::create(&tmp)?;
+            self.fetch_blob_into(digest, progress, Self::MAX_BLOB_BYTES, &mut sink)?;
+            let got = sink.finish()?;
+            let want = crate::cas::strip(digest);
+            if got != want {
+                return Err(Error::DigestMismatch(format!(
+                    "blob {digest}: content hashes to sha256:{got}"
+                )));
+            }
+            cas.adopt(&tmp, want)
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        result
+    }
+
+    /// The download loop shared by [`Self::blob_with_progress_capped`] (into
+    /// memory) and [`Self::blob_into_cas`] (into a file): resume by `Range`,
+    /// the three ways a server may not honour it, the size cap, and the
+    /// backoff all live here once.
+    fn fetch_blob_into<S: BlobSink>(
+        &mut self,
+        digest: &str,
+        progress: Option<&dyn Fn(u64, Option<u64>)>,
+        max_bytes: u64,
+        sink: &mut S,
+    ) -> Result<()> {
         use std::io::Read;
         let url = format!(
             "{}://{}/v2/{}/blobs/{}",
@@ -545,10 +597,8 @@ impl Client {
             self.repo,
             digest
         );
-        // Kept ACROSS attempts: this is what "resume" means here. A blob is
-        // buffered whole in memory (a property of this function since it was
-        // written), so what a retry continues from is this vector, not a file.
-        let mut buf: Vec<u8> = Vec::new();
+        // The sink is kept ACROSS attempts: this is what "resume" means here —
+        // a retry continues from what it already holds (memory or file).
         // Size of the WHOLE blob. Not `content_length()` on a resumed request:
         // a 206's Content-Length is the length of the FRAGMENT, so taking it
         // would make the progress bar restart against a shrinking total. On a
@@ -557,14 +607,14 @@ impl Client {
         let mut last_err = String::new();
 
         for attempt in 1..=Self::BLOB_ATTEMPTS {
-            let from = (!buf.is_empty()).then_some(buf.len() as u64);
+            let from = (sink.len() > 0).then_some(sink.len());
             if attempt > 1 {
                 // Backoff, and a line saying what is happening: without it a
                 // resumed pull on a slow link is indistinguishable from a hang,
                 // which is the complaint that started this.
                 std::thread::sleep(Duration::from_secs(1 << (attempt - 2).min(3)));
                 tracing::warn!(
-                    have = buf.len(),
+                    have = sink.len(),
                     attempt,
                     "resuming blob {digest} after: {last_err}"
                 );
@@ -615,18 +665,15 @@ impl Client {
                 }
             }
             if restart {
-                buf.clear();
                 total = resp.content_length();
-                if let Some(t) = total {
-                    buf.reserve(t.min(max_bytes) as usize);
-                }
+                sink.reset(total)?;
             }
 
             let mut chunk = [0u8; 65536];
             let mut broke = false;
             loop {
                 let n = match resp.read(&mut chunk) {
-                    // Whatever is in `buf` stays: the next attempt continues
+                    // Whatever the sink holds stays: the next attempt continues
                     // from there instead of throwing away minutes of transfer.
                     Err(e) => {
                         last_err = format!("blob read: {e}");
@@ -638,14 +685,14 @@ impl Client {
                 if n == 0 {
                     break;
                 }
-                if buf.len() as u64 + n as u64 > max_bytes {
+                if sink.len() + n as u64 > max_bytes {
                     return Err(Error::Registry(format!(
                         "blob {digest} exceeds the {max_bytes}-byte limit — aborted"
                     )));
                 }
-                buf.extend_from_slice(&chunk[..n]);
+                sink.append(&chunk[..n])?;
                 if let Some(p) = progress {
-                    p(buf.len() as u64, total);
+                    p(sink.len(), total);
                 }
             }
             if broke {
@@ -656,18 +703,18 @@ impl Client {
             // came back truncated and only the caller's digest check noticed,
             // reporting corruption for what was really a dropped transfer.
             if let Some(t) = total {
-                if (buf.len() as u64) < t {
-                    last_err = format!("connection closed at {} of {t} bytes", buf.len());
+                if sink.len() < t {
+                    last_err = format!("connection closed at {} of {t} bytes", sink.len());
                     continue;
                 }
             }
-            return Ok(buf);
+            return Ok(());
         }
 
         Err(Error::Registry(format!(
             "blob {digest}: gave up after {} attempts with {} of {} bytes — last error: {last_err}",
             Self::BLOB_ATTEMPTS,
-            buf.len(),
+            sink.len(),
             total.map(|t| t.to_string()).unwrap_or_else(|| "?".into()),
         )))
     }
@@ -822,6 +869,52 @@ fn layer_media_type(data: &[u8]) -> &'static str {
         "application/vnd.oci.image.layer.v1.tar+zstd"
     } else {
         "application/vnd.oci.image.layer.v1.tar"
+    }
+}
+
+/// Where a downloaded blob goes: `len` is what a resume continues from,
+/// `reset` starts over (the server ignored the `Range`), `append` takes the
+/// next chunk.
+trait BlobSink {
+    fn len(&self) -> u64;
+    fn reset(&mut self, size_hint: Option<u64>) -> Result<()>;
+    fn append(&mut self, bytes: &[u8]) -> Result<()>;
+}
+
+/// The whole blob in memory — for the callers that need the bytes
+/// (manifests' neighbours, signatures, VM artifacts until they stream).
+struct MemSink {
+    buf: Vec<u8>,
+    max: u64,
+}
+
+impl BlobSink for MemSink {
+    fn len(&self) -> u64 {
+        self.buf.len() as u64
+    }
+    fn reset(&mut self, size_hint: Option<u64>) -> Result<()> {
+        self.buf.clear();
+        // Capped: the hint is the registry's UNTRUSTED Content-Length.
+        if let Some(t) = size_hint {
+            self.buf.reserve(t.min(self.max) as usize);
+        }
+        Ok(())
+    }
+    fn append(&mut self, bytes: &[u8]) -> Result<()> {
+        self.buf.extend_from_slice(bytes);
+        Ok(())
+    }
+}
+
+impl BlobSink for crate::cas::StreamingBlob {
+    fn len(&self) -> u64 {
+        crate::cas::StreamingBlob::len(self)
+    }
+    fn reset(&mut self, _size_hint: Option<u64>) -> Result<()> {
+        crate::cas::StreamingBlob::reset(self)
+    }
+    fn append(&mut self, bytes: &[u8]) -> Result<()> {
+        crate::cas::StreamingBlob::append(self, bytes)
     }
 }
 
@@ -1093,7 +1186,6 @@ pub fn pull_from_registry_with_creds_full(
     // disk, a multi-second write — measured 2.5s for 5.6 KiB) in front of
     // every layer download.
     let config_digest = manifest.config().digest().to_string();
-    let config_expected = manifest.config().digest().digest().to_string();
     let need_config = !store.cas().has(&config_digest);
 
     // 3) layers (ignores "foreign"/Windows layers) — same CAS-first check.
@@ -1125,9 +1217,9 @@ pub fn pull_from_registry_with_creds_full(
         //
         // The cap is small on purpose: a registry throttles per-client, and
         // more sockets past the point the link saturates buys nothing while
-        // making a 429 more likely. It also bounds memory — each in-flight
-        // layer is buffered whole (a pre-existing property of `blob`, not
-        // changed here), so N in flight is N layers of RAM.
+        // making a 429 more likely. Memory is no longer what bounds it: each
+        // layer streams to a scratch file in the CAS (`blob_into_cas`), so a
+        // worker holds one read chunk, not the layer.
         let workers = missing.len().min(4);
         let done_bytes = std::sync::atomic::AtomicU64::new(0);
         let done_layers = std::sync::atomic::AtomicUsize::new(0);
@@ -1138,16 +1230,15 @@ pub fn pull_from_registry_with_creds_full(
         std::thread::scope(|scope| {
             if need_config {
                 let mut cc = c.clone();
-                let (config_digest, config_expected, config_result) =
-                    (&config_digest, &config_expected, &config_result);
+                let (config_digest, config_result) = (&config_digest, &config_result);
                 let store = &store;
                 scope.spawn(move || {
-                    let res = cc.blob(config_digest).and_then(|bytes| {
-                        if sha256_hex(&bytes) != *config_expected {
-                            return Err(Error::DigestMismatch("config digest mismatch".into()));
+                    let res = match cc.blob_into_cas(store.cas(), config_digest, None) {
+                        Err(Error::DigestMismatch(_)) => {
+                            Err(Error::DigestMismatch("config digest mismatch".into()))
                         }
-                        store.cas().write(&bytes).map(|_| ())
-                    });
+                        other => other,
+                    };
                     *config_result.lock().unwrap() = Some(res);
                 });
             }
@@ -1191,15 +1282,15 @@ pub fn pull_from_registry_with_creds_full(
                             let li = done_layers.load(std::sync::atomic::Ordering::Relaxed) + 1;
                             cb(li.min(total), total, acc, None);
                         };
-                        cw.blob_with_progress(&dg, Some(&adapter))
+                        cw.blob_into_cas(store.cas(), &dg, Some(&adapter))
                     } else {
-                        cw.blob(&dg)
+                        cw.blob_into_cas(store.cas(), &dg, None)
                     };
-                    match res.and_then(|data| store.cas().write(&data)) {
-                        Ok(written) if written == dg => {
+                    match res {
+                        Ok(()) => {
                             done_layers.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         }
-                        Ok(_) => errors
+                        Err(Error::DigestMismatch(_)) => errors
                             .lock()
                             .unwrap()
                             .push(format!("corrupted layer: {dg}")),
@@ -2889,6 +2980,62 @@ mod tests {
             got, payload,
             "colar um 206 do offset errado duplicaria o prefixo"
         );
+    }
+
+    /// Everything in the store's blob directory that is not a finished blob:
+    /// a streamed download must never leave a scratch file behind.
+    fn scratch_files(cas: &crate::cas::Cas) -> Vec<String> {
+        let dir = cas.path("sha256:x").parent().unwrap().to_path_buf();
+        std::fs::read_dir(dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.starts_with('.'))
+            .collect()
+    }
+
+    /// Streaming into the CAS keeps the three resume behaviours of the
+    /// in-memory path — including the file being TRUNCATED when the server
+    /// ignores the range or answers from the wrong offset (appending there
+    /// would duplicate the prefix on disk).
+    #[test]
+    fn a_streamed_blob_resumes_or_restarts_into_the_cas() {
+        for (mode, cut) in [
+            (Resume::Honour, 12_345),
+            (Resume::Ignore, 9_000),
+            (Resume::WrongOffset, 7_000),
+        ] {
+            let payload: Vec<u8> = (0..40_000u32).map(|i| (i % 251) as u8).collect();
+            let digest = format!("sha256:{}", sha256_hex(&payload));
+            let (port, _) = serve_flaky_blob(payload.clone(), cut, mode);
+            let mut c = test_client(&format!("127.0.0.1:{port}"), "stream");
+            let dir = scratch("stream-cas");
+            let cas = crate::cas::Cas::open(&dir).unwrap();
+
+            c.blob_into_cas(&cas, &digest, None)
+                .expect("the cut download must end up whole in the CAS");
+            assert_eq!(cas.read(&digest).unwrap(), payload);
+            assert!(scratch_files(&cas).is_empty(), "{:?}", scratch_files(&cas));
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Content that does not hash to its digest is refused and leaves NOTHING
+    /// in the store — neither under the digest's name nor as a scratch file.
+    #[test]
+    fn a_streamed_blob_that_does_not_match_its_digest_leaves_nothing() {
+        let payload = b"what the registry actually sent".to_vec();
+        let (port, _) = serve_flaky_blob(payload.clone(), 5, Resume::Honour);
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "tamper-layer");
+        let dir = scratch("stream-tamper");
+        let cas = crate::cas::Cas::open(&dir).unwrap();
+        let claimed = format!("sha256:{}", sha256_hex(b"what the manifest promised"));
+
+        let err = c.blob_into_cas(&cas, &claimed, None).unwrap_err();
+        assert!(matches!(err, crate::Error::DigestMismatch(_)), "{err}");
+        assert!(!cas.has(&claimed));
+        assert!(scratch_files(&cas).is_empty(), "{:?}", scratch_files(&cas));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The progress callback reports the RUNNING TOTAL for the blob, and both
