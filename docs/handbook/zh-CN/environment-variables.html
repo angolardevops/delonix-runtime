@@ -1098,6 +1098,20 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_MOVE_NODE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td><code>vm move</code> 实机用例把 VM 移到的同一集群中的节点（ADR-0053）。需要一个两节点的实验集群——绝不能是生产环境。</td>
+<td>未设置：两个移动用例会跳过。</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_SHARED_STORAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>集群所有节点共享的存储（NFS、Ceph RBD），移动用例把 VM 的磁盘放在这里——位于本地存储上的磁盘会被拒绝，而不是被复制。</td>
+<td>未设置：两个移动用例会跳过。</td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_CALLBACK_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node</code></a></td>
 <td>节点能够访问到这台机器的地址：测试会启动一个桩 HTTP 服务器，把 <code>http:/<wbr>/<wbr>&lt;addr&gt;:&lt;port&gt;/<wbr>…</code> 作为一个 IPAM 控制器和一个 DNS 控制器的 URL 交给节点，因为节点会通过调用它们来验证两者。</td>

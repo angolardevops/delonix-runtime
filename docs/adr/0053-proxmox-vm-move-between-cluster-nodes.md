@@ -1,7 +1,8 @@
 # ADR-0053: A Proxmox VM moves between the nodes of its cluster with `vm move --node`, and each VM is addressed on its own node
 
-- **Status:** Accepted (2026-09-26, by the owner) — decisions 2 and 3 implemented and tested
-  (see the addendum at the end); decision 1 (`vm move`) waits for the lab cluster decision 6 names
+- **Status:** Accepted (2026-09-26, by the owner) — all six decisions implemented and tested:
+  decisions 2 and 3 in the first addendum, decision 1 (`vm move`) on the lab cluster of decision 6
+  in the second
 - **Date:** 2026-09-25
 - **Deciders:** Walter Angolar
 - **Numbering:** drafted as ADR-0052 (#511); that number was taken first by
@@ -178,3 +179,63 @@ re-run as a regression (no `/cluster/resources` request, every handle right) plu
 **Not measured:** following a VM to ANOTHER node, and a request for `/nodes/<other>/…` served
 through the configured node's API — both need a second node, which is the lab of decision 6.
 
+## Addendum 2026-09-26 — decision 1 implemented, on the lab cluster of decision 6
+
+**The lab.** Two libvirt VMs on the developer host, both from this repository's appliance image
+`proxmox-ve_9.2.qcow2` (PVE 9.2.2): `pve` (192.168.122.91, the API entry point) and `pve2`
+(192.168.122.55), joined in a cluster `lab`, quorate, with a shared NFS storage `nfs-lab`
+exported by `pve2`. Two things the appliance brought had to be fixed first, and both would bite
+any cluster built from it: both disks carried the SAME `machine-id`, and `/etc/hosts` named the
+build-time `10.0.2.15`. `ngola-lda` was not touched.
+
+**The verb.** `delonix vm move <name> --node <target> [--live]`, behind
+`VmBackend::move_to_node`, whose default refuses by name and names `vm migrate` (libvirt and
+Cloud Hypervisor keep it, DX-1501). The engine refuses an empty target (DX-1538) and a power state
+that does not match `--live` as the record says it — a paused VM either way (DX-5507) — before the
+backend is asked, and writes the returned handle only after the backend's `Ok`.
+
+**Refused before anything moves** (decision 4), each checked in failure injection against what
+the node RECEIVED: the node the VM is on, a node that is not a member, an offline node (DX-1538,
+and the precheck is not even sent); the power state as the NODE reports it (DX-5507); and what
+`GET …/migrate?target=` says — local disks (the volumes named), local resources, a target outside
+`allowed_nodes` (the storages it lacks named when the node says so). Measured on PVE 9.2.2: an
+allowed target is ALSO a key of `not_allowed_nodes`, with an empty object, so only
+`allowed_nodes` decides.
+
+**Proved on the node** (decision 5): `POST …/migrate` goes through the task path and the ledger;
+after it, `/cluster/resources` lists the VM on the target, its config is readable on the target
+and not on the source, and a live move left it running. A lost answer is settled by the source
+node's task list (`qmigrate`, which runs on the SOURCE; a live move also forks a `qmstart` on the
+target) and by where the cluster lists the VM — never resent.
+
+**The two behaviours this ADR marked "not measured"**, now measured: a request for
+`/nodes/pve2/qemu/<vmid>/…` sent to `pve`'s API is served — the moved VM was started and stopped
+on `pve2` through the entry point; and the precheck's answer shape, above.
+
+**Two defects the live cases found**, both fixed here:
+
+- **A task's status was read on the client's node.** A `qmigrate` stays on the source, so the
+  next operation on the moved VM, settling the ledger through a client for the target, asked the
+  wrong node. The status read now goes to the node the UPID names (validated, since the ledger is
+  a file whose content goes into a URL). The live case moves a VM there and BACK, which is what
+  exercises it.
+- **The lock retry never fired for a move.** Right after a start the node's `qm cleanup` holds
+  the VM's config lock (see `Client::task`), and a `qmigrate` turned away by it ends with the exit
+  status `migration aborted` — the lock line is only in the task's log. A failed task's error now
+  carries the last `ERROR:` line of its log (`GET …/tasks/{upid}/log`), skipping the node's
+  `TASK ERROR:` summary, which only repeats the exit status. The first version took the summary,
+  and its test asserted exactly that; the test now requires the lock line from the whole log.
+
+**Tested:** engine (`move_refuses_before_the_backend_and_writes_the_handle_only_on_success`),
+failure injection (`a_refused_move_never_sends_the_migrate`,
+`a_move_is_sent_once_waited_on_and_proved_on_the_node`), unit (the measured precheck shape, the
+node out of a UPID, the error line of a failed log), live against the lab cluster
+(`a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there`,
+`a_running_vm_moves_live_on_shared_storage_and_keeps_running` — 2 passed; the lock retry fired
+twice: 5 `POST …/migrate` for 3 completed moves), and battery checks for the CLI refusals.
+`vm.migration.cold` and `vm.migration.live` are `supported` on Proxmox, citing the two live cases.
+Matrix: 117/675 called, 114 in a live trace.
+
+**Still out, as decided:** a VM with local disks is refused, not copied (the lab measured that
+`--with-local-disks` works — an NBD mirror, 21 s for 1 GiB — so a later flag is feasible); no
+creation on another node; HA excluded; no cross-cluster move.

@@ -1135,6 +1135,20 @@ variable au moment où le programme s’exécute.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_MOVE_NODE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Le nœud du même cluster vers lequel les cas en direct de <code>vm move</code> déplacent une VM (ADR-0053). Nécessite un cluster de laboratoire de deux nœuds — jamais la production.</td>
+<td>Non défini : les deux cas de déplacement sont sautés.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_SHARED_STORAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Un stockage partagé par tous les nœuds du cluster (NFS, Ceph RBD), où les cas de déplacement placent le disque de la VM — un disque sur un stockage local est refusé, pas copié.</td>
+<td>Non défini : les deux cas de déplacement sont sautés.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_CALLBACK_ADDR</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node</code></a></td>
 <td>L’adresse à laquelle le NŒUD peut joindre cet hôte : le test démarre un serveur HTTP bouchon et donne au nœud <code>http:/<wbr>/<wbr>&lt;addr&gt;:&lt;port&gt;/<wbr>…</code> comme URL d’un contrôleur IPAM et d’un contrôleur DNS, parce que le nœud vérifie les deux en les appelant.</td>

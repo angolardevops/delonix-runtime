@@ -226,6 +226,7 @@
 ~	vm ls
 ~	vm ls-remote
 ~	vm migrate
+~	vm move
 ~	vm pause
 ~	vm prune
 ~	vm pull
