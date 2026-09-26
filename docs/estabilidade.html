@@ -492,6 +492,33 @@ bloco <code>nfs:</code>/<code>cifs:</code>/<code>webdav:</code>. Os nomes antigo
 aviso de depreciação — a regra do «corte limpo» aplica-se a comandos, e um
 manifesto em git merece um degrau em vez de um erro.</p>
 </blockquote>
+<h2 id="o-ficheiro-de-providers-do-no-configdelonixiov1">O ficheiro de providers do nó — <code>config.delonix.io/v1</code></h2>
+<p>O <code>providers.yaml</code> (ADR-0054) diz que providers de VM o nó tem, como o motor
+chega a cada um e qual serve um pedido que não nomeia nenhum. Procura-se por
+esta ordem, e <strong>o primeiro ficheiro que existe ganha, sem fusão</strong>:
+<code>DELONIX_PROVIDERS_CONFIG</code>, <code>$XDG_CONFIG_HOME/delonix/providers.yaml</code> (ou
+<code>~/.config/…</code>), <code>/etc/delonix/providers.yaml</code>.</p>
+<p>É um formato publicado, com a mesma promessa que o schema dos manifestos dentro
+do <code>0.x</code>: <strong>uma chave nunca é removida nem muda de significado, uma chave nova é
+sempre opcional, e <code>apiVersion: config.delonix.io/v1</code> só muda com um <code>v2</code></strong> que
+não sai sem o <code>v1</code> continuar a ser lido.</p>
+<p>A verdade é o schema, gerado dos tipos que o motor lê:
+<strong><code>delonix provider config schema</code></strong>, publicado em
+<a href="schema/v1/providers.json"><code>schema/v1/providers.json</code></a>, com o mesmo teste a
+falhar se o publicado deixar de ser o gerado. O schema recusa uma chave
+desconhecida, outra versão, um tipo de provider que não existe e um segredo
+escrito no próprio ficheiro (<code>tokenSecret</code>, <code>password</code> — só por referência:
+<code>tokenSecretFile</code>, <code>passwordFile</code>, <code>secretRef</code>).</p>
+<p>O schema diz se o ficheiro está <strong>bem escrito</strong>; o
+<strong><code>delonix provider config validate</code></strong> diz se ele <strong>serve</strong>: um
+<code>defaultProvider</code> sem entrada no ficheiro, um ficheiro de token legível por
+outros utilizadores, uma CA que não existe. Nenhum dos dois contacta um nó.</p>
+<pre><code class="language-yaml"># yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json
+apiVersion: config.delonix.io/v1
+defaultProvider: libvirt
+providers:
+  - type: libvirt
+</code></pre>
 <h2 id="nao-estavel-pode-mudar-em-qualquer-versao">NÃO estável — pode mudar em qualquer versão</h2>
 <ul>
 <li><strong><code>serve cri</code>, <code>serve api</code>, <code>serve docker-api</code></strong> — superfícies de protocolo

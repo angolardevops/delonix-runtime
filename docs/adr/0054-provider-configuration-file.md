@@ -214,8 +214,20 @@ node and a production node differ in what their file says, not in how it is read
    `container ls`). `uri:` on a libvirt entry is refused as unknown in this version.
    Other binaries (`delonix-mgmt`, `delonix-mcp`, `delonix-cri`) do not read the file yet —
    that is slice 5, with the node contract.
-3. `provider config show|validate`, `vm default-backend` on the file, `pt.po` entries, the
-   schema of the file published next to the manifest schema.
+3. **Done.** `provider config show` says which file is read (and every existing file the
+   D2 order skips — `provider ls` says it too), the default provider and where it comes
+   from (environment, file, the legacy per-root default, auto-detection), and each provider
+   with its settings; a credential is shown only by where it comes from — the battery greps
+   both outputs for the token's value. `provider config validate [-f]` runs `parse` plus
+   what the file points at, through the registration's own reader, contacting nothing (exit
+   1 on a default with no entry, an inline secret, a token file others can read).
+   `vm default-backend --set/--clear` edits the `defaultProvider:` line of the file this
+   process reads (or creates the user/system file the way `install.sh` does), keeps every
+   other line and the file's mode, refuses to write a result this build would reject, and
+   MOVES the legacy per-root default instead of leaving a second answer behind.
+   `provider config schema` prints the JSON Schema generated from the parser's own types,
+   published as `docs/schema/v1/providers.json` with a test that fails when the two differ,
+   and `docs/cli-stability.md` lists the format.
 4. **Done.** `install.sh --vm-provider <libvirt|cloud-hypervisor>` (default `libvirt`) writes
    `/etc/delonix/providers.yaml` (`~/.config/delonix/` with `--user`) inside the VM block, so
    `--no-vm` writes nothing, and ONLY when the file is absent — `set -C` refuses an existing
