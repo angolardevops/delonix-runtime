@@ -15,9 +15,7 @@
 //! image digest (prevents reusing a signature on another image).
 
 use crate::cas::{sha256_hex, strip};
-use crate::registry::{
-    parse_reference, push_oci_artifact_with_layer_annotations, registry_client, RegistryClient,
-};
+use crate::registry::{parse_reference, registry_client, RegistryClient};
 use crate::ImageStore;
 use crate::{Error, Result};
 use base64::Engine;
@@ -263,19 +261,6 @@ fn ensure_signing_key(path: &Path) -> Result<EcdsaKeyPair> {
         .map_err(|e| Error::SigningKey(format!("just-generated signing key rejected itself: {e}")))
 }
 
-/// Builds the cosign-compatible signature target for `reference`: the SAME
-/// host/repo, with the tag replaced by `sha256-<hex>.sig`. String
-/// reconstruction (not a second `Client`/store) because [`parse_reference`]
-/// is pure and total — round-tripping `host/repo:tag` through it always
-/// re-derives the same host/repo, including the Docker Hub default
-/// (`registry-1.docker.io` contains a `.`, so it is never re-collapsed to a
-/// bare name) and the `library/` prefix (already baked into `repo` from the
-/// first parse, and a repo containing `/` is never re-prefixed).
-fn signature_target(reference: &str, hex: &str) -> String {
-    let (host, repo, _) = parse_reference(reference);
-    format!("{host}/{repo}:sha256-{hex}.sig")
-}
-
 /// Signs `reference` with the key at `key_path` (generated there on first
 /// use if absent) and publishes the signature as a separate cosign-format
 /// OCI artifact in the SAME repository — the only place a later
@@ -352,10 +337,11 @@ the registry did not answer for {sig_tag}: {}",
 
     let mut annotations = BTreeMap::new();
     annotations.insert(COSIGN_SIG_ANNOTATION.to_string(), sig_b64);
-    let target = signature_target(reference, &hex);
-    push_oci_artifact_with_layer_annotations(
-        store.root(),
-        &target,
+    // The same client that read the manifest publishes the signature, in the
+    // same repository — where `verify_signature` looks: a second client meant a
+    // second TLS handshake and a second token flow for one host.
+    c.push_signature(
+        &sig_tag,
         COSIGN_SIG_MEDIA_TYPE,
         &payload_bytes,
         &annotations,
@@ -368,7 +354,7 @@ the registry did not answer for {sig_tag}: {}",
 mod tests {
     use super::{
         default_signing_key_path, ensure_signing_key, p256_point_from_pem, p256_point_to_pem,
-        sign_image, signature_target, verify_ecdsa_p256, verify_signature,
+        sign_image, verify_ecdsa_p256, verify_signature,
     };
 
     #[test]
@@ -466,22 +452,6 @@ mod tests {
     /// `parse_reference` round-trips host/repo through `host/repo:tag` —
     /// this is the property that makes rebuilding a string (instead of
     /// reusing the open client) safe for the Docker Hub default too.
-    #[test]
-    fn signature_target_keeps_the_same_repo_docker_hub_default() {
-        assert_eq!(
-            signature_target("alpine:latest", "deadbeef"),
-            "registry-1.docker.io/library/alpine:sha256-deadbeef.sig"
-        );
-    }
-
-    #[test]
-    fn signature_target_keeps_the_same_repo_explicit_host() {
-        assert_eq!(
-            signature_target("ghcr.io/angolardevops/delonix-vm-k8s:1.34", "cafef00d"),
-            "ghcr.io/angolardevops/delonix-vm-k8s:sha256-cafef00d.sig"
-        );
-    }
-
     /// End-to-end against a local OCI registry mock (the SAME one
     /// `registry.rs`'s own push/pull round-trip test uses, not a second
     /// copy — see the doc-comment on `serve_anon_registry`): sign a real

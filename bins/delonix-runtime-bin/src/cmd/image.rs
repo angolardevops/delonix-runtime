@@ -859,9 +859,33 @@ fn cmd_push(images: &ImageStore, image: &str, destination: Option<&str>) -> Resu
     // Without a destination, publishes under its own reference (the common case: the image
     // was already built with the destination registry's tag).
     let dest = destination.unwrap_or(image);
-    let digest = delonix_oci::push_to_registry(images, image, dest)?;
+    // The same bar as the pull: without it, an upload of a large image looked
+    // hung for as long as it took.
+    let label = format!("[push] {dest}");
+    let digest = delonix_oci::registry::push_to_registry_with_progress(
+        images,
+        image,
+        dest,
+        Some(push_progress_bar(label)),
+    )?;
+    super::output::progress_done();
     println!("{dest}  {digest}");
     Ok(())
+}
+
+/// A push progress callback drawing `label`'s bar, redrawn at most every
+/// ~2 MiB like the pull's so the terminal is not hammered. Shared with
+/// `vm push`. Layers go out in parallel, so it is called from several threads.
+pub(crate) fn push_progress_bar(label: String) -> delonix_oci::registry::PushProgress {
+    let last = std::sync::atomic::AtomicU64::new(0);
+    std::sync::Arc::new(move |done: u64, total: u64| {
+        use std::sync::atomic::Ordering::Relaxed;
+        let prev = last.load(Relaxed);
+        if done >= total || done.saturating_sub(prev) >= 2 * 1024 * 1024 || done < prev {
+            last.store(done, Relaxed);
+            super::output::progress_bar(&label, done, Some(total));
+        }
+    })
 }
 
 /// Size of an image = sum of its layers' blobs in the CAS.
