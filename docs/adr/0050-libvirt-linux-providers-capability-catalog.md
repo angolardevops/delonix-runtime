@@ -194,13 +194,23 @@ static IP, backup of a VM). Those rows are implemented and unproven, and `partia
   CPU baselines, a multi-host decision), reproducible by anyone with the help output of a named
   libvirt version. Tests in `scripts/test_libvirt_virsh_inventory.py`.
 
-### D5. Readback through the node contract — where it goes, and why not now
+### D5. Readback through the node contract — served since 2026-09-25
 
-`ListProviders` maps this JSON one-to-one; the handler is one function when `delonix-node-api`
-exists (ADR-0042 step C). It does **not** go into `delonix-mgmt`: ADR-0041 D4 froze that server, and
-a route added there today would be a route to migrate tomorrow. The CLI and its JSON are the
-readback until then; a local client that needs the list runs `delonix provider ls -o json`, which is
-the same shape the RPC will return.
+`ListProviders` maps this JSON one-to-one, and it is served: `delonix-node-api`
+(`crates/interfaces/delonix-node-api`, the `delonix-node-api` binary that `delonix serve node-api`
+runs) answers `NodeService.ListProviders` as gRPC and as `GET /v1/providers[?kind=]` on one local
+unix socket, `0600` and `SO_PEERCRED`-checked like the CRI and the management API. The contract
+gained two additive fields for it — `Capability.state` (the six-state label; `supported` stays its
+boolean reading) and `ProviderInfo.catalog_version` — so the RPC carries what `provider ls -o json`
+prints and not less. The JSON is the proto3 mapping generated from the same `.proto` files
+(`pbjson`, proto field names, the naming the published OpenAPI uses), never a hand-written shape.
+
+It does **not** go into `delonix-mgmt`: ADR-0041 D4 froze that server. The provider list is
+composed a second time in the server (the CLI's composition root cannot be depended on), and the
+copy is guarded — `the_declared_providers_are_the_published_matrix` fails when the server's set of
+(kind, id) differs from the matrix the CLI publishes, and the E2E battery diffs the socket's list
+against `provider ls -o json` on the same host. The other `NodeService` RPCs answer
+`UNIMPLEMENTED` naming the ADR-0042 step that brings them; no other service is registered.
 
 ### D6. Request-time refusal by name
 

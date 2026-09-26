@@ -7,7 +7,7 @@ pull request。读完本页后，你会知道本手册的编排顺序，以及�
 [用户文档网站](https://angolardevops.github.io/delonix-runtime/) 开始。
 
 <!-- dev-docs:begin crate-count -->
-工作区共有 **23 个 crate**，产出 **4 个二进制**（`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`）。
+工作区共有 **25 个 crate**，产出 **5 个二进制**（`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`）。
 <!-- dev-docs:end crate-count -->
 
 ## 引擎是什么——以及它不是什么

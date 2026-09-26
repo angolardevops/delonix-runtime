@@ -667,10 +667,12 @@ flowchart TB
     delonix_cri["delonix-cri"]
     delonix_mcp["delonix-mcp"]
     delonix_mgmt["delonix-mgmt"]
+    delonix_node_api["delonix-node-api"]
   end
   subgraph bin["Binaries"]
     delonix_mcp_bin["delonix-mcp-bin"]
     delonix_mgmt_bin["delonix-mgmt-bin"]
+    delonix_node_api_bin["delonix-node-api-bin"]
     delonix_runtime_bin["delonix-runtime-bin"]
   end
   delonix_compute --> delonix_model
@@ -714,6 +716,17 @@ flowchart TB
   delonix_mgmt_bin --> delonix_node
   delonix_mgmt_bin --> delonix_telemetry
   delonix_node --> delonix_model
+  delonix_node_api --> delonix_compute
+  delonix_node_api --> delonix_linux
+  delonix_node_api --> delonix_model
+  delonix_node_api --> delonix_node
+  delonix_node_api --> delonix_proxmox
+  delonix_node_api --> delonix_sdn
+  delonix_node_api --> delonix_vm
+  delonix_node_api --> delonix_volume
+  delonix_node_api_bin --> delonix_node
+  delonix_node_api_bin --> delonix_node_api
+  delonix_node_api_bin --> delonix_telemetry
   delonix_oci --> delonix_compute
   delonix_oci --> delonix_model
   delonix_oci --> delonix_node
@@ -773,6 +786,8 @@ flowchart TB
   class delonix_model store
   class delonix_net_rules store
   class delonix_node block
+  class delonix_node_api iface
+  class delonix_node_api_bin engine
   class delonix_oci block
   class delonix_opnsense external
   class delonix_proxmox external

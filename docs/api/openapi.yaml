@@ -1884,6 +1884,12 @@ components:
                     type: boolean
                 detail:
                     type: string
+                state:
+                    type: string
+                    description: |-
+                        One of the catalog's states (ADR-0050 D2): "supported" | "partial" |
+                         "unsupported-by-provider" | "requires-external-component" | "not-implemented" |
+                         "unavailable-on-host". `supported` above is the boolean reading of it.
             description: |-
                 A named optional capability a provider declares (topology §6: discovery, not the
                  lowest common denominator). A request needing a capability the selected provider lacks
@@ -2696,6 +2702,9 @@ components:
                         $ref: '#/components/schemas/delonix.node.v1.Capability'
                 health:
                     $ref: '#/components/schemas/delonix.node.v1.Condition'
+                catalog_version:
+                    type: string
+                    description: The version of the capability catalog the names are drawn from (ADR-0050 D1).
         delonix.node.v1.ProvisionRequest:
             type: object
             properties:

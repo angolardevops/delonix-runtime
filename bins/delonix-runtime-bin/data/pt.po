@@ -13881,6 +13881,26 @@ msgstr "reclamá-los: pin, processo de controlo e slirp de cada raiz de estado q
 msgid "{n} director(y/ies) under `vms/` ({size}) that no VM record points into: {list}\n`vm prune` will NOT take these — a bare directory is somebody's data, and that rule once stopped a sweep from destroying 53 GiB of live disks. They are named here because until now nothing named them at all; removing them is your call."
 msgstr "{n} directório(s) em `vms/` ({size}) para onde nenhum registo de VM aponta: {list}\nO `vm prune` NÃO os leva — um directório nu são dados de alguém, e foi essa regra que travou uma varredura de destruir 53 GiB de discos vivos. Ficam aqui nomeados porque até agora nada os nomeava; removê-los é decisão tua."
 
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket — the versioned node contract (ADR-0040). Today it serves `ListProviders`; the rest of the contract answers UNIMPLEMENTED with the step that brings it."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix — o contrato de nó versionado (ADR-0040). Hoje serve o `ListProviders`; o resto do contrato responde UNIMPLEMENTED com o passo que o traz."
+
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix."
+
+msgid "Serve the NODE API (gRPC + HTTP/JSON of `delonix.node.v1`) on a unix socket.\n\nThe versioned node contract (ADR-0040). Today it serves `ListProviders`; the rest of the contract answers UNIMPLEMENTED with the step that brings it."
+msgstr "Serve a API de NÓ (gRPC + HTTP/JSON do `delonix.node.v1`) num socket unix.\n\nO contrato de nó versionado (ADR-0040). Hoje serve o `ListProviders`; o resto do contrato responde UNIMPLEMENTED com o passo que o traz."
+
+msgid "The versioned node contract (ADR-0040). Today it serves `ListProviders`; the rest of the contract answers UNIMPLEMENTED with the step that brings it."
+msgstr "O contrato de nó versionado (ADR-0040). Hoje serve o `ListProviders`; o resto do contrato responde UNIMPLEMENTED com o passo que o traz."
+
+msgid "Socket address (default: `$DELONIX_NODE_API_ADDR` or `unix:///run/delonix-node.sock`)."
+msgstr "Endereço do socket (por omissão: `$DELONIX_NODE_API_ADDR` ou `unix:///run/delonix-node.sock`)."
+
+msgid "the node contract on the default unix socket — gRPC and HTTP/JSON of delonix.node.v1"
+msgstr "o contrato de nó no socket unix por omissão — gRPC e HTTP/JSON do delonix.node.v1"
+
+msgid "a socket of your own, then read the providers as JSON"
+msgstr "um socket teu, e depois lê os providers em JSON"
 # vm resize (vm.resize.cold, ADR-0049 slice 2)
 msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot"
 msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque"

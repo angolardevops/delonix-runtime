@@ -24,6 +24,8 @@ members = [
     "crates/adapters/delonix-telemetry",
     "bins/delonix-mcp-bin",
     "bins/delonix-mgmt-bin",
+    "crates/interfaces/delonix-node-api",
+    "bins/delonix-node-api-bin",
 ]
 
 [workspace.package]
@@ -47,6 +49,7 @@ delonix-vm = { path = "crates/adapters/delonix-vm" }
 delonix-volume = { path = "crates/adapters/delonix-volume" }
 delonix-cri = { path = "crates/interfaces/delonix-cri" }
 delonix-mgmt = { path = "crates/interfaces/delonix-mgmt" }
+delonix-node-api = { path = "crates/interfaces/delonix-node-api" }
 delonix-scanner = { path = "crates/adapters/delonix-scanner" }
 delonix-state = { path = "crates/adapters/delonix-state" }
 delonix-security-runtime = { path = "crates/contexts/delonix-security-runtime" }
@@ -121,6 +124,10 @@ reqwest = { version = "0.12", default-features = false }
 tonic = "0.12"
 tonic-build = "0.12"
 prost = "0.13"
+# proto3 JSON for the node contract (delonix-node-api): the same files as the gRPC stubs.
+pbjson = "0.7"
+pbjson-types = "0.7"
+pbjson-build = "0.7"
 # Crypto, encoding, compression
 chacha20poly1305 = "0.10"
 getrandom = "0.2"

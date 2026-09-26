@@ -114,7 +114,7 @@ jobs:
         run: test "$(uname -m)" = aarch64
       - uses: Swatinem/rust-cache@v2
       - name: Build (release, aarch64)
-        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin
+        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin -p delonix-node-api-bin
       - name: Stage, strip and version-check
         run: |
           mkdir -p dist-arm64
@@ -122,6 +122,7 @@ jobs:
           cp target/release/delonix-cri  dist-arm64/delonix-cri-aarch64-linux
           cp target/release/delonix-mcp  dist-arm64/delonix-mcp-aarch64-linux
           cp target/release/delonix-mgmt dist-arm64/delonix-mgmt-aarch64-linux
+          cp target/release/delonix-node-api dist-arm64/delonix-node-api-aarch64-linux
           strip dist-arm64/delonix-*-aarch64-linux
           file dist-arm64/delonix-aarch64-linux | grep -q 'ARM aarch64'
           V=$(dist-arm64/delonix-aarch64-linux --version)
@@ -147,7 +148,7 @@ jobs:
         run: rustup show
       - uses: Swatinem/rust-cache@v2
       - name: Compila (release, x86-64 genérico)
-        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin
+        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin -p delonix-node-api-bin
       - name: Guarda binários genéricos
         run: |
           mkdir -p dist-release
@@ -155,6 +156,7 @@ jobs:
           cp target/release/delonix-cri dist-release/delonix-cri-x86_64-linux
           cp target/release/delonix-mcp dist-release/delonix-mcp-x86_64-linux
           cp target/release/delonix-mgmt dist-release/delonix-mgmt-x86_64-linux
+          cp target/release/delonix-node-api dist-release/delonix-node-api-x86_64-linux
       # O SITE PUBLICADO TEM DE SER O GERADO POR ESTE BINÁRIO.
       #
       # Este gate existe no `ci.yml` e disparou na v0.48.0 — e a release saiu na
@@ -181,7 +183,7 @@ jobs:
       - name: Compila (release, x86-64-v3)
         env:
           RUSTFLAGS: "-C target-cpu=x86-64-v3"
-        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin
+        run: cargo build --release --locked -p delonix-runtime-bin -p delonix-cri -p delonix-mcp-bin -p delonix-mgmt-bin -p delonix-node-api-bin
       - name: Fetch the arm64 binaries built natively
         uses: actions/download-artifact@v4
         with:
@@ -193,10 +195,11 @@ jobs:
           cp target/release/delonix-cri dist-release/delonix-cri-x86_64-v3-linux
           cp target/release/delonix-mcp dist-release/delonix-mcp-x86_64-v3-linux
           cp target/release/delonix-mgmt dist-release/delonix-mgmt-x86_64-v3-linux
+          cp target/release/delonix-node-api dist-release/delonix-node-api-x86_64-v3-linux
           strip dist-release/delonix-*-x86_64*-linux
           cp scripts/install.sh dist-release/install.sh
           cp dist-arm64/* dist-release/
-          cd dist-release && sha256sum delonix-aarch64-linux delonix-cri-aarch64-linux delonix-mcp-aarch64-linux delonix-mgmt-aarch64-linux delonix-x86_64-linux delonix-x86_64-v3-linux delonix-cri-x86_64-linux delonix-cri-x86_64-v3-linux delonix-mcp-x86_64-linux delonix-mcp-x86_64-v3-linux delonix-mgmt-x86_64-linux delonix-mgmt-x86_64-v3-linux install.sh > SHA256SUMS
+          cd dist-release && sha256sum delonix-aarch64-linux delonix-cri-aarch64-linux delonix-mcp-aarch64-linux delonix-mgmt-aarch64-linux delonix-x86_64-linux delonix-x86_64-v3-linux delonix-cri-x86_64-linux delonix-cri-x86_64-v3-linux delonix-mcp-x86_64-linux delonix-mcp-x86_64-v3-linux delonix-mgmt-x86_64-linux delonix-mgmt-x86_64-v3-linux delonix-node-api-aarch64-linux delonix-node-api-x86_64-linux delonix-node-api-x86_64-v3-linux install.sh > SHA256SUMS
       - name: SBOM (SPDX 2.3, do Cargo.lock)
         run: |
           python3 scripts/sbom.py --version "${TAG#v}" > dist-release/delonix-sbom.spdx.json
@@ -303,10 +306,13 @@ jobs:
             dist-release/delonix-mcp-x86_64-v3-linux
             dist-release/delonix-mgmt-x86_64-linux
             dist-release/delonix-mgmt-x86_64-v3-linux
+            dist-release/delonix-node-api-x86_64-linux
+            dist-release/delonix-node-api-x86_64-v3-linux
             dist-release/delonix-aarch64-linux
             dist-release/delonix-cri-aarch64-linux
             dist-release/delonix-mcp-aarch64-linux
             dist-release/delonix-mgmt-aarch64-linux
+            dist-release/delonix-node-api-aarch64-linux
             dist-release/delonix-sbom.spdx.json
       - name: Publica a release
         env:

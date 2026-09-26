@@ -9,7 +9,7 @@ ordre, pour votre rôle. Si vous voulez seulement *utiliser* Delonix, commencez 
 [site de documentation utilisateur](https://angolardevops.github.io/delonix-runtime/).
 
 <!-- dev-docs:begin crate-count -->
-Le workspace compte **23 crates** et livre **4 binaires** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`).
+Le workspace compte **25 crates** et livre **5 binaires** (`delonix`, `delonix-cri`, `delonix-mcp`, `delonix-mgmt`, `delonix-node-api`).
 <!-- dev-docs:end crate-count -->
 
 ## Ce qu’est le moteur — et ce qu’il n’est pas

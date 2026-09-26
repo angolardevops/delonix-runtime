@@ -53,10 +53,11 @@ chercher, mais certaines parties sont obsolètes ; vérifiez dans le code ce qu�
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
 │   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
-│   └── interfaces/               CRI, local management API, MCP server
+│   └── interfaces/               CRI, local management API, node API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
+│   ├── delonix-node-api-bin/     the `delonix-node-api` binary
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -118,10 +119,11 @@ La liste des crates, la couche de chacun et qui dépend de qui sont des faits g�
 | `crates/contexts/` | Contextes bornés avec les cas d’usage : Compute, avec les enregistrements `Container` et `Vm` (`delonix-compute`), les propres assistants du nœud — journal d’événements, vérifications d’hôte et de processus, répartition serveur (`delonix-node`) —, Stack — Kinds, réconciliateur, révisions (`delonix-stack`) — et les décisions de sécurité du nœud (`delonix-security-runtime`). | Fonctionnalités qui changent ce que le moteur décide. | [Les crates](crates.md) |
 | `crates/adapters/` | Mécanismes sur ce nœud : namespaces/cgroups Linux (`delonix-linux`), images OCI (`delonix-oci`), réseau et pare-feu (`delonix-sdn`), microVM (`delonix-vm`), volumes (`delonix-volume`), état persisté et coffre de secrets (`delonix-state`), analyse de vulnérabilités (`delonix-scanner`), logging/métriques/traçage (`delonix-telemetry`). | Fonctionnalités qui touchent le noyau, le disque ou un outil local. | [Les crates](crates.md), [Initiation au cloud native](cloud-native-primer.md) |
 | `crates/providers/` | Systèmes distants derrière un port : un nœud Proxmox VE en tant que `VmBackend` (`delonix-proxmox`) et le provisionnement TrueNAS (`delonix-truenas`). | Changements à une intégration de provider ; un nouveau provider entre ici comme implémentation d’un port. | `docs/adr/0008-proxmox-vm-backend.md` |
-| `crates/interfaces/` | Serveurs qui exposent le moteur : le CRI de Kubernetes (`delonix-cri`, qui livre aussi le binaire `delonix-cri`), l’API de gestion locale (`delonix-mgmt`) et le serveur MCP (`delonix-mcp`). | Changements à l’un de ces protocoles. | [Standards cloud native](cloud-native-standards.md) |
+| `crates/interfaces/` | Serveurs qui exposent le moteur : le CRI de Kubernetes (`delonix-cri`, qui livre aussi le binaire `delonix-cri`), l’API de gestion locale (`delonix-mgmt`), le serveur du contrat de nœud (`delonix-node-api`) et le serveur MCP (`delonix-mcp`). | Changements à l’un de ces protocoles. | [Standards cloud native](cloud-native-standards.md) |
 | `bins/` | Crates binaires. Chacun compose une interface (imposé par `arch_fitness.py`). | Toute fonctionnalité visible dans la CLI. | [Architecture](architecture.md) |
 | `bins/delonix-runtime-bin/` | La CLI `delonix` : `src/main.rs`, un module par groupe de commandes dans `src/cmd/`, le catalogue de messages en portugais `data/pt.po`, les modèles de projet `init` dans `templates/`, `build.rs`, et `tests/architecture.rs`. | Toute fonctionnalité avec une commande, une option ou un message. | [Conventions de code](coding-conventions.md) |
 | `bins/delonix-mgmt-bin/` | Le binaire `delonix-mgmt` : un `main.rs` mince au-dessus de `delonix-mgmt`. | Rarement ; la logique vit dans le crate d’interface. | [Les crates](crates.md) |
+| `bins/delonix-node-api-bin/` | Le binaire `delonix-node-api` : un `main.rs` mince au-dessus de `delonix-node-api` (le contrat de nœud sur un socket unix, ADR-0040 P5). | Rarement ; la logique vit dans le crate d’interface. | `docs/adr/0050-libvirt-linux-providers-capability-catalog.md` |
 | `bins/delonix-mcp-bin/` | Le binaire `delonix-mcp` : un `main.rs` mince au-dessus de `delonix-mcp`. | Rarement ; la logique vit dans le crate d’interface. | `docs/adr/0025-mcp-local-ai-control-surface.md` |
 | `proto/` | Le contrat de nœud `delonix.node.v1` (`proto/delonix/node/v1/*.proto`), marqué brouillon ; source de vérité pour le gRPC et le HTTP/JSON et pour `docs/api/openapi.yaml`. Vérifié par `scripts/contract_gate.py` (format, lint, changements cassants, mappages HTTP, OpenAPI). | Changements de contrat, relus avec soin — les changements cassants contre la dernière tag échouent. | `proto/README.md`, ADR-0040 |
 | `tests/` | Vérifications de compatibilité hors arborescence cargo, pas des tests cargo : `tests/compat/cri-conformance.sh` (la suite `critest`) et `tests/compat/docker_api_smoke.py`. Les tests d’intégration cargo vivent dans le propre `tests/` de chaque crate. | Quiconque travaille sur la compatibilité CRI ou API Docker. | `docs/cri-conformance.md`, [Cloner, compiler et tester](build-and-test.md) |

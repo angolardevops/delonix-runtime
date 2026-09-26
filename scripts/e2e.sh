@@ -524,8 +524,10 @@ section "provider ls / describe / matrix (ADR-0050): a matriz medida, não afirm
 # nunca vem sem evidência, e que a matriz publicada é a gerada — o teste
 # unitário do bin compara o ficheiro, este check confirma-o contra o binário.
 check "provider ls" ok "$BIN" provider ls
-check "provider ls -o json é um array com os 6 providers" ok bash -c \
-  "'$BIN' provider ls -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert len(v)==6, len(v)'"
+# The count comes from `provider matrix`, not a literal: ADR-0052 added a seventh
+# provider and a `==6` written here went red on every run after it.
+check "provider ls -o json lista os mesmos providers que a matriz" ok bash -c \
+  "n=\$('$BIN' provider matrix | grep -c '^- \*\*'); '$BIN' provider ls -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); n=int(sys.argv[1]); assert n>0 and len(v)==n, (len(v), n)' \"\$n\""
 check "provider ls -o json: cada capacidade leva name/supported/state/detail" ok bash -c \
   "'$BIN' provider ls -o json | python3 -c '
 import json,sys
@@ -537,7 +539,7 @@ for p in json.load(sys.stdin):
         assert c[\"state\"] != \"supported\" or c[\"detail\"], (p[\"id\"], c[\"name\"])
 '"
 check "provider ls --kind network só traz a rede" ok bash -c \
-  "'$BIN' provider ls --kind network -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert [p[\"kind\"] for p in v]==[\"network\"], v'"
+  "'$BIN' provider ls --kind network -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v and all(p[\"kind\"]==\"network\" for p in v), [p[\"kind\"] for p in v]'"
 check "provider describe libvirt" ok "$BIN" provider describe libvirt
 check "provider describe linux --kind storage" ok "$BIN" provider describe linux --kind storage
 check "provider describe de um provider inexistente diz 4" 4 "$BIN" provider describe naoexiste
@@ -551,6 +553,38 @@ check "provider ls --l18n=pt traduz o cabeçalho" ok bash -c \
 # «indisponível» (69) — nunca um 0 com a secção do cluster em falta.
 check "provider describe libvirt --probe recusa (1)" 1 "$BIN" provider describe libvirt --probe
 check "provider describe proxmox --probe sem alvo diz 69" 69 env -u DELONIX_PROXMOX_URL "$BIN" provider describe proxmox --probe
+
+# ADR-0050 D5: the same providers through the node CONTRACT. `serve node-api`
+# runs the sibling `delonix-node-api` (built beside the CLI in this checkout);
+# what the check reads is the JSON on the socket, and it has to be the same set
+# of providers `provider ls` lists — measured on this host by the same probes.
+NODESOCK="/tmp/dlxe2e-node-$$.sock"
+NODEBIN="$(dirname "$BIN")/delonix-node-api"
+if [[ -x "$NODEBIN" ]]; then
+  "$BIN" serve node-api --addr "unix://$NODESOCK" >"$OUT/node-api.log" 2>&1 &
+  NODEPID=$!
+  for _ in $(seq 100); do [[ -S "$NODESOCK" ]] && break; sleep 0.05; done
+  check "serve node-api: o socket existe e é 0600" ok bash -c \
+    "[[ -S '$NODESOCK' ]] && [[ \$(stat -c %a '$NODESOCK') == 600 ]]"
+  check "GET /v1/providers responde com os mesmos providers que provider ls" ok bash -c \
+    "diff <(curl -s --unix-socket '$NODESOCK' http://localhost/v1/providers | python3 -c 'import json,sys; print(sorted(p[\"kind\"]+\"/\"+p[\"id\"] for p in json.load(sys.stdin)[\"providers\"]))') \
+          <('$BIN' provider ls -o json | python3 -c 'import json,sys; print(sorted(p[\"kind\"]+\"/\"+p[\"id\"] for p in json.load(sys.stdin)))')"
+  check "GET /v1/providers: cada capacidade leva name/supported/state/detail e o catalog_version" ok bash -c \
+    "curl -s --unix-socket '$NODESOCK' http://localhost/v1/providers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(set(c)>={\"name\",\"supported\",\"state\",\"detail\"} for p in d[\"providers\"] for c in p[\"capabilities\"]); assert all(p[\"catalog_version\"] for p in d[\"providers\"])'"
+  check "GET /v1/providers?kind=network só traz a rede" ok bash -c \
+    "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=network' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert d and all(p[\"kind\"]==\"network\" for p in d)'"
+  check "GET /v1/providers?kind=ceph é 400 com google.rpc.Status code 3" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph') == 400 ]] && curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph' | grep -q '\"code\":3'"
+  # BUG REAL, medido na 1.ª corrida deste check: o fallback do router do tonic
+  # respondia a QUALQUER caminho desconhecido com 200 + `grpc-status: 12` e corpo
+  # vazio — um cliente REST lia «servido, sem nada». Agora é 404 com um
+  # google.rpc.Status (code 5); só um chamador gRPC recebe o UNIMPLEMENTED de fio.
+  check "GET /v1/node (sem handler ainda) é 404 com code 5, nunca um 200 vazio" ok bash -c \
+    "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' http://localhost/v1/node) == 404 ]] && curl -s --unix-socket '$NODESOCK' http://localhost/v1/node | grep -q '\"code\":5'"
+  kill "$NODEPID" 2>/dev/null; wait "$NODEPID" 2>/dev/null; rm -f "$NODESOCK"
+else
+  skip "node API pelo contrato (ADR-0050 D5)" "sem delonix-node-api ao lado de $BIN (cargo build -p delonix-node-api-bin)"
+fi
 
 section "erros: a CLI tem de RECUSAR o que é inválido"
 ########################################

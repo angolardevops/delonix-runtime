@@ -710,7 +710,9 @@ command, no residing process:
      - Local management API (HTTP+JSON over a unix socket); ``delonix-mgmt`` binary, run by ``delonix serve api``.
    * - ``delonix-mcp``
      - Model Context Protocol server; ``delonix-mcp`` binary, run by ``delonix mcp``.
-   * - ``delonix-runtime-bin`` / ``delonix-mcp-bin`` / ``delonix-mgmt-bin``
+   * - ``delonix-node-api``
+     - The node contract ``delonix.node.v1`` (gRPC + HTTP/JSON on a unix socket, ADR-0040 P5); ``delonix-node-api`` binary, run by ``delonix serve node-api``. Serves ``ListProviders`` today.
+   * - ``delonix-runtime-bin`` / ``delonix-mcp-bin`` / ``delonix-mgmt-bin`` / ``delonix-node-api-bin``
      - The ``delonix`` CLI — the one door; it runs the servers as sibling binaries.
 
 See the `architecture page
