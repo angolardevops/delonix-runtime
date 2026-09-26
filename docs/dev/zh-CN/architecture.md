@@ -431,7 +431,6 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 - `delonix-oci` → `delonix-state` — 移除于 **P4**
 - `delonix-opnsense` → `delonix-sdn` — 移除于 **P4**
 - `delonix-proxmox` → `delonix-sdn` — 移除于 **P4**
-- `delonix-proxmox` → `delonix-vm` — 移除于 **P4**
 - `delonix-scanner` → `delonix-oci` — 移除于 **P4**
 - `delonix-sdn` → `delonix-state` — 移除于 **P4**
 - `delonix-vm` → `delonix-state` — 移除于 **P4**
@@ -713,7 +712,6 @@ flowchart TB
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
   delonix_proxmox --> delonix_sdn
-  delonix_proxmox --> delonix_vm
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt

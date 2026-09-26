@@ -18,8 +18,8 @@
 //! promotes every route it records to `supported+tested` (ADR-0049 D2), and the
 //! committed `docs/proxmox/trace-<ver>.routes` is one such run.
 
+use delonix_compute::vm_backend::{CreateStage, VmBackend, VmConfig};
 use delonix_proxmox::{AgentExecStatus, Auth, ProxmoxBackend, Target};
-use delonix_vm::{CreateStage, VmBackend, VmConfig};
 
 /// The backend over a client that honours the route trace: with
 /// `DELONIX_PROXMOX_TRACE_ROUTES=<file>` every request of this run lands in
@@ -2531,7 +2531,7 @@ fn sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node()
 /// appending, and the other direction left alone.
 #[test]
 fn a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back() {
-    use delonix_vm::firewall::{Direction, Policy, Proto, Rule};
+    use delonix_compute::vm_firewall::{Direction, Policy, Proto, Rule};
     let Some(t) = target() else {
         return;
     };
@@ -3021,19 +3021,19 @@ fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
         vcpus: 1,
         memory: "512M".into(),
         extra_disks: vec![
-            delonix_vm::ExtraDisk {
+            delonix_compute::ExtraDisk {
                 source: format!("{storage}:1"),
                 ..Default::default()
             },
-            delonix_vm::ExtraDisk {
+            delonix_compute::ExtraDisk {
                 source: format!("{storage}:2"),
                 bus: "scsi".into(),
                 ..Default::default()
             },
         ],
         extra_nics: vec![
-            delonix_vm::ExtraNic::default(),
-            delonix_vm::ExtraNic {
+            delonix_compute::ExtraNic::default(),
+            delonix_compute::ExtraNic {
                 kind: "bridge".into(),
                 source: Some("vmbr0".into()),
                 model: "e1000".into(),
@@ -3149,7 +3149,7 @@ fn a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it() {
         boot.api_socket.clone(),
     );
     let client = b.client();
-    let intent = delonix_vm::CloudInitIntent {
+    let intent = delonix_compute::vm_backend::CloudInitIntent {
         hostname: Some("dlx-renamed".into()),
         ci_user: Some("ops".into()),
         ssh_keys: vec![new_key.into()],
