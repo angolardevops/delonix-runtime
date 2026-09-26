@@ -1777,7 +1777,11 @@ pub(crate) fn cmd_push(store: &VmImageStore, name: &str, target: Option<&str>) -
         VM_IMAGE_MEDIA_TYPE,
         &qcow2,
         &annotations_of(&img),
+        Some(super::image::push_progress_bar(format!(
+            "[vm push] {target}"
+        ))),
     )?;
+    super::output::progress_done();
     println!("{digest}");
     Ok(())
 }
