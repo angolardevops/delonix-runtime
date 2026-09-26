@@ -738,6 +738,19 @@ impl Client {
         &mut self,
         build: &dyn Fn(&reqwest::blocking::Client) -> Result<reqwest::blocking::RequestBuilder>,
     ) -> Result<reqwest::blocking::Response> {
+        self.write_req_raw(build)?
+            .map_err(|e| reg_err_with_hint(e, &self.host))
+    }
+
+    /// [`Self::write_req_try`], with a TRANSPORT failure (connection refused
+    /// or reset, timeout, body cut) kept as the raw `reqwest::Error` in the
+    /// inner `Result` — the upload retry needs to tell it apart from a
+    /// registry that answered. The outer `Result` carries what is not
+    /// transport: the body could not be built, or no token was granted.
+    fn write_req_raw(
+        &mut self,
+        build: &dyn Fn(&reqwest::blocking::Client) -> Result<reqwest::blocking::RequestBuilder>,
+    ) -> Result<std::result::Result<reqwest::blocking::Response, reqwest::Error>> {
         let send = |http: &reqwest::blocking::Client, token: &Option<String>| -> Result<_> {
             let mut req = build(http)?;
             if let Some(t) = token {
@@ -745,7 +758,10 @@ impl Client {
             }
             Ok(req.send())
         };
-        let resp = send(&self.http, &self.token)?.map_err(|e| reg_err_with_hint(e, &self.host))?;
+        let resp = match send(&self.http, &self.token)? {
+            Ok(r) => r,
+            Err(e) => return Ok(Err(e)),
+        };
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www = resp
                 .headers()
@@ -755,23 +771,9 @@ impl Client {
                 .to_string();
             let scope = format!("repository:{}:pull,push", self.repo);
             self.token = Some(self.get_token(&www, Some(&scope))?);
-            let resp = send(&self.http, &self.token)?.map_err(reg_err)?;
-            return Ok(resp);
+            return send(&self.http, &self.token);
         }
-        Ok(resp)
-    }
-
-    /// `true` if the blob already exists in the registry (avoids resending it — remote dedup).
-    fn blob_exists(&mut self, digest: &str) -> Result<bool> {
-        let url = format!(
-            "{}://{}/v2/{}/blobs/{}",
-            scheme_for(&self.host),
-            self.host,
-            self.repo,
-            digest
-        );
-        let resp = self.write_req(&|http| http.head(&url))?;
-        Ok(resp.status().is_success())
+        Ok(Ok(resp))
     }
 
     /// Sends a small blob held in memory (a config, a signature).
@@ -792,36 +794,111 @@ impl Client {
         })
     }
 
-    /// Monolithic upload: `POST` to open the session, then
-    /// `PUT …?digest=<sha256>` with the body `body` produces (called once per
-    /// attempt).
+    /// How many times one blob's upload is tried. Same budget as the pull's
+    /// `BLOB_ATTEMPTS`: enough to ride out a link that drops a connection every
+    /// few minutes, not so many that a broken transfer takes all afternoon to
+    /// say so.
+    const PUSH_ATTEMPTS: u32 = 5;
+
+    /// Uploads a blob, retrying what a retry can fix. The push had no retry at
+    /// all: a connection that dropped at 90% of a 2 GiB image meant running
+    /// the command again and sending all of it.
+    ///
+    /// Every attempt starts with a `HEAD`: a blob the registry already holds
+    /// is done — including one whose `PUT` was accepted but whose answer was
+    /// lost on the way back, which must not be sent twice. A transport failure
+    /// and a 5xx/408/429 are retried with backoff, on a NEW session (a failed
+    /// `PUT` usually invalidates its upload URL); any other answer (400 for a
+    /// digest mismatch, 403) fails at once, since sending the same bytes again
+    /// cannot change it. `body` is called once per attempt.
     fn push_blob_with(
         &mut self,
         digest: &str,
         body: &dyn Fn() -> Result<reqwest::blocking::Body>,
     ) -> Result<()> {
-        if self.blob_exists(digest)? {
-            return Ok(());
+        let mut last = String::new();
+        for attempt in 1..=Self::PUSH_ATTEMPTS {
+            if attempt > 1 {
+                std::thread::sleep(Duration::from_secs(1 << (attempt - 2).min(3)));
+                tracing::warn!(attempt, "retrying the upload of {digest} after: {last}");
+            }
+            let outcome = match self.blob_present(digest) {
+                Ok(true) => return Ok(()),
+                Ok(false) => self.upload_once(digest, body),
+                Err(f) => Err(f),
+            };
+            match outcome {
+                Ok(()) => return Ok(()),
+                Err(UploadFailure::Retry(why)) => last = why,
+                Err(UploadFailure::Fatal(e)) => return Err(e),
+            }
         }
+        Err(Error::Registry(format!(
+            "blob {digest}: upload gave up after {} attempts — last error: {last}",
+            Self::PUSH_ATTEMPTS
+        )))
+    }
+
+    /// `HEAD` of a blob for the upload loop: `true` if the registry has it,
+    /// a transport failure or a 5xx/408/429 as retryable.
+    fn blob_present(&mut self, digest: &str) -> std::result::Result<bool, UploadFailure> {
+        let url = format!(
+            "{}://{}/v2/{}/blobs/{}",
+            scheme_for(&self.host),
+            self.host,
+            self.repo,
+            digest
+        );
+        match self.write_req_raw(&|http| Ok(http.head(&url))) {
+            Err(e) => Err(UploadFailure::Fatal(e)),
+            Ok(Err(e)) => Err(UploadFailure::Retry(format!("blob HEAD: {e}"))),
+            Ok(Ok(r)) if retryable_status(r.status()) => Err(UploadFailure::Retry(format!(
+                "blob HEAD: HTTP {}",
+                r.status()
+            ))),
+            Ok(Ok(r)) => Ok(r.status().is_success()),
+        }
+    }
+
+    /// One monolithic upload: `POST` to open the session, then
+    /// `PUT …?digest=<sha256>` with the body `body` produces.
+    fn upload_once(
+        &mut self,
+        digest: &str,
+        body: &dyn Fn() -> Result<reqwest::blocking::Body>,
+    ) -> std::result::Result<(), UploadFailure> {
         let start = format!(
             "{}://{}/v2/{}/blobs/uploads/",
             scheme_for(&self.host),
             self.host,
             self.repo
         );
-        let resp = self.write_req(&|http| http.post(&start))?;
+        let resp = match self.write_req_raw(&|http| Ok(http.post(&start))) {
+            Err(e) => return Err(UploadFailure::Fatal(e)),
+            Ok(Err(e)) => {
+                return Err(UploadFailure::Retry(format!("upload start: {e}")));
+            }
+            Ok(Ok(r)) => r,
+        };
         if resp.status() != reqwest::StatusCode::ACCEPTED {
-            return Err(Error::Registry(format!(
-                "upload start: HTTP {} (run `delonix login {}`?)",
-                resp.status(),
+            let status = resp.status();
+            let msg = format!(
+                "upload start: HTTP {status} (run `delonix login {}`?)",
                 self.host
-            )));
+            );
+            return Err(if retryable_status(status) {
+                UploadFailure::Retry(msg)
+            } else {
+                UploadFailure::Fatal(Error::Registry(msg))
+            });
         }
         let location = resp
             .headers()
             .get(reqwest::header::LOCATION)
             .and_then(|v| v.to_str().ok())
-            .ok_or_else(|| Error::Registry("upload without Location header".into()))?
+            .ok_or_else(|| {
+                UploadFailure::Fatal(Error::Registry("upload without Location header".into()))
+            })?
             .to_string();
         // Location may come absolute or relative to the host.
         let base = if location.starts_with("http") {
@@ -831,17 +908,28 @@ impl Client {
         };
         let sep = if base.contains('?') { '&' } else { '?' };
         let put_url = format!("{base}{sep}digest={digest}");
-        let resp = self.write_req_try(&|http| {
+        let resp = match self.write_req_raw(&|http| {
             Ok(http
                 .put(&put_url)
                 .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
                 .body(body()?))
-        })?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            return Err(Error::Registry(format!("blob PUT {digest}: HTTP {status}")));
+        }) {
+            Err(e) => return Err(UploadFailure::Fatal(e)),
+            Ok(Err(e)) => return Err(UploadFailure::Retry(format!("blob PUT {digest}: {e}"))),
+            Ok(Ok(r)) => r,
+        };
+        let status = resp.status();
+        if status.is_success() {
+            Ok(())
+        } else if retryable_status(status) {
+            Err(UploadFailure::Retry(format!(
+                "blob PUT {digest}: HTTP {status}"
+            )))
+        } else {
+            Err(UploadFailure::Fatal(Error::Registry(format!(
+                "blob PUT {digest}: HTTP {status}"
+            ))))
         }
-        Ok(())
     }
 
     /// Publishes the manifest under the given tag/digest.
@@ -903,6 +991,22 @@ fn layer_media_type(data: &[u8]) -> &'static str {
     } else {
         "application/vnd.oci.image.layer.v1.tar"
     }
+}
+
+/// What one blob-upload attempt ended in, when it did not succeed.
+enum UploadFailure {
+    /// Transport failure, or a 5xx/408/429 — another attempt may succeed.
+    Retry(String),
+    /// Anything a retry cannot change.
+    Fatal(Error),
+}
+
+/// Registry answers worth another attempt: server errors, and the two that
+/// mean "not now" (request timeout, too many requests).
+fn retryable_status(s: reqwest::StatusCode) -> bool {
+    s.is_server_error()
+        || s == reqwest::StatusCode::REQUEST_TIMEOUT
+        || s == reqwest::StatusCode::TOO_MANY_REQUESTS
 }
 
 /// Where a downloaded blob goes: `len` is what a resume continues from,
@@ -3016,6 +3120,139 @@ mod tests {
         assert_eq!(auth.as_deref(), Some("bearer tok"));
         assert_eq!(body, &payload, "the retry must carry the whole file again");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// What the scripted registry does with the n-th blob PUT.
+    #[derive(Clone, Copy)]
+    enum PutAct {
+        /// Answer with this status (201 stores the blob).
+        Status(u16),
+        /// Read the body, then close without answering: a dropped connection.
+        Drop,
+        /// Store the blob, then close without answering: the answer is lost.
+        StoreThenDrop,
+    }
+
+    /// A registry whose blob PUTs follow `script`, in order (the last entry
+    /// repeats). HEAD answers 200 once a blob is stored. Returns the port and
+    /// the number of PUTs received.
+    fn serve_scripted_push(
+        script: Vec<PutAct>,
+    ) -> (u16, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        use std::io::{Read, Write};
+        use std::sync::atomic::Ordering;
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let puts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = puts.clone();
+        std::thread::spawn(move || {
+            let mut stored = false;
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let hend = loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break None;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = crate::registry::find_subslice(&buf, b"\r\n\r\n") {
+                        break Some(i);
+                    }
+                };
+                let Some(hend) = hend else { continue };
+                let head = String::from_utf8_lossy(&buf[..hend]).to_lowercase();
+                let len: usize = head
+                    .lines()
+                    .find(|l| l.starts_with("content-length:"))
+                    .and_then(|l| l[15..].trim().parse().ok())
+                    .unwrap_or(0);
+                let mut body_len = buf.len() - hend - 4;
+                while body_len < len {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    body_len += n;
+                }
+                let reply = |s: &mut std::net::TcpStream, status: &str, extra: &str| {
+                    let _ = s.write_all(
+                        format!("HTTP/1.1 {status}\r\n{extra}content-length: 0\r\nconnection: close\r\n\r\n")
+                            .as_bytes(),
+                    );
+                };
+                if head.starts_with("head ") {
+                    reply(&mut s, if stored { "200 OK" } else { "404 Not Found" }, "");
+                } else if head.starts_with("post ") {
+                    reply(
+                        &mut s,
+                        "202 Accepted",
+                        "location: /v2/r/blobs/uploads/u\r\n",
+                    );
+                } else if head.starts_with("put ") {
+                    let n = counter.fetch_add(1, Ordering::SeqCst);
+                    match script[n.min(script.len() - 1)] {
+                        PutAct::Status(code) => {
+                            if code == 201 {
+                                stored = true;
+                            }
+                            reply(&mut s, &format!("{code} X"), "");
+                        }
+                        PutAct::Drop => {}
+                        PutAct::StoreThenDrop => stored = true,
+                    }
+                } else {
+                    reply(&mut s, "404 Not Found", "");
+                }
+            }
+        });
+        (port, puts)
+    }
+
+    fn push_with_script(script: Vec<PutAct>) -> (crate::Result<()>, usize) {
+        let (port, puts) = serve_scripted_push(script);
+        let dir = scratch("push-retry");
+        let path = dir.join("blob");
+        let payload = vec![5u8; 200_000];
+        std::fs::write(&path, &payload).unwrap();
+        let digest = format!("sha256:{}", sha256_hex(&payload));
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "r");
+        let res = c.push_blob_file(&digest, &path, payload.len() as u64);
+        let _ = std::fs::remove_dir_all(&dir);
+        (res, puts.load(std::sync::atomic::Ordering::SeqCst))
+    }
+
+    /// The push had no retry: a dropped connection or a registry hiccup
+    /// meant sending the whole blob again by hand. A 503 and a dropped
+    /// connection are retried on a new session.
+    #[test]
+    fn a_push_retries_a_503_and_a_dropped_connection() {
+        let (res, puts) =
+            push_with_script(vec![PutAct::Status(503), PutAct::Drop, PutAct::Status(201)]);
+        res.expect("two transient failures must not fail the push");
+        assert_eq!(puts, 3);
+    }
+
+    /// A PUT that landed but whose answer was lost is NOT sent again: the
+    /// next attempt's HEAD finds the blob.
+    #[test]
+    fn a_push_whose_answer_was_lost_is_not_sent_twice() {
+        let (res, puts) = push_with_script(vec![PutAct::StoreThenDrop]);
+        res.expect("the blob is in the registry");
+        assert_eq!(
+            puts, 1,
+            "the blob was already there — a second PUT would resend it all"
+        );
+    }
+
+    /// A 400 (digest mismatch) cannot be fixed by sending the same bytes
+    /// again: one PUT, and the error.
+    #[test]
+    fn a_push_does_not_retry_a_400() {
+        let (res, puts) = push_with_script(vec![PutAct::Status(400)]);
+        assert!(res.unwrap_err().to_string().contains("400"));
+        assert_eq!(puts, 1);
     }
 
     /// Security-audit finding: `blob_with_progress` used to trust the registry's raw
