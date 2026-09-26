@@ -2185,7 +2185,7 @@ fn provision_and_apply(args: ProvisionArgs) -> Result<()> {
     // choice (`DELONIX_VM_BACKEND` or `vm default-backend`), which is exactly
     // how a control plane provisioning onto Proxmox steers it.
     let remote_storage = delonix_vm::backend_manages_own_storage(
-        delonix_vm::standing_backend_choice(&state_root()).as_deref(),
+        delonix_vm::standing_backend_choice(&state_root())?.as_deref(),
     );
     let (image_tag, disk) = if remote_storage {
         let ref_ = args.vm_image.clone().ok_or_else(|| {

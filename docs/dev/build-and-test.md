@@ -178,6 +178,7 @@ pgrep -a delonix
 | AppArmor | profile for `<dir>/delonix` when the userns restriction is active | always (when the restriction is on) |
 | Old Debian | `kernel.unprivileged_userns_clone=1` when it is `0` | always (when needed) |
 | VM dependencies | libvirt, qemu, cloud-init tooling; Cloud Hypervisor and its firmware downloaded from upstream | skipped with `--no-vm` |
+| Default VM provider | `providers.yaml` with `defaultProvider: libvirt` (ADR-0054): `/etc/delonix/`, or `~/.config/delonix/` with `--user`; written only if absent, never rewritten | `--vm-provider cloud-hypervisor` changes the default; skipped with `--no-vm` |
 | Kernel tuning | `/etc/modules-load.d/delonix.conf`, `/etc/sysctl.d/99-delonix.conf` | skipped with `--no-tune` |
 | cgroup delegation | `user@.service` drop-in, only if not already delegated | skipped with `--no-delegate` |
 | Accelerators | NVIDIA CDI and `render` group, only when a GPU is present | skipped with `--no-gpu` |
