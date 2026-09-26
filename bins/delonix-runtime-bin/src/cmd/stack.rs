@@ -398,6 +398,7 @@ pub(crate) fn desired_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile
                 k::FIREWALL_POLICY => super::firewall::desired(doc)?,
                 k::NETWORK_ACCESS_RULE => super::network_access_rule::desired(doc)?,
                 k::NETWORK_GATEWAY => super::network_gateway::desired(doc)?,
+                k::NETWORK_ZONE => super::network_zone::desired(doc)?,
                 k::HTTP_ROUTE | k::INGRESS => super::httproute::desired(doc)?,
                 k::GATEWAY => super::tunnel::desired(doc)?,
                 _ => reconcile::Desired {
@@ -435,6 +436,7 @@ pub(crate) fn actual_of(docs: &[manifest::ManifestDoc]) -> Result<Vec<reconcile:
     out.extend(super::firewall::actual(docs)?);
     out.extend(super::network_access_rule::actual(docs)?);
     out.extend(super::network_gateway::actual()?);
+    out.extend(super::network_zone::actual()?);
     out.extend(super::httproute::actual(docs)?);
     out.extend(super::tunnel::actual(docs)?);
     let (_, cstore) = super::util::open_stores()?;
@@ -709,6 +711,10 @@ pub(crate) fn compared_fields_table() -> Vec<(&'static str, &'static [&'static s
         (
             k::NETWORK_GATEWAY,
             super::network_gateway::RECONCILED_NETWORK_GATEWAY_FIELDS,
+        ),
+        (
+            k::NETWORK_ZONE,
+            super::network_zone::RECONCILED_NETWORK_ZONE_FIELDS,
         ),
         (k::HTTP_ROUTE, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
         (k::INGRESS, super::httproute::RECONCILED_HTTPROUTE_FIELDS),
@@ -1339,6 +1345,7 @@ fn presence(
         k::SERVICE => super::service::presence_of(doc),
         k::IPPOOL => super::ippool::presence_of(doc),
         k::NETWORK_GATEWAY => super::network_gateway::presence_of(doc),
+        k::NETWORK_ZONE => super::network_zone::presence_of(doc),
         // A share has a record of its own, keyed by (namespace, name) — the
         // namespace comes from the document, which is why `load_record` takes
         // both and why guessing it is not an option.
@@ -1760,6 +1767,9 @@ fn run_layers(
     // Logo a seguir às redes: uma rota nomeia DUAS que têm de existir, e nada
     // do que vem abaixo depende dela para ser criado.
     layers.run(k::NETWORK_ROUTE, "🔗", || super::netroute::apply(docs))?;
+    // Cluster-native SDN before anything that might attach to it — mirrors
+    // NETWORK's own early position.
+    layers.run(k::NETWORK_ZONE, "🗺", || super::network_zone::apply(docs))?;
     layers.run(k::VOLUME, "💽", || super::volume::apply(docs))?;
     layers.run(k::IMAGE, "📦", || super::image::apply(docs))?;
     layers.run(k::APP, "🏗", || super::app::apply(docs))?;
@@ -1880,6 +1890,7 @@ fn destroy_one(kind: &str, name: &str) -> Result<()> {
         k::VM => super::vm::remove_for_replace(name),
         k::NETWORK_ACCESS_RULE => super::network_access_rule::remove_for_replace(name),
         k::NETWORK_GATEWAY => super::network_gateway::remove_for_replace(name),
+        k::NETWORK_ZONE => super::network_zone::remove_for_replace(name),
         // Unreachable: the guard above already refused everything outside
         // the `teardown` column. Kept so flipping that column without an arm
         // here fails instead of silently doing nothing.
@@ -2155,6 +2166,20 @@ fn converge_and_stamp(
                         })?;
                     super::network_gateway::converge_doc(doc)?
                 }
+                // Same shape again: `network_zone::apply_one` already fully
+                // re-ensures the declared zone/vnets, so converging is applying.
+                k::NETWORK_ZONE => {
+                    let doc = docs
+                        .iter()
+                        .find(|d| d.kind == c.kind && d.metadata.name == c.name)
+                        .ok_or_else(|| {
+                            delonix_model::Error::Invalid(format!(
+                                "NetworkZone/{}: not in the manifest",
+                                c.name
+                            ))
+                        })?;
+                    super::network_zone::converge_doc(doc)?
+                }
                 k::IPPOOL => {
                     let doc = docs
                         .iter()
@@ -2233,6 +2258,7 @@ fn stamp_all(
             k::NETWORK_ROUTE => super::netroute::stamp(&d.name, stack, &d.fields),
             k::SERVICE => super::service::stamp(&d.name, stack, &d.fields),
             k::NETWORK_GATEWAY => super::network_gateway::stamp(&d.name, stack, &d.fields),
+            k::NETWORK_ZONE => super::network_zone::stamp(&d.name, stack, &d.fields),
             k::IPPOOL => super::ippool::stamp(&d.name, stack, &d.fields),
             k::HTTP_ROUTE | k::INGRESS => {
                 super::httproute::stamp(&d.kind, &d.name, stack, &d.fields)
@@ -2870,10 +2896,10 @@ fn validate_graph_with(
                         ));
                     }
                 }
-                if !matches!(scope, "container" | "network") {
+                if !matches!(scope, "container" | "network" | "vm") {
                     // Message consistent with the apply (which also rejects the scope).
                     issues.push(super::po::tf(
-                        "{kind} '{name}' → invalid scope '{scope}' (use container|network)",
+                        "{kind} '{name}' → invalid scope '{scope}' (use container|network|vm)",
                         &[("kind", &doc.kind), ("name", name), ("scope", scope)],
                     ));
                 } else if let Some(target) = doc.spec.get("target").and_then(|v| v.as_str()) {
@@ -2882,6 +2908,16 @@ fn validate_graph_with(
                         if !networks.contains(target) {
                             issues.push(super::po::tf(
                                 "{kind} '{name}' (scope network) → target '{target}' is not a declared or existing Network",
+                                &[("kind", &doc.kind), ("name", name), ("target", target)],
+                            ));
+                        }
+                    } else if scope == "vm" {
+                        // `containers` holds the declared and existing VMs too;
+                        // whether the VM's backend has a firewall is the
+                        // apply's question (ADR-0052), not the graph's.
+                        if !containers.contains(target) {
+                            issues.push(super::po::tf(
+                                "{kind} '{name}' (scope vm) → target '{target}' is not a declared or existing VirtualMachine",
                                 &[("kind", &doc.kind), ("name", name), ("target", target)],
                             ));
                         }

@@ -437,7 +437,7 @@ Declared exceptions (each one names the ADR-0040 phase that removes it):
 - `delonix-mcp` → `delonix-mgmt` — removed in **P5**
 - `delonix-oci` → `delonix-state` — removed in **P4**
 - `delonix-opnsense` → `delonix-sdn` — removed in **P4**
-- `delonix-proxmox` → `delonix-vm` — removed in **P4**
+- `delonix-proxmox` → `delonix-sdn` — removed in **P4**
 - `delonix-scanner` → `delonix-oci` — removed in **P4**
 - `delonix-sdn` → `delonix-state` — removed in **P4**
 - `delonix-vm` → `delonix-state` — removed in **P4**
@@ -480,7 +480,16 @@ binaries → P4 providers → P5 node API → P6 CRI → P7 observability). What
   write files through `delonix-state` (`delonix-linux`, `delonix-vm`, `delonix-sdn`,
   `delonix-oci`, `delonix-volume`) are declared exceptions until P4 gives them a
   `StateRepository` port (`scripts/arch_fitness.py`).
-- **P4–P7 have not started.** The remaining exceptions in the table above name those phases.
+- **P4 is under way; P5–P7 have not started.** ADR-0044 (accepted 2026-09-24) decides how P4 is
+  done. **#420** landed the `StateRepository<T>` port
+  (`crates/foundation/delonix-model/src/ports.rs`), and `delonix-linux` already uses it for
+  `wait_and_record`/`stop`/`persist_stop`/`remove`, which is why its exception in
+  `scripts/arch_fitness.py` names phase `P4a` and lists only the sites still open. **#486** added
+  the VM provider port (`VmSpec`, `Extensions`, `Provider`, `VmProvider` in
+  `crates/contexts/delonix-compute/src/vm_provider.rs`, P4b slice 1), and `delonix-vm` implements
+  it for the two local backends (`LocalVmProvider`, `crates/adapters/delonix-vm/src/provider.rs`)
+  by reusing its existing `create_with`/`stop`/`start` rather than a second orchestration; moving
+  each backend into its own provider crate is P4b slice 2. The remaining exceptions in the table above name the phase that removes each.
 
 ### Records, node helpers and persisted state, after #406
 
@@ -726,7 +735,7 @@ flowchart TB
   delonix_opnsense --> delonix_sdn
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
-  delonix_proxmox --> delonix_vm
+  delonix_proxmox --> delonix_sdn
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
@@ -1003,7 +1012,9 @@ sequenceDiagram
 
 > **Note — adapters still reach the state files directly.** `delonix-linux`, `delonix-vm`,
 > `delonix-sdn`, `delonix-oci` and `delonix-volume` depend on `delonix-state` as declared
-> exceptions; the `StateRepository` port that removes them is ADR-0040 P4, not yet written.
+> exceptions. The `StateRepository` port that removes them exists since #420
+> (`delonix-model/src/ports.rs`, ADR-0044 D6), and so far only `delonix-linux` goes through it for
+> part of its lifecycle; the other four still open the stores directly until their P4 slice lands.
 
 > **Note — `macvlan`/`ipvlan` are declared, not realized.** `network create` records them and
 > reports `Realized=False` with reason `DriverNotImplemented`

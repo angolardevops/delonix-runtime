@@ -282,7 +282,7 @@ script and in <a href="build-and-test.html">Clone, build and test</a>, not here.
 </tr>
 <tr>
 <td>VM backend</td>
-<td><code>--backend</code> (or the image's <code>HYPERVISOR</code>) &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>vm default-backend --set</code> &gt; auto-detection</td>
+<td><code>--backend</code> (or the image's <code>HYPERVISOR</code>) &gt; <code>DELONIX_VM_BACKEND</code> &gt; <code>defaultProvider</code> in the providers file (ADR-0054) &gt; <code>vm default-backend --set</code> &gt; auto-detection (only with no providers file)</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/lib.rs" target="_blank" rel="noopener"><code>crates/<wbr>adapters/<wbr>delonix-vm/<wbr>src/<wbr>lib.<wbr>rs:standing_backend_choice</code></a></td>
 </tr>
 <tr>
@@ -470,6 +470,13 @@ and how to tear the isolated infra down, is in
 <td>Session-wide VM backend when a command does not name one.</td>
 <td>A backend name (<code>libvirt</code>, <code>cloud-hypervisor</code>, or a registered remote backend such as <code>proxmox</code>). Blank is ignored.</td>
 <td>Below <code>--backend</code> and the image's <code>HYPERVISOR</code>, above the machine default from <code>delonix vm default-backend --set</code>. Like an explicit choice, it overrides the capability heuristic and can fail late at boot if the backend cannot run the VM.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROVIDERS_CONFIG</code></td>
+<td><code>cmd/<wbr>providers_config.<wbr>rs:locate_with</code></td>
+<td>Path to the node's providers file (ADR-0054), ahead of <code>$XDG_CONFIG_HOME/<wbr>delonix/<wbr>providers.<wbr>yaml</code> and <code>/<wbr>etc/<wbr>delonix/<wbr>providers.<wbr>yaml</code>.</td>
+<td>A path.</td>
+<td>Must name an existing file — never falls back to another one. The first file found is the configuration; files are never merged. A file that cannot be read makes a VM request without <code>--backend</code> fail instead of guessing a provider.</td>
 </tr>
 <tr>
 <td><code>DELONIX_NO_CGROUP_WARN</code></td>
@@ -793,6 +800,13 @@ commands. Background: <a class="src" href="https://github.com/angolardevops/delo
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TOKEN_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:credential_value</code></td>
+<td>Path to a file holding the API token secret; preferred over <code>DELONIX_PROXMOX_TOKEN</code>, which every child process inherits.</td>
+<td>A path.</td>
+<td>Refused unless only its owner can read it (<code>chmod 600</code>).</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_USER</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:proxmox_auth</code></td>
 <td>Account for password authentication.</td>
@@ -805,6 +819,13 @@ commands. Background: <a class="src" href="https://github.com/angolardevops/delo
 <td>Password for that account.</td>
 <td></td>
 <td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_PASSWORD_FILE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:credential_value</code></td>
+<td>Path to a file holding that password; preferred over <code>DELONIX_PROXMOX_PASSWORD</code>.</td>
+<td>A path.</td>
+<td>Refused unless only its owner can read it (<code>chmod 600</code>). The providers file's <code>passwordFile</code> maps onto it.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_INSECURE_TLS</code></td>
@@ -1125,6 +1146,13 @@ variable when the program runs.</p>
 <td>A SECOND storage <code>move_disk</code> moves the test VM's boot disk to — the node refuses a move to the same storage with the same format, so this has to be a genuinely different pool.</td>
 <td>Default <code>local</code> (must have <code>content=images</code> enabled on it).</td>
 <td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_CALLBACK_ADDR</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node</code></a></td>
+<td>The address the NODE can reach this host at: the test starts a stub HTTP server and gives the node <code>http:/<wbr>/<wbr>&lt;addr&gt;:&lt;port&gt;/<wbr>…</code> as the URL of an IPAM and a DNS controller, because the node verifies both by calling them.</td>
+<td>An IP the node routes to (<code>192.168.122.1</code> for a libvirt-NAT lab node).</td>
+<td>Without it the controller half of that test is skipped; the rest still runs.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_AGENT_VMID</code></td>

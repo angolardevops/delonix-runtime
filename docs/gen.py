@@ -278,8 +278,10 @@ gerar na mesma.""",
         "intro": """O grupo <code>container</code> é o dia a dia do runtime — o homólogo do
 <code>docker container</code>. Cada invocação é um processo efémero (sem daemon): o
 <code>run</code> faz <code>clone()</code> directo com os namespaces pedidos e o estado fica em
-JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs do container é uma cópia flat
-<em>persistente</em> — as escritas sobrevivem a <code>stop</code>/<code>start</code>, como no Docker.""",
+JSON no <code>$DELONIX_ROOT</code>. Em rootless, o rootfs é um overlay montado dentro do user
+namespace do próprio container: as layers da imagem são partilhadas entre todos os containers e
+cada um tem a sua camada de escrita <em>persistente</em> — as escritas sobrevivem a
+<code>stop</code>/<code>start</code>, como no Docker.""",
         "subs": {
             "run": {"examples": [
                 ("Servir nginx na porta 8080 do host (NAT userspace, sem root)",
@@ -1636,9 +1638,10 @@ GROUPS_EN = {
         "intro": """The <code>container</code> group is the runtime's everyday surface — the
 counterpart to <code>docker container</code>. Each invocation is an ephemeral process (no daemon):
 <code>run</code> does a direct <code>clone()</code> with the requested namespaces and the state
-lands as JSON under <code>$DELONIX_ROOT</code>. In rootless mode, a container's rootfs is a
-<em>persistent</em> flat copy — writes survive <code>stop</code>/<code>start</code>, just like in
-Docker.""",
+lands as JSON under <code>$DELONIX_ROOT</code>. In rootless mode, the rootfs is an overlay mounted
+inside the container's own user namespace: the image layers are shared by every container, and
+each one has its own <em>persistent</em> writable layer — writes survive
+<code>stop</code>/<code>start</code>, just like in Docker.""",
     },
     "workload": {
         "tagline": "Unified layer over containers AND VMs: ls, describe, stop, rm (ADR-0002).",
@@ -1851,8 +1854,9 @@ connections/conntrack; <code>system events</code> the event stream.""",
     "dash": {
         "tagline": "Summary/KPI dashboard (htop-style TUI) — RAM/network/disk, per-container uptime, JSON and Prometheus.",
         "intro": """A live view of runtime state — containers, VMs, images, networks, storage —
-in one screen, without running <code>ls</code> across 5 different groups. Each group also has its
-own (<code>container dash</code>, <code>vm dash</code>, ...); this is the global aggregate.
+in one screen, without running <code>ls</code> across 5 different groups. <code>--scope
+container|vm|network|volume|image</code> focuses it on one group — it replaced the five
+<code>&lt;group&gt; dash</code> commands that existed before (clean cut, no alias).
 Dynamic KPIs: cgroup slice memory, accumulated rx/tx traffic per container (with an explicit count
 of unmeasured <code>--net host/none</code> containers, never silently summed as zero), disk usage
 by area (images/volumes/VM-images/containers), and real per-container uptime (the <code>UP</code>
@@ -3613,28 +3617,52 @@ delonix container start web      # restarts with the same state</code></pre>
 
 ARCH = """
 <h1>Arquitectura</h1>
-<p class="tagline">10 crates, um binário — e nenhum processo residente.</p>
+<p class="tagline">Um comando, crates em cinco camadas (ADR-0040) — e nenhum processo residente.</p>
 
 <h2>Visão geral</h2>
+<p>O directório de cada crate é a sua camada, e o <code>scripts/arch_fitness.py</code> falha
+quando os dois discordam ou quando uma dependência vai contra a direcção das camadas (uma camada só
+depende das de baixo; um binário compõe UMA interface).</p>
 <div class="arch">
-<div class="row"><div class="box mut" style="flex:3"><b>delonix (CLI) — delonix-runtime-bin</b>
-comandos agrupados: container · image · build · vm · volumes · network · stack · cluster</div></div>
+<div class="row"><div class="box mut" style="flex:3"><b>binários — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin</b>
+a CLI <code>delonix</code> é a única porta: container · image · build · vm · volume · network · stack · cluster · …;
+<code>delonix mcp</code>/<code>serve api</code>/<code>serve cri</code> executam os binários irmãos</div></div>
 <div class="row">
-<div class="box"><b>delonix-linux</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
-pivot_root, seccomp/caps, cgroups v2 delegados, exec, reconcile</div>
-<div class="box"><b>delonix-oci</b>pull OCI (digest verificado), build, export, buildpacks CNB,
-assinaturas, registo</div>
-<div class="box"><b>delonix-sdn</b>SDN rootless: holder netns + bridge + slirp único, DNAT/firewall
-nft, DNS interno, overlay WireGuard</div>
-</div>
-<div class="row">
-<div class="box"><b>delonix-vm</b>microVMs (trait VmBackend: Cloud Hypervisor · libvirt), cloud-init</div>
-<div class="box"><b>delonix-volume</b>volumes nomeados, bind mounts, quotas, nfs</div>
 <div class="box"><b>delonix-cri</b>servidor CRI runtime.v1 — o kubelet fala com o Delonix</div>
-<div class="box mut"><b>delonix-runtime-core</b>tipos partilhados: Container, Vm, Status, Store JSON,
-Secret Manager</div>
+<div class="box"><b>delonix-mgmt</b>API de gestão LOCAL (HTTP+JSON num socket unix), métricas Prometheus</div>
+<div class="box"><b>delonix-mcp</b>servidor Model Context Protocol, local e sem inquilino</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-proxmox</b>VmBackend e SDN contra a API de um nó Proxmox VE</div>
+<div class="box"><b>delonix-truenas</b>dataset, quota e partilha numa appliance TrueNAS</div>
+<div class="box"><b>delonix-opnsense</b>GatewayProvider contra a API REST do OPNsense (ADR-0051)</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-linux</b>clone() + namespaces, pivot_root, seccomp/caps, cgroups v2 delegados, exec, reconcile</div>
+<div class="box"><b>delonix-sdn</b>SDN rootless: holder netns + bridge + slirp único, DNAT/firewall nft,
+DNS interno, overlay WireGuard</div>
+<div class="box"><b>delonix-oci</b>pull OCI (digest verificado), build, export, buildpacks CNB, assinaturas</div>
+<div class="box"><b>delonix-vm</b>microVMs (VmBackend: Cloud Hypervisor · libvirt), cloud-init</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-volume</b>volumes nomeados, bind mounts, quotas, nfs/cifs/webdav</div>
+<div class="box"><b>delonix-state</b>Store/JsonStore com flock, escrita atómica, cofre de segredos cifrado</div>
+<div class="box"><b>delonix-scanner</b>SBOM + CVE</div>
+<div class="box"><b>delonix-telemetry</b>logging estruturado, spans OpenTelemetry, registo Prometheus</div>
+</div>
+<div class="row">
+<div class="box mut"><b>delonix-compute</b>contexto: a especificação única de execução, registos Container/Vm</div>
+<div class="box mut"><b>delonix-stack</b>contexto: tabela de Kinds, reconciliador de 3 vias, revisões</div>
+<div class="box mut"><b>delonix-node</b>contexto: eventos, verificações do host, contrato de dispatch</div>
+<div class="box mut"><b>delonix-security-runtime</b>contexto: política e o único ponto de admissão</div>
+</div>
+<div class="row">
+<div class="box mut"><b>delonix-model</b>fundação pura: erro partilhado e códigos DX, Status, regras de firewall,
+modelo do segredo</div>
+<div class="box mut"><b>delonix-net-rules</b>fundação pura, sem dependências: CIDR, nomes de bridge, IPAM</div>
 </div>
 </div>
+<p>De cima para baixo: binários e interfaces · providers · adaptadores · contextos · fundação.</p>
 
 <h2>Daemonless a sério</h2>
 <p>Não há daemon, nem sequer um monitor por container (o conmon do podman). O <code>run</code> faz
@@ -3647,8 +3675,10 @@ oportunistas limpam órfãos (slirp sem alvo, hostfwd sem container) a cada invo
 <h2>Rootless-first</h2>
 <p>Sem root, o isolamento vem de user namespaces com mapeamento de subuid
 (<code>newuidmap</code>/<code>newgidmap</code>, como o podman) — o uid 0 do container é um uid
-não-privilegiado do host. O rootfs é uma cópia flat persistente por container (em root, overlayfs
-com upper preservado). Com <code>--privileged</code> + labels de node Kind, o runtime prepara a
+não-privilegiado do host. O rootfs é um overlayfs nos dois modos: as layers da imagem são
+partilhadas e cada container tem a sua upper persistente. Em rootless o mount é feito pelo init do
+container, dentro do seu user namespace, porque um utilizador sem privilégio não pode montar no
+host (desde a v0.59.0; um container antigo com cópia flat migra no <code>start</code> seguinte). Com <code>--privileged</code> + labels de node Kind, o runtime prepara a
 delegação de cgroup v2 dedicada que um systemd aninhado (kindest/node) exige.</p>
 
 <h2>Rede rootless: o ingress</h2>
@@ -3677,9 +3707,12 @@ validados por whitelist antes de chegarem a qualquer shell remoto.</p>
 <p><b>Auditoria de 2026-07-21 — 6 achados de severidade alta, CORRIGIDOS em 2026-07-23</b> (o
 <code>COPY</code> do build, por exemplo, era contornável por symlink apesar de uma correcção
 anterior ter tentado fechá-lo — agora canonicaliza e confirma o confinamento). Não há indícios de
-RCE pela rede, mas os fixes ainda não foram confirmados por uma 2.ª auditoria independente e o
-núcleo de syscalls nunca teve revisão de segurança — por prudência, evita ainda imagens/manifestos
-não confiáveis ou expor o motor num host partilhado até à confirmação. Detalhe completo em
+RCE pela rede. Uma auditoria adversarial independente (2026-07-26) confirmou 5 das 6 correcções e
+fechou um TOCTOU residual no kubeconfig, e reviu o núcleo de syscalls (namespaces, seccomp,
+<code>clone3</code>, higiene de fds, <code>SO_PEERCRED</code>) sem achados altos novos; uma 3.ª
+auditoria (2026-08-10) varreu as classes de CVE conhecidas do Docker/runc/CRI-O e corrigiu o que
+encontrou. Isto reduz o risco, não o elimina: num host partilhado, trata imagens e manifestos de
+terceiros com a mesma cautela que terias com qualquer runtime. Detalhe completo em
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
 — ver também a <a href="comparacao.html">comparação com Docker/Podman</a> para o estado geral do
 projecto.</p>
@@ -3688,28 +3721,52 @@ projecto.</p>
 
 ARCH_EN = """
 <h1>Architecture</h1>
-<p class="tagline">10 crates, one binary — and no resident process.</p>
+<p class="tagline">One command, crates in five layers (ADR-0040) — and no resident process.</p>
 
 <h2>Overview</h2>
+<p>A crate's directory is its layer, and <code>scripts/arch_fitness.py</code> fails when the two
+disagree or when a dependency runs against the direction of the layers (a layer depends only on the
+ones below it; a binary composes ONE interface).</p>
 <div class="arch">
-<div class="row"><div class="box mut" style="flex:3"><b>delonix (CLI) — delonix-runtime-bin</b>
-grouped commands: container · image · build · vm · volumes · network · stack · cluster</div></div>
+<div class="row"><div class="box mut" style="flex:3"><b>binaries — delonix-runtime-bin · delonix-mcp-bin · delonix-mgmt-bin</b>
+the <code>delonix</code> CLI is the one door: container · image · build · vm · volume · network · stack · cluster · …;
+<code>delonix mcp</code>/<code>serve api</code>/<code>serve cri</code> run the sibling binaries</div></div>
 <div class="row">
-<div class="box"><b>delonix-linux</b>clone() + namespaces (mount/pid/ipc/uts/net/user/cgroup),
-pivot_root, seccomp/caps, delegated cgroups v2, exec, reconcile</div>
-<div class="box"><b>delonix-oci</b>OCI pull (digest verified), build, export, CNB buildpacks,
-signatures, registry</div>
-<div class="box"><b>delonix-sdn</b>rootless SDN: holder netns + bridge + single slirp, nft
-DNAT/firewall, internal DNS, WireGuard overlay</div>
-</div>
-<div class="row">
-<div class="box"><b>delonix-vm</b>microVMs (VmBackend trait: Cloud Hypervisor · libvirt), cloud-init</div>
-<div class="box"><b>delonix-volume</b>named volumes, bind mounts, quotas, nfs</div>
 <div class="box"><b>delonix-cri</b>runtime.v1 CRI server — the kubelet talks to Delonix</div>
-<div class="box mut"><b>delonix-runtime-core</b>shared types: Container, Vm, Status, JSON Store,
-Secret Manager</div>
+<div class="box"><b>delonix-mgmt</b>LOCAL management API (HTTP+JSON over a unix socket), Prometheus metrics</div>
+<div class="box"><b>delonix-mcp</b>Model Context Protocol server, local and tenancy-free</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-proxmox</b>VmBackend and SDN against one Proxmox VE node's API</div>
+<div class="box"><b>delonix-truenas</b>dataset, quota and share on a TrueNAS appliance</div>
+<div class="box"><b>delonix-opnsense</b>GatewayProvider against OPNsense's REST API (ADR-0051)</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-linux</b>clone() + namespaces, pivot_root, seccomp/caps, delegated cgroups v2, exec, reconcile</div>
+<div class="box"><b>delonix-sdn</b>rootless SDN: holder netns + bridge + single slirp, nft DNAT/firewall,
+internal DNS, WireGuard overlay</div>
+<div class="box"><b>delonix-oci</b>OCI pull (digest verified), build, export, CNB buildpacks, signatures</div>
+<div class="box"><b>delonix-vm</b>microVMs (VmBackend: Cloud Hypervisor · libvirt), cloud-init</div>
+</div>
+<div class="row">
+<div class="box"><b>delonix-volume</b>named volumes, bind mounts, quotas, nfs/cifs/webdav</div>
+<div class="box"><b>delonix-state</b>Store/JsonStore behind flock, atomic writes, encrypted secret vault</div>
+<div class="box"><b>delonix-scanner</b>SBOM + CVE</div>
+<div class="box"><b>delonix-telemetry</b>structured logging, OpenTelemetry spans, Prometheus registry</div>
+</div>
+<div class="row">
+<div class="box mut"><b>delonix-compute</b>context: the one run specification, Container/Vm records</div>
+<div class="box mut"><b>delonix-stack</b>context: the Kind table, three-way reconciler, revisions</div>
+<div class="box mut"><b>delonix-node</b>context: events, host checks, the dispatch contract</div>
+<div class="box mut"><b>delonix-security-runtime</b>context: policy and the single admission point</div>
+</div>
+<div class="row">
+<div class="box mut"><b>delonix-model</b>pure foundation: shared error and DX codes, Status, firewall rules,
+secret model</div>
+<div class="box mut"><b>delonix-net-rules</b>pure foundation, zero dependencies: CIDRs, bridge names, IPAM</div>
 </div>
 </div>
+<p>Top to bottom: binaries and interfaces · providers · adapters · contexts · foundation.</p>
 
 <h2>Genuinely daemonless</h2>
 <p>There's no daemon, not even a per-container monitor (podman's conmon). <code>run</code> does a
@@ -3723,8 +3780,10 @@ hostfwd with no container) on every relevant invocation.</p>
 <h2>Rootless-first</h2>
 <p>Without root, isolation comes from user namespaces with subuid mapping
 (<code>newuidmap</code>/<code>newgidmap</code>, like podman) — the container's uid 0 is an
-unprivileged host uid. The rootfs is a persistent flat copy per container (in root mode, overlayfs
-with the upper layer preserved). With <code>--privileged</code> plus Kind node labels, the runtime
+unprivileged host uid. The rootfs is an overlayfs in both modes: the image layers are shared and
+each container keeps its own persistent upper layer. In rootless mode the mount is done by the
+container's init, inside its user namespace, because an unprivileged user cannot mount on the host
+(since v0.59.0; an older container with a flat copy migrates on its next <code>start</code>). With <code>--privileged</code> plus Kind node labels, the runtime
 sets up the dedicated cgroup v2 delegation a nested systemd (kindest/node) needs.</p>
 
 <h2>Rootless networking: the ingress</h2>
@@ -3753,9 +3812,12 @@ whitelist before reaching any remote shell.</p>
 <p><b>2026-07-21 audit — 6 high-severity findings, FIXED by 2026-07-23</b> (the build's
 <code>COPY</code>, for instance, was bypassable via symlink despite an earlier fix having tried to
 close it — it now canonicalizes and confirms confinement). There's no sign of remote code
-execution, but the fixes haven't yet been confirmed by a 2nd independent audit and the syscall core
-has never had a security review — out of caution, still avoid untrusted images/manifests or
-exposing the engine on a shared host until confirmed. Full detail in
+execution. An independent adversarial audit (2026-07-26) confirmed 5 of the 6 fixes, closed a
+residual TOCTOU on the kubeconfig, and reviewed the syscall core (namespaces, seccomp,
+<code>clone3</code>, fd hygiene, <code>SO_PEERCRED</code>) with no new high findings; a third audit
+(2026-08-10) swept the known Docker/runc/CRI-O CVE classes and fixed what it found. That lowers the
+risk, it does not remove it: on a shared host, treat third-party images and manifests with the
+same care you would with any runtime. Full detail in
 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AUDITORIA-E2E.md">AUDITORIA-E2E.md</a>
 — see also the <a href="comparacao.html">comparison with Docker/Podman</a> for the project's
 overall status.</p>
@@ -4461,6 +4523,24 @@ KINDS_DOC = [
      "daemon."),
     ("NetworkAccessRule", "network-access-rule.yaml", "UMA regra de firewall INCREMENTAL por documento: várias regras "
      "para o mesmo container acumulam, e cada uma sai sozinha quando o documento sai do manifesto."),
+    ("RuntimePolicy", "full-runtimepolicy.yaml", "O tecto de admissão do PRÓPRIO nó (grupo "
+     "<code>security.delonix.io</code>): recusar <code>--privileged</code>, rede do host, <code>:latest</code>, "
+     "registos fora da lista, passthrough de dispositivos numa VM. É o mesmo <code>policy.json</code> que "
+     "<code>container run</code> e <code>vm create</code> já consultam antes de criar seja o que for. Singleton do "
+     "nó: um manifesto declara no máximo um. Converge como qualquer Kind, mas tirá-lo do manifesto "
+     "<strong>não</strong> o remove — só <code>delonix policy unset</code> o faz."),
+    ("IPPool", "full-ippool.yaml", "Um livro de reservas de endereços DO HOST que as rotas reclamam: uma rota com "
+     "<code>spec.pool</code> segura UM endereço do pool enquanto for declarada e responde nesse endereço em vez do "
+     "loopback. Só IPv4; com <code>announce: local</code> o endereço já tem de estar numa interface deste host. Um "
+     "pool com um endereço reservado não se remove nem encolhe."),
+    ("NetworkZone", "networkzone.yaml", "Uma zona da SDN do próprio Proxmox VE e as vnets dentro dela. O documento "
+     "não nomeia a infraestrutura: realiza-o o provider de zonas configurado (hoje um nó Proxmox registado por "
+     "<code>DELONIX_PROXMOX_*</code>); sem nenhum, o <code>apply</code> recusa. Sem actualização no lugar: o "
+     "<code>apply</code> garante as vnets listadas, e o teardown remove as vnets, depois a zona."),
+    ("NetworkGateway", "networkgateway.yaml", "Aliases e regras de filtro numa firewall de perímetro (ADR-0051), "
+     "hoje o OPNsense, registado por <code>DELONIX_OPNSENSE_URL</code> e um par key/secret de API. Aliases entram "
+     "antes das regras e saem depois delas; a identidade de uma regra é a sua <code>description</code>. Uma "
+     "alteração ao spec é remover e voltar a aplicar."),
 ]
 
 # For each base example above, the `full-<kind>.yaml` file showing EVERY option of
@@ -4567,6 +4647,23 @@ KINDS_DOC_EN = [
     "<code>&lt;name&gt;.&lt;namespace&gt;.delonix.internal</code>, round-robin. No VIP, no daemon.",
     "ONE INCREMENTAL firewall rule per document: several rules for the same container accumulate, and each one "
     "goes away on its own when its document leaves the manifest.",
+    "The node's OWN admission ceiling (group <code>security.delonix.io</code>): refuse "
+    "<code>--privileged</code>, host networking, <code>:latest</code>, unlisted registries, device passthrough into "
+    "a VM. It is the same <code>policy.json</code> that <code>container run</code> and <code>vm create</code> "
+    "already check before creating anything. A node singleton: a manifest declares at most one. It converges like "
+    "any Kind, but dropping it from the manifest does <strong>not</strong> remove it — only "
+    "<code>delonix policy unset</code> does.",
+    "A reservation ledger of HOST addresses that routes claim: a route with <code>spec.pool</code> holds ONE "
+    "address of the pool for as long as it is declared, and answers on that address instead of loopback. IPv4 "
+    "only; with <code>announce: local</code> the address must already be on an interface of this host. A pool "
+    "with a leased address cannot be removed or shrunk.",
+    "A zone of Proxmox VE's own SDN and the vnets inside it. The document never names the infrastructure: the "
+    "configured zone provider realizes it (today a Proxmox node registered through <code>DELONIX_PROXMOX_*</code>); "
+    "with none, <code>apply</code> refuses. No update in place: <code>apply</code> ensures the listed vnets, and "
+    "teardown removes the vnets, then the zone.",
+    "Aliases and filter rules on a perimeter firewall (ADR-0051), today OPNsense, registered through "
+    "<code>DELONIX_OPNSENSE_URL</code> and an API key/secret pair. Aliases go in before rules and come out after "
+    "them; a rule's identity is its <code>description</code>. A spec change is a remove and re-apply.",
 ]
 
 

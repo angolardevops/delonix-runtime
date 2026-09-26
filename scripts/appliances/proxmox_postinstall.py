@@ -23,6 +23,15 @@ hypervisor is `enp0s3` under the next, leaving `vmbr0` with no member and the
 guest off the network again. `net.ifnames=0` makes it `eth0` everywhere, which
 is the only name that is true in every environment.
 
+3. **The rewrite itself dropped the SDN `source` directive** (found 2026-09-25,
+   by applying a Proxmox SDN zone on a published 9.2 image): the stock
+   `/etc/network/interfaces` ends with `source /etc/network/interfaces.d/*`,
+   which is where Proxmox writes every SDN vnet and fabric it applies. Without
+   it the SDN reload ends `TASK OK` with the warning "missing 'source
+   /etc/network/interfaces.d/sdn' directive for SDN support!" and realizes
+   nothing — the API keeps reporting the config as applied while no bridge
+   exists. The rewritten file carries the directive again.
+
 Driven over SSH with pexpect because that is what is available: the appliance
 has sshd running and a known root password, and its serial console has no getty
 to talk to (that is defect 2, and this is what fixes it).
@@ -90,6 +99,13 @@ iface vmbr0 inet dhcp
     bridge-ports eth0
     bridge-stp off
     bridge-fd 0
+
+# Proxmox's SDN writes its vnets and fabrics to interfaces.d/sdn and expects
+# this directive, which the stock installer's file carries and the rewrite
+# above dropped. Without it every SDN apply ends "TASK OK" with the warning
+# "missing 'source /etc/network/interfaces.d/sdn' directive for SDN support!"
+# and realizes nothing on the node (measured on a 9.2 appliance, 2026-09-25).
+source /etc/network/interfaces.d/*
 EOF
 
 # net.ifnames=0 makes the NIC eth0 in every hypervisor, which is what the

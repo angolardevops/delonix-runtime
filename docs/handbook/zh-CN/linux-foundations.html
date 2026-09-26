@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Linux foundations · Delonix Runtime — 贡献者手册</title>
+<title>Linux 基础 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,86 +206,61 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a class="on" aria-current="page" href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a class="on" aria-current="page" href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">基础</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="linux-foundations">Linux foundations</h1>
-<p><strong>Before you read:</strong> <a href="iaas-and-cloud-native.html">IaaS and cloud native</a>, for why a node engine needs these primitives. You need a Linux shell and nothing else.</p>
-<p>Every page after this one assumes you can answer, with a command, questions like "which network
-namespace is this process in?", "why did this limit not apply?" or "who is still holding this pipe
-open?". This page teaches those primitives hands-on, from the perspective of someone who writes
-Linux system code <em>and</em> has to operate it at 3 a.m. By the end you will be able to answer each of
-those questions from a shell, and to predict the failures that later pages describe in the engine's
-terms (a limit that does not apply, a pipe that never reaches EOF, a PID that names another process).</p>
-<p>It does not explain how the engine uses them — that mapping, with files and symbols, is the
-<a href="cloud-native-primer.html">Cloud native primer</a>. Each section here ends with a pointer to the
-matching part of it.</p>
-<p><strong>How to use this page.</strong> Open a terminal and type along. Every command marked <em>unprivileged</em> was
-run as an ordinary user on an Ubuntu host with a 7.0 kernel, util-linux 2.39 and systemd, and the
-output shown is what it printed (trimmed, with host-specific paths replaced by placeholders).
-Commands marked <strong>requires root — run in a disposable VM</strong> were <em>not executed</em> for this page:
-they change host-wide state, and you should never try them on a machine that runs anything you
-care about. <a href="microvm-setup.html">Microvm setup</a> shows how to get a throwaway VM from the engine
-itself.</p>
-<p>Work in a scratch directory so nothing you create lands in the repository:</p>
+<h1 id="linux-foundations">Linux 基础</h1>
+<p><strong>阅读之前：</strong> <a href="iaas-and-cloud-native.html">IaaS 与云原生</a>，说明为什么一个节点引擎需要这些原语。你只需要一个 Linux shell，别无其他。</p>
+<p>此后的每一页都假设你能够用一条命令回答诸如"这个进程处于哪个网络命名空间？""为什么这个限制没有生效？"或者"这个管道还被谁占着？"这样的问题。本页从一个既要编写 Linux 系统代码、又要在凌晨三点亲自运维它的人的视角出发，手把手地讲解这些原语。读完之后，你将能够在 shell 中回答上述每一个问题，并能用引擎的术语预测后续页面所描述的故障（不生效的限制、永远收不到 EOF 的管道、名字指向另一个进程的 PID）。</p>
+<p>本页不解释引擎如何使用这些原语——那份映射，连同具体的文件和符号，属于<a href="cloud-native-primer.html">云原生入门</a>。这里的每一节末尾都会指向那边对应的部分。</p>
+<p><strong>如何使用本页。</strong> 打开一个终端，跟着敲命令。每一条标记为 <em>无特权</em> 的命令，都是在一台内核版本 7.0、util-linux 2.39、systemd 的 Ubuntu 主机上以普通用户身份执行的，展示的输出就是它实际打印的内容（有所裁剪，主机特有的路径已替换为占位符）。标记为 <strong>需要 root——请在一次性虚拟机中运行</strong> 的命令，在写作本页时<em>并未执行</em>：它们会改变整台主机的状态，绝不应该在一台你在意其上任何东西的机器上尝试。<a href="microvm-setup.html">Microvm setup</a> 说明了如何从引擎本身获取一台可随时丢弃的虚拟机。</p>
+<p>在一个临时目录中操作，这样你创建的任何东西都不会进到仓库里：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">mkdir -p ~/scratch/linux-lab &amp;&amp; cd ~/scratch/linux-lab
 </code></pre></div>
 <hr />
-<h2 id="processes-the-kernel-and-proc">Processes, the kernel and /proc<a class="hanchor" href="#processes-the-kernel-and-proc" aria-label="#">#</a></h2>
-<p>A <strong>process</strong> is a running program with its own address space, a numeric <strong>PID</strong>, a parent (its
-<strong>PPID</strong>) and a set of kernel-owned attributes: credentials, namespaces, cgroup membership, open
-file descriptors, signal dispositions and resource limits. Every process except PID 1 has a
-parent; when a parent dies first, the orphan is re-parented to the nearest <em>subreaper</em> or to PID 1.</p>
+<h2 id="processes-the-kernel-and-proc">进程、内核与 /proc<a class="hanchor" href="#processes-the-kernel-and-proc" aria-label="#">#</a></h2>
+<p><strong>进程</strong>是一个正在运行的程序，拥有自己的地址空间、一个数字型的 <strong>PID</strong>、一个父进程（其 <strong>PPID</strong>），以及一组由内核持有的属性：凭据、命名空间、cgroup 归属、打开的文件描述符、信号处置方式和资源限制。除 PID 1 之外的每个进程都有一个父进程；当父进程先于子进程死亡时，孤儿进程会被重新过继给最近的 <em>subreaper</em>（子进程收割者）或者 PID 1。</p>
 <ul>
-<li><strong><code>fork</code></strong> duplicates the calling process. The child gets a copy of the address space (copy-on-
-  write) and a copy of the <strong>file descriptor table</strong> — the same open files, shared, not reopened.
-  Only the calling <em>thread</em> is copied, which is why forking a multi-threaded program and then
-  doing anything non-trivial before <code>exec</code> is dangerous (a lock held by another thread stays held
-  forever in the child).</li>
-<li><strong><code>execve</code></strong> replaces the program running in a process: same PID, same parent, same namespaces
-  and cgroup, new code. File descriptors survive <code>exec</code> <em>unless</em> they are marked close-on-exec —
-  more on that in <a href="#file-descriptors">File descriptors</a>.</li>
-<li><strong><code>clone</code></strong> is the general form behind both <code>fork</code> and thread creation. Its flags choose what the
-  child shares with the parent and, crucially here, which <strong>new namespaces</strong> it starts in
-  (<code>CLONE_NEWUSER</code>, <code>CLONE_NEWNS</code>, <code>CLONE_NEWPID</code>, <code>CLONE_NEWNET</code>, …). A container is born from a
-  <code>clone</code> with those flags.</li>
+<li><strong><code>fork</code></strong> 复制调用它的进程。子进程得到地址空间的一份拷贝（写时复制）和 <strong>文件描述符表</strong> 的一份拷贝——同样的已打开文件，是共享的，而不是重新打开的。只有发起调用的那个 <em>线程</em> 会被复制，这就是为什么对一个多线程程序执行 fork、然后在 <code>exec</code> 之前做任何不简单的事情都很危险（另一个线程持有的锁，在子进程里会永远锁着）。</li>
+<li><strong><code>execve</code></strong> 替换一个进程中正在运行的程序：PID 不变、父进程不变、命名空间和 cgroup 不变，代码是新的。文件描述符会在 <code>exec</code> 之后继续存活，<em>除非</em>它们被标记为 close-on-exec——详见 <a href="#file-descriptors">文件描述符</a>。</li>
+<li><strong><code>clone</code></strong> 是 <code>fork</code> 和线程创建背后共同的通用形式。它的标志位决定了子进程与父进程共享什么，而这里最关键的是，子进程会从哪些<strong>新命名空间</strong>里启动（<code>CLONE_NEWUSER</code>、<code>CLONE_NEWNS</code>、<code>CLONE_NEWPID</code>、<code>CLONE_NEWNET</code> 等）。一个容器正是从带着这些标志位的一次 <code>clone</code> 中诞生的。</li>
 </ul>
-<p>The kernel exposes each process as a directory under <code>/proc</code>. The files you will use most:</p>
+<p>内核把每个进程都以 <code>/proc</code> 下的一个目录形式暴露出来。你最常用到的文件有：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it tells you</th>
+<th>路径</th>
+<th>它告诉你什么</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>status</code></td>
-<td>name, state, PPid, uid/gid, <code>NSpid</code> (the PID in every nested PID namespace), capability sets, threads</td>
+<td>名称、状态、PPid、uid/gid、<code>NSpid</code>（该进程在每一层嵌套 PID 命名空间中的 PID）、能力集、线程数</td>
 </tr>
 <tr>
 <td><code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>cmdline</code></td>
-<td>the argv, NUL-separated</td>
+<td>argv，以 NUL 分隔</td>
 </tr>
 <tr>
 <td><code>/proc/&lt;pid&gt;/ns/</code></td>
-<td>one symlink per namespace; the inode number is the namespace's identity</td>
+<td>每个命名空间一个符号链接；inode 编号就是该命名空间的身份标识</td>
 </tr>
 <tr>
 <td><code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>cgroup</code></td>
-<td>the cgroup v2 path (<code>0::/…</code>)</td>
+<td>cgroup v2 的路径（<code>0::/…</code>）</td>
 </tr>
 <tr>
-<td><code>/proc/&lt;pid&gt;/fd/</code>, <code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>fdinfo/<wbr></code></td>
-<td>open file descriptors and their offset/flags</td>
+<td><code>/proc/&lt;pid&gt;/fd/</code>、<code>/<wbr>proc/<wbr>&lt;pid&gt;/<wbr>fdinfo/<wbr></code></td>
+<td>已打开的文件描述符及其偏移量/标志位</td>
 </tr>
 <tr>
 <td><code>/proc/&lt;pid&gt;/stat</code></td>
-<td>field 22 is the start time, which distinguishes a process from a later one that reused its PID</td>
+<td>第 22 个字段是启动时间，用它来区分一个进程与之后重用了同一 PID 的另一个进程</td>
 </tr>
 </tbody>
 </table></div>
-<p>Try it on your own shell (<em>unprivileged</em>):</p>
+<p>在你自己的 shell 里试一下（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">grep -E &#x27;^(State|PPid|Threads|NSpid|CapEff)&#x27; /proc/$$/status
 tr &#x27;\0&#x27; &#x27; &#x27; &lt; /proc/$$/cmdline; echo
 cat /proc/self/cgroup
@@ -297,77 +272,65 @@ Threads:	1
 CapEff:	0000000000000000
 0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-….scope
 </code></pre></div>
-<p>Note that <code>$$</code> is your shell, while <code>self</code> is whichever process opens the file — for <code>cat
-/proc/self/cgroup</code> that is <code>cat</code>. Also note that <strong>a PID is a number, not a name</strong>: once a process
-has been reaped, the kernel may give the same number to an unrelated process. Code that stores a
-PID and signals it later must check the start time, or better, hold a <em>pidfd</em> (see below).</p>
-<p><strong>Why the engine reads <code>/proc</code>.</strong> It is the only authoritative, lock-free view of a live
-process: the real cgroup of a running container, whether a recorded PID still names the same
-process, which namespaces to join for <code>exec</code>. → <a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">How Delonix uses this: namespaces and rootless
-operation</a>.</p>
-<p><strong>Read more:</strong> <a href="https://man7.org/linux/man-pages/man5/proc.5.html"><code>proc(5)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/fork.2.html"><code>fork(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/execve.2.html"><code>execve(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/clone.2.html"><code>clone(2)</code></a>.</p>
+<p>注意 <code>$$</code> 指的是你的 shell，而 <code>self</code> 指的是打开这个文件的那个进程——对 <code>cat /proc/self/cgroup</code> 来说，那就是 <code>cat</code> 自己。还要注意，<strong>PID 是一个数字，不是一个名字</strong>：一个进程被收割之后，内核可能把同一个数字分配给一个毫不相干的进程。如果代码保存了一个 PID、打算稍后向它发信号，就必须先检查启动时间，或者更好的做法是持有一个 <em>pidfd</em>（见下文）。</p>
+<p><strong>为什么引擎要读 <code>/proc</code>。</strong> 它是对一个存活进程唯一权威、无锁的视图：一个运行中容器的真实 cgroup、一个记录下来的 PID 是否仍然指向同一个进程、<code>exec</code> 时该加入哪些命名空间。→ <a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">Delonix 如何使用它：命名空间与 rootless 运作</a>。</p>
+<p><strong>延伸阅读：</strong> <a href="https://man7.org/linux/man-pages/man5/proc.5.html"><code>proc(5)</code></a>、<a href="https://man7.org/linux/man-pages/man2/fork.2.html"><code>fork(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/execve.2.html"><code>execve(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/clone.2.html"><code>clone(2)</code></a>。</p>
 <hr />
-<h2 id="namespaces">Namespaces<a class="hanchor" href="#namespaces" aria-label="#">#</a></h2>
-<p>A <strong>namespace</strong> wraps one kind of global resource so that processes inside it see their own
-instance. Linux has eight:</p>
+<h2 id="namespaces">命名空间<a class="hanchor" href="#namespaces" aria-label="#">#</a></h2>
+<p><strong>命名空间</strong>（namespace）把一种全局资源包裹起来，使得其中的进程看到的是各自独立的一份实例。Linux 一共有八种：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Namespace</th>
-<th>Flag</th>
-<th>Isolates</th>
+<th>命名空间</th>
+<th>标志位</th>
+<th>隔离的内容</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td>mount</td>
 <td><code>CLONE_NEWNS</code></td>
-<td>the mount table: what is mounted where</td>
+<td>挂载表：什么被挂载在哪里</td>
 </tr>
 <tr>
 <td>UTS</td>
 <td><code>CLONE_NEWUTS</code></td>
-<td>hostname and NIS domain name</td>
+<td>主机名和 NIS 域名</td>
 </tr>
 <tr>
 <td>IPC</td>
 <td><code>CLONE_NEWIPC</code></td>
-<td>System V IPC objects and POSIX message queues</td>
+<td>System V IPC 对象和 POSIX 消息队列</td>
 </tr>
 <tr>
 <td>PID</td>
 <td><code>CLONE_NEWPID</code></td>
-<td>process numbering; the first process inside is PID 1</td>
+<td>进程编号；命名空间内的第一个进程是 PID 1</td>
 </tr>
 <tr>
 <td>network</td>
 <td><code>CLONE_NEWNET</code></td>
-<td>interfaces, addresses, routes, firewall tables, sockets, <code>/proc/sys/net</code></td>
+<td>网络接口、地址、路由、防火墙表、套接字、<code>/proc/sys/net</code></td>
 </tr>
 <tr>
 <td>user</td>
 <td><code>CLONE_NEWUSER</code></td>
-<td>uids/gids and capabilities; the owner of every other namespace</td>
+<td>uid/gid 和能力（capabilities）；是其他所有命名空间的所有者</td>
 </tr>
 <tr>
 <td>cgroup</td>
 <td><code>CLONE_NEWCGROUP</code></td>
-<td>the view of the cgroup tree (the process sees its cgroup as <code>/</code>)</td>
+<td>cgroup 树的视图（进程把自己的 cgroup 看作 <code>/</code>）</td>
 </tr>
 <tr>
 <td>time</td>
 <td><code>CLONE_NEWTIME</code></td>
-<td>the offsets of <code>CLOCK_MONOTONIC</code> and <code>CLOCK_BOOTTIME</code></td>
+<td><code>CLOCK_MONOTONIC</code> 和 <code>CLOCK_BOOTTIME</code> 的偏移量</td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="identity-the-inode-behind-procns">Identity: the inode behind /proc/<pid>/ns<a class="hanchor" href="#identity-the-inode-behind-procns" aria-label="#">#</a></h3>
-<p>Each entry in <code>/proc/&lt;pid&gt;/ns</code> is a symlink whose target encodes the namespace type and an inode
-number. <strong>Two processes are in the same namespace exactly when those inodes are equal</strong> — this is
-how you compare, not by names (<em>unprivileged</em>):</p>
+<h3 id="identity-the-inode-behind-procns">身份标识：/proc/<pid>/ns 背后的 inode<a class="hanchor" href="#identity-the-inode-behind-procns" aria-label="#">#</a></h3>
+<p><code>/proc/&lt;pid&gt;/ns</code> 里的每一项都是一个符号链接，它的目标编码了命名空间的类型和一个 inode 编号。<strong>当且仅当这些 inode 相等时，两个进程才处于同一个命名空间</strong>——这才是比较的方法，而不是靠名字（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">ls -l /proc/self/ns
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">lrwxrwxrwx 1 you you 0 … cgroup -&gt; cgroup:[4026531835]
@@ -381,20 +344,15 @@ lrwxrwxrwx 1 you you 0 … time_for_children -&gt; time:[4026531834]
 lrwxrwxrwx 1 you you 0 … user -&gt; user:[4026531837]
 lrwxrwxrwx 1 you you 0 … uts -&gt; uts:[4026531838]
 </code></pre></div>
-<p><code>pid_for_children</code> and <code>time_for_children</code> exist because a process never changes its own PID or
-time namespace: <code>unshare</code>/<code>setns</code> on those affects only the children it creates next.</p>
-<p><code>lsns</code> lists namespaces system-wide. On the host used for this page, <strong>util-linux 2.39.3 on a
-7.0 kernel fails</strong> with <code>lsns: Unsupported ioctl NS_GET_USERNS</code> and prints nothing. If yours does
-the same, compare the inodes directly: <code>readlink /proc/&lt;pid&gt;/ns/net</code> for the processes you care
-about.</p>
-<h3 id="hands-on-a-user-mount-uts-network-namespace-without-root">Hands-on: a user + mount + UTS + network namespace, without root<a class="hanchor" href="#hands-on-a-user-mount-uts-network-namespace-without-root" aria-label="#">#</a></h3>
-<p>An unprivileged user cannot create most namespaces on their own…</p>
+<p><code>pid_for_children</code> 和 <code>time_for_children</code> 之所以存在，是因为一个进程永远不会改变自己的 PID 或 time 命名空间：对它们执行 <code>unshare</code>/<code>setns</code>，影响的只是它接下来创建的子进程。</p>
+<p><code>lsns</code> 会列出整个系统范围内的命名空间。在写作本页所用的主机上，<strong>内核版本 7.0 上的 util-linux 2.39.3 会失败</strong>，报 <code>lsns: Unsupported ioctl NS_GET_USERNS</code> 且不打印任何内容。如果你的环境也是这样，就直接比较 inode：对你关心的进程执行 <code>readlink /proc/&lt;pid&gt;/ns/net</code>。</p>
+<h3 id="hands-on-a-user-mount-uts-network-namespace-without-root">动手实践：不用 root 创建 user + mount + UTS + network 命名空间<a class="hanchor" href="#hands-on-a-user-mount-uts-network-namespace-without-root" aria-label="#">#</a></h3>
+<p>一个无特权用户无法独自创建大多数命名空间……</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">unshare --net true
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">unshare: unshare failed: Operation not permitted
 </code></pre></div>
-<p>…but can create a <strong>user namespace</strong>, and inside it becomes root <em>over the namespaces that user
-namespace owns</em>. <code>--map-root-user</code> (<code>-r</code>) maps your uid to 0 inside (<em>unprivileged</em>):</p>
+<p>……但可以创建一个 <strong>user 命名空间</strong>，并且在其中成为 root——<em>但仅限于该 user 命名空间所拥有的那些命名空间</em>。<code>--map-root-user</code>（<code>-r</code>）会把你的 uid 映射为里面的 0（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">unshare --user --map-root-user --mount --uts --net sh -c &#x27;
   hostname lab; hostname; id
   cat /proc/self/uid_map
@@ -411,11 +369,8 @@ net:[4026534483]
 &lt;your-host&gt;
 net:[4026531833]
 </code></pre></div>
-<p>Three things to see: the hostname changed only inside; the fresh network namespace has <strong>only
-<code>lo</code>, and it is down</strong>; and the namespace inode differs from the host's. The <code>65534(nogroup)</code>
-group is a host group with no mapping inside — unmapped ids always show as the overflow id.</p>
-<p>A mount namespace works the same way: mounts made inside are invisible outside
-(<em>unprivileged</em>):</p>
+<p>要留意三件事：主机名只在里面变了；全新的网络命名空间<strong>只有 <code>lo</code>，而且是 down 的</strong>；命名空间的 inode 和主机的不一样。<code>65534(nogroup)</code> 这个组是一个在里面没有映射的宿主机组——没有映射的 id 总是显示为溢出 id（overflow id）。</p>
+<p>mount 命名空间的原理一样：在里面做的挂载，在外面是看不见的（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">mkdir -p mnt
 unshare -r -m sh -c &quot;mount -t tmpfs scratch $PWD/mnt &amp;&amp; findmnt -n -o SOURCE,FSTYPE $PWD/mnt &amp;&amp; touch $PWD/mnt/only-here &amp;&amp; ls $PWD/mnt&quot;
 ls mnt; findmnt -n mnt; echo &quot;findmnt rc=$?&quot;
@@ -424,9 +379,7 @@ ls mnt; findmnt -n mnt; echo &quot;findmnt rc=$?&quot;
 only-here
 findmnt rc=1
 </code></pre></div>
-<p>A PID namespace needs <code>--fork</code>, because the caller itself stays in its old PID namespace; only
-its child becomes PID 1. <code>--mount-proc</code> remounts <code>/proc</code> so tools like <code>ps</code> see the new numbering
-(<em>unprivileged</em>):</p>
+<p>PID 命名空间需要 <code>--fork</code>，因为调用者自身仍留在它原来的 PID 命名空间里；只有它的子进程才会成为 PID 1。<code>--mount-proc</code> 会重新挂载 <code>/proc</code>，这样 <code>ps</code> 之类的工具才能看到新的编号（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">unshare -r --pid --fork --mount-proc sh -c &#x27;echo $$; ps -o pid,ppid,comm&#x27;
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">1
@@ -434,28 +387,22 @@ its child becomes PID 1. <code>--mount-proc</code> remounts <code>/proc</code> s
       1       0 sh
       2       1 ps
 </code></pre></div>
-<p>Seen from outside, the same process has two PIDs — <code>NSpid</code> lists them from the outermost
-namespace inwards (<em>unprivileged</em>):</p>
+<p>从外面看，同一个进程有两个 PID——<code>NSpid</code> 会把它们从最外层命名空间到最里层依次列出来（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">unshare -r -p -f sleep 3 &amp; U=$!; sleep 0.4
 grep -E &#x27;^(Name|NSpid)&#x27; /proc/$(pgrep -P $U)/status; wait
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">Name:	sleep
 NSpid:	953619	1
 </code></pre></div>
-<p>The cgroup and time namespaces can be tried the same way (<code>unshare -r --cgroup cat
-/proc/self/cgroup</code> prints <code>0::/</code>).</p>
-<h3 id="user-namespaces-and-uid-mapping">User namespaces and uid mapping<a class="hanchor" href="#user-namespaces-and-uid-mapping" aria-label="#">#</a></h3>
-<p>The mapping lives in <code>/proc/&lt;pid&gt;/uid_map</code> and <code>gid_map</code>, one line per range:
-<code>&lt;first id inside&gt; &lt;first id outside&gt; &lt;count&gt;</code>. The rules that shape rootless containers:</p>
+<p>cgroup 和 time 命名空间可以用同样的方式试验（<code>unshare -r --cgroup cat /proc/self/cgroup</code> 会打印出 <code>0::/</code>）。</p>
+<h3 id="user-namespaces-and-uid-mapping">User 命名空间与 uid 映射<a class="hanchor" href="#user-namespaces-and-uid-mapping" aria-label="#">#</a></h3>
+<p>映射保存在 <code>/proc/&lt;pid&gt;/uid_map</code> 和 <code>gid_map</code> 里，每个区间一行：<code>&lt;里面的起始 id&gt; &lt;外面的起始 id&gt; &lt;数量&gt;</code>。塑造出 rootless 容器形态的规则是：</p>
 <ul>
-<li>The maps are written <strong>once</strong>, by a process with the right privilege over the new namespace —
-  typically the parent, while the child waits.</li>
-<li>An unprivileged user may write a <strong>single-line map of its own uid</strong> (what <code>-r</code> did above: <code>0 1000
-  1</code>). A container whose image runs as uid 101 or chowns files to service uids needs a <em>range</em>.</li>
-<li>Ranges come from <code>/etc/subuid</code> and <code>/etc/subgid</code> and are written by the setuid helpers
-  <strong><code>newuidmap</code>/<code>newgidmap</code></strong>, which check that the range belongs to you.</li>
+<li>映射<strong>只写一次</strong>，由对这个新命名空间拥有相应权限的进程来写——通常是父进程，此时子进程在等待。</li>
+<li>一个无特权用户可以写一个<strong>只映射自己 uid 的单行映射</strong>（就是上面 <code>-r</code> 所做的：<code>0 1000 1</code>）。如果一个容器的镜像以 uid 101 运行，或者要把文件 chown 给服务用的 uid，就需要一个<em>区间</em>。</li>
+<li>区间来自 <code>/etc/subuid</code> 和 <code>/etc/subgid</code>，由 setuid 辅助程序 <strong><code>newuidmap</code>/<code>newgidmap</code></strong> 写入，它们会检查这个区间确实属于你。</li>
 </ul>
-<p><em>Unprivileged</em> (needs an entry for your user in <code>/etc/subuid</code>/<code>/etc/subgid</code>):</p>
+<p><em>无特权</em>（需要 <code>/etc/subuid</code>/<code>/etc/subgid</code> 里有你这个用户的条目）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">grep &quot;^$(id -un):&quot; /etc/subuid /etc/subgid
 unshare --user --map-auto --map-root-user cat /proc/self/uid_map
 </code></pre></div>
@@ -464,28 +411,15 @@ unshare --user --map-auto --map-root-user cat /proc/self/uid_map
          0       1000          1
          1     100000      65536
 </code></pre></div>
-<p>Uid 0 inside is you; uids 1–65536 inside are host uids 100000–165535, which belong to nobody on
-the host. That last point is why a file written by a container as uid 999 cannot be removed by
-you from outside — see the note on reading such files in
-<a href="environment.html">Environment</a>.</p>
-<p>On Ubuntu 23.10 and later, <code>kernel.apparmor_restrict_unprivileged_userns=1</code> can refuse user
-namespaces to binaries without an AppArmor profile. <code>/usr/bin/unshare</code> has one; a freshly built
-binary in an arbitrary directory may not. The symptom is <code>EPERM</code> at the first <code>unshare</code>, which
-looks like a bug in the program. <a href="environment.html">Environment</a> covers the fix.</p>
-<h3 id="creating-versus-joining-keeping-a-namespace-alive">Creating versus joining; keeping a namespace alive<a class="hanchor" href="#creating-versus-joining-keeping-a-namespace-alive" aria-label="#">#</a></h3>
+<p>里面的 uid 0 就是你；里面的 uid 1–65536 对应宿主机上的 uid 100000–165535，这些 uid 在宿主机上不属于任何人。正是最后这一点，导致一个容器以 uid 999 写入的文件，你没法从外面把它删掉——关于读取这类文件的说明，见<a href="environment.html">环境</a>。</p>
+<p>在 Ubuntu 23.10 及之后的版本上，<code>kernel.apparmor_restrict_unprivileged_userns=1</code> 可能会拒绝给没有 AppArmor 配置文件的二进制程序创建 user 命名空间。<code>/usr/bin/unshare</code> 有配置文件；一个刚构建出来、放在任意目录下的二进制程序可能没有。症状是第一次 <code>unshare</code> 就报 <code>EPERM</code>，看起来像是程序本身的 bug。<a href="environment.html">环境</a> 讲了怎么修。</p>
+<h3 id="creating-versus-joining-keeping-a-namespace-alive">创建与加入；让命名空间保持存活<a class="hanchor" href="#creating-versus-joining-keeping-a-namespace-alive" aria-label="#">#</a></h3>
 <ul>
-<li><strong>Create</strong>: <code>unshare(2)</code> (the current process moves into new namespaces) or <code>clone(2)</code> with
-  <code>CLONE_NEW*</code> (the child starts in them).</li>
-<li><strong>Join</strong>: <code>setns(2)</code> on a file descriptor opened from <code>/proc/&lt;pid&gt;/ns/&lt;type&gt;</code>. The <code>nsenter(1)</code>
-  tool wraps it.</li>
+<li><strong>创建</strong>：<code>unshare(2)</code>（当前进程移入新的命名空间）或者带 <code>CLONE_NEW*</code> 的 <code>clone(2)</code>（子进程从一开始就在里面）。</li>
+<li><strong>加入</strong>：对一个从 <code>/proc/&lt;pid&gt;/ns/&lt;type&gt;</code> 打开的文件描述符执行 <code>setns(2)</code>。<code>nsenter(1)</code> 工具就是对它的封装。</li>
 </ul>
-<p><strong>A namespace lives as long as something references it</strong>: a process inside it, an open file
-descriptor to its <code>/proc/&lt;pid&gt;/ns/*</code> file, or a bind mount of that file (which is what
-<code>ip netns add</code> creates under <code>/run/netns</code>). When the last reference goes, a network namespace and
-every interface in it disappear.</p>
-<p>So the rootless pattern is a <strong>holder</strong>: a small process that sleeps inside the namespace so it
-survives, and that others join. You can do this without root, because you own the user namespace
-the holder created (<em>unprivileged</em>):</p>
+<p><strong>只要还有东西引用着它，一个命名空间就会一直存在</strong>：可能是其中的一个进程、一个指向它 <code>/proc/&lt;pid&gt;/ns/*</code> 文件的已打开文件描述符，或者是那个文件的一个绑定挂载（这正是 <code>ip netns add</code> 在 <code>/run/netns</code> 下创建的东西）。最后一个引用消失时，一个网络命名空间连同它里面的每一个接口都会随之消失。</p>
+<p>所以 rootless 的模式是一个 <strong>holder（持有者）</strong>：一个在命名空间内睡眠的小进程，靠它让命名空间存活下来，其他进程再加入进来。这不需要 root 就能做到，因为你拥有 holder 所创建的那个 user 命名空间（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">unshare --user --map-root-user --net sleep 60 &amp;   # the holder; unshare execs sleep
 H=$!; sleep 0.5
 nsenter --target $H --user --net --preserve-credentials sh -c &#x27;ip link add dummy0 type dummy; ip -br link&#x27;
@@ -496,62 +430,37 @@ dummy0           DOWN           ae:1a:b3:4b:88:4c &lt;BROADCAST,NOARP&gt;
 lo               DOWN           00:00:00:00:00:00 &lt;LOOPBACK&gt;
 dummy0           DOWN           ae:1a:b3:4b:88:4c &lt;BROADCAST,NOARP&gt;
 </code></pre></div>
-<p>When <code>sleep</code> ends, the namespace and <code>dummy0</code> go with it.</p>
-<p>The privileged equivalents, <strong>requires root — run in a disposable VM</strong> (not executed in this
-review):</p>
+<p><code>sleep</code> 结束时，命名空间和 <code>dummy0</code> 也就随之消失了。</p>
+<p>与之等价的、需要特权的做法，<strong>需要 root——请在一次性虚拟机中运行</strong>（本次审阅未执行）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">ip netns add lab                 # a named netns, pinned by a bind mount in /run/netns
 ip netns exec lab ip link        # run a command in it
 nsenter --target &lt;pid&gt; --net --mount ip addr   # join another user&#x27;s process&#x27;s namespaces
 ip netns del lab
 </code></pre></div>
-<h3 id="best-practices">Best practices<a class="hanchor" href="#best-practices" aria-label="#">#</a></h3>
+<h3 id="best-practices">最佳实践<a class="hanchor" href="#best-practices" aria-label="#">#</a></h3>
 <ul>
-<li><strong>When rootless, always pair the network namespace with a user namespace.</strong> Without it you have
-  no <code>CAP_NET_ADMIN</code> over the new namespace; with it you do, and nothing leaks to the host.</li>
-<li><strong>Create the user namespace first</strong> (or in the same <code>clone</code>): every other namespace is owned by
-  the user namespace it was created in, and that ownership decides who may configure it.</li>
-<li><strong>Keep a holder</strong> for anything that must outlive a command, and treat the holder as a process
-  with an owner and a pidfile, not as an accident.</li>
-<li><strong>Join, don't recreate.</strong> Recreating a namespace that still has live members cuts them off.</li>
-<li><strong>Compare inodes, never names or PIDs</strong>, to decide "same namespace".</li>
-<li><strong>Clean up</strong> what you name: <code>ip netns del</code>, unmount bind mounts, and let holders exit.</li>
+<li><strong>在 rootless 场景下，永远把网络命名空间和 user 命名空间配对使用。</strong> 没有 user 命名空间，你在新命名空间里就没有 <code>CAP_NET_ADMIN</code>；有了它，你就有，而且什么都不会泄漏到宿主机。</li>
+<li><strong>先创建 user 命名空间</strong>（或者在同一次 <code>clone</code> 里创建）：其他每一种命名空间都归创建它时所在的那个 user 命名空间所有，而这个归属关系决定了谁可以配置它。</li>
+<li><strong>为任何必须比一条命令活得更久的东西保留一个 holder</strong>，并把这个 holder 当作一个有主人、有 pidfile 的正经进程来对待，而不是一个意外产物。</li>
+<li><strong>加入，不要重建。</strong> 重建一个仍然有存活成员的命名空间，会把这些成员都切断。</li>
+<li>要判断"是不是同一个命名空间"，<strong>永远比较 inode，绝不比较名字或 PID</strong>。</li>
+<li><strong>清理</strong>你命名过的东西：<code>ip netns del</code>、卸载绑定挂载、让 holder 退出。</li>
 </ul>
-<p>→ <a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">How Delonix uses this: Linux namespaces and rootless
-operation</a> and <a href="cloud-native-primer.html#45-container-networking">Container
-networking</a>.</p>
-<p><strong>Read more:</strong> <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html"><code>namespaces(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html"><code>user_namespaces(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"><code>pid_namespaces(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man7/network_namespaces.7.html"><code>network_namespaces(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man1/unshare.1.html"><code>unshare(1)</code></a>,
-<a href="https://man7.org/linux/man-pages/man1/nsenter.1.html"><code>nsenter(1)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/setns.2.html"><code>setns(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man1/newuidmap.1.html"><code>newuidmap(1)</code></a>,
-<a href="https://man7.org/linux/man-pages/man5/subuid.5.html"><code>subuid(5)</code></a>.</p>
+<p>→ <a href="cloud-native-primer.html#41-linux-namespaces-and-rootless-operation">Delonix 如何使用它：Linux 命名空间与 rootless 运作</a>以及<a href="cloud-native-primer.html#45-container-networking">容器网络</a>。</p>
+<p><strong>延伸阅读：</strong> <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html"><code>namespaces(7)</code></a>、<a href="https://man7.org/linux/man-pages/man7/user_namespaces.7.html"><code>user_namespaces(7)</code></a>、<a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"><code>pid_namespaces(7)</code></a>、<a href="https://man7.org/linux/man-pages/man7/network_namespaces.7.html"><code>network_namespaces(7)</code></a>、<a href="https://man7.org/linux/man-pages/man1/unshare.1.html"><code>unshare(1)</code></a>、<a href="https://man7.org/linux/man-pages/man1/nsenter.1.html"><code>nsenter(1)</code></a>、<a href="https://man7.org/linux/man-pages/man2/setns.2.html"><code>setns(2)</code></a>、<a href="https://man7.org/linux/man-pages/man1/newuidmap.1.html"><code>newuidmap(1)</code></a>、<a href="https://man7.org/linux/man-pages/man5/subuid.5.html"><code>subuid(5)</code></a>。</p>
 <hr />
 <h2 id="cgroups-v2">cgroups v2<a class="hanchor" href="#cgroups-v2" aria-label="#">#</a></h2>
-<p>A <strong>control group</strong> is a set of processes to which resource limits and accounting apply. cgroup
-v2 is <strong>one unified tree</strong> mounted at <code>/sys/fs/cgroup</code>: a directory is a cgroup, a process
-belongs to exactly one, and the files in the directory are the interface.</p>
+<p><strong>控制组</strong>（control group）是一组适用资源限制和统计核算的进程。cgroup v2 是挂载在 <code>/sys/fs/cgroup</code> 上的<strong>一棵统一的树</strong>：一个目录就是一个 cgroup，一个进程恰好属于一个 cgroup，目录里的文件就是接口。</p>
 <ul>
-<li><code>cgroup.controllers</code> — the controllers <strong>available</strong> in this cgroup (granted by the parent).</li>
-<li><code>cgroup.subtree_control</code> — the controllers <strong>enabled for the children</strong> of this cgroup. Writing
-  <code>+memory</code> there creates <code>memory.*</code> files in every child.</li>
-<li><code>cgroup.procs</code> — the PIDs in this cgroup. Writing a PID moves that process (only that process;
-  its existing children stay where they are).</li>
-<li>Controller files: <code>memory.max</code>, <code>memory.high</code>, <code>memory.events</code>, <code>memory.peak</code>, <code>cpu.max</code>
-  (<code>&lt;quota&gt; &lt;period&gt;</code> in microseconds, or <code>max</code>), <code>cpu.weight</code>, <code>cpu.stat</code>, <code>pids.max</code>, and the
-  pressure files <code>cpu.pressure</code>, <code>memory.pressure</code>, <code>io.pressure</code> (PSI).</li>
+<li><code>cgroup.controllers</code> ——这个 cgroup 里<strong>可用</strong>的控制器（由父 cgroup 授予）。</li>
+<li><code>cgroup.subtree_control</code> ——为这个 cgroup 的<strong>子节点启用</strong>的控制器。往里面写 <code>+memory</code>，会在每个子节点里创建 <code>memory.*</code> 文件。</li>
+<li><code>cgroup.procs</code> ——这个 cgroup 里的 PID。写入一个 PID 会把该进程移动过来（只移动该进程本身；它已有的子进程留在原地）。</li>
+<li>控制器文件：<code>memory.max</code>、<code>memory.high</code>、<code>memory.events</code>、<code>memory.peak</code>、<code>cpu.max</code>（以微秒为单位的 <code>&lt;配额&gt; &lt;周期&gt;</code>，或者 <code>max</code>）、<code>cpu.weight</code>、<code>cpu.stat</code>、<code>pids.max</code>，以及压力文件 <code>cpu.pressure</code>、<code>memory.pressure</code>、<code>io.pressure</code>（PSI）。</li>
 </ul>
-<h3 id="the-no-internal-processes-rule">The "no internal processes" rule<a class="hanchor" href="#the-no-internal-processes-rule" aria-label="#">#</a></h3>
-<p>A cgroup that <strong>has processes</strong> cannot enable controllers for its children, and a cgroup that
-distributes resources to children keeps its processes in leaves. In practice: processes live in
-<strong>leaves</strong>, and a manager that wants to create children for its own processes must first move
-itself into a leaf. The kernel reports a violation as <code>EBUSY</code>.</p>
-<h3 id="delegation-to-users">Delegation to users<a class="hanchor" href="#delegation-to-users" aria-label="#">#</a></h3>
-<p>Only root can write the cgroup tree by default. systemd <strong>delegates</strong> a subtree to a user by
-chowning it: on most hosts <code>user@&lt;uid&gt;.service</code> belongs to you and delegates some controllers.
-Look at your own position first (<em>unprivileged</em>):</p>
+<h3 id="the-no-internal-processes-rule">"无内部进程"规则<a class="hanchor" href="#the-no-internal-processes-rule" aria-label="#">#</a></h3>
+<p>一个<strong>已经有进程</strong>的 cgroup 不能为它的子节点启用控制器，而一个把资源分配给子节点的 cgroup，会把自己的进程都放在叶子节点里。实际上就是：进程活在<strong>叶子节点</strong>里，一个想为自己的进程创建子节点的管理者，必须先把自己挪进一个叶子节点。内核会把违反这条规则报告为 <code>EBUSY</code>。</p>
+<h3 id="delegation-to-users">委派给用户<a class="hanchor" href="#delegation-to-users" aria-label="#">#</a></h3>
+<p>默认情况下只有 root 能写 cgroup 树。systemd 通过 chown 把一棵子树<strong>委派</strong>给某个用户：在大多数主机上，<code>user@&lt;uid&gt;.service</code> 归你所有，并且委派了一些控制器。先看看你自己所处的位置（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">CG=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo &quot;$CG&quot;
 cat &quot;$CG/cgroup.controllers&quot;
 U=/sys/fs/cgroup/user.slice/user-$(id -u).slice/user@$(id -u).service
@@ -562,17 +471,10 @@ memory pids
 you /sys/fs/cgroup/user.slice/user-1000.slice/user@1000.service/cgroup.subtree_control
 cpu memory pids
 </code></pre></div>
-<p>Two facts worth noticing on this host: the shell's scope has no <code>cpu</code> controller (so <code>cpu.max</code>
-does not exist there), and <code>cpuset</code>/<code>io</code> are not delegated to the user at all — the root slice
-does not pass them down.</p>
-<p><strong>Why an SSH session cannot set limits.</strong> A login over SSH lands in <code>session-&lt;n&gt;.scope</code>, which is
-a <em>sibling</em> of <code>user@&lt;uid&gt;.service</code>, not a child. Moving a PID between two cgroups requires write
-access to their <strong>common ancestor's</strong> <code>cgroup.procs</code>; here that is <code>user-&lt;uid&gt;.slice</code>, owned by
-root. So a program started from SSH cannot put itself under the delegated subtree, and limits it
-tries to set have nowhere to go. The fix is to ask systemd for a delegated scope.</p>
-<h3 id="hands-on-a-limited-command-in-a-user-scope">Hands-on: a limited command in a user scope<a class="hanchor" href="#hands-on-a-limited-command-in-a-user-scope" aria-label="#">#</a></h3>
-<p><code>systemd-run --user --scope</code> runs a command in a new transient scope under your user manager,
-with resource-control properties applied (<em>unprivileged</em>):</p>
+<p>在这台主机上，有两个事实值得注意：shell 所在的 scope 没有 <code>cpu</code> 控制器（所以那里不存在 <code>cpu.max</code>），而 <code>cpuset</code>/<code>io</code> 根本没有被委派给用户——根 slice 没有把它们往下传递。</p>
+<p><strong>为什么一个 SSH 会话无法设置限制。</strong> 通过 SSH 登录落在 <code>session-&lt;n&gt;.scope</code> 里，它是 <code>user@&lt;uid&gt;.service</code> 的<em>兄弟节点</em>，而不是子节点。要在两个 cgroup 之间移动一个 PID，需要对它们<strong>共同祖先</strong>的 <code>cgroup.procs</code> 有写权限；这里那个共同祖先是 <code>user-&lt;uid&gt;.slice</code>，归 root 所有。所以从 SSH 启动的程序没法把自己放到被委派的子树下面，它想设置的限制也就无处安放。解决办法是向 systemd 要一个被委派的 scope。</p>
+<h3 id="hands-on-a-limited-command-in-a-user-scope">动手实践：在用户 scope 中运行一条受限命令<a class="hanchor" href="#hands-on-a-limited-command-in-a-user-scope" aria-label="#">#</a></h3>
+<p><code>systemd-run --user --scope</code> 会在你的用户管理器下的一个全新临时 scope 里运行一条命令，并应用资源控制属性（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">systemd-run --user --scope -q -p MemoryMax=64M -p CPUQuota=20% sh -c &#x27;
   C=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); echo &quot;$C&quot;
   cat &quot;$C/memory.max&quot; &quot;$C/cpu.max&quot;
@@ -588,12 +490,8 @@ usage_usec 6398
 user_usec 1066
 system_usec 5331
 </code></pre></div>
-<p><code>CPUQuota=20%</code> became <code>cpu.max = 20000 100000</code>: 20 ms of CPU per 100 ms period.</p>
-<p>Now provoke an OOM kill and read the evidence <strong>before the cgroup disappears</strong>. A transient scope
-is removed as soon as its last process exits, so the reading must happen from inside it. Two
-details matter: <code>MemorySwapMax=0</code> (otherwise the allocation just swaps), and <code>OOMPolicy=continue</code>
-(systemd's default for a scope is to stop the <em>whole</em> scope when one process is OOM-killed — the
-reader would die too; without it this command printed only <code>Terminated</code>) (<em>unprivileged</em>):</p>
+<p><code>CPUQuota=20%</code> 变成了 <code>cpu.max = 20000 100000</code>：每 100 毫秒周期里有 20 毫秒的 CPU 时间。</p>
+<p>现在触发一次 OOM kill，并<strong>在这个 cgroup 消失之前</strong>读出证据。一个临时 scope 在它的最后一个进程退出的那一刻就会被移除，所以读取动作必须在它内部完成。有两个细节很关键：<code>MemorySwapMax=0</code>（否则那次分配只会去用交换空间），以及 <code>OOMPolicy=continue</code>（systemd 对一个 scope 的默认行为是，一个进程被 OOM 杀掉时就停掉<em>整个</em> scope——读取者自己也会跟着死；没有这个选项的话，这条命令就只会打印出 <code>Terminated</code>）（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">systemd-run --user --scope -q -p MemoryMax=32M -p MemorySwapMax=0 -p OOMPolicy=continue sh -c &#x27;
   python3 -c &quot;b = bytearray(128 * 1024 * 1024)&quot;; echo &quot;python exit=$?&quot;
   C=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup); cat &quot;$C/memory.events&quot;&#x27;
@@ -608,10 +506,8 @@ oom_kill 1
 oom_group_kill 0
 sock_throttled 0
 </code></pre></div>
-<p>Exit code 137 is 128 + 9 (SIGKILL). The <strong>only</strong> place that says "this was an OOM kill and not a
-<code>kill -9</code>" is <code>oom_kill</code> in <code>memory.events</code> — and it is gone once the cgroup is removed.</p>
-<p>Finally, see the "no internal processes" rule and delegation in one go, inside a scope systemd
-delegates to you (<code>Delegate=yes</code>) (<em>unprivileged</em>):</p>
+<p>退出码 137 就是 128 + 9（SIGKILL）。<strong>唯一</strong>能说明"这是一次 OOM kill，而不是一次 <code>kill -9</code>"的地方，就是 <code>memory.events</code> 里的 <code>oom_kill</code>——而这个 cgroup 一旦被移除，它就没了。</p>
+<p>最后，在一个 systemd 委派给你的 scope（<code>Delegate=yes</code>）里，一次性看到"无内部进程"规则和委派机制的效果（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">systemd-run --user --scope -q -p Delegate=yes sh -c &#x27;
   C=/sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)
   mkdir &quot;$C/leaf&quot;
@@ -626,8 +522,7 @@ moved self into leaf
 controllers enabled for children
 16777216
 </code></pre></div>
-<p>The same steps without systemd, <strong>requires root — run in a disposable VM</strong> (not executed in this
-review):</p>
+<p>同样的步骤，不借助 systemd，<strong>需要 root——请在一次性虚拟机中运行</strong>（本次审阅未执行）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">mkdir /sys/fs/cgroup/lab
 echo &quot;+memory +pids&quot; &gt; /sys/fs/cgroup/cgroup.subtree_control   # usually already enabled at the root
 mkdir /sys/fs/cgroup/lab/work
@@ -637,58 +532,35 @@ cat /sys/fs/cgroup/lab/work/memory.events
 # cleanup: the cgroup must be empty before rmdir
 echo &lt;pid&gt; &gt; /sys/fs/cgroup/cgroup.procs; rmdir /sys/fs/cgroup/lab/work /sys/fs/cgroup/lab
 </code></pre></div>
-<h3 id="best-practices_1">Best practices<a class="hanchor" href="#best-practices_1" aria-label="#">#</a></h3>
+<h3 id="best-practices_1">最佳实践<a class="hanchor" href="#best-practices_1" aria-label="#">#</a></h3>
 <ul>
-<li><strong>One leaf per workload.</strong> Limits, accounting and OOM evidence then belong to exactly one thing.</li>
-<li><strong>Set limits and move the process in <em>before</em> it starts running its program.</strong> A migration moves
-  one process, never its descendants; anything forked before the move stays outside the limit
-  forever.</li>
-<li><strong>Read <code>memory.events</code> for OOM</strong>, and read it while the cgroup still exists — from the process
-  that waits for the workload, not afterwards.</li>
-<li><strong>Do not write to controllers or cgroups you do not own.</strong> A cgroup delegated to you is yours;
-  its parent is not. On a shared host, never touch <code>/sys/fs/cgroup</code> outside your own subtree.</li>
-<li><strong>Check the ownership of <code>cgroup.subtree_control</code></strong>, not the presence of a controller name, to
-  know whether you really have delegation.</li>
-<li><strong>Use PSI (<code>*.pressure</code>)</strong> to see contention before it becomes an OOM or a latency incident.</li>
+<li><strong>一个工作负载一个叶子节点。</strong> 这样限制、统计核算和 OOM 证据就恰好只属于一样东西。</li>
+<li><strong>在进程开始运行它的程序<em>之前</em>，先设置好限制并把它移进去。</strong> 一次迁移只移动一个进程，永远不会移动它的后代；在迁移之前 fork 出来的任何东西，都会永远留在限制之外。</li>
+<li>要了解 OOM 就<strong>读 <code>memory.events</code></strong>，而且要在这个 cgroup 还存在的时候读——从等待这个工作负载的那个进程里读，而不是事后再读。</li>
+<li><strong>不要写入你不拥有的控制器或 cgroup。</strong> 一个委派给你的 cgroup 是你的；它的父节点不是。在共享主机上，绝不要触碰你自己子树以外的 <code>/sys/fs/cgroup</code>。</li>
+<li>要知道自己是不是真的拿到了委派，<strong>检查的是 <code>cgroup.subtree_control</code> 的属主</strong>，而不是某个控制器名字是否存在。</li>
+<li><strong>使用 PSI（<code>*.pressure</code>）</strong>，在资源争用演变成 OOM 或延迟事故之前先看见它。</li>
 </ul>
-<p>→ <a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">How Delonix uses this: cgroups v2 and delegation</a>.</p>
-<p><strong>Read more:</strong> <a href="https://www.kernel.org/doc/Documentation/admin-guide/cgroup-v2.rst">kernel.org — Control Group v2
-(<code>cgroup-v2.rst</code>)</a>,
-<a href="https://man7.org/linux/man-pages/man7/cgroups.7.html"><code>cgroups(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man5/systemd.resource-control.5.html"><code>systemd.resource-control(5)</code></a>,
-<a href="https://man7.org/linux/man-pages/man1/systemd-run.1.html"><code>systemd-run(1)</code></a>,
-<a href="https://systemd.io/CGROUP_DELEGATION/">systemd — Control Group APIs and Delegation</a>,
-<a href="https://docs.kernel.org/accounting/psi.html">kernel — PSI</a>.</p>
+<p>→ <a href="cloud-native-primer.html#42-cgroups-v2-and-delegation">Delonix 如何使用它：cgroups v2 与委派</a>。</p>
+<p><strong>延伸阅读：</strong> <a href="https://www.kernel.org/doc/Documentation/admin-guide/cgroup-v2.rst">kernel.org — Control Group v2（<code>cgroup-v2.rst</code>）</a>、<a href="https://man7.org/linux/man-pages/man7/cgroups.7.html"><code>cgroups(7)</code></a>、<a href="https://man7.org/linux/man-pages/man5/systemd.resource-control.5.html"><code>systemd.resource-control(5)</code></a>、<a href="https://man7.org/linux/man-pages/man1/systemd-run.1.html"><code>systemd-run(1)</code></a>、<a href="https://systemd.io/CGROUP_DELEGATION/">systemd — Control Group APIs and Delegation</a>、<a href="https://docs.kernel.org/accounting/psi.html">kernel — PSI</a>。</p>
 <hr />
-<h2 id="file-descriptors">File descriptors<a class="hanchor" href="#file-descriptors" aria-label="#">#</a></h2>
-<p>A <strong>file descriptor</strong> is a small integer that indexes a <strong>per-process table</strong>. Each entry points
-to an <strong>open file description</strong> in the kernel — which holds the file offset and the status flags
-(<code>O_APPEND</code>, <code>O_NONBLOCK</code>, …) — and that description points to the underlying object: an inode
-for a regular file, or a pipe, a socket, an event counter, a process.</p>
+<h2 id="file-descriptors">文件描述符<a class="hanchor" href="#file-descriptors" aria-label="#">#</a></h2>
+<p><strong>文件描述符</strong>是索引到一张<strong>每进程一张的表</strong>里的一个小整数。表里的每一项都指向内核中的一个<strong>已打开文件描述</strong>（open file description）——它保存着文件偏移量和状态标志位（<code>O_APPEND</code>、<code>O_NONBLOCK</code> 等）——这个描述再指向底层的对象：常规文件的 inode，或者是一个管道、一个套接字、一个事件计数器、一个进程。</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="nohighlight">process fd table          kernel                         object
   3 ─────────────┐
                  ├──► open file description ──────────► inode / pipe / socket / …
   7 (dup of 3) ──┘     (offset, O_APPEND, …)
 </code></pre></div>
-<p>Consequences that bite in real code:</p>
+<p>在实际代码中会咬人的后果：</p>
 <ul>
-<li><strong><code>dup</code>/<code>dup2</code> and <code>fork</code> share the open file description</strong>: two fds (or two processes) move the
-  same offset. Opening the same path twice gives two descriptions with independent offsets.</li>
-<li>The <strong>close-on-exec</strong> flag (<code>FD_CLOEXEC</code>) is per <em>descriptor</em>, not per description: it lives in
-  the table entry and is set with <code>O_CLOEXEC</code> at <code>open</code>, <code>SOCK_CLOEXEC</code> at <code>socket</code>, <code>pipe2(…,
-  O_CLOEXEC)</code>, or <code>fcntl(fd, F_SETFD, FD_CLOEXEC)</code> afterwards. The window between <code>open</code> and
-  <code>fcntl</code> is a race in a multi-threaded program; use the atomic flag.</li>
-<li>Fds <strong>0, 1, 2</strong> are stdin, stdout and stderr only by convention; they are inherited like any
-  other fd.</li>
-<li>Everything a process talks to is an fd: files, <strong>pipes</strong> (<code>pipe2</code>), <strong>sockets</strong> including <strong>unix
-  sockets</strong>, <strong>pidfds</strong> (a stable handle to a process, <code>pidfd_open</code>), <strong>memfds</strong> (anonymous memory
-  with a file interface, <code>memfd_create</code>), <strong>eventfds</strong> (a counter for wakeups), epoll instances,
-  namespace handles opened from <code>/proc/&lt;pid&gt;/ns</code>.</li>
-<li><strong>A pipe reaches EOF only when every copy of its write end is closed</strong>, in every process. One
-  forgotten copy in a long-lived child and the reader blocks forever.</li>
+<li><strong><code>dup</code>/<code>dup2</code> 和 <code>fork</code> 共享同一个已打开文件描述</strong>：两个 fd（或者两个进程）移动的是同一个偏移量。把同一条路径打开两次，得到的是两个各自独立偏移量的描述。</li>
+<li><strong>close-on-exec</strong> 标志（<code>FD_CLOEXEC</code>）是按<em>描述符</em>算的，不是按描述算的：它存在表项里，可以在 <code>open</code> 时用 <code>O_CLOEXEC</code>、在 <code>socket</code> 时用 <code>SOCK_CLOEXEC</code>、用 <code>pipe2(…, O_CLOEXEC)</code>，或者事后用 <code>fcntl(fd, F_SETFD, FD_CLOEXEC)</code> 来设置。在多线程程序里，<code>open</code> 和 <code>fcntl</code> 之间的窗口是一个竞态；请使用原子标志位。</li>
+<li>fd <strong>0、1、2</strong> 分别是 stdin、stdout 和 stderr，这只是一种约定；它们和其他任何 fd 一样会被继承。</li>
+<li>一个进程与之打交道的一切都是 fd：文件、<strong>管道</strong>（<code>pipe2</code>）、<strong>套接字</strong>（包括 <strong>unix 套接字</strong>）、<strong>pidfd</strong>（指向一个进程的稳定句柄，<code>pidfd_open</code>）、<strong>memfd</strong>（带文件接口的匿名内存，<code>memfd_create</code>）、<strong>eventfd</strong>（用于唤醒的计数器）、epoll 实例、从 <code>/proc/&lt;pid&gt;/ns</code> 打开的命名空间句柄。</li>
+<li><strong>只有当一个管道写端的每一份拷贝、在每一个进程里都被关闭时，它才会到达 EOF</strong>。哪怕只在一个长生命周期的子进程里忘了关一份拷贝，读端也会永远阻塞下去。</li>
 </ul>
-<h3 id="hands-on-in-bash">Hands-on in bash<a class="hanchor" href="#hands-on-in-bash" aria-label="#">#</a></h3>
-<p>Open, write, inspect and close a descriptor (<em>unprivileged</em>):</p>
+<h3 id="hands-on-in-bash">在 bash 中动手实践<a class="hanchor" href="#hands-on-in-bash" aria-label="#">#</a></h3>
+<p>打开、写入、检查并关闭一个描述符（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">bash -c &#x27;
 exec 3&lt;&gt;notes.txt          # open read-write as fd 3
 echo hello &gt;&amp;3
@@ -711,9 +583,7 @@ ino:	21761577
 2
 hello
 </code></pre></div>
-<p><code>flags</code> is octal: <code>02</code> is <code>O_RDWR</code>, <code>0100000</code> is <code>O_LARGEFILE</code>. There is no <code>02000000</code>
-(<code>O_CLOEXEC</code>): <strong>fds opened by the shell are inherited</strong> by every command it runs. You can see it
-(<em>unprivileged</em>):</p>
+<p><code>flags</code> 是八进制的：<code>02</code> 是 <code>O_RDWR</code>，<code>0100000</code> 是 <code>O_LARGEFILE</code>。这里没有 <code>02000000</code>（<code>O_CLOEXEC</code>）：<strong>shell 打开的 fd 会被它运行的每一条命令继承</strong>。你可以亲眼看到这一点（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">bash -c &#x27;exec 3&gt;inherited.txt; ls -l /proc/self/fd | awk &quot;NR&gt;1{print \$9,\$10,\$11}&quot;&#x27;
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">0 -&gt; socket:[464878621]
@@ -722,9 +592,8 @@ hello
 3 -&gt; /home/you/scratch/linux-lab/inherited.txt
 4 -&gt; /proc/953134/fd
 </code></pre></div>
-<p><code>ls</code> received fd 3 from the shell without asking for it (fd 4 is the directory <code>ls</code> itself opened).</p>
-<p><strong>Redirection order matters</strong>, because each redirection is a <code>dup2</code> applied left to right
-(<em>unprivileged</em>):</p>
+<p><code>ls</code> 从 shell 那里收到了 fd 3，它自己根本没要求过（fd 4 是 <code>ls</code> 自己打开的目录）。</p>
+<p><strong>重定向的顺序很重要</strong>，因为每一次重定向都是一次从左到右施加的 <code>dup2</code>（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">( echo out; echo err &gt;&amp;2 ) &gt;both.log 2&gt;&amp;1      # stdout → file, then stderr → where stdout is now
 cat both.log
 ( echo out; echo err &gt;&amp;2 ) 2&gt;&amp;1 &gt;only-out.log  # stderr → where stdout is NOW (the terminal), then stdout → file
@@ -735,10 +604,8 @@ err
 err
 out
 </code></pre></div>
-<p>The first form puts both lines in the file. In the second, <code>err</code> went to the terminal (the lone
-<code>err</code> line) and only <code>out</code> reached the file.</p>
-<p><strong>A pipe as a numbered fd</strong>, using process substitution and an automatically chosen fd number
-(<em>unprivileged</em>):</p>
+<p>第一种形式把两行都放进了文件。第二种形式里，<code>err</code> 去了终端（那行孤零零的 <code>err</code>），只有 <code>out</code> 到达了文件。</p>
+<p><strong>把管道当作一个带编号的 fd</strong>，用进程替换和一个自动选取的 fd 编号来实现（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">bash -c &#x27;
 exec {fd}&lt; &lt;(printf &quot;line1\nline2\n&quot;)
 echo &quot;fd=$fd&quot;; readlink /proc/$$/fd/$fd
@@ -749,8 +616,7 @@ exec {fd}&lt;&amp;-&#x27;
 pipe:[464865935]
 line1
 </code></pre></div>
-<p><strong>Named pipes and unix sockets</strong> from the command line (<em>unprivileged</em>; <code>nc</code> here is OpenBSD
-netcat, where <code>-U</code> means unix socket and <code>-N</code> closes the connection at end of input):</p>
+<p>从命令行使用<strong>命名管道和 unix 套接字</strong>（<em>无特权</em>；这里的 <code>nc</code> 是 OpenBSD 版 netcat，其中 <code>-U</code> 表示 unix 套接字，<code>-N</code> 表示在输入结束时关闭连接）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">mkfifo pipe.fifo
 ( echo &quot;through the fifo&quot; &gt; pipe.fifo &amp; ); cat pipe.fifo; rm pipe.fifo
 
@@ -760,10 +626,8 @@ printf &#x27;ping\n&#x27; | nc -NU s.sock; wait; cat got.txt; rm -f s.sock got.t
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">through the fifo
 ping
 </code></pre></div>
-<p><code>socat</code> offers the same and more (<code>socat - UNIX-CONNECT:s.sock</code>); it was not installed on the host
-used for this page, so that form is not verified here.</p>
-<p><strong>The other fd kinds, and close-on-exec by default.</strong> Python opens everything with <code>O_CLOEXEC</code>
-unless told otherwise, which makes it a convenient lab (<em>unprivileged</em>):</p>
+<p><code>socat</code> 提供同样的能力，而且更多（<code>socat - UNIX-CONNECT:s.sock</code>）；写作本页所用的主机上没有装它，所以这种形式在这里没有验证过。</p>
+<p><strong>其他几种 fd，以及默认的 close-on-exec。</strong> 除非另外指定，Python 打开任何东西都会带上 <code>O_CLOEXEC</code>，这让它成了一个方便的实验场（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">python3 - &lt;&lt;&#x27;EOF&#x27;
 import os, subprocess
 a = os.open(&quot;cloexec.txt&quot;, os.O_WRONLY | os.O_CREAT | os.O_CLOEXEC, 0o600)
@@ -786,9 +650,8 @@ pidfd -&gt; anon_inode:[pidfd]
 memfd -&gt; /memfd:scratch (deleted)
 eventfd -&gt; anon_inode:[eventfd]
 </code></pre></div>
-<p>The child shell got fd 4 and <strong>not</strong> fd 3: close-on-exec did its job at <code>execve</code>.</p>
-<p>To inspect another process's descriptors, use <code>/proc/&lt;pid&gt;/fd</code> and <code>/proc/&lt;pid&gt;/fdinfo/&lt;fd&gt;</code>, or
-<code>lsof -p &lt;pid&gt;</code> (<em>unprivileged</em>, for your own processes):</p>
+<p>子 shell 得到了 fd 4，<strong>没有</strong>得到 fd 3：close-on-exec 在 <code>execve</code> 时发挥了作用。</p>
+<p>要检查另一个进程的描述符，可以用 <code>/proc/&lt;pid&gt;/fd</code> 和 <code>/proc/&lt;pid&gt;/fdinfo/&lt;fd&gt;</code>，或者用 <code>lsof -p &lt;pid&gt;</code>（<em>无特权</em>，针对你自己的进程）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">lsof -p $$ | head -4
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">COMMAND    PID   USER   FD   TYPE             DEVICE SIZE/OFF      NODE NAME
@@ -796,10 +659,9 @@ bash    953131   you     0u  unix 0x0000000000000000      0t0 464878621 type=STR
 bash    953131   you     1w   REG              259,4      827  21672530 …
 bash    953131   you     2w   REG              259,4      827  21672530 …
 </code></pre></div>
-<p>Tracing which fds a program opens and closes is <code>strace -f -e trace=openat,close,dup2,pipe2,execve
-&lt;cmd&gt;</code> (not exercised for this page).</p>
-<h3 id="limits">Limits<a class="hanchor" href="#limits" aria-label="#">#</a></h3>
-<p>(<em>unprivileged</em>)</p>
+<p>要追踪一个程序打开和关闭了哪些 fd，用的是 <code>strace -f -e trace=openat,close,dup2,pipe2,execve &lt;cmd&gt;</code>（本页没有实际操练过）。</p>
+<h3 id="limits">限制<a class="hanchor" href="#limits" aria-label="#">#</a></h3>
+<p>（<em>无特权</em>）</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">ulimit -n; ulimit -Hn
 cat /proc/sys/fs/file-nr /proc/sys/fs/file-max /proc/sys/fs/nr_open
 </code></pre></div>
@@ -810,70 +672,27 @@ cat /proc/sys/fs/file-nr /proc/sys/fs/file-max /proc/sys/fs/nr_open
 1048576
 </code></pre></div>
 <ul>
-<li><code>ulimit -n</code> is <code>RLIMIT_NOFILE</code> for <em>this</em> process: soft, then hard. It is inherited across
-  <code>fork</code>/<code>exec</code>; systemd units set it with <code>LimitNOFILE=</code>. Many hosts default the soft limit to
-  1024 — this one does not, so do not assume your numbers match.</li>
-<li><code>fs.nr_open</code> is the ceiling any process's hard limit may be raised to.</li>
-<li><code>file-nr</code> is <em>allocated handles, unused, maximum</em> system-wide.</li>
-<li><code>EMFILE</code> means your process is out; <code>ENFILE</code> means the system is.</li>
+<li><code>ulimit -n</code> 是<em>当前</em>进程的 <code>RLIMIT_NOFILE</code>：先是软限制，再是硬限制。它会跨 <code>fork</code>/<code>exec</code> 被继承；systemd 单元用 <code>LimitNOFILE=</code> 来设置它。很多主机的软限制默认是 1024——这台不是，所以不要假设你看到的数字和这里一样。</li>
+<li><code>fs.nr_open</code> 是任何进程的硬限制可以被提升到的上限。</li>
+<li><code>file-nr</code> 是系统范围内的<em>已分配句柄数、未使用数、最大值</em>。</li>
+<li><code>EMFILE</code> 表示你的进程用完了；<code>ENFILE</code> 表示整个系统用完了。</li>
 </ul>
-<h3 id="best-practices-for-engine-code">Best practices for engine code<a class="hanchor" href="#best-practices-for-engine-code" aria-label="#">#</a></h3>
+<h3 id="best-practices-for-engine-code">引擎代码的最佳实践<a class="hanchor" href="#best-practices-for-engine-code" aria-label="#">#</a></h3>
 <ul>
-<li><strong>CLOEXEC everywhere.</strong> Open with <code>O_CLOEXEC</code>, create pipes with <code>pipe2(…, O_CLOEXEC)</code>, sockets
-  with <code>SOCK_CLOEXEC</code>. Rust's standard library already does this for what it opens; raw <code>libc</code>
-  calls do not. In the engine, see the readiness and exec pipes in <code>spawn</code>
-  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>), whose comment explains that <code>O_CLOEXEC</code> on the
-  write end is what turns "the child died, or exec'd without writing" into an EOF the parent can
-  act on; the same <code>pipe2(…, O_CLOEXEC)</code> appears in <code>pipe</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a>, and <code>OFlag::O_CLOEXEC</code> in <code>exec_with</code> and
-  <code>open_container_ns</code> in <code>delonix-linux</code>.</li>
-<li><strong>A child that forks but never execs must close what it inherited.</strong> CLOEXEC only acts at
-  <code>execve</code>. The engine's log shim is exactly such a child: it closes everything except the fds it
-  needs with <code>close_range</code> right after the fork — see <code>close_range_raw</code> and its call site in
-  <code>spawn</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>). <code>close_range_raw</code> calls the syscall by
-  number because the <code>libc</code> wrapper exists only for glibc targets.</li>
-<li><strong>Never leak a pipe or the caller's stdio into a long-lived child.</strong> Two real incidents are
-  recorded in <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>: the log shim holding other HTTP connections of a
-  long-running server open (section <em>«CLI (<code>delonix</code>)»</em>, the <code>delonix serve docker-api</code> entry), and
-  the network pin (the long-lived holder process of the engine's rootless network namespace — the
-  holder pattern shown in <a href="#creating-versus-joining-keeping-a-namespace-alive">Namespaces</a>) inheriting the caller's stderr so that <code>out=$(delonix …)</code> never saw EOF — fixed
-  by writing to <code>pin.log</code> (section <em>«A classe «X não é Y» — varredura de 2026-08-05»</em>; code:
-  <code>start_pin</code> and <code>pin_log_path</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a>).</li>
-<li><strong>Signal a process through a pidfd, not a PID.</strong> A reaped PID can be reused; a pidfd refers to
-  one process for its whole life. See <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0027-pidfd-for-killing-exec-children.md" target="_blank" rel="noopener">ADR-0027</a>
-  and <code>ChildHandle</code> (<code>open</code>, <code>kill</code>) in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/child_handle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/child_handle.rs</code></a>. Where
-  only a stored PID exists, compare the start time first: <code>safe_to_signal</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/host.rs</code></a>.</li>
-<li><strong>Bound fds under load.</strong> A server that opens a descriptor per request must close it on every
-  path, including errors and timeouts, and must treat <code>EMFILE</code> as back-pressure, not a crash.</li>
-<li><strong>After <code>fork</code> in a multi-threaded process, do only async-signal-safe work</strong> (close fds, <code>dup2</code>,
-  <code>execve</code>, <code>_exit</code>) — no allocation, no locks.</li>
+<li><strong>处处使用 CLOEXEC。</strong> 用 <code>O_CLOEXEC</code> 打开文件、用 <code>pipe2(…, O_CLOEXEC)</code> 创建管道、用 <code>SOCK_CLOEXEC</code> 创建套接字。Rust 标准库对它自己打开的东西已经这样做了；裸的 <code>libc</code> 调用则没有。在这个引擎里，可以看 <code>spawn</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>）里的就绪管道和 exec 管道，它的注释解释了写端上的 <code>O_CLOEXEC</code> 正是把"子进程死了，或者执行了 exec 却没有写入"这件事，转化成父进程可以据此行动的一个 EOF；同样的 <code>pipe2(…, O_CLOEXEC)</code> 出现在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/pin_userns.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/pin_userns.rs</code></a> 的 <code>pipe</code> 里，以及 <code>delonix-linux</code> 里 <code>exec_with</code> 和 <code>open_container_ns</code> 中的 <code>OFlag::O_CLOEXEC</code>。</li>
+<li><strong>一个 fork 之后从不 exec 的子进程，必须自己关掉它继承来的东西。</strong> CLOEXEC 只在 <code>execve</code> 时起作用。引擎的日志垫片（log shim）正是这样一个子进程：它在 fork 之后立刻用 <code>close_range</code> 关掉除了自己需要的 fd 之外的一切——见 <code>spawn</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>）里的 <code>close_range_raw</code> 及其调用点。<code>close_range_raw</code> 是按编号调用这个系统调用的，因为 <code>libc</code> 的封装只对 glibc 目标存在。</li>
+<li><strong>绝不要把一个管道或者调用者的 stdio 泄漏进一个长生命周期的子进程里。</strong> <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里记录了两次真实的事故：日志垫片把一个长期运行的服务器的其他 HTTP 连接一直攥在手里没放（见章节 <em>«CLI (<code>delonix</code>)»</em> 中 <code>delonix serve docker-api</code> 那一条），以及网络 pin（引擎 rootless 网络命名空间的那个长生命周期 holder 进程——就是<a href="#creating-versus-joining-keeping-a-namespace-alive">命名空间</a>一节里展示的 holder 模式）继承了调用者的 stderr，导致 <code>out=$(delonix …)</code> 永远等不到 EOF——修复方式是改为写入 <code>pin.log</code>（见章节 <em>«A classe «X não é Y» — varredura de 2026-08-05»</em>；代码见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-sdn/src/infra.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-sdn/src/infra.rs</code></a> 中的 <code>start_pin</code> 和 <code>pin_log_path</code>）。</li>
+<li><strong>通过 pidfd 而不是 PID 给一个进程发信号。</strong> 一个被收割过的 PID 可能被重用；而一个 pidfd 在它整个生命周期内始终指向同一个进程。见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adr/0027-pidfd-for-killing-exec-children.md" target="_blank" rel="noopener">ADR-0027</a> 以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/interfaces/delonix-cri/src/child_handle.rs" target="_blank" rel="noopener"><code>crates/interfaces/delonix-cri/src/child_handle.rs</code></a> 中的 <code>ChildHandle</code>（<code>open</code>、<code>kill</code>）。在只有一个保存下来的 PID 可用的地方，先比较启动时间：见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-node/src/host.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-node/src/host.rs</code></a> 中的 <code>safe_to_signal</code>。</li>
+<li><strong>在负载下限制 fd 的数量。</strong> 一个每次请求都打开一个描述符的服务器，必须在每一条路径上都把它关掉，包括出错和超时的路径，并且必须把 <code>EMFILE</code> 当作背压（back-pressure）来处理，而不是当作崩溃。</li>
+<li><strong>在一个多线程进程里 <code>fork</code> 之后，只做异步信号安全（async-signal-safe）的工作</strong>（关闭 fd、<code>dup2</code>、<code>execve</code>、<code>_exit</code>）——不分配内存，不加锁。</li>
 </ul>
-<p>→ <a href="cloud-native-primer.html#43-capabilities-seccomp-apparmor-masked-paths">How Delonix uses this: Capabilities, seccomp, AppArmor, masked
-paths</a> (the syscall
-filter lists <code>close_range</code>, <code>memfd_create</code> and <code>eventfd2</code>), and <a href="cloud-native-primer.html#410-daemonless-in-one-paragraph">Daemonless, in one
-paragraph</a> for why per-workload processes
-must not hold what they do not own.</p>
-<p><strong>Read more:</strong> <a href="https://man7.org/linux/man-pages/man2/open.2.html"><code>open(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/fcntl.2.html"><code>fcntl(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/dup.2.html"><code>dup(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/pipe.2.html"><code>pipe(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/close_range.2.html"><code>close_range(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/pidfd_open.2.html"><code>pidfd_open(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/memfd_create.2.html"><code>memfd_create(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/eventfd.2.html"><code>eventfd(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man7/unix.7.html"><code>unix(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/getrlimit.2.html"><code>getrlimit(2)</code></a>,
-<a href="https://www.gnu.org/software/bash/manual/html_node/Redirections.html">bash manual — Redirections</a>.</p>
+<p>→ <a href="cloud-native-primer.html#43-capabilities-seccomp-apparmor-masked-paths">Delonix 如何使用它：能力（Capabilities）、seccomp、AppArmor、屏蔽路径</a>（系统调用过滤器列表里有 <code>close_range</code>、<code>memfd_create</code> 和 <code>eventfd2</code>），以及<a href="cloud-native-primer.html#410-daemonless-in-one-paragraph">无守护进程（Daemonless），一段话讲清楚</a>——说明为什么按工作负载划分的进程不能持有不属于自己的东西。</p>
+<p><strong>延伸阅读：</strong> <a href="https://man7.org/linux/man-pages/man2/open.2.html"><code>open(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/fcntl.2.html"><code>fcntl(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/dup.2.html"><code>dup(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/pipe.2.html"><code>pipe(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/close_range.2.html"><code>close_range(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/pidfd_open.2.html"><code>pidfd_open(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/memfd_create.2.html"><code>memfd_create(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/eventfd.2.html"><code>eventfd(2)</code></a>、<a href="https://man7.org/linux/man-pages/man7/unix.7.html"><code>unix(7)</code></a>、<a href="https://man7.org/linux/man-pages/man2/getrlimit.2.html"><code>getrlimit(2)</code></a>、<a href="https://www.gnu.org/software/bash/manual/html_node/Redirections.html">bash manual — Redirections</a>。</p>
 <hr />
-<h2 id="signals-and-process-lifetime">Signals and process lifetime<a class="hanchor" href="#signals-and-process-lifetime" aria-label="#">#</a></h2>
+<h2 id="signals-and-process-lifetime">信号与进程生命周期<a class="hanchor" href="#signals-and-process-lifetime" aria-label="#">#</a></h2>
 <ul>
-<li><strong><code>SIGTERM</code></strong> asks a process to exit; it can be caught, and a well-behaved service cleans up.
-  <strong><code>SIGKILL</code></strong> cannot be caught or ignored. A graceful stop is "<code>SIGTERM</code>, wait a bounded time,
-  then <code>SIGKILL</code>" — <code>stop</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> does exactly that.</li>
-<li><strong>PID 1 in a PID namespace is special</strong>: signals sent to it from <em>inside</em> its namespace are
-  ignored unless it installed a handler, and even <code>SIGKILL</code> from inside does nothing
-  (<em>unprivileged</em>):</li>
+<li><strong><code>SIGTERM</code></strong> 请求一个进程退出；它可以被捕获，一个行为良好的服务会借此清理资源。<strong><code>SIGKILL</code></strong> 无法被捕获或忽略。一次优雅的停止是"先 <code>SIGTERM</code>，等待一段有限的时间，再 <code>SIGKILL</code>"——<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 里的 <code>stop</code> 做的正是这件事。</li>
+<li><strong>PID 命名空间里的 PID 1 很特殊</strong>：从它自己命名空间<em>内部</em>发给它的信号会被忽略，除非它安装了处理程序；即便是从内部发来的 <code>SIGKILL</code> 也不起作用（<em>无特权</em>）：</li>
 </ul>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">unshare -r -p -f --mount-proc sh -c &#x27;kill -TERM 1; kill -KILL 1; echo &quot;pid $$ survived its own SIGTERM and SIGKILL&quot;&#x27;
 sh -c &#x27;kill -TERM $$; echo not reached&#x27;; echo &quot;rc=$?&quot;
@@ -882,44 +701,25 @@ sh -c &#x27;kill -TERM $$; echo not reached&#x27;; echo &quot;rc=$?&quot;
 Terminated
 rc=143
 </code></pre></div>
-<p>So a container whose PID 1 has no <code>SIGTERM</code> handler does not stop on <code>SIGTERM</code>, and the stop
-  ends in <code>SIGKILL</code>. When PID 1 of a namespace exits, the kernel kills every other process in it.
-- <strong>Zombies.</strong> A child that has exited stays as a zombie until its parent collects the status with
-  <code>wait</code>/<code>waitpid</code>/<code>waitid</code>. A parent that never waits accumulates zombies (<em>unprivileged</em>):</p>
+<p>所以一个 PID 1 没有安装 <code>SIGTERM</code> 处理程序的容器，不会因为 <code>SIGTERM</code> 而停止，最终这次停止会以 <code>SIGKILL</code> 收场。当一个命名空间的 PID 1 退出时，内核会杀掉其中的每一个其他进程。
+- <strong>僵尸进程。</strong> 一个已经退出的子进程会一直以僵尸状态存在，直到它的父进程用 <code>wait</code>/<code>waitpid</code>/<code>waitid</code> 收取它的退出状态。一个从不 wait 的父进程会不断积累僵尸进程（<em>无特权</em>）：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">sh -c &#x27;sleep 0.2 &amp; exec sleep 2&#x27; &amp; P=$!; sleep 1
 ps -o pid,ppid,stat,comm --ppid $P; wait
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">    PID    PPID STAT COMMAND
  953503  953501 Z    sleep
 </code></pre></div>
-<p>The shell forked a <code>sleep</code>, then <code>exec</code>'d into another <code>sleep</code> that never waits: the child stays
-  in state <code>Z</code> until its parent exits.
-- <strong>Only the parent can wait.</strong> That is why an engine without a daemon still needs a small
-  <strong>supervisor</strong> per detached workload: the process that forked the workload is the only one that
-  can read its real exit status and, for OOM, read <code>memory.events</code> before the cgroup is removed.
-  See <code>run_supervised</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> and <code>wait_and_record</code> in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.
-- <strong>A long-running server must reap its children</strong>, and must not reap children someone else is
-  waiting for. The Docker API shim's reaper peeks with <code>WNOWAIT</code> for that reason
-  (<code>spawn_zombie_reaper</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a>); the history is in
-  <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>, sections <em>«CLI (<code>delonix</code>)»</em> and <em>«Auditoria de segurança #3
-  (2026-08-10)»</em>.</p>
-<p><strong>Read more:</strong> <a href="https://man7.org/linux/man-pages/man7/signal.7.html"><code>signal(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"><code>pid_namespaces(7)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/wait.2.html"><code>wait(2)</code></a>,
-<a href="https://man7.org/linux/man-pages/man2/pidfd_send_signal.2.html"><code>pidfd_send_signal(2)</code></a>.</p>
+<p>这个 shell fork 出了一个 <code>sleep</code>，然后 <code>exec</code> 成了另一个从不 wait 的 <code>sleep</code>：这个子进程会一直停在 <code>Z</code> 状态，直到它的父进程退出。
+- <strong>只有父进程才能 wait。</strong> 这就是为什么一个没有守护进程的引擎，仍然需要为每一个分离运行的工作负载配一个小小的<strong>supervisor（监督者）</strong>：fork 出这个工作负载的那个进程，是唯一能够读到它真实退出状态的进程，对于 OOM 的情形，也是唯一能在 cgroup 被移除之前读到 <code>memory.events</code> 的进程。见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/supervise.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/supervise.rs</code></a> 中的 <code>run_supervised</code> 和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 中的 <code>wait_and_record</code>。
+- <strong>一个长期运行的服务器必须收割自己的子进程</strong>，但绝不能收割别人正在等待的子进程。正因如此，Docker API 垫片的收割者用 <code>WNOWAIT</code> 来"偷看"（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/dockerapi.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/dockerapi.rs</code></a> 中的 <code>spawn_zombie_reaper</code>）；来龙去脉见 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 中的 <em>«CLI (<code>delonix</code>)»</em> 和 <em>«Auditoria de segurança #3 (2026-08-10)»</em> 两节。</p>
+<p><strong>延伸阅读：</strong> <a href="https://man7.org/linux/man-pages/man7/signal.7.html"><code>signal(7)</code></a>、<a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html"><code>pid_namespaces(7)</code></a>、<a href="https://man7.org/linux/man-pages/man2/wait.2.html"><code>wait(2)</code></a>、<a href="https://man7.org/linux/man-pages/man2/pidfd_send_signal.2.html"><code>pidfd_send_signal(2)</code></a>。</p>
 <hr />
-<h2 id="putting-it-together">Putting it together<a class="hanchor" href="#putting-it-together" aria-label="#">#</a></h2>
-<p>A rootless container is the primitives above, applied in a strict order. The sequence below
-follows <code>spawn</code> and <code>container_init</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>; the order is
-not cosmetic, and the comments there explain the race each step closes.</p>
+<h2 id="putting-it-together">融会贯通<a class="hanchor" href="#putting-it-together" aria-label="#">#</a></h2>
+<p>一个 rootless 容器，就是把上面这些原语按照严格的顺序应用出来的结果。下面这个序列遵循的是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a> 中 <code>spawn</code> 和 <code>container_init</code> 的实际顺序；这个顺序不是装饰性的，那里的注释解释了每一步都关闭了哪一个竞态。</p>
 <blockquote>
-<p><strong>Legend</strong> — participants are processes (and the kernel); solid arrows are system calls or
-writes; dashed arrows are replies or pipe events; notes mark state that becomes true at that
-point.</p>
+<p><strong>图例</strong>——参与者是各个进程（以及内核）；实线箭头是系统调用或写操作；虚线箭头是回应或管道事件；旁注标记的是在那个时间点变为真的状态。</p>
 </blockquote>
-<p>The figure shows that the parent configures identity, cgroup and network <strong>while the child is
-blocked</strong>, and that the child only reports "ready" after its filesystem is final.</p>
+<p>这张图展示的是，父进程在配置身份、cgroup 和网络的<strong>同时子进程处于阻塞状态</strong>，而子进程只有在它的文件系统尘埃落定之后，才会报告"就绪"。</p>
 <pre class="mermaid">sequenceDiagram
     participant P as delonix (parent, spawn)
     participant K as Linux kernel
@@ -937,88 +737,67 @@ blocked</strong>, and that the child only reports "ready" after its filesystem i
     C-&gt;&gt;K: execvp(entrypoint), CLOEXEC fds close
     K--&gt;&gt;P: EOF on exec pipe = program started
 </pre>
-<p>Step by step, in the vocabulary of this page:</p>
+<p>用本页的词汇，一步一步来看：</p>
 <ol>
-<li><strong>File descriptors first.</strong> The pipes that coordinate parent and child are created
-   close-on-exec, so the child's copies vanish at <code>execvp</code> and a dead child reads as EOF, never as
-   a hang.</li>
-<li><strong>User namespace</strong>, created in the same <code>clone</code> as the others, so it owns them.</li>
-<li><strong>uid/gid maps</strong>, written by the parent while the child waits (a process cannot usefully map
-   itself).</li>
-<li><strong>cgroup leaf</strong> with limits, and the PID moved in <em>before</em> the program runs — a later move
-   would leave early children outside the limit.</li>
-<li><strong>Mount namespace → <code>pivot_root</code></strong>: the child builds its root and swaps it in, then signals
-   readiness, so nothing can <code>setns</code> into a half-built filesystem.</li>
-<li><strong>Privileges dropped, then <code>exec</code></strong>, with no inherited descriptor except stdio.</li>
+<li><strong>文件描述符先行。</strong> 用来协调父子进程的那些管道，创建时就带着 close-on-exec，所以子进程手里的那些拷贝会在 <code>execvp</code> 时消失，一个已经死掉的子进程读到的是 EOF，而不是卡死。</li>
+<li><strong>User 命名空间</strong>，和其他命名空间在同一次 <code>clone</code> 里创建，因此它拥有那些命名空间。</li>
+<li><strong>uid/gid 映射</strong>，由父进程在子进程等待期间写入（一个进程没法有效地映射自己）。</li>
+<li>带着限制的 <strong>cgroup 叶子节点</strong>，PID 会在程序运行<em>之前</em>被移进去——如果移动得晚了，早先产生的子进程就会留在限制之外。</li>
+<li><strong>Mount 命名空间 → <code>pivot_root</code></strong>：子进程构建好自己的根文件系统并把它换上去，然后再发出就绪信号，这样就不会有谁能 <code>setns</code> 进一个建到一半的文件系统。</li>
+<li><strong>先放弃权限，再 <code>exec</code></strong>，除了 stdio 之外不继承任何描述符。</li>
 </ol>
-<p>→ See <a href="architecture.html#level-2-containers-executables-and-processes">Architecture — Level 2: executables and
-processes</a>, <a href="architecture.html#level-4-two-flows-as-sequences">Architecture — Level 4:
-two flows, as sequences</a>, and the <a href="crates.html#delonix-linux"><code>delonix-linux</code>
-crate</a>.</p>
+<p>→ 参见<a href="architecture.html#level-2-containers-executables-and-processes">架构——层级 2：可执行文件与进程</a>、<a href="architecture.html#level-4-two-flows-as-sequences">架构——层级 4：两条流程，以时序方式呈现</a>，以及 <a href="crates.html#delonix-linux"><code>delonix-linux</code> crate</a>。</p>
 <hr />
-<h2 id="self-check-exercises">Self-check exercises<a class="hanchor" href="#self-check-exercises" aria-label="#">#</a></h2>
-<p>Do these in your scratch directory, as your normal user.</p>
+<h2 id="self-check-exercises">自查练习<a class="hanchor" href="#self-check-exercises" aria-label="#">#</a></h2>
+<p>以你的普通用户身份，在你的临时目录里做下面这些练习。</p>
 <ol>
-<li><strong>Same or different?</strong> Start <code>unshare -r -n sleep 30 &amp;</code>, then compare
-   <code>readlink /proc/$!/ns/net</code> with <code>readlink /proc/self/ns/net</code>, and <code>…/ns/mnt</code> for both.
-   <em>Expected:</em> the <code>net</code> inodes differ; the <code>mnt</code> inodes are equal (you did not ask for a mount
-   namespace).</li>
-<li><strong>Join the holder.</strong> With the same <code>sleep</code> running, run <code>nsenter --target $! --user --net
-   --preserve-credentials ip -br link</code>. <em>Expected:</em> only <code>lo</code>, <code>DOWN</code>. After <code>sleep</code> exits, the
-   same <code>nsenter</code> fails because the process, and with it the namespace, is gone.</li>
-<li><strong>Where did the limit go?</strong> Run <code>systemd-run --user --scope -q -p MemoryMax=48M sh -c 'cat
-   /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max'</code>, then <code>cat
-   /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max</code> in your plain shell. <em>Expected:</em>
-   <code>50331648</code> inside the scope; outside, <code>max</code> (or "No such file" if your cgroup has no memory
-   controller).</li>
-<li><strong>Inheritance in bash.</strong> Run <code>bash -c 'exec 5&gt;five.txt; ls /proc/self/fd'</code>, then <code>bash -c
-   'exec 5&gt;five.txt; exec 5&gt;&amp;-; ls /proc/self/fd'</code>. <em>Expected:</em> <code>5</code> appears in the first listing
-   (inherited by <code>ls</code>, because the shell does not set close-on-exec) and not in the second; <code>3</code> in
-   both is the directory <code>ls</code> itself opened.</li>
-<li><strong>Who holds the write end?</strong> Compare the two commands and their timings:</li>
+<li><strong>相同还是不同？</strong> 启动 <code>unshare -r -n sleep 30 &amp;</code>，然后比较 <code>readlink /proc/$!/ns/net</code> 和 <code>readlink /proc/self/ns/net</code>，两边的 <code>…/ns/mnt</code> 也比较一下。<em>预期结果：</em> <code>net</code> 的 inode 不一样；<code>mnt</code> 的 inode 一样（你并没有要求一个 mount 命名空间）。</li>
+<li><strong>加入 holder。</strong> 在同一个 <code>sleep</code> 仍在运行的情况下，执行 <code>nsenter --target $! --user --net --preserve-credentials ip -br link</code>。<em>预期结果：</em> 只有 <code>lo</code>，状态是 <code>DOWN</code>。<code>sleep</code> 退出之后，同样的 <code>nsenter</code> 会失败，因为那个进程没了，连同它的命名空间也一起没了。</li>
+<li><strong>限制去哪儿了？</strong> 执行 <code>systemd-run --user --scope -q -p MemoryMax=48M sh -c 'cat
+   /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max'</code>，然后在你普通的 shell 里执行 <code>cat
+   /sys/fs/cgroup$(cut -d: -f3 /proc/self/cgroup)/memory.max</code>。<em>预期结果：</em> 在 scope 内部是 <code>50331648</code>；在外面则是 <code>max</code>（如果你的 cgroup 没有 memory 控制器，就是"No such file"）。</li>
+<li><strong>bash 中的继承。</strong> 先执行 <code>bash -c 'exec 5&gt;five.txt; ls /proc/self/fd'</code>，再执行 <code>bash -c
+   'exec 5&gt;five.txt; exec 5&gt;&amp;-; ls /proc/self/fd'</code>。<em>预期结果：</em> <code>5</code> 出现在第一次的列表里（被 <code>ls</code> 继承了，因为这个 shell 没有设置 close-on-exec），第二次则没有；两次里的 <code>3</code> 都是 <code>ls</code> 自己打开的那个目录。</li>
+<li><strong>谁攥着写端？</strong> 比较下面这两条命令和它们的时序：</li>
 </ol>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">bash -c &#x27;exec {w}&gt; &gt;(cat &gt;/dev/null; echo &quot;reader got EOF at ${SECONDS}s&quot; &gt;&amp;2)
          sleep 3 &amp; exec {w}&gt;&amp;-; echo &quot;writer closed at ${SECONDS}s&quot;; wait&#x27;
 bash -c &#x27;exec {w}&gt; &gt;(cat &gt;/dev/null; echo &quot;reader got EOF at ${SECONDS}s&quot; &gt;&amp;2)
          { exec {w}&gt;&amp;-; sleep 3; } &amp; exec {w}&gt;&amp;-; echo &quot;writer closed at ${SECONDS}s&quot;; wait&#x27;
 </code></pre></div>
-<p><em>Expected:</em> in the first, <code>writer closed at 0s</code> and <code>reader got EOF at 3s</code> — the background
-   <code>sleep</code> inherited a copy of the pipe's write end, so EOF waits for it; in the second, the child
-   closes its copy first and the reader gets EOF at <code>0s</code>. This is the same shape as the pin/stderr
-   incident. (Do not drop the <code>exec {w}&gt;&amp;-</code> in the parent: <code>wait</code> also waits for the reader, and a
-   reader that never sees EOF makes the command hang.)</p>
+<p><em>预期结果：</em> 第一条命令里，<code>writer closed at 0s</code>，而 <code>reader got EOF at 3s</code>——后台的 <code>sleep</code> 继承了一份管道写端的拷贝，所以 EOF 要等它退出才会到来；第二条命令里，子进程先关掉了自己的那份拷贝，读端在 <code>0s</code> 就拿到了 EOF。这和 pin/stderr 那次事故是同一种形状。（父进程里的 <code>exec {w}&gt;&amp;-</code> 不能省：<code>wait</code> 也会等待读端，一个永远等不到 EOF 的读端会让整条命令卡住。）</p>
 <hr />
-<p><strong>Next:</strong> <a href="cloud-native-primer.html">Cloud native primer</a> — where the engine uses each of these primitives, and the open specifications (OCI, CNI, CRI, KVM) layered on top of them.</p>
-<nav class="pager"><a href="iaas-and-cloud-native.html"><span>← 上一页</span>IaaS and cloud native — where the engine fits</a><a class="next" href="cloud-native-primer.html"><span>下一页 →</span>Cloud native primer</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/linux-foundations.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/linux-foundations.md</code></footer>
+<p><strong>下一篇：</strong> <a href="cloud-native-primer.html">云原生入门</a>——引擎在哪里用到了这些原语，以及在它们之上分层构建的开放规范（OCI、CNI、CRI、KVM）。</p>
+<nav class="pager"><a href="iaas-and-cloud-native.html"><span>← 上一页</span>IaaS 与云原生——引擎的定位</a><a class="next" href="cloud-native-primer.html"><span>下一页 →</span>云原生入门</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/linux-foundations.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/linux-foundations.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#processes-the-kernel-and-proc">Processes, the kernel and /proc</a></li>
-<li><a href="#namespaces">Namespaces</a><ul>
-<li><a href="#identity-the-inode-behind-procns">Identity: the inode behind /proc//ns</a></li>
-<li><a href="#hands-on-a-user-mount-uts-network-namespace-without-root">Hands-on: a user + mount + UTS + network namespace, without root</a></li>
-<li><a href="#user-namespaces-and-uid-mapping">User namespaces and uid mapping</a></li>
-<li><a href="#creating-versus-joining-keeping-a-namespace-alive">Creating versus joining; keeping a namespace alive</a></li>
-<li><a href="#best-practices">Best practices</a></li>
+<li><a href="#processes-the-kernel-and-proc">进程、内核与 /proc</a></li>
+<li><a href="#namespaces">命名空间</a><ul>
+<li><a href="#identity-the-inode-behind-procns">身份标识：/proc//ns 背后的 inode</a></li>
+<li><a href="#hands-on-a-user-mount-uts-network-namespace-without-root">动手实践：不用 root 创建 user + mount + UTS + network 命名空间</a></li>
+<li><a href="#user-namespaces-and-uid-mapping">User 命名空间与 uid 映射</a></li>
+<li><a href="#creating-versus-joining-keeping-a-namespace-alive">创建与加入；让命名空间保持存活</a></li>
+<li><a href="#best-practices">最佳实践</a></li>
 </ul>
 </li>
 <li><a href="#cgroups-v2">cgroups v2</a><ul>
-<li><a href="#the-no-internal-processes-rule">The "no internal processes" rule</a></li>
-<li><a href="#delegation-to-users">Delegation to users</a></li>
-<li><a href="#hands-on-a-limited-command-in-a-user-scope">Hands-on: a limited command in a user scope</a></li>
-<li><a href="#best-practices_1">Best practices</a></li>
+<li><a href="#the-no-internal-processes-rule">"无内部进程"规则</a></li>
+<li><a href="#delegation-to-users">委派给用户</a></li>
+<li><a href="#hands-on-a-limited-command-in-a-user-scope">动手实践：在用户 scope 中运行一条受限命令</a></li>
+<li><a href="#best-practices_1">最佳实践</a></li>
 </ul>
 </li>
-<li><a href="#file-descriptors">File descriptors</a><ul>
-<li><a href="#hands-on-in-bash">Hands-on in bash</a></li>
-<li><a href="#limits">Limits</a></li>
-<li><a href="#best-practices-for-engine-code">Best practices for engine code</a></li>
+<li><a href="#file-descriptors">文件描述符</a><ul>
+<li><a href="#hands-on-in-bash">在 bash 中动手实践</a></li>
+<li><a href="#limits">限制</a></li>
+<li><a href="#best-practices-for-engine-code">引擎代码的最佳实践</a></li>
 </ul>
 </li>
-<li><a href="#signals-and-process-lifetime">Signals and process lifetime</a></li>
-<li><a href="#putting-it-together">Putting it together</a></li>
-<li><a href="#self-check-exercises">Self-check exercises</a></li>
+<li><a href="#signals-and-process-lifetime">信号与进程生命周期</a></li>
+<li><a href="#putting-it-together">融会贯通</a></li>
+<li><a href="#self-check-exercises">自查练习</a></li>
 </ul>
 </div>
 </aside>

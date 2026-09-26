@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Project structure · Delonix Runtime — 贡献者手册</title>
+<title>项目结构 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,35 +206,36 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a class="on" aria-current="page" href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">架构</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="project-structure">Project structure</h1>
-<p><strong>Before you read:</strong> <a href="build-and-test.html">Clone, build and test</a> — you have a checkout that builds, and know which gates exist.</p>
-<p>This page is the map of the repository: what each top-level file and directory is, who changes it
-and when, and which parts are <strong>generated</strong> and must never be edited by hand. Read it after
-<a href="build-and-test.html">Clone, build and test</a> and before <a href="architecture.html">Architecture</a> — the
-architecture explains <em>why</em> the code is split the way it is; this page tells you <em>where</em> things
-are. After it you can place any path in the repository, say who changes it, and know whether you
-may edit it by hand or must regenerate it.</p>
-<p>A CI gate keeps it honest: <code>python3 scripts/dev_docs.py --check</code> fails when a tracked top-level
-path (or a second-level directory of <code>crates/</code>, <code>bins/</code> or <code>docs/</code>) is missing from the tables
-below, or when a table names a path that no longer exists.</p>
-<h2 id="reading-the-repository-in-five-minutes">Reading the repository in five minutes<a class="hanchor" href="#reading-the-repository-in-five-minutes" aria-label="#">#</a></h2>
-<p>Start at the root and follow the dependencies inward:</p>
+<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/project-structure.html">阅读英文页面</a></span></div><h1 id="project-structure">项目结构</h1>
+<p><strong>阅读之前：</strong><a href="build-and-test.html">克隆、构建与测试</a> —— 你已经有一份能构建的 checkout，也知道
+有哪些门禁存在。</p>
+<p>本页是这个仓库的地图：每一个顶层文件和目录是什么、谁在什么时候改动它，以及哪些部分是<strong>生成
+的</strong>、绝不能手动编辑。请在读完<a href="build-and-test.html">克隆、构建与测试</a>之后、<a href="architecture.html">架构</a>
+之前读本页——架构解释的是<em>为什么</em>代码是这样切分的；本页告诉你的是东西<em>在哪里</em>。读完之后，
+你就能在这个仓库中给任何一个路径定位、说出是谁在改它，也知道你能不能手动编辑它，还是必须重新
+生成它。</p>
+<p>一个 CI 门禁会保证它诚实：当一个被追踪的顶层路径（或者 <code>crates/</code>、<code>bins/</code>、<code>docs/</code> 的一个
+二级目录）在下面的表格中缺失，或者一张表格提到了一个已经不存在的路径时，
+<code>python3 scripts/dev_docs.py --check</code> 会失败。</p>
+<h2 id="reading-the-repository-in-five-minutes">五分钟读懂本仓库<a class="hanchor" href="#reading-the-repository-in-five-minutes" aria-label="#">#</a></h2>
+<p>从根目录开始，沿着依赖关系往里走：</p>
 <ol>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a></strong> — the workspace: every member crate, and every dependency version (members
-   only write <code>{ workspace = true }</code>).</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a></strong> — the <code>delonix</code> CLI. Each command group is one
-   module under <code>src/cmd/</code>; follow the group you care about.</li>
-<li><strong><code>crates/&lt;layer&gt;/&lt;crate&gt;/src/lib.rs</code></strong> — the engine. The directory <em>is</em> the layer
-   (foundation → contexts → adapters / providers → interfaces), and every <code>lib.rs</code> opens with a
-   <code>//!</code> comment saying what the crate does. <a href="crates.html">The crates</a> has one section per crate.</li>
-<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></strong> — this handbook. <strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></strong> — the decisions behind the structure.</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a></strong> —— workspace 本身：每一个成员 crate，以及每一个依赖的版本（成员 crate
+   只写 <code>{ workspace = true }</code>）。</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/main.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/main.rs</code></a></strong> —— <code>delonix</code> CLI。每一个命令组都是
+   <code>src/cmd/</code> 下的一个模块；跟着你关心的那个组走就行。</li>
+<li><strong><code>crates/&lt;层&gt;/&lt;crate&gt;/src/lib.rs</code></strong> —— 引擎本身。目录<em>就是</em>层
+   （foundation → contexts → adapters / providers → interfaces），每一个 <code>lib.rs</code> 开头都有
+   一段 <code>//!</code> 注释说明这个 crate 是做什么的。<a href="crates.html">各个 crate</a> 每个 crate 都有独立的
+   一节。</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></strong> —— 本手册。<strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></strong> —— 结构背后的那些决策。</li>
 </ol>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> is the long, Portuguese working journal of the project. It is useful for finding
-<em>where</em> to look, but parts of it are out of date; confirm anything it says in the code.</p>
-<h2 id="annotated-tree">Annotated tree<a class="hanchor" href="#annotated-tree" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 是这个项目那份又长、又用葡萄牙语写的工作日志。它有用之处在于帮你找到<em>该去哪里
+看</em>，但其中一部分内容已经过时；它说的东西要在代码里确认一遍。</p>
+<h2 id="annotated-tree">带注释的目录树<a class="hanchor" href="#annotated-tree" aria-label="#">#</a></h2>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text">.
 ├── Cargo.toml, Cargo.lock        workspace members, shared dependency versions, lock file
 ├── rust-toolchain.toml           pinned Rust toolchain (clippy + rustfmt)
@@ -254,11 +255,10 @@ below, or when a table names a path that no longer exists.</p>
 │   ├── contexts/                 Compute, Stack, security decisions
 │   ├── adapters/                 Linux, OCI, SDN, VM, volumes, state, scanner, telemetry
 │   ├── providers/                remote systems behind ports (Proxmox VE, TrueNAS)
-│   └── interfaces/               CRI, local management API, node API, MCP server
+│   └── interfaces/               CRI, local management API, MCP server
 ├── bins/
 │   ├── delonix-runtime-bin/      the `delonix` CLI (+ templates, pt.po catalogue)
 │   ├── delonix-mgmt-bin/         the `delonix-mgmt` binary
-│   ├── delonix-node-api-bin/     the `delonix-node-api` binary
 │   └── delonix-mcp-bin/          the `delonix-mcp` binary
 ├── proto/                        node contract delonix.node.v1 (draft, ADR-0040)
 ├── third_party/                  vendored googleapis protos (Apache-2.0)
@@ -281,419 +281,413 @@ below, or when a table names a path that no longer exists.</p>
 ├── editors/                      VMfile syntax for Vim and VS Code
 └── reports/                      dated audit reports (historical)
 </code></pre></div>
-<h2 id="top-level-files">Top-level files<a class="hanchor" href="#top-level-files" aria-label="#">#</a></h2>
+<h2 id="top-level-files">顶层文件<a class="hanchor" href="#top-level-files" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>路径</th>
+<th>是什么</th>
+<th>谁在什么时候改它</th>
+<th>延伸阅读</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a></td>
-<td>Workspace root: the member list, <code>[workspace.package]</code>, <code>[workspace.<wbr>dependencies]</code> (every crate path and every external version) and <code>[workspace.<wbr>lints.<wbr>clippy]</code>. Its <code>version</code> is the published tag.</td>
-<td>Anyone adding a crate or dependency; the <code>version</code> changes <strong>only in a release commit</strong> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a>).</td>
-<td><a href="coding-conventions.html">Coding conventions</a>, <a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>workspace 的根：成员列表、<code>[workspace.package]</code>、<code>[workspace.<wbr>dependencies]</code>（每个 crate 的路径和每个外部依赖的版本）以及 <code>[workspace.<wbr>lints.<wbr>clippy]</code>。它的 <code>version</code> 就是已发布的 tag。</td>
+<td>任何新增 crate 或依赖的人；<code>version</code> <strong>只</strong>在一次发布提交里改变（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/version_gate.py" target="_blank" rel="noopener"><code>scripts/version_gate.py</code></a>）。</td>
+<td><a href="coding-conventions.html">编码约定</a>、<a href="contributing-workflow.html">贡献流程</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>
-<td>Resolved dependency graph for the whole workspace; builds use <code>--locked</code>.</td>
-<td>Updated by cargo when dependencies change; commit it with that change.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td>整个 workspace 已解析的依赖图；构建使用 <code>--locked</code>。</td>
+<td>依赖变化时由 cargo 更新；随那次变化一起提交它。</td>
+<td><a href="build-and-test.html">克隆、构建与测试</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a></td>
-<td>Pins the Rust channel with <code>rustfmt</code> and <code>clippy</code>, so dev and CI build with the same compiler.</td>
-<td>Maintainers, in a dedicated commit.</td>
-<td><a href="environment.html">Preparing your environment</a></td>
+<td>固定带 <code>rustfmt</code> 和 <code>clippy</code> 的 Rust 频道，使开发环境与 CI 用同一个编译器构建。</td>
+<td>维护者，在一次专门的提交里改动。</td>
+<td><a href="environment.html">准备你的环境</a></td>
 </tr>
 <tr>
 <td><code>buf.yaml</code></td>
-<td><code>buf</code> v2 configuration: the <code>proto/</code> module (linted) and the vendored <code>third_party/googleapis</code> module (not linted), with the written lint exceptions.</td>
-<td>Whoever changes the node contract rules.</td>
+<td><code>buf</code> v2 的配置：<code>proto/</code> 模块（要 lint）和被 vendor 进来的 <code>third_party/googleapis</code> 模块（不 lint），附带写明的 lint 例外。</td>
+<td>改动节点契约规则的人。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0040-engine-restructuring-layers-ports-node-contract.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0040-engine-restructuring-layers-ports-node-contract.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/deny.toml" target="_blank" rel="noopener"><code>deny.toml</code></a></td>
-<td><code>cargo-deny</code> policy: advisories (each ignore with a reason), licences, sources. Run by the <code>cargo-deny</code> CI job.</td>
-<td>Anyone adding a dependency that trips it — with a written justification.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td><code>cargo-deny</code> 的策略：advisory（每一条 ignore 都附带理由）、许可证、来源。由 CI 的 <code>cargo-deny</code> 作业运行。</td>
+<td>任何新增了会触发它的依赖的人——附带一段写明的理由。</td>
+<td><a href="build-and-test.html">克隆、构建与测试</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Makefile" target="_blank" rel="noopener"><code>Makefile</code></a></td>
-<td>Convenience targets: <code>binaries</code> (release <code>delonix</code> + <code>delonix-cri</code>, the primary artefact), <code>image</code>, <code>ghcr-push</code>, <code>bench</code>, <code>coverage</code>.</td>
-<td>Maintainers.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td>便捷目标：<code>binaries</code>（release 版的 <code>delonix</code> + <code>delonix-cri</code>，主要制品）、<code>image</code>、<code>ghcr-push</code>、<code>bench</code>、<code>coverage</code>。</td>
+<td>维护者。</td>
+<td><a href="build-and-test.html">克隆、构建与测试</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a></td>
-<td>Multi-stage build of the secondary CLI container image (builds <code>delonix</code> + <code>delonix-cri</code> from source).</td>
-<td>Maintainers, when the image build changes.</td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>次要 CLI 容器镜像的多阶段构建（从源码构建 <code>delonix</code> + <code>delonix-cri</code>）。</td>
+<td>维护者，镜像构建方式变化时。</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a></td>
 </tr>
 <tr>
 <td><code>.dockerignore</code></td>
-<td>Keeps <code>target/</code>, <code>dist/</code> and <code>.git</code> out of the <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> build context.</td>
-<td>Rarely.</td>
+<td>让 <code>target/</code>、<code>dist/</code> 和 <code>.git</code> 不进入 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Delonixfile" target="_blank" rel="noopener"><code>Delonixfile</code></a> 的构建上下文。</td>
+<td>很少改动。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.gitignore</code></td>
-<td>Ignores <code>target/</code>, <code>__pycache__/</code> and local agent-tool files.</td>
-<td>Rarely.</td>
+<td>忽略 <code>target/</code>、<code>__pycache__/</code> 和本地的 agent 工具文件。</td>
+<td>很少改动。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.git-blame-ignore-revs</code></td>
-<td>Commits <code>git blame</code> should skip (the workspace-wide <code>rustfmt</code> run). Enable with <code>git config blame.<wbr>ignoreRevsFile .<wbr>git-blame-ignore-revs</code>.</td>
-<td>Whoever lands a mass reformatting commit.</td>
+<td><code>git blame</code> 应该跳过的提交（那次全 workspace 的 <code>rustfmt</code> 运行）。用 <code>git config blame.<wbr>ignoreRevsFile .<wbr>git-blame-ignore-revs</code> 启用。</td>
+<td>落地一次大规模重排版提交的人。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a></td>
-<td>Project journal and agent rules, in Portuguese: the engine's identity and boundary (canonical), the gates, and a long history per feature. Some sections are out of date.</td>
-<td>Maintainers and contributors recording decisions and findings; conflicts are resolved by keeping both sides.</td>
-<td><a href="start-here.html">Start here</a></td>
+<td>项目日志与 agent 规则，用葡萄牙语写成：引擎的身份与边界（权威版本）、各个门禁，以及每个功能的一段长历史。有些章节已经过时。</td>
+<td>维护者和贡献者用来记录决策和发现；冲突用「两边都保留」的方式解决。</td>
+<td><a href="start-here.html">从这里开始</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a></td>
-<td>C4 model (context, containers, components) and functional system design, in Portuguese, rendered into the user site.</td>
-<td>Hand-written, kept in step with the code on structural changes.</td>
-<td><a href="architecture.html">Architecture</a></td>
+<td>C4 模型（context、containers、components）与功能性系统设计，用葡萄牙语写成，渲染进用户站点。</td>
+<td>手写，随结构性变化与代码保持同步。</td>
+<td><a href="architecture.html">架构</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener"><code>README.rst</code></a></td>
-<td>The user-facing entry point: what Delonix is, installation, first commands.</td>
-<td>Changed with user-visible features and releases.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>面向用户的入口：Delonix 是什么、如何安装、第一批命令。</td>
+<td>随用户可见的功能和发布而改动。</td>
+<td><a href="publishing-docs.html">发布文档</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a></td>
-<td>Short contributor entry point that points into <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>.</td>
-<td>Handbook maintainers.</td>
-<td><a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>简短的贡献者入口，指向 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>。</td>
+<td>手册维护者。</td>
+<td><a href="contributing-workflow.html">贡献流程</a></td>
 </tr>
 <tr>
 <td><code>GOVERNANCE.md</code></td>
-<td>How decisions are made (single-maintainer model, ADRs for structural decisions).</td>
-<td>Maintainers.</td>
+<td>决策是怎么做出来的（单一维护者模式，结构性决策用 ADR）。</td>
+<td>维护者。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a></td>
 </tr>
 <tr>
 <td><code>MAINTAINERS.md</code></td>
-<td>Who maintains which area (one maintainer today).</td>
-<td>Maintainers.</td>
+<td>谁维护哪个领域（今天只有一位维护者）。</td>
+<td>维护者。</td>
 <td><code>GOVERNANCE.md</code></td>
 </tr>
 <tr>
 <td><code>CODE_OF_CONDUCT.md</code></td>
-<td>Contributor Covenant.</td>
-<td>Maintainers.</td>
+<td>Contributor Covenant。</td>
+<td>维护者。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a></td>
-<td>How to report a vulnerability privately (GitHub Private Vulnerability Reporting).</td>
-<td>Maintainers.</td>
+<td>如何私下报告一个漏洞（GitHub 的私有漏洞报告功能）。</td>
+<td>维护者。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/SECURITY-RELEASES.md" target="_blank" rel="noopener"><code>docs/<wbr>SECURITY-RELEASES.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><code>LICENSE</code></td>
-<td>Apache-2.0 licence of the project.</td>
-<td>Never, in practice.</td>
+<td>项目的 Apache-2.0 许可证。</td>
+<td>实际上从不改动。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.clinerules</code></td>
-<td>Pointer file for the Cline assistant: "the rules are in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>". Its crate count is stale; <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> and <a href="crates.html">The crates</a> are authoritative.</td>
-<td>Rarely.</td>
+<td>给 Cline 助手用的指针文件：「规则在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 里」。它记的 crate 数量已经过时；权威版本是 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 和<a href="crates.html">各个 crate</a>。</td>
+<td>很少改动。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>.cursorrules</code></td>
-<td>Same pointer, for Cursor.</td>
-<td>Rarely.</td>
+<td>给 Cursor 用的同一份指针。</td>
+<td>很少改动。</td>
 <td>—</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="source-code-crates-bins-proto-tests">Source code (crates/, bins/, proto/, tests/)<a class="hanchor" href="#source-code-crates-bins-proto-tests" aria-label="#">#</a></h2>
-<p>The crate list, each crate's layer and who depends on whom are generated facts in
-<a href="architecture.html">Architecture</a> and <a href="crates.html">The crates</a>; they are not repeated here.</p>
+<h2 id="source-code-crates-bins-proto-tests">源代码（crates/、bins/、proto/、tests/）<a class="hanchor" href="#source-code-crates-bins-proto-tests" aria-label="#">#</a></h2>
+<p>crate 列表、每个 crate 所在的层，以及谁依赖谁，这些都是生成出来的事实，写在
+<a href="architecture.html">架构</a>和<a href="crates.html">各个 crate</a>里；此处不再重复。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>路径</th>
+<th>是什么</th>
+<th>谁在什么时候改它</th>
+<th>延伸阅读</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>crates/</code></td>
-<td>All library crates, one directory per layer (ADR-0040). <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> fails a crate whose directory is not the layer declared in its <code>LAYERS</code> table, and any dependency against the allowed direction.</td>
-<td>Every engine feature.</td>
-<td><a href="architecture.html">Architecture</a></td>
+<td>所有的库 crate，每层一个目录（ADR-0040）。<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 会让一个目录与其 <code>LAYERS</code> 表中声明的层不一致的 crate失败，也会让任何违反允许方向的依赖失败。</td>
+<td>每一个引擎功能。</td>
+<td><a href="architecture.html">架构</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a></td>
-<td>Pure foundation: the data-only model — errors, plain-data records (<code>Status</code>, the firewall records), the secret model, generated names, exit-code and <code>DX_*</code> classes (<code>delonix-model</code>), and zero-dependency network rules (<code>delonix-net-rules</code>). Depends only on the foundation.</td>
-<td>Changes that add a shared type or pure rule.</td>
-<td><a href="crates.html">The crates</a></td>
+<td>纯粹的基础层：只有数据的模型——错误、纯数据记录（<code>Status</code>、防火墙相关的记录）、secret 模型、生成的名称、退出码与 <code>DX_*</code> 类别（<code>delonix-model</code>），以及零依赖的网络规则（<code>delonix-net-rules</code>）。只依赖基础层本身。</td>
+<td>新增一个共享类型或纯规则的改动。</td>
+<td><a href="crates.html">各个 crate</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a></td>
-<td>Bounded contexts with the use cases: Compute, with the <code>Container</code> and <code>Vm</code> records (<code>delonix-compute</code>), the node's own helpers — event log, host and process checks, server dispatch (<code>delonix-node</code>) —, Stack — Kinds, reconciler, revisions (<code>delonix-stack</code>) — and the node's security decisions (<code>delonix-security-runtime</code>).</td>
-<td>Features that change what the engine decides.</td>
-<td><a href="crates.html">The crates</a></td>
+<td>带用例的限界上下文：Compute，带着 <code>Container</code> 和 <code>Vm</code> 记录（<code>delonix-compute</code>），节点自己的辅助功能——事件日志、宿主机与进程检查、服务器分发（<code>delonix-node</code>）——，Stack——Kind、协调器、revision（<code>delonix-stack</code>）——，以及节点的安全决策（<code>delonix-security-runtime</code>）。</td>
+<td>改变引擎决策方式的功能。</td>
+<td><a href="crates.html">各个 crate</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a></td>
-<td>Mechanisms on this node: Linux namespaces/cgroups (<code>delonix-linux</code>), OCI images (<code>delonix-oci</code>), networking and firewall (<code>delonix-sdn</code>), microVMs (<code>delonix-vm</code>), volumes (<code>delonix-volume</code>), persisted state and the secret vault (<code>delonix-state</code>), vulnerability scanning (<code>delonix-scanner</code>), logging/metrics/tracing (<code>delonix-telemetry</code>).</td>
-<td>Features that touch the kernel, disk or a local tool.</td>
-<td><a href="crates.html">The crates</a>, <a href="cloud-native-primer.html">Cloud native primer</a></td>
+<td>这个节点上的各种机制：Linux 命名空间/cgroup（<code>delonix-linux</code>）、OCI 镜像（<code>delonix-oci</code>）、网络与防火墙（<code>delonix-sdn</code>）、微虚拟机（<code>delonix-vm</code>）、卷（<code>delonix-volume</code>）、持久化状态与 secret 保险库（<code>delonix-state</code>）、漏洞扫描（<code>delonix-scanner</code>）、日志/指标/追踪（<code>delonix-telemetry</code>）。</td>
+<td>触碰内核、磁盘或本地工具的功能。</td>
+<td><a href="crates.html">各个 crate</a>、<a href="cloud-native-primer.html">云原生入门</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a></td>
-<td>Remote systems behind a port: a Proxmox VE node as a <code>VmBackend</code> (<code>delonix-proxmox</code>) and TrueNAS provisioning (<code>delonix-truenas</code>).</td>
-<td>Changes to a provider integration; a new provider enters here as a port implementation.</td>
+<td>端口背后的远程系统：作为 <code>VmBackend</code> 的一个 Proxmox VE 节点（<code>delonix-proxmox</code>），以及 TrueNAS 的资源制备（<code>delonix-truenas</code>）。</td>
+<td>对某个 provider 集成的改动；一个新 provider 以端口实现的形式进入这里。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0008-proxmox-vm-backend.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0008-proxmox-vm-backend.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a></td>
-<td>Servers that expose the engine: the Kubernetes CRI (<code>delonix-cri</code>, which also ships the <code>delonix-cri</code> binary), the local management API (<code>delonix-mgmt</code>), the node contract server (<code>delonix-node-api</code>) and the MCP server (<code>delonix-mcp</code>).</td>
-<td>Changes to one of those protocols.</td>
-<td><a href="cloud-native-standards.html">Cloud native standards</a></td>
+<td>暴露引擎的服务器：Kubernetes CRI（<code>delonix-cri</code>，同时也提供 <code>delonix-cri</code> 这个二进制程序）、本地管理 API（<code>delonix-mgmt</code>）以及 MCP 服务器（<code>delonix-mcp</code>）。</td>
+<td>对这几种协议之一的改动。</td>
+<td><a href="cloud-native-standards.html">云原生标准</a></td>
 </tr>
 <tr>
 <td><code>bins/</code></td>
-<td>Binary crates. Each composes one interface (enforced by <code>arch_fitness.py</code>).</td>
-<td>Every CLI-visible feature.</td>
-<td><a href="architecture.html">Architecture</a></td>
+<td>二进制 crate。每一个只组合一个接口（由 <code>arch_fitness.py</code> 强制执行）。</td>
+<td>每一个 CLI 可见的功能。</td>
+<td><a href="architecture.html">架构</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr></code></a></td>
-<td>The <code>delonix</code> CLI: <code>src/main.rs</code>, one module per command group in <code>src/cmd/</code>, the Portuguese message catalogue <code>data/pt.po</code>, the <code>init</code> project templates in <code>templates/</code>, <code>build.rs</code>, and <code>tests/architecture.rs</code>.</td>
-<td>Every feature with a command, flag or message.</td>
-<td><a href="coding-conventions.html">Coding conventions</a></td>
+<td><code>delonix</code> CLI：<code>src/main.rs</code>、<code>src/cmd/</code> 下每个命令组一个模块、葡萄牙语消息目录 <code>data/pt.po</code>、<code>templates/</code> 下的 <code>init</code> 项目模板、<code>build.rs</code>，以及 <code>tests/architecture.rs</code>。</td>
+<td>每一个带命令、flag 或消息的功能。</td>
+<td><a href="coding-conventions.html">编码约定</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mgmt-bin" target="_blank" rel="noopener"><code>bins/delonix-mgmt-bin/</code></a></td>
-<td>The <code>delonix-mgmt</code> binary: a thin <code>main.rs</code> over <code>delonix-mgmt</code>.</td>
-<td>Rarely; the logic lives in the interface crate.</td>
-<td><a href="crates.html">The crates</a></td>
-</tr>
-<tr>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-node-api-bin" target="_blank" rel="noopener"><code>bins/<wbr>delonix-node-api-bin/<wbr></code></a></td>
-<td>The <code>delonix-node-api</code> binary: a thin <code>main.rs</code> over <code>delonix-node-api</code> (the node contract on a unix socket, ADR-0040 P5).</td>
-<td>Rarely; the logic lives in the interface crate.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0050-libvirt-linux-providers-capability-catalog.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0050-libvirt-linux-providers-capability-catalog.<wbr>md</code></a></td>
+<td><code>delonix-mgmt</code> 二进制程序：一个覆盖在 <code>delonix-mgmt</code> 之上的很薄的 <code>main.rs</code>。</td>
+<td>很少改动；逻辑活在接口层的那个 crate 里。</td>
+<td><a href="crates.html">各个 crate</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-mcp-bin" target="_blank" rel="noopener"><code>bins/delonix-mcp-bin/</code></a></td>
-<td>The <code>delonix-mcp</code> binary: a thin <code>main.rs</code> over <code>delonix-mcp</code>.</td>
-<td>Rarely; the logic lives in the interface crate.</td>
+<td><code>delonix-mcp</code> 二进制程序：一个覆盖在 <code>delonix-mcp</code> 之上的很薄的 <code>main.rs</code>。</td>
+<td>很少改动；逻辑活在接口层的那个 crate 里。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0025-mcp-local-ai-control-surface.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0025-mcp-local-ai-control-surface.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><code>proto/</code></td>
-<td>The node contract <code>delonix.node.v1</code> (<code>proto/<wbr>delonix/<wbr>node/<wbr>v1/<wbr>*.<wbr>proto</code>), marked draft; source of truth for gRPC and HTTP/JSON and of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a>. Checked by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a> (format, lint, breaking changes, HTTP mappings, OpenAPI).</td>
-<td>Contract changes, reviewed carefully — breaking changes against the last tag fail.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/README.md" target="_blank" rel="noopener"><code>proto/README.md</code></a>, ADR-0040</td>
+<td>节点契约 <code>delonix.node.v1</code>（<code>proto/<wbr>delonix/<wbr>node/<wbr>v1/<wbr>*.<wbr>proto</code>），标记为 draft；是 gRPC 和 HTTP/JSON 以及 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/api/openapi.yaml" target="_blank" rel="noopener"><code>docs/api/openapi.yaml</code></a> 的唯一真相来源。由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a> 检查（格式、lint、破坏性变更、HTTP 映射、OpenAPI）。</td>
+<td>契约变更，需要仔细评审——相对于上一个 tag 的破坏性变更会失败。</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/README.md" target="_blank" rel="noopener"><code>proto/README.md</code></a>、ADR-0040</td>
 </tr>
 <tr>
 <td><code>tests/</code></td>
-<td>Out-of-tree compatibility checks, not cargo tests: <code>tests/<wbr>compat/<wbr>cri-conformance.<wbr>sh</code> (the <code>critest</code> suite) and <code>tests/<wbr>compat/<wbr>docker_api_smoke.<wbr>py</code>. Cargo integration tests live in each crate's own <code>tests/</code>.</td>
-<td>Whoever works on CRI or Docker API compatibility.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener"><code>docs/cri-conformance.md</code></a>, <a href="build-and-test.html">Clone, build and test</a></td>
+<td>树外的兼容性检查，不是 cargo 测试：<code>tests/<wbr>compat/<wbr>cri-conformance.<wbr>sh</code>（<code>critest</code> 套件）和 <code>tests/<wbr>compat/<wbr>docker_api_smoke.<wbr>py</code>。Cargo 的集成测试活在每个 crate 自己的 <code>tests/</code> 里。</td>
+<td>从事 CRI 或 Docker API 兼容性工作的人。</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener"><code>docs/cri-conformance.md</code></a>、<a href="build-and-test.html">克隆、构建与测试</a></td>
 </tr>
 <tr>
 <td><code>fuzz/</code></td>
-<td><code>cargo-fuzz</code> targets over hand-written parsers fed with untrusted input (a cloned repo's <code>Dockerfile</code>, an image reference string). Its own <code>[workspace]</code>, so the sanitizer build flags never touch the main one; the CI <code>fuzz</code> job runs each target for 60s per push/PR.</td>
-<td>Whoever adds a hand-written parser for externally-controlled input.</td>
-<td>M04 of <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/roadmap/13-improvements-traceability.md" target="_blank" rel="noopener"><code>docs/<wbr>roadmap/<wbr>13-improvements-traceability.<wbr>md</code></a></td>
+<td><code>cargo-fuzz</code> 的目标，针对喂入不受信输入（一个被克隆仓库的 <code>Dockerfile</code>、一个镜像引用字符串）的手写解析器。它有自己独立的 <code>[workspace]</code>，这样 sanitizer 的构建 flag 就永远不会碰到主 workspace；CI 的 <code>fuzz</code> 作业每次 push/PR 对每个目标跑 60 秒。</td>
+<td>任何为外部可控输入新增手写解析器的人。</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/roadmap/13-improvements-traceability.md" target="_blank" rel="noopener"><code>docs/<wbr>roadmap/<wbr>13-improvements-traceability.<wbr>md</code></a> 的 M04</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="documentation-docs">Documentation (docs/…)<a class="hanchor" href="#documentation-docs" aria-label="#">#</a></h2>
-<p><code>docs/</code> is also the GitHub Pages root. Its top-level files are a mix: the HTML pages
-(<code>index.html</code>, <code>cheatsheet.html</code>, <code>estrutura.html</code>, …) and <code>.nojekyll</code> are <strong>generated</strong> by
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>; <code>gen.py</code> itself and Markdown such as <code>cli-stability.md</code>, <code>gitops.md</code>,
-<code>estrutura.md</code>, <code>guia-vm-lab.md</code> are hand-written sources that it renders; <code>RELEASES.md</code> is
-<strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a>; and dated reports (<code>AUDITORIA-E2E.md</code>,
-<code>RELATORIO-PRE-PRODUCAO.md</code>, <code>paridade-docker-podman.md</code>, <code>comparacao-medida.md</code>,
-<code>sovereignty-engine.md</code>) record what was measured on a given date.</p>
+<h2 id="documentation-docs">文档（docs/……）<a class="hanchor" href="#documentation-docs" aria-label="#">#</a></h2>
+<p><code>docs/</code> 同时也是 GitHub Pages 的根目录。它的顶层文件是混合的：HTML 页面
+（<code>index.html</code>、<code>cheatsheet.html</code>、<code>estrutura.html</code>……）和 <code>.nojekyll</code> 是由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>
+<strong>生成</strong>的；<code>gen.py</code> 本身，以及像 <code>cli-stability.md</code>、<code>gitops.md</code>、<code>estrutura.md</code>、
+<code>guia-vm-lab.md</code> 这样的 Markdown，是它渲染所依据的手写源文件；<code>RELEASES.md</code> 是由
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/gen-releases.sh" target="_blank" rel="noopener"><code>scripts/gen-releases.sh</code></a> <strong>生成</strong>的；而带日期的报告（<code>AUDITORIA-E2E.md</code>、
+<code>RELATORIO-PRE-PRODUCAO.md</code>、<code>paridade-docker-podman.md</code>、<code>comparacao-medida.md</code>、
+<code>sovereignty-engine.md</code>）记录的是在某个特定日期测量到的结果。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>路径</th>
+<th>是什么</th>
+<th>谁在什么时候改它</th>
+<th>延伸阅读</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>docs/</code></td>
-<td>Documentation root and user site (see the paragraph above).</td>
-<td>User-visible changes regenerate the site with <code>python3 docs/gen.py</code>; CI fails if the committed <code>docs/</code> differs from the regenerated one.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>文档根目录，也是用户站点（见上面那段）。</td>
+<td>用户可见的改动要用 <code>python3 docs/gen.py</code> 重新生成站点；如果已提交的 <code>docs/</code> 和重新生成出来的不一样，CI 会失败。</td>
+<td><a href="publishing-docs.html">发布文档</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></td>
-<td>Architecture Decision Records, <code>NNNN-title.md</code>, with an index in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>. Accepted ADRs are never rewritten — a new ADR supersedes.</td>
-<td>A contributor proposing a structural decision.</td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>, <a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>架构决策记录（Architecture Decision Records），<code>NNNN-title.md</code>，索引在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a> 里。已接受的 ADR 从不重写——由一份新 ADR 取代。</td>
+<td>提出一项结构性决策的贡献者。</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/README.md</code></a>、<a href="contributing-workflow.html">贡献流程</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/api" target="_blank" rel="noopener"><code>docs/api/</code></a></td>
-<td><code>openapi.yaml</code>, <strong>generated</strong> from <code>proto/</code> by <code>protoc-gen-openapi</code>. Never edit it.</td>
-<td><code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code> after a <code>proto/</code> change.</td>
+<td><code>openapi.yaml</code>，由 <code>protoc-gen-openapi</code> 从 <code>proto/</code> <strong>生成</strong>。绝不要手动编辑它。</td>
+<td><code>proto/</code> 变化之后运行 <code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code>。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/proto/README.md" target="_blank" rel="noopener"><code>proto/README.md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
-<td>One HTML page per CLI command group, <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> from the release binary's real <code>--help</code> plus editorial text in the generator.</td>
-<td>Never by hand: edit <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>, rebuild the binary, regenerate.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>每个 CLI 命令组一个 HTML 页面，由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a> 从 release 二进制程序真实的 <code>--help</code> 加上生成器里的编辑说明文字<strong>生成</strong>。</td>
+<td>从不手动改：改 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/gen.py" target="_blank" rel="noopener"><code>docs/gen.py</code></a>，重新构建二进制程序，重新生成。</td>
+<td><a href="publishing-docs.html">发布文档</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
-<td>This contributor handbook: English Markdown source, with <code>pt-AO/</code> and <code>fr-FR/</code> translations that carry a <code>translated-from</code> hash. Regions between <code>dev-docs:begin</code>/<code>dev-docs:end</code> markers are <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a>; the rest is hand-written.</td>
-<td>Handbook maintainers; generated regions follow the code and are refreshed at release time.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>本贡献者手册：英文 Markdown 源文件，带 <code>pt-AO/</code> 和 <code>fr-FR/</code> 翻译，翻译带有 <code>translated-from</code> 哈希。<code>dev-docs:begin</code>/<code>dev-docs:end</code> 标记之间的区域由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs.py" target="_blank" rel="noopener"><code>scripts/dev_docs.py</code></a> <strong>生成</strong>；其余部分是手写的。</td>
+<td>手册维护者；生成的区域跟随代码变化，在发布时刷新。</td>
+<td><a href="publishing-docs.html">发布文档</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/providers" target="_blank" rel="noopener"><code>docs/providers/</code></a></td>
-<td><code>capability-matrix.md</code>, the DECLARED provider capability matrix (ADR-0050), <strong>generated</strong> by <code>delonix provider matrix</code>; a test in <code>delonix-runtime-bin</code> fails when it differs from the output.</td>
-<td><code>delonix provider matrix &gt; docs/<wbr>providers/<wbr>capability-matrix.<wbr>md</code> after a declaration changes.</td>
+<td><code>capability-matrix.md</code>，声明式的 provider 能力矩阵（ADR-0050），由 <code>delonix provider matrix</code> <strong>生成</strong>；<code>delonix-runtime-bin</code> 里有一个测试，在它与实际输出不一致时会失败。</td>
+<td>一个声明变化之后运行 <code>delonix provider matrix &gt; docs/<wbr>providers/<wbr>capability-matrix.<wbr>md</code>。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0050-libvirt-linux-providers-capability-catalog.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0050-libvirt-linux-providers-capability-catalog.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/discovery" target="_blank" rel="noopener"><code>docs/discovery/</code></a></td>
-<td>Numbered, dated investigations and plans (inventories, spikes with their raw result files). Historical records — do not rewrite; write a new one.</td>
-<td>Whoever runs an investigation before a structural change.</td>
+<td>编号、带日期的调查与计划（清单、附带原始结果文件的 spike）。历史记录——不要重写；写一份新的。</td>
+<td>在结构性变化之前进行调查的人。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>
-<td>This handbook as a website (<code>en/</code>, <code>pt-AO/</code>, <code>fr-FR/</code>, <code>zh-CN/</code>, <code>index.html</code>), <strong>generated</strong> by <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/<wbr>dev_docs_site.<wbr>py</code></a> from <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>. Never edit the HTML.</td>
-<td>Regenerated with <code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code> after a <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> change, and at release time.</td>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
+<td>本手册作为一个网站（<code>en/</code>、<code>pt-AO/</code>、<code>fr-FR/</code>、<code>zh-CN/</code>、<code>index.html</code>），由 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/<wbr>dev_docs_site.<wbr>py</code></a> 从 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> <strong>生成</strong>。绝不要编辑 HTML。</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a> 变化之后、以及发布时，用 <code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code> 重新生成。</td>
+<td><a href="publishing-docs.html">发布文档</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
-<td>The Proxmox VE API coverage matrix (ADR-0049): <code>api-&lt;ver&gt;.<wbr>routes.<wbr>json</code>, the schema of a named release extracted from a node's <code>apidoc.js</code> with its provenance (fetch date, sha256), and <code>matrix-&lt;ver&gt;.md</code>, <strong>generated</strong> from it and from the routes the provider crate calls. Never edit the matrix.</td>
-<td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code> after a route is added to <code>delonix-proxmox</code>; the schema only when a new release is measured.</td>
+<td>Proxmox VE 的 API 覆盖矩阵（ADR-0049）：<code>api-&lt;ver&gt;.<wbr>routes.<wbr>json</code>，从某个节点的 <code>apidoc.js</code> 中提取出的一个命名版本的 schema，附带其溯源信息（抓取日期、sha256），以及 <code>matrix-&lt;ver&gt;.md</code>，由它以及 provider crate 调用的路由<strong>生成</strong>。绝不要编辑这份矩阵。</td>
+<td>一条路由加进 <code>delonix-proxmox</code> 之后运行 <code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code>；schema 只在测量了一个新版本时才更新。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a></td>
-<td>Release notes, one <code>v&lt;version&gt;.md</code> per release. A release commit must add its own (<code>version_gate.py</code>). Historical — do not rewrite past notes.</td>
-<td>The release commit.</td>
-<td><a href="contributing-workflow.html">Contribution workflow</a></td>
+<td>发布说明，每个发布一份 <code>v&lt;version&gt;.md</code>。一次发布提交必须自己新增一份（<code>version_gate.py</code>）。历史记录——不要重写过去的说明。</td>
+<td>发布提交本身。</td>
+<td><a href="contributing-workflow.html">贡献流程</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/roadmap" target="_blank" rel="noopener"><code>docs/roadmap/</code></a></td>
-<td>Traceability matrix of an improvement programme, where every cell cites a measurement or says "not measured".</td>
-<td>Maintainers, as items are measured or closed.</td>
+<td>一个改进项目的可追溯性矩阵，其中每一个单元格都引用了一次测量，或者写着「未测量」。</td>
+<td>维护者，随着条目被测量或关闭。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/runtime" target="_blank" rel="noopener"><code>docs/runtime/</code></a></td>
-<td>Dated discovery of the runtime (current state, crate dependency map, target-vs-reality). Historical: crate names in it predate later renames.</td>
-<td>Not updated; superseded by <a href="architecture.html">Architecture</a> and <a href="crates.html">The crates</a>.</td>
-<td><a href="architecture.html">Architecture</a></td>
+<td>带日期的运行时调查（现状、crate 依赖图、目标与现实的对比）。历史记录：里面的 crate 名称是后来重命名之前的。</td>
+<td>不再更新；被<a href="architecture.html">架构</a>和<a href="crates.html">各个 crate</a>取代。</td>
+<td><a href="architecture.html">架构</a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
-<td><code>v1/delonix.json</code>, the manifest JSON Schema, <strong>generated</strong> from the code (ADR-0007).</td>
-<td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code> when a manifest type changes.</td>
+<td><code>v1/delonix.json</code>，清单的 JSON Schema，从代码<strong>生成</strong>（ADR-0007）。</td>
+<td>一个清单类型变化时运行 <code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code>。</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0007-generated-manifest-schema.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0007-generated-manifest-schema.<wbr>md</code></a></td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">Tooling, CI and packaging (scripts/, .github/, dist/, editors/, examples/, reports/, third_party/, .ai/)<a class="hanchor" href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai" aria-label="#">#</a></h2>
+<h2 id="tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">工具、CI 与打包（scripts/、.github/、dist/、editors/、examples/、reports/、third_party/、.ai/）<a class="hanchor" href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>What it is</th>
-<th>Who changes it / when</th>
-<th>Read more</th>
+<th>路径</th>
+<th>是什么</th>
+<th>谁在什么时候改它</th>
+<th>延伸阅读</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>scripts/</code></td>
-<td>Gates (<code>arch_fitness.py</code>, <code>lang_ratchet.py</code>, <code>contract_gate.py</code>, <code>version_gate.py</code>, <code>docs_cli_gate.py</code>, <code>cli-tree.sh</code>, <code>dev_docs.py</code>) with their baselines (<code>arch_baseline.json</code>, <code>lang_baseline.json</code>, <code>cli_baseline.tsv</code>), generators (<code>dev_docs_site.py</code>, <code>gen-releases.sh</code>, <code>sbom.py</code>), harnesses (<code>e2e.sh</code>, <code>chaos.sh</code>, <code>critest.sh</code>, <code>bench.sh</code>, <code>coverage.sh</code>), the installer <code>install.sh</code>, appliance image builds in <code>appliances/</code>, and spike probes in <code>spikes/</code>.</td>
-<td>Anyone whose change moves a ratchet (lower the baseline in the same commit); maintainers for the rest.</td>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
+<td>各个门禁（<code>arch_fitness.py</code>、<code>lang_ratchet.py</code>、<code>contract_gate.py</code>、<code>version_gate.py</code>、<code>docs_cli_gate.py</code>、<code>cli-tree.sh</code>、<code>dev_docs.py</code>）及其基线（<code>arch_baseline.json</code>、<code>lang_baseline.json</code>、<code>cli_baseline.tsv</code>）、各个生成器（<code>dev_docs_site.py</code>、<code>gen-releases.sh</code>、<code>sbom.py</code>）、各个测试装置（<code>e2e.sh</code>、<code>chaos.sh</code>、<code>critest.sh</code>、<code>bench.sh</code>、<code>coverage.sh</code>）、安装脚本 <code>install.sh</code>、<code>appliances/</code> 下的一体机镜像构建，以及 <code>spikes/</code> 下的 spike 探针。</td>
+<td>任何改动会移动一个棘轮（ratchet）的人（在同一个提交里降低基线）；其余情况由维护者负责。</td>
+<td><a href="build-and-test.html">克隆、构建与测试</a></td>
 </tr>
 <tr>
 <td><code>.github/</code></td>
-<td><code>workflows/ci.yml</code> (every gate on push and PR to <code>main</code>), <code>chaos.yml</code> (chaos harness), <code>release.yml</code> (manual, <code>gh workflow run release.<wbr>yml -f tag=vX.<wbr>Y.<wbr>Z</code>), <code>vm-image.yml</code> and <code>vm-appliances.yml</code> (manual image publishing), plus <code>CODEOWNERS</code>, issue and PR templates and a pointer file for GitHub Copilot.</td>
-<td>Maintainers; a new gate is added here and documented in the handbook.</td>
-<td><a href="build-and-test.html">Clone, build and test</a>, <a href="publishing-docs.html">Publishing the documentation</a></td>
+<td><code>workflows/ci.yml</code>（每次 push 和对 <code>main</code> 的 PR 都跑的所有门禁）、<code>chaos.yml</code>（混沌测试装置）、<code>release.yml</code>（手动触发，<code>gh workflow run release.<wbr>yml -f tag=vX.<wbr>Y.<wbr>Z</code>）、<code>vm-image.yml</code> 和 <code>vm-appliances.yml</code>（手动的镜像发布），再加上 <code>CODEOWNERS</code>、issue 和 PR 模板，以及给 GitHub Copilot 用的一份指针文件。</td>
+<td>维护者；新增一个门禁时，要在这里加，并在手册里记录下来。</td>
+<td><a href="build-and-test.html">克隆、构建与测试</a>、<a href="publishing-docs.html">发布文档</a></td>
 </tr>
 <tr>
 <td><code>dist/</code></td>
-<td><code>delonix-cri.service</code>, the systemd unit for the CRI server (also embedded in the binary).</td>
-<td>Whoever changes how <code>delonix-cri</code> runs under systemd.</td>
-<td><a href="cloud-native-standards.html">Cloud native standards</a></td>
+<td><code>delonix-cri.service</code>，CRI 服务器用的 systemd unit（同时也嵌在二进制程序里）。</td>
+<td>改动 <code>delonix-cri</code> 在 systemd 下如何运行的人。</td>
+<td><a href="cloud-native-standards.html">云原生标准</a></td>
 </tr>
 <tr>
 <td><code>editors/</code></td>
-<td>VMfile syntax highlighting: <code>vim/</code> (ftdetect + syntax) and <code>vscode/</code> (language configuration + TextMate grammar).</td>
-<td>Whoever changes the VMfile grammar.</td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>VMfile 语法高亮：<code>vim/</code>（ftdetect + syntax）和 <code>vscode/</code>（语言配置 + TextMate 语法）。</td>
+<td>改动 VMfile 语法的人。</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a></td>
 </tr>
 <tr>
 <td><code>examples/</code></td>
-<td>Example manifests per Kind, a multi-file network lab (<code>lab-rede/</code>) and a small complete project (<code>delonix-temp/</code>). The CI <code>docs</code> job dry-runs every <code>examples/*.yaml</code>, so a deprecated or broken example fails the build.</td>
-<td>Every feature that adds or changes a Kind.</td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>每个 Kind 的示例清单、一个多文件的网络实验室（<code>lab-rede/</code>），以及一个小的完整项目（<code>delonix-temp/</code>）。CI 的 <code>docs</code> 作业会 dry-run 每一个 <code>examples/*.yaml</code>，所以一个已废弃或已损坏的示例会让构建失败。</td>
+<td>每一个新增或改变某个 Kind 的功能。</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a></td>
 </tr>
 <tr>
 <td><code>images/</code></td>
-<td>One folder per VM image: <code>ubuntu</code>, <code>debian</code>, <code>rocky</code>, <code>fedora</code> (custom recipes that build offline) and eight appliances (<code>opnsense</code>, <code>proxmox</code>, <code>truenas</code>, <code>openstack</code>, <code>monitoring</code>, <code>carbonio</code>, <code>glpi</code>, <code>wazuh</code>) whose <code>vm.yaml</code> names a builder in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a>. Each has a README; <code>images/README.md</code> indexes them and explains <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/<wbr>verify-images.<wbr>sh</code></a>. A unit test (<code>vmspec::<wbr>every_shipped_recipe_is_valid_and_complete</code>) fails if a recipe stops parsing or points at a missing file or builder.</td>
-<td>Whoever adds a distro or an appliance, or changes the <code>vm.yaml</code> schema.</td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
+<td>每个 VM 镜像一个文件夹：<code>ubuntu</code>、<code>debian</code>、<code>rocky</code>、<code>fedora</code>（离线构建的自定义配方）和八个一体机（<code>opnsense</code>、<code>proxmox</code>、<code>truenas</code>、<code>openstack</code>、<code>monitoring</code>、<code>carbonio</code>、<code>glpi</code>、<code>wazuh</code>），它们的 <code>vm.yaml</code> 在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/scripts/appliances" target="_blank" rel="noopener"><code>scripts/appliances/</code></a> 中点名一个构建器。每个都有一份 README；<code>images/README.md</code> 给它们做了索引，并解释了 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/verify-images.sh" target="_blank" rel="noopener"><code>scripts/<wbr>verify-images.<wbr>sh</code></a>。有一个单元测试（<code>vmspec::<wbr>every_shipped_recipe_is_valid_and_complete</code>）会在某个配方解析失败、或指向一个缺失的文件或构建器时失败。</td>
+<td>任何新增一个发行版或一体机、或改变 <code>vm.yaml</code> schema 的人。</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a></td>
 </tr>
 <tr>
 <td><code>reports/</code></td>
-<td>Dated audit reports: <code>code-quality/</code> and <code>production-readiness/<wbr>&lt;version&gt;/<wbr></code> (inventory, gap matrix, backlog). Historical records of an audit at a commit — do not rewrite; nothing in them is implemented by being listed.</td>
-<td>Whoever runs a new audit (new files).</td>
+<td>带日期的审计报告：<code>code-quality/</code> 和 <code>production-readiness/<wbr>&lt;version&gt;/<wbr></code>（清单、差距矩阵、待办列表）。某次审计在某个提交上的历史记录——不要重写；列在里面的东西不会因为被列出来就算实现了。</td>
+<td>进行一次新审计的人（新增文件）。</td>
 <td>—</td>
 </tr>
 <tr>
 <td><code>third_party/</code></td>
-<td>Vendored <code>googleapis</code> protos (<code>google/<wbr>api/<wbr>annotations.<wbr>proto</code>, <code>http.proto</code>) used for the HTTP mapping of the node contract. Apache-2.0, licence headers kept; the source commit is recorded in its <code>README.md</code>. Never edited here.</td>
-<td>Whoever updates the vendored protos, both files from one upstream commit.</td>
+<td>被 vendor 进来的 <code>googleapis</code> proto（<code>google/<wbr>api/<wbr>annotations.<wbr>proto</code>、<code>http.proto</code>），用于节点契约的 HTTP 映射。Apache-2.0，许可证头保留；来源提交记录在它自己的 <code>README.md</code> 里。绝不要在这里编辑。</td>
+<td>更新被 vendor 进来的 proto 的人，两个文件要来自同一个上游提交。</td>
 <td><code>third_party/<wbr>googleapis/<wbr>README.<wbr>md</code></td>
 </tr>
 <tr>
 <td><code>.ai/</code></td>
-<td>Tool-neutral skills for AI assistants: <code>skills/<wbr>delonix-runtime-e2e-quality/<wbr></code> (test taxonomy, provider contract, security checks, report templates).</td>
-<td>Maintainers.</td>
+<td>面向 AI 助手、与工具无关的 skill：<code>skills/<wbr>delonix-runtime-e2e-quality/<wbr></code>（测试分类法、provider 契约、安全检查、报告模板）。</td>
+<td>维护者。</td>
 <td>—</td>
 </tr>
 </tbody>
 </table></div>
-<h2 id="generated-vs-hand-written">Generated vs hand-written<a class="hanchor" href="#generated-vs-hand-written" aria-label="#">#</a></h2>
-<p>Everything below is produced by a command. Edit the source, run the generator, commit both — and
-expect CI to fail if you edit the output by hand.</p>
+<h2 id="generated-vs-hand-written">生成的 vs 手写的<a class="hanchor" href="#generated-vs-hand-written" aria-label="#">#</a></h2>
+<p>下面的一切都是由一条命令产生的。改动源文件、跑生成器、把两者一起提交——如果你手动编辑了输出，
+预期 CI 会失败。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Path</th>
-<th>Generated file(s)</th>
-<th>Generator command</th>
-<th>CI gate that checks it</th>
+<th>路径</th>
+<th>生成的文件</th>
+<th>生成器命令</th>
+<th>检查它的 CI 门禁</th>
 </tr>
 </thead>
 <tbody>
@@ -701,100 +695,100 @@ expect CI to fail if you edit the output by hand.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/api" target="_blank" rel="noopener"><code>docs/api/</code></a></td>
 <td><code>openapi.yaml</code></td>
 <td><code>python3 scripts/<wbr>contract_gate.<wbr>py --update</code></td>
-<td><code>contract gate</code> job (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>)</td>
+<td><code>contract gate</code> 作业（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/contract_gate.py" target="_blank" rel="noopener"><code>scripts/<wbr>contract_gate.<wbr>py</code></a>）</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/schema" target="_blank" rel="noopener"><code>docs/schema/</code></a></td>
 <td><code>v1/delonix.json</code></td>
 <td><code>delonix manifest schema &gt; docs/<wbr>schema/<wbr>v1/<wbr>delonix.<wbr>json</code></td>
-<td><code>test</code> job, test <code>o_schema_publicado_esta_em_dia_com_o_codigo</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a></td>
+<td><code>test</code> 作业，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>schema.<wbr>rs</code></a> 里的测试 <code>o_schema_publicado_esta_em_dia_com_o_codigo</code></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/comandos" target="_blank" rel="noopener"><code>docs/comandos/</code></a></td>
-<td>every page</td>
-<td><code>python3 docs/gen.py</code> (needs <code>cargo build --release -p delonix-runtime-bin</code>)</td>
-<td><code>generated docs and valid examples</code> job, step "O site publicado tem de ser o gerado" (<code>git diff</code> on <code>docs/</code>)</td>
+<td>每一个页面</td>
+<td><code>python3 docs/gen.py</code>（需要 <code>cargo build --release -p delonix-runtime-bin</code>）</td>
+<td><code>generated docs and valid examples</code> 作业，步骤「O site publicado tem de ser o gerado」（对 <code>docs/</code> 做 <code>git diff</code>）</td>
 </tr>
 <tr>
 <td><code>docs/</code></td>
-<td>top-level <code>*.html</code>, <code>.nojekyll</code></td>
+<td>顶层的 <code>*.html</code>、<code>.nojekyll</code></td>
 <td><code>python3 docs/gen.py</code></td>
-<td>same step as above</td>
+<td>同上面那一步</td>
 </tr>
 <tr>
 <td><code>docs/</code></td>
 <td><code>RELEASES.md</code></td>
 <td><code>bash scripts/<wbr>gen-releases.<wbr>sh</code></td>
-<td>none in CI: <code>release.yml</code> regenerates and commits it after each release</td>
+<td>CI 中没有：<code>release.yml</code> 在每次发布之后重新生成并提交它</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a></td>
-<td>the <code>dev-docs</code> regions only</td>
+<td>只有 <code>dev-docs</code> 那些区域</td>
 <td><code>python3 scripts/<wbr>dev_docs.<wbr>py</code></td>
-<td><code>arch fitness</code> job, step <code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code>; also refreshed by <code>release.yml</code></td>
+<td><code>arch fitness</code> 作业，步骤 <code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code>；也由 <code>release.yml</code> 刷新</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
 <td><code>matrix-9.2.2.md</code></td>
 <td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code></td>
-<td><code>script tests</code> job, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/test_proxmox_api_inventory.py" target="_blank" rel="noopener"><code>scripts/<wbr>test_proxmox_api_inventory.<wbr>py</code></a> (<code>test_the_committed_matrix_is_up_to_date</code>)</td>
+<td><code>script tests</code> 作业，<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/test_proxmox_api_inventory.py" target="_blank" rel="noopener"><code>scripts/<wbr>test_proxmox_api_inventory.<wbr>py</code></a>（<code>test_the_committed_matrix_is_up_to_date</code>）</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>
-<td>every page</td>
+<td>每一个页面</td>
 <td><code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code></td>
-<td><code>generated docs and valid examples</code> job, <code>python3 scripts/<wbr>dev_docs_site.<wbr>py --check</code>; also refreshed by <code>release.yml</code></td>
+<td><code>generated docs and valid examples</code> 作业，<code>python3 scripts/<wbr>dev_docs_site.<wbr>py --check</code>；也由 <code>release.yml</code> 刷新</td>
 </tr>
 <tr>
 <td><code>scripts/</code></td>
-<td><code>cli_baseline.tsv</code>, <code>arch_baseline.json</code>, <code>lang_baseline.json</code></td>
-<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>, <code>arch_fitness.<wbr>py --update</code>, <code>lang_ratchet.<wbr>py --update</code></td>
-<td><code>cli surface</code> (<code>cli-tree.sh --gate</code>), <code>arch fitness</code>, <code>lang ratchet</code> jobs</td>
+<td><code>cli_baseline.tsv</code>、<code>arch_baseline.json</code>、<code>lang_baseline.json</code></td>
+<td><code>scripts/<wbr>cli-tree.<wbr>sh --update</code>、<code>arch_fitness.<wbr>py --update</code>、<code>lang_ratchet.<wbr>py --update</code></td>
+<td><code>cli surface</code>（<code>cli-tree.sh --gate</code>）、<code>arch fitness</code>、<code>lang ratchet</code> 作业</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.lock" target="_blank" rel="noopener"><code>Cargo.lock</code></a></td>
-<td>the lock file</td>
+<td>锁文件本身</td>
 <td><code>cargo</code></td>
-<td>every cargo job builds with <code>--locked</code></td>
+<td>每一个 cargo 作业都用 <code>--locked</code> 构建</td>
 </tr>
 </tbody>
 </table></div>
-<p>Not committed at all: the manpages (<code>delonix man --dir</code>, checked with <code>groff</code> in CI) and <code>target/</code>.</p>
-<h2 id="where-does-a-new-file-go">Where does a new file go?<a class="hanchor" href="#where-does-a-new-file-go" aria-label="#">#</a></h2>
+<p>完全没有被提交的：manpage（<code>delonix man --dir</code>，CI 中用 <code>groff</code> 检查）和 <code>target/</code>。</p>
+<h2 id="where-does-a-new-file-go">一个新文件该放在哪里？<a class="hanchor" href="#where-does-a-new-file-go" aria-label="#">#</a></h2>
 <ul>
-<li><strong>A type or rule every layer can name, with no I/O</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>. Pure network math
-  goes in <code>delonix-net-rules</code>; data-only records and names in <code>delonix-model</code>.</li>
-<li><strong>A decision or use case</strong> (what to run, what a Kind means, a plan) → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>.</li>
-<li><strong>Code that calls the kernel, the disk or a local tool</strong> (<code>ip</code>, <code>nft</code>, <code>qemu-img</code>) →
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>, in the crate that owns that mechanism.</li>
-<li><strong>An integration with a remote system</strong> → a new port implementation in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a>,
-  never an <code>if provider == …</code> in existing code.</li>
-<li><strong>A new protocol server</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>, composed by exactly one binary in <code>bins/</code>.</li>
-<li><strong>A CLI command or flag</strong> → a module in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a>, with its
-  Portuguese translation in <code>data/pt.po</code>.</li>
-<li><strong>A new crate</strong> → the directory of its layer <strong>and</strong> the <code>LAYERS</code> table in
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> and <code>[workspace.dependencies]</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, in the same commit.</li>
-<li><strong>An example manifest</strong> → <code>examples/</code> (CI dry-runs it). <strong>A structural decision</strong> →
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>. <strong>Contributor documentation</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>.</li>
+<li><strong>任何层都能引用、且不涉及 I/O 的一个类型或规则</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/foundation" target="_blank" rel="noopener"><code>crates/foundation/</code></a>。纯粹的网络数学去
+  <code>delonix-net-rules</code>；只有数据的记录和名称去 <code>delonix-model</code>。</li>
+<li><strong>一个决策或用例</strong>（该运行什么、一个 Kind 意味着什么、一份 plan） → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/contexts" target="_blank" rel="noopener"><code>crates/contexts/</code></a>。</li>
+<li><strong>调用内核、磁盘或本地工具</strong>（<code>ip</code>、<code>nft</code>、<code>qemu-img</code>）的代码 → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters" target="_blank" rel="noopener"><code>crates/adapters/</code></a>，放进
+  拥有那个机制的那个 crate 里。</li>
+<li><strong>与一个远程系统的集成</strong> → 在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/providers" target="_blank" rel="noopener"><code>crates/providers/</code></a> 里新增一个端口实现，绝不要在已有代码里
+  写一个 <code>if provider == ……</code>。</li>
+<li><strong>一个新的协议服务器</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/interfaces" target="_blank" rel="noopener"><code>crates/interfaces/</code></a>，由 <code>bins/</code> 里恰好一个二进制程序去组合它。</li>
+<li><strong>一个 CLI 命令或 flag</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a> 下的一个模块，附带它在
+  <code>data/pt.po</code> 里的葡萄牙语翻译。</li>
+<li><strong>一个新 crate</strong> → 它所在层的目录，<strong>同时</strong>在同一次提交里，把它加进
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a> 的 <code>LAYERS</code> 表和 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> 的 <code>[workspace.dependencies]</code> 里。</li>
+<li><strong>一份示例清单</strong> → <code>examples/</code>（CI 会 dry-run 它）。<strong>一项结构性决策</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/adr" target="_blank" rel="noopener"><code>docs/adr/</code></a>。
+  <strong>贡献者文档</strong> → <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>。</li>
 </ul>
-<p>The rules behind this list, with examples, are in
-<a href="coding-conventions.html">Coding conventions — Structure: where code goes</a> and
-<a href="crates.html">The crates</a>.</p>
+<p>这份清单背后的规则，附带例子，在
+<a href="coding-conventions.html">编码约定 —— 结构：代码该放在哪里</a>和<a href="crates.html">各个 crate</a>里。</p>
 <hr />
-<p><strong>Next:</strong> <a href="architecture.html">Architecture</a> — why the code is split that way: the layers, the processes at runtime, the crate graph and the state on disk.</p>
-<nav class="pager"><a href="build-and-test.html"><span>← 上一页</span>Clone, build and test</a><a class="next" href="architecture.html"><span>下一页 →</span>Architecture</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/project-structure.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/project-structure.md</code></footer>
+<p><strong>下一篇：</strong><a href="architecture.html">架构</a> —— 为什么代码是这样切分的：各个层、运行时的进程、crate
+依赖图，以及磁盘上的状态。</p>
+<nav class="pager"><a href="build-and-test.html"><span>← 上一页</span>克隆、构建与测试</a><a class="next" href="architecture.html"><span>下一页 →</span>架构</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/project-structure.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/project-structure.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#reading-the-repository-in-five-minutes">Reading the repository in five minutes</a></li>
-<li><a href="#annotated-tree">Annotated tree</a></li>
-<li><a href="#top-level-files">Top-level files</a></li>
-<li><a href="#source-code-crates-bins-proto-tests">Source code (crates/, bins/, proto/, tests/)</a></li>
-<li><a href="#documentation-docs">Documentation (docs/…)</a></li>
-<li><a href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">Tooling, CI and packaging (scripts/, .github/, dist/, editors/, examples/, reports/, third_party/, .ai/)</a></li>
-<li><a href="#generated-vs-hand-written">Generated vs hand-written</a></li>
-<li><a href="#where-does-a-new-file-go">Where does a new file go?</a></li>
+<li><a href="#reading-the-repository-in-five-minutes">五分钟读懂本仓库</a></li>
+<li><a href="#annotated-tree">带注释的目录树</a></li>
+<li><a href="#top-level-files">顶层文件</a></li>
+<li><a href="#source-code-crates-bins-proto-tests">源代码（crates/、bins/、proto/、tests/）</a></li>
+<li><a href="#documentation-docs">文档（docs/……）</a></li>
+<li><a href="#tooling-ci-and-packaging-scripts-github-dist-editors-examples-reports-third_party-ai">工具、CI 与打包（scripts/、.github/、dist/、editors/、examples/、reports/、third_party/、.ai/）</a></li>
+<li><a href="#generated-vs-hand-written">生成的 vs 手写的</a></li>
+<li><a href="#where-does-a-new-file-go">一个新文件该放在哪里？</a></li>
 </ul>
 </div>
 </aside>

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>How names reach /etc/hosts · Delonix Runtime — 贡献者手册</title>
+<title>名称是如何抵达 /etc/hosts 的 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,83 +206,84 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a class="on" aria-current="page" href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a class="on" aria-current="page" href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">运维与排障</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="how-names-reach-etchosts">How names reach <code>/etc/hosts</code></h1>
-<p><strong>Before you read:</strong> <a href="architecture.html#state-on-disk">Architecture</a> (state root, <code>httproute/</code>), <a href="environment-variables.html">Environment variables</a> (<code>DELONIX_ROOT</code>, <code>DELONIX_HOSTS_FILE</code>) and <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> (isolating the engine's state).</p>
-<p>A workload on the SDN is not reachable from the host by its IP; the way in is the L7 proxy, which the
-slirp forward publishes on loopback. So a browser on the operator's machine only opens
-<code>http://app.example.pt:8080/</code> once the name <code>app.example.pt</code> resolves to <code>127.0.0.1</code> (or to an
-address the route reserved). The engine can write that mapping for you. This page explains the one
-mechanism behind it, the two ways a name gets into it, and what each refuses to do. Everything
-below is read from the files named next to it; the decisions are ADR-0046 (<code>hosts: [host]</code>) and
-ADR-0048 (<code>hosts sync</code>), which you should read for the <em>why</em>.</p>
-<h2 id="one-block-per-state-root">One block per state root<a class="hanchor" href="#one-block-per-state-root" aria-label="#">#</a></h2>
-<p>All of it lives in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a>. The engine never rewrites the
-hosts file: it owns <strong>one delimited block</strong> and leaves every other byte alone.</p>
+<h1 id="how-names-reach-etchosts">名称是如何抵达 <code>/etc/hosts</code> 的</h1>
+<p><strong>阅读之前：</strong><a href="architecture.html#state-on-disk">架构 —— 磁盘上的状态</a>（state root、<code>httproute/</code>）、
+<a href="environment-variables.html">环境变量</a>（<code>DELONIX_ROOT</code>、<code>DELONIX_HOSTS_FILE</code>）以及
+<a href="build-and-test.html#the-gates-ci-runs">克隆、构建与测试 —— CI 会跑的那些门禁</a>（隔离引擎的状态）。</p>
+<p>SDN 上的一个工作负载，从宿主机通过它的 IP 是到达不了的；进去的路是 L7 代理，slirp 的 forward
+会把它发布在 loopback 上。所以操作者机器上的浏览器，只有在名字 <code>app.example.pt</code> 解析到
+<code>127.0.0.1</code>（或者路由所保留的那个地址）之后，才能打开 <code>http://app.example.pt:8080/</code>。引擎能够
+替你写下这个映射。本页解释的是它背后的那一个机制、一个名字进入这个机制的两条路，以及每一条
+路各自会拒绝做什么。下面所写的一切都是从它旁边点名的那些文件里读出来的；相关决策是
+ADR-0046（<code>hosts: [host]</code>）和 ADR-0048（<code>hosts sync</code>），要理解<em>为什么</em>应该去读那两份文档。</p>
+<h2 id="one-block-per-state-root">每个 state root 一个块<a class="hanchor" href="#one-block-per-state-root" aria-label="#">#</a></h2>
+<p>这一切都活在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/hosts_file.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/hosts_file.rs</code></a> 里。引擎从不重写整个 hosts
+文件：它只拥有<strong>一个界定好的块</strong>，其余每一个字节都不去碰。</p>
 <div class="code"><div class="code-head"><span class="lang">text</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-text"># BEGIN delonix 3fa2c1d0 (managed — do not edit)
 127.0.0.1	app.example.pt
 127.0.0.1	web.default.svc.delonix.internal
 # END delonix 3fa2c1d0
 </code></pre></div>
 <ul>
-<li><strong>The id names the state root.</strong> <code>root_id()</code> is an FNV-1a hash of <code>state_root()</code>, truncated to 32
-  bits and printed as eight hex digits. It is a hand-rolled hash on purpose: <code>DefaultHasher</code> is not
-  promised stable, and a block orphaned by a hash change is a name that never goes away. Two roots
-  on one machine (an isolated root next to the real one; root and a rootless user) each own their
-  own block, so neither erases the other's names when it rebuilds.</li>
-<li><strong>The block is rewritten whole</strong> (<code>block</code>, <code>render</code>). Entries are lowercased, sorted and
-  deduplicated, and <code>render</code> is pure: it takes the existing text and the wanted entries and returns
-  the new text, so the cases that matter are unit tests. A name that no longer has a source simply
-  is not in the next rewrite; there is nothing to reap. An empty list removes the block.</li>
-<li><strong>The block is rewritten in place</strong>, where it was. Two roots' blocks do not swap places at every
-  sync. Lines keep their own endings (CRLF and a missing final newline are preserved).</li>
+<li><strong>id 用来指名 state root。</strong> <code>root_id()</code> 是 <code>state_root()</code> 的一个 FNV-1a 哈希，截断到 32
+  位，打印成八位十六进制数字。这是一个故意手写的哈希：<code>DefaultHasher</code> 并不承诺稳定，而一个
+  因为哈希变化被留下的孤儿块，是一个再也不会消失的名字。同一台机器上的两个 root（一个隔离的
+  root 挨着真正的那个；root 用户和一个 rootless 用户）各自拥有自己的块，因此谁重建自己的块
+  都不会抹掉另一个的名字。</li>
+<li><strong>块是被整个重写的</strong>（<code>block</code>、<code>render</code>）。条目会被转成小写、排序并去重，<code>render</code> 是一个
+  纯函数：它接收已存在的文本和想要的条目，返回新的文本，所以真正要紧的那些情形都是单元测试。
+  一个已经没有来源的名字，简单地就不会出现在下一次重写里；没有什么需要去清理的。一份空列表
+  会移除整个块。</li>
+<li><strong>块是就地重写的</strong>，写回它原本所在的位置。两个 root 的块不会在每次同步时互换位置。每一行
+  保留自己的行结束符（CRLF，以及缺失的末尾换行符，都会被保留）。</li>
 </ul>
-<h3 id="what-render-refuses">What <code>render</code> refuses<a class="hanchor" href="#what-render-refuses" aria-label="#">#</a></h3>
-<p>Each of these is an <code>Error::Invalid</code> returned <em>before</em> any write, so the file is untouched:</p>
+<h3 id="what-render-refuses"><code>render</code> 会拒绝什么<a class="hanchor" href="#what-render-refuses" aria-label="#">#</a></h3>
+<p>以下每一种情况都会在任何写入<em>之前</em>返回一个 <code>Error::Invalid</code>，所以文件不会被碰：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Situation</th>
-<th>Why it is refused</th>
+<th>情况</th>
+<th>为什么会被拒绝</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>A wanted name already has an entry <strong>outside</strong> this root's block (a hand-written line, or another root's block)</td>
-<td>The operator, or another root, wrote that line. A second answer for the same name would silently change where it points. Comments that merely mention the name do not count.</td>
+<td>一个想要的名字，在这个 root 的块<strong>之外</strong>已经有一条条目了（一行手写的行，或者另一个 root 的块）</td>
+<td>这一行是操作者、或者另一个 root 写下的。为同一个名字再给出第二个答案，会悄悄改变它指向的地方。只是提到这个名字的注释不算数。</td>
 </tr>
 <tr>
-<td>One name with <strong>two different addresses</strong> in the same rewrite</td>
-<td>Two routes claiming it from different pools: the resolver would take whichever line it read first.</td>
+<td>同一次重写里，同一个名字有<strong>两个不同的地址</strong></td>
+<td>两条路由都要认领它，来自不同的地址池：解析器会取它读到的第一行。</td>
 </tr>
 <tr>
-<td>This root's block has a <code># BEGIN</code> line but <strong>no <code># END</code></strong></td>
-<td>Usually a hand edit. Treating "up to the end of the file" as the block would erase the hand-written lines and other roots' blocks that follow. The message tells you which line to restore.</td>
+<td>这个 root 的块有一行 <code># BEGIN</code>，但<strong>没有 <code># END</code></strong></td>
+<td>通常是一次手动编辑。如果把「一直到文件末尾」当成块，会抹掉手写的那些行，以及排在后面的其他 root 的块。这条消息会告诉你该恢复哪一行。</td>
 </tr>
 </tbody>
 </table></div>
-<h3 id="how-it-writes-sync_at">How it writes (<code>sync_at</code>)<a class="hanchor" href="#how-it-writes-sync_at" aria-label="#">#</a></h3>
+<h3 id="how-it-writes-sync_at">它是怎么写入的（<code>sync_at</code>）<a class="hanchor" href="#how-it-writes-sync_at" aria-label="#">#</a></h3>
 <ol>
-<li>Read the file; <code>render</code>; if the result equals what was read, <strong>return without writing</strong>. This is
-   why a manifest that does not use <code>hosts:</code> never needs root.</li>
-<li>Resolve symlinks (<code>canonicalize</code>), so a symlinked hosts file is edited through the link and the
-   link is not replaced by a regular file.</li>
-<li>Take an exclusive <code>flock</code> on <code>.hosts.delonix.lock</code> beside the target, re-read, and re-render if
-   the file changed meanwhile. Two writers must not interleave a read-modify-write.</li>
-<li>Write a temporary file <code>.hosts.delonix.&lt;pid&gt;.&lt;nanos&gt;</code> beside the target, opened with
-   <code>create_new</code> (<code>O_EXCL</code>): a name nobody can guess that cannot be pre-created as a symlink to
-   redirect the write. Copy the target's permissions, <code>sync_all</code> (a crash between the rename and the
-   data reaching disk must not leave an empty name→address map), then <code>rename</code> over the target.</li>
+<li>读取文件；<code>render</code>；如果结果和读到的一样，<strong>直接返回、不写入</strong>。这正是为什么一份不使用
+   <code>hosts:</code> 的清单永远不需要 root。</li>
+<li>解析符号链接（<code>canonicalize</code>），这样一个被软链接指向的 hosts 文件会通过那个链接被编辑，
+   链接本身也不会被一个普通文件取代。</li>
+<li>在目标旁边的 <code>.hosts.delonix.lock</code> 上取得一个独占的 <code>flock</code>，重新读取一遍，如果文件在
+   这期间变化了就重新渲染一次。两个写入者绝不能交错进行一次读改写。</li>
+<li>在目标旁边写入一个临时文件 <code>.hosts.delonix.&lt;pid&gt;.&lt;nanos&gt;</code>，以 <code>create_new</code>（<code>O_EXCL</code>）
+   打开：一个谁也猜不到的名字，没法预先创建成一个符号链接来劫持这次写入。拷贝目标文件的
+   权限，<code>sync_all</code>（在 rename 和数据真正落盘之间崩溃，绝不能留下一份空的「名字→地址」
+   映射），然后 <code>rename</code> 覆盖目标文件。</li>
 </ol>
-<p>The engine does not test "am I root?". It tries the write and, on <code>PermissionDenied</code>, returns an
-error that prints the exact block to paste. An unprivileged run therefore stops with the block on
-the screen; it does not skip the name silently. (If the lock file cannot be created the lock is
-simply not held; the write then fails with the same message.)</p>
-<h2 id="where-the-names-come-from">Where the names come from<a class="hanchor" href="#where-the-names-come-from" aria-label="#">#</a></h2>
-<p>There are two inputs, and they end up in the same block through the same function
-(<code>sync</code> in <code>hosts_file.rs</code>), called from <code>rebuild</code> in <code>cmd/ingress_proxy.rs</code>.</p>
+<p>引擎不会去测试「我是 root 吗？」。它直接尝试写入，如果遇到 <code>PermissionDenied</code>，就返回一个
+把那个确切的块打印出来、供你粘贴的错误。因此一次无特权的运行，会带着屏幕上的那个块停下来；
+它不会悄悄跳过这个名字。（如果连锁文件都创建不了，那这次锁就干脆不持有；随后的写入会以同样
+的消息失败。）</p>
+<h2 id="where-the-names-come-from">名字从哪里来<a class="hanchor" href="#where-the-names-come-from" aria-label="#">#</a></h2>
+<p>有两个输入，它们经由同一个函数（<code>hosts_file.rs</code> 里的 <code>sync</code>，从 <code>cmd/ingress_proxy.rs</code> 里
+的 <code>rebuild</code> 调用）最终进入同一个块。</p>
 <pre class="mermaid">graph LR
     A[&quot;HTTPRoute hosts: [host]&lt;br/&gt;VM expose[].hosts&quot;] --&gt; M[&quot;manual.json&lt;br/&gt;published_hosts&quot;]
     C[&quot;container run --expose&quot;] --&gt; U[&quot;auto.json&lt;br/&gt;AutoRoute list&quot;]
@@ -293,82 +294,81 @@ simply not held; the write then fails with the same message.)</p>
     N --&gt; R
     R --&gt; F[&quot;# BEGIN delonix … # END&quot;]
 </pre>
-<h3 id="path-a-hosts-host-on-a-route-adr-0046">Path A: <code>hosts: [host]</code> on a route (ADR-0046)<a class="hanchor" href="#path-a-hosts-host-on-a-route-adr-0046" aria-label="#">#</a></h3>
-<p><code>HttpRouteSpec.hosts</code> (<code>cmd/httproute.rs</code>) accepts one value today, <code>host</code> (<code>HOSTS_TARGETS</code>);
-anything else is refused at validation, and the message says <code>containers</code> needs ADR-0047 and <code>guest</code>
-is planned. When a route lists <code>host</code>, <code>apply</code> records one <code>PublishedHost { host, source, addr }</code> per
-rule host in the route's manual config (<code>published_hosts</code>, in <code>&lt;root&gt;/httproute/manual.json</code>, or
-<code>httproute-host/</code> for a route served by the host-netns proxy — see <code>Where</code> in <code>ingress_proxy.rs</code>).
-<code>source</code> is the document that asked, so the reconciler can tell whose name it is, and <code>remove_for_prune</code>
-can drop exactly that document's names.</p>
-<p>A <code>VirtualMachine</code> reaches the same path through <code>spec.expose[]</code> (<code>cmd/vm_expose.rs</code>): the sugar
-lowers at load into a synthetic <code>HTTPRoute</code> named <code>&lt;vm&gt;-expose</code>, and <code>expose[].hosts</code> is copied onto
-it. The route publishes one list for all its names, so every <code>expose</code> entry must carry the same
-<code>hosts</code>; a difference is an error, covered by
-<code>hosts_are_carried_to_the_route_and_must_agree_across_entries</code>.</p>
-<p><strong>The address</strong> is <code>127.0.0.1</code> unless the route has <code>spec.pool</code>. Then <code>apply</code> reserves one address
-from that <code>kind: IPPool</code> (<code>cmd/ippool.rs</code>: <code>peek</code>, <code>claim_moving</code>, <code>address_present</code>) and the name
-points at it. Two conditions worth knowing: the address must already be on an interface of the host
-(the apply stops and suggests <code>ip addr add … dev lo</code>; the engine adding it, <code>announce: l2</code>, is not
-built), and the reservation is looked at <em>before</em> it is taken so a failed apply does not leave a
-lease held. <strong>The port is not in the hosts file</strong>: a hosts file cannot carry one, so the URL you
-open still has the route's entrypoint port.</p>
-<h3 id="path-b-delonix-hosts-sync-adr-0048-phase-2">Path B: <code>delonix hosts sync</code> (ADR-0048, phase 2)<a class="hanchor" href="#path-b-delonix-hosts-sync-adr-0048-phase-2" aria-label="#">#</a></h3>
-<p><code>cmd/hosts.rs</code>. The standard service name of a container registered with <code>container run --expose</code> is
-<code>&lt;name&gt;.&lt;ns&gt;.svc.delonix.internal</code> (<code>AutoRoute::fqdn</code>, which calls
-<code>delonix_sdn::infra::service_fqdn</code>). Those registrations are <code>AutoRoute { name, namespace, ip, port }</code>
-entries in <code>&lt;root&gt;/httproute/auto.json</code>. <code>hosts sync</code> is an explicit opt-in:</p>
+<h3 id="path-a-hosts-host-on-a-route-adr-0046">路径 A：一条路由上的 <code>hosts: [host]</code>（ADR-0046）<a class="hanchor" href="#path-a-hosts-host-on-a-route-adr-0046" aria-label="#">#</a></h3>
+<p><code>HttpRouteSpec.hosts</code>（<code>cmd/httproute.rs</code>）目前只接受一个值，<code>host</code>（<code>HOSTS_TARGETS</code>）；
+其他任何值都会在校验时被拒绝，消息会说 <code>containers</code> 需要 ADR-0047，<code>guest</code> 则是计划中的。
+当一条路由列出了 <code>host</code>，<code>apply</code> 会为路由的每一个 rule host，在这条路由自己的手动配置里
+（<code>published_hosts</code>，位于 <code>&lt;root&gt;/httproute/manual.json</code>，或者对于由 host-netns 代理服务的
+路由，位于 <code>httproute-host/</code>——见 <code>ingress_proxy.rs</code> 里的 <code>Where</code>）记录一条
+<code>PublishedHost { host, source, addr }</code>。<code>source</code> 就是提出这个要求的那份文档，所以协调器能
+分辨出这是谁的名字，<code>remove_for_prune</code> 也能只删掉那一份文档的名字。</p>
+<p>一个 <code>VirtualMachine</code> 通过 <code>spec.expose[]</code>（<code>cmd/vm_expose.rs</code>）走上同一条路：这一份语法糖
+在 load 时会降解成一个合成的 <code>HTTPRoute</code>，命名为 <code>&lt;vm&gt;-expose</code>，而 <code>expose[].hosts</code> 会被
+拷贝到它上面。这条路由为它所有的名字发布同一份列表，所以每一个 <code>expose</code> 条目都必须携带同样
+的 <code>hosts</code>；不一致会是一个错误，由
+<code>hosts_are_carried_to_the_route_and_must_agree_across_entries</code> 覆盖。</p>
+<p><strong>地址</strong>默认是 <code>127.0.0.1</code>，除非路由有 <code>spec.pool</code>。这时 <code>apply</code> 会从那个 <code>kind: IPPool</code>
+（<code>cmd/ippool.rs</code>：<code>peek</code>、<code>claim_moving</code>、<code>address_present</code>）里预留一个地址，名字就指向它。
+有两个条件值得了解：地址必须已经在宿主机的某个接口上（apply 会停下来，建议执行
+<code>ip addr add … dev lo</code>；引擎自己去添加它，也就是 <code>announce: l2</code>，目前还没有实现），并且预留
+动作是在真正拿走之前先去看一眼的，这样一次失败的 apply 就不会留下一份被占用的租约。<strong>端口不
+在 hosts 文件里</strong>：hosts 文件没法携带端口，所以你打开的那个 URL，用的仍然是路由的
+entrypoint 端口。</p>
+<h3 id="path-b-delonix-hosts-sync-adr-0048-phase-2">路径 B：<code>delonix hosts sync</code>（ADR-0048，第二阶段）<a class="hanchor" href="#path-b-delonix-hosts-sync-adr-0048-phase-2" aria-label="#">#</a></h3>
+<p><code>cmd/hosts.rs</code>。一个用 <code>container run --expose</code> 注册的容器，其标准服务名是
+<code>&lt;name&gt;.&lt;ns&gt;.svc.delonix.internal</code>（<code>AutoRoute::fqdn</code>，调用的是
+<code>delonix_sdn::infra::service_fqdn</code>）。这些注册就是 <code>&lt;root&gt;/httproute/auto.json</code> 里的
+<code>AutoRoute { name, namespace, ip, port }</code> 条目。<code>hosts sync</code> 是一个显式的 opt-in：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Command</th>
-<th>What it does</th>
+<th>命令</th>
+<th>它做什么</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>delonix hosts sync --print</code></td>
-<td>Prints the block that would be written (<code>hosts_block_now</code>) and touches nothing, so it needs no root.</td>
+<td>打印出将会被写入的那个块（<code>hosts_block_now</code>），什么都不碰，所以不需要 root。</td>
 </tr>
 <tr>
 <td><code>delonix hosts sync</code></td>
-<td>Writes the marker <code>&lt;root&gt;/hosts-sync</code>, then rewrites the block (<code>sync_hosts_now</code>). If the write is refused the marker is removed again, so a failed first run does not leave later <code>--expose</code> runs warning about a block nobody accepted.</td>
+<td>写入标记文件 <code>&lt;root&gt;/hosts-sync</code>，然后重写那个块（<code>sync_hosts_now</code>）。如果写入被拒绝，标记会被再次移除，这样一次失败的首次运行，就不会让之后的 <code>--expose</code> 运行去警告一个谁也没接受过的块。</td>
 </tr>
 <tr>
 <td><code>delonix hosts sync --off</code></td>
-<td>Removes the marker and rewrites the block.</td>
+<td>移除标记，并重写那个块。</td>
 </tr>
 </tbody>
 </table></div>
-<p>Once the marker exists, <code>desired_hosts</code> includes the auto-routes' names, and <code>container run --expose</code>
-(<code>auto_register</code>) and <code>container rm</code> (<code>auto_deregister</code>) rebuild the block on their own. Auto names
-always point at <code>127.0.0.1</code>; a container's <code>--expose</code> has no pool. The <code>hosts:</code> names of declared
-routes are <strong>not</strong> published by <code>hosts sync</code> (their own opt-in wins), and <code>--off</code> therefore removes
-only the auto names: names asked for by a route's <code>hosts: [host]</code> stay in the block. The command's
-own message ("service names removed") is about the former.</p>
-<h3 id="two-kinds-of-name-two-failure-policies">Two kinds of name, two failure policies<a class="hanchor" href="#two-kinds-of-name-two-failure-policies" aria-label="#">#</a></h3>
-<p><code>desired_hosts</code> returns a pair: names a <strong>document asked for</strong> (<code>strict</code>) and names <strong>published by
-<code>hosts sync</code></strong>. <code>rebuild</code> calls <code>hosts_file::sync</code> and, if it fails:</p>
+<p>一旦标记存在，<code>desired_hosts</code> 就会包含各个自动路由的名字，<code>container run --expose</code>
+（<code>auto_register</code>）和 <code>container rm</code>（<code>auto_deregister</code>）会自行重建那个块。自动生成的名字
+总是指向 <code>127.0.0.1</code>；一个容器的 <code>--expose</code> 没有地址池。已声明路由的 <code>hosts:</code> 名字<strong>不会</strong>
+被 <code>hosts sync</code> 发布（它们自己的 opt-in 优先），因此 <code>--off</code> 只会移除自动生成的名字：由一条
+路由的 <code>hosts: [host]</code> 要求的名字会留在块里。命令自己的消息（「已移除服务名」）说的正是前者。</p>
+<h3 id="two-kinds-of-name-two-failure-policies">两种名字，两套失败策略<a class="hanchor" href="#two-kinds-of-name-two-failure-policies" aria-label="#">#</a></h3>
+<p><code>desired_hosts</code> 返回一对：一份<strong>文档要求的</strong>名字（<code>strict</code>），和一份由 <code>hosts sync</code>
+<strong>发布的</strong>名字。<code>rebuild</code> 会调用 <code>hosts_file::sync</code>，如果它失败了：</p>
 <ul>
-<li>with <strong>no</strong> strict names at all, it only prints <code>warning: …</code> (an unprivileged <code>container run
-  --expose</code> must not fail because <code>/etc/hosts</code> needs root);</li>
-<li>with <strong>any</strong> strict name present, it returns the error and the apply fails.</li>
+<li>如果<strong>完全没有</strong> strict 名字，只会打印 <code>warning: ……</code>（一次无特权的
+  <code>container run --expose</code> 绝不能因为 <code>/etc/hosts</code> 需要 root 而失败）；</li>
+<li>只要<strong>存在任何一个</strong> strict 名字，就会返回那个错误，apply 也会失败。</li>
 </ul>
-<p>Read that condition carefully: it looks at whether strict names exist in the block, not at which
-name caused the failure. So while a route with <code>hosts: [host]</code> is declared, a failing write caused
-only by an auto name also fails the operation that triggered the rebuild.</p>
-<h2 id="running-it-as-root-sudo">Running it as root: <code>sudo</code><a class="hanchor" href="#running-it-as-root-sudo" aria-label="#">#</a></h2>
-<p><code>delonix hosts sync</code> calls <code>cmd::vmbridge::adopt_invoking_user_root()</code> first. Under <code>sudo</code> the state
-root would be root's (<code>/var/lib/delonix</code>), which has no registrations, and the command would publish
-zero names instead of the invoking user's. The function reads <code>SUDO_USER</code>, looks its home up with
-<code>getent passwd</code>, and sets <code>DELONIX_ROOT</code> to <code>&lt;home&gt;/.local/share/delonix</code>. An explicit <code>DELONIX_ROOT</code>
-wins, and outside <code>sudo</code> nothing changes. The block's id is the hash of the resulting root, so
-<code>sudo delonix hosts sync</code> and the user's own <code>delonix container run --expose</code> agree on the same
-block.</p>
-<h2 id="testing-it-without-touching-etchosts">Testing it without touching <code>/etc/hosts</code><a class="hanchor" href="#testing-it-without-touching-etchosts" aria-label="#">#</a></h2>
-<p>Set <code>DELONIX_HOSTS_FILE</code> (read by <code>hosts_path()</code>) and isolate the state, as
-<a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> describes. Path B needs no proxy and no
-container to <em>write</em> the block, only the registration file, so you can fabricate it:</p>
+<p>仔细看这个条件：它看的是块里是否存在 strict 名字，而不是看是哪个名字导致了这次失败。所以，
+即使一条声明了 <code>hosts: [host]</code> 的路由已经存在，一次只因为某个自动生成的名字而失败的写入，
+也会让触发这次重建的那个操作一并失败。</p>
+<h2 id="running-it-as-root-sudo">以 root 身份运行它：<code>sudo</code><a class="hanchor" href="#running-it-as-root-sudo" aria-label="#">#</a></h2>
+<p><code>delonix hosts sync</code> 首先会调用 <code>cmd::vmbridge::adopt_invoking_user_root()</code>。在 <code>sudo</code> 之下，
+state root 会变成 root 自己的（<code>/var/lib/delonix</code>），那里没有任何注册记录，命令就会发布出
+零个名字，而不是调用者自己的那些。这个函数读取 <code>SUDO_USER</code>，用 <code>getent passwd</code> 查出它的
+home 目录，然后把 <code>DELONIX_ROOT</code> 设为 <code>&lt;home&gt;/.local/share/delonix</code>。一个显式给出的
+<code>DELONIX_ROOT</code> 会优先生效，在 <code>sudo</code> 之外则什么都不会改变。块的 id 是最终那个 root 的哈希，
+所以 <code>sudo delonix hosts sync</code> 和用户自己的 <code>delonix container run --expose</code> 会认同同一个块。</p>
+<h2 id="testing-it-without-touching-etchosts">不碰 <code>/etc/hosts</code> 就测试它<a class="hanchor" href="#testing-it-without-touching-etchosts" aria-label="#">#</a></h2>
+<p>设置 <code>DELONIX_HOSTS_FILE</code>（由 <code>hosts_path()</code> 读取），并像
+<a href="build-and-test.html#the-gates-ci-runs">克隆、构建与测试 —— CI 会跑的那些门禁</a>描述的那样隔离
+状态。路径 B 不需要代理，也不需要一个容器来<em>写</em>这个块——只需要那份注册文件，所以你可以自己
+伪造一份：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">S=$(mktemp -d)                                   # or your scratch directory
 export DELONIX_ROOT=$S/root DELONIX_NET_RUNTIME_DIR=$S/run DELONIX_HOSTS_FILE=$S/hosts
 mkdir -p &quot;$DELONIX_ROOT/httproute&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
@@ -380,61 +380,61 @@ delonix hosts sync --print      # the block, nothing written
 delonix hosts sync              # writes it into $DELONIX_HOSTS_FILE
 delonix hosts sync --off        # removes it; the rest of the file is as it was
 </code></pre></div>
-<p>Run this way, the engine printed the block for <code>--print</code> without creating <code>hosts-sync</code>; <code>hosts sync</code>
-wrote the block after the existing <code>localhost</code> line and created the marker; <code>--off</code> removed the marker
-and left the file as it was; a hand-written line for the same name made <code>hosts sync</code> fail with the
-offending line and write nothing; and a hosts file in a read-only directory made it fail with the block
-to paste and <strong>remove the marker again</strong>. (<code>--off</code> prints "removed from /etc/hosts" whatever
-<code>DELONIX_HOSTS_FILE</code> says; the message is fixed text.) Path A was checked only up to validation:
-<code>hosts: [guest]</code> is refused with the message above, and <code>stack apply --dry-run</code> keeps <code>hosts: [host]</code>
-in the rendered document. No proxy was started.</p>
-<p>The unit tests in <code>hosts_file.rs</code> exercise <code>render</code> and <code>sync_at</code> directly (<code>sync_at</code> takes the path
-so the tests never touch the process environment). Run <code>cargo test -p delonix-runtime-bin hosts_file</code>.</p>
-<h2 id="what-is-not-validated">What is not validated<a class="hanchor" href="#what-is-not-validated" aria-label="#">#</a></h2>
-<p>Say so in a review rather than assuming:</p>
+<p>这样运行的话，引擎为 <code>--print</code> 打印出了那个块，却没有创建 <code>hosts-sync</code>；<code>hosts sync</code> 把这个
+块写在了已存在的 <code>localhost</code> 那一行之后，并创建了标记；<code>--off</code> 移除了标记，文件的其余部分
+保持原样；对同一个名字的一行手写的行，会让 <code>hosts sync</code> 带着那一行出错、什么都不写；而一个
+位于只读目录里的 hosts 文件，会让它失败，附带那个可供粘贴的块，并且<strong>再次移除标记</strong>。
+（<code>--off</code> 打印的是「removed from /etc/hosts」，不管 <code>DELONIX_HOSTS_FILE</code> 指向哪里；这条消息
+是固定文字。）路径 A 只被检查到了校验这一步：<code>hosts: [guest]</code> 会带着上面那条消息被拒绝，
+<code>stack apply --dry-run</code> 在渲染出来的文档里保留了 <code>hosts: [host]</code>。没有启动任何代理。</p>
+<p><code>hosts_file.rs</code> 里的单元测试直接对 <code>render</code> 和 <code>sync_at</code> 做了测试（<code>sync_at</code> 接收路径作为
+参数，所以这些测试从不碰进程环境）。运行 <code>cargo test -p delonix-runtime-bin hosts_file</code>。</p>
+<h2 id="what-is-not-validated">什么还没有被验证过<a class="hanchor" href="#what-is-not-validated" aria-label="#">#</a></h2>
+<p>在评审里把这些说清楚，而不是假定它们成立：</p>
 <ul>
-<li><strong>The real <code>/etc/hosts</code>.</strong> Every run above used a scratch file. Writing the real file, as root,
-  was not observed by this page.</li>
-<li><strong>A client resolving a name from the block and reaching the backend.</strong> ADR-0046 records that this
-  traffic step was not observed either (the block, the refusals and the removal were measured).
-  The <code>expose:</code> sugar with <code>hosts:</code> was covered by unit tests and <code>--dry-run</code>, not by traffic.</li>
-<li><strong><code>hosts: guest</code></strong> and <strong><code>announce: l2</code></strong> are not built: <code>guest</code> is refused by validation, and an
-  address that is not on the host is refused rather than added.</li>
-<li><strong>Automatic maintenance needs a process that can write the file.</strong> A rootless <code>container run
-  --expose</code> after <code>sudo delonix hosts sync</code> only warns when it cannot rewrite <code>/etc/hosts</code>; the block
-  then keeps the old names until something with permission rewrites it.</li>
-<li>The <strong>removal</strong> side of the failure policy above (a <code>rm</code> that cannot write the file) was read
-  in the code, not run without root.</li>
+<li><strong>真正的 <code>/etc/hosts</code>。</strong> 上面每一次运行用的都是一个临时文件。以 root 身份写入真正的文件，
+  本页没有观测过。</li>
+<li><strong>一个客户端从这个块里解析出一个名字、并到达后端。</strong> ADR-0046 记录说这一步流量也没有被
+  观测过（观测到的是块、拒绝，以及移除）。带 <code>hosts:</code> 的 <code>expose:</code> 语法糖被单元测试和
+  <code>--dry-run</code> 覆盖过，但没有被流量覆盖过。</li>
+<li><strong><code>hosts: guest</code></strong> 和 <strong><code>announce: l2</code></strong> 都还没有实现：<code>guest</code> 会在校验时被拒绝，而一个
+  不在宿主机上的地址会被拒绝，而不是被添加。</li>
+<li><strong>自动维护需要一个能够写文件的进程。</strong> 一次 <code>sudo delonix hosts sync</code> 之后的、无特权的
+  <code>container run --expose</code>，在无法重写 <code>/etc/hosts</code> 时只会警告；那个块会一直保留旧的名字，
+  直到某个有权限的东西重写它为止。</li>
+<li>上面失败策略里<strong>移除</strong>的那一半（一次写不了文件的 <code>rm</code>）是在代码里读到的，没有在不用 root
+  的情况下运行过。</li>
 </ul>
-<h2 id="where-to-read-next">Where to read next<a class="hanchor" href="#where-to-read-next" aria-label="#">#</a></h2>
+<h2 id="where-to-read-next">接下来读什么<a class="hanchor" href="#where-to-read-next" aria-label="#">#</a></h2>
 <ul>
-<li><code>cmd/hosts_file.rs</code> for the mechanism, <code>cmd/ingress_proxy.rs</code> (<code>desired_hosts</code>, <code>rebuild</code>,
-  <code>hosts_block_now</code>, <code>sync_hosts_now</code>, <code>hosts_sync_flag</code>) for the two inputs.</li>
-<li><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> and <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a> for
-  the decisions and what each says was measured.</li>
+<li>机制部分见 <code>cmd/hosts_file.rs</code>；两个输入部分见 <code>cmd/ingress_proxy.rs</code>（<code>desired_hosts</code>、
+  <code>rebuild</code>、<code>hosts_block_now</code>、<code>sync_hosts_now</code>、<code>hosts_sync_flag</code>）。</li>
+<li>相关决策以及每一份文档各自说测量过什么，见 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0046-vm-expose-ippool-hosts.md" target="_blank" rel="noopener"><code>docs/adr/0046-vm-expose-ippool-hosts.md</code></a> 和
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0048-service-names-and-credentials.md" target="_blank" rel="noopener"><code>docs/adr/0048-service-names-and-credentials.md</code></a>。</li>
 </ul>
 <hr />
-<p><strong>Next:</strong> <a href="coding-conventions.html">Coding conventions</a> — how code in this repository must be written, each rule tagged with the gate or decision behind it.</p>
-<nav class="pager"><a href="troubleshooting.html"><span>← 上一页</span>Troubleshooting</a><a class="next" href="coding-conventions.html"><span>下一页 →</span>Coding conventions</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/service-names-and-hosts.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/service-names-and-hosts.md</code></footer>
+<p><strong>下一篇：</strong><a href="coding-conventions.html">编码约定</a> —— 本仓库中的代码必须怎么写，每条规则都标注了
+它背后的门禁或决定。</p>
+<nav class="pager"><a href="troubleshooting.html"><span>← 上一页</span>排查问题</a><a class="next" href="coding-conventions.html"><span>下一页 →</span>编码规范</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/service-names-and-hosts.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/service-names-and-hosts.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#one-block-per-state-root">One block per state root</a><ul>
-<li><a href="#what-render-refuses">What render refuses</a></li>
-<li><a href="#how-it-writes-sync_at">How it writes (sync_at)</a></li>
+<li><a href="#one-block-per-state-root">每个 state root 一个块</a><ul>
+<li><a href="#what-render-refuses">render 会拒绝什么</a></li>
+<li><a href="#how-it-writes-sync_at">它是怎么写入的（sync_at）</a></li>
 </ul>
 </li>
-<li><a href="#where-the-names-come-from">Where the names come from</a><ul>
-<li><a href="#path-a-hosts-host-on-a-route-adr-0046">Path A: hosts: [host] on a route (ADR-0046)</a></li>
-<li><a href="#path-b-delonix-hosts-sync-adr-0048-phase-2">Path B: delonix hosts sync (ADR-0048, phase 2)</a></li>
-<li><a href="#two-kinds-of-name-two-failure-policies">Two kinds of name, two failure policies</a></li>
+<li><a href="#where-the-names-come-from">名字从哪里来</a><ul>
+<li><a href="#path-a-hosts-host-on-a-route-adr-0046">路径 A：一条路由上的 hosts: [host]（ADR-0046）</a></li>
+<li><a href="#path-b-delonix-hosts-sync-adr-0048-phase-2">路径 B：delonix hosts sync（ADR-0048，第二阶段）</a></li>
+<li><a href="#two-kinds-of-name-two-failure-policies">两种名字，两套失败策略</a></li>
 </ul>
 </li>
-<li><a href="#running-it-as-root-sudo">Running it as root: sudo</a></li>
-<li><a href="#testing-it-without-touching-etchosts">Testing it without touching /etc/hosts</a></li>
-<li><a href="#what-is-not-validated">What is not validated</a></li>
-<li><a href="#where-to-read-next">Where to read next</a></li>
+<li><a href="#running-it-as-root-sudo">以 root 身份运行它：sudo</a></li>
+<li><a href="#testing-it-without-touching-etchosts">不碰 /etc/hosts 就测试它</a></li>
+<li><a href="#what-is-not-validated">什么还没有被验证过</a></li>
+<li><a href="#where-to-read-next">接下来读什么</a></li>
 </ul>
 </div>
 </aside>

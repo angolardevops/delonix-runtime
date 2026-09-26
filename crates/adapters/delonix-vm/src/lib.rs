@@ -57,180 +57,18 @@ pub use error::{Error, Result};
 /// friends keep resolving for every existing caller.
 pub use delonix_compute::{CpuTopology, ExtraDisk, ExtraNic, VmVolume};
 
+/// The `VmBackend` port and its companions moved to `delonix-compute` in P4b.2
+/// (the P4b plan, `docs/discovery/61`) so a provider crate can implement
+/// it without depending on this adapter. Re-exported: no caller changes.
+pub use delonix_compute::vm_backend::{
+    mem_mib, parse_mem_mib, BackendFactory, BackendRegistration, Boot, CloudInitIntent,
+    CreateStage, DestroyStage, ReportFactory, VmBackend, VmConfig,
+};
+
 pub mod capabilities;
 pub mod cloudinit;
+pub mod firewall;
 pub mod provider;
-
-/// Configuration to boot a microVM (flat fields, independent of the
-/// `orchestrator` — the CLI translates the `VmSpec` into this).
-#[derive(Debug, Clone, Default)]
-pub struct VmConfig {
-    /// Name (persistence key and of the deterministic `tap`/MAC).
-    pub name: String,
-    /// Base disk (qcow2/raw) — becomes a per-VM overlay.
-    pub disk: String,
-    /// vCPUs.
-    pub vcpus: u32,
-    /// Memory (e.g. `"2G"`, `"1024M"`).
-    pub memory: String,
-    /// Ingress network for the `tap`.
-    pub network: String,
-    /// Logical isolation namespace (`None`/`"default"` = the open SDN), the same
-    /// notion `container run --namespace` uses. Only meaningful for a VM that
-    /// actually lives on the holder's SDN — see [`vm_namespace_supported`].
-    pub namespace: Option<String>,
-    /// Kernel for *direct boot* (vmlinux/bzImage).
-    pub kernel: Option<String>,
-    /// Initrd/initramfs (with `kernel`).
-    pub initrd: Option<String>,
-    /// Firmware (alternative to the kernel: rust-hypervisor-fw/EDK2 — for cloud images).
-    pub firmware: Option<String>,
-    /// Kernel command line (with `kernel`).
-    pub cmdline: Option<String>,
-    /// cloud-init *seed* ISO (NoCloud) — secondary disk.
-    ///
-    /// This is the MECHANISM, and it is a file on THIS host: a backend whose
-    /// guest runs elsewhere cannot open it. Prefer the intent fields below and
-    /// let each backend realize them; keep this for a seed you built yourself.
-    pub seed: Option<String>,
-    /// Tamanho do disco do nó, em GiB. `None` = herda o da imagem base.
-    ///
-    /// Existe porque sem ele **todo o nó herdava o tamanho da golden**, e não
-    /// havia como dimensionar um nó pelo armazenamento que o inquilino paga —
-    /// uma quota de armazenamento, de quem a tiver, conta-se sobre o
-    /// PROVISIONADO, logo é aqui que ela se aplica.
-    ///
-    /// O overlay é fino: pedir 40 GiB não escreve 40 GiB: cresce à medida do
-    /// uso. Mas o número PROMETIDO é o que a quota do inquilino paga, e é este.
-    ///
-    /// **Não pode ser menor que a imagem base** — um overlay qcow2 não encolhe
-    /// o seu backing file, e tentar fazê-lo produz uma VM que arranca e corrompe
-    /// o filesystem. Validado antes de criar (ver `prepare_local_overlay`).
-    pub disk_size_gib: Option<u32>,
-    // --- cloud-init INTENT ------------------------------------------------
-    // What the operator MEANT, as opposed to `seed` above, which is one way of
-    // delivering it. The local backends turn these into a NoCloud ISO
-    // ([`cloudinit::generate_seed_iso`]); Proxmox maps them to the node's own
-    // cloud-init (`--ciuser`/`--sshkeys`). Before this existed, a remote backend
-    // was structurally excluded from cloud-init — the only vocabulary available
-    // was a local path.
-    /// Guest hostname. `None` means the VM name.
-    pub hostname: Option<String>,
-    /// Account the SSH keys are installed on, and that the serial console
-    /// auto-logs in as. `None` means [`cloudinit::DEFAULT_CI_USER`] — the
-    /// account the golden image already creates.
-    pub ci_user: Option<String>,
-    /// Authorized SSH public keys, ALREADY RESOLVED (never `@file` forms — see
-    /// [`cloudinit::generate_seed_iso`]).
-    pub ssh_keys: Vec<String>,
-    /// Whether this guest runs cloud-init at all. `Some(false)` for an appliance
-    /// (OPNsense, Proxmox, TrueNAS), which configures itself and for which a
-    /// seed is an ISO nobody reads on a drive that changes the guest's device
-    /// list for no reason.
-    ///
-    /// `Option` and not `bool` **because this struct derives `Default`**, and
-    /// callers build it with `..Default::default()` all over this workspace: a
-    /// bare `bool` would default to `false` and silently stop seeding every one
-    /// of them — a VM with no datasource skips cloud-init's network phase and
-    /// comes up with no address, which is the exact bug already on record for
-    /// `kind: Vm`. `None` means "yes", so nothing changes for who never sets it.
-    pub cloud_init: Option<bool>,
-    /// Normalized restart policy (`"no"`|`"on-failure"`|`"always"`).
-    pub restart_policy: Option<String>,
-    // --- HPC (S4) ---------------------------------------------------------
-    /// Backs the VM memory with *hugepages* (`--memory …,hugepages=on`). Reduces
-    /// TLB misses and jitter in HPC workloads. Requires hugepages reserved on the host.
-    pub hugepages: bool,
-    /// CPU affinity (NUMA/pinning): list of host CPUs (e.g. `"8-15"`) to which
-    /// ALL vCPUs are pinned (`--cpus …,affinity=<vcpu>@[<list>]`). Avoids
-    /// vCPU migration between cores/NUMA nodes — latency determinism.
-    pub cpu_affinity: Option<String>,
-    /// PCI device passthrough (SR-IOV VF, GPU, …) via VFIO: sysfs paths
-    /// (e.g. `/sys/bus/pci/devices/0000:65:00.1`). The VF must be pre-bound to
-    /// `vfio-pci` on the host. Each one becomes a `--device path=…`.
-    pub devices: Vec<String>,
-    /// Virtualization backend: `Some("cloud-hypervisor")`, `Some("libvirt")` or
-    /// `None` (auto-detection). Historical default = cloud-hypervisor.
-    pub backend: Option<String>,
-    /// Network mode of the **libvirt** backend (Cloud Hypervisor always uses the
-    /// ingress `tap`). Abstracts the domain's `<interface>` — the user NEVER writes XML:
-    ///   * `None`/`"user"` — user-mode network (SLIRP/passt): egress, no inbound IP.
-    ///   * `"nat"`         — NAT network managed by libvirt (`<source network=…>`, DHCP +
-    ///     IP via `virsh domifaddr`). Requires `qemu:///system` (root).
-    ///   * `"bridge"`      — attaches to a host bridge (`bridge` below).
-    pub net_mode: Option<String>,
-    /// Name of the host bridge (mode `net_mode = "bridge"`) or of the libvirt network (mode
-    /// `"nat"`; default `"default"`).
-    pub bridge: Option<String>,
-    /// Volumes/Storage shared into the VM (via **virtio-9p**). Each one
-    /// comes already RESOLVED by the bin (the `Volume`/`Storage` name → host
-    /// directory). Only the **libvirt** backend materializes them (Cloud Hypervisor does not do
-    /// 9p) — see `create`. Closes the gap "mount a NAS into a VM without cloud-init/XML".
-    pub volumes: Vec<VmVolume>,
-    /// VNC graphical console (`--vnc`) — **libvirt backend only** (Cloud Hypervisor
-    /// has no display). Binds to `127.0.0.1` on an auto port; see `vm vnc`.
-    pub vnc: bool,
-    /// Capture the serial console to `<vmdir>/<name>.serial` instead of exposing
-    /// it as an interactive socket (Cloud Hypervisor) or pty (libvirt).
-    ///
-    /// **The two are mutually exclusive, in both backends**, and that is why this
-    /// is a per-VM choice and not a second sink: the guest writes to a single
-    /// `/dev/console` (`ttyS0`), and CH's `--serial` takes ONE destination
-    /// (`off|null|pty|tty|file=|socket=`). With capture on, `delonix vm console`
-    /// has nothing to attach to for this VM, and says so.
-    ///
-    /// Exists for an UNATTENDED reader that needs the boot log as a file — the DKS
-    /// reads the `kubeadm join` marker its control-plane prints on the console.
-    /// That reader was written when the serial WAS a file; the interactive console
-    /// (`487c9d3f`, 2026-07-20) moved it to a socket and left the file unwritten,
-    /// and nothing noticed because the reader's `unwrap_or_default()` reads a
-    /// missing file as "the node has not printed yet".
-    pub serial_capture: bool,
-    /// Static IP (`--ip`) — libvirt `nat` mode only: materialized as a DHCP
-    /// reservation (`<host mac=… ip=…/>`) on the libvirt network, so the guest
-    /// needs NO cloud-init network config. Must belong to the network's subnet.
-    pub static_ip: Option<String>,
-    /// Catalog capabilities the backend MUST mark usable on this host, by name
-    /// (`vm.snapshot.memory`, `vm.namespace-isolation`, … — `delonix provider
-    /// ls` lists them). Resolved with [`Capability::from_name`] before any
-    /// backend is touched (a typo is an invalid argument, never "unsupported"),
-    /// and checked against the backend's report on THIS host before anything
-    /// is created; auto-detection only picks a backend that has them all.
-    /// The contract's `required_capabilities` (ADR-0050 D6).
-    pub required_capabilities: Vec<String>,
-
-    // --- Advanced libvirt knobs (libvirt backend only) ------------------------
-    // Declarative `kind: Vm` parity with hand-written libvirt XML: typed fields
-    // for the common cases + two raw-XML escape hatches for the long tail.
-    /// Machine type (`<os><type machine=…>`), default `q35`.
-    pub machine: Option<String>,
-    /// CPU mode/model: `"host-passthrough"` (default), `"host-model"`, or a named
-    /// model (e.g. `"Skylake-Server"`) → `<cpu mode='custom'>`.
-    pub cpu_model: Option<String>,
-    /// CPU topology (`<topology sockets cores threads/>`).
-    pub cpu_topology: Option<CpuTopology>,
-    /// Emulated TPM 2.0 (`<tpm>`) — needed by some guests (Windows/Secure Boot).
-    pub tpm: bool,
-    /// Video model (`<video><model type=…>`): `"virtio"`, `"qxl"`, `"vga"`,
-    /// `"none"`. Overrides the default (virtio when `vnc`).
-    pub video: Option<String>,
-    /// OS boot device order (`<os><boot dev=…/>`): e.g. `["hd","cdrom","network"]`
-    /// (ignored on direct-kernel boot).
-    pub boot_order: Vec<String>,
-    /// Extra disks beyond the main overlay + cloud-init seed.
-    pub extra_disks: Vec<ExtraDisk>,
-    /// Extra network interfaces beyond the primary one.
-    pub extra_nics: Vec<ExtraNic>,
-    /// Raw libvirt XML FRAGMENTS injected verbatim just before `</devices>` — the
-    /// escape hatch for device knobs with no typed field. **UNVALIDATED**: a
-    /// fragment can reference arbitrary host paths/devices, so only for TRUSTED
-    /// manifests (same trust model as running an arbitrary disk image).
-    pub libvirt_xml_overlay: Vec<String>,
-    /// FULL `<domain>` override used VERBATIM (ignores everything generated from
-    /// the fields above except the rootless seclabel injected at boot). The
-    /// ultimate escape hatch — the author owns the entire XML. **UNVALIDATED**.
-    pub libvirt_xml: Option<String>,
-}
 
 // `VmVolume` — what connects `kind: Volume`/`kind: Storage` to a VM without the
 // user writing cloud-init or XML: the bin resolves the name → `source` (the
@@ -246,8 +84,15 @@ fn vms_dir(base: &Path) -> std::path::PathBuf {
     base.join("vms")
 }
 
+/// A record-store failure, as this crate's error. A free function and not a
+/// `From` impl since P4b.2: both types now live in other crates, so the orphan
+/// rule forbids the impl; the conversion is the one the impl used to do.
+fn state_err(e: delonix_state::Error) -> Error {
+    Error::Engine(e.into())
+}
+
 fn store(base: &Path) -> Result<JsonStore<Vm>> {
-    Ok(JsonStore::open(vms_dir(base))?)
+    JsonStore::open(vms_dir(base)).map_err(state_err)
 }
 
 // `is_alive` era uma TERCEIRA cópia da mesma pergunta (a do motor usa o
@@ -395,37 +240,6 @@ fn terminate_vmm(pid: i32, starttime: Option<u64>, grace: Duration, kill_grace: 
 /// `true` if a VM with this name already exists.
 pub fn exists(base: &Path, name: &str) -> bool {
     store(base).map(|s| s.exists(name)).unwrap_or(false)
-}
-
-/// Converts memory (`"2G"`/`"1024M"`/`"512"`/`"2Gi"`) to MiB.
-/// `"2G"`/`"512M"`/`"2Gi"`/`"2048"` → MiB.
-///
-/// **Public because every backend has to read the SAME field the same way.**
-/// It was private, so `delonix-proxmox` grew its own copy — and the copy did
-/// not know the k8s `Gi`/`Mi` suffix this one tolerates, so `memory: 2Gi` meant
-/// 2 GiB on libvirt and Cloud Hypervisor and 1 GiB on Proxmox, silently. Same
-/// discipline as `fw_rule_tail` on the network side: one definition, shared by
-/// everyone who reads the format.
-pub fn mem_mib(s: &str) -> u64 {
-    let t = s.trim();
-    // Tolerates the k8s-style `i` suffix (Gi/Mi): "2Gi" == "2G", "512Mi" == "512M".
-    let t = t.strip_suffix(['i', 'I']).unwrap_or(t);
-    let (num, mult) = if let Some(n) = t.strip_suffix(['G', 'g']) {
-        (n, 1024)
-    } else if let Some(n) = t.strip_suffix(['M', 'm']) {
-        (n, 1)
-    } else {
-        (t, 1)
-    };
-    match num.trim().parse::<u64>() {
-        Ok(v) => v * mult,
-        // Do not degrade silently: a mistyped value ("2GB", "2 Gi") would give
-        // roughly half of the requested RAM without warning. Warn and use a safe default.
-        Err(_) => {
-            tracing::warn!(value = ?s, "invalid memory value; defaulting to 1024 MiB");
-            1024
-        }
-    }
 }
 
 /// The host's `MemAvailable` in MiB (from `/proc/meminfo`) — memory that can be
@@ -662,41 +476,6 @@ fn run_quiet(prog: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-/// Stages emitted by [`create_with`] so a caller can render step-by-step
-/// progress. The engine emits ONLY the enum — the user-facing text and its
-/// translation stay in `delonix-runtime-bin` (project rule: UI strings live in
-/// the bin, not in the mechanism crates).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum CreateStage {
-    /// Preparing the per-VM overlay disk (`qemu-img create`).
-    Disk,
-    /// Ensuring/attaching the network (libvirt NAT net, or the SDN tap).
-    Network,
-    /// Defining the domain in the hypervisor.
-    Define,
-    /// Starting the domain.
-    Start,
-}
-
-/// A stage of [`destroy_with`], reported as it STARTS — the teardown twin of
-/// [`CreateStage`], so a destroy can show what it is taking away instead of a
-/// blinking cursor. Only stages that have something to do are reported.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum DestroyStage<'a> {
-    /// Powering off and removing the VM from its provider (the backend id).
-    Provider(&'a str),
-    /// Deleting the per-VM overlay disk.
-    Overlay,
-    /// Deleting extra disks that belong to the VM (how many).
-    ExtraDisks(usize),
-    /// Deleting the cloud-init seed and the preserved snapshots.
-    SeedAndSnapshots,
-    /// Deleting sockets, serial log, pid file and the domain XML.
-    RuntimeState,
-    /// Removing the record itself.
-    Record,
-}
-
 /// Builds a `Command` whose output this crate PARSES, pinned to the `C` locale.
 ///
 /// BUG FIXED HERE (latent, and it bites precisely in this product's home
@@ -825,283 +604,6 @@ fn leases_max_expiry(out: &str, mac: &str) -> Option<String> {
 // ===========================================================================
 // Backend trait
 // ===========================================================================
-
-/// What a backend produced when booting a VM — persisted in the [`Vm`].
-pub struct Boot {
-    /// PID of the VMM on the host (Cloud Hypervisor). `None` when managed by a daemon
-    /// (libvirt) — there the liveness comes from `is_running`.
-    pub pid: Option<i32>,
-    /// `tap` interface (or `"user"` for libvirt user-mode networking).
-    pub tap: String,
-    /// NIC MAC.
-    pub mac: String,
-    /// Control socket (Cloud Hypervisor API; empty on libvirt).
-    pub api_socket: String,
-    /// The VM's IP, if known at boot.
-    pub ip: Option<String>,
-    /// See [`Vm::dhcp_lease_floor`]. Only a backend whose IP comes from a DHCP
-    /// lease table that outlives the VM sets it.
-    pub lease_floor: Option<String>,
-}
-
-/// The virtualization mechanism behind a microVM. Allows having Cloud
-/// Hypervisor and libvirt/KVM side by side (chosen per VM).
-pub trait VmBackend {
-    /// Stable identifier persisted in the [`Vm`].
-    fn id(&self) -> &'static str;
-    /// `true` if the backend has the required tools installed.
-    fn available(&self) -> bool;
-    /// Creates the network (if applicable) and boots the VM from the `overlay`. The overlay
-    /// creation and idempotency are handled by [`create`]. `on` receives the
-    /// sub-stages (network/define/start) for a progress UI.
-    fn boot(
-        &self,
-        vmdir: &Path,
-        cfg: &VmConfig,
-        overlay: &str,
-        on: &dyn Fn(CreateStage),
-    ) -> delonix_model::Result<Boot>;
-    /// Is the VM still alive?
-    fn is_running(&self, vm: &Vm) -> bool;
-    /// Current IP of the VM (may change/resolve later via DHCP).
-    fn ip(&self, vm: &Vm) -> Option<String>;
-
-    /// Is [`VmBackend::ip`] a PREDICTION rather than an OBSERVATION?
-    ///
-    /// Default `false`: libvirt reads a real DHCP lease, so an address there is
-    /// evidence that the guest booted far enough to ask for one. Cloud
-    /// Hypervisor overrides it — its address is computed from the MAC before
-    /// the guest runs at all, so it is evidence of nothing.
-    ///
-    /// Whoever waits for a boot needs this to know when "it has an IP" is an
-    /// answer and when it is only an arithmetic identity. It lives on the
-    /// backend rather than in a `backend.contains("cloud-hypervisor")` at the
-    /// call site for the reason ADR-0008 gives: the knowledge belongs to the
-    /// backend that does the predicting.
-    fn ip_is_predicted(&self) -> bool {
-        false
-    }
-    /// Stops the VM and frees the network resources. Returns `Err` when the backend
-    /// REFUSED the cleanup (e.g. libvirt) — the caller decides whether to abort (so as not to
-    /// delete the local record of a VM that is still defined in the hypervisor) or
-    /// to ignore it (`vm rm --force`).
-    fn stop(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()>;
-
-    /// Releases everything the VM owns, because its record is going away
-    /// (`vm rm`). Default: [`Self::stop`] — which is exactly right for the two
-    /// local backends and is why nothing existing changes.
-    ///
-    /// **The two are the same operation locally and NOT the same remotely**,
-    /// and conflating them destroyed data. Locally the disk is the engine's: a
-    /// libvirt `undefine` leaves `<root>/vms/<name>.qcow2` untouched, so `stop`
-    /// can free the hypervisor's side and `rm` deletes the file afterwards. On
-    /// a remote node the disk belongs to the node, and the only call that frees
-    /// the VM also frees its disk — so a backend that implemented `stop` as
-    /// "stop and destroy" made `delonix vm stop` erase the guest, while the
-    /// CLI's own next-steps block promises `stop it (keeps the disk)`.
-    ///
-    /// A backend that owns nothing beyond what `stop` releases should leave
-    /// this alone.
-    fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
-        self.stop(vmdir, vm)
-    }
-
-    /// Suspends a RUNNING VM's vCPUs, guest memory intact — the same notion
-    /// as `container pause`'s cgroup freezer, not [`VmBackend::snapshot`]
-    /// (which persists a checkpoint to disk; this never touches storage).
-    /// Default: unsupported (fail closed) — a backend overrides this only
-    /// once it actually has a mechanism, never as a silent no-op.
-    fn pause(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
-        Err(unsupported_pause(self.id(), "pause"))
-    }
-    /// Resumes a VM suspended with [`VmBackend::pause`]. Default: unsupported.
-    fn unpause(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
-        Err(unsupported_pause(self.id(), "unpause"))
-    }
-
-    /// Checked once, right after [`VmBackend::stop`] has already confirmed the
-    /// vmm gone and the caller has already persisted `Status::Stopped` — this
-    /// is a POST-CONDITION check, not a precondition, so an `Err` here must
-    /// never be read as "the stop failed" (the record is already correct by
-    /// the time this runs). Default: nothing to check.
-    ///
-    /// Exists for exactly one known failure mode (BUG-VM-001, cloud-hypervisor
-    /// only): a real guest write in flight at the moment of `stop` can leave
-    /// the qcow2 corrupted even though the vmm exited cleanly. Nothing this
-    /// engine controls can repair that; what it owes the operator is not
-    /// making them discover it three commands later from an unrelated
-    /// `restore`/`snapshot` error.
-    fn disk_health(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<()> {
-        Ok(())
-    }
-
-    /// Brings an already-created VM back up, instead of creating one.
-    ///
-    /// `Ok(None)` — the default — means "I have no way to resume; create it the
-    /// usual way", which is the truth for both local backends: their `boot` is
-    /// idempotent because the per-VM overlay is on this filesystem and gets
-    /// reused.
-    ///
-    /// A remote backend has no such luck. Its `boot` asks the node for the next
-    /// free id, so a `vm start` on a stopped VM would build a SECOND one and
-    /// leave the first orphaned on the node with nothing pointing at it —
-    /// silently, since the record is then rewritten to the new handle. Here it
-    /// can start the VM its record already names.
-    ///
-    /// Called only when a record exists and the VM is not running.
-    fn resume(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<Option<Boot>> {
-        Ok(None)
-    }
-
-    /// Takes a named snapshot of the VM. On libvirt this is a **system checkpoint**
-    /// (`virsh snapshot-create-as`): for a running domain it captures memory + disk
-    /// state; `restore` reverts to it. Default: unsupported — a backend that does not
-    /// override this fails closed with a clear message (never a silent no-op).
-    fn snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> delonix_model::Result<()> {
-        Err(unsupported_snapshot(self.id(), "snapshot"))
-    }
-    /// Reverts the VM to a named snapshot (libvirt: `virsh snapshot-revert`).
-    /// Default: unsupported (fail closed).
-    fn restore(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> delonix_model::Result<()> {
-        Err(unsupported_snapshot(self.id(), "restore"))
-    }
-    /// Lists the VM's snapshot names. Default: unsupported (fail closed).
-    ///
-    /// Takes `vmdir` because a stopped VM's snapshots may live only on OUR
-    /// side: libvirt's metadata does not survive the undefine that [`stop`]
-    /// does, so the list of a stopped VM is read from what
-    /// [`VmBackend::preserve_snapshots`] wrote there.
-    fn snapshots(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<Vec<String>> {
-        Err(unsupported_snapshot(self.id(), "snapshots"))
-    }
-    /// Deletes a named snapshot — the state in the disk AND whatever metadata
-    /// points at it. Default: unsupported (fail closed).
-    fn delete_snapshot(&self, _vmdir: &Path, _vm: &Vm, _name: &str) -> delonix_model::Result<()> {
-        Err(unsupported_snapshot(self.id(), "snapshot rm"))
-    }
-
-    /// Saves whatever snapshot state STOPPING this VM would otherwise destroy,
-    /// and returns the names saved. Called by [`stop`] BEFORE
-    /// [`VmBackend::stop`], so a failure here aborts the stop with nothing lost
-    /// yet. Default: nothing to preserve (a backend whose snapshots survive a
-    /// stop, or which has none, keeps its behaviour byte for byte).
-    ///
-    /// This exists because of what libvirt's `undefine --snapshots-metadata`
-    /// does: the snapshot DATA stays in the qcow2 (measured), only libvirt's
-    /// bookkeeping is deleted — so a `vm stop`/`vm start` left `vm snapshots`
-    /// empty with rc=0 and `vm restore` answering "Domain snapshot not found",
-    /// for snapshots that were still there on the disk the whole time.
-    fn preserve_snapshots(&self, _vmdir: &Path, _vm: &Vm) -> delonix_model::Result<Vec<String>> {
-        Ok(Vec::new())
-    }
-
-    /// `true` when the backend owns its own disks and [`create`] must NOT
-    /// prepare one.
-    ///
-    /// The default is `false`, which is what both local backends are and what
-    /// every existing implementation keeps without changing a line: `create`
-    /// resolves `cfg.disk` on THIS filesystem and builds a thin qcow2 overlay
-    /// for the VM, and `boot` receives that overlay's path.
-    ///
-    /// A backend whose hypervisor is on another machine cannot use any of it —
-    /// the base image lives on that node, and a local overlay backs nothing
-    /// there. Worse, `create` would fail on the local `canonicalize` before the
-    /// backend was ever asked. With `true`, `boot` receives `cfg.disk`
-    /// unchanged and decides for itself what it names on the far side.
-    ///
-    /// This exists because the alternative was uploading a local overlay on
-    /// every create — a second disk model, and slow — purely to satisfy a
-    /// signature (ADR-0008).
-    fn manages_own_storage(&self) -> bool {
-        false
-    }
-
-    /// `true` when auto-detection may pick this backend with nobody asking for
-    /// it by name.
-    ///
-    /// Local backends answer `available()` with a `which`, which is cheap and
-    /// truthful. A REMOTE backend cannot: the only honest answer needs a
-    /// network round trip to a node that may not even be configured, and
-    /// auto-detection is not a place to make HTTP requests. So a remote backend
-    /// returns `false` here and is chosen explicitly (`--backend`,
-    /// `DELONIX_VM_BACKEND`, `vm default-backend`) or not at all.
-    fn auto_selectable(&self) -> bool {
-        true
-    }
-}
-
-/// Fail-closed error for a backend that does not implement pause/unpause.
-///
-/// Returns the SHARED type directly (not this crate's own `Result`): its two
-/// callers are `VmBackend` default method bodies, and that trait's signatures
-/// stay on `delonix_model::Result` — see the module doc comment on why.
-fn unsupported_pause(backend: &str, op: &str) -> delonix_model::Error {
-    Error::UnsupportedByBackend(format!("{op} is not supported on the '{backend}' backend")).into()
-}
-
-/// Fail-closed error for a backend that does not implement snapshot/restore
-/// (today: cloud-hypervisor — its restore relaunches a fresh vmm, a different
-/// lifecycle than libvirt's in-place revert, and needs `ch-remote`; deferred).
-fn unsupported_snapshot(backend: &str, op: &str) -> delonix_model::Error {
-    Error::UnsupportedByBackend(format!(
-        "{op} is not supported on the '{backend}' backend yet — use the libvirt backend"
-    ))
-    .into()
-}
-
-/// How a registered backend is built when somebody selects it.
-///
-/// A closure and not a `fn` pointer because a REMOTE backend needs
-/// configuration — an endpoint, a node name, a credential — and
-/// `fn() -> Box<dyn VmBackend>` has nowhere to receive it. That gap is
-/// precisely what kept ADR-0008's decision 2 from landing: a crate that
-/// depends on `delonix-vm` (as any backend must, for the trait) could not put
-/// itself into a `static` table here.
-///
-/// `Send + Sync` because the table is process-wide. It constrains the CLOSURE,
-/// not the trait: a backend implementation is untouched by this.
-///
-/// It returns `Result` so a backend whose construction can fail (a remote one
-/// authenticating) reports why, instead of a factory that must panic or lie.
-pub type BackendFactory = Box<dyn Fn() -> Result<Box<dyn VmBackend>> + Send + Sync>;
-
-/// Builds the backend's capability report (ADR-0050). Called by `provider ls`,
-/// never at registration: like [`BackendFactory`] it may probe the host, and
-/// for a remote backend it must NOT connect — it declares, it does not verify.
-pub type ReportFactory = Box<dyn Fn() -> delonix_compute::capability::ProviderReport + Send + Sync>;
-
-/// One backend this build knows about: its canonical id (the value persisted in
-/// [`Vm::backend`]), the aliases accepted on input, and how to build one.
-pub struct BackendRegistration {
-    /// Canonical id. Must equal what the built backend's [`VmBackend::id`]
-    /// returns — it is what gets persisted in the record and looked up later.
-    pub id: &'static str,
-    /// Extra spellings accepted from a user; never repeats `id`.
-    pub aliases: &'static [&'static str],
-    /// Whether auto-detection may pick this backend with nobody naming it.
-    ///
-    /// **A copy of [`VmBackend::auto_selectable`], and deliberately so**:
-    /// auto-detection has to answer this WITHOUT building the backend.
-    /// Construction is where a remote backend authenticates, so asking the
-    /// built object would make the walk do the network round trip the flag
-    /// exists to prevent. [`register_backend`] checks the two agree.
-    pub auto_selectable: bool,
-    pub new: BackendFactory,
-    /// The backend's answer to every catalog entry (ADR-0050). Required: a
-    /// backend that cannot say what it supports is a backend nobody can
-    /// select by requirement.
-    pub report: ReportFactory,
-}
-
-impl std::fmt::Debug for BackendRegistration {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("BackendRegistration")
-            .field("id", &self.id)
-            .field("aliases", &self.aliases)
-            .field("auto_selectable", &self.auto_selectable)
-            .finish_non_exhaustive()
-    }
-}
 
 fn builtin_backends() -> Vec<BackendRegistration> {
     vec![
@@ -1262,7 +764,8 @@ const KNOWN_UNREGISTERED: &[(&str, &str)] = &[(
     "the Proxmox backend (crate `delonix-proxmox`) needs a node to talk to, so it is only \
      available once one is configured. Set `DELONIX_PROXMOX_URL`, `DELONIX_PROXMOX_NODE` and a \
      credential (`DELONIX_PROXMOX_TOKEN`, or a `kind: Secret` named by \
-     `DELONIX_PROXMOX_SECRET`) — see docs/adr/0008-proxmox-vm-backend.md",
+     `DELONIX_PROXMOX_SECRET`), or a `type: proxmox` entry in the node's providers file \
+     (`/etc/delonix/providers.yaml`, ADR-0054) — see docs/adr/0008-proxmox-vm-backend.md",
 )];
 
 fn unknown_backend(name: &str) -> Error {
@@ -1482,9 +985,39 @@ pub fn backend_manages_own_storage(want: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-/// The backend chosen ONCE instead of per-command: `DELONIX_VM_BACKEND`
-/// (session-wide) and then the persisted default ([`set_default_backend`],
-/// machine-wide). `None` when neither is set.
+/// The default provider the NODE declares, set once at startup by whoever
+/// read the node's providers file (ADR-0054 D1-D3) — the composition root, not
+/// this crate, which never reads a configuration file. `Ok(None)`: the file
+/// names no default. `Err`: the file exists and could not be read, which makes
+/// every choice that would have used it fail instead of guessing.
+static CONFIGURED_DEFAULT: std::sync::OnceLock<std::result::Result<Option<String>, String>> =
+    std::sync::OnceLock::new();
+
+/// Records the node's configured default provider (ADR-0054). The first call
+/// wins; a process reads its providers file once.
+pub fn set_configured_default_backend(value: std::result::Result<Option<String>, String>) {
+    let _ = CONFIGURED_DEFAULT.set(value.map(|o| o.map(|n| n.trim().to_lowercase())));
+}
+
+/// What [`set_configured_default_backend`] recorded, if anything — for a
+/// caller that reports the default (`vm default-backend`) and has to say where
+/// it came from.
+pub fn configured_default_backend() -> Option<&'static std::result::Result<Option<String>, String>>
+{
+    CONFIGURED_DEFAULT.get()
+}
+
+/// The backend chosen ONCE instead of per-command, in the order ADR-0054 D3
+/// fixes: `DELONIX_VM_BACKEND` (session-wide), then the node's configured
+/// default ([`set_configured_default_backend`]), then the persisted legacy
+/// default ([`set_default_backend`]). `Ok(None)` when none is set.
+///
+/// **A default the process cannot serve is not dropped.** The name is
+/// returned as written, so selecting it fails with the reason
+/// (`BackendNotConfigured` for a provider this process has no target for)
+/// instead of falling through to auto-detection and creating the VM on a
+/// LOCAL hypervisor — measured before this existed: a default of `proxmox`
+/// read by a process without the target created locally, rc=0 (ADR-0054 §3).
 ///
 /// Public because [`create_with`] is no longer the only place that needs the
 /// answer, and two copies of a precedence rule is how they start to disagree.
@@ -1492,11 +1025,19 @@ pub fn backend_manages_own_storage(want: Option<&str>) -> bool {
 /// that asks it without threading this through gets the local backend even on a
 /// machine standing-configured for Proxmox — and then goes on to prepare a
 /// local overlay for a guest that will run somewhere else entirely.
-pub fn standing_backend_choice(base: &Path) -> Option<String> {
-    std::env::var("DELONIX_VM_BACKEND")
+pub fn standing_backend_choice(base: &Path) -> Result<Option<String>> {
+    if let Some(v) = std::env::var("DELONIX_VM_BACKEND")
         .ok()
         .filter(|s| !s.trim().is_empty())
-        .or_else(|| get_default_backend(base))
+    {
+        return Ok(Some(v));
+    }
+    match CONFIGURED_DEFAULT.get() {
+        Some(Err(why)) => return Err(Error::BackendNotConfigured(why.clone())),
+        Some(Ok(Some(name))) => return Ok(Some(name.clone())),
+        _ => {}
+    }
+    Ok(get_default_backend(base))
 }
 
 /// Validates and normalizes a backend name for external callers (the CLI's
@@ -1515,12 +1056,21 @@ fn default_backend_file(base: &Path) -> PathBuf {
 }
 
 /// The persisted default backend, if one was set with [`set_default_backend`].
-/// Best-effort: a missing or unreadable file is `None`, never an error — this
-/// is a convenience default, not a requirement, and a corrupt/stale file must
-/// not block `vm create` (fall through to auto-detection instead).
+/// A missing or unreadable file is `None`. A name this process has not
+/// registered is returned AS WRITTEN, never dropped: dropping it is what made
+/// a `proxmox` default fall through to a local hypervisor in a process without
+/// the target (ADR-0054 §3). Selecting it then fails with the reason.
 pub fn get_default_backend(base: &Path) -> Option<String> {
     let raw = std::fs::read_to_string(default_backend_file(base)).ok()?;
-    canonical_backend_name(raw.trim()).map(str::to_string)
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(
+        canonical_backend_name(raw)
+            .map(str::to_string)
+            .unwrap_or_else(|| raw.to_lowercase()),
+    )
 }
 
 /// Persists the default backend used when neither `--backend` nor
@@ -1532,7 +1082,8 @@ pub fn set_default_backend(base: &Path, backend: &str) -> Result<()> {
     std::fs::create_dir_all(base)?;
     // Atomic: a torn write leaves a truncated backend name, and the reader has no way to
     // tell "libvir" from a value someone meant to write.
-    delonix_state::write_atomic(&default_backend_file(base), canon.as_bytes())?;
+    delonix_state::write_atomic(&default_backend_file(base), canon.as_bytes())
+        .map_err(state_err)?;
     Ok(())
 }
 
@@ -1679,6 +1230,20 @@ impl VmBackend for CloudHypervisorBackend {
     /// anyone waiting on a boot needs to be told.
     fn ip_is_predicted(&self) -> bool {
         true
+    }
+
+    /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
+    /// This backend keeps no definition of its own between boots — `vm start`
+    /// rebuilds the vmm's command line from the record (`start` → `create(config_from(..))`),
+    /// so the engine rewriting `vcpus`/`memory` there is the whole resize.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Ok(())
     }
 
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
@@ -3731,6 +3296,20 @@ impl VmBackend for LibvirtBackend {
         }
     }
 
+    /// `vm resize` (`vm.resize.cold`): nothing to change outside the record.
+    /// This backend keeps no definition of its own between boots — `vm start`
+    /// rebuilds the domain XML from the record (`start` → `create(config_from(..))`),
+    /// so the engine rewriting `vcpus`/`memory` there is the whole resize.
+    fn resize_cold(
+        &self,
+        _vmdir: &Path,
+        _vm: &Vm,
+        _vcpus: u32,
+        _memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        Ok(())
+    }
+
     fn stop(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
         libvirt_cleanup(&vm.name)?;
         // The domain XML that `boot` wrote STAYS. It used to be deleted here,
@@ -4370,7 +3949,7 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
             // choice, just made once instead of per-command; a backend
             // requested this way that can't actually boot the VM (e.g. the
             // volumes/9p case above) still fails loud at boot, never silently.
-            let standing_choice = standing_backend_choice(base);
+            let standing_choice = standing_backend_choice(base)?;
             let want = match cfg.backend.as_deref().or(standing_choice.as_deref()) {
                 Some(b) => Some(b.to_string()),
                 None if !cfg.volumes.is_empty() => Some("libvirt".to_string()),
@@ -4539,7 +4118,7 @@ libvirt+qemu"
             backend.id()
         );
     }
-    st.save(&cfg.name, &vm)?;
+    st.save(&cfg.name, &vm).map_err(state_err)?;
     Ok(vm)
 }
 
@@ -4788,7 +4367,7 @@ fn remove_inner(
         }
     }
     on(DestroyStage::Record);
-    st.remove(name)?;
+    st.remove(name).map_err(state_err)?;
     // The store's per-record lock file (`.<name>.lock`) is the last trace: it
     // outlived every destroy, so «removes everything» was not quite true.
     // Nothing holds it once the record is gone.
@@ -4814,7 +4393,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
                 None => Err(Error::VmNotFound(name.to_string())),
             };
         }
-        Err(e) => return Err(e.into()),
+        Err(e) => return Err(state_err(e)),
     };
     let backend = backend_for(&vm)?;
     // BEFORE the stop, and its failure aborts the stop: on libvirt the stop
@@ -4826,7 +4405,7 @@ pub fn stop(base: &Path, name: &str) -> Result<()> {
     vm.status = Status::Stopped;
     vm.pid = None;
     vm.started_unix = None;
-    st.save(name, &vm)?;
+    st.save(name, &vm).map_err(state_err)?;
     // AFTER the save: the vmm is confirmed gone and the record already says
     // so correctly either way — an `Err` from here is a diagnosis on top of a
     // stop that already happened, never a reason to leave the record lying
@@ -4858,7 +4437,7 @@ pub fn pause(base: &Path, name: &str) -> Result<()> {
     }
     backend_for(&vm)?.pause(&vmdir, &vm)?;
     vm.status = Status::Paused;
-    Ok(st.save(name, &vm)?)
+    st.save(name, &vm).map_err(state_err)
 }
 
 /// Resumes a VM suspended with [`pause`]. Refuses a VM that is not currently
@@ -4875,7 +4454,152 @@ pub fn unpause(base: &Path, name: &str) -> Result<()> {
     }
     backend_for(&vm)?.unpause(&vmdir, &vm)?;
     vm.status = Status::Running;
-    Ok(st.save(name, &vm)?)
+    st.save(name, &vm).map_err(state_err)
+}
+
+/// Whether `h` is a DNS label a guest accepts as its hostname: letters,
+/// digits and '-', not at either end, 1 to 63 characters. Pure.
+fn valid_hostname(h: &str) -> bool {
+    (1..=63).contains(&h.len())
+        && h.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        && !h.starts_with('-')
+        && !h.ends_with('-')
+}
+
+/// Whether `u` is a login name cloud-init can create: a lowercase letter or
+/// '_' first, then lowercase letters, digits, '_' or '-', at most 32. Pure.
+fn valid_login(u: &str) -> bool {
+    let mut b = u.bytes();
+    matches!(b.next(), Some(c) if c.is_ascii_lowercase() || c == b'_')
+        && u.len() <= 32
+        && b.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == b'_' || c == b'-')
+}
+
+/// Changes a STOPPED VM's cloud-init — hostname, user and/or SSH keys — for
+/// its next boot (see [`VmBackend::update_cloud_init`]).
+///
+/// Everything refusable is refused before a backend is asked, with the record
+/// untouched: nothing to change, a hostname that is not a DNS label, a user
+/// that is not a login name, a key that is empty or spans lines, an appliance
+/// (which does not run cloud-init), and a VM that is running or paused. `keys`
+/// REPLACE the record's when given; a field not given keeps its value, and the
+/// backend receives the whole merged intent. The record is rewritten only
+/// after the backend returns `Ok`.
+pub fn set_cloud_init(
+    base: &Path,
+    name: &str,
+    hostname: Option<&str>,
+    ci_user: Option<&str>,
+    keys: Option<Vec<String>>,
+) -> Result<Vm> {
+    let bad = |m: String| Error::InvalidCloudInitChange(m);
+    if hostname.is_none() && ci_user.is_none() && keys.is_none() {
+        return Err(bad(format!(
+            "nothing to change in VM '{name}''s cloud-init: give --hostname, --user and/or --ssh-key"
+        )));
+    }
+    if let Some(h) = hostname.filter(|h| !valid_hostname(h)) {
+        return Err(bad(format!(
+            "hostname '{h}' is not a DNS label (letters, digits, '-', not at either end, at most 63)"
+        )));
+    }
+    if let Some(u) = ci_user.filter(|u| !valid_login(u)) {
+        return Err(bad(format!("user '{u}' is not a login name")));
+    }
+    if let Some(k) = &keys {
+        if k.is_empty() {
+            return Err(bad("give at least one --ssh-key".to_string()));
+        }
+        if let Some((i, _)) = k
+            .iter()
+            .enumerate()
+            .find(|(_, key)| key.trim().is_empty() || key.contains('\n'))
+        {
+            return Err(bad(format!("ssh key #{} is empty or spans lines", i + 1)));
+        }
+    }
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if vm.boot.cloud_init == Some(false) {
+        return Err(bad(format!(
+            "VM '{name}' runs an appliance image, which does not run cloud-init"
+        )));
+    }
+    if matches!(vm.status, Status::Running | Status::Paused) {
+        return Err(Error::CloudInitNeedsStopped(format!(
+            "VM '{name}' is {:?}: the guest reads cloud-init at boot — stop it first (`delonix vm stop {name}`)",
+            vm.status
+        )));
+    }
+    let intent = CloudInitIntent {
+        hostname: hostname
+            .map(str::to_string)
+            .or_else(|| vm.boot.hostname.clone()),
+        ci_user: ci_user
+            .map(str::to_string)
+            .or_else(|| vm.boot.ci_user.clone()),
+        ssh_keys: keys
+            .map(|k| k.into_iter().map(|s| s.trim().to_string()).collect())
+            .unwrap_or_else(|| vm.boot.ssh_keys.clone()),
+    };
+    backend_for(&vm)?.update_cloud_init(&vmdir, &vm, &intent)?;
+    vm.boot.hostname = intent.hostname;
+    vm.boot.ci_user = intent.ci_user;
+    vm.boot.ssh_keys = intent.ssh_keys;
+    st.save(name, &vm).map_err(state_err)?;
+    Ok(vm)
+}
+
+/// Changes a STOPPED VM's vCPUs and/or memory for its next boot — the cold
+/// resize (`vm.resize.cold`, see [`VmBackend::resize_cold`]).
+///
+/// Everything that can be refused is refused before the backend is asked:
+/// nothing to change, zero vCPUs, a memory value that does not parse (the
+/// lenient [`mem_mib`] would read `2GB` as 1 GiB and this would report it
+/// done), and a VM that is running or paused — a guest that only sees the
+/// change after its next reboot has not been resized yet. The record is
+/// rewritten only after the backend returns `Ok`, so a refused or failed
+/// resize leaves it saying what the VM actually has.
+///
+/// Returns the updated record.
+pub fn resize(base: &Path, name: &str, vcpus: Option<u32>, memory: Option<&str>) -> Result<Vm> {
+    if vcpus.is_none() && memory.is_none() {
+        return Err(Error::InvalidResize(format!(
+            "nothing to resize on VM '{name}': give --vcpus and/or --memory"
+        )));
+    }
+    if vcpus == Some(0) {
+        return Err(Error::InvalidResize(format!(
+            "VM '{name}' cannot have 0 vCPUs"
+        )));
+    }
+    let new_mib = match memory {
+        Some(m) => Some(parse_mem_mib(m).ok_or_else(|| {
+            Error::InvalidResize(format!(
+                "memory '{m}' is not a size: use a number with an optional M/G suffix (512M, 4G, 4Gi)"
+            ))
+        })?),
+        None => None,
+    };
+    let vmdir = vms_dir(base);
+    let st = store(base)?;
+    let mut vm = load_vm(base, name)?;
+    if matches!(vm.status, Status::Running | Status::Paused) {
+        return Err(Error::ResizeNeedsStopped(format!(
+            "VM '{name}' is {:?}: `vm resize` is a cold resize — stop it first (`delonix vm stop {name}`)",
+            vm.status
+        )));
+    }
+    let target_vcpus = vcpus.unwrap_or(vm.vcpus.max(1));
+    let target_mib = new_mib.unwrap_or_else(|| mem_mib(&vm.memory));
+    backend_for(&vm)?.resize_cold(&vmdir, &vm, target_vcpus, target_mib)?;
+    vm.vcpus = target_vcpus;
+    if let Some(m) = memory {
+        vm.memory = m.trim().to_string();
+    }
+    st.save(name, &vm).map_err(state_err)?;
+    Ok(vm)
 }
 
 /// Takes a named snapshot of VM `name` (see [`VmBackend::snapshot`]). On libvirt a
@@ -4983,36 +4707,21 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
         quiet("virsh", &["-c", uri, "domblklist", "--details", "--", name]).map_err(|e| {
             Error::LiveBackupFailed(format!("live backup: cannot list the disks of {name}: {e}"))
         })?;
-    // type device target source — every file-backed entry, in libvirt's order.
-    let file_disks: Vec<(String, String, String)> = blklist
+    let target = blklist
         .lines()
         .filter_map(|l| {
             let f: Vec<&str> = l.split_whitespace().collect();
-            (f.len() >= 4 && f[0] == "file")
-                .then(|| (f[1].to_string(), f[2].to_string(), f[3].to_string()))
+            // type device target source
+            (f.len() >= 4 && f[0] == "file" && f[1] == "disk")
+                .then(|| (f[2].to_string(), f[3].to_string()))
         })
-        .collect();
-    let target = file_disks
-        .iter()
-        .find(|(device, _, _)| device == "disk")
-        .map(|(_, dev, source)| (dev.clone(), source.clone()))
+        .next()
         .ok_or_else(|| {
             Error::LiveBackupFailed(format!(
                 "live backup: {name} has no file-backed disk to copy"
             ))
         })?;
     let (dev, source) = target;
-    // Every OTHER disk is told `snapshot=no`. `--disk-only` snapshots ALL disks
-    // unless each is named, so a VM with `extraDisks` failed with «missing
-    // existing file for disk vdb: <extra>.delonix-backup-<pid>» — libvirt wanted
-    // a pre-created overlay for a disk this backup never copies. Measured
-    // 2026-09-24 in the E2E battery, on the first VM with a second disk that
-    // ever reached this path.
-    let other_specs: Vec<String> = file_disks
-        .iter()
-        .filter(|(_, d, _)| d != &dev)
-        .map(|(_, d, _)| format!("{d},snapshot=no"))
-        .collect();
 
     let tmp = PathBuf::from(format!("{source}.delonix-backup-{}", std::process::id()));
     let tmp_s = tmp.to_string_lossy().to_string();
@@ -5062,18 +4771,10 @@ pub fn backup_disk_live(base: &Path, name: &str, dest: &Path, quiesce: bool) -> 
         "--diskspec",
         &diskspec,
     ];
-    for spec in &other_specs {
-        args.push("--diskspec");
-        args.push(spec);
-    }
     if quiesce {
         args.push("--quiesce");
     }
     quiet("virsh", &args).map_err(|e| {
-        // The staged overlay was ours to create, so it is ours to remove: a
-        // failed snapshot left it beside the VM's disk (measured: one
-        // `.delonix-backup-<pid>` per failed attempt).
-        let _ = std::fs::remove_file(&tmp);
         Error::LiveBackupFailed(format!(
             "live backup: could not snapshot {name}: {e}{}",
             if quiesce {
@@ -5149,6 +4850,26 @@ pub fn delete_snapshot(base: &Path, name: &str, snap: &str) -> Result<()> {
     let vmdir = vms_dir(base);
     let vm = load_vm(base, name)?;
     Ok(backend_for(&vm)?.delete_snapshot(&vmdir, &vm, snap)?)
+}
+
+/// Applies one direction of VM `name`'s own firewall (see
+/// [`VmBackend::apply_firewall`]).
+pub fn apply_firewall(base: &Path, name: &str, policy: &firewall::Policy) -> Result<()> {
+    let vmdir = vms_dir(base);
+    let vm = load_vm(base, name)?;
+    Ok(backend_for(&vm)?.apply_firewall(&vmdir, &vm, policy)?)
+}
+
+/// Reads one direction of VM `name`'s own firewall back (see
+/// [`VmBackend::read_firewall`]).
+pub fn read_firewall(
+    base: &Path,
+    name: &str,
+    direction: firewall::Direction,
+) -> Result<firewall::Policy> {
+    let vmdir = vms_dir(base);
+    let vm = load_vm(base, name)?;
+    Ok(backend_for(&vm)?.read_firewall(&vmdir, &vm, direction)?)
 }
 
 /// Reconstructs the subset of [`VmConfig`] reliably recoverable from a
@@ -5368,7 +5089,7 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
     // build cannot resolve is not something to discover halfway through a
     // read-modify-write. `load()` above already read the record, so this costs
     // nothing extra.
-    let named = st.load(name)?;
+    let named = st.load(name).map_err(state_err)?;
     let backend = backend_for(&named)?;
     st.update(name, |vm| {
         let old_ip = vm.ip.clone();
@@ -5410,9 +5131,19 @@ pub fn status(base: &Path, name: &str) -> Result<Vm> {
         // change too, and the old `was_running != is_running` saw both sides as
         // "not running" and left `Paused` on disk while `vm ls` said `Stopped`
         // — so `vm unpause` went on to aim at a VM that no longer existed.
-        adopted || vm.ip != old_ip || vm.status != old_status
+        // A remote backend that found the VM on another node of its cluster
+        // (ADR-0053 decision 3) says so here; the record takes the new handle,
+        // or every later command would ask the old node again.
+        let relocated = match backend.current_handle(vm) {
+            Some(h) if h != vm.api_socket => {
+                vm.api_socket = h;
+                true
+            }
+            _ => false,
+        };
+        adopted || relocated || vm.ip != old_ip || vm.status != old_status
     })
-    .map_err(Into::into)
+    .map_err(state_err)
 }
 
 /// Does this VM's recorded IP come from a PREDICTION rather than an
@@ -5431,7 +5162,7 @@ pub fn ip_is_predicted(vm: &Vm) -> bool {
 pub fn list(base: &Path) -> Result<Vec<Vm>> {
     let st = store(base)?;
     let mut out = Vec::new();
-    for vm in st.list()? {
+    for vm in st.list().map_err(state_err)? {
         out.push(status(base, &vm.name).unwrap_or(vm));
     }
     Ok(out)
@@ -5764,21 +5495,6 @@ Format specific information:
             vec!["s1".to_string(), "s2".to_string()]
         );
         std::fs::remove_dir_all(&tmp).unwrap();
-    }
-
-    #[test]
-    fn unsupported_snapshot_names_the_backend_and_op() {
-        let e = super::unsupported_snapshot("cloud-hypervisor", "restore").to_string();
-        assert!(e.contains("restore"), "{e}");
-        assert!(e.contains("cloud-hypervisor"), "{e}");
-        assert!(e.contains("libvirt"), "{e}");
-    }
-
-    #[test]
-    fn unsupported_pause_names_the_backend_and_op() {
-        let e = super::unsupported_pause("proxmox", "pause").to_string();
-        assert!(e.contains("pause"), "{e}");
-        assert!(e.contains("proxmox"), "{e}");
     }
 
     #[test]
@@ -6583,6 +6299,13 @@ Format specific information:
         assert_eq!(get_default_backend(&dir), None);
         // Clearing an already-cleared default is not an error.
         clear_default_backend(&dir).unwrap();
+
+        // ADR-0054 §3: a name this process has not registered is kept, not
+        // dropped — so selecting it fails instead of falling through to a
+        // local hypervisor.
+        std::fs::write(default_backend_file(&dir), "Nave-Remota\n").unwrap();
+        assert_eq!(get_default_backend(&dir).as_deref(), Some("nave-remota"));
+        assert!(select_backend(get_default_backend(&dir).as_deref()).is_err());
 
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -8126,6 +7849,501 @@ Format specific information:
             ..base
         };
         assert!(libvirt_domain_xml(&qxl, "/tmp/x.qcow2", "").contains("type='qxl'"));
+    }
+
+    /// `vm resize`: every refusal happens before the backend is asked and
+    /// leaves the record untouched; a backend failure leaves it untouched too;
+    /// only an `Ok` from the backend rewrites `vcpus`/`memory`. A backend with
+    /// no override refuses by name instead of doing nothing.
+    #[test]
+    fn resize_refuses_before_the_backend_and_writes_the_record_only_on_success() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Mutex;
+        static CALLS: Mutex<Vec<(u32, u64)>> = Mutex::new(Vec::new());
+        static FAIL: AtomicBool = AtomicBool::new(false);
+
+        struct Resizable;
+        impl VmBackend for Resizable {
+            fn id(&self) -> &'static str {
+                "redimensionavel"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn resize_cold(
+                &self,
+                _: &Path,
+                _: &Vm,
+                vcpus: u32,
+                memory_mib: u64,
+            ) -> delonix_model::Result<()> {
+                CALLS.lock().unwrap().push((vcpus, memory_mib));
+                if FAIL.load(Ordering::SeqCst) {
+                    return Err(delonix_model::Error::Invalid("node said no".into()));
+                }
+                Ok(())
+            }
+        }
+        struct NoOverride;
+        impl VmBackend for NoOverride {
+            fn id(&self) -> &'static str {
+                "sem-resize"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "redimensionavel",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Resizable))),
+        })
+        .expect("registar");
+        register_backend(BackendRegistration {
+            id: "sem-resize",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(NoOverride))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-resize-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let save = |name: &str, backend: &str, status: Status| {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+            vm.backend = backend.into();
+            vm.status = status;
+            st.save(name, &vm).unwrap();
+        };
+        save("r", "redimensionavel", Status::Stopped);
+        save("a-correr", "redimensionavel", Status::Running);
+        save("pausada", "redimensionavel", Status::Paused);
+        save("n", "sem-resize", Status::Stopped);
+        let unchanged = |name: &str| {
+            let vm = st.load(name).unwrap();
+            assert_eq!(
+                (vm.vcpus, vm.memory.as_str()),
+                (1, "1G"),
+                "{name}: record changed"
+            );
+        };
+
+        let code_of = |e: Error| e.number();
+        assert_eq!(code_of(resize(&base, "r", None, None).unwrap_err()), 1536);
+        assert_eq!(
+            code_of(resize(&base, "r", Some(0), None).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "r", None, Some("2GB")).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "r", None, Some("0")).unwrap_err()),
+            1536
+        );
+        assert_eq!(
+            code_of(resize(&base, "a-correr", Some(2), None).unwrap_err()),
+            5505
+        );
+        assert_eq!(
+            code_of(resize(&base, "pausada", Some(2), None).unwrap_err()),
+            5505
+        );
+        assert!(resize(&base, "nao-existe", Some(2), None)
+            .unwrap_err()
+            .is_not_found());
+        assert!(
+            CALLS.lock().unwrap().is_empty(),
+            "a refusal reached the backend"
+        );
+        unchanged("r");
+        unchanged("a-correr");
+
+        FAIL.store(true, Ordering::SeqCst);
+        assert!(resize(&base, "r", Some(4), None).is_err());
+        unchanged("r");
+        FAIL.store(false, Ordering::SeqCst);
+
+        // Only memory: vCPUs keep the record's value, and the backend is told both.
+        let vm = resize(&base, "r", None, Some("4Gi")).unwrap();
+        assert_eq!((vm.vcpus, vm.memory.as_str()), (1, "4Gi"));
+        let vm = resize(&base, "r", Some(3), None).unwrap();
+        assert_eq!((vm.vcpus, vm.memory.as_str()), (3, "4Gi"));
+        assert_eq!(st.load("r").unwrap().vcpus, 3);
+        assert_eq!(
+            *CALLS.lock().unwrap(),
+            vec![(4, 1024), (1, 4096), (3, 4096)]
+        );
+
+        let e = resize(&base, "n", Some(2), None).unwrap_err().to_string();
+        assert!(e.contains("resize") && e.contains("sem-resize"), "{e}");
+        unchanged("n");
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends()
+            .write()
+            .unwrap()
+            .retain(|b| b.id != "redimensionavel" && b.id != "sem-resize");
+    }
+
+    #[test]
+    fn parse_mem_mib_refuses_what_mem_mib_would_have_guessed() {
+        assert_eq!(parse_mem_mib("512M"), Some(512));
+        assert_eq!(parse_mem_mib("4G"), Some(4096));
+        assert_eq!(parse_mem_mib("4Gi"), Some(4096));
+        assert_eq!(parse_mem_mib(" 2048 "), Some(2048));
+        for bad in [
+            "2GB",
+            "2 Gi x",
+            "",
+            "G",
+            "0",
+            "0G",
+            "-1G",
+            "99999999999999999999G",
+        ] {
+            assert_eq!(parse_mem_mib(bad), None, "{bad:?}");
+        }
+        assert_eq!(
+            mem_mib("2GB"),
+            1024,
+            "the lenient reader keeps its fallback"
+        );
+    }
+
+    /// `vm cloud-init`: every refusal happens before the backend and leaves
+    /// the record untouched; the backend receives the MERGED intent (a field
+    /// not given keeps the record's value, keys replace); the record changes
+    /// only on `Ok`; a backend with no override refuses by name.
+    #[test]
+    fn set_cloud_init_refuses_first_and_hands_the_backend_the_merged_intent() {
+        use std::sync::Mutex;
+        static GOT: Mutex<Vec<CloudInitIntent>> = Mutex::new(Vec::new());
+
+        struct Ci;
+        impl VmBackend for Ci {
+            fn id(&self) -> &'static str {
+                "com-ci"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn update_cloud_init(
+                &self,
+                _: &Path,
+                _: &Vm,
+                intent: &CloudInitIntent,
+            ) -> delonix_model::Result<()> {
+                GOT.lock().unwrap().push(intent.clone());
+                Ok(())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "com-ci",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Ci))),
+        })
+        .expect("registar");
+
+        let base = std::env::temp_dir().join(format!(
+            "delonix-cloudinit-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        let save = |name: &str, backend: &str, status: Status, appliance: bool| {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                String::new(),
+            );
+            vm.backend = backend.into();
+            vm.status = status;
+            vm.boot.hostname = Some("velho".into());
+            vm.boot.ci_user = Some("delonix".into());
+            vm.boot.ssh_keys = vec!["ssh-ed25519 AAAA velha".into()];
+            if appliance {
+                vm.boot.cloud_init = Some(false);
+            }
+            st.save(name, &vm).unwrap();
+        };
+        save("c", "com-ci", Status::Stopped, false);
+        save("viva", "com-ci", Status::Running, false);
+        save("app", "com-ci", Status::Stopped, true);
+        save("sem", "libvirt", Status::Stopped, false);
+
+        let code_of = |e: Error| e.number();
+        let key = |k: &str| Some(vec![k.to_string()]);
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", Some("-x"), None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", Some("a.b"), None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, Some("Root"), None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, None, Some(vec![])).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "c", None, None, key("a\nb")).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "app", Some("h"), None, None).unwrap_err()),
+            1537
+        );
+        assert_eq!(
+            code_of(set_cloud_init(&base, "viva", Some("h"), None, None).unwrap_err()),
+            5506
+        );
+        assert!(set_cloud_init(&base, "nada", Some("h"), None, None)
+            .unwrap_err()
+            .is_not_found());
+        assert!(
+            GOT.lock().unwrap().is_empty(),
+            "a refusal reached the backend"
+        );
+        assert_eq!(
+            st.load("c").unwrap().boot.hostname.as_deref(),
+            Some("velho")
+        );
+
+        let vm = set_cloud_init(&base, "c", Some("novo"), None, None).unwrap();
+        assert_eq!(vm.boot.hostname.as_deref(), Some("novo"));
+        assert_eq!(
+            vm.boot.ssh_keys,
+            vec!["ssh-ed25519 AAAA velha".to_string()],
+            "keys kept"
+        );
+        let vm = set_cloud_init(
+            &base,
+            "c",
+            None,
+            Some("ops"),
+            key(" ssh-ed25519 AAAA nova "),
+        )
+        .unwrap();
+        assert_eq!(
+            vm.boot.ssh_keys,
+            vec!["ssh-ed25519 AAAA nova".to_string()],
+            "keys replaced, trimmed"
+        );
+        assert_eq!(st.load("c").unwrap().boot.ci_user.as_deref(), Some("ops"));
+        let got = GOT.lock().unwrap().clone();
+        assert_eq!(got.len(), 2);
+        assert_eq!(got[0].hostname.as_deref(), Some("novo"));
+        assert_eq!(
+            got[0].ci_user.as_deref(),
+            Some("delonix"),
+            "merged with the record"
+        );
+        assert_eq!(got[1].hostname.as_deref(), Some("novo"));
+        assert_eq!(got[1].ci_user.as_deref(), Some("ops"));
+
+        let e = set_cloud_init(&base, "sem", Some("h"), None, None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("cloud-init") && e.contains("libvirt"), "{e}");
+        assert_eq!(
+            st.load("sem").unwrap().boot.hostname.as_deref(),
+            Some("velho")
+        );
+
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "com-ci");
+    }
+
+    /// ADR-0053 decision 3, the engine half: when the backend reports that it
+    /// now knows the VM by another handle (it found it on another node of its
+    /// cluster), `status()` — what `vm ls` runs — writes that handle to the
+    /// record, so later commands stop asking the old node. A backend that
+    /// reports nothing leaves the record alone.
+    #[test]
+    fn status_persists_the_handle_a_backend_relocated_the_vm_to() {
+        struct Moved;
+        impl VmBackend for Moved {
+            fn id(&self) -> &'static str {
+                "movido"
+            }
+            fn available(&self) -> bool {
+                true
+            }
+            fn auto_selectable(&self) -> bool {
+                false
+            }
+            fn boot(
+                &self,
+                _: &Path,
+                _: &VmConfig,
+                _: &str,
+                _: &dyn Fn(CreateStage),
+            ) -> delonix_model::Result<Boot> {
+                unreachable!()
+            }
+            fn is_running(&self, _: &Vm) -> bool {
+                false
+            }
+            fn ip(&self, _: &Vm) -> Option<String> {
+                None
+            }
+            fn stop(&self, _: &Path, _: &Vm) -> delonix_model::Result<()> {
+                Ok(())
+            }
+            fn current_handle(&self, vm: &Vm) -> Option<String> {
+                (vm.name == "m").then(|| "remote:novo:7".to_string())
+            }
+        }
+        register_backend(BackendRegistration {
+            id: "movido",
+            aliases: &[],
+            auto_selectable: false,
+            report: crate::capabilities::undeclared("fake"),
+            new: Box::new(|| Ok(Box::new(Moved))),
+        })
+        .expect("registar");
+        let base = std::env::temp_dir().join(format!(
+            "delonix-relocated-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(vms_dir(&base)).unwrap();
+        let st = store(&base).unwrap();
+        for name in ["m", "fica"] {
+            let mut vm = Vm::new(
+                name.into(),
+                "d".into(),
+                "o".into(),
+                1,
+                "1G".into(),
+                String::new(),
+                String::new(),
+                String::new(),
+                "remote:velho:7".into(),
+            );
+            vm.backend = "movido".into();
+            vm.status = Status::Stopped;
+            st.save(name, &vm).unwrap();
+        }
+        assert_eq!(status(&base, "m").unwrap().api_socket, "remote:novo:7");
+        assert_eq!(
+            st.load("m").unwrap().api_socket,
+            "remote:novo:7",
+            "persisted"
+        );
+        assert_eq!(status(&base, "fica").unwrap().api_socket, "remote:velho:7");
+        assert_eq!(st.load("fica").unwrap().api_socket, "remote:velho:7");
+        let _ = std::fs::remove_dir_all(&base);
+        backends().write().unwrap().retain(|b| b.id != "movido");
     }
 }
 

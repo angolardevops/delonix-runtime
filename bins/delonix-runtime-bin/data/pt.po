@@ -2601,8 +2601,8 @@ msgstr "resolver {path}"
 msgid "FirewallPolicy/{name}: direction is required and ∈ {{ingress, egress}} (got {other})"
 msgstr "FirewallPolicy/{name}: direction obrigatório e ∈ {{ingress, egress}} (veio {other})"
 
-msgid "{kind}/{name}: invalid scope '{scope}' (use container|network)"
-msgstr "{kind}/{name}: scope inválido '{scope}' (usa container|network)"
+msgid "{kind}/{name}: invalid scope '{scope}' (use container|network|vm)"
+msgstr "{kind}/{name}: scope inválido '{scope}' (usa container|network|vm)"
 
 msgid "{kind}/{name}: scope: network is only supported in Egress (there is no per-network INGRESS policy)"
 msgstr "{kind}/{name}: scope: network só é suportado em Egress (não há política de INGRESS por-rede)"
@@ -3186,8 +3186,8 @@ msgstr "FirewallPolicy '{name}' → direction obrigatório e ∈ {{ingress, egre
 msgid "FirewallPolicy '{name}' → scope: network is only supported with direction: egress"
 msgstr "FirewallPolicy '{name}' → scope: network só é suportado com direction: egress"
 
-msgid "{kind} '{name}' → invalid scope '{scope}' (use container|network)"
-msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network)"
+msgid "{kind} '{name}' → invalid scope '{scope}' (use container|network|vm)"
+msgstr "{kind} '{name}' → scope inválido '{scope}' (usa container|network|vm)"
 
 msgid "{kind} '{name}' (scope network) → target '{target}' is not a declared or existing Network"
 msgstr "{kind} '{name}' (scope network) → target '{target}' não é uma Network declarada nem existente"
@@ -12189,6 +12189,43 @@ msgstr "Uma subnet SDN é nomeada por uma rede CIDR (um endereço IPv4 ou IPv6 c
 msgid "Give a CIDR like '10.0.0.0/24' or 'fd00::/64', with a prefix length valid for the address family."
 msgstr "Dá um CIDR como '10.0.0.0/24' ou 'fd00::/64', com um comprimento de prefixo válido para a família de endereços."
 
+msgid "invalid Proxmox SDN address"
+msgstr "endereço SDN do Proxmox inválido"
+
+msgid "A plain IPv4/IPv6 address (a DHCP range end, a DNS server, an IPAM reservation, a fabric node's router address) or a MAC address that an SDN field takes did not parse as one, refused before it goes into a request body or a URL."
+msgstr "Um endereço IPv4/IPv6 simples (uma ponta de intervalo DHCP, um servidor DNS, uma reserva no IPAM, o endereço de router de um nó de fabric) ou um endereço MAC que um campo SDN recebe não foi reconhecido como tal, recusado antes de entrar no corpo de um pedido ou num URL."
+
+msgid "Give the address without a prefix length ('10.0.0.50', 'fd00::5'), or the MAC as XX:XX:XX:XX:XX:XX."
+msgstr "Dá o endereço sem comprimento de prefixo ('10.0.0.50', 'fd00::5'), ou o MAC como XX:XX:XX:XX:XX:XX."
+
+msgid "invalid Proxmox shutdown timeout"
+msgstr "tempo limite de encerramento do Proxmox inválido"
+
+msgid "A guest-driven shutdown or reboot was asked to wait longer than this client waits for any node task, so the client would give up while the node was still inside the task."
+msgstr "Pediu-se a um encerramento ou reinício feito pelo convidado que esperasse mais do que este cliente espera por qualquer tarefa do nó, por isso o cliente desistiria com o nó ainda dentro da tarefa."
+
+msgid "Give a timeout shorter than the client's task deadline (600 seconds by default), or omit it to take the node's own default."
+msgstr "Dá um tempo limite menor do que o prazo de tarefa do cliente (600 segundos por omissão), ou omite-o para ficar com o valor por omissão do próprio nó."
+
+# DX-1536 / DX-5505 — vm resize (vm.resize.cold, ADR-0049 slice 2)
+msgid "invalid VM resize"
+msgstr "redimensionamento de VM inválido"
+
+msgid "`vm resize` needs `--vcpus` and/or `--memory`; vCPUs have to be at least 1 and memory a number with an optional M/G suffix (`512M`, `4G`, `4Gi`). A value that does not parse is refused rather than read as a default."
+msgstr "O `vm resize` precisa de `--vcpus` e/ou `--memory`; os vCPUs têm de ser pelo menos 1 e a memória um número com sufixo M/G opcional (`512M`, `4G`, `4Gi`). Um valor que não se lê é recusado em vez de ser tomado por um valor por omissão."
+
+msgid "Pass `--vcpus <n>` (n ≥ 1) and/or `--memory <size>`, e.g. `--memory 4G`."
+msgstr "Passa `--vcpus <n>` (n ≥ 1) e/ou `--memory <tamanho>`, por exemplo `--memory 4G`."
+
+msgid "the VM must be stopped to resize it"
+msgstr "a VM tem de estar parada para ser redimensionada"
+
+msgid "`vm resize` is a cold resize: it changes the definition a VM boots with. A running or paused guest would not see the change until its next reboot, so the verb refuses instead of reporting a resize that has not happened."
+msgstr "O `vm resize` é um redimensionamento a frio: muda a definição com que a VM arranca. Um convidado a correr ou em pausa só veria a mudança no reinício seguinte, por isso o verbo recusa em vez de reportar um redimensionamento que não aconteceu."
+
+msgid "Run `delonix vm stop <name>`, resize, then `delonix vm start <name>`."
+msgstr "Corre `delonix vm stop <nome>`, redimensiona, e depois `delonix vm start <nome>`."
+
 msgid "The VM has no snapshot with that name on the Proxmox node."
 msgstr "A VM não tem instantâneo nenhum com esse nome no nó Proxmox."
 
@@ -12981,6 +13018,33 @@ msgstr "O corpo da resposta da appliance não fez parse como o JSON que esta cha
 
 msgid "Read the raw body in the message; the appliance's API may have changed shape in a newer/older release than ADR-0051's Phase 0 measured (26.1.2)."
 msgstr "Lê o corpo em bruto na mensagem; a API da appliance pode ter mudado de forma numa versão mais nova/antiga do que a que a Fase 0 do ADR-0051 mediu (26.1.2)."
+
+msgid "network zone provider registration refused"
+msgstr "registo de provider de zona de rede recusado"
+
+msgid "A process tried to register a NetworkZoneProvider with an empty id, or one whose id/alias already belongs to a different provider."
+msgstr "Um processo tentou registar um NetworkZoneProvider com um id vazio, ou cujo id/alias já pertence a um provider diferente."
+
+msgid "Fix the registration (an internal call error unless a third-party provider crate is involved)."
+msgstr "Corrige o registo (erro de chamada interna, a menos que esteja envolvido um crate de provider de terceiros)."
+
+msgid "no network zone provider configured"
+msgstr "nenhum provider de zona de rede configurado"
+
+msgid "`kind: NetworkZone` was applied but the runtime has no NetworkZoneProvider registered — it names no provider itself, on purpose, so the runtime's own configuration decides."
+msgstr "Foi aplicado um `kind: NetworkZone` mas o runtime não tem nenhum NetworkZoneProvider registado — o próprio Kind não nomeia provider nenhum, de propósito, para a configuração do runtime é que decide."
+
+msgid "Configure DELONIX_PROXMOX_URL (the only provider this build knows about) and its credential."
+msgstr "Configura o DELONIX_PROXMOX_URL (o único provider que esta build conhece) e a sua credencial."
+
+msgid "ambiguous network zone provider"
+msgstr "provider de zona de rede ambíguo"
+
+msgid "More than one NetworkZoneProvider is registered and `kind: NetworkZone` has no field to pick one by name."
+msgstr "Está registado mais de um NetworkZoneProvider e o `kind: NetworkZone` não tem campo para escolher um pelo nome."
+
+msgid "Unregister all but one NetworkZoneProvider target."
+msgstr "Retira o registo de todos os alvos NetworkZoneProvider excepto um."
 
 msgid "no such NetworkRoute"
 msgstr "não existe esse NetworkRoute"
@@ -13837,3 +13901,132 @@ msgstr "o contrato de nó no socket unix por omissão — gRPC e HTTP/JSON do de
 
 msgid "a socket of your own, then read the providers as JSON"
 msgstr "um socket teu, e depois lê os providers em JSON"
+# vm resize (vm.resize.cold, ADR-0049 slice 2)
+msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot"
+msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque"
+
+msgid "Change a STOPPED VM's vCPUs and/or memory for its next boot.\n\nA cold resize: refused while the VM is running or paused, because a guest that only sees the change after its next reboot has not been resized yet. On libvirt and Cloud Hypervisor the record is the whole definition and `vm start` rebuilds the VM from it; on Proxmox the node's config is changed and read back, and the node is asked too — a VM started from its own UI is refused even if the record says stopped. A value that does not parse (`2GB`) is refused, never read as a default."
+msgstr "Muda os vCPUs e/ou a memória de uma VM PARADA para o próximo arranque.\n\nUm redimensionamento a frio: recusado enquanto a VM está a correr ou em pausa, porque um convidado que só vê a mudança no reinício seguinte ainda não foi redimensionado. No libvirt e no Cloud Hypervisor o registo é a definição inteira e o `vm start` reconstrói a VM a partir dele; no Proxmox a config do nó é alterada e relida, e o nó também é consultado — uma VM arrancada pela interface dele é recusada mesmo que o registo diga parada. Um valor que não se lê (`2GB`) é recusado, nunca tomado por um valor por omissão."
+
+msgid "New number of vCPUs (at least 1)"
+msgstr "Novo número de vCPUs (pelo menos 1)"
+
+msgid "New memory: a number with an optional M/G suffix (`768M`, `4G`, `4Gi`)"
+msgstr "Nova memória: um número com sufixo M/G opcional (`768M`, `4G`, `4Gi`)"
+
+msgid "give a stopped VM 4 vCPUs and 8 GiB for its next boot"
+msgstr "dar a uma VM parada 4 vCPUs e 8 GiB para o próximo arranque"
+
+msgid "stop, resize the memory only, start again with it"
+msgstr "parar, redimensionar só a memória, e voltar a arrancar com ela"
+
+# provider describe proxmox --probe (ADR-0049 slice 3, read-only)
+msgid "Contact the configured Proxmox target and measure its cluster (nodes, quorum, shared storage, HA, SDN zones) with read-only requests. Only for `proxmox`: the local providers are measured on every describe"
+msgstr "Contacta o alvo Proxmox configurado e mede o cluster dele (nós, quórum, storage partilhado, HA, zonas SDN) só com pedidos de leitura. Só para `proxmox`: os providers locais são medidos em cada describe"
+
+msgid "--probe applies to a remote provider (proxmox); '{id}' is measured on this host by every describe"
+msgstr "o --probe aplica-se a um provider remoto (proxmox); '{id}' é medido neste host por cada describe"
+
+msgid "no Proxmox target is configured: set DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE and a credential (DELONIX_PROXMOX_SECRET, or DELONIX_PROXMOX_TOKEN_ID with DELONIX_PROXMOX_TOKEN_FILE)"
+msgstr "não há alvo Proxmox configurado: define DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE e uma credencial (DELONIX_PROXMOX_SECRET, ou DELONIX_PROXMOX_TOKEN_ID com DELONIX_PROXMOX_TOKEN_FILE)"
+
+msgid "Cluster of the target, measured now ({url}, node {node}), read-only:"
+msgstr "Cluster do alvo, medido agora ({url}, nó {node}), só leitura:"
+
+msgid "cluster:"
+msgstr "cluster:"
+
+msgid "none — the node is not in a cluster"
+msgstr "nenhum — o nó não está num cluster"
+
+msgid "resource(s)"
+msgstr "recurso(s)"
+
+msgid "What the cluster offers is a fact about the cluster, not engine support: the backend addresses one node and never picks another (ADR-0049 slice 3)."
+msgstr "O que o cluster oferece é um facto sobre o cluster, não suporte do motor: o backend fala com um nó e nunca escolhe outro (ADR-0049, fatia 3)."
+
+msgid "measure the cluster around the configured Proxmox node — nodes, quorum, shared storage, HA — with read-only requests"
+msgstr "medir o cluster à volta do nó Proxmox configurado — nós, quórum, storage partilhado, HA — só com pedidos de leitura"
+
+# DX-1537 / DX-5506 — vm cloud-init (ADR-0049 slice 2)
+msgid "invalid cloud-init change"
+msgstr "alteração de cloud-init inválida"
+
+msgid "`vm cloud-init` needs `--hostname`, `--user` and/or `--ssh-key`; the hostname has to be a DNS label (letters, digits, '-', at most 63), the user a login name, each key one line. An appliance image does not run cloud-init and is refused."
+msgstr "O `vm cloud-init` precisa de `--hostname`, `--user` e/ou `--ssh-key`; o hostname tem de ser uma etiqueta DNS (letras, dígitos, '-', no máximo 63), o utilizador um nome de login, cada chave uma linha. Uma imagem de appliance não corre cloud-init e é recusada."
+
+msgid "Give at least one of the three, in the form the guest accepts — e.g. `--hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub`."
+msgstr "Dá pelo menos um dos três, na forma que o convidado aceita — por exemplo `--hostname web-1 --ssh-key @~/.ssh/id_ed25519.pub`."
+
+msgid "the VM must be stopped to change its cloud-init"
+msgstr "a VM tem de estar parada para mudar o cloud-init"
+
+msgid "The guest reads cloud-init at boot: a running or paused VM would keep the old hostname and keys until its next reboot, so the verb refuses instead of reporting a change that has not reached the guest."
+msgstr "O convidado lê o cloud-init no arranque: uma VM a correr ou em pausa ficaria com o hostname e as chaves antigas até ao reinício seguinte, por isso o verbo recusa em vez de reportar uma mudança que não chegou ao convidado."
+
+msgid "Run `delonix vm stop <name>`, change it, then `delonix vm start <name>`."
+msgstr "Corre `delonix vm stop <nome>`, muda, e depois `delonix vm start <nome>`."
+
+# vm cloud-init (ADR-0049 slice 2)
+msgid "Change a STOPPED VM's cloud-init — hostname, user, SSH keys — for its next boot"
+msgstr "Muda o cloud-init de uma VM PARADA — hostname, utilizador, chaves SSH — para o próximo arranque"
+
+msgid "Change a STOPPED VM's cloud-init — hostname, user, SSH keys — for its next boot.\n\nRefused while the VM runs or is paused: the guest reads cloud-init at boot. `--ssh-key` REPLACES the keys the VM had; a flag not given keeps its value. On Proxmox the node's config is changed, the cloud-init drive regenerated, and the node's own rendering read back. The local backends refuse it: their seed is an ISO built at create, and a guest only re-runs cloud-init for a new instance id. An appliance image is refused."
+msgstr "Muda o cloud-init de uma VM PARADA — hostname, utilizador, chaves SSH — para o próximo arranque.\n\nRecusado enquanto a VM está a correr ou em pausa: o convidado lê o cloud-init no arranque. O `--ssh-key` SUBSTITUI as chaves que a VM tinha; uma flag não dada mantém o valor. No Proxmox a config do nó é alterada, o drive de cloud-init regenerado, e a renderização do próprio nó relida. Os backends locais recusam: o seed deles é um ISO construído no create, e um convidado só volta a correr o cloud-init com um instance id novo. Uma imagem de appliance é recusada."
+
+msgid "New guest hostname (a DNS label)"
+msgstr "Novo hostname do convidado (uma etiqueta DNS)"
+
+msgid "Account the keys land on"
+msgstr "Conta onde as chaves ficam"
+
+msgid "Authorized public SSH key, `ssh-ed25519 AAAA...` or `@path` to read from a file. Repeatable; replaces the VM's keys"
+msgstr "Chave SSH pública autorizada, `ssh-ed25519 AAAA...` ou `@caminho` para ler de um ficheiro. Repetível; substitui as chaves da VM"
+
+msgid "give a stopped VM a new hostname and replace its SSH keys, for its next boot"
+msgstr "dar a uma VM parada um hostname novo e substituir as chaves SSH, para o próximo arranque"
+
+# DX-6508 — NetworkPolicy scope: vm on a Proxmox cluster (ADR-0052)
+msgid "the Proxmox datacenter firewall is off"
+msgstr "a firewall de datacenter do Proxmox está desligada"
+
+msgid "A `NetworkPolicy` with `scope: vm` asked for rules on a VM of a Proxmox cluster whose datacenter-level firewall is disabled. With it off, no rule of any VM filters anything, so applying the policy would report protection that does not exist (ADR-0052). The engine never turns it on: that also changes what the cluster's own nodes accept."
+msgstr "Um `NetworkPolicy` com `scope: vm` pediu regras numa VM de um cluster Proxmox cuja firewall de datacenter está desligada. Com ela desligada, nenhuma regra de nenhuma VM filtra nada, e aplicar a política anunciaria uma protecção que não existe (ADR-0052). O motor nunca a liga: isso muda também o que os próprios nós do cluster aceitam."
+
+msgid "Enable the firewall at Datacenter level on the cluster (Datacenter › Firewall › Options, or `pvesh set /cluster/firewall/options --enable 1`), after checking the management rules for the nodes, then apply again."
+msgstr "Liga a firewall ao nível de Datacenter no cluster (Datacenter › Firewall › Options, ou `pvesh set /cluster/firewall/options --enable 1`), depois de verificar as regras de gestão dos nós, e aplica outra vez."
+
+# NetworkPolicy scope: vm (ADR-0052)
+msgid "{kind} '{name}' (scope vm) → target '{target}' is not a declared or existing VirtualMachine"
+msgstr "{kind} '{name}' (scope vm) → o alvo '{target}' não é uma VirtualMachine declarada nem existente"
+
+msgid "{kind}/{name}: allowCidrs/fqdnAllowlist/rateLimit are only for scope: network"
+msgstr "{kind}/{name}: allowCidrs/fqdnAllowlist/rateLimit são só para scope: network"
+
+msgid "{kind}/{name}: fromWorkload/toWorkload name an address on this engine's SDN, which a VM filtered by its node's firewall is not on — use from/to with a CIDR"
+msgstr "{kind}/{name}: fromWorkload/toWorkload nomeiam um endereço na SDN deste motor, onde uma VM filtrada pela firewall do seu nó não está — usa from/to com um CIDR"
+
+# The node's providers file (ADR-0054)
+msgid "{path}: apiVersion '{got}' is not one this build reads (expected '{want}')"
+msgstr "{path}: o apiVersion '{got}' não é um que esta build leia (esperado '{want}')"
+
+msgid "{path}: provider type '{type}' is listed twice — one entry per type in this version (two targets of one type are a later phase of ADR-0054)"
+msgstr "{path}: o tipo de provider '{type}' aparece duas vezes — uma entrada por tipo nesta versão (dois alvos do mesmo tipo são uma fase posterior do ADR-0054)"
+
+msgid "{path}: `name: {name}` is reserved — it must equal the type ('{type}') until a node can carry two providers of one type"
+msgstr "{path}: `name: {name}` está reservado — tem de ser igual ao tipo ('{type}') até um nó poder ter dois providers do mesmo tipo"
+
+msgid "{path}: a secret VALUE is never written in this file — use `tokenSecretFile` (a 0600 file) or `secretRef` (a `kind: Secret`), or `passwordFile` for a password"
+msgstr "{path}: o VALOR de um segredo nunca se escreve neste ficheiro — usa `tokenSecretFile` (um ficheiro 0600) ou `secretRef` (um `kind: Secret`), ou `passwordFile` para uma password"
+
+msgid "DELONIX_PROVIDERS_CONFIG names '{path}', which is not a file"
+msgstr "o DELONIX_PROVIDERS_CONFIG nomeia '{path}', que não é um ficheiro"
+
+msgid "the node's providers file could not be read, so there is no default VM provider to use: {err}"
+msgstr "não foi possível ler o ficheiro de providers do nó, por isso não há provider de VM por omissão a usar: {err}"
+
+msgid "warning: {why}"
+msgstr "aviso: {why}"
+
+msgid "warning: '{name}' is the default VM provider, but this process has no configuration for it — `vm create` without --backend will refuse"
+msgstr "aviso: '{name}' é o provider de VM por omissão, mas este processo não tem configuração para ele — o `vm create` sem --backend vai recusar"

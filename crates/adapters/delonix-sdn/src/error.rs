@@ -221,6 +221,22 @@ pub enum Error {
     #[error("{0}")]
     UnsupportedByGatewayProvider(String),
 
+    /// A [`crate::network_zone::NetworkZoneProvider`] registration refused —
+    /// an empty id, or one whose id/alias already belongs to a different
+    /// provider (ADR-0049 addendum, mirrors `GatewayProviderRegistrationRefused`).
+    #[error("{0}")]
+    NetworkZoneProviderRegistrationRefused(String),
+
+    /// `kind: NetworkZone` was applied but nothing registered a
+    /// [`crate::network_zone::NetworkZoneProvider`].
+    #[error("{0}")]
+    NoNetworkZoneProviderConfigured(String),
+
+    /// More than one [`crate::network_zone::NetworkZoneProvider`] is
+    /// registered — `kind: NetworkZone` has no field to disambiguate.
+    #[error("{0}")]
+    AmbiguousNetworkZoneProvider(String),
+
     // ---- not found ----------------------------------------------------
     /// No `NetworkRoute` between the given pair.
     #[error("{0}")]
@@ -355,6 +371,9 @@ impl Error {
             Error::IpNotInSubnet(_) => 1340,
             Error::GatewayProviderRegistrationRefused(_) => 1341,
             Error::UnsupportedByGatewayProvider(_) => 1342,
+            Error::NetworkZoneProviderRegistrationRefused(_) => 1344,
+            Error::NoNetworkZoneProviderConfigured(_) => 1345,
+            Error::AmbiguousNetworkZoneProvider(_) => 1346,
             Error::RouteNotFound(_) => 4301,
             Error::ServiceNotFound(_) => 4302,
             Error::IngressNetworkNotRealized(_) => 4303,
@@ -472,6 +491,16 @@ mod tests {
             ),
             Error::UnsupportedByGatewayProvider(
                 "ensure_alias is not supported by the 'native' gateway provider".into(),
+            ),
+            Error::NetworkZoneProviderRegistrationRefused(
+                "network zone provider 'x' cannot claim the name 'y': it already belongs to 'z'"
+                    .into(),
+            ),
+            Error::NoNetworkZoneProviderConfigured(
+                "kind: NetworkZone has no registered provider".into(),
+            ),
+            Error::AmbiguousNetworkZoneProvider(
+                "kind: NetworkZone has 2 registered providers (a, b)".into(),
             ),
             Error::RouteNotFound("route: a -> b".into()),
             Error::ServiceNotFound("service: default/web".into()),

@@ -1,4 +1,4 @@
-<!-- translated-from: architecture.md sha256:ce0b4cc047eb967f418349a1b81b6096f61bd47fdc80136d63667a1c6ea1c28e -->
+<!-- translated-from: architecture.md sha256:b386f534ba4f3a6df4c7e43ccb89095987972faa8be57403b9127c8a62dd2551 -->
 # Architecture
 
 **Avant de lire :** [Structure du projet](project-structure.md) (où se trouvent les choses), [IaaS et cloud native](iaas-and-cloud-native.md) (la place et les principes du moteur) et [Initiation au cloud native](cloud-native-primer.md) (les mécanismes que les figures nomment).
@@ -446,7 +446,7 @@ Exceptions déclarées (chacune nomme la phase de l'ADR-0040 qui la supprime) :
 - `delonix-mcp` → `delonix-mgmt` — supprimée en **P5**
 - `delonix-oci` → `delonix-state` — supprimée en **P4**
 - `delonix-opnsense` → `delonix-sdn` — supprimée en **P4**
-- `delonix-proxmox` → `delonix-vm` — supprimée en **P4**
+- `delonix-proxmox` → `delonix-sdn` — supprimée en **P4**
 - `delonix-scanner` → `delonix-oci` — supprimée en **P4**
 - `delonix-sdn` → `delonix-state` — supprimée en **P4**
 - `delonix-vm` → `delonix-state` — supprimée en **P4**
@@ -493,8 +493,17 @@ aujourd’hui :
   `delonix-state` (`delonix-linux`, `delonix-vm`, `delonix-sdn`, `delonix-oci`,
   `delonix-volume`) sont des exceptions déclarées jusqu’à ce que la P4 leur donne un port
   `StateRepository` (`scripts/arch_fitness.py`).
-- **Les P4–P7 n’ont pas commencé.** Les exceptions restantes dans le tableau ci-dessus nomment
-  ces phases.
+- **La P4 est en cours ; les P5–P7 n’ont pas commencé.** L’ADR-0044 (accepté le 2026-09-24)
+  décide comment la P4 se fait. Le **#420** a apporté le port `StateRepository<T>`
+  (`crates/foundation/delonix-model/src/ports.rs`), que `delonix-linux` utilise déjà pour
+  `wait_and_record`/`stop`/`persist_stop`/`remove` — d’où son exception `P4a` dans
+  `scripts/arch_fitness.py`, qui ne liste que les sites encore ouverts. Le **#486** a ajouté le port
+  de provider de VM (`VmSpec`, `Extensions`, `Provider`, `VmProvider` dans
+  `crates/contexts/delonix-compute/src/vm_provider.rs`, P4b tranche 1), et `delonix-vm`
+  l’implémente pour les deux backends locaux (`LocalVmProvider`,
+  `crates/adapters/delonix-vm/src/provider.rs`) en réutilisant son `create_with`/`stop`/`start`
+  existant ; déplacer chaque backend dans son propre crate de provider est la P4b tranche 2. Les
+  exceptions restantes dans le tableau ci-dessus nomment la phase qui supprime chacune.
 
 ### Enregistrements, assistants de nœud et état persisté, après la #406
 
@@ -743,7 +752,7 @@ flowchart TB
   delonix_opnsense --> delonix_sdn
   delonix_proxmox --> delonix_compute
   delonix_proxmox --> delonix_model
-  delonix_proxmox --> delonix_vm
+  delonix_proxmox --> delonix_sdn
   delonix_runtime_bin --> delonix_compute
   delonix_runtime_bin --> delonix_linux
   delonix_runtime_bin --> delonix_mgmt
@@ -1030,8 +1039,10 @@ sequenceDiagram
 
 > **Note — les adapters atteignent encore directement les fichiers d’état.** `delonix-linux`,
 > `delonix-vm`, `delonix-sdn`, `delonix-oci` et `delonix-volume` dépendent de `delonix-state`
-> comme exceptions déclarées ; le port `StateRepository` qui les supprime est la P4 de
-> l’ADR-0040, pas encore écrite.
+> comme exceptions déclarées. Le port `StateRepository` qui les supprime existe depuis le #420
+> (`delonix-model/src/ports.rs`, ADR-0044 D6), et pour l’instant seul `delonix-linux` passe par lui
+> pour une partie de son cycle de vie ; les quatre autres ouvrent les stores directement jusqu’à
+> l’arrivée de leur tranche de la P4.
 
 > **Note — `macvlan`/`ipvlan` sont déclarés, pas réalisés.** `network create` les enregistre et
 > rapporte `Realized=False` avec la raison `DriverNotImplemented`

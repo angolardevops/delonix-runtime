@@ -41,8 +41,17 @@
 //!   that may not be configured at all, and auto-detection is not a place to
 //!   make HTTP requests.
 
+pub mod cluster;
 mod error;
+mod network_zone;
 mod sdn;
+pub mod vm_firewall;
+pub use sdn::{
+    validate_fabric_id, validate_ip, validate_mac, DhcpRange, FabricProtocol, IpamKind,
+    SubnetOptions, ZoneOptions,
+};
+
+pub use network_zone::{ProxmoxNetworkZoneProvider, ID as NETWORK_ZONE_PROVIDER_ID};
 
 use delonix_compute::Vm;
 pub use error::{Error, Result};
@@ -50,7 +59,7 @@ pub use error::{Error, Result};
 // used to live in this file did not know the k8s `Gi`/`Mi` suffix the engine
 // tolerates, so `memory: 2Gi` meant 2 GiB on libvirt and Cloud Hypervisor and
 // 1 GiB here — silently, which is the failure this repo treats as its worst.
-use delonix_vm::{mem_mib, Boot, CreateStage, VmBackend, VmConfig};
+use delonix_compute::vm_backend::{mem_mib, Boot, CreateStage, VmBackend, VmConfig};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -158,6 +167,24 @@ pub struct Target {
     pub ca_cert_pem: Option<Vec<u8>>,
 }
 
+/// A VM's power state read from `…/status/current` ([`Client::power_state`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PowerState {
+    /// The node's view: `running` or `stopped`.
+    pub status: String,
+    /// QEMU's own view (`running`, `paused`, `prelaunch`, …), `None` when the
+    /// node did not send it.
+    pub qmpstatus: Option<String>,
+}
+
+impl PowerState {
+    /// Suspended with memory kept: the node says `running`, QEMU says
+    /// `paused`.
+    pub fn is_paused(&self) -> bool {
+        self.qmpstatus.as_deref() == Some("paused")
+    }
+}
+
 /// Bounds the client applies to every call. `Default` is what production
 /// runs with; a test lowers them to make a hang observable in seconds.
 #[derive(Debug, Clone)]
@@ -220,7 +247,7 @@ impl CloudInitPendingKey {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Ticket {
     ticket: String,
     #[serde(rename = "CSRFPreventionToken")]
@@ -376,6 +403,20 @@ enum TaskKind {
     Clone,
     Start,
     Stop,
+    /// `POST …/status/shutdown` — asks the GUEST to power off (ACPI, or the
+    /// agent), unlike [`TaskKind::Stop`], which pulls the plug.
+    Shutdown,
+    /// `POST …/status/reboot` — a guest-driven shutdown followed by a start.
+    Reboot,
+    /// `POST …/status/reset` — a hard reset of the vCPUs; the guest is not
+    /// asked.
+    Reset,
+    /// `POST …/status/suspend` — pauses the vCPUs, memory kept (not the
+    /// `todisk` hibernation).
+    Suspend,
+    /// `POST …/status/resume` — continues a VM paused by [`TaskKind::Suspend`].
+    /// Not [`ProxmoxBackend`]'s `resume`, which STARTS a stopped VM.
+    ResumeSuspended,
     Snapshot,
     Rollback,
     Destroy,
@@ -489,6 +530,34 @@ enum TaskKind {
     /// `DELETE /cluster/sdn/vnets/{vnet}/subnets/{subnet}` — same
     /// PENDING-only caveat.
     DeleteSdnSubnet,
+    /// `POST/PUT/DELETE /cluster/sdn/ipams[/{ipam}]` — an external IPAM
+    /// controller entry. STAGED, and VERIFIED by the node against the
+    /// controller's URL before it is (see [`Client::create_sdn_ipam`]).
+    CreateSdnIpam,
+    UpdateSdnIpam,
+    DeleteSdnIpam,
+    /// `POST/PUT/DELETE /cluster/sdn/dns[/{dns}]` — a DNS controller entry,
+    /// same STAGED-and-verified shape as the IPAM ones.
+    CreateSdnDns,
+    UpdateSdnDns,
+    DeleteSdnDns,
+    /// `POST/PUT/DELETE /cluster/sdn/fabrics/fabric[/{id}]` — a fabric.
+    /// STAGED; measured to answer an empty STRING, never a UPID (see
+    /// [`upid_or_done`]).
+    CreateSdnFabric,
+    UpdateSdnFabric,
+    DeleteSdnFabric,
+    /// `POST/PUT/DELETE /cluster/sdn/fabrics/node/{fabric_id}[/{node_id}]` —
+    /// a node's membership of a fabric. Same shape as the fabric itself.
+    CreateSdnFabricNode,
+    UpdateSdnFabricNode,
+    DeleteSdnFabricNode,
+    /// `POST/PUT/DELETE /cluster/sdn/vnets/{vnet}/ips` — an IPAM
+    /// reservation. NOT staged: acts on the IPAM database at once, against
+    /// the RUNNING subnet (see [`Client::sdn_vnet_ip_add`]).
+    AddSdnIp,
+    UpdateSdnIp,
+    DeleteSdnIp,
     /// `PUT /cluster/sdn` (no body) — reloads the PENDING SDN configuration
     /// onto every node in the cluster. The one SDN call that genuinely forks
     /// a cluster-wide task; every other SDN write above is very likely
@@ -504,6 +573,11 @@ impl TaskKind {
             TaskKind::Clone => "clone",
             TaskKind::Start => "start",
             TaskKind::Stop => "stop",
+            TaskKind::Shutdown => "shutdown",
+            TaskKind::Reboot => "reboot",
+            TaskKind::Reset => "reset",
+            TaskKind::Suspend => "suspend",
+            TaskKind::ResumeSuspended => "resume",
             TaskKind::Snapshot => "snapshot",
             TaskKind::Rollback => "rollback",
             TaskKind::Destroy => "destroy",
@@ -538,6 +612,21 @@ impl TaskKind {
             TaskKind::CreateSdnSubnet => "create-sdn-subnet",
             TaskKind::UpdateSdnSubnet => "update-sdn-subnet",
             TaskKind::DeleteSdnSubnet => "delete-sdn-subnet",
+            TaskKind::CreateSdnIpam => "create-sdn-ipam",
+            TaskKind::UpdateSdnIpam => "update-sdn-ipam",
+            TaskKind::DeleteSdnIpam => "delete-sdn-ipam",
+            TaskKind::CreateSdnDns => "create-sdn-dns",
+            TaskKind::UpdateSdnDns => "update-sdn-dns",
+            TaskKind::DeleteSdnDns => "delete-sdn-dns",
+            TaskKind::CreateSdnFabric => "create-sdn-fabric",
+            TaskKind::UpdateSdnFabric => "update-sdn-fabric",
+            TaskKind::DeleteSdnFabric => "delete-sdn-fabric",
+            TaskKind::CreateSdnFabricNode => "create-sdn-fabric-node",
+            TaskKind::UpdateSdnFabricNode => "update-sdn-fabric-node",
+            TaskKind::DeleteSdnFabricNode => "delete-sdn-fabric-node",
+            TaskKind::AddSdnIp => "add-sdn-ip",
+            TaskKind::UpdateSdnIp => "update-sdn-ip",
+            TaskKind::DeleteSdnIp => "delete-sdn-ip",
             TaskKind::ApplySdn => "apply-sdn",
         }
     }
@@ -569,6 +658,15 @@ impl TaskKind {
             TaskKind::Clone => "qmclone",
             TaskKind::Start => "qmstart",
             TaskKind::Stop => "qmstop",
+            // Read from the UPIDs a live PVE 9.2.2 node answered, not assumed.
+            // `…/status/suspend` forks `qmpause`, NOT the `qmsuspend` its path
+            // suggests — the name `qmsuspend` was the first guess here, and a
+            // lost-answer recovery keyed on it would never have found the task.
+            TaskKind::Shutdown => "qmshutdown",
+            TaskKind::Reboot => "qmreboot",
+            TaskKind::Reset => "qmreset",
+            TaskKind::Suspend => "qmpause",
+            TaskKind::ResumeSuspended => "qmresume",
             TaskKind::Snapshot => "qmsnapshot",
             TaskKind::Rollback => "qmrollback",
             TaskKind::Destroy => "qmdestroy",
@@ -667,6 +765,26 @@ impl TaskKind {
             TaskKind::CreateSdnSubnet => "sdnsubnetcreate",
             TaskKind::UpdateSdnSubnet => "sdnsubnetupdate",
             TaskKind::DeleteSdnSubnet => "sdnsubnetdelete",
+            // NEVER OBSERVED, and measured NOT to fork: a live run against PVE
+            // 9.2.2 (2026-09-25) had every one of these fifteen writes answer
+            // inline — the IPAM/DNS/IP ones with `null`, the fabric ones with an
+            // empty string — so these names are placeholders that keep the
+            // match exhaustive, never something a ledger has recorded.
+            TaskKind::CreateSdnIpam => "sdnipamcreate",
+            TaskKind::UpdateSdnIpam => "sdnipamupdate",
+            TaskKind::DeleteSdnIpam => "sdnipamdelete",
+            TaskKind::CreateSdnDns => "sdndnscreate",
+            TaskKind::UpdateSdnDns => "sdndnsupdate",
+            TaskKind::DeleteSdnDns => "sdndnsdelete",
+            TaskKind::CreateSdnFabric => "sdnfabriccreate",
+            TaskKind::UpdateSdnFabric => "sdnfabricupdate",
+            TaskKind::DeleteSdnFabric => "sdnfabricdelete",
+            TaskKind::CreateSdnFabricNode => "sdnfabricnodecreate",
+            TaskKind::UpdateSdnFabricNode => "sdnfabricnodeupdate",
+            TaskKind::DeleteSdnFabricNode => "sdnfabricnodedelete",
+            TaskKind::AddSdnIp => "sdnipadd",
+            TaskKind::UpdateSdnIp => "sdnipupdate",
+            TaskKind::DeleteSdnIp => "sdnipdelete",
             // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
             // not assumed: `PUT /cluster/sdn` forks `reloadnetworkall`, not the
             // `srvreload` this guess was originally written as.
@@ -802,11 +920,67 @@ pub struct Client {
     vlan: Option<u16>,
     task_timeout: Duration,
     trace_routes: Option<PathBuf>,
+    /// VMs found on another node of the cluster than their handle said
+    /// (ADR-0053 decision 3), `vmid -> node`, learnt in this process. Shared by
+    /// every backend handed this client, so a VM relocated once is addressed on
+    /// its node by the next call without a second search, and the engine can
+    /// persist the new handle (`VmBackend::current_handle`).
+    relocated: std::sync::Mutex<std::collections::HashMap<u32, String>>,
 }
 
 impl Client {
     pub fn connect(target: &Target) -> Result<Self> {
         Self::connect_with(target, ClientOptions::default())
+    }
+
+    /// The node this client addresses.
+    pub fn node(&self) -> &str {
+        &self.node
+    }
+
+    /// The same authenticated client, addressing `node` — another member of
+    /// the target's cluster (ADR-0053 decision 2: an existing VM is addressed
+    /// on the node its handle names). Shares the HTTP pool and the credential,
+    /// takes a copy of the current ticket, and does no I/O: the node's API
+    /// serves `/nodes/<other>/…` for a cluster member. Creating a VM stays on
+    /// the configured node — this is never used to pick one.
+    pub fn for_node(&self, node: &str) -> Result<Client> {
+        validate_node_name(node)?;
+        let ticket = self.ticket.read().map(|t| t.clone()).unwrap_or_default();
+        Ok(Client {
+            http: self.http.clone(),
+            base: self.base.clone(),
+            node: node.to_string(),
+            auth: self.auth.clone(),
+            ticket: std::sync::RwLock::new(ticket),
+            bridge: self.bridge.clone(),
+            vlan: self.vlan,
+            task_timeout: self.task_timeout,
+            trace_routes: self.trace_routes.clone(),
+            relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
+        })
+    }
+
+    /// Where the cluster says VM `vmid` is: `GET /cluster/resources?type=vm`,
+    /// the QEMU entries with that id. `Some(node)` only for exactly ONE match —
+    /// none, or two (an id the cluster should never show twice), is `None`,
+    /// and the caller keeps its original error. Reads where a VM already is;
+    /// never chooses where one should go (ADR-0053 decision 3).
+    pub fn locate_vm(&self, vmid: u32) -> Result<Option<String>> {
+        let body = self.get("/cluster/resources?type=vm")?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "cluster resources")?;
+        Ok(located_node(&w.data, vmid))
+    }
+
+    /// The node a VM was found on in this process, if it moved.
+    fn relocated_node(&self, vmid: u32) -> Option<String> {
+        self.relocated.lock().ok()?.get(&vmid).cloned()
+    }
+
+    fn remember_relocation(&self, vmid: u32, node: &str) {
+        if let Ok(mut m) = self.relocated.lock() {
+            m.insert(vmid, node.to_string());
+        }
     }
 
     pub fn connect_with(target: &Target, opts: ClientOptions) -> Result<Self> {
@@ -845,6 +1019,7 @@ impl Client {
             vlan: target.vlan,
             task_timeout: opts.task_timeout,
             trace_routes: opts.trace_routes,
+            relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
         };
         me.login()?;
         // Prove the credential AND the node name before anything is created:
@@ -973,6 +1148,16 @@ impl Client {
     fn put_form(&self, path: &str, form: &[(&str, &str)]) -> Result<String> {
         let url = self.url(path);
         self.send_authed("PUT", path, || self.http.put(&url).form(form))
+    }
+
+    /// The whole `GET …/status/current` answer: besides the state, the
+    /// `cpus` and `maxmem` of the definition the running VM booted with —
+    /// the node's own proof that a resize reached the guest, not only its
+    /// config file.
+    pub fn current(&self, vmid: u32) -> Result<serde_json::Value> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/status/current", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "status")?;
+        Ok(w.data)
     }
 
     /// The VM's `status` as the node reports it (`running`, `stopped`, …).
@@ -1145,7 +1330,12 @@ impl Client {
         storage: &str,
         gib: u32,
     ) -> Result<()> {
-        let form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        let mut form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        // Extra disks and NICs ride in the SAME create: one task, and either the
+        // VM exists with all of them or it does not exist. A second `POST
+        // …/config` after the create would be a window where the VM is on the
+        // node without the devices the caller asked for.
+        form.extend(extra_devices_form(cfg, &self.bridge)?);
         let form: Vec<(&str, &str)> = form.iter().map(|(k, v)| (*k, v.as_str())).collect();
         self.task(
             ledger,
@@ -1331,6 +1521,87 @@ impl Client {
         Ok(w.data)
     }
 
+    /// The VM's configuration changes the node has accepted but not applied
+    /// (`GET …/pending`): one entry per key, and an entry carrying `pending`
+    /// or `delete` is a change the guest does not have yet. A running VM puts
+    /// a memory or socket change here until its next reboot, which is why a
+    /// cold resize reads it: an empty pending list is the proof the new
+    /// values are the ones the VM will boot with.
+    pub fn pending(&self, vmid: u32) -> Result<Vec<serde_json::Value>> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/pending", self.node))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "pending")?;
+        Ok(w.data)
+    }
+
+    /// Gives a STOPPED VM `vcpus` and `memory_mib` for its next boot — the
+    /// cold resize behind `vm resize` (`vm.resize.cold`).
+    ///
+    /// Through `POST …/config`, the node's asynchronous config API, on the
+    /// same task path as [`Self::configure_clone`]: a UPID is waited on, only
+    /// a `null` is taken as applied inline. `sockets=1` goes with `cores`,
+    /// because the node counts vCPUs as sockets × cores and a clone of a
+    /// template with two sockets would otherwise get twice what was asked.
+    ///
+    /// Then read back, never assumed: the config has to carry the numbers
+    /// sent, and `pending` has to be empty. A VM the node still runs puts the
+    /// change in `pending` instead of applying it, and that is an unexpected
+    /// answer here, not a resize.
+    pub fn resize_hardware(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        vcpus: u32,
+        memory_mib: u64,
+    ) -> Result<()> {
+        let cores = vcpus.max(1).to_string();
+        let mem = memory_mib.to_string();
+        let form: Vec<(&str, &str)> = vec![
+            ("cores", cores.as_str()),
+            ("sockets", "1"),
+            ("memory", mem.as_str()),
+        ];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        let cfg = self.config(vmid)?;
+        let got = (
+            config_u64(&cfg, "cores"),
+            config_u64(&cfg, "sockets").or(Some(1)),
+            config_u64(&cfg, "memory"),
+        );
+        if got != (Some(u64::from(vcpus.max(1))), Some(1), Some(memory_mib)) {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} config after resize has cores/sockets/memory {got:?}, \
+                 expected ({}, 1, {memory_mib})",
+                vcpus.max(1)
+            )));
+        }
+        let left: Vec<String> = self
+            .pending(vmid)?
+            .iter()
+            .filter(|e| e.get("pending").is_some() || e.get("delete").is_some())
+            .filter_map(|e| e.get("key").and_then(|k| k.as_str()).map(str::to_string))
+            .collect();
+        if !left.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} holds the resize as PENDING ({}) — the node applies it \
+                 only at the next boot, so the VM is not resized yet",
+                left.join(", ")
+            )));
+        }
+        Ok(())
+    }
+
     /// The VM's boot disk as the node has it: `(key, bytes)` — `scsi0` and
     /// the bytes its `size=` says. Read from [`Self::config`], so it answers
     /// what the node RECORDED, which is the only size a resize can be judged
@@ -1410,6 +1681,24 @@ impl Client {
                 let size = b.get("size").and_then(|s| s.as_u64()).unwrap_or(0);
                 Some((volid, size))
             })
+            .collect())
+    }
+
+    /// The disk volumes `storage` holds for VM `vmid` (`volid`s), read from
+    /// the same `GET …/storage/{storage}/content` route as
+    /// [`Self::list_backups`], with `content=images`. The node filters by
+    /// `vmid` itself. It is how a caller checks that a destroy took EVERY disk
+    /// with it — a VM gone from `qemu/` with a volume left on the storage is
+    /// space nobody will ever reclaim.
+    pub fn list_images(&self, storage: &str, vmid: u32) -> Result<Vec<String>> {
+        let body = self.get(&format!(
+            "/nodes/{}/storage/{storage}/content?content=images&vmid={vmid}",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "content")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|b| Some(b.get("volid")?.as_str()?.to_string()))
             .collect())
     }
 
@@ -1666,6 +1955,88 @@ impl Client {
         )
     }
 
+    /// Writes a cloud-init intent into a VM's config and bakes it into the
+    /// drive — `vm cloud-init` on this backend — then proves the guest will
+    /// read it from the node's OWN rendering, never from the call's answer.
+    ///
+    /// `POST …/config` (task path) with `ciuser` and `sshkeys` (percent-encoded
+    /// by us, see [`cloud_init_form`]) and `name` for the hostname — the node's
+    /// cloud-init reads the VM name as the hostname, the same thing create and
+    /// `configure_clone` do; then [`Self::cloudinit_regenerate`]. Then read
+    /// back: [`Self::cloudinit_pending`] must have nothing pending, and
+    /// [`Self::cloudinit_dump`] of the user-data must carry the hostname and
+    /// every key. A key missing from the rendering is an unexpected answer,
+    /// whatever the writes said.
+    pub fn update_cloud_init(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        vm_name: &str,
+        intent: &delonix_compute::vm_backend::CloudInitIntent,
+    ) -> Result<()> {
+        let hostname = intent
+            .hostname
+            .as_deref()
+            .filter(|h| !h.is_empty())
+            .unwrap_or(vm_name)
+            .to_string();
+        let user = intent
+            .ci_user
+            .as_deref()
+            .filter(|u| !u.is_empty())
+            .unwrap_or(delonix_compute::vm_backend::DEFAULT_CI_USER)
+            .to_string();
+        let keys = urlencode(&intent.ssh_keys.join("\n"));
+        let mut form: Vec<(&str, &str)> =
+            vec![("name", hostname.as_str()), ("ciuser", user.as_str())];
+        if !intent.ssh_keys.is_empty() {
+            form.push(("sshkeys", keys.as_str()));
+        }
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )?;
+        self.cloudinit_regenerate(ledger, vmid)?;
+        let left: Vec<String> = self
+            .cloudinit_pending(vmid)?
+            .into_iter()
+            .filter(|k| k.is_pending())
+            .map(|k| k.key)
+            .collect();
+        if !left.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid}'s cloud-init drive still has pending keys after regenerate: {}",
+                left.join(", ")
+            )));
+        }
+        let user_data = self.cloudinit_dump(vmid, "user")?;
+        let mut missing: Vec<String> = Vec::new();
+        if !user_data.contains(&format!("hostname: {hostname}")) {
+            missing.push(format!("hostname {hostname}"));
+        }
+        for (i, k) in intent.ssh_keys.iter().enumerate() {
+            if !user_data.contains(k.as_str()) {
+                missing.push(format!("ssh key #{}", i + 1));
+            }
+        }
+        if !missing.is_empty() {
+            return Err(Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid}'s rendered user-data does not carry {}",
+                missing.join(", ")
+            )));
+        }
+        Ok(())
+    }
+
     pub fn start(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
         self.task(
             ledger,
@@ -1696,6 +2067,179 @@ impl Client {
             },
             Some(&|| Ok(self.status_current(vmid)? == "stopped")),
         )
+    }
+
+    /// The VM's power state as the node reports it: `status` (`running`,
+    /// `stopped`) AND `qmpstatus`, QEMU's own view (`running`, `paused`,
+    /// `prelaunch`, …).
+    ///
+    /// Both, because [`Self::status_current`] alone cannot tell a suspended VM
+    /// from a running one: measured on PVE 9.2.2, a VM after
+    /// `…/status/suspend` still answers `status: running`, and only
+    /// `qmpstatus` says `paused`. A stopped VM carries `qmpstatus: stopped`;
+    /// an answer without it is `None`, never guessed.
+    pub fn power_state(&self, vmid: u32) -> Result<PowerState> {
+        let body = self.get(&format!("/nodes/{}/qemu/{vmid}/status/current", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "status")?;
+        let field = |k: &str| w.data.get(k).and_then(|s| s.as_str()).map(str::to_string);
+        let status = field("status").ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: status/current of VM {vmid} carries no `status`: {}",
+                truncate_chars(&body, 200)
+            ))
+        })?;
+        Ok(PowerState {
+            status,
+            qmpstatus: field("qmpstatus"),
+        })
+    }
+
+    /// Asks the GUEST to power off (`POST …/status/shutdown`) — ACPI, or the
+    /// guest agent when the VM has one — instead of pulling the plug like
+    /// [`Self::stop`].
+    ///
+    /// A guest that ignores the request makes the node's task FAIL once
+    /// `timeout` runs out (measured: a VM with no OS answers «VM quit/powerdown
+    /// failed - got timeout»), and that failure is returned, not swallowed:
+    /// «I asked and it did not go down» is not the same answer as «it is
+    /// down». With `force_stop` the node pulls the plug itself after the
+    /// timeout, and the call succeeds with the VM stopped.
+    ///
+    /// `timeout: None` takes the node's own default. A timeout this client
+    /// could not wait out is refused here, before any request.
+    pub fn shutdown(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        timeout: Option<Duration>,
+        force_stop: bool,
+    ) -> Result<()> {
+        let secs = self.power_timeout(timeout, "shutdown")?;
+        let mut form: Vec<(&str, &str)> = Vec::new();
+        if let Some(t) = &secs {
+            form.push(("timeout", t));
+        }
+        if force_stop {
+            form.push(("forceStop", "1"));
+        }
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Shutdown,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/shutdown", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| Ok(self.status_current(vmid)? == "stopped")),
+        )
+    }
+
+    /// Reboots the guest (`POST …/status/reboot`): a guest-driven shutdown
+    /// the node follows with a start. Same failure shape as
+    /// [`Self::shutdown`] without `force_stop` — a guest that ignores ACPI
+    /// makes the task fail after `timeout`, and the VM stays running.
+    ///
+    /// No probe: a rebooted VM and one never touched both read `running`, so
+    /// nothing on the node tells a lost answer's effect apart. A lost answer
+    /// with no task in flight is a plain transport error, the choice
+    /// [`Self::rollback`] makes for the same reason.
+    pub fn reboot(&self, ledger: &Ledger, vmid: u32, timeout: Option<Duration>) -> Result<()> {
+        let secs = self.power_timeout(timeout, "reboot")?;
+        let form: Vec<(&str, &str)> = secs.iter().map(|t| ("timeout", t.as_str())).collect();
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Reboot,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/reboot", self.node),
+                    &form,
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Hard-resets the vCPUs (`POST …/status/reset`) — the guest is not asked,
+    /// the same as the reset button. No probe, for the reason
+    /// [`Self::reboot`] gives.
+    pub fn reset(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Reset,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/reset", self.node),
+                    &[],
+                    true,
+                )
+            },
+            None,
+        )
+    }
+
+    /// Pauses the vCPUs with memory kept (`POST …/status/suspend`) — what
+    /// `vm pause` means on the other backends. Not the `todisk` hibernation,
+    /// which writes the RAM to a storage and needs more permissions; that
+    /// form is not sent.
+    pub fn suspend(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::Suspend,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/suspend", self.node),
+                    &[],
+                    true,
+                )
+            },
+            Some(&|| Ok(self.power_state(vmid)?.is_paused())),
+        )
+    }
+
+    /// Continues a VM paused by [`Self::suspend`] (`POST …/status/resume`).
+    /// Named apart from [`ProxmoxBackend`]'s `resume`, which STARTS a stopped
+    /// VM — two different operations the node happens to share a verb for.
+    pub fn resume_suspended(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        self.task(
+            ledger,
+            vmid,
+            TaskKind::ResumeSuspended,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/status/resume", self.node),
+                    &[],
+                    true,
+                )
+            },
+            Some(&|| {
+                let p = self.power_state(vmid)?;
+                Ok(p.status == "running" && !p.is_paused())
+            }),
+        )
+    }
+
+    /// The `timeout` form value for a guest-driven shutdown/reboot, refused
+    /// when this client would stop waiting before the node's task could end.
+    fn power_timeout(&self, timeout: Option<Duration>, what: &str) -> Result<Option<String>> {
+        let Some(t) = timeout else {
+            return Ok(None);
+        };
+        if t >= self.task_timeout {
+            return Err(Error::InvalidPowerTimeout(format!(
+                "proxmox: a {what} timeout of {}s does not fit inside this client's {}s task \
+                 deadline — give a shorter one, or none for the node's default",
+                t.as_secs(),
+                self.task_timeout.as_secs()
+            )));
+        }
+        Ok(Some(t.as_secs().max(1).to_string()))
     }
 
     /// Takes a snapshot, refusing a name that is already taken as a CONFLICT.
@@ -1881,6 +2425,94 @@ impl Client {
                     .get("enable")
                     .and_then(|v| v.as_u64())
                     == Some(u64::from(enabled)))
+            }),
+        )
+    }
+
+    /// The cluster's DATACENTER-level firewall options (`GET
+    /// /cluster/firewall/options`) — the top switch of the three a VM's rules
+    /// need (datacenter `enable`, the VM's own `enable`, and `firewall=1` on
+    /// its NIC). Measured on PVE 9.2.2: a cluster that never had it turned on
+    /// answers only a `digest`, with no `enable` key at all — which the node
+    /// reads as off.
+    pub fn cluster_firewall_options(&self) -> Result<serde_json::Value> {
+        let body = self.get("/cluster/firewall/options")?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "cluster firewall options")?;
+        Ok(w.data)
+    }
+
+    /// Sets the default verdict of ONE direction of the VM's own firewall
+    /// (`PUT …/firewall/options`, `policy_in`/`policy_out`). `verdict` is
+    /// `ACCEPT`, `DROP` or `REJECT`, validated before anything is sent. The
+    /// probe re-reads the option: the node's own answer, never the call's.
+    pub fn set_firewall_policy(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        direction: &str,
+        verdict: &str,
+    ) -> Result<()> {
+        validate_firewall_direction(direction)?;
+        validate_firewall_action(verdict)?;
+        let key = if direction == "in" {
+            "policy_in"
+        } else {
+            "policy_out"
+        };
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::FirewallOptions,
+            || {
+                self.put_form(
+                    &format!("/nodes/{}/qemu/{vmid}/firewall/options", self.node),
+                    &[(key, verdict)],
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .firewall_options(vmid)?
+                    .get(key)
+                    .and_then(|v| v.as_str())
+                    == Some(verdict))
+            }),
+        )
+    }
+
+    /// Puts `firewall=1` on the VM's `net0`, the NIC switch without which the
+    /// node never routes the VM's traffic through its firewall bridge — rules
+    /// and `enable=1` present, nothing filtered. A NIC that already has it is
+    /// left alone (no request at all). Everything else in the property — the
+    /// MAC included — is sent back as the node has it, so the guest keeps its
+    /// address.
+    pub fn ensure_nic_firewall(&self, ledger: &Ledger, vmid: u32) -> Result<()> {
+        let cfg = self.config(vmid)?;
+        let net0 = cfg.get("net0").and_then(|v| v.as_str()).ok_or_else(|| {
+            Error::UnexpectedAnswer(format!(
+                "proxmox: VM {vmid} has no net0 to put its firewall on"
+            ))
+        })?;
+        let Some(wanted) = vm_firewall::net0_with_firewall(net0) else {
+            return Ok(());
+        };
+        let form = [("net0", wanted.as_str())];
+        self.task_or_done(
+            ledger,
+            vmid,
+            TaskKind::Configure,
+            || {
+                self.post_form(
+                    &format!("/nodes/{}/qemu/{vmid}/config", self.node),
+                    &form,
+                    true,
+                )
+            },
+            Some(&|| {
+                Ok(self
+                    .config(vmid)?
+                    .get("net0")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|n| vm_firewall::net0_with_firewall(n).is_none()))
             }),
         )
     }
@@ -2687,6 +3319,15 @@ impl Client {
     }
 }
 
+/// A numeric config key as the node sends it: a JSON number (`cores`) or a
+/// string (`memory` is a string property since PVE 8, `"2048"`). `None` when
+/// the key is absent or not a number — never zero.
+fn config_u64(cfg: &serde_json::Value, key: &str) -> Option<u64> {
+    let v = cfg.get(key)?;
+    v.as_u64()
+        .or_else(|| v.as_str().and_then(|s| s.trim().parse().ok()))
+}
+
 /// Reads the UPID out of a task-producing answer.
 ///
 /// Every one of these endpoints answers with a task id and not a result —
@@ -2700,7 +3341,12 @@ fn upid_or_done(body: &str, what: &str, null_is_done: bool) -> Result<Option<Str
     if let Some(s) = w.data.as_str().filter(|s| s.starts_with("UPID:")) {
         return Ok(Some(s.to_string()));
     }
-    if null_is_done && w.data.is_null() {
+    // `null` is how the Perl-side SDN/config routes say "applied inline"; the
+    // Rust-side fabrics API (`/cluster/sdn/fabrics/*`, PVE 9) says the same
+    // with an EMPTY STRING — measured against a live 9.2.2 node, `{"data":""}`
+    // on every fabric write. Both mean the same thing to a caller: done, no
+    // task to wait on.
+    if null_is_done && (w.data.is_null() || w.data.as_str() == Some("")) {
         return Ok(None);
     }
     Err(Error::UnexpectedAnswer(format!(
@@ -2900,7 +3546,7 @@ fn truncate_chars(s: &str, max: usize) -> &str {
 /// emoji) is not percent-encoding at all — the server would read a path nobody
 /// wrote. A UPID comes back from the node with the account name inside it, so
 /// the input is not ours to assume ASCII.
-fn urlencode(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {
         match b {
@@ -3513,8 +4159,6 @@ fn refuse_unsupported(cfg: &VmConfig) -> Result<()> {
     add(cfg.tpm, "tpm");
     add(cfg.video.is_some(), "video");
     add(!cfg.boot_order.is_empty(), "bootOrder");
-    add(!cfg.extra_disks.is_empty(), "extraDisks");
-    add(!cfg.extra_nics.is_empty(), "extraNics");
     add(!cfg.libvirt_xml_overlay.is_empty(), "libvirtXmlOverlay");
     add(cfg.libvirt_xml.is_some(), "libvirtXml");
     add(cfg.net_mode.is_some(), "netMode");
@@ -3596,12 +4240,155 @@ fn cloud_init_form(cfg: &VmConfig) -> Vec<(&'static str, String)> {
             cfg.ci_user
                 .as_deref()
                 .filter(|u| !u.is_empty())
-                .unwrap_or(delonix_vm::cloudinit::DEFAULT_CI_USER)
+                .unwrap_or(delonix_compute::vm_backend::DEFAULT_CI_USER)
                 .to_string(),
         ));
         out.push(("sshkeys", urlencode(&cfg.ssh_keys.join("\n"))));
     }
     out
+}
+
+/// The node's device slots an extra disk may take, per bus. Static, so the
+/// create form keeps `&'static str` keys. `scsi0` is the boot disk and `ide2`
+/// the cloud-init drive, so neither is offered.
+const VIRTIO_SLOTS: [&str; 16] = [
+    "virtio0", "virtio1", "virtio2", "virtio3", "virtio4", "virtio5", "virtio6", "virtio7",
+    "virtio8", "virtio9", "virtio10", "virtio11", "virtio12", "virtio13", "virtio14", "virtio15",
+];
+const SCSI_SLOTS: [&str; 30] = [
+    "scsi1", "scsi2", "scsi3", "scsi4", "scsi5", "scsi6", "scsi7", "scsi8", "scsi9", "scsi10",
+    "scsi11", "scsi12", "scsi13", "scsi14", "scsi15", "scsi16", "scsi17", "scsi18", "scsi19",
+    "scsi20", "scsi21", "scsi22", "scsi23", "scsi24", "scsi25", "scsi26", "scsi27", "scsi28",
+    "scsi29", "scsi30",
+];
+const SATA_SLOTS: [&str; 6] = ["sata0", "sata1", "sata2", "sata3", "sata4", "sata5"];
+const IDE_SLOTS: [&str; 3] = ["ide0", "ide1", "ide3"];
+/// `net0` is the primary NIC.
+const NET_SLOTS: [&str; 31] = [
+    "net1", "net2", "net3", "net4", "net5", "net6", "net7", "net8", "net9", "net10", "net11",
+    "net12", "net13", "net14", "net15", "net16", "net17", "net18", "net19", "net20", "net21",
+    "net22", "net23", "net24", "net25", "net26", "net27", "net28", "net29", "net30", "net31",
+];
+/// NIC models the node's QEMU offers under these names.
+const NIC_MODELS: [&str; 5] = ["virtio", "e1000", "e1000e", "rtl8139", "vmxnet3"];
+
+/// Translates `extraDisks`/`extraNics` into the node's own device keys, or
+/// refuses by name what has no meaning on a remote node. Pure.
+///
+/// A disk is a NEW one on the node's storage, `<storage>:<gib>` — the same
+/// shape as the boot disk. A local path, a `cdrom`, a libvirt `target` dev and
+/// `readOnly` are refused: the node cannot open a file on this host, and the
+/// other three are libvirt knobs with no Proxmox equivalent this client sets.
+/// A NIC is `netN=<model>[=<mac>],bridge=<bridge>` on a bridge of the node
+/// (the target's default when none is named); a libvirt `network` or a
+/// `user` NIC has nothing to attach to there. No VLAN tag: the target's tag
+/// describes how `net0` is cabled, and a second NIC on another bridge is
+/// exactly the case where it would be wrong.
+fn extra_devices_form(cfg: &VmConfig, default_bridge: &str) -> Result<Vec<(&'static str, String)>> {
+    let mut out: Vec<(&'static str, String)> = Vec::new();
+    let (mut virtio, mut scsi, mut sata, mut ide) = (0usize, 0usize, 0usize, 0usize);
+    for (i, d) in cfg.extra_disks.iter().enumerate() {
+        let spec = parse_disk_spec(&d.source)?;
+        let DiskSpec::New { storage, gib } = spec else {
+            return Err(Error::InvalidDiskSpec(format!(
+                "proxmox: extraDisks[{i}] '{}' names a template — an extra disk is a fresh \
+                 `<storage>:<gib>`",
+                d.source
+            )));
+        };
+        let mut bad: Vec<&str> = Vec::new();
+        if !matches!(d.device.as_str(), "" | "disk") {
+            bad.push("device (only `disk`)");
+        }
+        if d.target.is_some() {
+            bad.push("target");
+        }
+        if d.read_only {
+            bad.push("readOnly");
+        }
+        if !matches!(d.format.as_str(), "" | "raw" | "qcow2") {
+            bad.push("format (only `raw` or `qcow2`)");
+        }
+        let (slots, used): (&[&'static str], &mut usize) = match d.bus.as_str() {
+            "" | "virtio" => (&VIRTIO_SLOTS, &mut virtio),
+            "scsi" => (&SCSI_SLOTS, &mut scsi),
+            "sata" => (&SATA_SLOTS, &mut sata),
+            "ide" => (&IDE_SLOTS, &mut ide),
+            _ => {
+                bad.push("bus (virtio, scsi, sata or ide)");
+                (&VIRTIO_SLOTS, &mut virtio)
+            }
+        };
+        if !bad.is_empty() {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraDisks[{i}]: {}",
+                bad.join(", ")
+            )));
+        }
+        let key = *slots.get(*used).ok_or_else(|| {
+            Error::UnsupportedField(format!(
+                "the 'proxmox' backend has no free `{}` slot for extraDisks[{i}]",
+                if d.bus.is_empty() {
+                    "virtio"
+                } else {
+                    d.bus.as_str()
+                }
+            ))
+        })?;
+        *used += 1;
+        let mut value = format!("{storage}:{gib}");
+        if !d.format.is_empty() {
+            value.push_str(&format!(",format={}", d.format));
+        }
+        out.push((key, value));
+    }
+    for (i, n) in cfg.extra_nics.iter().enumerate() {
+        if !matches!(n.kind.as_str(), "" | "bridge") {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraNics[{i}]: kind '{}' (a remote node \
+                 has bridges, not libvirt networks or user-mode NICs — use `bridge`)",
+                n.kind
+            )));
+        }
+        let bridge = n
+            .source
+            .as_deref()
+            .map(str::trim)
+            .filter(|b| !b.is_empty())
+            .unwrap_or(default_bridge);
+        validate_bridge_name(bridge)?;
+        let model = if n.model.is_empty() {
+            "virtio"
+        } else {
+            n.model.as_str()
+        };
+        if !NIC_MODELS.contains(&model) {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot honour extraNics[{i}]: model '{model}' (one of {})",
+                NIC_MODELS.join(", ")
+            )));
+        }
+        // The MAC rule is the schema's `mac-addr`, already written once in
+        // `sdn::validate_mac`; only the message names where it came from.
+        let head = match &n.mac {
+            Some(mac) => {
+                sdn::validate_mac(mac).map_err(|_| {
+                    Error::InvalidSdnAddress(format!(
+                        "proxmox: extraNics[{i}] MAC '{mac}' is not XX:XX:XX:XX:XX:XX"
+                    ))
+                })?;
+                format!("{model}={}", mac.to_ascii_uppercase())
+            }
+            None => model.to_string(),
+        };
+        let key = *NET_SLOTS.get(i).ok_or_else(|| {
+            Error::UnsupportedField(format!(
+                "the 'proxmox' backend has no free `net` slot for extraNics[{i}]"
+            ))
+        })?;
+        out.push((key, format!("{head},bridge={bridge}")));
+    }
+    Ok(out)
 }
 
 /// The body of `POST /nodes/<node>/qemu`. Pure, so that "each key goes ONCE"
@@ -3666,13 +4453,31 @@ fn create_form(
     form
 }
 
-/// The vmid out of the handle `boot` stored (`proxmox:<node>:<vmid>`). Pure, so
-/// the "not ours" case is testable without a node.
-fn vmid_from_handle(handle: &str) -> Option<u32> {
-    handle
-        .strip_prefix("proxmox:")
-        .and_then(|r| r.rsplit_once(':'))
-        .and_then(|(_, id)| id.parse().ok())
+/// The one node `/cluster/resources?type=vm` lists QEMU VM `vmid` on, or
+/// `None` for zero or more than one match. Pure.
+fn located_node(entries: &[serde_json::Value], vmid: u32) -> Option<String> {
+    let nodes: Vec<&str> = entries
+        .iter()
+        .filter(|e| e.get("type").and_then(|t| t.as_str()).unwrap_or("qemu") == "qemu")
+        .filter(|e| e.get("vmid").and_then(|v| v.as_u64()) == Some(u64::from(vmid)))
+        .filter_map(|e| e.get("node").and_then(|n| n.as_str()))
+        .collect();
+    match nodes.as_slice() {
+        [one] => Some(one.to_string()),
+        _ => None,
+    }
+}
+
+/// The node and the vmid out of the handle `boot` stored
+/// (`proxmox:<node>:<vmid>`), or `None` for a handle this backend did not
+/// write. Pure.
+fn handle_parts(handle: &str) -> Option<(String, u32)> {
+    let rest = handle.strip_prefix("proxmox:")?;
+    let (node, id) = rest.rsplit_once(':')?;
+    if node.is_empty() {
+        return None;
+    }
+    Some((node.to_string(), id.parse().ok()?))
 }
 
 // ===========================================================================
@@ -3697,20 +4502,59 @@ impl ProxmoxBackend {
         self.client.clone()
     }
 
-    /// The node-side id of a VM this backend created, out of the handle `boot`
-    /// stored (`proxmox:<node>:<vmid>`).
-    ///
-    /// NOT the name: two VMs on a node may share one, and every `qm` call takes
-    /// the id. A record without the handle was not created by this backend —
-    /// saying so beats guessing an id.
-    fn vmid_of(&self, vm: &Vm) -> Result<u32> {
-        vmid_from_handle(&vm.api_socket).ok_or_else(|| {
+    /// The client for the node this VM is on, and its vmid (ADR-0053
+    /// decision 2): the node its handle names — or the node an earlier call in
+    /// this process found it on — instead of the configured node, which is
+    /// only the API entry point and where new VMs are created.
+    fn vm_client(&self, vm: &Vm) -> Result<(std::sync::Arc<Client>, u32)> {
+        let (handle_node, vmid) = handle_parts(&vm.api_socket).ok_or_else(|| {
             Error::NoHandle(format!(
                 "VM '{}' has no Proxmox handle in its record (found {:?}) — it was not created \
                  by this backend",
                 vm.name, vm.api_socket
             ))
-        })
+        })?;
+        let node = self.client.relocated_node(vmid).unwrap_or(handle_node);
+        if node == self.client.node {
+            return Ok((self.client.clone(), vmid));
+        }
+        Ok((std::sync::Arc::new(self.client.for_node(&node)?), vmid))
+    }
+
+    /// Runs `f` against the VM's node, and follows the VM once if it moved
+    /// (ADR-0053 decision 3): when the node answers `NodeNotFound`, one
+    /// `/cluster/resources` read looks for the SAME vmid; found on exactly one
+    /// other node, the move is logged, remembered for this process (and for
+    /// `current_handle`), and `f` runs again there. Otherwise the original
+    /// error stands. It reads where a VM is; it never picks where one goes.
+    fn on_vm<T>(&self, vm: &Vm, f: impl Fn(&Client, u32) -> Result<T>) -> Result<T> {
+        let (c, vmid) = self.vm_client(vm)?;
+        match f(&c, vmid) {
+            Err(Error::NodeNotFound(msg)) => {
+                let Some(found) = self.client.locate_vm(vmid)? else {
+                    return Err(Error::NodeNotFound(msg));
+                };
+                if found == c.node {
+                    return Err(Error::NodeNotFound(msg));
+                }
+                tracing::warn!(
+                    vm = %vm.name,
+                    vmid,
+                    from = %c.node,
+                    to = %found,
+                    "proxmox: the VM is not on the node its record names; the cluster lists it on \
+                     another node — following it"
+                );
+                self.client.remember_relocation(vmid, &found);
+                let moved = if found == self.client.node {
+                    self.client.clone()
+                } else {
+                    std::sync::Arc::new(self.client.for_node(&found)?)
+                };
+                f(&moved, vmid)
+            }
+            other => other,
+        }
     }
 }
 
@@ -3771,6 +4615,22 @@ impl VmBackend for ProxmoxBackend {
         // node's own refusal arrives inside a failed task.
         let spec = parse_disk_spec(disk)?;
         check_fresh_disk_size(&spec, cfg.disk_size_gib)?;
+        // Extra disks/NICs are checked here too, before `next_vmid`: the create
+        // is where they are sent, and a refusal there would come after an id
+        // was asked for. The default bridge does not change whether a NIC is
+        // valid, only where it lands, so any name serves for the check.
+        extra_devices_form(cfg, "vmbr0")?;
+        if matches!(spec, DiskSpec::Template(_))
+            && (!cfg.extra_disks.is_empty() || !cfg.extra_nics.is_empty())
+        {
+            return Err(Error::UnsupportedField(format!(
+                "the 'proxmox' backend cannot add extraDisks/extraNics to a template clone \
+                 ('{disk}'): the template may already hold `scsi1`/`net1`, and writing a slot \
+                 it uses would detach the template's own device without a word. Put the \
+                 devices in the template, or create from `<storage>:<gib>`"
+            ))
+            .into());
+        }
         // The template's config is read only when there is a size to judge:
         // a clone without `diskSize` costs no extra round trip.
         let grow = match (&spec, cfg.disk_size_gib) {
@@ -3845,13 +4705,17 @@ impl VmBackend for ProxmoxBackend {
     }
 
     fn is_running(&self, vm: &Vm) -> bool {
-        let Ok(vmid) = self.vmid_of(vm) else {
-            return false;
-        };
-        self.client
-            .status_current(vmid)
+        self.on_vm(vm, |c, vmid| c.status_current(vmid))
             .map(|s| s == "running")
             .unwrap_or(false)
+    }
+
+    /// The handle the VM is known by after this process found it on another
+    /// node (ADR-0053 decision 3) — read from the shared client, no I/O.
+    fn current_handle(&self, vm: &Vm) -> Option<String> {
+        let (node, vmid) = handle_parts(&vm.api_socket)?;
+        let now = self.client.relocated_node(vmid)?;
+        (now != node).then(|| format!("proxmox:{now}:{vmid}"))
     }
 
     /// The guest's IPv4, asked of the QEMU guest agent.
@@ -3870,12 +4734,11 @@ impl VmBackend for ProxmoxBackend {
     /// permissions" both show up as an empty IP column, and the second one is
     /// worth being able to find.
     fn ip(&self, vm: &Vm) -> Option<String> {
-        let vmid = self.vmid_of(vm).ok()?;
-        let body = self
-            .client
+        let (c, vmid) = self.vm_client(vm).ok()?;
+        let body = c
             .get(&format!(
                 "/nodes/{}/qemu/{vmid}/agent/network-get-interfaces",
-                self.client.node
+                c.node
             ))
             .map_err(|e| {
                 tracing::debug!(vm = %vm.name, error = %e, "proxmox: no address from the guest agent");
@@ -3903,13 +4766,14 @@ impl VmBackend for ProxmoxBackend {
     /// VM destroyed the guest's data on a plain `vm stop`. Freeing everything
     /// is now [`Self::destroy`], which is what `vm rm` calls.
     fn stop(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        if self.is_running(vm) {
-            self.client.stop(&ledger, vmid)?;
-        }
-        Ok(())
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            if c.status_current(vmid)? == "running" {
+                c.stop(&ledger, vmid)?;
+            }
+            Ok(())
+        })?)
     }
 
     /// Powers off AND removes the VM from the node — the record is going away,
@@ -3918,9 +4782,92 @@ impl VmBackend for ProxmoxBackend {
     /// The order matters: a running VM cannot be destroyed, and asking anyway
     /// gets a task failure that reads like a bug.
     fn destroy(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         self.stop(vmdir, vm)?;
-        Ok(self.client.destroy(&Ledger::at(vmdir), vmid)?)
+        let ledger = Ledger::at(vmdir);
+        Ok(self.on_vm(vm, |c, vmid| c.destroy(&ledger, vmid))?)
+    }
+
+    /// `vm pause`: the node's `…/status/suspend`, vCPUs stopped with memory
+    /// kept — the same notion as the libvirt and Cloud Hypervisor backends,
+    /// never the `todisk` hibernation. A task still in flight for the VM is
+    /// waited on first, like every other operation here.
+    fn pause(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        let ledger = Ledger::at(vmdir);
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.suspend(&ledger, vmid)
+        })?)
+    }
+
+    /// `vm unpause`: the node's `…/status/resume` on a suspended VM.
+    fn unpause(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<()> {
+        let ledger = Ledger::at(vmdir);
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.resume_suspended(&ledger, vmid)
+        })?)
+    }
+
+    /// `vm resize` (`vm.resize.cold`): the engine has checked its record, and
+    /// this asks the node too — a record can say `Stopped` about a VM somebody
+    /// started from the node's own UI, and a config change on a running VM
+    /// lands in `pending`, not in the guest. A task still in flight for the VM
+    /// is waited on first, like every other operation here.
+    fn resize_cold(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        vcpus: u32,
+        memory_mib: u64,
+    ) -> delonix_model::Result<()> {
+        let ledger = Ledger::at(vmdir);
+        let (ps, vmid) = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            Ok((c.power_state(vmid)?, vmid))
+        })?;
+        if ps.status != "stopped" {
+            return Err(
+                delonix_compute::vm_error::Error::ResizeNeedsStopped(format!(
+                    "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+                 is stopped: `vm resize` is a cold resize — stop it first (`delonix vm stop {}`)",
+                    vm.name, ps.status, vm.name
+                ))
+                .into(),
+            );
+        }
+        Ok(self.on_vm(vm, |c, _| {
+            c.resize_hardware(&ledger, vmid, vcpus, memory_mib)
+        })?)
+    }
+
+    /// `vm cloud-init`: the engine has checked its record; the node is asked
+    /// too, because a VM started from the node's own UI would read the old
+    /// drive until its next reboot. A task still in flight is waited on first.
+    fn update_cloud_init(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        intent: &delonix_compute::vm_backend::CloudInitIntent,
+    ) -> delonix_model::Result<()> {
+        let ledger = Ledger::at(vmdir);
+        let (ps, vmid) = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            Ok((c.power_state(vmid)?, vmid))
+        })?;
+        if ps.status != "stopped" {
+            return Err(
+                delonix_compute::vm_error::Error::CloudInitNeedsStopped(format!(
+                    "VM '{}' is {} on the Proxmox node (vmid {vmid}) although the record says it \
+                 is stopped: the guest reads cloud-init at boot — stop it first (`delonix vm \
+                 stop {}`)",
+                    vm.name, ps.status, vm.name
+                ))
+                .into(),
+            );
+        }
+        Ok(self.on_vm(vm, |c, _| {
+            c.update_cloud_init(&ledger, vmid, &vm.name, intent)
+        })?)
     }
 
     /// Starts the VM this record already names, instead of creating another.
@@ -3934,16 +4881,24 @@ impl VmBackend for ProxmoxBackend {
     /// `Ok(None)` when the node no longer has that vmid — the VM was removed
     /// outside this engine, and creating one is then the honest answer.
     fn resume(&self, vmdir: &Path, vm: &Vm) -> delonix_model::Result<Option<Boot>> {
-        let Ok(vmid) = self.vmid_of(vm) else {
+        if handle_parts(&vm.api_socket).is_none() {
             // No handle: not created by this backend. Let the caller create.
             return Ok(None);
-        };
-        let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        if !self.client.vm_exists(vmid)? {
-            return Ok(None);
         }
-        self.client.start(&ledger, vmid)?;
+        let ledger = Ledger::at(vmdir);
+        // `vm_exists` answers `false` for a VM that moved — `on_vm` follows a
+        // `NodeNotFound`, so the existence check is the node's own config read.
+        let started = self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.config(vmid)?;
+            c.start(&ledger, vmid)?;
+            Ok(true)
+        });
+        match started {
+            Ok(_) => {}
+            Err(Error::NodeNotFound(_)) => return Ok(None),
+            Err(e) => return Err(e.into()),
+        }
         Ok(Some(Boot {
             pid: None,
             tap: String::new(),
@@ -3955,19 +4910,21 @@ impl VmBackend for ProxmoxBackend {
     }
 
     fn snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.snapshot(&ledger, vmid, name)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.snapshot(&ledger, vmid, name)
+        })?)
     }
 
     fn restore(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.rollback(&ledger, vmid, name)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.rollback(&ledger, vmid, name)
+        })?)
     }
 
     // `_vmdir` porque o Proxmox não tem disco local nosso: os instantâneos
@@ -3975,15 +4932,36 @@ impl VmBackend for ProxmoxBackend {
     // trait quando os verbos passaram a servir uma VM PARADA (v0.52.0), e serve
     // os backends que leem o overlay em disco — este não é um deles.
     fn snapshots(&self, _vmdir: &Path, vm: &Vm) -> delonix_model::Result<Vec<String>> {
-        Ok(self.client.snapshots(self.vmid_of(vm)?)?)
+        Ok(self.on_vm(vm, |c, vmid| c.snapshots(vmid))?)
     }
 
     fn delete_snapshot(&self, vmdir: &Path, vm: &Vm, name: &str) -> delonix_model::Result<()> {
-        let vmid = self.vmid_of(vm)?;
         validate_snapshot_name(name)?;
         let ledger = Ledger::at(vmdir);
-        self.client.settle_pending(&ledger, vmid)?;
-        Ok(self.client.delete_snapshot(&ledger, vmid, name)?)
+        Ok(self.on_vm(vm, |c, vmid| {
+            c.settle_pending(&ledger, vmid)?;
+            c.delete_snapshot(&ledger, vmid, name)
+        })?)
+    }
+
+    /// The node's own per-VM firewall (ADR-0052) — see [`vm_firewall`].
+    fn apply_firewall(
+        &self,
+        vmdir: &Path,
+        vm: &Vm,
+        policy: &delonix_compute::vm_firewall::Policy,
+    ) -> delonix_model::Result<()> {
+        let ledger = Ledger::at(vmdir);
+        Ok(self.on_vm(vm, |c, vmid| vm_firewall::apply(c, &ledger, vmid, policy))?)
+    }
+
+    fn read_firewall(
+        &self,
+        _vmdir: &Path,
+        vm: &Vm,
+        direction: delonix_compute::vm_firewall::Direction,
+    ) -> delonix_model::Result<delonix_compute::vm_firewall::Policy> {
+        Ok(self.on_vm(vm, |c, vmid| vm_firewall::read(c, vmid, direction))?)
     }
 
     /// The address is OBSERVED: it comes from the guest agent
@@ -3997,14 +4975,18 @@ impl VmBackend for ProxmoxBackend {
     }
 }
 
-/// Registers this backend under the name `proxmox`, against `target`.
+/// This backend's registry entry under the name `proxmox`, against `target` —
+/// validated, not yet registered.
 ///
-/// **This is the caller ADR-0008's decision 2 was waiting for.** The registry
-/// takes a closure precisely because a remote backend needs configuration, and
+/// **The composition root registers it** (`delonix_vm::register_backend`),
+/// which is what ADR-0008 decision 2 describes and what lets this crate depend
+/// on the `VmBackend` port in `delonix-compute` without depending on the
+/// adapter that holds the registry (P4b.2, `docs/discovery/61`).
+/// The registry closure is why a remote backend can be registered at all:
 /// `fn() -> Box<dyn VmBackend>` had nowhere to receive an endpoint, a node name
 /// and a credential.
 ///
-/// **Connects once, lazily.** Registering does no I/O — a node that is
+/// **Connects once, lazily.** Nothing here does I/O — a node that is
 /// unreachable costs nothing until somebody selects the backend — and the
 /// authenticated client is then SHARED by every later lookup. Without that,
 /// `vm ls` over ten VMs would authenticate ten times, because the engine builds
@@ -4012,42 +4994,163 @@ impl VmBackend for ProxmoxBackend {
 ///
 /// Never auto-selectable: auto-detection asks `available()`, and the only
 /// honest answer here costs a network round trip to a node nobody named.
-pub fn register(target: Target) -> delonix_model::Result<()> {
-    register_with(target, ClientOptions::default())
-}
-
-/// [`register`] with the client's bounds and trace chosen by the caller — the
-/// composition root, which is where the environment is read.
-pub fn register_with(target: Target, opts: ClientOptions) -> delonix_model::Result<()> {
+pub fn registration(
+    target: Target,
+    opts: ClientOptions,
+) -> delonix_model::Result<delonix_compute::vm_backend::BackendRegistration> {
     // Fail on a malformed target HERE, at registration, rather than at the
     // first `vm create`: the operator is looking at the configuration now.
     validate_target_url(&target.base_url)?;
     validate_node_name(&target.node)?;
 
     let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
-    Ok(delonix_vm::register_backend(
-        delonix_vm::BackendRegistration {
-            id: "proxmox",
+    Ok(delonix_compute::vm_backend::BackendRegistration {
+        id: "proxmox",
+        aliases: &["pve"],
+        auto_selectable: false,
+        report: Box::new(|| capability_report(true)),
+        new: Box::new(move || {
+            let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(c) = slot.as_ref() {
+                return Ok(Box::new(ProxmoxBackend::sharing(c.clone())));
+            }
+            // A failed connect is NOT cached: a node that was down when the
+            // first VM was listed must not stay "down" for the rest of the
+            // process.
+            let c =
+                std::sync::Arc::new(Client::connect_with(&target, opts.clone()).map_err(|e| {
+                    delonix_compute::vm_error::Error::Engine(delonix_model::Error::from(e))
+                })?);
+            *slot = Some(c.clone());
+            Ok(Box::new(ProxmoxBackend::sharing(c)))
+        }),
+    })
+}
+
+/// Registers this Proxmox target's cluster-native SDN as a
+/// `delonix_sdn::network_zone::NetworkZoneProvider` (ADR-0049 addendum) — a
+/// SEPARATE registration from [`registration`]'s `VmBackend` one, with its
+/// own authenticated [`Client`] (Proxmox tickets are cheap to mint, and
+/// sharing one across two registries would tie an unrelated port's lifetime
+/// to this one's). Reuses the SAME [`Target`]/[`Auth`]/[`ClientOptions`]
+/// types — one Proxmox target, two ports, the composition root
+/// (`cmd::network_zone_providers`) reads the same environment for both.
+///
+/// **Nothing here does I/O until the registered factory is actually
+/// selected** — same contract as [`registration`]. `ledger_dir` is where
+/// the task ledger for the cluster-wide `apply_sdn` reload persists
+/// (`<ledger_dir>/proxmox-tasks.json`, via [`Ledger::at`]): the SDN reload
+/// has no VM directory of its own (it is cluster-scoped, not VM-scoped —
+/// see `sdn.rs`'s own `SDN_VMID` sentinel), so the caller hands in the
+/// directory this provider's OWN registry uses instead.
+pub fn register_network_zone_provider(
+    target: Target,
+    opts: ClientOptions,
+    ledger_dir: std::path::PathBuf,
+) -> delonix_model::Result<()> {
+    validate_target_url(&target.base_url)?;
+    validate_node_name(&target.node)?;
+
+    let shared: std::sync::Mutex<Option<std::sync::Arc<Client>>> = std::sync::Mutex::new(None);
+    delonix_sdn::network_zone::register_network_zone_provider(
+        delonix_sdn::network_zone::NetworkZoneProviderRegistration {
+            id: NETWORK_ZONE_PROVIDER_ID,
             aliases: &["pve"],
-            auto_selectable: false,
-            report: Box::new(|| capability_report(true)),
             new: Box::new(move || {
                 let mut slot = shared.lock().unwrap_or_else(|e| e.into_inner());
-                if let Some(c) = slot.as_ref() {
-                    return Ok(Box::new(ProxmoxBackend::sharing(c.clone())));
-                }
-                // A failed connect is NOT cached: a node that was down when the
-                // first VM was listed must not stay "down" for the rest of the
-                // process.
-                let c = std::sync::Arc::new(
-                    Client::connect_with(&target, opts.clone())
-                        .map_err(|e| delonix_vm::Error::Engine(delonix_model::Error::from(e)))?,
-                );
-                *slot = Some(c.clone());
-                Ok(Box::new(ProxmoxBackend::sharing(c)))
+                let client = if let Some(c) = slot.as_ref() {
+                    c.clone()
+                } else {
+                    // A failed connect is NOT cached — same reasoning as
+                    // `registration`: a node down on the first selection
+                    // must not stay "down" for the rest of the process.
+                    let c = std::sync::Arc::new(
+                        Client::connect_with(&target, opts.clone())
+                            .map_err(|e| delonix_sdn::Error::from(e.into_root()))?,
+                    );
+                    *slot = Some(c.clone());
+                    c
+                };
+                Ok(Box::new(ProxmoxNetworkZoneProvider::new(
+                    client,
+                    Ledger::at(&ledger_dir),
+                ))
+                    as Box<dyn delonix_sdn::network_zone::NetworkZoneProvider>)
             }),
         },
-    )?)
+    )
+    .map_err(delonix_model::Error::from)
+}
+
+/// What the Proxmox backend says about the NETWORK half of the capability
+/// catalog (ADR-0050): the node's own per-VM firewall (ADR-0052) and the
+/// cluster SDN that `kind: NetworkZone` drives (ADR-0049 addendum).
+///
+/// A separate report from [`capability_report`] because the catalog files the
+/// firewall under the network kind — the same split the Linux provider has
+/// (`delonix-linux` for compute, `delonix-sdn` for network). Declared, never
+/// probed, for the same reason.
+///
+/// The four firewall rows are `partial`, not `supported`, and the detail says
+/// why: the live case proves the node HOLDS the policy — the three switches,
+/// the default verdict, the rules in order, a hand-made rule untouched — but
+/// no guest in it sends traffic, so "the node filters" is read from the node's
+/// configuration, not measured on a packet.
+pub fn network_capability_report(configured: bool) -> delonix_compute::capability::ProviderReport {
+    use delonix_compute::capability::{
+        Capability as C, CapabilityState as S, HealthStatus, ProviderHealth, ProviderKind,
+        ProviderReport,
+    };
+    let health = if configured {
+        ProviderHealth {
+            status: HealthStatus::Unknown,
+            reason: "NotProbed",
+            message: "a remote provider is not contacted by `provider ls`; the first operation authenticates".to_string(),
+        }
+    } else {
+        ProviderHealth {
+            status: HealthStatus::Unavailable,
+            reason: "NotConfigured",
+            message: "set DELONIX_PROXMOX_URL/_NODE and a credential to register a target"
+                .to_string(),
+        }
+    };
+    ProviderReport::build("proxmox", ProviderKind::Network, configured, health, |c| {
+        match c {
+        C::FirewallPerWorkload => S::Partial { detail: "`NetworkPolicy` `scope: vm` replaces the engine's rules of one direction on the node's own firewall (ADR-0052); the live case reads rules, order and the three switches back — no guest traffic is measured" },
+        C::FirewallDefaultDeny => S::Partial { detail: "`defaultPolicy` becomes the VM's `policy_in`/`policy_out`, written after the rules; read back live, not measured on a packet" },
+        C::FirewallSourceFiltering => S::Partial { detail: "`from`/`to` CIDRs become the rule's `source`/`dest`; `fromWorkload` is refused (an SDN address the VM is not on); read back live, not measured on a packet" },
+        C::FirewallEgressPolicy => S::Partial { detail: "`direction: egress` writes `out` rules and `policy_out`; read back live, not measured on a packet" },
+        C::NetBridge => S::Partial { detail: "`kind: NetworkZone` creates a simple SDN zone and its VNets on the cluster and reloads the SDN (ADR-0049 addendum); a VNet is the node's bridge, not `network create`" },
+        C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted
+        | C::NetIpam | C::NetDns | C::NetRoutesBetweenNetworks | C::NetRateLimit => S::NotImplemented,
+        C::NetStaticIp | C::NetPublishPorts | C::NetNamespaceIsolation | C::NetL7Proxy
+        | C::NetPacketCapture => S::UnsupportedByProvider { reason: "a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it" },
+        C::NetTunnelEgress => S::UnsupportedByProvider { reason: "a tunnel agent runs on this host, not on the node" },
+        C::NetIpv6 => S::NotImplemented,
+        C::ProviderAvailability | C::ResourceReadback | C::Events | C::AsyncOperations
+        | C::VmCreate | C::VmStart | C::VmStop | C::VmDestroy | C::VmRestart | C::VmPause
+        | C::VmResume | C::VmResumeSameIdentity | C::VmClone | C::VmTemplate | C::VmResizeCold
+        | C::VmHotplug | C::VmExtraDisks | C::VmExtraNics | C::VmDiskResize | C::VmPciPassthrough
+        | C::VmTpm | C::VmCpuModel | C::VmCpuPinning | C::VmHugepages | C::VmCloudInit
+        | C::VmRestartPolicyNative | C::VmNamespaceIsolation | C::VmAntispoof | C::VmRawDefinition
+        | C::ContainerLifecycle | C::ContainerExec | C::ContainerLogs | C::ContainerHotReconfigure
+        | C::ContainerResourceLimits | C::ContainerGpuCdi | C::ContainerSeccompCustomProfile
+        | C::ContainerOomDetection | C::PodSharedNetwork | C::PodSharedIpcUts | C::PodSharedPid
+        | C::ContainerImages | C::VmNetworkNat | C::VmNetworkBridge | C::VmNetworkSdn
+        | C::VmStaticIp | C::VolumeLocal | C::VolumeBind | C::VolumeNfs | C::VolumeCifs
+        | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot | C::VolumeProvisionNas
+        | C::StoragePools | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph
+        | C::VmSnapshotDisk | C::VmSnapshotMemory | C::VmSnapshotRestore | C::VmSnapshotDelete
+        | C::VmSnapshotPersistent | C::VmBackupDisk | C::VmBackupQuiesced | C::VmBackupRestore
+        | C::ContainerBackupRestore | C::VmMigrationCold | C::VmMigrationLive | C::VmReplication
+        | C::VmHighAvailability | C::VmConsoleSerial | C::VmConsoleVnc | C::VmGuestAgent
+        | C::VmIpObserved | C::MetricsPrometheus | C::MetricsPerWorkloadNetwork | C::HostHealth
+        | C::HostCapacity | C::TransportVerified | C::CredentialInVault => {
+            S::UnsupportedByProvider { reason: "not a network capability" }
+        }
+    }
+    })
 }
 
 /// What the Proxmox backend says about the capability catalog (ADR-0050).
@@ -4087,22 +5190,22 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::VmStop => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmDestroy => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmRestart => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
-        C::VmPause => S::UnsupportedByProvider { reason: "`…/status/suspend` is not called; refused by name (`unsupported_pause`)" },
-        C::VmResume => S::UnsupportedByProvider { reason: "`…/status/resume` is not called; refused by name" },
+        C::VmPause => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::power_operations_round_trip_through_the_node" },
+        C::VmResume => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::power_operations_round_trip_through_the_node" },
         C::VmResumeSameIdentity => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::cria_arranca_e_destroi_contra_um_no_real" },
         C::VmClone => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_template_clone_gets_the_disk_size_asked_for" },
         C::VmTemplate => S::Partial { detail: "`POST …/template` is a client call (`mark_template`) the live case uses to make its clone source; no engine verb turns a VM into a template" },
-        C::VmResizeCold => S::NotImplemented,
+        C::VmResizeCold => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size" },
         C::VmHotplug => S::NotImplemented,
-        C::VmExtraDisks => S::UnsupportedByProvider { reason: "refused by name (`refuse_unsupported`); ADR-0049 slice 2 maps disks beyond `config`" },
-        C::VmExtraNics => S::UnsupportedByProvider { reason: "refused by name; one `net0` on the target's bridge/VLAN" },
+        C::VmExtraDisks => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it" },
+        C::VmExtraNics => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::extra_disks_and_nics_are_created_with_the_vm_and_go_with_it" },
         C::VmDiskResize => S::Partial { detail: "`PUT …/resize` grows a template clone's boot disk to `diskSize` at create (live case); a shrink is refused by name; no engine verb resizes an existing VM" },
         C::VmPciPassthrough => S::UnsupportedByProvider { reason: "`devices` refused by name: the guest is on another machine" },
         C::VmTpm => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
         C::VmCpuModel => S::UnsupportedByProvider { reason: "refused by name: the node owns the QEMU knobs" },
         C::VmCpuPinning => S::UnsupportedByProvider { reason: "refused by name" },
         C::VmHugepages => S::UnsupportedByProvider { reason: "refused by name" },
-        C::VmCloudInit => S::Partial { detail: "hostname/user/ssh keys map to the node's cloud-init keys through `config`; a `seed` file is refused" },
+        C::VmCloudInit => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it" },
         C::VmRestartPolicyNative => S::UnsupportedByProvider { reason: "the engine's supervisor is not on the node; no policy is set there" },
         C::VmNamespaceIsolation => S::UnsupportedByProvider { reason: "refused before any API call (`vm_namespace_supported`)" },
         C::VmAntispoof => S::RequiresExternalComponent { component: "the node's firewall (`…/firewall`), excluded as administration (ADR-0049 D3)" },
@@ -4586,6 +5689,7 @@ mod tests {
             vlan: None,
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
+            relocated: Default::default(),
         };
         let e = cli.cloudinit_dump(100, "bogus").unwrap_err();
         assert!(e.is_invalid_argument(), "{e}");
@@ -4899,7 +6003,7 @@ mod tests {
             (
                 "volumes",
                 VmConfig {
-                    volumes: vec![delonix_vm::VmVolume {
+                    volumes: vec![delonix_compute::VmVolume {
                         source: "/data".into(),
                         tag: "data".into(),
                         mount_path: "/data".into(),
@@ -5155,6 +6259,7 @@ mod tests {
             vlan,
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
+            relocated: Default::default(),
         };
         let cfg = VmConfig::default();
         assert_eq!(cli(None, None).net0_arg(&cfg), "virtio,bridge=vmbr0");
@@ -5622,17 +6727,48 @@ mod tests {
         // Two VMs on a node may share a name; every `qm` call takes the id.
         // A record with no handle was not created by this backend — saying so
         // beats guessing an id and acting on somebody else's VM.
-        assert!(vmid_from_handle("").is_none());
-        assert!(
-            vmid_from_handle("/run/x.sock").is_none(),
-            "a libvirt/CH record"
+        assert!(handle_parts("").is_none());
+        assert!(handle_parts("/run/x.sock").is_none(), "a libvirt/CH record");
+        assert!(handle_parts("proxmox:pve:").is_none());
+        assert!(handle_parts("proxmox:pve:abc").is_none());
+        assert!(handle_parts("proxmox::101").is_none(), "no node, no handle");
+        // The NODE is read now too (ADR-0053 decision 2): it is the node the
+        // VM is addressed on, not the configured one.
+        assert_eq!(handle_parts("proxmox:pve:101"), Some(("pve".into(), 101)));
+        assert_eq!(handle_parts("proxmox:pve2:7"), Some(("pve2".into(), 7)));
+        // The id is the LAST field; what is left is the node, validated when a
+        // client is built for it (`for_node`), never trusted blindly.
+        assert_eq!(handle_parts("proxmox:a:b:7"), Some(("a:b".into(), 7)));
+    }
+
+    /// `/cluster/resources?type=vm` names ONE node for a vmid, or the lookup
+    /// gives up: zero matches, two matches, and LXC entries with the same id
+    /// all leave the caller's original error standing (ADR-0053 decision 3).
+    #[test]
+    fn a_moved_vm_is_located_only_on_exactly_one_node() {
+        let entries: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+                {"type":"qemu","vmid":100,"node":"pve2","name":"a"},
+                {"type":"qemu","vmid":101,"node":"pve","name":"b"},
+                {"type":"lxc","vmid":102,"node":"pve3"},
+                {"type":"qemu","vmid":103,"node":"pve"},
+                {"type":"qemu","vmid":103,"node":"pve2"}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(located_node(&entries, 100).as_deref(), Some("pve2"));
+        assert_eq!(located_node(&entries, 101).as_deref(), Some("pve"));
+        assert_eq!(
+            located_node(&entries, 102),
+            None,
+            "an LXC container is not a VM"
         );
-        assert!(vmid_from_handle("proxmox:pve:").is_none());
-        assert!(vmid_from_handle("proxmox:pve:abc").is_none());
-        assert_eq!(vmid_from_handle("proxmox:pve:101"), Some(101));
-        // A node name with a colon still yields the id: the parse takes the LAST
-        // field.
-        assert_eq!(vmid_from_handle("proxmox:a:b:7"), Some(7));
+        assert_eq!(
+            located_node(&entries, 103),
+            None,
+            "listed twice: do not guess"
+        );
+        assert_eq!(located_node(&entries, 999), None);
     }
 
     /// O parser contra uma resposta REAL, e não contra uma escrita à mão.
@@ -5660,5 +6796,129 @@ mod tests {
         ))
         .expect("a resposta gravada tem de ser JSON válido");
         assert_eq!(parse_agent_ip(&v).as_deref(), Some("10.0.2.17"));
+    }
+
+    /// `extraDisks`/`extraNics` become the node's device keys, a slot per bus
+    /// in order; what has no meaning on a remote node is refused by name.
+    #[test]
+    fn extra_devices_map_to_node_slots_and_refuse_what_the_node_cannot_open() {
+        use delonix_compute::{ExtraDisk, ExtraNic};
+        let disk = |source: &str, bus: &str| ExtraDisk {
+            source: source.into(),
+            bus: bus.into(),
+            ..Default::default()
+        };
+        let cfg = VmConfig {
+            extra_disks: vec![
+                disk("local-lvm:4", ""),
+                disk("local-lvm:2", "scsi"),
+                disk("local-lvm:1", "virtio"),
+                ExtraDisk {
+                    format: "qcow2".into(),
+                    ..disk("local:3", "sata")
+                },
+            ],
+            extra_nics: vec![
+                ExtraNic::default(),
+                ExtraNic {
+                    kind: "bridge".into(),
+                    source: Some("vmbr1".into()),
+                    model: "e1000".into(),
+                    mac: Some("bc:24:11:00:00:01".into()),
+                },
+            ],
+            ..Default::default()
+        };
+        let f = extra_devices_form(&cfg, "vmbr0").unwrap();
+        assert_eq!(
+            f,
+            vec![
+                ("virtio0", "local-lvm:4".to_string()),
+                ("scsi1", "local-lvm:2".to_string()),
+                ("virtio1", "local-lvm:1".to_string()),
+                ("sata0", "local:3,format=qcow2".to_string()),
+                ("net1", "virtio,bridge=vmbr0".to_string()),
+                ("net2", "e1000=BC:24:11:00:00:01,bridge=vmbr1".to_string()),
+            ]
+        );
+        assert!(extra_devices_form(&VmConfig::default(), "vmbr0")
+            .unwrap()
+            .is_empty());
+
+        let refused = |c: VmConfig| extra_devices_form(&c, "vmbr0").unwrap_err().number();
+        let one_disk = |d: ExtraDisk| VmConfig {
+            extra_disks: vec![d],
+            ..Default::default()
+        };
+        let one_nic = |n: ExtraNic| VmConfig {
+            extra_nics: vec![n],
+            ..Default::default()
+        };
+        assert_eq!(
+            refused(one_disk(disk("/var/lib/x.qcow2", ""))),
+            1522,
+            "a host path"
+        );
+        assert_eq!(refused(one_disk(disk("template:9000", ""))), 1522);
+        for d in [
+            ExtraDisk {
+                device: "cdrom".into(),
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                target: Some("vdb".into()),
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                read_only: true,
+                ..disk("local-lvm:1", "")
+            },
+            ExtraDisk {
+                format: "vmdk".into(),
+                ..disk("local-lvm:1", "")
+            },
+            disk("local-lvm:1", "nvme"),
+        ] {
+            assert_eq!(refused(one_disk(d.clone())), 1524, "{d:?}");
+        }
+        let four_ide = VmConfig {
+            extra_disks: vec![disk("local-lvm:1", "ide"); 4],
+            ..Default::default()
+        };
+        assert_eq!(
+            refused(four_ide),
+            1524,
+            "ide0, ide1, ide3 — ide2 is cloud-init's"
+        );
+        for n in [
+            ExtraNic {
+                kind: "network".into(),
+                ..Default::default()
+            },
+            ExtraNic {
+                kind: "user".into(),
+                ..Default::default()
+            },
+            ExtraNic {
+                model: "ne2k".into(),
+                ..Default::default()
+            },
+        ] {
+            assert_eq!(refused(one_nic(n.clone())), 1524, "{n:?}");
+        }
+        assert_eq!(
+            refused(one_nic(ExtraNic {
+                source: Some("vmbr 1".into()),
+                ..Default::default()
+            })),
+            1520
+        );
+        assert_eq!(
+            refused(one_nic(ExtraNic {
+                mac: Some("bc:24:11".into()),
+                ..Default::default()
+            })),
+            1534
+        );
     }
 }

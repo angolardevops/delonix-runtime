@@ -6308,8 +6308,43 @@ segredo do token em qualquer `{:?}`.
   `<vmdir>/proxmox-tasks.json`, e com `/tmp` uma corrida herdava o livro da anterior. Os
   workers `qmsnapshot`/`qmrollback` foram vistos no nó real, não só no mock.
 
+- **A camada acima das zonas/vnets/subnets do SDN nativo (2026-09-25)**: controladores de IPAM
+  (`/cluster/sdn/ipams`, 6 rotas) e de DNS (`/cluster/sdn/dns`, 5), fabrics e os seus nós
+  (`/cluster/sdn/fabrics/*`, 13, mais as 4 leituras do lado do nó), o `content` de uma zona no
+  nó, os campos `dhcp`/`ipam`/`dns` de uma zona (`ZoneOptions`), o `dhcp-range`/
+  `dhcp-dns-server`/`snat` de uma subnet (`SubnetOptions`) e as reservas de IP
+  (`…/vnets/{vnet}/ips`, 3) — 30 rotas, todas vistas ao vivo num só caso; matriz em **102/675
+  (15,1 %), 99 ao vivo**. Três factos medidos que o schema não diz: (1) **o nó VERIFICA um
+  controlador de IPAM/DNS chamando o URL dele** antes de o guardar (`GET <url>/ipam/aggregates/`
+  com `Authorization: token …` para o NetBox, `GET <url>` com `X-API-Key` para o PowerDNS) — um
+  URL inalcançável é um pedido pendurado, não uma entrada, e por isso o `live.rs` levanta um
+  stub HTTP e dá ao nó `DELONIX_PROXMOX_TEST_CALLBACK_ADDR` para lá chegar; (2) **a API de
+  fabrics (Rust, PVE 9) responde às escritas com `""`**, não `null` — o `upid_or_done` passou a
+  ler as duas como «feito em linha»; (3) **`PUT …/ips` move um MAC para um IP novo**, nunca um
+  IP para um MAC novo — o handler (`Ips.pm`, lido no próprio nó) procura o IP antigo pelo MAC,
+  e chamá-lo ao contrário dá «can't find any subnet for ip » com o IP VAZIO; a primeira versão
+  do teste fez exactamente isso. E o `DELETE …/ips` leva os parâmetros na query string: com
+  corpo o proxy responde 501 antes do handler. O `dhcp-range` vai como
+  `start-address=…,end-address=…` num campo por intervalo (a forma nua é recusada).
+- **Um apply «TASK OK» não é uma rede realizada — e o defeito era nosso.** O `content` da zona
+  respondia `status: error, vnet is not generated` depois de um apply OK: o
+  `proxmox_postinstall.py` do appliance reescrevia o `/etc/network/interfaces` **sem**
+  `source /etc/network/interfaces.d/*`, e o reload do PVE avisava («missing 'source
+  /etc/network/interfaces.d/sdn' directive for SDN support!») e terminava OK sem criar bridge
+  nenhuma. Ou seja, **todos os applies das corridas anteriores (#493, #497) foram aceites e
+  nunca realizados no nó** — os testes só asseguravam o estado pendente e o veredicto da tarefa.
+  Corrigido no script; o nó de laboratório levou a linha à mão, mais `dnsmasq` (necessário ao
+  `dhcp=dnsmasq`; o `frr` já lá estava). O caso novo assere `available` no `content` e a
+  interface `dummy_<fabric>` de pé nas `interfaces` do fabric — é o gate que faltava.
+- **Placeholders com o nome do schema, ou o inventário não conta.** `{fabric_id}`/`{node_id}`
+  (não `{fabric}`/`{node}`) e um `let path = format!(…)` imediatamente antes do envio — o
+  scanner lê o verbo do statement seguinte ao literal, e um `push_str` pelo meio torna a rota
+  «não classificada» e contada como não chamada. O #497 já tinha pago o mesmo com `{id}`.
+
 **Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
-— a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; o
+— a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; um fabric
+com mais de um nó, OSPF, um NetBox/PowerDNS a sério atrás dos controladores e um lease DHCP entregue
+a um convidado ficam por medir; o
 `ip()` pelo agente continua a precisar de um convidado preparado
 (`DELONIX_PROXMOX_TEST_AGENT_VMID`); e o porquê de o lock ficar preso ~25 s depois de um
 `qmstart` num convidado sem SO não foi isolado — só medido.
@@ -7542,3 +7577,38 @@ correr o `critest` num nó) e nada neste binário o consegue derivar: um
 seu envelhecimento. O OCI não tem neste repositório trabalho de conformidade
 nenhum, logo a contagem honesta é zero, e um comando que imprime uma tabela
 vazia não ensina nada.
+
+## A firewall por VM do nó Proxmox é o segundo provider do domínio `firewall` (ADR-0052)
+
+Até aqui o domínio `firewall` do catálogo tinha um só provider: a cadeia nftables do holder
+(`linux`), que só filtra containers. Uma VM num nó Proxmox estava fora de qualquer regra do
+motor. O cliente já falava com a firewall própria de cada VM (#492, #496, testado ao vivo),
+mas nenhum código do motor lhe chamava. Agora `kind: NetworkPolicy` com `scope: vm` põe a
+política na firewall do nó, através de `VmBackend::apply_firewall`/`read_firewall`. Nos outros
+backends estes métodos recusam por nome (DX-1501).
+
+- **Três interruptores, e só um é nosso para ligar.** As regras de uma VM só filtram com o
+  `enable` de DATACENTER, o `enable` da VM e `firewall=1` no `net0`. O motor liga os dois
+  últimos e **recusa com DX-6508** quando o primeiro está desligado, antes de qualquer escrita.
+  Ligá-lo muda o que os nós aceitam, e foi medido: no lab cortou o acesso ao nó (API e ping),
+  porque o `/etc/hosts` do appliance ainda aponta `pve` para o `10.0.2.15` do build e a
+  firewall detectou só `127.0.0.0/8` como rede local. Recuperado pela consola série, com um
+  IPSet `management`. **O defeito do appliance fica por corrigir** (`scripts/appliances/`).
+- **Posse por comentário** `delonix-managed:<n>`: o nó guarda as regras só por posição, e o
+  operador pode acrescentar regras à mão. Uma regra sem a etiqueta nunca é apagada nem conta
+  como deriva. O nó insere no TOPO, por isso as regras escrevem-se ao contrário e ficam por
+  cima das feitas à mão. A política por omissão escreve-se em ÚLTIMO lugar, para um `deny`
+  nunca vigorar antes de os `allow` estarem escritos.
+- **A ordem é significado** só em `scope: vm` (o nó avalia por ordem e a primeira regra que
+  casa ganha), por isso o `plan` compara a lista sem a ordenar. `fromWorkload` é recusado,
+  porque resolve para um endereço da SDN do motor, onde a VM não está.
+- **Provado**: o caso ao vivo `a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back`
+  nos dois ramos (recusa com o datacenter desligado; ciclo completo com ele ligado). Pela CLI:
+  `stack apply`, depois `plan` com código 0; uma mudança no manifesto dá `~` e converge a
+  quente; uma regra apagada à mão no nó dá código 2 e é reposta. A cadeia `tap<vmid>i0-IN` que
+  o `pve-firewall` compilou foi lida uma vez à mão e tinha as regras pela ordem, com `DROP`
+  no fim. **As quatro linhas `firewall.*` ficam `partial`**: nenhum pacote atravessa a VM em
+  teste nenhum.
+- **O perímetro por `/cluster/firewall` NÃO foi feito**: o ADR-0049 D3 exclui essas escritas
+  como administração do provider, e as regras de datacenter guardam os NÓS, não as VMs. Só
+  entrou a leitura `GET /cluster/firewall/options`.

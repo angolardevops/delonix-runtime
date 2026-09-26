@@ -3119,9 +3119,6 @@ fn do_vmtap(
     run("ip", &["link", "set", &tap, "master", &bridge])?;
     run("ip", &["link", "set", &tap, "up"])?;
     if let (Some(ip), Some(ns)) = (ip, namespace) {
-        // `ns` is "default" for an ordinary VM since 2026-09-24 (see
-        // `vmtap_line`): the rule and the `@dlxall` membership below are what
-        // every container gets, whatever its namespace.
         // ANTI-SPOOFING on the VM's tap, for the same reason `do_attach`/
         // `do_attach_extra` have it on a container's veth — and it matters MORE
         // here: a VM runs a guest kernel we do not control, so nothing inside it
@@ -6206,21 +6203,12 @@ pub fn name_hash(s: &str) -> u32 {
 /// older holder keeps serving the overwhelmingly common case unchanged. Only a
 /// genuinely namespaced VM needs the 6-token form — the same compatibility
 /// idiom `attach` and `attach-extra` already use.
-/// The long form goes whenever a lease is derivable — `default` INCLUDED. Until
-/// 2026-09-24 the `default` namespace kept the short form "so an old holder goes
-/// on serving it", and the cost of that was measured in the E2E battery: with no
-/// address on the line, `do_vmtap` installs no anti-spoof rule and joins no set,
-/// so a `default` VM could put any source address on the wire and was absent
-/// from `@dlxall` — the set every cross-namespace drop keys off — while a
-/// `default` CONTAINER gets both from `do_attach`. The holder has accepted the
-/// six-token form since the namespaced VMs of v0.40.0, so sending it for
-/// `default` costs nothing on any holder that also serves those.
 fn vmtap_line(tap: &str, bridge: &str, gateway: &str, ip: Option<&str>, namespace: &str) -> String {
-    match ip {
-        None => format!("vmtap {tap} {bridge} {gateway}"),
-        Some(ip) => format!(
+    match (namespace, ip) {
+        ("default", _) | (_, None) => format!("vmtap {tap} {bridge} {gateway}"),
+        (ns, Some(ip)) => format!(
             "vmtap {tap} {bridge} {gateway} {ip} {}",
-            namespace_isolation_key(namespace)
+            namespace_isolation_key(ns)
         ),
     }
 }
@@ -9710,13 +9698,11 @@ Inter-|   Receive                                                |  Transmit
         assert_eq!(tap[3], super::INGRESS_TABLE);
     }
 
-    /// The short form is for a VM with no derivable lease and nothing else: a
-    /// `default` VM with a lease sends it, so the holder installs the same
-    /// anti-spoof rule and `@dlxall` membership a `default` container gets. The
-    /// previous version of this test asserted the OPPOSITE for `default`, and
-    /// the battery measured what that cost (see `vmtap_line`).
+    /// A VM with nothing to isolate must keep emitting the OLD line, so a holder
+    /// from a previous build goes on serving it. Only the namespaced VM — which
+    /// genuinely needs the new behaviour — requires the new holder.
     #[test]
-    fn vmtap_line_short_only_without_a_lease() {
+    fn vmtap_line_mantem_a_forma_curta_sem_namespace() {
         assert_eq!(
             vmtap_line(
                 "vt01",
@@ -9725,7 +9711,7 @@ Inter-|   Receive                                                |  Transmit
                 Some("10.200.254.42"),
                 "default"
             ),
-            "vmtap vt01 delonix0 10.200.0.1 10.200.254.42 default"
+            "vmtap vt01 delonix0 10.200.0.1"
         );
         // No derivable lease → nothing to register, so the short form again
         // rather than a line with a hole in it.

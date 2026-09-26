@@ -186,6 +186,7 @@ O `scripts/install.sh` faz dois trabalhos separados. Só o primeiro diz respeito
 | AppArmor | perfil para `<dir>/delonix` quando a restrição de userns está activa | sempre (quando a restrição está ligada) |
 | Debian antigo | `kernel.unprivileged_userns_clone=1` quando está a `0` | sempre (quando necessário) |
 | Dependências de VM | libvirt, qemu, ferramentas de cloud-init; Cloud Hypervisor e o seu firmware descarregados do upstream | saltadas com `--no-vm` |
+| Provider de VM por omissão | `providers.yaml` com `defaultProvider: libvirt` (ADR-0054): `/etc/delonix/`, ou `~/.config/delonix/` com `--user`; escrito só se não existir, nunca reescrito | `--vm-provider cloud-hypervisor` muda o default; saltado com `--no-vm` |
 | Afinação do kernel | `/etc/modules-load.d/delonix.conf`, `/etc/sysctl.d/99-delonix.conf` | saltada com `--no-tune` |
 | Delegação de cgroup | drop-in do `user@.service`, só se ainda não estiver delegado | saltada com `--no-delegate` |
 | Aceleradores | CDI da NVIDIA e grupo `render`, só quando há uma GPU | saltados com `--no-gpu` |

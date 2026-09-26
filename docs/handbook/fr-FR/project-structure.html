@@ -512,6 +512,12 @@ chercher, mais certaines parties sont obsolètes ; vérifiez dans le code ce qu�
 <td>Quiconque travaille sur la compatibilité CRI ou API Docker.</td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/cri-conformance.md" target="_blank" rel="noopener"><code>docs/cri-conformance.md</code></a>, <a href="build-and-test.html">Cloner, compiler et tester</a></td>
 </tr>
+<tr>
+<td><code>fuzz/</code></td>
+<td>Cibles <code>cargo-fuzz</code> sur des parseurs écrits à la main alimentés par de l’entrée non fiable (un <code>Dockerfile</code> d’un dépôt cloné, une chaîne de référence d’image). Son propre <code>[workspace]</code>, pour que les flags de build du sanitizer ne touchent jamais celui du principal ; le job CI <code>fuzz</code> fait tourner chaque cible 60s par push/PR.</td>
+<td>Quiconque ajoute un parseur écrit à la main pour de l’entrée contrôlée de l’extérieur.</td>
+<td>M04 de <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/roadmap/13-improvements-traceability.md" target="_blank" rel="noopener"><code>docs/<wbr>roadmap/<wbr>13-improvements-traceability.<wbr>md</code></a></td>
+</tr>
 </tbody>
 </table></div>
 <h2 id="documentation-docs">Documentation (docs/…)<a class="hanchor" href="#documentation-docs" aria-label="#">#</a></h2>
@@ -579,6 +585,12 @@ par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/m
 <td>Ce manuel sous forme de site (<code>en/</code>, <code>pt-AO/</code>, <code>fr-FR/</code>, <code>zh-CN/</code>, <code>index.html</code>), <strong>généré</strong> par <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/dev_docs_site.py" target="_blank" rel="noopener"><code>scripts/<wbr>dev_docs_site.<wbr>py</code></a> depuis <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>. Ne jamais éditer le HTML.</td>
 <td>Régénéré avec <code>python3 scripts/<wbr>dev_docs_site.<wbr>py</code> après un changement dans <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/dev" target="_blank" rel="noopener"><code>docs/dev/</code></a>, et au moment de la release.</td>
 <td><a href="publishing-docs.html">Publier la documentation</a></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
+<td>La matrice de couverture de l’API Proxmox VE (ADR-0049) : <code>api-&lt;ver&gt;.<wbr>routes.<wbr>json</code>, le schéma d’une release nommée extrait du <code>apidoc.js</code> d’un nœud avec sa provenance (date de récupération, sha256), et <code>matrix-&lt;ver&gt;.md</code>, <strong>générée</strong> à partir de lui et des routes que le crate provider appelle. Ne jamais éditer la matrice.</td>
+<td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code> après qu’une route soit ajoutée à <code>delonix-proxmox</code> ; le schéma seulement quand une nouvelle release est mesurée.</td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.md" target="_blank" rel="noopener"><code>docs/<wbr>adr/<wbr>0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.<wbr>md</code></a></td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/releases" target="_blank" rel="noopener"><code>docs/releases/</code></a></td>
@@ -721,6 +733,12 @@ les deux — et attendez-vous à ce que la CI échoue si vous éditez la sortie 
 <td>uniquement les régions <code>dev-docs</code></td>
 <td><code>python3 scripts/<wbr>dev_docs.<wbr>py</code></td>
 <td>job <code>arch fitness</code>, étape <code>python3 scripts/<wbr>dev_docs.<wbr>py --check</code> ; aussi rafraîchi par <code>release.yml</code></td>
+</tr>
+<tr>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/proxmox" target="_blank" rel="noopener"><code>docs/proxmox/</code></a></td>
+<td><code>matrix-9.2.2.md</code></td>
+<td><code>python3 scripts/<wbr>proxmox_api_inventory.<wbr>py docs/<wbr>proxmox/<wbr>api-9.<wbr>2.<wbr>2.<wbr>routes.<wbr>json --markdown &gt; docs/<wbr>proxmox/<wbr>matrix-9.<wbr>2.<wbr>2.<wbr>md</code></td>
+<td>job <code>script tests</code>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/test_proxmox_api_inventory.py" target="_blank" rel="noopener"><code>scripts/<wbr>test_proxmox_api_inventory.<wbr>py</code></a> (<code>test_the_committed_matrix_is_up_to_date</code>)</td>
 </tr>
 <tr>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/docs/handbook" target="_blank" rel="noopener"><code>docs/handbook/</code></a></td>

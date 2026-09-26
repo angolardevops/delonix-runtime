@@ -744,6 +744,8 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
+ "thiserror 2.0.19",
+ "tracing",
 ]
 
 [[package]]
@@ -975,7 +977,7 @@ version = "4.4.0"
 dependencies = [
  "delonix-compute",
  "delonix-model",
- "delonix-vm",
+ "delonix-sdn",
  "rcgen",
  "reqwest 0.12.28",
  "rustls",

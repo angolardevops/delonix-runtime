@@ -1,4 +1,4 @@
-<!-- translated-from: releases-and-stability.md sha256:38c64cb15968ed86136ea555f0d3b7515baa85a8a5e7439fcf65700807c8df37 -->
+<!-- translated-from: releases-and-stability.md sha256:7d575f084b949f5b59b58dec29fb1ba7eb63904aa8514433ec4a2809e13a25e4 -->
 # Releases et stabilité
 
 **À lire avant :** [Flux de contribution](contributing-workflow.md#version-alignment) (le gate de version) et [Publier la documentation](publishing-docs.md) (ce qu'une release régénère).
@@ -63,7 +63,7 @@ aurait publié une release appelée « main ». Ensuite seulement, en un seul 
    quand le CPU de l'hôte le prend en charge.
    Un job `build-arm64` distinct construit nativement les quatre mêmes binaires sur un runner aarch64 (un par
    composant, sans variante `-v3`), et ils sont publiés sous le nom `<name>-aarch64-linux` avec le même
-   `SHA256SUMS`. `install.sh` ne les installe pas encore. Le job ne s'exécute qu'au moment de la release, donc sa
+   `SHA256SUMS`. `install.sh` les installe sur un hôte aarch64 (#447). Le job ne s'exécute qu'au moment de la release, donc sa
    première exécution a été la release v4.2.0 elle-même ; la CI exécute la suite de tests nativement sur arm64
    dans le job `test (arm64)` à chaque PR.
 2. **Régénère le site utilisateur contre ce build de release exact et échoue si `docs/`

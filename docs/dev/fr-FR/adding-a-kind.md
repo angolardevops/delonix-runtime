@@ -1,4 +1,4 @@
-<!-- translated-from: adding-a-kind.md sha256:390b9b778fbc57a84fa46c20c5fbddf6e29ec5a6b7b476e1ed05169ecad6a056 -->
+<!-- translated-from: adding-a-kind.md sha256:b5a2233cec9f575cc201a08988e44f84c483edc92591778fb2b44afc200baaec -->
 # Ajouter un Kind
 
 **À lire avant :** [Conventions de code](coding-conventions.md), [Architecture](architecture.md) et [Les crates](crates.md#delonix-stack) — cette page suppose que vous savez ce que possède `delonix-stack` et pourquoi la planification est pure.
@@ -8,8 +8,11 @@ et ainsi de suite (`delonix api-resources` les liste tous). En ajouter un touche
 simple bras de `match` : la table qui décrit ce qu'EST le Kind, le code qui l'applique, et le
 câblage du réconciliateur qui permet à `stack plan`/`apply` de le traiter comme n'importe quel
 autre Kind. Cette page parcourt cela dans l'ordre, avec un Kind réel — **`Service`** (ADR-0032) —
-comme exemple travaillé de bout en bout, car c'est le Kind ajouté le plus récemment et chaque
-fichier cité ci-dessous est lu depuis l'arbre, pas depuis le souvenir d'une ancienne disposition.
+comme exemple travaillé de bout en bout. Ce n'est pas le Kind le plus récent (`IPPool`,
+`NetworkGateway`, `NetworkZone` et `RuntimePolicy` sont venus après), mais c'est celui qui
+parcourt tous les chemins à la fois : primaire, convergent, supprimable, avec namespace et doté
+de son propre registre. Chaque fichier cité ci-dessous est lu depuis l'arbre, pas depuis le
+souvenir d'une ancienne disposition.
 
 ## La table unique à laquelle un Kind doit répondre
 
@@ -37,6 +40,7 @@ KindFacts {
     domain: Domain::NetConnectivity,
     form: Form::Primary,
     in_stack: true,
+    stack_group: "services",
     converges: true,
     teardown: true,
     namespaced: Namespaced::Always,
@@ -55,21 +59,52 @@ Chaque champ est une décision, pas une formalité :
 | `domain` | Le domaine d'action, affiché dans la colonne `DOMAIN` de `stack ls`/`plan --fields`. Les trois de réseau sont séparées volontairement : `NetConnectivity` répond « un chemin existe-t-il », `NetPolicy` répond « le trafic y est-il permis » — les fusionner cacherait que `NetworkRoute` ouvre un chemin tandis que `FirewallPolicy` décide de laisser le trafic le traverser. | Un domaine qui répond à une question différente de celle sur laquelle le Kind agit réellement. |
 | `form` | Ce que devient un document de ce Kind : `Primary` (son propre apply, survit au load), `Sugar(cible)` (réécrit vers un autre Kind au moment du load, disparaît), `Aggregate` (se développe dans les documents qu'il contient, comme `Stack`), `Compat(cible)` (un schéma étranger — `Ingress` est `networking.k8s.io/v1` — compilé sur le mécanisme d'un autre Kind, et contrairement à `Sugar` il *survit* au load), ou `Sunset(cible)` (toujours primaire, survit au load, mais un successeur est annoncé ; utilisé quand réécrire changerait silencieusement ce que le moteur *fait* — `Container` ne peut pas être abaissé en `Pod` à un seul membre car un Pod construit toujours un netns partagé, ce qui est une forme d'exécution différente). | Choisir `Sugar` pour quelque chose qui doit garder son propre apply, ou l'inverse. |
 | `in_stack` | Si `stack apply` s'en occupe du tout. **Les lignes avec `in_stack: true` doivent rester un préfixe contigu de la table** — `destroy` dérive son ordre de démontage en inversant l'ordre du stack, donc une ligne placée après un Kind hors stack change l'ordre d'apply sans que personne n'édite un « ordre » nulle part. Un test (`os_kinds_do_stack_sao_um_prefixo_contiguo`) impose ceci. | Un Kind appliqué hors de l'ordre de dépendance, ou un Kind de procédure distante comme `KubernetesCluster` (SSH contre des hôtes qui existent déjà, pas une ressource locale) câblé par erreur dans le cycle. |
+| `stack_group` | La clé d'un `spec` de `kind: Stack` qui contient les documents de ce Kind (`services:`), ou `""` quand il ne peut pas être regroupé. Cette colonne gouverne l'expansion : `expand_stack`, le schéma, l'avertissement de champ inconnu et la documentation générée la lisent tous, et il n'existe pas de seconde liste de groupes (voir [Le groupe du Stack](#the-stack-group) ci-dessous). Ce n'est pas la même question que `in_stack` — `Workload` et `Dependency` sont abaissés au load, donc ils ne sont pas appliqués en tant que tels, et pourtant ce sont deux choses qu'on écrit à l'intérieur d'un Stack. | Un Kind dont `stack apply` s'occupe mais qu'on ne peut pas mettre dans un Stack — ce qui est arrivé à `NetworkRoute`, `NetworkAccessRule`, `Service` et `App` tant que la liste des groupes était écrite à la main. |
 | `converges` | Si un champ *modifié* est réellement appliqué, par opposition à « garantir présent » seulement. `false` est légitime — l'état de `Secret` ce sont des valeurs chiffrées qu'un plan ne déchiffrera pas pour comparer — mais il faut une raison (voir `not_converged_reason` ci-dessous) ; une excuse générique fait échouer un test. | Un Kind qui rapporte `!` sur chaque plan avec une raison qui se lit comme « personne n'y est arrivé » alors que la vérité est une propriété de la ressource. |
 | `teardown` | Si `destroy_one` peut le retirer, pour que `--prune` et `destroy` puissent le promettre. Un test (`so_um_kind_convergente_tem_teardown`) refuse un Kind avec `teardown: true` et `converges: false` — promettre de purger quelque chose que le plan ne peut même pas représenter comme modifié. | `--prune` promettant un retrait et `destroy_one` refusant à mi-course, après que des Kinds antérieurs dans l'ordre de démontage aient déjà disparu. |
 | `namespaced` | `Never`, `Always`, ou `PerDocument`. Pas un `bool` — `Volume` a réellement trois réponses : aucune pour un volume simple, réelle pour un avec un bloc `share:` ; le modéliser comme `true` avertirait « namespace sans effet » sur chaque volume ordinaire, et comme `false` avertirait la même chose, à tort, sur un partage dont le namespace décide dans quel répertoire vivent ses données. | Un avertissement de namespace qui contredit ce que fait réellement le propre `apply` du Kind avec le champ. |
 | `presence` | Comment `stack ls`/`wait` apprennent si la ressource est là : `Registry` (un store répond oui/non), `Derived` (calculé à partir d'autre chose — un Pod est ses membres étiquetés), `Declarative` (rien à relire ; la ressource est une directive appliquée à une cible, et `presence()` répond `-`, ce qui n'est *pas* « absent »), ou `NotObservable` (n'atteint jamais `presence()` — ne survit pas au load, ou n'est pas du tout une ressource locale). | `NetworkRoute` n'avait autrefois aucune branche dans `presence()` et tombait dans `_ => ("?", "unsupported kind")` — affiché par `ls`/`describe`, et lu par `wait` comme éternellement en attente. |
 
 La ligne de `Service` se lit, en une phrase : appliqué par le stack, juste après les Kinds de
-calcul qu'il sélectionne ; a un chemin réel (`NetConnectivity`) ; primaire ; converge sans
-recréer ; peut être démonté ; toujours namespaced ; et un vrai registre est derrière.
+calcul qu'il sélectionne ; regroupé sous `services:` dans un Stack ; a un chemin réel
+(`NetConnectivity`) ; primaire ; converge sans recréer ; peut être démonté ; toujours
+namespaced ; et un vrai registre est derrière.
+
+## Le groupe du Stack
+
+Un Kind avec `in_stack: true` doit avoir un `stack_group`, et quatre tests dans `kinds.rs`
+tiennent la colonne en place (ADR-0045) :
+
+- **`every_kind_applied_by_the_stack_has_a_group`** — rien de ce que le stack applique ne peut
+  manquer à `kind: Stack`.
+- **`a_kind_without_a_group_says_why`** — une ligne avec `stack_group: ""` a besoin d'une entrée
+  dans `stack_group_absent_reason` (`Stack` lui-même, `KubernetesCluster`), et une ligne qui a un
+  groupe ne doit pas en avoir.
+- **`a_group_key_is_unique_and_no_alias_shadows_it`** — deux Kinds sous une même clé fusionneraient
+  leurs enfants et donneraient à l'un d'eux la mauvaise spec.
+- **`a_group_is_the_plural_of_its_kind`** — la clé est le pluriel en lowerCamelCase
+  (`networkRoutes` pour `NetworkRoute`), pour que personne n'ait à la chercher. Seules trois clés
+  plus anciennes sont dispensées (`ingress`, `vms`, `firewallPolicies`), car renommer un groupe
+  casse chaque Stack déjà publié.
+
+Le groupe doit ensuite être prouvé de bout en bout, dans `bins/delonix-runtime-bin/src/cmd/` :
+
+- `manifest.rs`, **`stack_group_sample`** — le `spec` minimal d'un enfant du groupe et le Kind
+  qu'il devient ; `every_stack_group_loads` parcourt chaque groupe et échoue sur un groupe sans
+  échantillon.
+- **`examples/stack.yaml`** — doit mentionner le groupe ; `the_stack_example_names_every_group`
+  échoue sinon. Ce fichier est aussi ce qu'affiche la page Kinds du site utilisateur.
+- `schema.rs`, **`every_stack_group_is_typed_against_its_kinds_own_spec`** — les éléments du groupe
+  sont typés contre la propre spec du Kind, donc le Kind a besoin de sa branche `TYPED_KINDS`
+  (section suivante) avant que son groupe puisse être validé.
 
 ## Le type de spec et le schéma
 
 Un Kind avec une spec de manifeste typée (la plupart) a besoin d'une struct
 `#[derive(Deserialize, Serialize, JsonSchema)]` — `ServiceSpec` pour cet exemple, dans
 `bins/delonix-runtime-bin/src/cmd/service.rs` — et d'une branche dans `TYPED_KINDS`, dans
-`bins/delonix-runtime-bin/src/cmd/schema.rs`. Cette constante alimente `delonix manifest schema` et
+`bins/delonix-runtime-bin/src/cmd/schema.rs`, plus le bras correspondant qui nomme la struct pour
+`manifest_schema`. Cette constante alimente `delonix manifest schema` et
 `delonix explain <Kind>.<champ>`, tous deux générés depuis la même struct (ADR-0007), afin que le
 schéma publié ne puisse jamais diverger de ce que le code accepte réellement. Laisser un Kind de
 côté est un état réel et autorisé — `Storage` et `ShareVolume` n'ont pas de schéma exprès, car ils
@@ -79,6 +114,27 @@ donne la redirection spécifique, et `todo_kind_conhecido_tem_schema_ou_dica` (d
 fait échouer le build si un Kind que la table connaît n'est ni dans `TYPED_KINDS` ni doté d'un
 indice. Le message générique (« no typed schema for X ») se lit comme un bug du manifeste ;
 l'indice dit que c'est une propriété du Kind.
+
+Deux autres endroits lisent la spec, tous deux dans `bins/delonix-runtime-bin/src/cmd/manifest.rs` :
+
+- **`filled_spec`** — un bras appelant le `spec_with_defaults(doc)` du Kind, l'aller-retour par la
+  struct typée que `stack apply --dry-run` et `manifest render` impriment avec chaque valeur par
+  défaut remplie.
+- **`spec_fields_for`** — un bras renvoyant la liste `*_SPEC_FIELDS` du Kind, ce contre quoi
+  `warn_unknown_fields` vérifie un document. Le `additionalProperties: false` du schéma prend ses
+  clés acceptées dans la même liste, donc une faute de frappe dans un nom de champ est attrapée
+  aux deux endroits.
+
+**Régénérez ensuite le schéma publié**, car c'est un fichier qu'un éditeur va chercher, pas une
+copie que quelqu'un tient à jour à la main :
+
+```bash
+delonix manifest schema > docs/schema/v1/delonix.json
+```
+
+`o_schema_publicado_esta_em_dia_com_o_codigo` (dans `schema.rs`) échoue tant que le fichier n'est
+pas exactement ce que génère le binaire. Utilisez le binaire construit depuis votre arbre
+(`target/release/delonix` ou `cargo run -p delonix-runtime-bin --`), pas celui de votre `PATH`.
 
 ## Câbler le Kind dans le réconciliateur
 
@@ -162,6 +218,30 @@ client demandant le nom). Deux tests protègent spécifiquement cette colonne :
   seul signe de disponibilité, donc un manifeste avec *n'importe quel* Kind déclaratif épuisait
   tout le `--timeout` en attendant un marqueur que ce Kind ne peut jamais produire.
 
+## Les verbes génériques et `drift`
+
+`delonix get`/`describe`/`delete <pluriel>` routent par Kind à travers trois listes dans
+`bins/delonix-runtime-bin/src/cmd/verbs.rs` — `GET_ROUTES`, `DESCRIBE_ROUTES` et
+`DELETE_ROUTES` — plus un bras par verbe qui appelle les propres `cmd_ls`, `cmd_describe` et
+`remove_for_replace` du Kind. Un Kind qui ne peut pas y répondre écrit l'obstacle dans
+`no_verb_reason` à la place (`Stack` se lit depuis un fichier, `Workload` est abaissé au load, …).
+Sachez ce que le portail fait et ne fait pas :
+`a_kind_never_both_routes_and_claims_it_cannot` **échoue** seulement quand un Kind à la fois route
+et prétend ne pas le pouvoir ; un Kind qui n'est dans aucune des deux listes ne produit qu'une
+ligne `not wired yet: …` sur stderr pendant l'exécution des tests, et `delonix get <pluriel>`
+répond « not wired yet » à l'utilisateur. Lisez cette ligne ; le build ne vous arrêtera pas.
+
+`delonix drift` compare le tampon `last-applied` avec ce que détient la machine, et la plupart des
+Kinds peuvent être énumérés depuis leur propre store. Si votre `actual()` a besoin des documents
+analysés pour répondre — le nœud ne tient aucun registre qui liste le Kind tout seul, comme une
+`NetworkPolicy` qui vit sous forme de règles nft sur une cible — ajoutez-le à `DOC_SCOPED` dans
+`bins/delonix-runtime-bin/src/cmd/drift.rs`. `doc_scoped_matches_the_stack_wiring` lit `stack.rs`
+(le site d'appel **et** la signature de `actual`) et échoue si la liste et le câblage sont en
+désaccord ; un module qui reçoit `docs` et les ignore (`fn actual(_docs: …)`) n'a pas sa place
+dans la liste.
+
+## Namespaces et complétion
+
 Si le Kind est namespaced (`namespaced != Namespaced::Never`), il lui faut aussi une entrée dans
 `NAMESPACE_SOURCES` (`bins/delonix-runtime-bin/src/cmd/complete.rs`) — soit `NsSource::Store(fn)`
 lisant le propre store du Kind, soit `NsSource::Via("AutreKind — raison")` quand le namespace
@@ -174,18 +254,31 @@ locataire dont la seule ressource serait le nouveau Kind.
 
 Pour un Kind qui se comporte comme `Service` (primaire, converge, a un démontage, namespaced) :
 
-1. `kinds.rs` — un `pub const` nommé, et une ligne `KindFacts`.
-2. Une struct de spec avec `JsonSchema`, et une branche dans `TYPED_KINDS` (`schema.rs`) — ou
-   une entrée dans `untyped_hint` expliquant pourquoi pas.
-3. `stack.rs` — des branches dans `desired_of`, `actual_of`, `converge_and_stamp`, `stamp_all`,
+1. `kinds.rs` — un `pub const` nommé et une ligne `KindFacts`, y compris son `stack_group` (ou une
+   entrée dans `stack_group_absent_reason`).
+2. Une struct de spec avec `JsonSchema` ; une branche dans `TYPED_KINDS` et dans `manifest_schema`
+   (`schema.rs`) — ou une entrée dans `untyped_hint` expliquant pourquoi pas.
+3. `manifest.rs` — un bras dans `filled_spec` (`spec_with_defaults`), un bras dans
+   `spec_fields_for`, et un échantillon dans `stack_group_sample` ; le groupe dans
+   `examples/stack.yaml`.
+4. `stack.rs` — des branches dans `desired_of`, `actual_of`, `converge_and_stamp`, `stamp_all`,
    `destroy_one`, `presence`, et une couche dans `run_layers` appelant le propre `apply(docs)` du
    Kind.
-4. `reconcile.rs` — une entrée dans `hot_fields` nommant les champs qui convergent à chaud.
-5. Si le Kind ne converge pas ou ne peut pas être démonté : une phrase spécifique dans
+5. `reconcile.rs` — une entrée dans `hot_fields` nommant les champs qui convergent à chaud.
+6. Si le Kind ne converge pas ou ne peut pas être démonté : une phrase spécifique dans
    `not_converged_reason` / `no_teardown_reason` (`stack.rs`).
-6. Si namespaced : une entrée dans `NAMESPACE_SOURCES` (`complete.rs`).
-7. `cargo test -p delonix-runtime-bin -p delonix-stack` — les tests nommés ci-dessus sont ce qui
-   attrape une étape sautée, pas un relecteur lisant le diff à l'œil.
+7. `verbs.rs` — le Kind dans `GET_ROUTES`/`DESCRIBE_ROUTES`/`DELETE_ROUTES` avec ses bras, ou une
+   raison dans `no_verb_reason`.
+8. `drift.rs` — `DOC_SCOPED`, uniquement si `actual()` a réellement besoin des documents.
+9. Si namespaced : une entrée dans `NAMESPACE_SOURCES` (`complete.rs`).
+10. Chaque nouvelle chaîne visible par l'utilisateur en anglais dans le code et traduite dans
+    `bins/delonix-runtime-bin/data/pt.po` ; un nouveau code d'erreur dans le dictionnaire
+    `DX-CDNN` (`crates/foundation/delonix-model/src/codes.rs`) a lui aussi besoin de son texte PT
+    (`every_dictionary_text_has_a_portuguese_translation`). Lancez `python3 scripts/lang_ratchet.py`.
+11. `delonix manifest schema > docs/schema/v1/delonix.json` avec le binaire de l'arbre, puis
+    `python3 docs/gen.py <ce binaire>` pour que la page Kinds du site utilisateur suive.
+12. `cargo test -p delonix-runtime-bin -p delonix-stack` — les tests nommés ci-dessus sont ce qui
+    attrape une étape sautée, pas un relecteur lisant le diff à l'œil.
 
 Un Kind qui est `Sugar`/`Aggregate` (réécrit ou développé au load, comme `Workload` ou `Stack`)
 saute la plupart de tout cela : `um_kind_que_baixa_para_outro_nao_pertence_ao_ciclo_do_stack`

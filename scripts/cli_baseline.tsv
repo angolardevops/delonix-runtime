@@ -217,6 +217,7 @@
 ~	vm apply
 →	vm bridge
 ~	vm build
+~	vm cloud-init
 =	vm console
 ~	vm convert
 ~	vm create
@@ -231,6 +232,7 @@
 ~	vm pull
 ~	vm push
 ~	vm reach
+~	vm resize
 =	vm restart
 =	vm snapshot create
 =	vm snapshot ls

@@ -800,14 +800,14 @@
         },
         "scope": {
           "default": null,
-          "description": "`container` (default) or `network`. In `network` (only `Egress`), the `target`\nis a NETWORK NAME and the per-network egress policy + CIDR/FQDN allowlist +\nL4 rate-limit apply — not per-container L4 rules.",
+          "description": "`container` (default), `network` or `vm`. In `network` (only `Egress`), the\n`target` is a NETWORK NAME and the per-network egress policy + CIDR/FQDN\nallowlist + L4 rate-limit apply — not per-container L4 rules. In `vm`, the\n`target` is a VM NAME and the rules land on the firewall of the node the\nVM runs on — today a Proxmox node; any other backend refuses (ADR-0052).",
           "type": [
             "string",
             "null"
           ]
         },
         "target": {
-          "description": "`container` (default): container name. `network`: network name.",
+          "description": "`container` (default): container name. `network`: network name. `vm`: VM name.",
           "type": "string"
         }
       },
@@ -1417,6 +1417,20 @@
           ]
         },
         "wg_ip": {}
+      },
+      "type": "object"
+    },
+    "NetworkZoneSpecDoc": {
+      "additionalProperties": false,
+      "description": "`spec` of `kind: NetworkZone`.",
+      "properties": {
+        "vnets": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/VNetSpecInput"
+          },
+          "type": "array"
+        }
       },
       "type": "object"
     },
@@ -2596,6 +2610,39 @@
           },
           "type": "array"
         },
+        "networkZones": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "annotations": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "labels": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "namespace": {
+                "type": "string"
+              },
+              "spec": {
+                "$ref": "#/$defs/NetworkZoneSpecDoc"
+              }
+            },
+            "required": [
+              "name"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
         "networks": {
           "items": {
             "additionalProperties": false,
@@ -3041,6 +3088,24 @@
       "required": [
         "provider",
         "localPort"
+      ],
+      "type": "object"
+    },
+    "VNetSpecInput": {
+      "properties": {
+        "alias": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
       ],
       "type": "object"
     },
@@ -4079,6 +4144,31 @@
       "if": {
         "properties": {
           "kind": {
+            "const": "NetworkZone"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "properties": {
+          "apiVersion": {
+            "enum": [
+              "networking.delonix.io/v1alpha1",
+              "delonix.io/v1"
+            ]
+          },
+          "spec": {
+            "$ref": "#/$defs/NetworkZoneSpecDoc"
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
             "const": "Service"
           }
         },
@@ -4234,6 +4324,7 @@
         "NetworkGateway",
         "NetworkPolicy",
         "NetworkRoute",
+        "NetworkZone",
         "Pod",
         "RuntimePolicy",
         "Secret",

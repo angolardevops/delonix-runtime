@@ -26,10 +26,7 @@ pub use error::{Error, Result};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-/// The user the golden image creates at build time (`sudo` NOPASSWD), and the
-/// account everything else here assumes is the login target — the serial
-/// autologin below and `cluster kubeadm`'s SSH user.
-pub const DEFAULT_CI_USER: &str = "delonix";
+pub use delonix_compute::vm_backend::DEFAULT_CI_USER;
 
 /// Minimal NoCloud `user-data` — pure, testable without a real `cloud-localds`.
 /// `package_update: false`/`package_upgrade: false` because the golden image

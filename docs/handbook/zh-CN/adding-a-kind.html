@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Adding a Kind · Delonix Runtime — 贡献者手册</title>
+<title>新增一个 Kind · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,27 +206,27 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a class="on" aria-current="page" href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a class="on" aria-current="page" href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">贡献</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="adding-a-kind">Adding a Kind</h1>
-<p><strong>Before you read:</strong> <a href="coding-conventions.html">Coding conventions</a>, <a href="architecture.html">Architecture</a> and <a href="crates.html#delonix-stack">The crates</a> — this page assumes you know what <code>delonix-stack</code> owns and why planning is pure.</p>
-<p>A Kind is a declarative resource this engine understands — <code>Container</code>, <code>Volume</code>, <code>Service</code>,
-and so on (<code>delonix api-resources</code> lists them all). Adding one touches more than a single
-<code>match</code> arm: the table that describes what the Kind IS, the code that applies it, and the
-reconciler wiring that lets <code>stack plan</code>/<code>apply</code> treat it like every other Kind. This page
-walks through that in order, with a real Kind — <strong><code>Service</code></strong> (ADR-0032) — as the worked
-example throughout, because it is the most recently added Kind and every file cited below is
-read from the tree, not from memory of an older layout.</p>
-<h2 id="the-one-table-a-kind-has-to-answer">The one table a Kind has to answer<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
-<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> is the single source of what a Kind is. Its own
-module doc explains why it exists: before this table, the same facts about a Kind lived in six
-separate lists (<code>KINDS</code>, <code>CONVERGING_KINDS</code>, <code>TEARDOWN_KINDS</code>, <code>kind_honors_namespace</code>, the
-<code>DECLARATIVOS</code> of the wait test, and the arms of <code>presence()</code>), and they drifted — <code>Vm</code>,
-<code>FirewallPolicy</code> and <code>ShareVolume</code> once gained a reconciler adapter and stayed <em>out</em> of
-<code>CONVERGING_KINDS</code>, so the converge step silently skipped them while their own <code>apply</code> kept the
-resource looking correct through the wrong path.</p>
-<p>Adding a Kind starts with one <code>KindFacts</code> row:</p>
+<h1 id="adding-a-kind">新增一个 Kind</h1>
+<p><strong>阅读之前：</strong><a href="coding-conventions.html">编码规范</a>、<a href="architecture.html">架构</a> 和 <a href="crates.html#delonix-stack">各个 crate</a> —— 本页假设你已经知道 <code>delonix-stack</code> 拥有什么、以及为什么规划（planning）是纯函数式的。</p>
+<p>Kind 是这个引擎能理解的声明式资源 —— <code>Container</code>、<code>Volume</code>、<code>Service</code> 等等
+（<code>delonix api-resources</code> 会把它们全部列出来）。新增一个 Kind 涉及的不只是一处 <code>match</code>
+分支：描述这个 Kind 是什么的那张表、应用它的代码，以及让 <code>stack plan</code>/<code>apply</code> 能像对待
+其他 Kind 一样对待它的协调器接线。本页依序走一遍这个过程，全程以一个真实的 Kind ——
+<strong><code>Service</code></strong>（ADR-0032）—— 作为完整示例。它不是最新的 Kind（<code>IPPool</code>、<code>NetworkGateway</code>、
+<code>NetworkZone</code> 和 <code>RuntimePolicy</code> 都是在它之后出现的），但它是唯一一次性用到全部路径的
+Kind：primary、可收敛、可移除、按命名空间隔离，并拥有自己的注册表。更新的那些 Kind 也走过
+同样的步骤；下面引用的每个文件都是从代码树里读到的，不是凭对旧结构的记忆写的。</p>
+<h2 id="the-one-table-a-kind-has-to-answer">一个 Kind 必须回答的这张唯一的表<a class="hanchor" href="#the-one-table-a-kind-has-to-answer" aria-label="#">#</a></h2>
+<p><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/kinds.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/kinds.rs</code></a> 是「一个 Kind 是什么」的唯一来源。它自己的
+模块文档解释了为什么要有它：在这张表出现之前，关于一个 Kind 的同一批事实分散在六份独立的
+清单里（<code>KINDS</code>、<code>CONVERGING_KINDS</code>、<code>TEARDOWN_KINDS</code>、<code>kind_honors_namespace</code>、等待测试里
+的 <code>DECLARATIVOS</code>，以及 <code>presence()</code> 的各个分支），而它们会走样 —— <code>Vm</code>、<code>FirewallPolicy</code>
+和 <code>ShareVolume</code> 都曾经拿到了一个协调器适配器，却仍然留在 <code>CONVERGING_KINDS</code> <em>之外</em>，于是
+收敛这一步悄无声息地跳过了它们，而它们各自的 <code>apply</code> 又通过错误的路径，让资源看起来是对的。</p>
+<p>新增一个 Kind，从一行 <code>KindFacts</code> 开始：</p>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">pub const SERVICE: &amp;str = &quot;Service&quot;;
 </code></pre></div>
 <div class="code"><div class="code-head"><span class="lang">rust</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-rust">KindFacts {
@@ -237,203 +237,284 @@ resource looking correct through the wrong path.</p>
     domain: Domain::NetConnectivity,
     form: Form::Primary,
     in_stack: true,
+    stack_group: &quot;services&quot;,
     converges: true,
     teardown: true,
     namespaced: Namespaced::Always,
     presence: Presence::Registry,
 },
 </code></pre></div>
-<p>Each field is a decision, not a formality:</p>
+<p>每个字段都是一项决定，不是走个形式：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
 <th>Field</th>
-<th>Question it answers</th>
-<th>Getting it wrong</th>
+<th>它回答的问题</th>
+<th>答错的后果</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>kind</code></td>
-<td>The name, as a <code>const</code> — never a bare string literal. A rename touching every call site was measured at <strong>106 occurrences across ten files</strong> before this table existed; a <code>const</code> makes a typo a compile error instead of a silently unreachable <code>match</code> arm (a mistyped <code>&amp;'static str</code> pattern degrades to a catch-all <em>binding</em>, which the crate's own doc-comment on <code>SECRET</code>/<code>NETWORK</code>/etc. calls out by name).</td>
-<td>A second Kind answering to nobody, or a rename that misses a site with no build error.</td>
+<td>名称，以 <code>const</code> 的形式存在 —— 绝不用裸的字符串字面量。在这张表出现之前，一次牵动所有调用点的改名，实测涉及<strong>十个文件里的 106 处</strong>；用 <code>const</code> 能让打错字变成编译错误，而不是一个悄无声息、永远匹配不到的 <code>match</code> 分支（一个拼错的 <code>&amp;'static str</code> 模式会退化成一个兜底的<em>绑定</em>，crate 自己在 <code>SECRET</code>/<code>NETWORK</code> 等常量上的文档注释点名提到了这一点）。</td>
+<td>出现一个谁也认不出来的第二个 Kind，或者一次漏掉某处、却没有构建错误的改名。</td>
 </tr>
 <tr>
 <td><code>plural</code></td>
-<td>The word <code>delonix get &lt;plural&gt;</code> accepts. Its own field, not <code>kind</code> + <code>"s"</code> — <code>Dependency</code>→<code>dependencies</code> and <code>Ingress</code>→<code>ingresses</code> do not follow that rule.</td>
-<td><code>delonix get services</code> (correct) vs. a guessed <code>delonix get servicess</code>.</td>
+<td><code>delonix get &lt;plural&gt;</code> 接受的那个词。它是独立的字段，不是 <code>kind</code> 加上 <code>"s"</code> —— <code>Dependency</code>→<code>dependencies</code>、<code>Ingress</code>→<code>ingresses</code> 都不遵循这条规则。</td>
+<td><code>delonix get services</code>（正确）对上瞎猜出来的 <code>delonix get servicess</code>。</td>
 </tr>
 <tr>
 <td><code>short</code></td>
-<td>Accepted abbreviations. Sparse on purpose — a test enforces global uniqueness, so a shortname that collides with another Kind's fails the build rather than silently shadowing it.</td>
-<td>Two Kinds answering to the same three letters.</td>
+<td>可接受的缩写。刻意保持稀疏 —— 有一个测试强制要求全局唯一，所以一个和别的 Kind 缩写冲突的 shortname 会让构建失败，而不是悄悄把它遮住。</td>
+<td>两个 Kind 抢答同一个三字母缩写。</td>
 </tr>
 <tr>
 <td><code>api_version</code></td>
-<td>The <code>apiVersion</code> a manifest writes, split by domain (<code>compute.delonix.io/…</code>, <code>networking.delonix.io/…</code>, …) since ADR-0020. A column, not a shared constant, precisely so Kinds can move to the split scheme one at a time.</td>
-<td>A Kind stuck on the legacy <code>delonix.io/v1</code> string, or the wrong group.</td>
+<td>清单里写的那个 <code>apiVersion</code>，自 ADR-0020 起按域拆分（<code>compute.delonix.io/…</code>、<code>networking.delonix.io/…</code> 等）。之所以是一列而不是共享常量，正是为了让各个 Kind 能一个一个地迁移到拆分后的方案。</td>
+<td>某个 Kind 卡在旧的 <code>delonix.io/v1</code> 字符串上，或者分到了错误的组。</td>
 </tr>
 <tr>
 <td><code>domain</code></td>
-<td>The area of action, shown as the <code>DOMAIN</code> column of <code>stack ls</code>/<code>plan --fields</code>. The three networking ones are split on purpose: <code>NetConnectivity</code> answers "does a path exist", <code>NetPolicy</code> answers "is traffic on it permitted" — merging them would hide that <code>NetworkRoute</code> opens a path while <code>FirewallPolicy</code> decides whether to let traffic through it.</td>
-<td>A domain that answers a different question than the Kind actually acts on.</td>
+<td>作用范围，显示为 <code>stack ls</code>/<code>plan --fields</code> 里的 <code>DOMAIN</code> 列。三个网络相关的域是刻意拆开的：<code>NetConnectivity</code> 回答「路径是否存在」，<code>NetPolicy</code> 回答「这条路径上的流量是否被允许」—— 把它们合并会掩盖一个事实：<code>NetworkRoute</code> 打开一条路径，而 <code>FirewallPolicy</code> 决定要不要放行走这条路径的流量。</td>
+<td>一个域回答的问题，跟这个 Kind 实际作用的对象对不上。</td>
 </tr>
 <tr>
 <td><code>form</code></td>
-<td>What a document of this Kind becomes: <code>Primary</code> (its own apply, survives the load), <code>Sugar(target)</code> (rewritten into another Kind at load time, disappears), <code>Aggregate</code> (expands into the documents it contains, like <code>Stack</code>), <code>Compat(target)</code> (a foreign schema — <code>Ingress</code> is <code>networking.k8s.io/v1</code> — compiled onto another Kind's mechanism, and unlike <code>Sugar</code> it <em>survives</em> the load), or <code>Sunset(target)</code> (still primary, but a successor is announced; used when rewriting would silently change what the engine <em>does</em> — <code>Container</code> cannot lower into a one-member <code>Pod</code> because a Pod always builds a shared netns, which is a different runtime shape).</td>
-<td>Choosing <code>Sugar</code> for something that must keep its own apply, or vice versa.</td>
+<td>这个 Kind 的文档会变成什么：<code>Primary</code>（有自己的 apply，会在 load 之后继续存在）、<code>Sugar(target)</code>（在 load 时被改写成另一个 Kind，自身消失）、<code>Aggregate</code>（展开成它内部包含的那些文档，像 <code>Stack</code> 一样）、<code>Compat(target)</code>（一种外来的 schema —— <code>Ingress</code> 就是 <code>networking.k8s.io/v1</code> —— 被编译到另一个 Kind 的机制上，和 <code>Sugar</code> 不同的是它在 load 之后会<em>继续存在</em>），或者 <code>Sunset(target)</code>（仍然是 primary，但已经宣布了继任者；用在改写会悄悄改变引擎实际<em>行为</em>的场合 —— <code>Container</code> 不能降级成一个单成员的 <code>Pod</code>，因为一个 Pod 总是会构建一个共享的 netns，那是另一种运行时形态）。</td>
+<td>给一个必须保留自己 apply 的东西选了 <code>Sugar</code>，或者反过来。</td>
 </tr>
 <tr>
 <td><code>in_stack</code></td>
-<td>Whether <code>stack apply</code> handles it at all. <strong>Rows with <code>in_stack: true</code> must stay a contiguous prefix of the table</strong> — <code>destroy</code> derives its teardown order by reversing the stack order, so a row placed after a non-stack Kind changes the apply order with nobody editing an "order" anywhere. A test (<code>os_kinds_do_stack_sao_um_prefixo_contiguo</code>) enforces this.</td>
-<td>A Kind applied out of dependency order, or a remote-procedure Kind like <code>KubernetesCluster</code> (SSH against hosts that already exist, not a local resource) mistakenly wired into the cycle.</td>
+<td><code>stack apply</code> 到底会不会处理它。<strong><code>in_stack: true</code> 的那些行必须留在表格开头连续的一段</strong> —— <code>destroy</code> 是靠反转 stack 顺序来推导拆除顺序的，所以把一行放在某个非 stack 的 Kind 后面，就会在没有人动过任何「顺序」字段的情况下改变 apply 的顺序。一个测试（<code>os_kinds_do_stack_sao_um_prefixo_contiguo</code>）强制要求这一点。</td>
+<td>一个 Kind 没按依赖顺序应用，或者像 <code>KubernetesCluster</code> 这样的远程过程型 Kind（对已经存在的主机执行 SSH，不是本地资源）被错误地接进了这个循环。</td>
+</tr>
+<tr>
+<td><code>stack_group</code></td>
+<td><code>kind: Stack</code> 的 <code>spec</code> 里容纳这个 Kind 文档的那个键（<code>services:</code>），如果这个 Kind 没法被分组，就是 <code>""</code>。这一列决定了展开方式：<code>expand_stack</code>、schema、未知字段告警，以及生成的文档全都读它，不存在第二份分组清单（见下文 <a href="#the-stack-group">Stack 分组</a>）。它跟 <code>in_stack</code> 回答的不是同一个问题 —— <code>Workload</code> 和 <code>Dependency</code> 在 load 时就被降级，所以它们不是作为自身被应用的，但它们又都是有人会写在 Stack 里面的东西。</td>
+<td><code>stack apply</code> 会处理、却放不进 Stack 里的一个 Kind —— 在分组清单还是手写的年代，<code>NetworkRoute</code>、<code>NetworkAccessRule</code>、<code>Service</code> 和 <code>App</code> 都遇到过这种事。</td>
 </tr>
 <tr>
 <td><code>converges</code></td>
-<td>Whether a <em>changed</em> field is really applied, versus "ensure present" only. <code>false</code> is legitimate — <code>Secret</code>'s state is encrypted values a plan will not decrypt to compare — but it needs a reason (see <code>not_converged_reason</code> below); a generic excuse fails a test.</td>
-<td>A Kind that reports <code>!</code> on every plan with a reason that reads as "nobody got to it" when the truth is a property of the resource.</td>
+<td>一个<em>被改动</em>的字段是否真的会被应用，而不只是「确保存在」。<code>false</code> 是合理的取值 —— <code>Secret</code> 的状态是加密后的值，规划时不会解密来比较 —— 但它需要一个理由（见下文 <code>not_converged_reason</code>）；一个笼统的借口会让测试失败。</td>
+<td>某个 Kind 在每次规划时都报 <code>!</code>，理由却读起来像「没人管它」，而真相其实是这个资源本身的性质。</td>
 </tr>
 <tr>
 <td><code>teardown</code></td>
-<td>Whether <code>destroy_one</code> can remove it, so <code>--prune</code> and <code>destroy</code> can promise to. A test (<code>so_um_kind_convergente_tem_teardown</code>) refuses a Kind with <code>teardown: true</code> and <code>converges: false</code> — promising to prune something the plan cannot even represent as changed.</td>
-<td><code>--prune</code> promising removal and <code>destroy_one</code> refusing mid-run, after earlier Kinds in the teardown order are already gone.</td>
+<td><code>destroy_one</code> 能不能移除它，从而让 <code>--prune</code> 和 <code>destroy</code> 能够作出这个承诺。一个测试（<code>so_um_kind_convergente_tem_teardown</code>）会拒绝 <code>teardown: true</code> 却 <code>converges: false</code> 的 Kind —— 那等于承诺去修剪一样连规划都无法表示为「已改动」的东西。</td>
+<td><code>--prune</code> 承诺了移除，<code>destroy_one</code> 却在拆除顺序里靠前的那些 Kind 已经被清掉之后、运行到一半时拒绝执行。</td>
 </tr>
 <tr>
 <td><code>namespaced</code></td>
-<td><code>Never</code>, <code>Always</code>, or <code>PerDocument</code>. Not a <code>bool</code> — <code>Volume</code> genuinely has three answers: none for a plain volume, real for one with a <code>share:</code> block; modelling that as <code>true</code> would warn "namespace has no effect" on every ordinary volume, and as <code>false</code> it would warn the same, wrongly, on a share whose namespace decides which directory its data lives in.</td>
-<td>A namespace warning that contradicts what the Kind's own <code>apply</code> does with the field.</td>
+<td><code>Never</code>、<code>Always</code>，或者 <code>PerDocument</code>。不是一个 <code>bool</code> —— <code>Volume</code> 真的有三种答案：普通 volume 没有命名空间，带 <code>share:</code> 块的才有；如果把它建模成 <code>true</code>，就会在每一个普通 volume 上都警告「namespace 没有效果」；建模成 <code>false</code>，又会在一个 share 上发出同样错误的警告 —— 而这个 share 的命名空间恰恰决定了它的数据存放在哪个目录里。</td>
+<td>命名空间告警的内容，跟这个 Kind 自己的 <code>apply</code> 对该字段的实际处理相矛盾。</td>
 </tr>
 <tr>
 <td><code>presence</code></td>
-<td>How <code>stack ls</code>/<code>wait</code> learn whether the resource is there: <code>Registry</code> (a store answers yes/no), <code>Derived</code> (computed from something else — a Pod is its labelled members), <code>Declarative</code> (nothing to read back; the resource is a directive applied to a target, and <code>presence()</code> answers <code>-</code>, which is <em>not</em> "absent"), or <code>NotObservable</code> (never reaches <code>presence()</code> — it does not survive the load, or is not a local resource).</td>
-<td><code>NetworkRoute</code> once had no arm in <code>presence()</code> at all and fell into <code>_ =&gt; ("?", "unsupported kind")</code> — printed by <code>ls</code>/<code>describe</code>, and read by <code>wait</code> as pending forever.</td>
+<td><code>stack ls</code>/<code>wait</code> 是怎么知道这个资源存不存在的：<code>Registry</code>（有个 store 能回答是或否）、<code>Derived</code>（从别的东西算出来 —— 一个 Pod 就是它那些带标签的成员）、<code>Declarative</code>（没有东西可以读回来；这个资源是应用在某个目标上的一条指令，<code>presence()</code> 回答 <code>-</code>，这<em>不是</em>「不存在」的意思），或者 <code>NotObservable</code>（永远不会走到 <code>presence()</code> —— 它在 load 之后不会继续存在，或者根本不是本地资源）。</td>
+<td><code>NetworkRoute</code> 曾经在 <code>presence()</code> 里完全没有分支，落进了 <code>_ =&gt; ("?", "unsupported kind")</code> —— 被 <code>ls</code>/<code>describe</code> 打印出来，还被 <code>wait</code> 读成永远处于挂起状态。</td>
 </tr>
 </tbody>
 </table></div>
-<p><code>Service</code>'s row reads, in one line: applied by the stack, right after the compute Kinds it
-selects; a real path exists (<code>NetConnectivity</code>); primary; converges without recreating; can be
-torn down; always namespaced; and a real registry backs it.</p>
-<h2 id="the-spec-type-and-the-schema">The spec type and the schema<a class="hanchor" href="#the-spec-type-and-the-schema" aria-label="#">#</a></h2>
-<p>A Kind with a typed manifest spec (most of them) needs a <code>#[derive(Deserialize, Serialize,
-JsonSchema)]</code> struct — <code>ServiceSpec</code> for this example, in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a>
-— and a branch in <code>TYPED_KINDS</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a>. That constant feeds
-<code>delonix manifest schema</code> and <code>delonix explain &lt;Kind&gt;.&lt;field&gt;</code>, both generated from the same struct
-(ADR-0007) so the published schema cannot drift from what the code actually accepts. Leaving a
-Kind out is a real, allowed state — <code>Storage</code> and <code>ShareVolume</code> have no schema on purpose,
-because they are rewritten into <code>Volume</code> at load and a second struct would just be a
-hand-maintained copy of <code>Volume</code>'s own fields — but it has to be <em>said</em>: <code>untyped_hint(kind)</code>
-gives the specific redirection, and <code>todo_kind_conhecido_tem_schema_ou_dica</code> (in <code>schema.rs</code>)
-fails the build if a Kind the table knows about is neither in <code>TYPED_KINDS</code> nor has a hint. The
-generic message ("no typed schema for X") reads as a manifest bug; the hint says it is a property
-of the Kind.</p>
-<h2 id="wiring-the-kind-into-the-reconciler">Wiring the Kind into the reconciler<a class="hanchor" href="#wiring-the-kind-into-the-reconciler" aria-label="#">#</a></h2>
-<p>The reconciler's plan (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>) is pure — it never
-opens a store or runs a command. Everything that touches the machine lives in
-<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a>, re-exported as <code>cmd::kinds</code>/<code>cmd::reconcile</code> from
-<code>delonix-stack</code> (<code>pub use delonix_stack::kinds;</code> in <code>cmd/mod.rs</code>, so nothing that already called
-<code>cmd::kinds::…</code> had to change when the table moved into its own crate). Four functions in
-<code>stack.rs</code> need a branch for a new Kind that converges:</p>
-<ol>
-<li><strong><code>desired_of</code></strong> — one <code>reconcile::Desired</code> per document, with <code>fields</code> keyed by the
-   <strong>manifest</strong> field name (<code>matchLabels</code>, <code>port</code>), never the internal record name, because the
-   diff is read by whoever wrote the YAML. <code>Service::desired</code> builds this from <code>ServiceSpec</code>.</li>
-<li><strong><code>actual_of</code></strong> — every instance of the Kind that exists on the machine, so <code>--prune</code> has
-   something to compare against. <code>Service::actual</code> reads <code>delonix_sdn::infra::service_list()</code>
-   and fills the <em>same</em> field names <code>desired</code> used, or the diff compares apples to oranges.</li>
-<li><strong><code>converge_and_stamp</code></strong> — applies an <code>Action::Update</code> live. <code>Service</code> reuses its own
-   <code>apply_one</code> here (<code>converge_doc</code>), because that function already fully overwrites the
-   registry entry — the same shape <code>FirewallPolicy</code> and <code>NetworkAccessRule</code> use, and the same
-   reasoning: a separate per-field path would be a second way to write the same record, and two
-   ways start to disagree. A Kind with no live update path at all (<code>Pod</code> has no hot field)
-   returns the explicit "no live update path" error rather than falling through silently.</li>
-<li><strong><code>stamp_all</code></strong> — records ownership (<code>delonix.io/stack</code> label) and the applied field map
-   (<code>delonix.io/last-applied</code> annotation) after a successful apply, which is what turns the next
-   plan into a three-way diff instead of a two-way one. <code>Service::stamp</code> writes these directly on
-   the service's own registry entry — unlike <code>NetworkAccessRule</code>, whose rule lives on a
-   <em>container</em> it does not own, a <code>Service</code> has a record entirely its own.</li>
-</ol>
-<p>And <code>destroy_one</code> needs a branch calling <code>remove_for_replace</code> when <code>teardown: true</code> —
-<code>Service::remove_for_replace</code> just calls <code>delonix_sdn::infra::service_remove</code>.</p>
-<p><strong>None of this is invented per Kind.</strong> <code>run_layers</code> (also in <code>stack.rs</code>) is where a document
-actually gets <em>created</em> the first time, one layer per <code>in_stack</code> Kind in table order
-(<code>layers.run(k::SERVICE, "🧭", || super::service::apply(docs))?</code>) — that <code>apply(docs)</code> function is
-the same one the imperative CLI group already has, reused rather than duplicated.</p>
-<h2 id="fields-that-converge-without-recreating">Fields that converge without recreating<a class="hanchor" href="#fields-that-converge-without-recreating" aria-label="#">#</a></h2>
-<p>If <code>converges: true</code>, add an entry to <code>hot_fields</code> in <code>reconcile.rs</code> naming exactly which
-manifest fields can change <em>live</em>. This table is a promise the executor has to keep — listing a
-field the converge step cannot actually apply turns a clean <code>Replace</code> into an <code>Update</code> that fails
-halfway, which the module doc calls "strictly worse than declaring the replace up front".
-<code>Service</code> lists <code>["matchLabels", "port"]</code>, because <code>service::apply_one</code> already fully overwrites
-the record with no restart needed — nothing about a <code>Service</code> is cold. A field left out of
-<code>hot_fields</code> still shows up in the plan; it just forces <code>Action::Replace</code> (refused without
-<code>--replace &lt;Kind&gt;/&lt;name&gt;</code>) instead of <code>Action::Update</code>.</p>
-<p>Three tests in <code>cmd/stack.rs</code> keep this table honest against the <code>kinds.rs</code> table and against
-each other:</p>
+<p><code>Service</code> 这一行用一句话概括就是：由 stack 应用，紧跟在它所选择的那些 compute Kind 之后；
+在 Stack 里分组到 <code>services:</code> 下；真的存在一条路径（<code>NetConnectivity</code>）；是 primary；能在
+不重建的情况下收敛；能被拆除；始终带命名空间；并且有一个真正的注册表在背后支撑。</p>
+<h2 id="the-stack-group">Stack 分组<a class="hanchor" href="#the-stack-group" aria-label="#">#</a></h2>
+<p>一个 <code>in_stack: true</code> 的 Kind 必须有一个 <code>stack_group</code>，<code>kinds.rs</code> 里的四个测试把这一列
+钉在原地（ADR-0045）：</p>
 <ul>
-<li><strong><code>as_tres_listas_de_kinds_convergentes_concordam</code></strong> — every Kind marked <code>converges: true</code> has
-  to appear in the <code>--fields</code> output (<code>compared_fields_table</code>), and vice versa; and a converging
-  Kind can never carry <code>not_converged_reason</code>'s generic excuse.</li>
-<li><strong><code>todo_kind_nao_convergente_tem_razao_especifica</code></strong> — the inverse: every Kind that does <em>not</em>
-  converge needs its own concrete sentence in <code>not_converged_reason</code>, not the shared
-  <code>NOT_CONVERGED_GENERIC</code>.</li>
-<li><strong><code>todo_kind_convergente_tem_teardown_ou_razao</code></strong> — a converging Kind is either removable
-  (<code>kinds::has_teardown</code>) or has an entry in <code>no_teardown_reason</code>; never both, never neither.</li>
+<li><strong><code>every_kind_applied_by_the_stack_has_a_group</code></strong> —— 凡是 stack 会应用的东西，都不能缺席
+  于 <code>kind: Stack</code>。</li>
+<li><strong><code>a_kind_without_a_group_says_why</code></strong> —— 一行 <code>stack_group: ""</code> 需要在
+  <code>stack_group_absent_reason</code> 里有对应条目（<code>Stack</code> 自己、<code>KubernetesCluster</code>），而有分组的
+  那一行不能出现在那里。</li>
+<li><strong><code>a_group_key_is_unique_and_no_alias_shadows_it</code></strong> —— 两个 Kind 共用一个键，会把它们的
+  子项合并到一起，给其中一个塞进错误的 spec。</li>
+<li><strong><code>a_group_is_the_plural_of_its_kind</code></strong> —— 键是用 lowerCamelCase 写的复数形式
+  （<code>NetworkRoute</code> 对应 <code>networkRoutes</code>），这样谁都不用去查。只有三个较早的键是例外
+  （<code>ingress</code>、<code>vms</code>、<code>firewallPolicies</code>），因为改一个分组的名字会破坏所有已发布的 Stack。</li>
 </ul>
-<h2 id="presence-for-lsdescribewait">Presence, for <code>ls</code>/<code>describe</code>/<code>wait</code><a class="hanchor" href="#presence-for-lsdescribewait" aria-label="#">#</a></h2>
-<p>Add a branch to <code>presence(kind, doc, containers)</code> in <code>stack.rs</code> that says whether an instance
-exists and, if so, its status string. <code>Service</code>'s branch checks
-<code>delonix_sdn::infra::service_get(namespace, name)</code> and, if found, counts how many live containers
-its selector currently matches (reading the <em>same</em> index the DNS resolver itself reads, so the
-plan can never disagree with what a client asking for the name actually gets). Two tests guard
-this column specifically:</p>
+<p>然后这个分组还得在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/bins/delonix-runtime-bin/src/cmd" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/</code></a> 里被端到端地证明出来：</p>
 <ul>
-<li><strong><code>todo_o_kind_declarativo_de_kinds_tem_braco_no_presence</code></strong> — every Kind whose <code>presence</code> is
-  <code>Declarative</code> really does answer <code>-</code> from <code>presence()</code> (not the fallback <code>"?"</code>/"unsupported
-  kind" that <code>NetworkRoute</code> fell into before it gained a registry of its own).</li>
-<li><strong><code>um_kind_declarativo_nao_fica_pendente_para_sempre</code></strong> — <code>is_pending("-", kind, status)</code> is
-  <code>false</code> for every declarative Kind. <code>stack wait</code> used to read <code>present == "yes"</code> as the only
-  sign of readiness, so a manifest with <em>any</em> declarative Kind burned its whole <code>--timeout</code>
-  waiting for a marker that Kind can never produce.</li>
+<li><code>manifest.rs</code> 里的 <strong><code>stack_group_sample</code></strong> —— 这个分组里一个子项最简的 <code>spec</code>，以及它
+  最终落地成的 Kind；<code>every_stack_group_loads</code> 会遍历每一个分组，遇到没有样例的就失败。</li>
+<li><strong><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/stack.yaml" target="_blank" rel="noopener"><code>examples/stack.yaml</code></a></strong> —— 必须提到这个分组；否则 <code>the_stack_example_names_every_group</code>
+  会失败。这个文件同时也是用户站点 Kinds 页面所展示的内容。</li>
+<li><code>schema.rs</code> 里的 <strong><code>every_stack_group_is_typed_against_its_kinds_own_spec</code></strong> —— 分组里的
+  条目要按 Kind 自己的 spec 来做类型校验，所以这个 Kind 得先有 <code>TYPED_KINDS</code> 分支（见下一节）
+  才能校验它的分组。</li>
 </ul>
-<p>If the Kind is namespaced (<code>namespaced != Namespaced::Never</code>), it also needs an entry in
-<code>NAMESPACE_SOURCES</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>) — either <code>NsSource::Store(fn)</code>
-reading the Kind's own store, or <code>NsSource::Via("OtherKind — reason")</code> when the namespace travels
-onto another Kind's record instead (a <code>Pod</code>'s namespace is on its member <code>Container</code>s, for
-example). <code>every_namespaced_kind_declares_a_source</code> fails otherwise — the practical effect of
-missing this is that shell completion for <code>--namespace</code> can never offer a tenant whose only
-resource is the new Kind.</p>
-<h2 id="the-checklist">The checklist<a class="hanchor" href="#the-checklist" aria-label="#">#</a></h2>
-<p>For a Kind that behaves like <code>Service</code> (primary, converges, has teardown, namespaced):</p>
+<h2 id="the-spec-type-and-the-schema">Spec 类型与 schema<a class="hanchor" href="#the-spec-type-and-the-schema" aria-label="#">#</a></h2>
+<p>带类型化清单 spec 的 Kind（大多数都是）需要一个
+<code>#[derive(Deserialize, Serialize, JsonSchema)]</code> 结构体 —— 本例里是
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/service.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/service.rs</code></a> 里的 <code>ServiceSpec</code> —— 以及
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/schema.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/schema.rs</code></a> 里 <code>TYPED_KINDS</code> 的一个分支，再加上
+<code>manifest_schema</code> 里指名这个结构体的对应分支。这个常量同时供给 <code>delonix manifest schema</code>
+和 <code>delonix explain &lt;Kind&gt;.&lt;field&gt;</code>，两者都是从同一个结构体生成的（ADR-0007），所以发布出去
+的 schema 不可能和代码实际接受的东西走样。把某个 Kind 排除在外是一个真实的、被允许的状态
+—— <code>Storage</code> 和 <code>ShareVolume</code> 就刻意没有 schema，因为它们在 load 时会被改写成 <code>Volume</code>，
+第二个结构体只会是 <code>Volume</code> 自身字段的手工复制品 —— 但这件事必须<em>说出来</em>：
+<code>untyped_hint(kind)</code> 给出具体的指引，<code>todo_kind_conhecido_tem_schema_ou_dica</code>（在
+<code>schema.rs</code> 里）会在表里认识的某个 Kind 既不在 <code>TYPED_KINDS</code> 里、也没有 hint 的时候让构建
+失败。那条通用的提示信息（"no typed schema for X"）读起来像是清单的 bug；而这条 hint 说的是
+这是这个 Kind 本身的性质。</p>
+<p>还有两个地方会读这个 spec，都在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/manifest.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/manifest.rs</code></a> 里：</p>
+<ul>
+<li><strong><code>filled_spec</code></strong> —— 一个调用这个 Kind 的 <code>spec_with_defaults(doc)</code> 的分支，也就是让
+  <code>stack apply --dry-run</code> 和 <code>manifest render</code> 打印出「每个默认值都已填好」的那趟经过类型化
+  结构体的往返。</li>
+<li><strong><code>spec_fields_for</code></strong> —— 一个返回这个 Kind 的 <code>*_SPEC_FIELDS</code> 清单的分支，
+  <code>warn_unknown_fields</code> 就是拿这份清单来检查一份文档的。schema 里 <code>additionalProperties:
+  false</code> 所接受的那些键，取的正是同一份清单，所以一个字段名打错字，两边都能抓到。</li>
+</ul>
+<p><strong>然后重新生成发布出去的 schema</strong>，因为这是一个编辑器会去获取的文件，而不是靠人手工维护的
+副本：</p>
+<div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">delonix manifest schema &gt; docs/schema/v1/delonix.json
+</code></pre></div>
+<p><code>o_schema_publicado_esta_em_dia_com_o_codigo</code>（在 <code>schema.rs</code> 里）会一直失败，直到这个
+文件和二进制程序生成的内容完全一致为止。请用你自己代码树构建出来的二进制程序
+（<code>target/release/delonix</code> 或者 <code>cargo run -p delonix-runtime-bin --</code>），而不是 <code>PATH</code>
+上那个。</p>
+<h2 id="wiring-the-kind-into-the-reconciler">把 Kind 接入协调器<a class="hanchor" href="#wiring-the-kind-into-the-reconciler" aria-label="#">#</a></h2>
+<p>协调器的规划函数（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-stack/src/reconcile.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-stack/src/reconcile.rs::plan</code></a>）是纯函数 —— 它从
+不打开 store，也不执行命令。凡是会碰到机器本身的东西，都在
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/stack.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/stack.rs</code></a> 里，并以 <code>cmd::kinds</code>/<code>cmd::reconcile</code> 的名字
+从 <code>delonix-stack</code> 重新导出（<code>cmd/mod.rs</code> 里的 <code>pub use delonix_stack::kinds;</code>，所以当这张
+表搬进自己的 crate 时，任何已经在调用 <code>cmd::kinds::…</code> 的地方都不用改）。<code>stack.rs</code> 里有四个
+函数，为一个会收敛的新 Kind 各需要一个分支：</p>
 <ol>
-<li><code>kinds.rs</code> — a <code>pub const</code> name and a <code>KindFacts</code> row.</li>
-<li>A spec struct with <code>JsonSchema</code>, and a branch in <code>TYPED_KINDS</code> (<code>schema.rs</code>) — or an entry in
-   <code>untyped_hint</code> explaining why not.</li>
-<li><code>stack.rs</code> — branches in <code>desired_of</code>, <code>actual_of</code>, <code>converge_and_stamp</code>, <code>stamp_all</code>,
-   <code>destroy_one</code>, <code>presence</code>, and a layer in <code>run_layers</code> calling the Kind's own <code>apply(docs)</code>.</li>
-<li><code>reconcile.rs</code> — a <code>hot_fields</code> entry naming the fields that converge live.</li>
-<li>If the Kind does not converge or cannot be torn down: a specific sentence in
-   <code>not_converged_reason</code> / <code>no_teardown_reason</code> (<code>stack.rs</code>).</li>
-<li>If namespaced: an entry in <code>NAMESPACE_SOURCES</code> (<code>complete.rs</code>).</li>
-<li><code>cargo test -p delonix-runtime-bin -p delonix-stack</code> — the tests named above are what catch a
-   skipped step, not a reviewer reading the diff by eye.</li>
+<li><strong><code>desired_of</code></strong> —— 每份文档对应一个 <code>reconcile::Desired</code>，其中 <code>fields</code> 用<strong>清单</strong>里的
+   字段名作键（<code>matchLabels</code>、<code>port</code>），绝不用内部记录的字段名，因为这份 diff 是写 YAML 的
+   那个人要看的。<code>Service::desired</code> 就是从 <code>ServiceSpec</code> 构建出这个的。</li>
+<li><strong><code>actual_of</code></strong> —— 机器上实际存在的这个 Kind 的每一个实例，好让 <code>--prune</code> 有东西可以拿来
+   比较。<code>Service::actual</code> 读取 <code>delonix_sdn::infra::service_list()</code>，并且填上和 <code>desired</code>
+   用的<em>同一批</em>字段名，不然 diff 就成了拿苹果比橙子。</li>
+<li><strong><code>converge_and_stamp</code></strong> —— 实时应用一个 <code>Action::Update</code>。<code>Service</code> 在这里复用了自己的
+   <code>apply_one</code>（<code>converge_doc</code>），因为这个函数本来就会完整地覆写注册表条目 —— 和
+   <code>FirewallPolicy</code>、<code>NetworkAccessRule</code> 用的是同一种形状，理由也一样：为每个字段单独开一条
+   路径，等于用第二种方式写同一条记录，而两种方式迟早会互相打架。一个完全没有实时更新路径的
+   Kind（<code>Pod</code> 没有 hot field）会明确返回「没有实时更新路径」的错误，而不是悄悄地落空。</li>
+<li><strong><code>stamp_all</code></strong> —— 在一次成功的 apply 之后，记录所有权（<code>delonix.io/stack</code> 标签）和已
+   应用的字段映射（<code>delonix.io/last-applied</code> 注解），正是这一步把下一次规划从两方 diff 变成
+   了三方 diff。<code>Service::stamp</code> 把这些直接写在 service 自己的注册表条目上 —— 和
+   <code>NetworkAccessRule</code> 不同（它的规则挂在一个它并不拥有的<em>容器</em>上），<code>Service</code> 有一条完全
+   属于自己的记录。</li>
 </ol>
-<p>A Kind that is <code>Sugar</code>/<code>Aggregate</code> (rewritten or expanded at load, like <code>Workload</code> or <code>Stack</code>)
-skips most of this: <code>um_kind_que_baixa_para_outro_nao_pertence_ao_ciclo_do_stack</code> requires
-<code>in_stack: false</code> and <code>converges: false</code> for those forms, and the work instead lives in
-<code>manifest::load</code>, where the rewrite happens.</p>
+<p>还有 <code>destroy_one</code>，当 <code>teardown: true</code> 时，它需要一个调用 <code>remove_for_replace</code> 的分支 ——
+<code>Service::remove_for_replace</code> 只是去调用 <code>delonix_sdn::infra::service_remove</code>。</p>
+<p><strong>这一切都不是给每个 Kind 单独发明的。</strong> <code>run_layers</code>（同样在 <code>stack.rs</code> 里）是一份文档
+第一次真正被<em>创建</em>出来的地方，按表里的顺序，每个 <code>in_stack</code> 的 Kind 占一层
+（<code>layers.run(k::SERVICE, "🧭", || super::service::apply(docs))?</code>）—— 那个 <code>apply(docs)</code>
+函数就是命令式 CLI 分组早就有的那一个，是复用而不是重复实现。</p>
+<h2 id="fields-that-converge-without-recreating">不用重建就能收敛的字段<a class="hanchor" href="#fields-that-converge-without-recreating" aria-label="#">#</a></h2>
+<p>如果 <code>converges: true</code>，就要在 <code>reconcile.rs</code> 的 <code>hot_fields</code> 里加一条，明确写出哪些清单
+字段可以<em>实时</em>改动。这张表是执行器必须遵守的承诺 —— 列出一个收敛步骤实际上没法应用的
+字段，会把一次干净的 <code>Replace</code> 变成一次运行到一半失败的 <code>Update</code>，模块文档把这种情况称为
+「比提前声明要重建还要糟糕」。<code>Service</code> 列出的是 <code>["matchLabels", "port"]</code>，因为
+<code>service::apply_one</code> 已经会完整覆写这条记录，不需要重启 —— <code>Service</code> 身上没有什么是「冷」
+的。一个没被写进 <code>hot_fields</code> 的字段照样会出现在规划里；只不过它会强制走 <code>Action::Replace</code>
+（没有 <code>--replace &lt;Kind&gt;/&lt;name&gt;</code> 就会被拒绝），而不是 <code>Action::Update</code>。</p>
+<p><code>cmd/stack.rs</code> 里有三个测试，让这张表对齐 <code>kinds.rs</code> 那张表，也让它们彼此对齐：</p>
+<ul>
+<li><strong><code>as_tres_listas_de_kinds_convergentes_concordam</code></strong> —— 每个标了 <code>converges: true</code> 的
+  Kind 都必须出现在 <code>--fields</code> 的输出里（<code>compared_fields_table</code>），反过来也一样；而且一个会
+  收敛的 Kind 绝不能带着 <code>not_converged_reason</code> 那条通用借口。</li>
+<li><strong><code>todo_kind_nao_convergente_tem_razao_especifica</code></strong> —— 反过来：每一个<em>不</em>收敛的 Kind
+  都需要在 <code>not_converged_reason</code> 里有一句属于自己的具体说法，而不是共用的
+  <code>NOT_CONVERGED_GENERIC</code>。</li>
+<li><strong><code>todo_kind_convergente_tem_teardown_ou_razao</code></strong> —— 一个会收敛的 Kind，要么可以被移除
+  （<code>kinds::has_teardown</code>），要么在 <code>no_teardown_reason</code> 里有对应条目；绝不会两者都有，也
+  绝不会两者都没有。</li>
+</ul>
+<h2 id="presence-for-lsdescribewait">Presence，供 <code>ls</code>/<code>describe</code>/<code>wait</code> 使用<a class="hanchor" href="#presence-for-lsdescribewait" aria-label="#">#</a></h2>
+<p>在 <code>stack.rs</code> 的 <code>presence(kind, doc, containers)</code> 里加一个分支，说明一个实例是否存在，
+如果存在，它的状态字符串是什么。<code>Service</code> 的分支会检查
+<code>delonix_sdn::infra::service_get(namespace, name)</code>，如果找到了，还会数一数它的 selector
+当前匹配到多少个活着的容器（读的是 DNS 解析器自己读的<em>同一份</em>索引，所以规划结果绝不会和
+一个客户端实际查询这个名字得到的结果对不上）。有两个测试专门守着这一列：</p>
+<ul>
+<li><strong><code>todo_o_kind_declarativo_de_kinds_tem_braco_no_presence</code></strong> —— 每一个 <code>presence</code> 为
+  <code>Declarative</code> 的 Kind，<code>presence()</code> 真的会回答 <code>-</code>（而不是 <code>NetworkRoute</code> 在拥有自己的
+  注册表之前落入的那个兜底 <code>_ =&gt; ("?", "unsupported kind")</code>）。</li>
+<li><strong><code>um_kind_declarativo_nao_fica_pendente_para_sempre</code></strong> —— 对每一个 declarative 的 Kind，
+  <code>is_pending("-", kind, status)</code> 都是 <code>false</code>。<code>stack wait</code> 曾经只把 <code>present == "yes"</code>
+  当作就绪的唯一标志，所以只要清单里有<em>任何</em>一个 declarative 的 Kind，就会把整个 <code>--timeout</code>
+  都耗在等一个这种 Kind 永远产生不出来的标记上。</li>
+</ul>
+<h2 id="the-generic-verbs-and-drift">通用动词与 <code>drift</code><a class="hanchor" href="#the-generic-verbs-and-drift" aria-label="#">#</a></h2>
+<p><code>delonix get</code>/<code>describe</code>/<code>delete &lt;plural&gt;</code> 是按 Kind，通过
+<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/verbs.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/verbs.rs</code></a> 里的三份清单 —— <code>GET_ROUTES</code>、
+<code>DESCRIBE_ROUTES</code> 和 <code>DELETE_ROUTES</code> —— 加上每个动词各一个、调用该 Kind 自己的
+<code>cmd_ls</code>、<code>cmd_describe</code> 和 <code>remove_for_replace</code> 的分支来路由的。一个回答不了这些动词的
+Kind，就把障碍写进 <code>no_verb_reason</code>（<code>Stack</code> 是从文件读的，<code>Workload</code> 在 load 时就降级了，
+……）。要清楚这个门禁做什么、不做什么：<code>a_kind_never_both_routes_and_claims_it_cannot</code>
+<strong>只有</strong>在一个 Kind 既路由了、又声称自己不能路由时才会失败；一个哪份清单都不在的 Kind，
+只会在测试运行时在 stderr 上产生一行 <code>not wired yet: …</code>，而 <code>delonix get &lt;plural&gt;</code> 会对
+用户回答 <code>not wired yet</code>。要读那一行；构建不会替你拦下来。</p>
+<p><code>delonix drift</code> 会拿 <code>last-applied</code> 印记和机器上实际持有的状态做比较，大多数 Kind 都可以
+从自己的 store 里枚举出来。如果你的 <code>actual()</code> 需要已解析的文档才能回答 —— 节点没有一份能
+自己列出这个 Kind 的注册表，就像 <code>NetworkPolicy</code> 是以 nft 规则的形式挂在目标上一样 —— 就把
+它加进 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/drift.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/drift.rs</code></a> 里的 <code>DOC_SCOPED</code>。
+<code>doc_scoped_matches_the_stack_wiring</code> 会读 <code>stack.rs</code>（调用点<strong>以及</strong> <code>actual</code> 的函数
+签名），一旦清单和接线对不上就会失败；一个接收了 <code>docs</code> 却把它们晾在一边的模块（<code>fn
+actual(_docs: …)</code>）不该出现在这份清单里。</p>
+<h2 id="namespaces-and-completion">命名空间与补全<a class="hanchor" href="#namespaces-and-completion" aria-label="#">#</a></h2>
+<p>如果这个 Kind 是带命名空间的（<code>namespaced != Namespaced::Never</code>），它还需要在
+<code>NAMESPACE_SOURCES</code>（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/complete.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/complete.rs</code></a>）里有一条 —— 要么是
+读取该 Kind 自己 store 的 <code>NsSource::Store(fn)</code>，要么是命名空间实际落在另一个 Kind 的记录
+上时的 <code>NsSource::Via("OtherKind — reason")</code>（比如一个 <code>Pod</code> 的命名空间是记在它成员
+<code>Container</code> 身上的）。否则 <code>every_namespaced_kind_declares_a_source</code> 会失败 —— 漏掉这一点
+的实际后果是：<code>--namespace</code> 的 shell 补全永远没法给出一个「唯一资源就是这个新 Kind」的
+租户。</p>
+<h2 id="the-checklist">清单<a class="hanchor" href="#the-checklist" aria-label="#">#</a></h2>
+<p>对于一个行为和 <code>Service</code> 一样的 Kind（primary、可收敛、有 teardown、带命名空间）：</p>
+<ol>
+<li><code>kinds.rs</code> —— 一个 <code>pub const</code> 名称和一行 <code>KindFacts</code>，包括它的 <code>stack_group</code>（或者在
+   <code>stack_group_absent_reason</code> 里的对应条目）。</li>
+<li>一个带 <code>JsonSchema</code> 的 spec 结构体；<code>TYPED_KINDS</code> 和 <code>manifest_schema</code>（<code>schema.rs</code>）
+   里的分支 —— 或者在 <code>untyped_hint</code> 里说明为什么没有。</li>
+<li><code>manifest.rs</code> —— <code>filled_spec</code>（<code>spec_with_defaults</code>）里的分支、<code>spec_fields_for</code> 里的
+   分支，以及 <code>stack_group_sample</code> 里的样例；分组要写进 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/examples/stack.yaml" target="_blank" rel="noopener"><code>examples/stack.yaml</code></a>。</li>
+<li><code>stack.rs</code> —— <code>desired_of</code>、<code>actual_of</code>、<code>converge_and_stamp</code>、<code>stamp_all</code>、
+   <code>destroy_one</code>、<code>presence</code> 里的分支，以及 <code>run_layers</code> 里调用该 Kind 自己 <code>apply(docs)</code>
+   的那一层。</li>
+<li><code>reconcile.rs</code> —— <code>hot_fields</code> 里的一条，写明哪些字段能实时收敛。</li>
+<li>如果这个 Kind 不收敛，或者没法被拆除：在 <code>not_converged_reason</code> / <code>no_teardown_reason</code>
+   （<code>stack.rs</code>）里写一句具体的理由。</li>
+<li><code>verbs.rs</code> —— 把这个 Kind 连同它的分支写进
+   <code>GET_ROUTES</code>/<code>DESCRIBE_ROUTES</code>/<code>DELETE_ROUTES</code>，或者在 <code>no_verb_reason</code> 里写理由。</li>
+<li><code>drift.rs</code> —— 只有当 <code>actual()</code> 真的需要文档本身时，才加进 <code>DOC_SCOPED</code>。</li>
+<li>如果带命名空间：在 <code>NAMESPACE_SOURCES</code>（<code>complete.rs</code>）里加一条。</li>
+<li>代码里每一个新的面向用户的字符串都用英文写，并在 <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/data/pt.po" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/data/pt.po</code></a>
+    里翻译；<code>DX-CDNN</code> 字典（<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/codes.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/codes.rs</code></a>）里新增的错误码，
+    也需要它的葡语文本（<code>every_dictionary_text_has_a_portuguese_translation</code>）。运行
+    <code>python3 scripts/lang_ratchet.py</code>。</li>
+<li>用代码树的二进制程序执行 <code>delonix manifest schema &gt; docs/schema/v1/delonix.json</code>，再
+    执行 <code>python3 docs/gen.py &lt;该二进制程序&gt;</code>，让用户站点的 Kinds 页面跟着更新。</li>
+<li><code>cargo test -p delonix-runtime-bin -p delonix-stack</code> —— 上面点名的那些测试，才是抓住
+    某一步被跳过的东西，而不是靠评审者肉眼看 diff。</li>
+</ol>
+<p>一个 <code>Sugar</code>/<code>Aggregate</code> 的 Kind（在 load 时被改写或展开，像 <code>Workload</code> 或 <code>Stack</code> 那样）
+可以跳过这里的大部分内容：<code>um_kind_que_baixa_para_outro_nao_pertence_ao_ciclo_do_stack</code>
+要求这两种 form 必须是 <code>in_stack: false</code> 且 <code>converges: false</code>，真正的工作是在改写发生的
+<code>manifest::load</code> 里完成的。</p>
 <hr />
-<p><strong>Next:</strong> <a href="contributing-workflow.html">Contribution workflow</a> — worktrees, version alignment, the language rule, when to write an ADR, and how to send the change.</p>
-<nav class="pager"><a href="coding-conventions.html"><span>← 上一页</span>Coding conventions</a><a class="next" href="contributing-workflow.html"><span>下一页 →</span>Contribution workflow</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/adding-a-kind.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/adding-a-kind.md</code></footer>
+<p><strong>下一篇：</strong><a href="contributing-workflow.html">贡献流程</a> —— worktree、版本对齐、语言规则、什么
+时候要写 ADR，以及怎么把改动发出去。</p>
+<nav class="pager"><a href="coding-conventions.html"><span>← 上一页</span>编码规范</a><a class="next" href="contributing-workflow.html"><span>下一页 →</span>贡献流程</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/adding-a-kind.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/adding-a-kind.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#the-one-table-a-kind-has-to-answer">The one table a Kind has to answer</a></li>
-<li><a href="#the-spec-type-and-the-schema">The spec type and the schema</a></li>
-<li><a href="#wiring-the-kind-into-the-reconciler">Wiring the Kind into the reconciler</a></li>
-<li><a href="#fields-that-converge-without-recreating">Fields that converge without recreating</a></li>
-<li><a href="#presence-for-lsdescribewait">Presence, for ls/describe/wait</a></li>
-<li><a href="#the-checklist">The checklist</a></li>
+<li><a href="#the-one-table-a-kind-has-to-answer">一个 Kind 必须回答的这张唯一的表</a></li>
+<li><a href="#the-stack-group">Stack 分组</a></li>
+<li><a href="#the-spec-type-and-the-schema">Spec 类型与 schema</a></li>
+<li><a href="#wiring-the-kind-into-the-reconciler">把 Kind 接入协调器</a></li>
+<li><a href="#fields-that-converge-without-recreating">不用重建就能收敛的字段</a></li>
+<li><a href="#presence-for-lsdescribewait">Presence，供 ls/describe/wait 使用</a></li>
+<li><a href="#the-generic-verbs-and-drift">通用动词与 drift</a></li>
+<li><a href="#namespaces-and-completion">命名空间与补全</a></li>
+<li><a href="#the-checklist">清单</a></li>
 </ul>
 </div>
 </aside>

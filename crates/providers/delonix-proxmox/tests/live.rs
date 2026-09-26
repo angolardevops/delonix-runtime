@@ -18,8 +18,8 @@
 //! promotes every route it records to `supported+tested` (ADR-0049 D2), and the
 //! committed `docs/proxmox/trace-<ver>.routes` is one such run.
 
+use delonix_compute::vm_backend::{CreateStage, VmBackend, VmConfig};
 use delonix_proxmox::{AgentExecStatus, Auth, ProxmoxBackend, Target};
-use delonix_vm::{CreateStage, VmBackend, VmConfig};
 
 /// The backend over a client that honours the route trace: with
 /// `DELONIX_PROXMOX_TRACE_ROUTES=<file>` every request of this run lands in
@@ -1958,5 +1958,1288 @@ fn sdn_subnet_and_the_single_item_zone_vnet_routes_are_staged_applied_and_torn_d
             .iter()
             .any(|z| z.get("zone").and_then(|v| v.as_str()) == Some(zone.as_str())),
         "the zone is still listed after delete+apply: {zones_after:?}"
+    );
+}
+
+/// A stand-in for the external controller an IPAM or DNS entry names: the
+/// node VERIFIES both on create and on update by calling the URL, so a live
+/// case for those routes needs something at the other end that answers. This
+/// answers `200` with an empty JSON collection to anything and keeps the
+/// request lines and the two auth headers the node is known to send, which
+/// is what the test asserts on. Bound on every interface at an ephemeral
+/// port; the node reaches it at `DELONIX_PROXMOX_TEST_CALLBACK_ADDR`.
+struct ControllerStub {
+    port: u16,
+    seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl ControllerStub {
+    fn start() -> ControllerStub {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("0.0.0.0:0").expect("bind the stub");
+        let port = listener.local_addr().expect("stub addr").port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let _ = s.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+                let mut buf = [0u8; 8192];
+                let n = s.read(&mut buf).unwrap_or(0);
+                let head = String::from_utf8_lossy(&buf[..n]).to_string();
+                let mut line = head.lines().next().unwrap_or("").to_string();
+                for h in head.lines() {
+                    let lower = h.to_ascii_lowercase();
+                    if lower.starts_with("authorization:") || lower.starts_with("x-api-key:") {
+                        line.push_str(" | ");
+                        line.push_str(h.trim());
+                    }
+                }
+                log.lock().expect("stub log").push(line);
+                let body = br#"{"results":[],"count":0}"#;
+                let _ = write!(
+                    s,
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                    body.len()
+                );
+                let _ = s.write_all(body);
+            }
+        });
+        ControllerStub { port, seen }
+    }
+
+    fn requests(&self) -> Vec<String> {
+        self.seen.lock().expect("stub log").clone()
+    }
+}
+
+/// The layer above zones/vnets/subnets, against a real node: IPAM and DNS
+/// controllers (with a stub at the other end of their URL, because the node
+/// calls it), a fabric and its node member, a DHCP-serving zone with a
+/// DHCP range on its subnet, the apply that makes the zone and the fabric
+/// real, the node-side fabric reads that only answer once it is, and IP
+/// reservations in the `pve` IPAM — which act on the RUNNING subnet, so
+/// they come after the apply. Everything staged here is torn down and a
+/// second apply proves the node ends as it started.
+///
+/// The controller half needs `DELONIX_PROXMOX_TEST_CALLBACK_ADDR` (the
+/// address the NODE can reach this host at); without it that half is
+/// skipped and the rest still runs. No SKIP line: a print in a library
+/// crate's tests is counted debt.
+#[test]
+fn sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node() {
+    use delonix_proxmox::{DhcpRange, FabricProtocol, IpamKind, SubnetOptions, ZoneOptions};
+    let Some(t) = target() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    let node = t.node.clone();
+
+    let suffix = std::process::id() % 1_000_000;
+    let ipam = format!("i{suffix}");
+    let dns = format!("n{suffix}");
+    let fabric = format!("f{suffix}");
+    let zone = format!("d{suffix}");
+    let vnet = format!("e{suffix}");
+    let cidr = "10.88.0.0/24";
+
+    // --- IPAM and DNS controllers, verified by the node against the stub ---
+    if let Ok(callback) = std::env::var("DELONIX_PROXMOX_TEST_CALLBACK_ADDR") {
+        let stub = ControllerStub::start();
+        let base = format!("http://{callback}:{}", stub.port);
+
+        client
+            .create_sdn_ipam(
+                &ledger,
+                &ipam,
+                IpamKind::Netbox,
+                &format!("{base}/api"),
+                "tok-one",
+                None,
+            )
+            .expect("create the NetBox IPAM entry");
+        let obj = client.sdn_ipam(&ipam).expect("read the IPAM entry back");
+        assert_eq!(
+            obj.get("type").and_then(|v| v.as_str()),
+            Some("netbox"),
+            "{obj}"
+        );
+        assert_eq!(
+            obj.get("token").and_then(|v| v.as_str()),
+            Some("tok-one"),
+            "{obj}"
+        );
+        client
+            .update_sdn_ipam(&ledger, &ipam, None, Some("tok-two"), None)
+            .expect("update the IPAM token");
+        let obj = client
+            .sdn_ipam(&ipam)
+            .expect("read the IPAM entry after the update");
+        assert_eq!(
+            obj.get("token").and_then(|v| v.as_str()),
+            Some("tok-two"),
+            "{obj}"
+        );
+        assert!(
+            client
+                .sdn_ipams()
+                .expect("list IPAMs")
+                .iter()
+                .any(|i| { i.get("ipam").and_then(|v| v.as_str()) == Some("pve") }),
+            "the built-in pve IPAM is always listed"
+        );
+        client
+            .delete_sdn_ipam(&ledger, &ipam)
+            .expect("delete the IPAM entry");
+        assert!(
+            !client
+                .sdn_ipams()
+                .expect("list IPAMs after delete")
+                .iter()
+                .any(|i| { i.get("ipam").and_then(|v| v.as_str()) == Some(ipam.as_str()) }),
+            "the IPAM entry is still listed after its delete"
+        );
+
+        client
+            .create_sdn_dns(
+                &ledger,
+                &dns,
+                &format!("{base}/api/v1/servers/localhost"),
+                "key-one",
+                Some(300),
+            )
+            .expect("create the PowerDNS entry");
+        let obj = client.sdn_dns(&dns).expect("read the DNS entry back");
+        assert_eq!(
+            obj.get("ttl").and_then(serde_json::Value::as_u64),
+            Some(300),
+            "{obj}"
+        );
+        client
+            .update_sdn_dns(&ledger, &dns, None, None, Some(600))
+            .expect("update the DNS ttl");
+        let obj = client
+            .sdn_dns(&dns)
+            .expect("read the DNS entry after the update");
+        assert_eq!(
+            obj.get("ttl").and_then(serde_json::Value::as_u64),
+            Some(600),
+            "{obj}"
+        );
+        client
+            .delete_sdn_dns(&ledger, &dns)
+            .expect("delete the DNS entry");
+        assert!(
+            !client
+                .sdn_dns_controllers()
+                .expect("list DNS after delete")
+                .iter()
+                .any(|d| { d.get("dns").and_then(|v| v.as_str()) == Some(dns.as_str()) }),
+            "the DNS entry is still listed after its delete"
+        );
+
+        // The node did call the controllers: that is the fact this half exists
+        // to prove, and the one a caller has to know (an unreachable URL is a
+        // hung request, not a staged entry).
+        let seen = stub.requests();
+        assert!(
+            seen.iter()
+                .any(|l| l.contains("/api/ipam/aggregates/") && l.contains("token tok-one")),
+            "the node did not verify the NetBox entry on create: {seen:?}"
+        );
+        assert!(
+            seen.iter()
+                .any(|l| l.contains("/api/ipam/aggregates/") && l.contains("token tok-two")),
+            "the node did not verify the NetBox entry on update: {seen:?}"
+        );
+        assert!(
+            seen.iter().any(|l| l.contains("/api/v1/servers/localhost")
+                && l.to_ascii_lowercase().contains("x-api-key: key-one")),
+            "the node did not verify the PowerDNS entry: {seen:?}"
+        );
+    }
+
+    // --- a fabric and its node member, staged ---
+    client
+        .create_sdn_fabric(
+            &ledger,
+            &fabric,
+            FabricProtocol::OpenFabric,
+            Some("10.99.0.0/24"),
+            Some(3),
+            None,
+        )
+        .expect("create the fabric");
+    let f = client.sdn_fabric(&fabric).expect("read the fabric back");
+    assert_eq!(
+        f.get("protocol").and_then(|v| v.as_str()),
+        Some("openfabric"),
+        "{f}"
+    );
+    assert_eq!(
+        f.get("hello_interval").and_then(serde_json::Value::as_u64),
+        Some(3),
+        "{f}"
+    );
+    client
+        .update_sdn_fabric(&ledger, &fabric, FabricProtocol::OpenFabric, Some(5), None)
+        .expect("update the fabric's hello interval");
+    let f = client
+        .sdn_fabric(&fabric)
+        .expect("read the fabric after the update");
+    assert_eq!(
+        f.get("hello_interval").and_then(serde_json::Value::as_u64),
+        Some(5),
+        "{f}"
+    );
+    client
+        .create_sdn_fabric_node(
+            &ledger,
+            &fabric,
+            &node,
+            FabricProtocol::OpenFabric,
+            Some("10.99.0.1"),
+            &[],
+        )
+        .expect("add this node to the fabric");
+    let n = client
+        .sdn_fabric_node(&fabric, &node)
+        .expect("read the fabric node back");
+    assert_eq!(
+        n.get("ip").and_then(|v| v.as_str()),
+        Some("10.99.0.1"),
+        "{n}"
+    );
+    client
+        .update_sdn_fabric_node(
+            &ledger,
+            &fabric,
+            &node,
+            FabricProtocol::OpenFabric,
+            Some("10.99.0.2"),
+        )
+        .expect("update the fabric node's address");
+    let n = client
+        .sdn_fabric_node(&fabric, &node)
+        .expect("read the fabric node after the update");
+    assert_eq!(
+        n.get("ip").and_then(|v| v.as_str()),
+        Some("10.99.0.2"),
+        "{n}"
+    );
+    let nodes = client
+        .sdn_fabric_nodes(&fabric)
+        .expect("list the fabric's nodes");
+    assert!(
+        nodes
+            .iter()
+            .any(|x| x.get("node_id").and_then(|v| v.as_str()) == Some(node.as_str())),
+        "{nodes:?}"
+    );
+    let all = client.sdn_fabrics_all().expect("fabrics/all");
+    assert!(
+        all.get("fabrics")
+            .and_then(|v| v.as_array())
+            .is_some_and(|fs| {
+                fs.iter()
+                    .any(|x| x.get("id").and_then(|v| v.as_str()) == Some(fabric.as_str()))
+            }),
+        "fabrics/all does not list the fabric: {all}"
+    );
+    let index = client
+        .sdn_fabric_node_index(&fabric)
+        .expect("node-side fabric index");
+    assert!(
+        index
+            .iter()
+            .any(|e| e.get("subdir").and_then(|v| v.as_str()) == Some("routes")),
+        "{index:?}"
+    );
+
+    // --- a DHCP-serving zone with a ranged subnet, staged ---
+    client
+        .create_sdn_zone_with(
+            &ledger,
+            &zone,
+            &ZoneOptions {
+                dhcp_dnsmasq: true,
+                ipam: Some("pve"),
+                ..Default::default()
+            },
+        )
+        .expect("create the DHCP zone");
+    let z = client.sdn_zone(&zone).expect("read the zone back");
+    assert_eq!(
+        z.get("dhcp").and_then(|v| v.as_str()),
+        Some("dnsmasq"),
+        "{z}"
+    );
+    client
+        .create_sdn_vnet(&ledger, &vnet, &zone, None)
+        .expect("create the vnet");
+    let range1 = [DhcpRange {
+        start: "10.88.0.100".into(),
+        end: "10.88.0.150".into(),
+    }];
+    client
+        .create_sdn_subnet_with(
+            &ledger,
+            &vnet,
+            &zone,
+            cidr,
+            &SubnetOptions {
+                gateway: Some("10.88.0.1"),
+                dhcp_ranges: &range1,
+                dhcp_dns_server: Some("10.88.0.1"),
+                snat: None,
+            },
+        )
+        .expect("create the subnet with a DHCP range");
+    let sub = client
+        .sdn_vnet_subnet(&vnet, &zone, cidr)
+        .expect("read the subnet back");
+    assert_eq!(
+        sub.pointer("/dhcp-range/0/start-address")
+            .and_then(|v| v.as_str()),
+        Some("10.88.0.100"),
+        "the DHCP range did not reach the node: {sub}"
+    );
+    assert_eq!(
+        sub.get("dhcp-dns-server").and_then(|v| v.as_str()),
+        Some("10.88.0.1"),
+        "{sub}"
+    );
+    let range2 = [DhcpRange {
+        start: "10.88.0.110".into(),
+        end: "10.88.0.160".into(),
+    }];
+    client
+        .update_sdn_subnet_with(
+            &ledger,
+            &vnet,
+            &zone,
+            cidr,
+            &SubnetOptions {
+                dhcp_ranges: &range2,
+                ..Default::default()
+            },
+        )
+        .expect("change the DHCP range");
+    let sub = client
+        .sdn_vnet_subnet(&vnet, &zone, cidr)
+        .expect("read the subnet after the range update");
+    assert_eq!(
+        sub.pointer("/dhcp-range/0/end-address")
+            .and_then(|v| v.as_str()),
+        Some("10.88.0.160"),
+        "the changed DHCP range did not reach the node: {sub}"
+    );
+
+    // --- apply: the zone, the subnet's dnsmasq and the fabric's FRR become real ---
+    client.apply_sdn(&ledger).expect("apply the pending config");
+    let read_ledger = || -> Vec<serde_json::Value> {
+        serde_json::from_str::<serde_json::Value>(
+            &std::fs::read_to_string(dir.path().join("proxmox-tasks.json"))
+                .expect("the ledger was written"),
+        )
+        .expect("the ledger is JSON")
+        .as_array()
+        .expect("the ledger is a list")
+        .clone()
+    };
+    let last_apply = |entries: &[serde_json::Value]| -> serde_json::Value {
+        entries
+            .iter()
+            .rev()
+            .find(|e| e.get("action").and_then(|a| a.as_str()) == Some("apply-sdn"))
+            .expect("an apply-sdn task in the ledger")
+            .clone()
+    };
+    let applied = last_apply(&read_ledger());
+    assert_eq!(
+        applied.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "{applied}"
+    );
+
+    // Node-side fabric reads answer only for a RUNNING fabric — this is that,
+    // and the interface list is the proof the fabric is real on this node
+    // (its dummy loopback), not just present in the running config.
+    let ifaces = client
+        .sdn_fabric_interfaces(&fabric)
+        .expect("fabric interfaces after apply");
+    let dummy = format!("dummy_{fabric}");
+    assert!(
+        ifaces
+            .iter()
+            .any(|i| i.get("name").and_then(|v| v.as_str()) == Some(dummy.as_str())),
+        "the fabric's own interface is not up on the node: {ifaces:?}"
+    );
+    let neigh = client
+        .sdn_fabric_neighbors(&fabric)
+        .expect("fabric neighbours after apply");
+    assert!(
+        neigh.is_empty(),
+        "a single node has no neighbour: {neigh:?}"
+    );
+    client
+        .sdn_fabric_routes(&fabric)
+        .expect("fabric routes after apply");
+    // `status: "available"` is the assertion that matters: an apply can end
+    // `TASK OK` and realize nothing (see the module doc comment of `sdn.rs`
+    // for the case this repository's own appliance image hit), and only this
+    // route says which of the two happened.
+    let content = client
+        .sdn_zone_content(&zone)
+        .expect("the zone's content on this node");
+    let entry = content
+        .iter()
+        .find(|c| c.get("vnet").and_then(|v| v.as_str()) == Some(vnet.as_str()))
+        .unwrap_or_else(|| {
+            panic!("the applied zone does not list its vnet on the node: {content:?}")
+        });
+    assert_eq!(
+        entry.get("status").and_then(|v| v.as_str()),
+        Some("available"),
+        "the vnet is in the zone but not realized on the node: {entry}"
+    );
+
+    // --- IP reservations, against the now-running subnet ---
+    client
+        .sdn_vnet_ip_add(
+            &ledger,
+            &vnet,
+            &zone,
+            "10.88.0.50",
+            Some("BC:24:11:00:00:01"),
+        )
+        .expect("reserve an address");
+    let held = client.sdn_ipam_status("pve").expect("pve IPAM status");
+    let entry = held
+        .iter()
+        .find(|e| e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.50"))
+        .unwrap_or_else(|| panic!("the reservation is not in the pve IPAM: {held:?}"));
+    assert!(
+        entry
+            .get("mac")
+            .and_then(|v| v.as_str())
+            .is_some_and(|m| m.eq_ignore_ascii_case("BC:24:11:00:00:01")),
+        "{entry}"
+    );
+    client
+        .sdn_vnet_ip_update(
+            &ledger,
+            &vnet,
+            &zone,
+            "BC:24:11:00:00:01",
+            "10.88.0.51",
+            None,
+        )
+        .expect("move the MAC's reservation to another address");
+    let held = client
+        .sdn_ipam_status("pve")
+        .expect("pve IPAM status after the update");
+    assert!(
+        held.iter().any(|e| {
+            e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.51")
+                && e.get("mac")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|m| m.eq_ignore_ascii_case("BC:24:11:00:00:01"))
+        }),
+        "the new address did not reach the IPAM: {held:?}"
+    );
+    assert!(
+        !held
+            .iter()
+            .any(|e| e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.50")),
+        "the old address survived the move: {held:?}"
+    );
+    client
+        .sdn_vnet_ip_delete(
+            &ledger,
+            &vnet,
+            &zone,
+            "10.88.0.51",
+            Some("BC:24:11:00:00:01"),
+        )
+        .expect("release the address");
+    let held = client
+        .sdn_ipam_status("pve")
+        .expect("pve IPAM status after the delete");
+    assert!(
+        !held
+            .iter()
+            .any(|e| e.get("ip").and_then(|v| v.as_str()) == Some("10.88.0.51")),
+        "the reservation survived its delete: {held:?}"
+    );
+
+    // --- teardown, and the apply that makes the node forget all of it ---
+    client
+        .delete_sdn_subnet(&ledger, &vnet, &zone, cidr)
+        .expect("delete the subnet");
+    client
+        .delete_sdn_vnet(&ledger, &vnet)
+        .expect("delete the vnet");
+    client
+        .delete_sdn_zone(&ledger, &zone)
+        .expect("delete the zone");
+    client
+        .delete_sdn_fabric_node(&ledger, &fabric, &node)
+        .expect("remove the node from the fabric");
+    client
+        .delete_sdn_fabric(&ledger, &fabric)
+        .expect("delete the fabric");
+    client
+        .apply_sdn(&ledger)
+        .expect("apply the pending deletions");
+    let applied = last_apply(&read_ledger());
+    assert_eq!(
+        applied.pointer("/state/state").and_then(|s| s.as_str()),
+        Some("ok"),
+        "{applied}"
+    );
+    assert!(
+        !client
+            .sdn_zones()
+            .expect("zones after cleanup")
+            .iter()
+            .any(|z| z.get("zone").and_then(|v| v.as_str()) == Some(zone.as_str())),
+        "the zone is still listed after delete+apply"
+    );
+    assert!(
+        !client
+            .sdn_fabrics()
+            .expect("fabrics after cleanup")
+            .iter()
+            .any(|f| f.get("id").and_then(|v| v.as_str()) == Some(fabric.as_str())),
+        "the fabric is still listed after delete+apply"
+    );
+}
+
+/// `NetworkPolicy` `scope: vm` through the backend port (ADR-0052): the
+/// engine's policy lands on the node's own per-VM firewall and reads back as
+/// the same policy.
+///
+/// Runs one of two branches, decided by the CLUSTER, never flipped here:
+/// with the datacenter firewall off, `apply_firewall` must refuse with
+/// DX-6508 and leave the VM's firewall exactly as it was; with it on, the
+/// whole cycle runs — the three switches, the rules in policy order above a
+/// hand-made rule that must survive, a re-apply that replaces instead of
+/// appending, and the other direction left alone.
+#[test]
+fn a_scope_vm_policy_lands_on_the_nodes_own_firewall_and_reads_back() {
+    use delonix_compute::vm_firewall::{Direction, Policy, Proto, Rule};
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxpol{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let client = b.client();
+    let vm = delonix_compute::Vm::new(
+        name,
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let rule = |allow: bool, proto: Proto, port: Option<&str>, peer: Option<&str>| Rule {
+        allow,
+        proto,
+        port: port.map(str::to_string),
+        peer: peer.map(str::to_string),
+    };
+    let inbound = Policy {
+        direction: Direction::In,
+        default_allow: false,
+        rules: vec![
+            rule(true, Proto::Any, Some("53"), Some("10.0.0.0/8")),
+            rule(true, Proto::Tcp, Some("22"), None),
+            rule(false, Proto::Any, None, Some("192.168.1.0/24")),
+        ],
+    };
+
+    let dc = client
+        .cluster_firewall_options()
+        .expect("datacenter firewall options");
+    if !delonix_proxmox::vm_firewall::datacenter_enabled(&dc) {
+        let err = b
+            .apply_firewall(vmdir, &vm, &inbound)
+            .expect_err("a datacenter firewall that is off must refuse the policy");
+        assert!(
+            matches!(err, delonix_model::Error::Coded { number: 6508, .. }),
+            "expected DX-6508, got: {err}"
+        );
+        let opts = client.firewall_options(vmid).expect("firewall options");
+        assert!(
+            opts.get("enable").is_none() && opts.get("policy_in").is_none(),
+            "the refusal touched the VM's firewall anyway: {opts}"
+        );
+        assert!(
+            client.firewall_rules(vmid).expect("rules").is_empty(),
+            "the refusal wrote rules anyway"
+        );
+    } else {
+        // A rule the engine did not write: it must survive every apply.
+        client
+            .add_firewall_rule(
+                &ledger,
+                vmid,
+                "in",
+                "ACCEPT",
+                &delonix_proxmox::FirewallRuleOpts {
+                    enable: Some(true),
+                    comment: Some("hand-made"),
+                    source: None,
+                    dest: None,
+                    proto: Some("tcp"),
+                    dport: Some("8006"),
+                    sport: None,
+                    iface: None,
+                    macro_name: None,
+                    rule_type: None,
+                    action: None,
+                },
+            )
+            .expect("a hand-made rule");
+
+        b.apply_firewall(vmdir, &vm, &inbound)
+            .expect("apply the inbound policy");
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::In)
+                .expect("read back"),
+            inbound,
+            "the node does not hold the policy that was applied"
+        );
+
+        // The three switches, read from the node, not from what apply said.
+        let opts = client.firewall_options(vmid).expect("firewall options");
+        assert_eq!(
+            opts.get("enable").and_then(|v| v.as_u64()),
+            Some(1),
+            "{opts}"
+        );
+        assert_eq!(
+            opts.get("policy_in").and_then(|v| v.as_str()),
+            Some("DROP"),
+            "{opts}"
+        );
+        let net0 = client.config(vmid).expect("config")["net0"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        assert!(
+            net0.contains("firewall=1"),
+            "net0 has no firewall switch: {net0}"
+        );
+        assert!(
+            net0.contains(&boot.mac),
+            "turning the NIC's firewall on changed its MAC: {net0} (was {})",
+            boot.mac
+        );
+
+        // The engine's four node rules sit ABOVE the hand-made one (the first
+        // match wins), and the hand-made one is still there.
+        let rules = client.firewall_rules(vmid).expect("rules");
+        let pos_of = |c: &str| {
+            rules
+                .iter()
+                .filter(|r| r.get("comment").and_then(|x| x.as_str()) == Some(c))
+                .filter_map(|r| r.get("pos").and_then(|p| p.as_u64()))
+                .collect::<Vec<_>>()
+        };
+        let hand = pos_of("hand-made");
+        assert_eq!(hand.len(), 1, "the hand-made rule is gone: {rules:?}");
+        let managed: Vec<u64> = [
+            "delonix-managed:0",
+            "delonix-managed:1",
+            "delonix-managed:2",
+        ]
+        .iter()
+        .flat_map(|c| pos_of(c))
+        .collect();
+        assert_eq!(managed.len(), 4, "any+port is two node rules: {rules:?}");
+        assert!(
+            managed.iter().all(|p| *p < hand[0]),
+            "a managed rule sits below the hand-made one: {rules:?}"
+        );
+
+        // Re-apply a different policy: it REPLACES the engine's rules.
+        let narrower = Policy {
+            direction: Direction::In,
+            default_allow: false,
+            rules: vec![rule(true, Proto::Tcp, Some("443"), None)],
+        };
+        b.apply_firewall(vmdir, &vm, &narrower)
+            .expect("re-apply the inbound policy");
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::In)
+                .expect("read back"),
+            narrower
+        );
+        let rules = client.firewall_rules(vmid).expect("rules");
+        assert_eq!(
+            rules.len(),
+            2,
+            "a re-apply must leave one managed rule and the hand-made one: {rules:?}"
+        );
+
+        // The other direction, and the first one untouched by it.
+        let outbound = Policy {
+            direction: Direction::Out,
+            default_allow: true,
+            rules: vec![rule(false, Proto::Tcp, Some("25"), None)],
+        };
+        b.apply_firewall(vmdir, &vm, &outbound)
+            .expect("apply the outbound policy");
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::Out)
+                .expect("read back"),
+            outbound
+        );
+        assert_eq!(
+            b.read_firewall(vmdir, &vm, Direction::In)
+                .expect("read back"),
+            narrower,
+            "an egress policy changed the ingress one"
+        );
+    }
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
+
+/// The power operations beyond start/stop, each asserted from what the node
+/// reports afterwards (`GET …/status/current`), never from the call's answer:
+///
+/// - `pause`/`unpause` (the backend's, i.e. `vm pause`) are the node's
+///   `…/status/suspend`/`…/status/resume`. A suspended VM still answers
+///   `status: running` — only `qmpstatus` says `paused`, so that is what is
+///   asserted, and `is_running` has to keep answering true for it (the
+///   engine's record says `Paused`, not gone).
+/// - `reset` leaves the VM running.
+/// - `reboot` and a plain `shutdown` of a guest with NO operating system —
+///   this case's 1 GiB empty disk ignores ACPI — FAIL after their timeout,
+///   and the VM is still running: «asked and it did not go down» is an
+///   error, never a success.
+/// - `shutdown` with `force_stop` stops it anyway.
+///
+/// The ledger is read at the end: every task that was meant to succeed did,
+/// and the only failures are the two the guest caused.
+#[test]
+fn power_operations_round_trip_through_the_node() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the sibling cases already say it.
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxpower{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let ledger = delonix_proxmox::Ledger::at(vmdir);
+    let state = || client.power_state(vmid).expect("status/current");
+
+    b.pause(vmdir, &vm).expect("pause (…/status/suspend)");
+    let s = state();
+    assert_eq!(
+        s.status, "running",
+        "a suspended VM still reads running: {s:?}"
+    );
+    assert!(
+        s.is_paused(),
+        "qmpstatus must say paused after a suspend: {s:?}"
+    );
+    assert!(
+        b.is_running(&vm),
+        "a paused VM is not gone — the engine keeps its record as Paused"
+    );
+
+    b.unpause(vmdir, &vm).expect("unpause (…/status/resume)");
+    let s = state();
+    assert!(
+        s.status == "running" && !s.is_paused(),
+        "running again after a resume: {s:?}"
+    );
+
+    client.reset(&ledger, vmid).expect("reset");
+    assert_eq!(state().status, "running", "a reset leaves the VM running");
+
+    let short = Some(std::time::Duration::from_secs(5));
+    let err = client
+        .reboot(&ledger, vmid, short)
+        .expect_err("a guest with no OS ignores ACPI: the reboot must fail");
+    assert!(
+        matches!(err, delonix_proxmox::Error::TaskFailed(_)),
+        "a task failure, not a transport error: {err:?}"
+    );
+    assert_eq!(
+        state().status,
+        "running",
+        "a failed reboot leaves it running"
+    );
+
+    let err = client
+        .shutdown(&ledger, vmid, short, false)
+        .expect_err("a guest with no OS ignores ACPI: the shutdown must fail");
+    assert!(
+        err.to_string().contains("powerdown failed"),
+        "the node's own reason is carried: {err}"
+    );
+    assert_eq!(
+        state().status,
+        "running",
+        "a failed shutdown leaves it running"
+    );
+
+    client
+        .shutdown(&ledger, vmid, short, true)
+        .expect("forceStop pulls the plug after the timeout");
+    let s = state();
+    assert_eq!(s.status, "stopped", "{s:?}");
+    assert!(!b.is_running(&vm));
+
+    let entries: Vec<serde_json::Value> = serde_json::from_str(
+        &std::fs::read_to_string(vmdir.join("proxmox-tasks.json")).expect("the ledger"),
+    )
+    .expect("ledger JSON");
+    let state_of = |e: &serde_json::Value| {
+        e.pointer("/state/state")
+            .or_else(|| e.get("state"))
+            .and_then(|s| s.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    for want in ["suspend", "resume", "reset"] {
+        let last = entries
+            .iter()
+            .rev()
+            .find(|e| e.get("action").and_then(|a| a.as_str()) == Some(want))
+            .unwrap_or_else(|| panic!("no `{want}` task in the ledger: {entries:?}"));
+        assert_eq!(state_of(last), "ok", "`{want}` did not succeed: {last}");
+    }
+    let failed: Vec<&str> = entries
+        .iter()
+        .filter(|e| state_of(e) == "failed")
+        .filter(|e| {
+            !e.pointer("/state/reason")
+                .and_then(|r| r.as_str())
+                .is_some_and(|r| r.contains("can't lock file"))
+        })
+        .filter_map(|e| e.get("action").and_then(|a| a.as_str()))
+        .collect();
+    assert_eq!(
+        failed,
+        ["reboot", "shutdown"],
+        "only the two the guest caused may fail: {entries:?}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
+
+/// `vm resize` on Proxmox (`vm.resize.cold`), asserted from what the node
+/// records afterwards (`GET …/config`, `GET …/pending`), never from the
+/// call's answer:
+///
+/// - a VM the NODE runs is refused with the engine's own
+///   `ResizeNeedsStopped` (DX-5505), even though a record could say
+///   `Stopped` — nothing is sent, the config keeps its old numbers;
+/// - stopped, `resize_cold` sets cores, sockets and memory, and `pending`
+///   is empty: the numbers are the ones the VM boots with;
+/// - it boots with them: after `resume` the config still says so and the
+///   node reports the VM's `cpus`/`maxmem` from the new definition.
+#[test]
+fn a_stopped_vm_is_resized_and_the_node_reads_back_the_new_size() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxresize{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let number_at = |v: &serde_json::Value, k: &str| -> Option<u64> {
+        let x = v.get(k)?;
+        x.as_u64()
+            .or_else(|| x.as_str().and_then(|s| s.parse().ok()))
+    };
+
+    let err = b
+        .resize_cold(vmdir, &vm, 2, 768)
+        .expect_err("the node runs it: a cold resize must be refused");
+    assert_eq!(err.number(), 5505, "{err}");
+    let c = client.config(vmid).expect("config");
+    assert_eq!(
+        (number_at(&c, "cores"), number_at(&c, "memory")),
+        (Some(1), Some(512)),
+        "a refused resize changed the config: {c}"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.resize_cold(vmdir, &vm, 2, 768)
+        .expect("resize a stopped VM");
+    let c = client.config(vmid).expect("config");
+    assert_eq!(
+        (
+            number_at(&c, "cores"),
+            number_at(&c, "sockets"),
+            number_at(&c, "memory")
+        ),
+        (Some(2), Some(1), Some(768)),
+        "{c}"
+    );
+    let pending = client.pending(vmid).expect("pending");
+    assert!(
+        pending
+            .iter()
+            .all(|e| e.get("pending").is_none() && e.get("delete").is_none()),
+        "a stopped VM's resize was left pending: {pending:?}"
+    );
+
+    b.resume(vmdir, &vm).expect("resume").expect("a started VM");
+    let st = client.current(vmid).expect("status/current");
+    assert_eq!(st.get("status").and_then(|s| s.as_str()), Some("running"));
+    assert_eq!(
+        number_at(&st, "cpus"),
+        Some(2),
+        "it booted with 2 vCPUs: {st}"
+    );
+    assert_eq!(
+        number_at(&st, "maxmem"),
+        Some(768 * 1024 * 1024),
+        "it booted with 768 MiB: {st}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
+
+/// `extraDisks`/`extraNics` on Proxmox (`vm.disks.extra`/`vm.nics.extra`),
+/// asserted from the node's own config and storage, never from the call's
+/// answer: the extra disks exist on the storage under this VM's id, in the
+/// slots asked for and with the sizes asked for; the extra NICs carry the
+/// model, the fixed MAC and the bridge asked for; and a destroy takes every
+/// disk with it (`storage/.../content?content=images`), not only the boot one.
+#[test]
+fn extra_disks_and_nics_are_created_with_the_vm_and_go_with_it() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxextra{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        extra_disks: vec![
+            delonix_compute::ExtraDisk {
+                source: format!("{storage}:1"),
+                ..Default::default()
+            },
+            delonix_compute::ExtraDisk {
+                source: format!("{storage}:2"),
+                bus: "scsi".into(),
+                ..Default::default()
+            },
+        ],
+        extra_nics: vec![
+            delonix_compute::ExtraNic::default(),
+            delonix_compute::ExtraNic {
+                kind: "bridge".into(),
+                source: Some("vmbr0".into()),
+                model: "e1000".into(),
+                mac: Some("BC:24:11:0A:0B:0C".into()),
+            },
+        ],
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+
+    let c = client.config(vmid).expect("config");
+    let key = |k: &str| {
+        c.get(k)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    let owned = format!("{storage}:vm-{vmid}-disk-");
+    assert!(
+        key("virtio0").starts_with(&owned) && key("virtio0").contains("size=1G"),
+        "virtio0: {c}"
+    );
+    assert!(
+        key("scsi1").starts_with(&owned) && key("scsi1").contains("size=2G"),
+        "scsi1: {c}"
+    );
+    assert!(
+        key("net1").starts_with("virtio=") && key("net1").contains("bridge=vmbr0"),
+        "net1: {c}"
+    );
+    assert!(
+        key("net2").starts_with("e1000=BC:24:11:0A:0B:0C") && key("net2").contains("bridge=vmbr0"),
+        "net2: {c}"
+    );
+    // The cloud-init drive (`vm-<id>-cloudinit`) is on the storage too —
+    // every VM gets one for `ipconfig0` — so the disks are counted by name.
+    let images = client.list_images(&storage, vmid).expect("storage content");
+    let disks: Vec<&String> = images.iter().filter(|v| v.contains("-disk-")).collect();
+    assert_eq!(disks.len(), 3, "boot + two extra disks: {images:?}");
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+    let left = client.list_images(&storage, vmid).expect("storage content");
+    assert!(
+        left.is_empty(),
+        "a destroy left disks on the storage: {left:?}"
+    );
+}
+
+/// `vm cloud-init` on Proxmox (`vm.cloud-init`), asserted from the node's
+/// OWN rendering of the drive (`…/cloudinit/dump?type=user`), never from the
+/// call's answer:
+///
+/// - refused with the engine's DX-5506 while the node runs the VM, and the
+///   rendering keeps the key the VM was created with;
+/// - stopped, the change reaches the drive: the new hostname, the new user
+///   and the new key are in the user-data, the old key is not, and
+///   `…/cloudinit` has nothing pending.
+#[test]
+fn a_stopped_vms_cloud_init_is_changed_and_the_node_renders_it() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    // Real ed25519 public keys, generated for this test only (no private half
+    // is kept): the node validates the key format and refuses an invented one.
+    let old_key =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIDoho0AhSdfKD3pWW/u4a2o3709J6q0Pl4kSE2rZ/B5Z dlx-old";
+    let new_key =
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIFjdrrc1qEToezK50JsCHNdww+KDK9e0S4YQon8PsUys dlx-new";
+    let name = format!("dlxci{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ssh_keys: vec![old_key.into()],
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    let intent = delonix_compute::vm_backend::CloudInitIntent {
+        hostname: Some("dlx-renamed".into()),
+        ci_user: Some("ops".into()),
+        ssh_keys: vec![new_key.into()],
+    };
+
+    let err = b
+        .update_cloud_init(vmdir, &vm, &intent)
+        .expect_err("the node runs it: a cloud-init change must be refused");
+    assert_eq!(err.number(), 5506, "{err}");
+    let before = client.cloudinit_dump(vmid, "user").expect("dump user");
+    assert!(
+        before.contains(old_key),
+        "a refused change touched the drive: {before}"
+    );
+
+    b.stop(vmdir, &vm).expect("stop");
+    b.update_cloud_init(vmdir, &vm, &intent)
+        .expect("cloud-init change on a stopped VM");
+    let after = client.cloudinit_dump(vmid, "user").expect("dump user");
+    assert!(after.contains("hostname: dlx-renamed"), "{after}");
+    assert!(after.contains("user: ops"), "{after}");
+    assert!(after.contains(new_key), "{after}");
+    assert!(!after.contains(old_key), "the old key survived: {after}");
+    let pending = client.cloudinit_pending(vmid).expect("cloudinit pending");
+    assert!(
+        pending.iter().all(|k| !k.is_pending()),
+        "keys left pending after the change: {pending:?}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
+    );
+}
+
+/// `locate_vm` (ADR-0053 decision 3) against a real node: the cluster's
+/// resource list places a VM this backend created on its node, and an id
+/// nobody has is not placed anywhere. On a single node this proves the READ;
+/// following a VM to ANOTHER node needs a second node and is not measured here.
+#[test]
+fn the_cluster_resource_list_places_a_vm_on_its_node() {
+    let Some(t) = target() else {
+        return;
+    };
+    let storage =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+    let name = format!("dlxloc{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{storage}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    let vm = delonix_compute::Vm::new(
+        name.clone(),
+        cfg.disk.clone(),
+        cfg.disk.clone(),
+        1,
+        "512M".into(),
+        String::new(),
+        boot.tap.clone(),
+        boot.mac.clone(),
+        boot.api_socket.clone(),
+    );
+    let client = b.client();
+    assert_eq!(
+        client
+            .locate_vm(vmid)
+            .expect("cluster resources")
+            .as_deref(),
+        Some(t.node.as_str()),
+        "the VM is listed on the node that created it"
+    );
+    assert_eq!(
+        client.locate_vm(999_999).expect("cluster resources"),
+        None,
+        "an id nobody has is placed nowhere"
+    );
+    assert_eq!(b.current_handle(&vm), None, "nothing moved");
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert!(
+        client.config(vmid).is_err(),
+        "the VM is still defined on the node after destroy — an orphan"
     );
 }

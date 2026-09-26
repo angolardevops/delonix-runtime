@@ -17,11 +17,11 @@ use std::net::TcpListener;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use delonix_compute::vm_backend::VmConfig;
 use delonix_proxmox::{
     AgentExecStatus, Auth, Client, ClientOptions, Error, Ledger, Target, TaskState,
     MAX_RESPONSE_BYTES,
 };
-use delonix_vm::VmConfig;
 
 // ===========================================================================
 // The mock node
@@ -687,7 +687,7 @@ fn a_lost_answer_finds_the_running_task_instead_of_resending() {
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let ledger = Ledger::at(dir.path());
-    let cfg = delonix_vm::VmConfig {
+    let cfg = delonix_compute::vm_backend::VmConfig {
         name: "delonix-test-lost".into(),
         ..Default::default()
     };
@@ -821,7 +821,7 @@ fn a_lost_answer_with_nothing_on_the_node_stays_a_transport_error() {
     ]));
     let client = Client::connect_with(&token_target(&node), fast()).unwrap();
     let dir = tempfile::tempdir().unwrap();
-    let cfg = delonix_vm::VmConfig {
+    let cfg = delonix_compute::vm_backend::VmConfig {
         name: "delonix-test-lost".into(),
         ..Default::default()
     };
@@ -1050,4 +1050,500 @@ fn the_secret_reaches_no_error_no_debug_output_and_no_trace_file() {
     assert!(!traced.contains("the-token-secret-value"));
     assert!(traced.contains("GET /nodes\n"), "{traced}");
     assert!(traced.contains(&format!("GET {CONFIG}\n")), "{traced}");
+}
+
+/// ADR-0052: a `scope: vm` policy on a cluster whose DATACENTER firewall is
+/// off is refused with DX-6508 — and refused BEFORE anything is written. The
+/// node's answer here is the one measured on PVE 9.2.2 for a cluster that
+/// never had it on: a bare `digest`, no `enable` key at all.
+#[test]
+fn a_vm_policy_on_a_cluster_with_its_firewall_off_is_refused_before_any_write() {
+    let node = MockNode::start(script(&[(
+        "GET",
+        "/cluster/firewall/options",
+        ok_data(r#"{"digest":"da39a3ee5e6b4b0d3255bfef95601890afd80709"}"#),
+    )]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let policy = delonix_compute::vm_firewall::Policy {
+        direction: delonix_compute::vm_firewall::Direction::In,
+        default_allow: false,
+        rules: vec![],
+    };
+    let err = delonix_proxmox::vm_firewall::apply(&client, &Ledger::at(dir.path()), 100, &policy)
+        .expect_err("a datacenter firewall that is off must refuse");
+    assert_eq!(err.number(), 6508, "{err}");
+    let writes: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.method != "GET" && !s.path.ends_with("/access/ticket"))
+        .collect();
+    assert!(
+        writes.is_empty(),
+        "the refusal wrote to the node: {writes:?}"
+    );
+}
+
+// ===========================================================================
+// Power operations: shutdown, reboot, reset, suspend, resume
+// ===========================================================================
+
+/// `…/status/suspend` forks a task the node lists as `qmpause` — measured on
+/// PVE 9.2.2, and NOT the `qmsuspend` the path suggests. A lost answer has to
+/// be found under the name the node actually uses, or the recovery falls
+/// through to its probe while the suspend is still in flight.
+#[test]
+fn a_lost_suspend_is_found_as_the_qmpause_task_the_node_runs() {
+    let upid = "UPID:pve:0001A2B3:0000C4D5:66F0:qmpause:100:root@pam:";
+    let status = format!("/nodes/pve/tasks/{upid}/status");
+    let node = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/status/suspend", Reply::Drop),
+        (
+            "GET",
+            "/nodes/pve/tasks",
+            ok_data(&format!(
+                r#"[{{"upid":"{upid}","type":"qmpause","status":"running"}}]"#
+            )),
+        ),
+        (
+            "GET",
+            &status,
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    client
+        .suspend(&ledger, 100)
+        .expect("the qmpause task the node was running finished OK");
+    assert_eq!(
+        node.count("POST", "/nodes/pve/qemu/100/status/suspend"),
+        1,
+        "NEVER resent"
+    );
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(recs[0].upid, upid, "the node's task, recorded as ours");
+    assert_eq!(recs[0].state, TaskState::Ok);
+}
+
+/// A suspended VM still answers `status: running`; only `qmpstatus` says
+/// `paused`. The lost-answer probe has to read the second field, or a
+/// suspend that never happened would be accepted.
+#[test]
+fn a_lost_suspend_is_accepted_only_when_qmpstatus_says_paused() {
+    let paused = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/status/suspend", Reply::Drop),
+        ("GET", "/nodes/pve/tasks", ok_data("[]")),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/status/current",
+            ok_data(r#"{"status":"running","qmpstatus":"paused"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&paused), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    client
+        .suspend(&Ledger::at(dir.path()), 100)
+        .expect("paused already: done");
+
+    let running = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/status/suspend", Reply::Drop),
+        ("GET", "/nodes/pve/tasks", ok_data("[]")),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/status/current",
+            ok_data(r#"{"status":"running","qmpstatus":"running"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&running), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .suspend(&Ledger::at(dir.path()), 100)
+        .expect_err("`status: running` alone is not a suspended VM");
+    assert!(matches!(err, Error::Request(_)), "{err:?}");
+    assert_eq!(
+        running.count("POST", "/nodes/pve/qemu/100/status/suspend"),
+        1,
+        "a lost answer is never resent"
+    );
+}
+
+/// A guest that ignores ACPI makes the node's shutdown task FAIL after the
+/// timeout (measured: «VM quit/powerdown failed - got timeout»). That is an
+/// error here, recorded as `failed` — never read as «it went down».
+#[test]
+fn a_shutdown_the_guest_ignores_is_a_failure_and_the_form_carries_the_timeout() {
+    let upid = "UPID:pve:0001A2B3:0000C4D5:66F0:qmshutdown:100:root@pam:";
+    let status = format!("/nodes/pve/tasks/{upid}/status");
+    let node = MockNode::start(script(&[
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/shutdown",
+            ok_data(&format!(r#""{upid}""#)),
+        ),
+        (
+            "GET",
+            &status,
+            ok_data(
+                r#"{"status":"stopped","exitstatus":"VM quit/powerdown failed - got timeout"}"#,
+            ),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), slow_task()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let err = client
+        .shutdown(&ledger, 100, Some(Duration::from_secs(5)), false)
+        .expect_err("a guest that did not go down is not a successful shutdown");
+    assert!(matches!(err, Error::TaskFailed(_)), "{err:?}");
+    assert!(err.to_string().contains("powerdown failed"), "{err}");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.path == "/nodes/pve/qemu/100/status/shutdown")
+        .unwrap();
+    assert_eq!(sent.body, "timeout=5", "no forceStop unless asked");
+    assert!(matches!(
+        ledger.records()[0].state,
+        TaskState::Failed { .. }
+    ));
+}
+
+/// `force_stop` and the timeout both reach the node, and a timeout this
+/// client could not wait out is refused before any request.
+#[test]
+fn a_forced_shutdown_sends_force_stop_and_an_unwaitable_timeout_is_refused_first() {
+    let node = MockNode::start(script(&[(
+        "POST",
+        "/nodes/pve/qemu/100/status/shutdown",
+        ok_data(r#""UPID:pve:0001A2B3:0000C4D5:66F0:qmshutdown:100:root@pam:""#),
+    )]));
+    let client = Client::connect_with(&token_target(&node), slow_task()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    client
+        .shutdown(&ledger, 100, Some(Duration::from_secs(5)), true)
+        .expect("forced shutdown");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.path == "/nodes/pve/qemu/100/status/shutdown")
+        .unwrap();
+    assert_eq!(sent.body, "timeout=5&forceStop=1");
+
+    let before = node.count("POST", "/nodes/pve/qemu/100/status/shutdown");
+    let err = client
+        .shutdown(&ledger, 100, Some(Duration::from_secs(100_000)), true)
+        .expect_err("a timeout past the client's task deadline");
+    assert!(matches!(err, Error::InvalidPowerTimeout(_)), "{err:?}");
+    let err = client
+        .reboot(&ledger, 100, Some(Duration::from_secs(100_000)))
+        .expect_err("the same bound applies to a reboot");
+    assert!(matches!(err, Error::InvalidPowerTimeout(_)), "{err:?}");
+    assert_eq!(
+        node.count("POST", "/nodes/pve/qemu/100/status/shutdown"),
+        before,
+        "refused before any request"
+    );
+    assert_eq!(node.count("POST", "/nodes/pve/qemu/100/status/reboot"), 0);
+}
+
+/// [`fast`] with room for a 5 s guest timeout inside the task deadline.
+fn slow_task() -> ClientOptions {
+    ClientOptions {
+        task_timeout: Duration::from_secs(30),
+        ..fast()
+    }
+}
+
+// ===========================================================================
+// Cold resize: POST …/config, then read back config and pending
+// ===========================================================================
+
+const RCONFIG: &str = "/nodes/pve/qemu/100/config";
+const RPENDING: &str = "/nodes/pve/qemu/100/pending";
+
+/// Applied inline (`null`), config carries the numbers sent (memory as the
+/// string PVE 8+ uses), nothing pending: done — and the form says
+/// `sockets=1`, so a two-socket template clone does not get twice the vCPUs.
+#[test]
+fn a_resize_is_done_only_when_config_and_pending_agree() {
+    let node = MockNode::start(script(&[
+        ("POST", RCONFIG, ok_data("null")),
+        (
+            "GET",
+            RCONFIG,
+            ok_data(r#"{"cores":2,"sockets":1,"memory":"768"}"#),
+        ),
+        ("GET", RPENDING, ok_data(r#"[{"key":"cores","value":2}]"#)),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .expect("config and pending agree");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == RCONFIG)
+        .unwrap();
+    assert_eq!(sent.body, "cores=2&sockets=1&memory=768");
+}
+
+/// A config that does not carry what was sent is an unexpected answer, not
+/// a resize — whatever the POST said.
+#[test]
+fn a_resize_whose_config_does_not_read_back_is_an_error() {
+    let node = MockNode::start(script(&[
+        ("POST", RCONFIG, ok_data("null")),
+        (
+            "GET",
+            RCONFIG,
+            ok_data(r#"{"cores":1,"sockets":2,"memory":"512"}"#),
+        ),
+        ("GET", RPENDING, ok_data("[]")),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .expect_err("the node did not record the new size");
+    assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
+}
+
+/// A VM the node still runs holds the change as PENDING until its next
+/// boot. That is not a resize, and it is said as one: the key is named.
+#[test]
+fn a_resize_left_pending_is_an_error_that_names_the_key() {
+    let node = MockNode::start(script(&[
+        ("POST", RCONFIG, ok_data("null")),
+        (
+            "GET",
+            RCONFIG,
+            ok_data(r#"{"cores":2,"sockets":1,"memory":"768"}"#),
+        ),
+        (
+            "GET",
+            RPENDING,
+            ok_data(r#"[{"key":"memory","value":"512","pending":"768"}]"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let err = client
+        .resize_hardware(&Ledger::at(dir.path()), 100, 2, 768)
+        .expect_err("a pending change is not applied");
+    assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
+    assert!(err.to_string().contains("memory"), "{err}");
+    assert!(err.to_string().contains("PENDING"), "{err}");
+}
+
+// ===========================================================================
+// Extra disks/NICs: refused on a template clone BEFORE anything is asked
+// ===========================================================================
+
+/// A template clone with `extraDisks` is refused before `next_vmid`: the
+/// template may already hold the slot, and writing it would detach the
+/// template's own device. The node sees no request past the login.
+#[test]
+fn extra_devices_on_a_template_clone_are_refused_before_any_request() {
+    use delonix_compute::vm_backend::{CreateStage, VmBackend};
+    use delonix_compute::ExtraDisk;
+    let node = MockNode::start(script(&[]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let before = node.log().len();
+    let b = delonix_proxmox::ProxmoxBackend::sharing(std::sync::Arc::new(client));
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = VmConfig {
+        name: "x".into(),
+        disk: "template:9000".into(),
+        vcpus: 1,
+        memory: "512M".into(),
+        extra_disks: vec![ExtraDisk {
+            source: "local-lvm:1".into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let stage = |_: CreateStage| {};
+    let Err(err) = b.boot(dir.path(), &cfg, &cfg.disk, &stage) else {
+        panic!("a template clone cannot take extra devices");
+    };
+    assert_eq!(err.number(), 1524, "{err}");
+    assert!(err.to_string().contains("template clone"), "{err}");
+    assert_eq!(
+        node.log().len(),
+        before,
+        "the refusal reached the node: {:?}",
+        node.log()
+    );
+}
+
+// ===========================================================================
+// Cloud-init change: the node's rendering is the proof, not the writes
+// ===========================================================================
+
+/// The config write and the regenerate both answer `null` (done), nothing is
+/// pending — and the node's rendered user-data does not carry the new key.
+/// That is an unexpected answer that names what is missing, never a success.
+#[test]
+fn a_cloud_init_change_the_rendering_does_not_carry_is_an_error() {
+    let node = MockNode::start(script(&[
+        ("POST", "/nodes/pve/qemu/100/config", ok_data("null")),
+        ("PUT", "/nodes/pve/qemu/100/cloudinit", ok_data("null")),
+        ("GET", "/nodes/pve/qemu/100/cloudinit", ok_data("[]")),
+        (
+            "GET",
+            "/nodes/pve/qemu/100/cloudinit/dump",
+            ok_data(r##""#cloud-config\nhostname: web-1\nuser: ops\n""##),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let intent = delonix_compute::vm_backend::CloudInitIntent {
+        hostname: Some("web-1".into()),
+        ci_user: Some("ops".into()),
+        ssh_keys: vec!["ssh-ed25519 AAAA k1".into()],
+    };
+    let err = client
+        .update_cloud_init(&Ledger::at(dir.path()), 100, "web-1", &intent)
+        .expect_err("a key the rendering lacks is not applied");
+    assert!(matches!(err, Error::UnexpectedAnswer(_)), "{err:?}");
+    assert!(err.to_string().contains("ssh key #1"), "{err}");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == "/nodes/pve/qemu/100/config")
+        .unwrap();
+    assert!(
+        sent.body.starts_with("name=web-1&ciuser=ops&sshkeys="),
+        "{}",
+        sent.body
+    );
+}
+
+// ===========================================================================
+// ADR-0053 decisions 2 and 3: each VM on its own node, and a moved VM found
+// ===========================================================================
+
+fn vm_with_handle(handle: &str) -> delonix_compute::Vm {
+    delonix_compute::Vm::new(
+        "v".into(),
+        "local-lvm:1".into(),
+        "local-lvm:1".into(),
+        1,
+        "512M".into(),
+        String::new(),
+        String::new(),
+        String::new(),
+        handle.into(),
+    )
+}
+
+fn backend_on(node: &MockNode) -> delonix_proxmox::ProxmoxBackend {
+    let client = Client::connect_with(&token_target(node), fast()).unwrap();
+    delonix_proxmox::ProxmoxBackend::sharing(Arc::new(client))
+}
+
+const PVE_STATUS: &str = "/nodes/pve/qemu/100/status/current";
+const PVE2_STATUS: &str = "/nodes/pve2/qemu/100/status/current";
+const RESOURCES: &str = "/cluster/resources";
+
+/// Decision 2: the handle's node is the node the VM is addressed on. The
+/// configured node (`pve`, the API entry point) is never asked about it.
+#[test]
+fn a_vm_is_addressed_on_the_node_its_handle_names() {
+    use delonix_compute::vm_backend::VmBackend;
+    let node = MockNode::start(script(&[(
+        "GET",
+        PVE2_STATUS,
+        ok_data(r#"{"status":"running"}"#),
+    )]));
+    let b = backend_on(&node);
+    let vm = vm_with_handle("proxmox:pve2:100");
+    assert!(b.is_running(&vm), "the VM on pve2 is running");
+    assert_eq!(node.count("GET", PVE2_STATUS), 1);
+    assert_eq!(
+        node.count("GET", PVE_STATUS),
+        0,
+        "the configured node was asked"
+    );
+    assert_eq!(
+        node.count("GET", RESOURCES),
+        0,
+        "no search when the handle is right"
+    );
+    assert_eq!(b.current_handle(&vm), None, "nothing moved");
+}
+
+/// Decision 3: the handle's node says the VM does not exist; ONE
+/// `/cluster/resources` read finds it on `pve2`; the call is retried there,
+/// the move is remembered — the next call goes straight to `pve2` — and
+/// `current_handle` gives the engine the new handle to persist.
+#[test]
+fn a_vm_moved_outside_the_engine_is_found_once_and_remembered() {
+    use delonix_compute::vm_backend::VmBackend;
+    let node = MockNode::start(script(&[
+        (
+            "GET",
+            PVE_STATUS,
+            Reply::Json(404, r#"{"data":null}"#.into()),
+        ),
+        (
+            "GET",
+            RESOURCES,
+            ok_data(
+                r#"[{"type":"qemu","vmid":100,"node":"pve2"},{"type":"qemu","vmid":101,"node":"pve"}]"#,
+            ),
+        ),
+        ("GET", PVE2_STATUS, ok_data(r#"{"status":"running"}"#)),
+        ("GET", PVE2_STATUS, ok_data(r#"{"status":"stopped"}"#)),
+    ]));
+    let b = backend_on(&node);
+    let vm = vm_with_handle("proxmox:pve:100");
+    assert!(b.is_running(&vm), "found on pve2, running there");
+    assert_eq!(b.current_handle(&vm).as_deref(), Some("proxmox:pve2:100"));
+    assert!(!b.is_running(&vm), "the second answer from pve2");
+    assert_eq!(
+        node.count("GET", PVE_STATUS),
+        1,
+        "the old node is asked once"
+    );
+    assert_eq!(
+        node.count("GET", RESOURCES),
+        1,
+        "one search, then remembered"
+    );
+    assert_eq!(node.count("GET", PVE2_STATUS), 2);
+}
+
+/// A VM the cluster does not list, or lists on two nodes, is not followed:
+/// the original not-found stands (class 4), and nothing is remembered.
+#[test]
+fn a_vm_the_cluster_cannot_place_keeps_its_not_found() {
+    use delonix_compute::vm_backend::VmBackend;
+    for listing in [
+        "[]",
+        r#"[{"type":"qemu","vmid":100,"node":"pve2"},{"type":"qemu","vmid":100,"node":"pve3"}]"#,
+    ] {
+        let node = MockNode::start(script(&[
+            (
+                "GET",
+                PVE_STATUS,
+                Reply::Json(404, r#"{"data":null}"#.into()),
+            ),
+            ("GET", RESOURCES, ok_data(listing)),
+        ]));
+        let b = backend_on(&node);
+        let vm = vm_with_handle("proxmox:pve:100");
+        let dir = tempfile::tempdir().unwrap();
+        let err = b
+            .stop(dir.path(), &vm)
+            .expect_err("a VM nobody can place is not found");
+        assert!(err.is_not_found(), "{listing}: {err}");
+        assert_eq!(b.current_handle(&vm), None, "{listing}: nothing remembered");
+        assert_eq!(node.count("GET", RESOURCES), 1);
+    }
 }

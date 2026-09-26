@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Delonix Runtime — Contributor Handbook · Delonix Runtime — 贡献者手册</title>
+<title>Delonix Runtime — 贡献者手册 · Delonix Runtime — 贡献者手册</title>
 <script>try{var t=localStorage.getItem('delonix-handbook-theme');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
@@ -206,271 +206,268 @@ th:first-child,td:first-child{white-space:nowrap}
   </div>
 </header>
 <div class="frame">
-<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a class="on" aria-current="page" href="index.html"><span class="n">·</span><span>Delonix Runtime — Contributor Handbook</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>Start here</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS and cloud native — where the engine fits</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux foundations</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Cloud native primer</span></a><a href="rust-primer.html"><span class="n">05</span><span>Rust primer for this codebase</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>Preparing your environment</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clone, build and test</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>Project structure</span></a><a href="architecture.html"><span class="n">09</span><span>Architecture</span></a><a href="crates.html"><span class="n">10</span><span>The crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — the Delonix Engine</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile and VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Building microVMs</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>Troubleshooting</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>How names reach /etc/hosts</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>Coding conventions</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Adding a Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Contribution workflow</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases and stability</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publishing the documentation</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Cloud native standards, layer by layer</span></a><a href="environment-variables.html"><span class="n">22</span><span>Environment variables (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossary</span></a></div></nav>
+<nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a class="on" aria-current="page" href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">概览</p>
-<div class="notice" role="note">本页尚未翻译为简体中文，当前显示英文版本。</div><h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — Contributor Handbook</h1>
-<p>This handbook is for people who want to <strong>change the engine</strong>: you cloned the repository today and
-want to send a first pull request without breaking your host or the engine. After this page you
-will know how the handbook is sequenced and which pages to read, in which order, for your role. If
-you only want to
-<em>use</em> Delonix, start with the <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> and the
-<a href="https://angolardevops.github.io/delonix-runtime/">user documentation site</a> instead.</p>
+<h1 id="delonix-runtime-contributor-handbook">Delonix Runtime — 贡献者手册</h1>
+<p>本手册面向想要<strong>修改引擎</strong>的人：你今天克隆了本仓库，想在不破坏你的宿主机或引擎的前提下发出第一个
+pull request。读完本页后，你会知道本手册的编排顺序，以及针对你的角色应按什么顺序阅读哪些页面。如果你只想
+<em>使用</em> Delonix，请改为从 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/README.rst" target="_blank" rel="noopener">README</a> 和
+<a href="https://angolardevops.github.io/delonix-runtime/">用户文档网站</a> 开始。</p>
 <!-- dev-docs:begin crate-count -->
-<p>The workspace has <strong>25 crates</strong> and ships <strong>5 binaries</strong> (<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>).</p>
+<p>工作区共有 <strong>25 个 crate</strong>，产出 <strong>5 个二进制</strong>（<code>delonix</code>, <code>delonix-cri</code>, <code>delonix-mcp</code>, <code>delonix-mgmt</code>, <code>delonix-node-api</code>）。</p>
 <!-- dev-docs:end crate-count -->
 
-<h2 id="what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not<a class="hanchor" href="#what-the-engine-is-and-what-it-is-not" aria-label="#">#</a></h2>
-<p>Delonix Runtime is an execution abstraction for <strong>one node</strong>: it runs <strong>containers and microVMs</strong>
-and manages the networking and storage they need. It is declarative (its own Kinds, grouped by
-<code>apiVersion</code> — see <code>delonix api-resources</code>), and it talks to providers (the Linux kernel, libvirt,
-Cloud Hypervisor, Proxmox VE, the Kubernetes CRI) only through ports, never through
-<code>if provider == …</code> branches spread across the code.</p>
-<p>Three principles shape almost every review comment you will get:</p>
+<h2 id="what-the-engine-is-and-what-it-is-not">引擎是什么——以及它不是什么<a class="hanchor" href="#what-the-engine-is-and-what-it-is-not" aria-label="#">#</a></h2>
+<p>Delonix Runtime 是<strong>单个节点</strong>上的执行抽象：它运行<strong>容器和微虚拟机（microVM）</strong>，
+并管理它们所需的网络和存储。它是声明式的（拥有自己的 Kind，按
+<code>apiVersion</code> 分组——见 <code>delonix api-resources</code>），并且只通过端口（port）与各 provider
+（Linux 内核、libvirt、Cloud Hypervisor、Proxmox VE、Kubernetes 的 CRI）通信，绝不会在代码中
+散布 <code>if provider == …</code> 这样的分支。</p>
+<p>几乎每一条你会收到的评审意见，都由以下三条原则塑造：</p>
 <ul>
-<li><strong>Cloud native</strong> — plan / apply / drift, API-first (the CLI, the node API, the CRI and the MCP
-  server expose the same operations), observable through open standards.</li>
-<li><strong>Daemonless</strong> — no resident process by default. What must persist belongs to systemd or to a
-  per-workload process with a clear owner. A new daemon needs an ADR.</li>
-<li><strong>Rootless-first</strong> — the normal path runs without root; privilege is an explicit opt-in.</li>
+<li><strong>云原生（Cloud native）</strong> —— plan / apply / drift（偏差），API 优先（CLI、节点 API、CRI
+  和 MCP 服务器暴露相同的操作），通过开放标准实现可观测。</li>
+<li><strong>无守护进程（Daemonless）</strong> —— 默认不驻留任何进程。必须持久化的东西属于 systemd，
+  或者属于一个有明确归属者的按工作负载（per-workload）进程。新增一个守护进程需要一份 ADR。</li>
+<li><strong>无根优先（Rootless-first）</strong> —— 正常路径在没有 root 权限下运行；特权是显式的可选项（opt-in）。</li>
 </ul>
-<p>And one boundary that is enforced by a CI gate: <strong>the engine knows no consumer.</strong> It does not know
-who calls it, and it has no notion of tenant, account, plan or billing. A requirement coming from a
-consumer enters as a generic engine capability, or it does not enter. The canonical text is the
-section <em>«Identidade e fronteira do motor»</em> at the top of <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a>.</p>
-<h2 id="two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative<a class="hanchor" href="#two-halves-generated-facts-and-narrative" aria-label="#">#</a></h2>
-<p>Pages in this handbook mix two kinds of content:</p>
+<p>还有一条由 CI 门禁（gate）强制的边界：<strong>引擎不认识任何消费者。</strong> 它不知道是谁在调用它，
+也没有租户、账户、方案（plan）或计费的概念。来自某个消费者的需求，要么以通用引擎能力的形式进入，
+要么就不进入。权威文本是 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/AGENTS.md" target="_blank" rel="noopener"><code>AGENTS.md</code></a> 顶部的
+<em>«Identidade e fronteira do motor»</em>（引擎的身份与边界）一节。</p>
+<h2 id="two-halves-generated-facts-and-narrative">两个部分：生成的事实与叙述<a class="hanchor" href="#two-halves-generated-facts-and-narrative" aria-label="#">#</a></h2>
+<p>本手册中的页面混合了两类内容：</p>
 <ul>
-<li><strong>Facts</strong> — which crates exist, their layer, who depends on whom, the binaries, the pinned
-  toolchain, the CI jobs. They live between <code>&lt;!-- dev-docs:begin &lt;key&gt; --&gt;</code> and
-  <code>&lt;!-- dev-docs:end &lt;key&gt; --&gt;</code> markers and are <strong>generated</strong> by <code>python3 scripts/dev_docs.py</code>
-  from <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> and
-  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a>. Never edit them by hand — CI runs <code>dev_docs.py --check</code> and fails.
-  If a fact is wrong, fix the source or the generator.</li>
-<li><strong>Narrative</strong> — why things are the way they are, how flows work, how to contribute. It is
-  written by hand and reviewed after each release. See <a href="publishing-docs.html">Publishing the docs</a>.</li>
+<li><strong>事实（Facts）</strong> —— 存在哪些 crate、它们所处的层、谁依赖谁、有哪些二进制文件、锁定的
+  工具链、CI 作业。它们存在于 <code>&lt;!-- dev-docs:begin &lt;key&gt; --&gt;</code> 和
+  <code>&lt;!-- dev-docs:end &lt;key&gt; --&gt;</code> 标记之间，由 <code>python3 scripts/dev_docs.py</code> 从
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>、<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/rust-toolchain.toml" target="_blank" rel="noopener"><code>rust-toolchain.toml</code></a> 和
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener"><code>.github/workflows/ci.yml</code></a> <strong>生成</strong>。绝不要手工编辑它们——CI 会运行
+  <code>dev_docs.py --check</code> 并使其失败。如果某个事实有误，请修正源头或生成器。</li>
+<li><strong>叙述（Narrative）</strong> —— 事情为何如此、各个流程如何运作、如何贡献。它是手写的，
+  并在每次发布后接受复核。见<a href="publishing-docs.html">发布文档</a>。</li>
 </ul>
-<h2 id="how-this-handbook-is-organised">How this handbook is organised<a class="hanchor" href="#how-this-handbook-is-organised" aria-label="#">#</a></h2>
-<p>The pages form <strong>one course</strong>, read top to bottom. Each page opens with a <strong>Before you read</strong> line
-naming the earlier pages it assumes, and ends with a <strong>Next</strong> line pointing to the page that builds
-on it. The number shown next to a page in the site's sidebar is its position in this order. Section
-numbers <em>inside</em> a page (for example §3.8 in the Rust primer or 13.4 in the standards page) are
-local labels kept stable for links; they are not page positions.</p>
-<p>The course is grouped in eight parts:</p>
+<h2 id="how-this-handbook-is-organised">本手册的组织方式<a class="hanchor" href="#how-this-handbook-is-organised" aria-label="#">#</a></h2>
+<p>各页面构成<strong>一门课程</strong>，从头到尾阅读。每一页开头都有一行 <strong>阅读之前</strong>，
+列出它所假设你已读过的前置页面；结尾则有一行 <strong>下一步</strong>，指向承接它的页面。
+站点侧栏中页面旁显示的数字，就是它在此顺序中的位置。页面<em>内部</em>的章节编号（例如
+Rust 入门中的 §3.8，或标准页面中的 13.4）是为链接保持稳定的本地标签；它们不是页面位置。</p>
+<p>课程分为八个部分：</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Part</th>
-<th>Pages</th>
-<th>What you get from it</th>
+<th>部分</th>
+<th>页面</th>
+<th>你会从中获得什么</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>Get started</strong></td>
-<td><a href="start-here.html">Start here</a> · <a href="iaas-and-cloud-native.html">IaaS and cloud native</a></td>
-<td>A working checkout, a first contribution path, and the mental model of where a node engine sits in a cloud</td>
+<td><strong>入门</strong></td>
+<td><a href="start-here.html">从这里开始</a> · <a href="iaas-and-cloud-native.html">IaaS 与云原生</a></td>
+<td>一个可用的检出（checkout）、一条第一次贡献的路径，以及节点引擎在云中所处位置的心智模型</td>
 </tr>
 <tr>
-<td><strong>Foundations</strong></td>
-<td><a href="linux-foundations.html">Linux foundations</a> · <a href="cloud-native-primer.html">Cloud native primer</a> · <a href="rust-primer.html">Rust primer</a></td>
-<td>The kernel primitives hands-on, how the engine uses each one, and the Rust this code is written in</td>
+<td><strong>基础</strong></td>
+<td><a href="linux-foundations.html">Linux 基础</a> · <a href="cloud-native-primer.html">云原生入门</a> · <a href="rust-primer.html">Rust 入门</a></td>
+<td>亲手操作的内核原语、引擎如何使用其中每一个，以及本代码所使用的 Rust</td>
 </tr>
 <tr>
-<td><strong>Set up &amp; build</strong></td>
-<td><a href="environment.html">Preparing your environment</a> · <a href="build-and-test.html">Clone, build and test</a></td>
-<td>A host that can run the live paths, and every CI gate as a local command</td>
+<td><strong>搭建与构建</strong></td>
+<td><a href="environment.html">准备你的环境</a> · <a href="build-and-test.html">克隆、构建与测试</a></td>
+<td>一台能运行实际（live）路径的宿主机，以及作为本地命令的每一个 CI 门禁</td>
 </tr>
 <tr>
-<td><strong>Architecture</strong></td>
-<td><a href="project-structure.html">Project structure</a> · <a href="architecture.html">Architecture</a> · <a href="crates.html">The crates</a> · <a href="system-design-interview.html">System Design Interview</a></td>
-<td>Where things are, why they are split that way, what each crate owns, and the reasoning behind the design</td>
+<td><strong>架构</strong></td>
+<td><a href="project-structure.html">项目结构</a> · <a href="architecture.html">架构</a> · <a href="crates.html">各个 crate</a> · <a href="system-design-interview.html">系统设计面试（System Design Interview）</a></td>
+<td>各部分位于何处、为何如此划分、每个 crate 拥有什么，以及设计背后的推理</td>
 </tr>
 <tr>
-<td><strong>Images &amp; microVMs</strong></td>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a> · <a href="microvm-setup.html">Building microVMs</a></td>
-<td>The two build grammars, and VMs from host prerequisites to boot</td>
+<td><strong>镜像与微虚拟机</strong></td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a> · <a href="microvm-setup.html">构建微虚拟机</a></td>
+<td>两种构建语法，以及虚拟机从宿主机前置条件到启动的全过程</td>
 </tr>
 <tr>
-<td><strong>Operate &amp; debug</strong></td>
-<td><a href="troubleshooting.html">Troubleshooting</a> · <a href="service-names-and-hosts.html">How names reach <code>/etc/hosts</code></a></td>
-<td>A symptom-first index of what a gate or a live run prints, and the mechanism that publishes service names and route hosts on the operator's machine</td>
+<td><strong>运维与调试</strong></td>
+<td><a href="troubleshooting.html">故障排查</a> · <a href="service-names-and-hosts.html">名称如何进入 <code>/etc/hosts</code></a></td>
+<td>一份以症状为索引的清单，说明门禁或实际运行会打印出什么，以及在操作者机器上发布服务名称和路由主机名的机制</td>
 </tr>
 <tr>
-<td><strong>Contributing</strong></td>
-<td><a href="coding-conventions.html">Coding conventions</a> · <a href="adding-a-kind.html">Adding a Kind</a> · <a href="contributing-workflow.html">Contribution workflow</a> · <a href="releases-and-stability.html">Releases and stability</a> · <a href="publishing-docs.html">Publishing the documentation</a></td>
-<td>How code must be written, how a declarative Kind is added, how a change is sent, what a release promises not to break, and how docs follow it</td>
+<td><strong>贡献</strong></td>
+<td><a href="coding-conventions.html">编码约定</a> · <a href="adding-a-kind.html">新增一个 Kind</a> · <a href="contributing-workflow.html">贡献流程</a> · <a href="releases-and-stability.html">发布与稳定性</a> · <a href="publishing-docs.html">发布文档</a></td>
+<td>代码必须如何编写、如何新增一个声明式 Kind、如何提交一次变更、一次发布承诺不破坏什么，以及文档如何随之更新</td>
 </tr>
 <tr>
-<td><strong>Reference</strong></td>
-<td><a href="cloud-native-standards.html">Cloud native standards</a> · <a href="environment-variables.html">Environment variables</a> · <a href="glossary.html">Glossary</a></td>
-<td>Pages you look things up in: conformance per standard, every <code>DELONIX_*</code> name, every term</td>
+<td><strong>参考</strong></td>
+<td><a href="cloud-native-standards.html">云原生标准</a> · <a href="environment-variables.html">环境变量</a> · <a href="glossary.html">术语表</a></td>
+<td>供你查阅的页面：按标准划分的合规性、每一个 <code>DELONIX_*</code> 名称、每一个术语</td>
 </tr>
 </tbody>
 </table></div>
-<p>Concepts are <strong>taught once</strong>: a kernel primitive in <a href="linux-foundations.html">Linux foundations</a>, how
-the engine uses it in <a href="cloud-native-primer.html">Cloud native primer</a>, and the standard it follows
-with its conformance status in <a href="cloud-native-standards.html">Cloud native standards</a>. Where a
-page mentions something taught elsewhere, it links there instead of repeating it.</p>
-<h2 id="reading-paths-by-role">Reading paths by role<a class="hanchor" href="#reading-paths-by-role" aria-label="#">#</a></h2>
-<p>Nobody is expected to read all twenty-two pages before a first change. Pick the row that describes you
-and read its pages in the order given; keep the <a href="glossary.html">Glossary</a> open.</p>
+<p>概念<strong>只教一次</strong>：内核原语在 <a href="linux-foundations.html">Linux 基础</a>中讲解，引擎如何使用它则在
+<a href="cloud-native-primer.html">云原生入门</a>中讲解，它所遵循的标准及其合规状态则在
+<a href="cloud-native-standards.html">云原生标准</a>中讲解。当某一页提到在别处教过的内容时，
+它会链接过去，而不是重复一遍。</p>
+<h2 id="reading-paths-by-role">按角色划分的阅读路径<a class="hanchor" href="#reading-paths-by-role" aria-label="#">#</a></h2>
+<p>没有人需要在第一次改动之前读完全部二十二页。挑选描述你的那一行，按给定顺序阅读其中的页面；
+让<a href="glossary.html">术语表</a>保持打开。</p>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Role</th>
-<th>Read, in order — and why</th>
+<th>角色</th>
+<th>按此顺序阅读——以及原因</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><strong>First PR, no time</strong></td>
-<td>1. <a href="start-here.html">Start here</a> — Day 0 check and the eight steps of a first PR. 2. <a href="environment.html#known-host-traps">Preparing your environment</a> — only <em>Known host traps</em>. 3. <a href="build-and-test.html#the-gates-ci-runs">Clone, build and test</a> — the gates you must pass. 4. <a href="crates.html">The crates</a> — only the section of the crate you touch. 5. <a href="contributing-workflow.html">Contribution workflow</a> — how the PR is judged.</td>
+<td><strong>第一个 PR，没时间</strong></td>
+<td>1. <a href="start-here.html">从这里开始</a>——第 0 天检查，以及第一个 PR 的八个步骤。2. <a href="environment.html#known-host-traps">准备你的环境</a>——只看<em>已知的宿主机陷阱</em>。3. <a href="build-and-test.html#the-gates-ci-runs">克隆、构建与测试</a>——你必须通过的门禁。4. <a href="crates.html">各个 crate</a>——只看你要改动的那个 crate 的部分。5. <a href="contributing-workflow.html">贡献流程</a>——PR 如何被评判。</td>
 </tr>
 <tr>
-<td><strong>DevOps engineer</strong> (CI, packaging, installing, releases)</td>
-<td>1. <a href="start-here.html">Start here</a> — the setup and the rules. 2. <a href="environment.html">Preparing your environment</a> — what a host needs and the traps that look like engine bugs. 3. <a href="build-and-test.html">Clone, build and test</a> — installing a build, every CI job as a local command, E2E and chaos. 4. <a href="project-structure.html">Project structure</a> — what is generated, what CI checks it, what <code>release.yml</code> refreshes. 5. <a href="troubleshooting.html">Troubleshooting</a> — recognising a gate failure by its message. 6. <a href="releases-and-stability.html">Releases and stability</a> — the version gate, what a pushed tag does, what is stable. 7. <a href="publishing-docs.html">Publishing the documentation</a> — what happens at release time. 8. <a href="environment-variables.html">Environment variables</a> — every knob and which ones lower a boundary.</td>
+<td><strong>DevOps 工程师</strong>（CI、打包、安装、发布）</td>
+<td>1. <a href="start-here.html">从这里开始</a>——配置与规则。2. <a href="environment.html">准备你的环境</a>——宿主机需要什么，以及看起来像引擎缺陷的陷阱。3. <a href="build-and-test.html">克隆、构建与测试</a>——安装一个构建版本，把每个 CI 作业当作本地命令，E2E 与混沌测试。4. <a href="project-structure.html">项目结构</a>——什么是生成的、CI 检查什么、<code>release.yml</code> 会刷新什么。5. <a href="troubleshooting.html">故障排查</a>——通过消息识别门禁失败。6. <a href="releases-and-stability.html">发布与稳定性</a>——版本门禁、推送一个标签会做什么、什么是稳定的。7. <a href="publishing-docs.html">发布文档</a>——发布时会发生什么。8. <a href="environment-variables.html">环境变量</a>——每一个开关，以及哪些会降低边界。</td>
 </tr>
 <tr>
-<td><strong>Platform engineer</strong> (building on the engine's interfaces)</td>
-<td>1. <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> — which layer the engine is and what it leaves to a control plane. 2. <a href="cloud-native-primer.html#48-declarative-reconciliation">Cloud native primer</a> — Kinds and the three-way reconciler. 3. <a href="architecture.html">Architecture</a> — the interfaces (CLI, CRI, management API, MCP, node contract) and the layers. 4. <a href="crates.html">The crates</a> — <code>delonix-stack</code>, <code>delonix-cri</code>, <code>delonix-mgmt</code>, <code>delonix-mcp</code>. 5. <a href="adding-a-kind.html">Adding a Kind</a> — the table and reconciler wiring a new Kind needs. 6. <a href="system-design-interview.html">System Design Interview</a> — the API choices and their trade-offs. 7. <a href="cloud-native-standards.html">Cloud native standards</a> — what is conformant, partial or absent, with dates.</td>
+<td><strong>平台工程师</strong>（在引擎接口之上构建）</td>
+<td>1. <a href="iaas-and-cloud-native.html">IaaS 与云原生</a>——引擎处于哪一层、它把什么留给控制平面。2. <a href="cloud-native-primer.html#48-declarative-reconciliation">云原生入门</a>——Kind 与三路协调器。3. <a href="architecture.html">架构</a>——接口（CLI、CRI、管理 API、MCP、节点契约）与各层。4. <a href="crates.html">各个 crate</a>——<code>delonix-stack</code>、<code>delonix-cri</code>、<code>delonix-mgmt</code>、<code>delonix-mcp</code>。5. <a href="adding-a-kind.html">新增一个 Kind</a>——新增一个 Kind 所需的表与协调器接线。6. <a href="system-design-interview.html">系统设计面试</a>——API 的选择及其取舍。7. <a href="cloud-native-standards.html">云原生标准</a>——什么是合规、部分合规或缺失的，附带日期。</td>
 </tr>
 <tr>
-<td><strong>SRE</strong> (operating nodes, diagnosing failures)</td>
-<td>1. <a href="linux-foundations.html">Linux foundations</a> — answer "which namespace, which cgroup, who holds this fd" with a command. 2. <a href="environment.html#diagnosing-the-host">Preparing your environment</a> — diagnosing a host and its traps. 3. <a href="troubleshooting.html">Troubleshooting</a> — a symptom-first index for gate and runtime failures. 4. <a href="architecture.html#level-2-containers-executables-and-processes">Architecture</a> — which processes exist at runtime, state on disk, known limitations. 5. <a href="system-design-interview.html#7-failure-modes-and-the-limits-of-one-node">System Design Interview</a> — failure modes and the limits of one node. 6. <a href="coding-conventions.html#38-exit-codes-and-dx_-codes">Coding conventions</a> — what an exit code means. 7. <a href="environment-variables.html#observability">Environment variables</a> — logging, OTLP and the escape hatches. 8. <a href="cloud-native-standards.html#1311-opentelemetry">Cloud native standards</a> — OpenTelemetry and Prometheus.</td>
+<td><strong>SRE</strong>（运维节点、诊断故障）</td>
+<td>1. <a href="linux-foundations.html">Linux 基础</a>——用一条命令回答"是哪个命名空间、哪个 cgroup、谁持有这个 fd"。2. <a href="environment.html#diagnosing-the-host">准备你的环境</a>——诊断宿主机及其陷阱。3. <a href="troubleshooting.html">故障排查</a>——针对门禁和运行时故障的按症状索引。4. <a href="architecture.html#level-2-containers-executables-and-processes">架构</a>——运行时存在哪些进程、磁盘上的状态、已知限制。5. <a href="system-design-interview.html#7-failure-modes-and-the-limits-of-one-node">系统设计面试</a>——故障模式与单节点的限制。6. <a href="coding-conventions.html#38-exit-codes-and-dx_-codes">编码约定</a>——退出码意味着什么。7. <a href="environment-variables.html#observability">环境变量</a>——日志、OTLP 与逃生舱口（escape hatch）。8. <a href="cloud-native-standards.html#1311-opentelemetry">云原生标准</a>——OpenTelemetry 与 Prometheus。</td>
 </tr>
 <tr>
-<td><strong>Cloud developer</strong> (Kinds, manifests, images, Compose/Docker compatibility)</td>
-<td>1. <a href="iaas-and-cloud-native.html">IaaS and cloud native</a> — principles as they appear in the code. 2. <a href="cloud-native-primer.html">Cloud native primer</a> — OCI images and declarative reconciliation. 3. <a href="build-and-test.html">Clone, build and test</a> — build and run isolated. 4. <a href="crates.html#delonix-stack">The crates</a> — <code>delonix-stack</code> and <code>delonix-oci</code>. 5. <a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a> — the build grammars. 6. <a href="coding-conventions.html#36-kinds-api-groups-and-manifest-fields">Coding conventions</a> — rules for Kinds and fields. 7. <a href="adding-a-kind.html">Adding a Kind</a> — wiring a Kind into the reconciler end to end. 8. <a href="cloud-native-standards.html#138-the-workload-api-own-kinds-and-the-node-contract">Cloud native standards</a> — own Kinds, Docker API and Compose subsets.</td>
+<td><strong>云开发者</strong>（Kind、清单（manifest）、镜像、Compose/Docker 兼容性）</td>
+<td>1. <a href="iaas-and-cloud-native.html">IaaS 与云原生</a>——这些原则在代码中如何呈现。2. <a href="cloud-native-primer.html">云原生入门</a>——OCI 镜像与声明式协调。3. <a href="build-and-test.html">克隆、构建与测试</a>——隔离地构建与运行。4. <a href="crates.html#delonix-stack">各个 crate</a>——<code>delonix-stack</code> 与 <code>delonix-oci</code>。5. <a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a>——构建语法。6. <a href="coding-conventions.html#36-kinds-api-groups-and-manifest-fields">编码约定</a>——Kind 与字段的规则。7. <a href="adding-a-kind.html">新增一个 Kind</a>——端到端地把一个 Kind 接入协调器。8. <a href="cloud-native-standards.html#138-the-workload-api-own-kinds-and-the-node-contract">云原生标准</a>——自有 Kind、Docker API 与 Compose 子集。</td>
 </tr>
 <tr>
-<td><strong>Linux developer</strong> (namespaces, cgroups, networking, VMs)</td>
-<td>1. <a href="linux-foundations.html">Linux foundations</a> — the primitives hands-on. 2. <a href="cloud-native-primer.html">Cloud native primer</a> — where each primitive lives in the code. 3. <a href="rust-primer.html#34-unsafe-ffi-and-linux-syscalls">Rust primer</a> — <code>unsafe</code>, syscalls, <code>fork</code>/<code>clone</code> in threaded processes. 4. <a href="environment.html">Preparing your environment</a> — AppArmor and cgroup delegation traps. 5. <a href="architecture.html">Architecture</a> — the rootless network infrastructure and the two flows as sequences. 6. <a href="crates.html#delonix-linux">The crates</a> — <code>delonix-linux</code>, <code>delonix-sdn</code>, <code>delonix-vm</code>. 7. <a href="microvm-setup.html">Building microVMs</a> — KVM, Cloud Hypervisor, libvirt. 8. <a href="coding-conventions.html#7-unsafe-syscalls-and-processes">Coding conventions</a> — the rules for <code>unsafe</code> and processes.</td>
+<td><strong>Linux 开发者</strong>（命名空间、cgroup、网络、虚拟机）</td>
+<td>1. <a href="linux-foundations.html">Linux 基础</a>——亲手操作各原语。2. <a href="cloud-native-primer.html">云原生入门</a>——每个原语在代码中位于何处。3. <a href="rust-primer.html#34-unsafe-ffi-and-linux-syscalls">Rust 入门</a>——<code>unsafe</code>、系统调用、多线程进程中的 <code>fork</code>/<code>clone</code>。4. <a href="environment.html">准备你的环境</a>——AppArmor 与 cgroup 委派（delegation）的陷阱。5. <a href="architecture.html">架构</a>——无根网络基础设施，以及作为序列的两条流程。6. <a href="crates.html#delonix-linux">各个 crate</a>——<code>delonix-linux</code>、<code>delonix-sdn</code>、<code>delonix-vm</code>。7. <a href="microvm-setup.html">构建微虚拟机</a>——KVM、Cloud Hypervisor、libvirt。8. <a href="coding-conventions.html#7-unsafe-syscalls-and-processes">编码约定</a>——<code>unsafe</code> 与进程的规则。</td>
 </tr>
 </tbody>
 </table></div>
-<p>Two narrower tasks have their own shortcut: <strong>changing how documentation is produced</strong> starts at
-<a href="publishing-docs.html">Publishing the documentation</a>; <strong>configuring or isolating a run</strong> starts at
-<a href="build-and-test.html#isolating-the-engines-state">Isolating the engine's state</a> and then
-<a href="environment-variables.html">Environment variables</a>.</p>
-<h2 id="pages">Pages<a class="hanchor" href="#pages" aria-label="#">#</a></h2>
+<p>两项更窄的任务有各自的捷径：<strong>改变文档的生成方式</strong>从
+<a href="publishing-docs.html">发布文档</a>开始；<strong>配置或隔离一次运行</strong>从
+<a href="build-and-test.html#isolating-the-engines-state">隔离引擎的状态</a>开始，然后是
+<a href="environment-variables.html">环境变量</a>。</p>
+<h2 id="pages">各页面<a class="hanchor" href="#pages" aria-label="#">#</a></h2>
 <div class="tablewrap"><table>
 <thead>
 <tr>
-<th>Page</th>
-<th>What it answers</th>
+<th>页面</th>
+<th>它回答什么</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><a href="start-here.html">Start here</a></td>
-<td>Day 0 setup check, your first contribution end to end, where a change goes, the rules and their sources, what to do when stuck</td>
+<td><a href="start-here.html">从这里开始</a></td>
+<td>第 0 天的设置检查、你端到端的第一次贡献、一次改动会流向哪里、规则及其来源、卡住时该怎么办</td>
 </tr>
 <tr>
-<td><a href="iaas-and-cloud-native.html">IaaS and cloud native</a></td>
-<td>What an IaaS is made of, which layer this engine is, what it leaves to a control plane, and how cloud native principles show up in its files</td>
+<td><a href="iaas-and-cloud-native.html">IaaS 与云原生</a></td>
+<td>IaaS 由什么构成、本引擎处于哪一层、它把什么留给控制平面，以及云原生原则如何体现在它的文件中</td>
 </tr>
 <tr>
-<td><a href="linux-foundations.html">Linux foundations</a></td>
-<td>Processes, namespaces, cgroups v2, file descriptors and signals — hands-on, with the commands to inspect each</td>
+<td><a href="linux-foundations.html">Linux 基础</a></td>
+<td>进程、命名空间、cgroups v2、文件描述符与信号——亲手操作，附带检查每一项的命令</td>
 </tr>
 <tr>
-<td><a href="cloud-native-primer.html">Cloud native primer</a></td>
-<td>How the engine uses namespaces, cgroups, capabilities, OCI, networking, CRI, KVM and reconciliation — with files and symbols</td>
+<td><a href="cloud-native-primer.html">云原生入门</a></td>
+<td>引擎如何使用命名空间、cgroup、capability、OCI、网络、CRI、KVM 与协调——附文件与符号</td>
 </tr>
 <tr>
-<td><a href="rust-primer.html">Rust primer for this codebase</a></td>
-<td>The Rust this codebase actually uses</td>
+<td><a href="rust-primer.html">面向本代码库的 Rust 入门</a></td>
+<td>本代码库实际使用的 Rust</td>
 </tr>
 <tr>
-<td><a href="environment.html">Preparing your environment</a></td>
-<td>What the kernel and host need, the pinned toolchain, and the host traps that look like engine bugs</td>
+<td><a href="environment.html">准备你的环境</a></td>
+<td>内核和宿主机需要什么、锁定的工具链，以及看起来像引擎缺陷的宿主机陷阱</td>
 </tr>
 <tr>
-<td><a href="build-and-test.html">Clone, build and test</a></td>
-<td>Building, installing, running tests, every CI gate as a local command, E2E and chaos with isolation</td>
+<td><a href="build-and-test.html">克隆、构建与测试</a></td>
+<td>构建、安装、运行测试、把每个 CI 门禁当作本地命令、带隔离的 E2E 与混沌测试</td>
 </tr>
 <tr>
-<td><a href="project-structure.html">Project structure</a></td>
-<td>What each top-level file and directory is, who changes it, and what is generated</td>
+<td><a href="project-structure.html">项目结构</a></td>
+<td>每个顶层文件和目录是什么、谁来改动它，以及什么是生成的</td>
 </tr>
 <tr>
-<td><a href="architecture.html">Architecture</a></td>
-<td>Layers, the crate graph, processes at runtime, control and data paths, state on disk</td>
+<td><a href="architecture.html">架构</a></td>
+<td>各层、crate 图、运行时的进程、控制路径与数据路径、磁盘上的状态</td>
 </tr>
 <tr>
-<td><a href="crates.html">The crates</a></td>
-<td>One block per crate: responsibility, main types, where to start reading</td>
+<td><a href="crates.html">各个 crate</a></td>
+<td>每个 crate 一段：职责、主要类型、从哪里开始阅读</td>
 </tr>
 <tr>
-<td><a href="system-design-interview.html">System Design Interview</a></td>
-<td>The engine designed as an interview answer, then compared with what was built</td>
+<td><a href="system-design-interview.html">系统设计面试</a></td>
+<td>把本引擎设计成一份面试答案，再与实际构建的成果对比</td>
 </tr>
 <tr>
-<td><a href="delonixfile-and-vmfile.html">Delonixfile and VMfile</a></td>
-<td>The build file grammars and how they differ from a Dockerfile</td>
+<td><a href="delonixfile-and-vmfile.html">Delonixfile 与 VMfile</a></td>
+<td>构建文件的语法，以及它们与 Dockerfile 的区别</td>
 </tr>
 <tr>
-<td><a href="microvm-setup.html">Building microVMs</a></td>
-<td>KVM, Cloud Hypervisor and firmware, libvirt, VM images</td>
+<td><a href="microvm-setup.html">构建微虚拟机</a></td>
+<td>KVM、Cloud Hypervisor 与固件、libvirt、虚拟机镜像</td>
 </tr>
 <tr>
-<td><a href="troubleshooting.html">Troubleshooting</a></td>
-<td>A symptom index: gate failure messages, host traps and their fixes, in one place</td>
+<td><a href="troubleshooting.html">故障排查</a></td>
+<td>一份症状索引：门禁失败信息、宿主机陷阱及其修复方法，集中于一处</td>
 </tr>
 <tr>
-<td><a href="service-names-and-hosts.html">How names reach <code>/etc/hosts</code></a></td>
-<td>The one delimited block, the two ways a name gets into it (<code>hosts: [host]</code> and <code>delonix hosts sync</code>), what it refuses, and how to test it without root</td>
+<td><a href="service-names-and-hosts.html">名称如何进入 <code>/etc/hosts</code></a></td>
+<td>唯一的定界代码块、一个名称进入其中的两种方式（<code>hosts: [host]</code> 与 <code>delonix hosts sync</code>）、它拒绝什么，以及如何在没有 root 权限的情况下测试它</td>
 </tr>
 <tr>
-<td><a href="coding-conventions.html">Coding conventions</a></td>
-<td>How code in this repository is written, and the checklist reviewers apply</td>
+<td><a href="coding-conventions.html">编码约定</a></td>
+<td>本仓库中的代码如何编写，以及评审者所使用的检查清单</td>
 </tr>
 <tr>
-<td><a href="adding-a-kind.html">Adding a Kind</a></td>
-<td>The table, the schema and the reconciler wiring a new declarative Kind needs, worked through <code>Service</code></td>
+<td><a href="adding-a-kind.html">新增一个 Kind</a></td>
+<td>新增一个声明式 Kind 所需的表、schema 与协调器接线，以 <code>Service</code> 为例逐步讲解</td>
 </tr>
 <tr>
-<td><a href="contributing-workflow.html">Contribution workflow</a></td>
-<td>Worktrees, versions, language rule, architecture rules, ADRs, commits and PRs</td>
+<td><a href="contributing-workflow.html">贡献流程</a></td>
+<td>Worktree、版本、语言规则、架构规则、ADR、提交与 PR</td>
 </tr>
 <tr>
-<td><a href="releases-and-stability.html">Releases and stability</a></td>
-<td>The version gate, what a pushed tag does, and what the CLI and manifest schema promise not to break</td>
+<td><a href="releases-and-stability.html">发布与稳定性</a></td>
+<td>版本门禁、推送一个标签会做什么，以及 CLI 和清单 schema 承诺不破坏什么</td>
 </tr>
 <tr>
-<td><a href="publishing-docs.html">Publishing the documentation</a></td>
-<td>How the site and this handbook are generated, gated and published</td>
+<td><a href="publishing-docs.html">发布文档</a></td>
+<td>站点和本手册如何被生成、经过门禁检查并发布</td>
 </tr>
 <tr>
-<td><a href="cloud-native-standards.html">Cloud native standards</a></td>
-<td>Each standard, what it requires, how Delonix implements it, and its conformance status</td>
+<td><a href="cloud-native-standards.html">云原生标准</a></td>
+<td>每一项标准、它要求什么、Delonix 如何实现它，以及它的合规状态</td>
 </tr>
 <tr>
-<td><a href="environment-variables.html">Environment variables</a></td>
-<td>Every <code>DELONIX_*</code> variable the code reads: who reads it, what it changes, its default, and which ones lower a boundary</td>
+<td><a href="environment-variables.html">环境变量</a></td>
+<td>代码读取的每一个 <code>DELONIX_*</code> 变量：谁读取它、它改变什么、它的默认值，以及哪些会降低边界</td>
 </tr>
 <tr>
-<td><a href="glossary.html">Glossary</a></td>
-<td>The engine and cloud-native terms you meet here, with their Delonix meaning and where to read more</td>
+<td><a href="glossary.html">术语表</a></td>
+<td>你在这里遇到的引擎与云原生术语，附带它们在 Delonix 中的含义，以及在何处可以阅读更多内容</td>
 </tr>
 </tbody>
 </table></div>
-<p>Other references you will be pointed to: <a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a> (C4 diagrams),
-<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a> (architecture decisions), <a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
-(private vulnerability reports) and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a> (the short front door).</p>
+<p>你会被指向的其他参考资料：<a href="https://github.com/angolardevops/delonix-runtime/blob/main/ARCHITECTURE.md" target="_blank" rel="noopener"><code>ARCHITECTURE.md</code></a>（C4 图表）、
+<a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/README.md" target="_blank" rel="noopener"><code>docs/adr/</code></a>（架构决策）、<a href="https://github.com/angolardevops/delonix-runtime/blob/main/SECURITY.md" target="_blank" rel="noopener"><code>SECURITY.md</code></a>
+（私密漏洞报告），以及 <a href="https://github.com/angolardevops/delonix-runtime/blob/main/CONTRIBUTING.md" target="_blank" rel="noopener"><code>CONTRIBUTING.md</code></a>（简短的入口）。</p>
 <hr />
-<p><strong>Next:</strong> <a href="start-here.html">Start here</a> — check your setup in thirty minutes and walk through a first contribution end to end.</p>
-<nav class="pager"><span></span><a class="next" href="start-here.html"><span>下一页 →</span>Start here</a></nav>
-<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/README.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/README.md</code></footer>
+<p><strong>下一步：</strong> <a href="start-here.html">从这里开始</a>——花三十分钟检查你的配置，并端到端地走一遍第一次贡献。</p>
+<nav class="pager"><span></span><a class="next" href="start-here.html"><span>下一页 →</span>从这里开始</a></nav>
+<footer class="foot"><a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/dev/zh-CN/README.md" target="_blank" rel="noopener">编辑本页</a><code>docs/dev/zh-CN/README.md</code></footer>
 </div></main>
 <aside class="toc"><p class="ttitle">本页内容</p><div class="toc">
 <ul>
-<li><a href="#what-the-engine-is-and-what-it-is-not">What the engine is — and what it is not</a></li>
-<li><a href="#two-halves-generated-facts-and-narrative">Two halves: generated facts and narrative</a></li>
-<li><a href="#how-this-handbook-is-organised">How this handbook is organised</a></li>
-<li><a href="#reading-paths-by-role">Reading paths by role</a></li>
-<li><a href="#pages">Pages</a></li>
+<li><a href="#what-the-engine-is-and-what-it-is-not">引擎是什么——以及它不是什么</a></li>
+<li><a href="#two-halves-generated-facts-and-narrative">两个部分：生成的事实与叙述</a></li>
+<li><a href="#how-this-handbook-is-organised">本手册的组织方式</a></li>
+<li><a href="#reading-paths-by-role">按角色划分的阅读路径</a></li>
+<li><a href="#pages">各页面</a></li>
 </ul>
 </div>
 </aside>

@@ -48,6 +48,12 @@ pub enum Error {
     /// HTTP 502/503/504: the API is up, the backend behind it is not.
     #[error("{0}")]
     NodeUnavailable(String),
+    /// A VM firewall was asked for on a cluster whose datacenter-level
+    /// firewall is off, so no rule of a VM would filter anything (ADR-0052).
+    /// Turning it on changes what the NODES accept too, which is the
+    /// operator's decision — this backend never flips it.
+    #[error("{0}")]
+    DatacenterFirewallDisabled(String),
     /// A body past the size this client reads into memory.
     #[error("{0}")]
     ResponseTooLarge(String),
@@ -137,6 +143,22 @@ pub enum Error {
     #[error("{0}")]
     InvalidCidr(String),
 
+    /// A plain address an SDN field takes — a DHCP range end, a DNS server,
+    /// an IPAM reservation, a fabric node's router address — or a MAC, that
+    /// does not parse as one. Its own variant, next to [`Error::InvalidCidr`],
+    /// for the same reason that one is next to [`Error::InvalidSdnId`]: an
+    /// address without a prefix is a different shape from a network, and a
+    /// message that called a MAC a "subnet CIDR" would send the reader to
+    /// the wrong field.
+    #[error("{0}")]
+    InvalidSdnAddress(String),
+
+    /// A guest-driven shutdown/reboot timeout this client could not wait out:
+    /// the node would still be inside the task when the client's own task
+    /// deadline ran out, and the answer would read as a timeout of the CLIENT.
+    #[error("{0}")]
+    InvalidPowerTimeout(String),
+
     /// A `VmConfig` field this backend cannot honour (local paths, QEMU knobs
     /// the node owns, libvirt-only escape hatches).
     #[error("{0}")]
@@ -171,6 +193,8 @@ impl Error {
             Error::InvalidSnapshotName(_) => 1523,
             Error::InvalidSdnId(_) => 1530,
             Error::InvalidCidr(_) => 1533,
+            Error::InvalidSdnAddress(_) => 1534,
+            Error::InvalidPowerTimeout(_) => 1535,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
             Error::InvalidFirewallObjectName(_) => 1531,
@@ -181,6 +205,7 @@ impl Error {
             Error::NodeNotFound(_) => 4504,
             Error::NodeConflict(_) => 5504,
             Error::NodeUnavailable(_) => 6506,
+            Error::DatacenterFirewallDisabled(_) => 6508,
             Error::Unauthorized(_) => 9515,
             Error::Forbidden(_) => 9516,
             Error::ResponseTooLarge(_) => 9517,
@@ -226,7 +251,9 @@ impl From<Error> for Dx {
         let class = match e {
             Error::SnapshotNotFound(text) | Error::NodeNotFound(text) => Dx::NotFound(text),
             Error::SnapshotTaken(text) | Error::NodeConflict(text) => Dx::Conflict(text),
-            Error::ClientBuild(text) | Error::NodeUnavailable(text) => Dx::Unavailable(text),
+            Error::ClientBuild(text)
+            | Error::NodeUnavailable(text)
+            | Error::DatacenterFirewallDisabled(text) => Dx::Unavailable(text),
             Error::TaskTimeout(text) | Error::LockTimeout(text) => Dx::Timeout(text),
             Error::BadRequest(text) => Dx::Invalid(text),
             Error::Request(text)
@@ -260,6 +287,7 @@ mod tests {
             Error::NodeConflict("proxmox: u returned HTTP 409: x".into()),
             Error::BadRequest("proxmox: u returned HTTP 400: x".into()),
             Error::NodeUnavailable("proxmox: u returned HTTP 503: x".into()),
+            Error::DatacenterFirewallDisabled("proxmox: the datacenter firewall of u is off".into()),
             Error::ResponseTooLarge("proxmox: the answer from /x exceeded 16 MiB".into()),
             Error::Decode("proxmox: could not read the answer from x: y".into()),
             Error::UnexpectedAnswer("proxmox: could not read a VM id from /cluster/nextid: x".into()),
@@ -280,6 +308,8 @@ mod tests {
             Error::InvalidFirewallAddress("invalid Proxmox firewall address 'x': expected an IPv4/IPv6 address, optionally with a '/<prefix>'".into()),
             Error::InvalidSdnId("invalid Proxmox SDN id 'x': expected a lowercase letter then up to 7 lowercase letters or digits".into()),
             Error::InvalidCidr("invalid Proxmox SDN subnet 'x': expected <address>/<prefix-length>".into()),
+            Error::InvalidSdnAddress("invalid Proxmox SDN MAC address 'x': expected XX:XX:XX:XX:XX:XX".into()),
+            Error::InvalidPowerTimeout("proxmox: a shutdown timeout of 900s does not fit inside this client's 600s task deadline".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),
             Error::Engine(delonix_model::Error::Conflict("x".into())),

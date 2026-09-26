@@ -48,6 +48,11 @@ pub enum ProviderCmd {
         /// provider at once. Omitted: all of its kinds.
         #[arg(long, value_parser = parse_kind)]
         kind: Option<ProviderKind>,
+        /// Contact the configured Proxmox target and measure its cluster (nodes,
+        /// quorum, shared storage, HA, SDN zones) with read-only requests. Only
+        /// for `proxmox`: the local providers are measured on every describe.
+        #[arg(long)]
+        probe: bool,
         #[arg(short = 'o', long = "output", value_enum, default_value_t)]
         output: super::output::OutputFormat,
     },
@@ -73,12 +78,13 @@ fn parse_kind(s: &str) -> std::result::Result<ProviderKind, String> {
 
 /// Every provider report, MEASURED on this host. Order: the VM backends in
 /// registry order (the auto-detection preference), then the Linux provider's
-/// three kinds. A Proxmox target that is not registered in this process still
+/// three kinds with Proxmox's network report after the Linux one. A Proxmox target that is not registered in this process still
 /// appears, declared and unavailable, so the list is the same set of names on
 /// every host — a reader compares hosts by state, not by which rows exist.
 pub fn measured_reports() -> Vec<ProviderReport> {
     let mut out = delonix_vm::provider_reports();
-    if !out.iter().any(|r| r.id == "proxmox") {
+    let proxmox_configured = out.iter().any(|r| r.id == "proxmox");
+    if !proxmox_configured {
         out.push(delonix_proxmox::capability_report(false));
     }
     out.push(delonix_linux::provider_report::report(
@@ -86,6 +92,12 @@ pub fn measured_reports() -> Vec<ProviderReport> {
     ));
     out.push(delonix_sdn::provider_report::report(
         &delonix_sdn::provider_report::SdnHost::probe(),
+    ));
+    // The node's own per-VM firewall (ADR-0052): the second network
+    // provider, next to the Linux one. Same configured flag as the VM backend
+    // — it is the same target, answering a different port.
+    out.push(delonix_proxmox::network_capability_report(
+        proxmox_configured,
     ));
     out.push(delonix_volume::provider_report::report(
         &delonix_volume::provider_report::StorageHost::probe(),
@@ -103,6 +115,7 @@ pub fn declared_reports() -> Vec<ProviderReport> {
         delonix_proxmox::capability_report(true),
         delonix_linux::provider_report::report(&delonix_linux::provider_report::LinuxHost::ASSUMED),
         delonix_sdn::provider_report::report(&delonix_sdn::provider_report::SdnHost::ASSUMED),
+        delonix_proxmox::network_capability_report(true),
         delonix_volume::provider_report::report(
             &delonix_volume::provider_report::StorageHost::ASSUMED,
         ),
@@ -128,7 +141,12 @@ pub fn run(cmd: ProviderCmd) -> Result<()> {
                 }
             }
         }
-        ProviderCmd::Describe { id, kind, output } => {
+        ProviderCmd::Describe {
+            id,
+            kind,
+            probe,
+            output,
+        } => {
             let reports: Vec<ProviderReport> = measured_reports()
                 .into_iter()
                 .filter(|r| r.id == id && kind.is_none_or(|k| r.kind == k))
@@ -144,15 +162,31 @@ pub fn run(cmd: ProviderCmd) -> Result<()> {
                     &[("id", &id), ("known", &known.join(", "))],
                 )));
             }
+            let cluster = if probe {
+                Some(probe_cluster(&id)?)
+            } else {
+                None
+            };
             match output {
                 super::output::OutputFormat::Json => {
-                    let items: Vec<serde_json::Value> =
-                        reports.iter().map(provider_info_json).collect();
+                    let items: Vec<serde_json::Value> = reports
+                        .iter()
+                        .map(|r| {
+                            let mut v = provider_info_json(r);
+                            if let (Some(c), Some(o)) = (&cluster, v.as_object_mut()) {
+                                o.insert("cluster".into(), cluster_json(c));
+                            }
+                            v
+                        })
+                        .collect();
                     super::output::print_json(&items)
                 }
                 super::output::OutputFormat::Table => {
                     for r in &reports {
                         print_describe(r);
+                    }
+                    if let Some(c) = &cluster {
+                        print_cluster(c);
                     }
                     Ok(())
                 }
@@ -163,6 +197,119 @@ pub fn run(cmd: ProviderCmd) -> Result<()> {
             Ok(())
         }
     }
+}
+
+/// What `--probe` measured: the target it asked and the cluster around it.
+pub struct ProbedCluster {
+    url: String,
+    node: String,
+    facts: delonix_proxmox::cluster::ClusterFacts,
+    verdicts: Vec<delonix_proxmox::cluster::ClusterVerdict>,
+}
+
+/// `provider describe proxmox --probe`: connects to the configured target —
+/// the same one a VM operation would use — and reads its cluster with GETs
+/// only (ADR-0049 slice 3). Refused for any other provider: the local ones
+/// are measured on every describe, and a flag that did nothing there would
+/// read as if it had.
+fn probe_cluster(id: &str) -> Result<ProbedCluster> {
+    if id != "proxmox" {
+        return Err(Error::Invalid(super::po::tf(
+            "--probe applies to a remote provider (proxmox); '{id}' is measured on this host by every describe",
+            &[("id", id)],
+        )));
+    }
+    let (target, opts) = super::vmbackends::proxmox_target()?.ok_or_else(|| {
+        Error::Unavailable(super::po::t(
+            "no Proxmox target is configured: set DELONIX_PROXMOX_URL, DELONIX_PROXMOX_NODE and a credential (DELONIX_PROXMOX_SECRET, or DELONIX_PROXMOX_TOKEN_ID with DELONIX_PROXMOX_TOKEN_FILE)",
+        ).to_string())
+    })?;
+    let url = target.base_url.clone();
+    let node = target.node.clone();
+    let client = delonix_proxmox::Client::connect_with(&target, opts)?;
+    let facts = client.cluster_facts()?;
+    let verdicts = delonix_proxmox::cluster::cluster_verdicts(&facts);
+    Ok(ProbedCluster {
+        url,
+        node,
+        facts,
+        verdicts,
+    })
+}
+
+fn cluster_json(c: &ProbedCluster) -> serde_json::Value {
+    serde_json::json!({
+        "url": c.url,
+        "node": c.node,
+        "facts": c.facts,
+        "verdicts": c.verdicts.iter().map(|v| serde_json::json!({
+            "name": v.capability.name(),
+            "offered": v.offered,
+            "reason": v.reason,
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn print_cluster(c: &ProbedCluster) {
+    let f = &c.facts;
+    println!();
+    println!(
+        "{}",
+        super::po::tf(
+            "Cluster of the target, measured now ({url}, node {node}), read-only:",
+            &[("url", &c.url), ("node", &c.node)],
+        )
+    );
+    let yes_no = |b: bool| if b { "yes" } else { "no" };
+    println!(
+        "  {} {}",
+        super::po::t("cluster:"),
+        match (&f.cluster, f.quorate) {
+            (Some(n), Some(q)) => format!("{n} (quorate: {})", yes_no(q)),
+            _ => super::po::t("none — the node is not in a cluster").to_string(),
+        }
+    );
+    let mut t = super::output::Table::new(&["NODE", "ONLINE", "TARGET"]);
+    for n in &f.nodes {
+        t.row(vec![
+            n.name.clone(),
+            yes_no(n.online).into(),
+            if n.target { "yes" } else { "-" }.into(),
+        ]);
+    }
+    t.print();
+    let mut t = super::output::Table::new(&["STORAGE", "TYPE", "SHARED", "VM DISKS"]);
+    for s in &f.storages {
+        t.row(vec![
+            s.id.clone(),
+            s.kind.clone(),
+            yes_no(s.shared).into(),
+            yes_no(s.images).into(),
+        ]);
+    }
+    t.print();
+    println!(
+        "  HA: {} · {} {} · SDN zones: {}",
+        f.ha.master.as_deref().unwrap_or("no CRM master"),
+        f.ha.resources,
+        super::po::t("resource(s)"),
+        f.sdn_zones
+    );
+    let mut t = super::output::Table::new(&["CAPABILITY", "THIS CLUSTER", "WHY"]);
+    for v in &c.verdicts {
+        t.row(vec![
+            v.capability.name().to_string(),
+            if v.offered { "offers it" } else { "does not" }.into(),
+            v.reason.clone(),
+        ]);
+    }
+    t.print();
+    println!(
+        "{}",
+        super::po::t(
+            "What the cluster offers is a fact about the cluster, not engine support: the backend addresses one node and never picks another (ADR-0049 slice 3)."
+        )
+    );
 }
 
 /// The contract's `ProviderInfo`, as JSON, from a report. `supported` is the

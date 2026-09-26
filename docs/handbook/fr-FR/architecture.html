@@ -924,7 +924,7 @@ classDef store fill:#2390c8,stroke:#17618a,color:#ffffff
 <li><code>delonix-mcp</code> → <code>delonix-mgmt</code> — supprimée en <strong>P5</strong></li>
 <li><code>delonix-oci</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-opnsense</code> → <code>delonix-sdn</code> — supprimée en <strong>P4</strong></li>
-<li><code>delonix-proxmox</code> → <code>delonix-vm</code> — supprimée en <strong>P4</strong></li>
+<li><code>delonix-proxmox</code> → <code>delonix-sdn</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-scanner</code> → <code>delonix-oci</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-sdn</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
 <li><code>delonix-vm</code> → <code>delonix-state</code> — supprimée en <strong>P4</strong></li>
@@ -971,8 +971,17 @@ aujourd’hui :</p>
   <code>delonix-state</code> (<code>delonix-linux</code>, <code>delonix-vm</code>, <code>delonix-sdn</code>, <code>delonix-oci</code>,
   <code>delonix-volume</code>) sont des exceptions déclarées jusqu’à ce que la P4 leur donne un port
   <code>StateRepository</code> (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>).</li>
-<li><strong>Les P4–P7 n’ont pas commencé.</strong> Les exceptions restantes dans le tableau ci-dessus nomment
-  ces phases.</li>
+<li><strong>La P4 est en cours ; les P5–P7 n’ont pas commencé.</strong> L’ADR-0044 (accepté le 2026-09-24)
+  décide comment la P4 se fait. Le <strong>#420</strong> a apporté le port <code>StateRepository&lt;T&gt;</code>
+  (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/foundation/delonix-model/src/ports.rs" target="_blank" rel="noopener"><code>crates/foundation/delonix-model/src/ports.rs</code></a>), que <code>delonix-linux</code> utilise déjà pour
+  <code>wait_and_record</code>/<code>stop</code>/<code>persist_stop</code>/<code>remove</code> — d’où son exception <code>P4a</code> dans
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/arch_fitness.py" target="_blank" rel="noopener"><code>scripts/arch_fitness.py</code></a>, qui ne liste que les sites encore ouverts. Le <strong>#486</strong> a ajouté le port
+  de provider de VM (<code>VmSpec</code>, <code>Extensions</code>, <code>Provider</code>, <code>VmProvider</code> dans
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/contexts/delonix-compute/src/vm_provider.rs" target="_blank" rel="noopener"><code>crates/contexts/delonix-compute/src/vm_provider.rs</code></a>, P4b tranche 1), et <code>delonix-vm</code>
+  l’implémente pour les deux backends locaux (<code>LocalVmProvider</code>,
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-vm/src/provider.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-vm/src/provider.rs</code></a>) en réutilisant son <code>create_with</code>/<code>stop</code>/<code>start</code>
+  existant ; déplacer chaque backend dans son propre crate de provider est la P4b tranche 2. Les
+  exceptions restantes dans le tableau ci-dessus nomment la phase qui supprime chacune.</li>
 </ul>
 <h3 id="records-node-helpers-and-persisted-state-after-406">Enregistrements, assistants de nœud et état persisté, après la #406<a class="hanchor" href="#records-node-helpers-and-persisted-state-after-406" aria-label="#">#</a></h3>
 <blockquote>
@@ -1205,7 +1214,7 @@ comprendre pourquoi.</p>
   delonix_opnsense --&gt; delonix_sdn
   delonix_proxmox --&gt; delonix_compute
   delonix_proxmox --&gt; delonix_model
-  delonix_proxmox --&gt; delonix_vm
+  delonix_proxmox --&gt; delonix_sdn
   delonix_runtime_bin --&gt; delonix_compute
   delonix_runtime_bin --&gt; delonix_linux
   delonix_runtime_bin --&gt; delonix_mgmt
@@ -1540,8 +1549,10 @@ processus multithreads, au prix d’un processus par opération et d’un texte 
 une frontière de processus.</p>
 <p><strong>Note — les adapters atteignent encore directement les fichiers d’état.</strong> <code>delonix-linux</code>,
 <code>delonix-vm</code>, <code>delonix-sdn</code>, <code>delonix-oci</code> et <code>delonix-volume</code> dépendent de <code>delonix-state</code>
-comme exceptions déclarées ; le port <code>StateRepository</code> qui les supprime est la P4 de
-l’ADR-0040, pas encore écrite.</p>
+comme exceptions déclarées. Le port <code>StateRepository</code> qui les supprime existe depuis le #420
+(<code>delonix-model/src/ports.rs</code>, ADR-0044 D6), et pour l’instant seul <code>delonix-linux</code> passe par lui
+pour une partie de son cycle de vie ; les quatre autres ouvrent les stores directement jusqu’à
+l’arrivée de leur tranche de la P4.</p>
 <p><strong>Note — <code>macvlan</code>/<code>ipvlan</code> sont déclarés, pas réalisés.</strong> <code>network create</code> les enregistre et
 rapporte <code>Realized=False</code> avec la raison <code>DriverNotImplemented</code>
 (<a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/network.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/network.rs</code></a>) : leur plan physique nécessite

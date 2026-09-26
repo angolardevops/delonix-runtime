@@ -1,4 +1,4 @@
-<!-- translated-from: environment-variables.md sha256:15aedcb799916846f25f3495c9deb547007ed75b76f5f8342e6620b23de42fea -->
+<!-- translated-from: environment-variables.md sha256:89a40a69d327ce2599cf5b5695e2cc96151828496b52fecabe7e4b62bdc71387 -->
 # Variáveis de ambiente (`DELONIX_*`)
 
 **Antes de leres:** [Isolar o estado do motor](build-and-test.md#isolating-the-engines-state) em Clonar, construir e testar.
@@ -49,7 +49,7 @@ Onde o código tem uma regra de precedência, ela é normalmente **flag > ambien
 | Socket da API Docker | `--addr` > `DELONIX_DOCKER_ADDR` > `unix:///run/delonix-docker.sock` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` |
 | Língua da saída | `--l18n` > `DELONIX_L18N` > inglês | `bins/delonix-runtime-bin/src/cmd/po.rs:peek_lang` |
 | Tecla de escape da consola de VM | `--escape` > `DELONIX_CONSOLE_ESCAPE` > `^]` | `bins/delonix-runtime-bin/src/cmd/vm.rs:resolve_escape` |
-| Backend de VM | `--backend` (ou o `HYPERVISOR` da imagem) > `DELONIX_VM_BACKEND` > `vm default-backend --set` > auto-detecção | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` |
+| Backend de VM | `--backend` (ou o `HYPERVISOR` da imagem) > `DELONIX_VM_BACKEND` > o `defaultProvider` do ficheiro de providers (ADR-0054) > `vm default-backend --set` > auto-detecção (só sem ficheiro de providers) | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` |
 | Endereço de bind das portas publicadas | o endereço em `-p <ip>:<host>:<container>` > `DELONIX_PUBLISH_ADDR` > `127.0.0.1` | `crates/adapters/delonix-sdn/src/lib.rs:publish_bind_addr` |
 | Feed de CVE para `image scan --update` | `--feed` > `DELONIX_ADVISORY_FEED` > erro | `bins/delonix-runtime-bin/src/cmd/scan.rs:cmd_scan_update` |
 | Filtro de logs | `DELONIX_LOG` > `RUST_LOG` > `info` | `crates/adapters/delonix-telemetry/src/telemetry.rs:init` |
@@ -102,6 +102,7 @@ conjunto de sockets. A história completa, e como desmontar a infra isolada, est
 | `DELONIX_NODE_API_ADDR` | `bins/delonix-node-api-bin/src/main.rs:run`; passada adiante por `cmd/serve.rs:run` | Socket da API de nó (`delonix serve node-api`, o contrato `delonix.node.v1` em gRPC e HTTP/JSON). | `unix://<path>`. Omissão `unix:///run/delonix-node.sock`. | `--addr` ganha. Só local (o uid que chama). |
 | `DELONIX_DOCKER_ADDR` | `bins/delonix-runtime-bin/src/cmd/dockerapi.rs:run` | Socket da fatia da Docker Engine API (`delonix serve docker-api`). | `unix://<path>` (o prefixo `unix://` é opcional). Omissão `unix:///run/delonix-docker.sock`. | `--addr` ganha. |
 | `DELONIX_VM_BACKEND` | `crates/adapters/delonix-vm/src/lib.rs:standing_backend_choice` | Backend de VM para toda a sessão quando um comando não nomeia nenhum. | Um nome de backend (`libvirt`, `cloud-hypervisor`, ou um backend remoto registado como `proxmox`). Um valor em branco é ignorado. | Abaixo de `--backend` e do `HYPERVISOR` da imagem, acima da omissão da máquina definida com `delonix vm default-backend --set`. Tal como uma escolha explícita, sobrepõe-se à heurística de capacidade e pode falhar tarde, no arranque, se o backend não conseguir correr a VM. |
+| `DELONIX_PROVIDERS_CONFIG` | `cmd/providers_config.rs:locate_with` | Caminho do ficheiro de providers do nó (ADR-0054), à frente de `$XDG_CONFIG_HOME/delonix/providers.yaml` e `/etc/delonix/providers.yaml`. | Um caminho. | Tem de nomear um ficheiro existente — nunca recua para outro. O primeiro ficheiro encontrado é a configuração; nunca se fundem. Um ficheiro ilegível faz falhar um pedido de VM sem `--backend`, em vez de adivinhar um provider. |
 | `DELONIX_NO_CGROUP_WARN` | `crates/adapters/delonix-linux/src/lib.rs` (o aviso de rootless sem delegação e `warn_if_unprotected_memory`), `bins/delonix-runtime-bin/src/cmd/kindmode.rs` | Silencia os avisos sobre a falta de delegação de cgroup e sobre um container sem tecto de memória em lado nenhum. | Definida (qualquer valor) → silêncio. | O motor **define-a** ele próprio (`cmd/util.rs:silence_cgroup_warning`, `cmd/kindmode.rs`) para que os filhos de re-exec não repitam um aviso que o pai já imprimiu. Defini-la à mão esconde uma condição real: os limites não são aplicados. |
 | `DELONIX_POLICY_LINT` | `bins/delonix-runtime-bin/src/cmd/policy.rs:show_lints` | Silencia os avisos de política de runtime emitidos uma vez por comando (`warning: runtime policy [...]`). | `0` → silêncio; qualquer outra coisa ou sem valor → mostrados. | Para quem leu o aviso e decidiu de outra forma. |
 | `DELONIX_NO_AUTO_RECOVER` | `bins/delonix-runtime-bin/src/cmd/netns.rs:reconcile_after_respawn` | Depois de o holder de rede ser reconstruído, reporta os containers encalhados e o comando para os reiniciar, em vez de os reiniciar automaticamente. | Definida (qualquer valor) → só reporta. | Para hosts onde queres escolher quando uma base de dados reinicia. |
@@ -180,11 +181,30 @@ impede os outros comandos. Contexto: `docs/adr/0008-proxmox-vm-backend.md`.
 | `DELONIX_PROXMOX_SECRET` | `cmd/vmbackends.rs:proxmox_auth` | Nome de um `kind: Secret` que guarda a credencial. | Segredo com `tokenId`+`tokenSecret` (preferido) ou `username`+`password`. | Verificada **primeiro**. Preferível às variáveis abaixo, que acabam no histórico da shell e no `ps`. |
 | `DELONIX_PROXMOX_TOKEN_ID` | `cmd/vmbackends.rs:proxmox_auth` | Id do token de API. | `user@realm!tokenname`. | Usada com `DELONIX_PROXMOX_TOKEN`; verificada depois do segredo. |
 | `DELONIX_PROXMOX_TOKEN` | `cmd/vmbackends.rs:proxmox_auth` | Segredo do token de API. | | |
+| `DELONIX_PROXMOX_TOKEN_FILE` | `cmd/vmbackends.rs:credential_value` | Caminho de um ficheiro com o segredo do token de API; preferível ao `DELONIX_PROXMOX_TOKEN`, que todo o processo filho herda. | Um caminho. | Recusado se alguém além do dono o puder ler (`chmod 600`). |
 | `DELONIX_PROXMOX_USER` | `cmd/vmbackends.rs:proxmox_auth` | Conta para autenticação por password. | `root@pam`, … | Usada com `DELONIX_PROXMOX_PASSWORD`; verificada em último lugar. |
 | `DELONIX_PROXMOX_PASSWORD` | `cmd/vmbackends.rs:proxmox_auth` | Password dessa conta. | | |
+| `DELONIX_PROXMOX_PASSWORD_FILE` | `cmd/vmbackends.rs:credential_value` | Caminho de um ficheiro com essa password; preferido ao `DELONIX_PROXMOX_PASSWORD`. | Um caminho. | Recusado se não for legível só pelo dono (`chmod 600`). O `passwordFile` do ficheiro de providers traduz-se para ele. |
 | `DELONIX_PROXMOX_INSECURE_TLS` | `cmd/vmbackends.rs:register_proxmox_with` | Salta a verificação do certificado TLS do nó. | `1`, `true` ou `yes` → salta; por omissão verifica. | **Outra máquina a responder em nome do nó recebe a credencial.** Só opt-in, nunca aplicada como recurso depois de um erro de TLS. |
 | `DELONIX_PROXMOX_BRIDGE` | `cmd/vmbackends.rs:register_proxmox_with` | Bridge de omissão para as NICs das VMs neste nó. | Um nome de bridge; a omissão do backend é `vmbr0`. | Um `bridge:` por VM ganha. |
 | `DELONIX_PROXMOX_VLAN` | `cmd/vmbackends.rs:parse_vlan` | Tag VLAN de omissão para as NICs das VMs neste nó. | 1–4094. Fora do intervalo é um **erro**, nunca descartado. | |
+| `DELONIX_PROXMOX_CA_FILE` | `cmd/vmbackends.rs:register_proxmox_with` | Um certificado CA (PEM) a confiar para o nó, além das raízes do sistema. | Caminho para um ficheiro PEM; ilegível é um **erro**. | A forma de verificar um nó cujo certificado foi assinado por uma CA interna, em vez de `DELONIX_PROXMOX_INSECURE_TLS`. |
+| `DELONIX_PROXMOX_TRACE_ROUTES` | `cmd/vmbackends.rs:register_proxmox_with` (lida uma vez, entregue ao cliente como `ClientOptions::trace_routes`; a constante `TRACE_ROUTES_ENV` em `crates/providers/delonix-proxmox/src/lib.rs` nomeia-a) e `crates/providers/delonix-proxmox/tests/live.rs:backend` (a suite ao vivo, cuja corrida está commitada como `docs/proxmox/trace-9.2.2.routes`) | Acrescenta `METHOD /path` de cada pedido a este ficheiro — o numerador da matriz de cobertura (ADR-0049). | Caminho para um ficheiro; vazio = desligado. | Alimenta-o ao `scripts/proxmox_api_inventory.py --trace` para marcar rotas `supported+tested`. |
+
+
+### OPNsense
+
+O `GatewayProvider` para um appliance OPNsense real (`kind: NetworkGateway`, ADR-0051), registado
+da mesma forma que o backend Proxmox acima e lido por `cmd::gatewayproviders`.
+
+| Variável | Lida por | Finalidade | Valores / omissão | Notas |
+|---|---|---|---|---|
+| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:register_opnsense_with` | Endpoint da API do appliance. Defini-lo é o que activa o provider. | `https://<host>`. | Exige uma credencial. |
+| `DELONIX_OPNSENSE_CREDENTIAL` | `cmd/gatewayproviders.rs:opnsense_auth` | Nome de um `kind: Secret` que guarda a credencial. | Segredo com os campos `key`+`secret` — um par gerado de chave/segredo de API, nunca o utilizador/password de uma conta da GUI (ADR-0051 Fase 0: esses são recusados pela API). | Verificada **primeiro**. |
+| `DELONIX_OPNSENSE_KEY` | `cmd/gatewayproviders.rs:opnsense_auth` | Chave de API. | | Usada com `DELONIX_OPNSENSE_SECRET`; verificada depois do `kind: Secret`. |
+| `DELONIX_OPNSENSE_SECRET` | `cmd/gatewayproviders.rs:opnsense_auth` (via `credential_value`) | Segredo de API. | Prefere `DELONIX_OPNSENSE_SECRET_FILE` (um caminho `chmod 600`). | |
+| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:register_opnsense_with` | Salta a verificação do certificado TLS do appliance. | `1`, `true` ou `yes` → salta; por omissão verifica. | Um OPNsense de fábrica serve um certificado self-signed (medido ao vivo, ADR-0051 Fase 0). **Outra máquina a responder em nome do appliance recebe a credencial.** Só opt-in. |
+| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:register_opnsense_with` | Um certificado CA (PEM) a confiar para o appliance, além das raízes do sistema. | Caminho para um ficheiro PEM; ilegível é um **erro**. | Em vez de `DELONIX_OPNSENSE_INSECURE_TLS`. |
 
 ### TrueNAS
 
@@ -198,6 +218,7 @@ definições de teste — ver [Só para testes](#test-only).
 |---|---|---|---|---|
 | `DELONIX_OTLP_ENDPOINT` | `crates/adapters/delonix-telemetry/src/telemetry.rs:build_otlp_layer` | Exporta spans de tracing por OTLP/HTTP (protobuf). | Um URL base como `http://localhost:4318`; `/v1/traces` é acrescentado se faltar. Sem valor ou em branco → sem exportador. | Uma falha a construir o exportador avisa e continua só com logs. O nome do serviço é `OTEL_SERVICE_NAME` ou o nome do executável. |
 | `DELONIX_METRICS_ADDR` | `crates/interfaces/delonix-cri/src/lib.rs` (arranque do servidor CRI) | Activa um listener HTTP Prometheus `/metrics` no `delonix-cri`. | `host:port`, por exemplo `127.0.0.1:9100`. Sem valor → sem listener. | Um listener TCP: faz bind ao loopback, a menos que as métricas devam ser alcançáveis pela rede. |
+| `DELONIX_WALK_THREADS` | `crates/adapters/delonix-volume/src/lib.rs:walk_threads` (a varredura de disco por trás do `system df`, do uso de volumes e da quota rootless) | Define quantos workers a varredura paralela de directórios usa. | Um inteiro positivo; `1` → a varredura sequencial. Não definida → o número de CPUs, com tecto. | As varreduras paralela e sequencial dão o MESMO total (testado com hardlinks vistos por workers diferentes); a variável existe para o provar num host dado, e como escapatória se um sistema de ficheiros se comportar mal sob `readdir` concorrente. |
 
 ## Definidas pelo próprio motor / internas
 
@@ -240,12 +261,18 @@ Estas são lidas apenas por testes. Sem elas, os testes ao vivo **saltam** e imp
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Conta para autenticação por password. | Por exemplo `root@pam`. Obrigatória. | A verificação TLS está desligada nestes testes. |
 | `DELONIX_PROXMOX_TEST_PASS` | `crates/providers/delonix-proxmox/tests/live.rs:target` | A sua password. | Obrigatória. | |
 | `DELONIX_PROXMOX_TEST_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage para o disco da VM de teste. | Omissão `local-lvm`. | |
+| `DELONIX_PROXMOX_TEST_BACKUP_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage onde o arquivo de backup aterra — o nó pode não aceitar conteúdo de backup no storage do disco (uma pool thin-LVM não pode). | Omissão: igual a `DELONIX_PROXMOX_TEST_STORAGE`. | |
+| `DELONIX_PROXMOX_TEST_MOVE_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Um SEGUNDO storage para onde o `move_disk` move o disco de arranque da VM de teste — o nó recusa um move para o mesmo storage com o mesmo formato, por isso tem de ser mesmo uma pool diferente. | Omissão `local` (tem de ter `content=images` activado). | |
+| `DELONIX_PROXMOX_TEST_CALLBACK_ADDR` | `crates/providers/delonix-proxmox/tests/live.rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node` | O endereço em que o NÓ alcança este host: o teste arranca um servidor HTTP stub e dá ao nó `http://<addr>:<port>/…` como o URL de um controlador IPAM e de um controlador DNS, porque o nó verifica os dois chamando-lhes. | Um IP que o nó consegue rotear (`192.168.122.1` para um nó de laboratório libvirt-NAT). | Sem ela, a metade do controlador desse teste é saltada; o resto continua a correr. |
 | `DELONIX_PROXMOX_TEST_AGENT_VMID` | `crates/providers/delonix-proxmox/tests/live.rs:o_ip_vem_do_agente_de_um_convidado_a_serio` | Uma VM existente, com o QEMU guest agent a correr, cujo IP o teste lê. | Um id de VM. | Saltado quando não definida, mesmo com o URL definido. |
 | `DELONIX_TRUENAS_TEST_URL` | `crates/providers/delonix-truenas/tests/live.rs:target` | Appliance TrueNAS contra o qual correr os testes ao vivo do provisionador. | `https://<host>`. | Activa os testes. Criam e destroem `<pool>/dlxlive-<pid>`. |
 | `DELONIX_TRUENAS_TEST_POOL` | `crates/providers/delonix-truenas/tests/live.rs:target` | Pool para o dataset de teste. | Omissão `tank`. | |
 | `DELONIX_TRUENAS_TEST_KEY` | `crates/providers/delonix-truenas/tests/live.rs:target` | Chave de API. | | Usada em vez de utilizador e password quando definida. |
 | `DELONIX_TRUENAS_TEST_USER` | `crates/providers/delonix-truenas/tests/live.rs:target` | Conta para autenticação por password. | Obrigatória sem chave. | A verificação TLS está desligada nestes testes. |
 | `DELONIX_TRUENAS_TEST_PASS` | `crates/providers/delonix-truenas/tests/live.rs:target` | A sua password. | Obrigatória sem chave. | |
+| `DELONIX_OPNSENSE_TEST_URL` | `crates/providers/delonix-opnsense/tests/live.rs:target` | Appliance OPNsense contra o qual correr os testes ao vivo do cliente. | `https://<host>`. | Activa os testes. Criam e removem um alias e uma regra, e depois confirmam que o appliance fica limpo. |
+| `DELONIX_OPNSENSE_TEST_KEY` | `crates/providers/delonix-opnsense/tests/live.rs:target` | Chave de API. | Obrigatória. | |
+| `DELONIX_OPNSENSE_TEST_SECRET` | `crates/providers/delonix-opnsense/tests/live.rs:target` | Segredo de API. | Obrigatório. | A verificação TLS está desligada nestes testes. |
 | `DELONIX_UPDATE_FIXTURES` | `crates/adapters/delonix-linux/tests/advisor_fixtures.rs:goldens_match_the_rules_as_they_are_today` | Reescreve as fixtures golden do advisor em `crates/adapters/delonix-linux/tests/fixtures/advisor/` em vez de comparar com elas. | Definida (qualquer valor) → reescreve. | Regenera-as no **mesmo commit** que a mudança de regra. |
 
 Corre os testes ao vivo (substitui os marcadores; nunca faças commit de credenciais reais):

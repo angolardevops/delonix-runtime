@@ -1,4 +1,4 @@
-<!-- translated-from: project-structure.md sha256:75e7e79156cf21d6baed4c5c38622782b7954f4556a9c82d4c5897b6417ef172 -->
+<!-- translated-from: project-structure.md sha256:e94e23872043e472c030bf702308c67c04a07d77ccc04d6d6b315b34e2ad2a21 -->
 # Estrutura do projecto
 
 **Antes de leres:** [Clonar, compilar e testar](build-and-test.md) — tens uma checkout que compila, e sabes que gates existem.
@@ -126,6 +126,7 @@ A lista de crates, a camada de cada um e quem depende de quem são factos gerado
 | `bins/delonix-mcp-bin/` | O binário `delonix-mcp`: um `main.rs` fino sobre o `delonix-mcp`. | Raramente; a lógica vive no crate de interface. | `docs/adr/0025-mcp-local-ai-control-surface.md` |
 | `proto/` | O contrato de nó `delonix.node.v1` (`proto/delonix/node/v1/*.proto`), marcado como rascunho; fonte de verdade para o gRPC e HTTP/JSON e para o `docs/api/openapi.yaml`. Verificado por `scripts/contract_gate.py` (formato, lint, mudanças que quebram, mapeamentos HTTP, OpenAPI). | Mudanças ao contrato, revistas com cuidado — mudanças que quebram contra a última tag falham. | `proto/README.md`, ADR-0040 |
 | `tests/` | Verificações de compatibilidade fora da árvore cargo, não testes cargo: `tests/compat/cri-conformance.sh` (a suite `critest`) e `tests/compat/docker_api_smoke.py`. Os testes de integração cargo vivem no próprio `tests/` de cada crate. | Quem trabalha em compatibilidade com o CRI ou a API Docker. | `docs/cri-conformance.md`, [Clonar, compilar e testar](build-and-test.md) |
+| `fuzz/` | Alvos `cargo-fuzz` sobre parsers escritos à mão alimentados com input não confiável (um `Dockerfile` de um repo clonado, uma string de referência de imagem). Tem o seu próprio `[workspace]`, para as flags de build do sanitizer nunca tocarem no principal; o job de CI `fuzz` corre cada alvo por 60s a cada push/PR. | Quem acrescentar um parser escrito à mão para input controlado externamente. | M04 de `docs/roadmap/13-improvements-traceability.md` |
 
 ## Documentação (docs/…)
 
@@ -147,6 +148,7 @@ HTML (`index.html`, `cheatsheet.html`, `estrutura.html`, …) e o `.nojekyll` s�
 | `docs/providers/` | `capability-matrix.md`, a matriz DECLARADA de capacidades dos providers (ADR-0050), **gerada** por `delonix provider matrix`; um teste no `delonix-runtime-bin` falha quando difere do output. | `delonix provider matrix > docs/providers/capability-matrix.md` depois de uma declaração mudar. | `docs/adr/0050-libvirt-linux-providers-capability-catalog.md` |
 | `docs/discovery/` | Investigações e planos numerados e datados (inventários, spikes com os seus ficheiros de resultado crus). Registos históricos — não reescrever; escrever um novo. | Quem corre uma investigação antes de uma mudança estrutural. | `docs/adr/` |
 | `docs/handbook/` | Este manual como um site (`en/`, `pt-AO/`, `fr-FR/`, `zh-CN/`, `index.html`), **gerado** por `scripts/dev_docs_site.py` a partir de `docs/dev/`. Nunca edites o HTML. | Regenerado com `python3 scripts/dev_docs_site.py` depois de uma mudança em `docs/dev/`, e no momento da release. | [Publicar a documentação](publishing-docs.md) |
+| `docs/proxmox/` | A matriz de cobertura da API do Proxmox VE (ADR-0049): `api-<ver>.routes.json`, o schema de uma release nomeada extraído do `apidoc.js` de um nó com a sua proveniência (data de obtenção, sha256), e `matrix-<ver>.md`, **gerada** a partir dele e das rotas que o crate do provider chama. Nunca editar a matriz. | `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --markdown > docs/proxmox/matrix-9.2.2.md` depois de uma rota ser acrescentada ao `delonix-proxmox`; o schema só quando uma release nova é medida. | `docs/adr/0049-proxmox-api-coverage-measured-matrix-not-a-cluster-proxy.md` |
 | `docs/releases/` | Notas de release, um `v<versão>.md` por release. Um commit de release tem de acrescentar a sua própria (`version_gate.py`). Histórico — não reescrever notas passadas. | O commit de release. | [Fluxo de contribuição](contributing-workflow.md) |
 | `docs/roadmap/` | Matriz de rastreabilidade de um programa de melhoria, onde toda célula cita uma medição ou diz "não medido". | Mantenedores, à medida que itens são medidos ou fechados. | — |
 | `docs/runtime/` | Descoberta datada do runtime (estado actual, mapa de dependências de crates, alvo-vs-realidade). Histórico: os nomes de crate lá dentro são anteriores a renomeações posteriores. | Não actualizado; sucedido por [Arquitectura](architecture.md) e [Os crates](crates.md). | [Arquitectura](architecture.md) |
@@ -179,6 +181,7 @@ espera que a CI falhe se editares a saída à mão.
 | `docs/` | `*.html` de topo, `.nojekyll` | `python3 docs/gen.py` | o mesmo passo acima |
 | `docs/` | `RELEASES.md` | `bash scripts/gen-releases.sh` | nenhum na CI: o `release.yml` regenera-o e faz commit dele depois de cada release |
 | `docs/dev/` | só as regiões `dev-docs` | `python3 scripts/dev_docs.py` | job `arch fitness`, passo `python3 scripts/dev_docs.py --check`; também actualizado pelo `release.yml` |
+| `docs/proxmox/` | `matrix-9.2.2.md` | `python3 scripts/proxmox_api_inventory.py docs/proxmox/api-9.2.2.routes.json --markdown > docs/proxmox/matrix-9.2.2.md` | job `script tests`, `scripts/test_proxmox_api_inventory.py` (`test_the_committed_matrix_is_up_to_date`) |
 | `docs/handbook/` | toda página | `python3 scripts/dev_docs_site.py` | job `generated docs and valid examples`, `python3 scripts/dev_docs_site.py --check`; também actualizado pelo `release.yml` |
 | `scripts/` | `cli_baseline.tsv`, `arch_baseline.json`, `lang_baseline.json` | `scripts/cli-tree.sh --update`, `arch_fitness.py --update`, `lang_ratchet.py --update` | jobs `cli surface` (`cli-tree.sh --gate`), `arch fitness`, `lang ratchet` |
 | `Cargo.lock` | o ficheiro de lock | `cargo` | todo job cargo compila com `--locked` |

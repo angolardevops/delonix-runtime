@@ -100,6 +100,7 @@ fn filled_spec(doc: &ManifestDoc) -> Result<serde_yaml::Value> {
         k::FIREWALL_POLICY => cmd::firewall::spec_with_defaults(doc),
         k::NETWORK_ACCESS_RULE => cmd::network_access_rule::spec_with_defaults(doc),
         k::NETWORK_GATEWAY => cmd::network_gateway::spec_with_defaults(doc),
+        k::NETWORK_ZONE => cmd::network_zone::spec_with_defaults(doc),
         k::CONTAINER if doc.spec.get("containers").is_some() => {
             cmd::container::pod_spec_with_defaults(doc)
         }
@@ -400,6 +401,7 @@ pub(crate) fn spec_fields_for(kind: &str) -> Option<&'static [&'static str]> {
             Some(crate::cmd::network_access_rule::NETWORK_ACCESS_RULE_SPEC_FIELDS)
         }
         k::NETWORK_GATEWAY => Some(crate::cmd::network_gateway::NETWORK_GATEWAY_SPEC_FIELDS),
+        k::NETWORK_ZONE => Some(crate::cmd::network_zone::NETWORK_ZONE_SPEC_FIELDS),
         k::HTTP_ROUTE => Some(crate::cmd::httproute::HTTP_ROUTE_SPEC_FIELDS),
         k::DEPENDENCY => Some(crate::cmd::dependency::DEPENDENCY_SPEC_FIELDS),
         k::NETWORK_ROUTE => Some(crate::cmd::netroute::NETWORK_ROUTE_SPEC_FIELDS),
@@ -1448,6 +1450,7 @@ spec: { image: nginx }
             "secrets" => ("{ stringData: { K: v } }", "Secret"),
             "networks" => ("{ driver: bridge }", "Network"),
             "networkRoutes" => ("{ from: a, to: b }", "NetworkRoute"),
+            "networkZones" => ("{ vnets: [{ name: prod }] }", "NetworkZone"),
             "volumes" => ("{}", "Volume"),
             "images" => ("{ pull: alpine }", "Image"),
             "apps" => ("{ source: ., image: shop }", "App"),
