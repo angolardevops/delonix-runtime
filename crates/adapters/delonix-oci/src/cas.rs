@@ -267,6 +267,30 @@ impl Drop for StreamingBlob {
 mod tests {
     use super::*;
 
+    /// A disk that fails mid-download must fail the blob, never truncate it in
+    /// silence: the writer thread's error reaches `append` or `finish`.
+    /// `/dev/full` answers every write with ENOSPC.
+    #[test]
+    fn a_write_error_on_the_writer_thread_reaches_the_caller() {
+        let Ok(full) = fs::OpenOptions::new().write(true).open("/dev/full") else {
+            return; // no /dev/full on this host: nothing to inject with
+        };
+        let mut blob = StreamingBlob::spawn(full, Sha256::new(), 0);
+        let chunk = vec![7u8; 64 * 1024];
+        let mut err = None;
+        for _ in 0..(4 * STREAM_BUF * STREAM_QUEUE / chunk.len()) {
+            if let Err(e) = blob.append(&chunk) {
+                err = Some(e);
+                break;
+            }
+        }
+        let err = match err {
+            Some(e) => e,
+            None => blob.finish().expect_err("a full disk must fail the blob"),
+        };
+        assert!(err.to_string().to_lowercase().contains("space"), "{err}");
+    }
+
     #[test]
     fn size_and_head_do_not_need_the_whole_blob() {
         let dir = std::env::temp_dir().join(format!("delonix-cas-head-{}", std::process::id()));
