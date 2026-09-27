@@ -29,8 +29,18 @@
 //! `table inet proxmox-firewall`, in the file's order, reached through a
 //! `bridge-map` keyed by the vnet's interface from the `forward` hook and the
 //! host's bridge input/output. Note the API creates a rule DISABLED unless
-//! `enable=1` is sent, which is why this client always sends it. What stays
-//! unproven here is a packet: no test sends traffic through the vnet.
+//! `enable=1` is sent, which is why this client always sends it.
+//!
+//! **What it filters, measured with packets** (same node, same day: network
+//! namespaces on veths in two vnets of one simple zone, listeners on 22 and
+//! 23, a DROP rule for 23 and an ACCEPT rule for 22 on the first vnet): under
+//! nftables, traffic BRIDGED between two ports of that vnet is filtered (23
+//! blocked, 22 open), and traffic ROUTED by the node into or out of it — to or
+//! from another vnet through the gateway — is not (23 open both ways). Under
+//! iptables nothing is filtered, and after turning nftables off again 23 was
+//! open everywhere. The map is keyed by bridge name, which only bridged
+//! traffic carries. So a vnet firewall isolates guests of one vnet from each
+//! other; it is not a boundary between vnets.
 //!
 //! # What is offered, and what is not
 //!
