@@ -869,6 +869,120 @@ pub fn fw_dispatch_migration_script() -> String {
     s
 }
 
+/// Brings the firewall dispatch of the RUNNING holder to [`fw_dispatch_chains`],
+/// once per pin, from the host.
+///
+/// [`fw_dispatch_migration_script`] used to run only when the control plane
+/// started (`reattach_or_setup_infra_netns`). An in-place upgrade leaves the old
+/// control running, so the old single-chain dispatch — the P0-1 bypass, where the
+/// destination's accept skipped the source's egress rules — stayed in force, with
+/// nothing saying so, until someone killed the control by hand (NaaS S1 review, A1).
+/// This enters the pin's user and network namespaces with `nsenter`, the way
+/// [`disable_ipv6_live`] reconfigures an old holder it cannot ask, so it works
+/// whatever binary the control came from.
+///
+/// Called on the paths every network change takes ([`ensure_up`] with the infra
+/// already up, [`apply_firewall_all`]). A marker per pin pid keeps it to one `nft -f`
+/// per holder lifetime; a new pin gets a new marker, and the script is idempotent
+/// anyway. A failure is an error, never a warning: leaving the old dispatch in place
+/// means every egress policy on the node is silently void.
+pub fn ensure_fw_dispatch_current() -> Result<()> {
+    let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) else {
+        return Ok(()); // no holder: the next one is built with the new dispatch
+    };
+    let marker = fw_dispatch_marker(pin);
+    if marker.exists() {
+        return Ok(());
+    }
+    // Already INSIDE the pin's user namespace — the second pass of a `run --net`
+    // re-exec, the control itself: `nsenter -U` into the namespace we are in is
+    // EINVAL, and it is not needed. Every path that reaches here from inside was
+    // preceded by one from the host (the attach that created the netns), and a
+    // control started by this binary writes the marker itself.
+    if same_user_namespace(pin) {
+        return Ok(());
+    }
+    use std::io::Write;
+    let script = fw_dispatch_migration_script();
+    let pin_s = pin.to_string();
+    let spawned = Command::new("nsenter")
+        .args(fw_dispatch_nsenter_args(&pin_s))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn();
+    let fail = |why: String| Error::Command {
+        context: "firewall dispatch migration",
+        message: format!(
+            "the running holder (pin {pin}) still has the old firewall dispatch, where a \
+             destination's accept skips the source's egress rules, and migrating it failed: \
+             {why}. Egress policies are NOT enforced until it is migrated: restart only the \
+             control plane (`delonix net netns status`, kill the control pid, then \
+             `delonix net netns up`)"
+        ),
+    };
+    let mut child = spawned.map_err(|e| fail(e.to_string()))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(script.as_bytes())
+            .map_err(|e| fail(e.to_string()))?;
+    }
+    let out = child.wait_with_output().map_err(|e| fail(e.to_string()))?;
+    if !out.status.success() {
+        return Err(fail(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    // Best effort: without the marker the next call migrates again, which is
+    // idempotent — a cost, never a hole.
+    let _ = std::fs::write(&marker, b"2\n");
+    Ok(())
+}
+
+/// Where [`ensure_fw_dispatch_current`] records that a pin's dispatch is current.
+fn fw_dispatch_marker(pin: i32) -> PathBuf {
+    ingress_dir().join(format!("fw-dispatch-v2.{pin}"))
+}
+
+/// Written by a control plane of THIS binary once it has built or migrated the
+/// dispatch, so the host side never enters the namespaces for a pin whose control
+/// already did the work. Best effort for the same reason as the host-side marker.
+fn mark_fw_dispatch_current() {
+    if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
+        let _ = std::fs::write(fw_dispatch_marker(pin), b"2\n");
+    }
+}
+
+/// `true` when this process already lives in `pin`'s user namespace.
+fn same_user_namespace(pin: i32) -> bool {
+    match (
+        std::fs::read_link("/proc/self/ns/user"),
+        std::fs::read_link(format!("/proc/{pin}/ns/user")),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// `nsenter` arguments that run `nft -f -` in the pin's user and network
+/// namespaces. Pure, so the invocation is testable without a holder.
+pub fn fw_dispatch_nsenter_args(pin: &str) -> Vec<String> {
+    [
+        "-t",
+        pin,
+        "-U",
+        "-n",
+        "--preserve-credentials",
+        "--",
+        "nft",
+        "-f",
+        "-",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
+}
+
 // ---- ref-count (lifecycle shared by the containers, Phase 3) ----------------
 //
 // SET model (not an integer counter). Each container/pod that enters the
@@ -1197,7 +1311,9 @@ fn ensure_up_locked() -> Result<()> {
     // intact. The only question is whether the CONTROL plane is there.
     if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
         if control_reachable() {
-            return Ok(());
+            // The control may predate the two-chain dispatch (an in-place upgrade):
+            // migrate it here, on the path every workload attach takes.
+            return ensure_fw_dispatch_current();
         }
         // An in-place upgrade over a PRE-split build: that holder is a single
         // process serving the legacy socket path, and its presence on disk is the
@@ -4564,20 +4680,31 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> Stri
         };
         body.push_str(&format!("\t\tip {self_dir} {ip} {tail}\n"));
     }
-    // NAMESPACE isolation on INGRESS — only when there is NO explicit inbound
-    // policy (a Dependency/Ingress is authoritative and replaces this): accepts the
-    // same namespace and drops NEW connections from containers of ANOTHER namespace. The
-    // `ct state new` exempts the return (established/related), and the `@dlxall` limits the
-    // drop to sources that ARE SDN containers (lets gateway/DNS/internet through).
-    // The EXPLICIT rules above take precedence (first-match terminal in the chain).
+    // NAMESPACE isolation on INGRESS is a GUARDRAIL: it survives every explicit
+    // inbound rule. It used to be emitted only when there was NO explicit inbound
+    // policy ("a Dependency/Ingress is authoritative and replaces this"), and that
+    // made ANY `in` rule — a `deny tcp/22` included — switch the isolation off: the
+    // chain kept only that rule, and every other namespace reached every other port
+    // (NaaS S1 review, C1). An explicit `allow` still gets through, because the
+    // rules above are first-match terminal (that is how a `kind: Dependency` admits
+    // one peer of another namespace); what no rule can do any more is OPEN the rest.
+    //
+    // The `ct state new` exempts the return (established/related), and the `@dlxall`
+    // limits the drop to sources that ARE SDN workloads (gateway, DNS and the
+    // internet pass). `namespace_isolation_key`, not the raw `fw.namespace`: this is
+    // the side of the attach/chain pair that must agree with the wire token
+    // `attach_container`/`attach_extra_container`/`vmtap_line` compute — see that
+    // function's doc comment for the cross-tenant bypass this closes.
+    let nsset = dlxns_set(&namespace_isolation_key(&fw.namespace));
     let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
-    if !has_explicit_in {
-        // `namespace_isolation_key`, not the raw `fw.namespace`: this is the
-        // side of the attach/chain pair that must agree with the wire token
-        // `attach_container`/`attach_extra_container`/`vmtap_line` compute —
-        // see that function's doc comment for the cross-tenant bypass this
-        // closes.
-        let nsset = dlxns_set(&namespace_isolation_key(&fw.namespace));
+    if has_explicit_in {
+        // The same namespace falls through to the explicit rules' default policy
+        // (an `ingress policy deny` still closes the container to its own
+        // namespace); only another namespace's NEW flows are cut here.
+        body.push_str(&format!(
+            "\t\tip daddr {ip} ip saddr @{DLXALL_SET} ip saddr != @{nsset} ct state new counter drop\n"
+        ));
+    } else {
         body.push_str(&format!(
             "\t\tip daddr {ip} ip saddr @{nsset} counter accept\n"
         ));
@@ -6504,6 +6631,9 @@ pub fn apply_firewall_all(
     // Also checked by the holder; checking here too is what protects a node whose
     // holder predates the refusal and would still skip the bad rule.
     validate_container_fw(fw)?;
+    // An egress rule written into an old single-chain dispatch is void (P0-1): the
+    // dispatch is brought current before any rule is sent.
+    ensure_fw_dispatch_current()?;
     let json = serde_json::to_vec(fw).map_err(|e| Error::FirewallEncodeFailed(e.to_string()))?;
     control_send(&format!(
         "firewall {} {} {}",
@@ -6699,6 +6829,32 @@ fn vmtap_line(tap: &str, bridge: &str, gateway: &str, ip: Option<&str>, namespac
     }
 }
 
+/// Refuses a namespaced VM whose address cannot be derived — before anything is
+/// attached.
+///
+/// The address the guest WILL get is what both halves of the isolation are keyed
+/// on: the membership in `@dlxall`/`@dlxns_<ns>` and the VM's own chain. On a
+/// network with a CIDR prefix [`dhcp_lease_ip`] has no answer (and the holder's
+/// DHCP does not serve such a network either), so the attach used to go ahead
+/// with the 4-token `vmtap` line and NO chain: a VM of `teamA` reachable from
+/// every namespace, reported as attached (NaaS S1 review, A3). The `default`
+/// namespace has nothing to isolate and keeps working as before.
+fn vm_isolation_derivable(
+    net: &str,
+    prefix: &str,
+    namespace: &str,
+    lease: Option<&str>,
+) -> Result<()> {
+    if namespace == "default" || lease.is_some() {
+        return Ok(());
+    }
+    Err(Error::SubnetNotSupported(format!(
+        "network '{net}' ({prefix}) gives a VM no address the engine can derive, so a VM in \
+         namespace '{namespace}' cannot be isolated on it — use a network without --subnet, \
+         or the `default` namespace"
+    )))
+}
+
 /// `mac` is the guest's MAC (deterministic from the VM name — see
 /// `delonix_vm::mac_for`) and `namespace` its logical isolation namespace.
 /// Together they are what makes a VM a first-class citizen of the namespace
@@ -6723,9 +6879,10 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
     // Ref key `vm-<name>` — its own namespace, distinct from the container ids
     // and the `cri-*` pods; the `prune` reaper preserves the `vm-*` (managed by
     // another store) just like the `cri-*`.
+    let lease = dhcp_lease_ip(&prefix, mac);
+    vm_isolation_derivable(net, &prefix, namespace, lease.as_deref())?;
     acquire(&format!("vm-{vm}"))?;
     let tap = vm_tap_name(vm);
-    let lease = dhcp_lease_ip(&prefix, mac);
     let line = vmtap_line(&tap, &bridge, &gateway, lease.as_deref(), namespace);
     if let Err(e) = control_send(&line) {
         release(&format!("vm-{vm}"));
@@ -7518,9 +7675,12 @@ fn link_exists(name: &str) -> bool {
 /// in its safe shape must not come up announcing a working firewall.
 fn reattach_or_setup_infra_netns() -> Result<()> {
     if !infra_netns_already_built() {
-        return setup_infra_netns();
+        setup_infra_netns()?;
+        mark_fw_dispatch_current();
+        return Ok(());
     }
     apply_nft_stdin(&fw_dispatch_migration_script())?;
+    mark_fw_dispatch_current();
     start_dhcp(INFRA_BRIDGE, INFRA_PREFIX);
     for def in network_list() {
         if link_exists(&def.bridge) {
@@ -9262,8 +9422,19 @@ Inter-|   Receive                                                |  Transmit
         assert!(body.contains("ip saddr 10.200.0.5 counter drop"), "{body}");
         // policy in=deny → final drop on the daddr
         assert!(body.contains("ip daddr 10.200.0.5 counter drop"), "{body}");
-        // EXPLICIT inbound policy (deny) → does NOT emit namespace rules.
-        assert!(!body.contains("@dlxall"), "{body}");
+        // EXPLICIT inbound policy (deny) → the namespace guardrail stays, and it is
+        // the only namespace line: the same namespace falls to the policy.
+        let def = dlxns_set("default");
+        assert!(
+            body.contains(&format!(
+                "ip daddr 10.200.0.5 ip saddr @dlxall ip saddr != @{def} ct state new counter drop"
+            )),
+            "{body}"
+        );
+        assert!(
+            !body.contains(&format!("ip saddr @{def} counter accept")),
+            "{body}"
+        );
         // disabled → empty body
         let off = delonix_model::records::ContainerFw {
             enabled: false,
@@ -9346,6 +9517,98 @@ Inter-|   Receive                                                |  Transmit
         );
         assert!(
             body.contains("ip daddr 10.200.0.7 ip saddr @dlxall ct state new counter drop"),
+            "{body}"
+        );
+    }
+
+    /// REGRESSION (NaaS S1 review, C1): one explicit inbound rule — a `deny` of a
+    /// single port — used to switch namespace isolation off for the WHOLE
+    /// container: the chain kept only that rule, and a container of any other
+    /// namespace reached every other port. The guardrail is now emitted after the
+    /// explicit rules and before the policy, so a `deny` never opens anything and
+    /// an explicit `allow` (a `kind: Dependency`) still admits its one peer.
+    /// Found by the chaos run of this very change: a `run --net` whose re-exec
+    /// reached the migration from INSIDE the pin's user namespace got `nsenter:
+    /// reassociate to namespace 'ns/user' failed: Invalid argument`, and the
+    /// container did not start. The guard reads the namespace, not a flag.
+    #[test]
+    fn a_process_is_in_its_own_user_namespace_and_not_in_a_dead_pids() {
+        assert!(same_user_namespace(std::process::id() as i32));
+        assert!(!same_user_namespace(i32::MAX));
+    }
+
+    #[test]
+    fn the_dispatch_migration_enters_only_the_pins_user_and_network_namespaces() {
+        let a = fw_dispatch_nsenter_args("4242");
+        assert_eq!(
+            a,
+            [
+                "-t",
+                "4242",
+                "-U",
+                "-n",
+                "--preserve-credentials",
+                "--",
+                "nft",
+                "-f",
+                "-"
+            ]
+        );
+        // The script it feeds is the reattach one: both chains, flushed and re-added.
+        let s = fw_dispatch_migration_script();
+        assert!(s.contains("flush chain ip dlxing fwout"), "{s}");
+        assert!(s.contains("flush chain ip dlxing fwcont"), "{s}");
+    }
+
+    #[test]
+    fn a_namespaced_vm_without_a_derivable_address_is_refused_before_attaching() {
+        // CIDR prefix: no lease → refused, naming the network and the namespace.
+        let e = vm_isolation_derivable("lab", "10.77.0.0/16", "teama", None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("lab") && e.contains("teama"), "{e}");
+        // `default` has nothing to isolate; a derivable address is fine.
+        vm_isolation_derivable("lab", "10.77.0.0/16", "default", None).unwrap();
+        vm_isolation_derivable("net", "10.230", "teama", Some("10.230.254.12")).unwrap();
+        assert_eq!(dhcp_lease_ip("10.77.0.0/16", "52:54:00:00:00:01"), None);
+    }
+
+    #[test]
+    fn an_explicit_inbound_rule_keeps_namespace_isolation() {
+        let rule = |action: &str, port: &str, src: &str| delonix_model::records::FwRule {
+            dir: "in".into(),
+            proto: "tcp".into(),
+            port: port.into(),
+            src: src.into(),
+            action: action.into(),
+            note: String::new(),
+            origin: None,
+        };
+        let fw = delonix_model::records::ContainerFw {
+            enabled: true,
+            namespace: "teama".into(),
+            rules: vec![rule("deny", "22", ""), rule("allow", "5432", "10.201.0.9")],
+            ..Default::default()
+        };
+        let body = fw_chain_body("10.200.0.7", &fw);
+        let nsset = dlxns_set("teama");
+        let guard = format!(
+            "ip daddr 10.200.0.7 ip saddr @dlxall ip saddr != @{nsset} ct state new counter drop"
+        );
+        assert!(body.contains(&guard), "{body}");
+        let at = |needle: &str| {
+            body.find(needle)
+                .unwrap_or_else(|| panic!("{needle}: {body}"))
+        };
+        // After the explicit rules (the Dependency-style allow still wins)...
+        assert!(at("tcp dport 22 counter drop") < at(&guard), "{body}");
+        assert!(
+            at("ip saddr 10.201.0.9 tcp dport 5432 counter accept") < at(&guard),
+            "{body}"
+        );
+        // ...and the same namespace is not blanket-accepted past the explicit rules.
+        assert!(
+            !body.contains(&format!("ip saddr @{nsset} counter accept")),
             "{body}"
         );
     }

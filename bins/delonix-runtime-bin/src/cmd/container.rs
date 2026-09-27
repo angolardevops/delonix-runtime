@@ -3747,7 +3747,14 @@ pub(crate) fn container_ips(c: &Container) -> Vec<String> {
 /// from every namespace. Its namespace alone is a firewall to enforce.
 pub(crate) fn firewall_to_enforce(c: &Container) -> Option<delonix_model::records::ContainerFw> {
     match &c.firewall {
-        Some(fw) if fw.enabled => Some(fw.clone()),
+        Some(fw) if fw.enabled => Some(delonix_model::records::ContainerFw {
+            // The container's namespace, never the record's: a record written
+            // before `firewall_or_new` existed can carry `default` for a `teamA`
+            // container, and enforcing it as written inverts the isolation
+            // (accept `default`, drop `teamA`) — NaaS S1 review, A4.
+            namespace: c.namespace.clone(),
+            ..fw.clone()
+        }),
         _ if c.namespace != "default" => Some(delonix_model::records::ContainerFw {
             enabled: true,
             namespace: c.namespace.clone(),
@@ -3766,12 +3773,11 @@ pub(crate) fn firewall_to_enforce(c: &Container) -> Option<delonix_model::record
 /// accepted the `default` namespace and dropped `teamA` — the isolation inverted,
 /// with nothing reporting it.
 pub(crate) fn firewall_or_new(c: &Container) -> delonix_model::records::ContainerFw {
-    c.firewall
-        .clone()
-        .unwrap_or_else(|| delonix_model::records::ContainerFw {
-            namespace: c.namespace.clone(),
-            ..Default::default()
-        })
+    let mut fw = c.firewall.clone().unwrap_or_default();
+    // Also for an EXISTING record: one written with the wrong namespace is
+    // corrected on its next edit instead of being written back as it was (A4).
+    fw.namespace = c.namespace.clone();
+    fw
 }
 
 pub(crate) fn apply_firewall_everywhere(
@@ -5249,10 +5255,20 @@ pub(crate) fn cmd_network_connect(store: &Store, id: &str, network: &str) -> Res
     // The firewall has to be re-applied so the NEW IP is governed too — without this
     // the container gains an address that no `ingress`/`egress`/`Dependency` rule
     // reaches, which is exactly how a `policy deny` container stayed reachable over a
-    // second network.
-    if let Some(fw) = c.firewall.clone() {
+    // second network. `firewall_to_enforce`, not the record: a container outside
+    // `default` whose record has no firewall still owes its namespace isolation.
+    // A failure UNDOES the attach and fails the command: the new address was
+    // reachable from every namespace, and a warning with rc=0 does not say that
+    // (NaaS S1 review, A2).
+    if let Some(fw) = firewall_to_enforce(&c) {
         if let Err(e) = apply_firewall_everywhere(&c, &fw) {
-            eprintln!("{}: firewall not extended to {ip}: {e}", c.name);
+            infra::detach_extra_container(&c.id, idx, &ip);
+            let _ = store.update(&c.id, |cur| {
+                let before = cur.extra_networks.len();
+                cur.extra_networks.retain(|x| x.network != network);
+                cur.extra_networks.len() != before
+            });
+            return Err(e);
         }
     }
     println!(
@@ -5295,11 +5311,10 @@ pub(crate) fn cmd_network_disconnect(store: &Store, id: &str, network: &str) -> 
         cur.extra_networks.len() != before
     })?;
     // Re-apply so the released IP loses its jumps: IPAM will hand that address to
-    // another container, which must not inherit this one's firewall.
-    if let Some(fw) = c.firewall.clone() {
-        if let Err(e) = apply_firewall_everywhere(&c, &fw) {
-            eprintln!("{}: firewall not re-applied after detach: {e}", c.name);
-        }
+    // another container, which must not inherit this one's firewall. The detach
+    // cannot be undone at this point, so a failure is reported as a failure (A2).
+    if let Some(fw) = firewall_to_enforce(&c) {
+        apply_firewall_everywhere(&c, &fw)?;
     }
     println!(
         "{}: detached from network {network} (eth{})",
@@ -7085,6 +7100,46 @@ mod tests {
             })
             .collect();
         c
+    }
+
+    /// NaaS S1 review, A4: a record written before `firewall_or_new` existed can
+    /// carry the namespace `default` for a `teama` container. Enforced as
+    /// written, the chain accepted `default` and dropped `teama` — the isolation
+    /// inverted. The container's namespace wins, both when enforcing and when
+    /// editing the record.
+    #[test]
+    fn the_containers_namespace_wins_over_a_stale_record() {
+        let mut c = c_com_extras(&[]);
+        c.namespace = "teama".into();
+        c.firewall = Some(delonix_model::records::ContainerFw {
+            enabled: true,
+            policy_out: "deny".into(),
+            namespace: "default".into(),
+            ..Default::default()
+        });
+        let enforced =
+            crate::cmd::container::firewall_to_enforce(&c).expect("an enabled record is enforced");
+        assert_eq!(enforced.namespace, "teama");
+        assert_eq!(
+            enforced.policy_out, "deny",
+            "the rest of the record is kept"
+        );
+        assert_eq!(
+            crate::cmd::container::firewall_or_new(&c).namespace,
+            "teama"
+        );
+        // No record at all: still the container's namespace.
+        c.firewall = None;
+        assert_eq!(
+            crate::cmd::container::firewall_or_new(&c).namespace,
+            "teama"
+        );
+        assert_eq!(
+            crate::cmd::container::firewall_to_enforce(&c)
+                .unwrap()
+                .namespace,
+            "teama"
+        );
     }
 
     #[test]
