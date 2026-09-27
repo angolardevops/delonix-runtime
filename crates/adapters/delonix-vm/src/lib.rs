@@ -969,6 +969,57 @@ fn auto_detect(
     )))
 }
 
+/// What a firmware boot (a cloud image, no `--kernel`) asks for when the caller
+/// named no backend.
+#[derive(Debug, PartialEq, Eq)]
+enum FirmwareBootPreference {
+    /// libvirt boots cloud images with full UEFI/SeaBIOS, so it is asked for.
+    Libvirt,
+    /// libvirt is installed but does not meet the caller's requirements
+    /// (ADR-0050 D6): the auto-detection picks among the backends that do.
+    AnyMeetingRequirements,
+    /// libvirt is not installed: Cloud Hypervisor gets the cloud image, with a
+    /// warning.
+    CloudHypervisorFallback,
+}
+
+/// libvirt is a PREFERENCE for a firmware boot, never a requirement. Asking for
+/// it by name when it does not meet `--require` turned the preference into the
+/// caller's choice: the requirement filter in [`auto_detect`] never ran, and a
+/// `--require vm.namespace-isolation` was refused naming libvirt while Cloud
+/// Hypervisor, installed and supporting it, was never asked.
+fn firmware_boot_preference(
+    libvirt_available: bool,
+    libvirt_meets_requirements: bool,
+) -> FirmwareBootPreference {
+    match (libvirt_available, libvirt_meets_requirements) {
+        (true, true) => FirmwareBootPreference::Libvirt,
+        (true, false) => FirmwareBootPreference::AnyMeetingRequirements,
+        (false, _) => FirmwareBootPreference::CloudHypervisorFallback,
+    }
+}
+
+#[cfg(test)]
+mod tests_firmware_boot_preference {
+    use super::*;
+
+    #[test]
+    fn libvirt_is_preferred_only_when_it_meets_the_requirements() {
+        assert_eq!(
+            firmware_boot_preference(true, true),
+            FirmwareBootPreference::Libvirt
+        );
+        assert_eq!(
+            firmware_boot_preference(true, false),
+            FirmwareBootPreference::AnyMeetingRequirements
+        );
+        assert_eq!(
+            firmware_boot_preference(false, false),
+            FirmwareBootPreference::CloudHypervisorFallback
+        );
+    }
+}
+
 /// Does the backend that would run this VM own its own storage?
 ///
 /// For a caller that has to decide something BEFORE `create_with` — the CLI
@@ -4001,16 +4052,21 @@ pub fn create_with(base: &Path, cfg: &VmConfig, on: &dyn Fn(CreateStage)) -> Res
             let want = match cfg.backend.as_deref().or(standing_choice.as_deref()) {
                 Some(b) => Some(b.to_string()),
                 None if !cfg.volumes.is_empty() => Some("libvirt".to_string()),
-                None if cfg.kernel.is_none() && LibvirtBackend.available() => {
-                    Some("libvirt".to_string())
-                }
                 None if cfg.kernel.is_none() => {
-                    eprintln!(
-                        "warning: booting a cloud image on Cloud Hypervisor \
+                    let available = LibvirtBackend.available();
+                    let meets = available && require_capabilities("libvirt", &required).is_ok();
+                    match firmware_boot_preference(available, meets) {
+                        FirmwareBootPreference::Libvirt => Some("libvirt".to_string()),
+                        FirmwareBootPreference::AnyMeetingRequirements => None,
+                        FirmwareBootPreference::CloudHypervisorFallback => {
+                            eprintln!(
+                                "warning: booting a cloud image on Cloud Hypervisor \
 (libvirt not found) — if it panics on 'unable to mount root fs', install \
 libvirt+qemu"
-                    );
-                    None
+                            );
+                            None
+                        }
+                    }
                 }
                 None => None,
             };
