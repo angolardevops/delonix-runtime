@@ -3695,6 +3695,16 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
   `--vm-subnet` (e cada subnet detectada) tem de ser `a.b.c.d/len` estrito, nem `/0`
   nem sobreposta à rede SDN, e segue canónica para o argv — `default` chegava ao
   `ip route add` do holder como rota por omissão.
+- **O `unbridge` desfaz o que o `bridge` abriu (2026-09-27)**: o `bridge --apply` grava
+  as subnets canónicas em `<state>/ingress/vmbridge-<bridge>.subnets` ANTES de correr o
+  plano (uma ponte que falha a meio também se desfaz), e o `unbridge` apaga as regras
+  FORWARD e a rota de retorno dessas subnets, mais as de `--vm-subnet`, e remove o
+  ficheiro no fim. Sem registo (ponte anterior), usa o `--vm-subnet` ou, na falta dele,
+  a detecção `virbr*`. Antes, o `unbridge` só detectava: uma ponte feita com
+  `--vm-subnet` explícito, ou num host sem `virbr*`, perdia o veth e deixava as duas
+  regras ACCEPT e a rota no holder, com a abertura VM↔SDN viva depois do teardown.
+  O re-`bridge` com outras subnets limpa também as registadas. Puro e testado:
+  `teardown_subnets`, `read_applied_subnets`/`write_applied_subnets`.
 - **Robustez**: regras `iptables -I FORWARD` ACCEPT nos dois sentidos
   (`<vm-subnet>↔<sdn>`) contra o REJECT default do libvirt; establish
   IDEMPOTENTE (limpa um veth órfão antes de criar, p.ex. após respawn do holder).
