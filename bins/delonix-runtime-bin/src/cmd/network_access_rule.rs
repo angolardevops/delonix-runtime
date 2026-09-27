@@ -168,7 +168,7 @@ fn apply_one(store: &Store, doc: &ManifestDoc) -> Result<()> {
 fn set_rule_by_origin(store: &Store, target: &str, origin: &str, rule: FwRule) -> Result<()> {
     update_locked(store, target, |c| {
         require_sdn_ip(c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
+        let mut fw = super::container::firewall_or_new(c);
         fw.enabled = true;
         fw.rules.retain(|r| r.origin.as_deref() != Some(origin));
         fw.rules.push(rule.clone());
@@ -195,7 +195,7 @@ pub(crate) fn remove_by_origin_anywhere(store: &Store, origin: &str) -> Result<(
             continue;
         }
         update_locked(store, &c.id, |c| {
-            let mut fw = c.firewall.clone().unwrap_or_default();
+            let mut fw = super::container::firewall_or_new(c);
             fw.rules.retain(|r| r.origin.as_deref() != Some(origin));
             super::container::apply_firewall_everywhere(c, &fw)?;
             c.firewall = Some(fw);

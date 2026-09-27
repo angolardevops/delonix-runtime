@@ -540,7 +540,7 @@ fn add_rule(
         // Guard only: rejects a container off the SDN. The addresses the firewall is
         // keyed on come from `container_ips` (primary + every additional network).
         require_sdn_ip(c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
+        let mut fw = super::container::firewall_or_new(c);
         fw.enabled = true;
         // The LAST command wins (ufw semantics): a new rule for the SAME match
         // (dir/proto/port/source) REPLACES the existing one. Without this, `deny 8069`
@@ -632,7 +632,7 @@ fn remove_rule(
     let mut n = 0usize;
     let c = update_locked(store, name, |c| {
         let ip = require_sdn_ip(c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
+        let mut fw = super::container::firewall_or_new(c);
         let rm_match = |r: &FwRule| {
             r.dir == dir
                 && (proto == "any" || r.proto == proto)
@@ -650,8 +650,9 @@ fn remove_rule(
             )));
         }
         // Same rule as `clear`: with no rules and no explicit policies, the firewall
-        // disappears entirely (clean chain) instead of leaving an empty record.
-        let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
+        // disappears entirely (clean chain) instead of leaving an empty record — but
+        // only where that leaves nothing to enforce (see `firewall_disposable`).
+        let empty = firewall_disposable(c, &fw);
         if empty {
             infra::clear_firewall(&ip);
         } else {
@@ -676,12 +677,28 @@ fn remove_rule(
     Ok(())
 }
 
+/// May this container's firewall be torn down entirely — chain, `@fwmap` entries and
+/// record — now that its rules are gone?
+///
+/// Only when NOTHING is left to enforce. No rules and no explicit policy is not
+/// enough: outside `default` the chain also carries the namespace isolation (the
+/// same-namespace accept and the cross-namespace drop), and it lives nowhere else.
+/// `ingress rm`/`clear` of the last rule used to tear it down with the rules, so
+/// removing one allow opened the container to every namespace (NaaS audit P0-4) —
+/// and cleared the record too, so a restart did not bring the isolation back either.
+fn firewall_disposable(c: &Container, fw: &delonix_model::records::ContainerFw) -> bool {
+    fw.rules.is_empty()
+        && fw.policy_in.is_empty()
+        && fw.policy_out.is_empty()
+        && c.namespace == "default"
+}
+
 fn set_policy(store: &Store, name: &str, dir: &str, policy: Action) -> Result<()> {
     let c = update_locked(store, name, |c| {
         // Guard only: rejects a container off the SDN. The addresses the firewall is
         // keyed on come from `container_ips` (primary + every additional network).
         require_sdn_ip(c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
+        let mut fw = super::container::firewall_or_new(c);
         fw.enabled = true;
         if dir == "in" {
             fw.policy_in = policy.as_str().to_string();
@@ -1160,9 +1177,10 @@ pub(crate) fn clear_dir(store: &Store, name: &str, dir: &str) -> Result<()> {
         let before = fw.rules.len();
         fw.rules.retain(|r| r.dir != dir);
         removed = before - fw.rules.len();
-        // If nothing is left (no rules, both policies default), drop the firewall
-        // entirely and detach it from the ingress; otherwise re-apply what remains.
-        let empty = fw.rules.is_empty() && fw.policy_in.is_empty() && fw.policy_out.is_empty();
+        // If nothing is left (no rules, both policies default, the open `default`
+        // namespace), drop the firewall entirely and detach it from the ingress;
+        // otherwise re-apply what remains — the namespace isolation included.
+        let empty = firewall_disposable(c, &fw);
         if let Some(ip) = c.ip.clone().filter(|s| !s.is_empty()) {
             if empty {
                 infra::clear_firewall(&ip);
@@ -1783,7 +1801,7 @@ fn apply_fw_doc(store: &Store, doc: &ManifestDoc, dir: &str) -> Result<()> {
         // Guard only: rejects a container off the SDN. The addresses the firewall is
         // keyed on come from `container_ips` (primary + every additional network).
         require_sdn_ip(c)?;
-        let mut fw = c.firewall.clone().unwrap_or_default();
+        let mut fw = super::container::firewall_or_new(c);
         fw.enabled = true;
         // Declarative: this direction is fully replaced by the document —
         // but only the UNOWNED rules of it, and rules an imperative `net
@@ -2410,5 +2428,64 @@ mod tests {
     fn parse_port_spec_rejects_bad_proto_and_port() {
         assert!(parse_port_spec("sctp/80").is_err());
         assert!(parse_port_spec("tcp/99999").is_err());
+    }
+
+    fn sdn_container(ns: &str) -> Container {
+        let mut c = Container::new(
+            "id".into(),
+            "web".into(),
+            "img".into(),
+            vec!["sh".to_string()],
+            "max".into(),
+        );
+        c.namespace = ns.into();
+        c.ip = Some("10.209.0.5".into());
+        c
+    }
+
+    /// NaaS audit P0-4. `ingress rm`/`clear` of the last rule tore the chain down —
+    /// and outside `default` the chain is ALSO the namespace isolation. Measured with the
+    /// previous binary: after `allow` + `rm` on a `team` container, the chain was gone,
+    /// the record was `None`, and a container of another namespace reached it 2/2.
+    #[test]
+    fn remover_a_ultima_regra_so_descarta_o_firewall_na_namespace_default() {
+        let empty = delonix_model::records::ContainerFw {
+            enabled: true,
+            namespace: "teamA".into(),
+            ..Default::default()
+        };
+        assert!(
+            !firewall_disposable(&sdn_container("teamA"), &empty),
+            "the isolation of teamA lives in this chain and nowhere else"
+        );
+        let open = delonix_model::records::ContainerFw::default();
+        assert!(firewall_disposable(&sdn_container("default"), &open));
+        let mut with_policy = open.clone();
+        with_policy.policy_out = "deny".into();
+        assert!(!firewall_disposable(
+            &sdn_container("default"),
+            &with_policy
+        ));
+    }
+
+    /// The other half of P0-4: a container outside `default` that is started with NO
+    /// firewall record (the state `rm`/`clear` used to leave behind, or any record that
+    /// lost it) still gets its namespace enforced; and a record that has to be CREATED
+    /// for it inherits its namespace instead of `default`, which inverted the isolation.
+    #[test]
+    fn a_namespace_do_container_e_um_firewall_a_impor_mesmo_sem_registo() {
+        use super::super::container::{firewall_or_new, firewall_to_enforce};
+        let c = sdn_container("teamA");
+        let fw = firewall_to_enforce(&c).expect("teamA has isolation to enforce");
+        assert!(fw.enabled && fw.namespace == "teamA" && fw.rules.is_empty());
+        assert!(firewall_to_enforce(&sdn_container("default")).is_none());
+        assert_eq!(firewall_or_new(&c).namespace, "teamA");
+
+        let mut kept = sdn_container("teamA");
+        let mut rec = firewall_or_new(&kept);
+        rec.enabled = true;
+        rec.policy_in = "deny".into();
+        kept.firewall = Some(rec.clone());
+        assert_eq!(firewall_to_enforce(&kept).unwrap().policy_in, "deny");
     }
 }

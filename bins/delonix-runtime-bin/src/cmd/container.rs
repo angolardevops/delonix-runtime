@@ -3738,6 +3738,42 @@ pub(crate) fn container_ips(c: &Container) -> Vec<String> {
 }
 
 /// Applies `fw` over ALL of the container's IPs (see [`container_ips`]).
+/// The firewall a container on the SDN must be running under, or `None` when it
+/// legitimately has none (the `default` namespace with no rules is the open SDN).
+///
+/// The persisted record is not enough on its own: a container outside `default`
+/// whose record lost its firewall — the `ingress rm`/`clear` path did exactly that
+/// until NaaS audit P0-4 — would otherwise be started with NO chain, i.e. reachable
+/// from every namespace. Its namespace alone is a firewall to enforce.
+pub(crate) fn firewall_to_enforce(c: &Container) -> Option<delonix_model::records::ContainerFw> {
+    match &c.firewall {
+        Some(fw) if fw.enabled => Some(fw.clone()),
+        _ if c.namespace != "default" => Some(delonix_model::records::ContainerFw {
+            enabled: true,
+            namespace: c.namespace.clone(),
+            ..Default::default()
+        }),
+        _ => None,
+    }
+}
+
+/// The container's firewall record to EDIT: the persisted one, or a fresh one that
+/// already carries the container's namespace.
+///
+/// `unwrap_or_default()` gave a fresh record the namespace `default`, whatever the
+/// container's was. On a `teamA` container with no record (the state `ingress
+/// rm`/`clear` used to leave it in), the next `egress deny` then built a chain that
+/// accepted the `default` namespace and dropped `teamA` — the isolation inverted,
+/// with nothing reporting it.
+pub(crate) fn firewall_or_new(c: &Container) -> delonix_model::records::ContainerFw {
+    c.firewall
+        .clone()
+        .unwrap_or_else(|| delonix_model::records::ContainerFw {
+            namespace: c.namespace.clone(),
+            ..Default::default()
+        })
+}
+
 pub(crate) fn apply_firewall_everywhere(
     c: &Container,
     fw: &delonix_model::records::ContainerFw,
@@ -3893,20 +3929,26 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
             }
             // Re-applies the persisted firewall (namespace isolation, Dependency,
             // Ingress) — the nft chain lives in the holder's EPHEMERAL netns, so a
-            // restarted container would lose the isolation without this. Best-effort.
-            // Keyed on EVERY IP (primary + extras), otherwise the additional networks
-            // come back ungoverned.
-            if let Some(fw) = &c.firewall {
-                if fw.enabled {
-                    if let Err(e) = apply_firewall_everywhere(&c, fw) {
-                        eprintln!(
-                            "{}",
-                            super::po::tf(
-                                "warning: firewall/isolation of '{name}' not reapplied on start: {e}",
-                                &[("name", &c.name), ("e", &e.to_string())],
-                            )
-                        );
-                    }
+            // restarted container would lose the isolation without this. Keyed on
+            // EVERY IP (primary + extras), otherwise the additional networks come
+            // back ungoverned.
+            //
+            // A REFUSAL TO START, not a warning (NaaS audit P0-3): a container that
+            // comes back without its chain answers every namespace and every source
+            // its rules were written to stop, while `inspect` still shows them. The
+            // attach is undone the same way a refused publish undoes it above.
+            if let Some(fw) = firewall_to_enforce(&c) {
+                if let Err(e) = apply_firewall_everywhere(&c, &fw) {
+                    unpublish_ports(&c, None);
+                    infra::detach_container(&c.id, &ip);
+                    return Err(Error::Runtime {
+                        context: "start",
+                        message: format!(
+                            "firewall/isolation of '{}' could not be reapplied, so it was not \
+                             started: {e}",
+                            c.name
+                        ),
+                    });
                 }
             }
         }
@@ -3931,7 +3973,10 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         if !reexec {
             if !infra::holder_serves_netns(&pn) {
                 let (_, ip) = infra::attach_container(&pn, "ingress", &c.namespace)?;
-                super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace);
+                if let Err(e) = super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace) {
+                    infra::detach_container(&pn, &ip);
+                    return Err(e);
+                }
             }
             let ip = infra::container_ip(&pn);
             return reexec_start(&c.id, &pn, &ip, false);

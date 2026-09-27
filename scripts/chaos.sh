@@ -700,6 +700,164 @@ scen_pod_namespace_isolation() {
   rm -rf "$d"
 }
 
+# The firewall FAILS CLOSED — the four ways it used to fail open (NaaS audit,
+# docs/discovery/62, P0-1/2/4/5), each measured in PACKETS and in the counter of
+# the rule that has to catch them, never in a command's exit code. Every one of
+# them reported success while the traffic flowed:
+#
+#   1. egress of the SOURCE skipped when the destination accepts. Both lookups
+#      lived in one base chain and the destination's `accept` ended it. Measured
+#      before the fix: `egress policy deny` on A, A→B (same namespace) 3/3, and
+#      the drop in A's chain at 0 packets.
+#   2. a rule that cannot be rendered was SKIPPED and the rest applied — a deny
+#      that disappears is an allow. The whole spec must be refused and the chain
+#      that was there must stay exactly as it was.
+#   3. `ingress rm` of the last rule tore down the chain, and outside `default`
+#      the chain is also the namespace isolation. Measured before: another
+#      namespace reached the container 2/2 right after the `rm`.
+#   4. a network declared with its own CIDR had no isolation at all: no chain,
+#      no `@dlxall`. Measured before: teamA→teamB 2/2 on 172.30.5.0/24.
+scen_firewall_fail_closed() {
+  head_ "firewall-fail-closed — egress da origem, regra inválida, rm, rede CIDR"
+  dlx net netns up >/dev/null 2>&1
+  # The pin is asked for on EVERY call, never cached: removing the last container
+  # of a phase drops the refcount to 0 and the next phase gets a NEW infra — a
+  # cached pid then reads a dead netns and every counter comes back `-`.
+  nft_() { nsenter -t "$(holder_pid)" -U -m -n -- nft "$@"; }
+  ipof() { DELONIX_ROOT="$SANDBOX/root" python3 - "$1" <<'EOF2'
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")==sys.argv[1]: print(d.get("ip") or ""); break
+EOF2
+  }
+  # The counter of the rule of <ip>'s chain whose text contains <fixed string>.
+  # `-` when the chain or the rule is absent: absence is an answer, never a 0.
+  fwcount() {
+    local ch n
+    ch=$(nft_ list map ip dlxing fwmap 2>/dev/null | grep -oP "$1 : jump \Kfw[0-9a-f]+")
+    [ -n "$ch" ] || { echo -; return; }
+    n=$(nft_ list chain ip dlxing "$ch" 2>/dev/null | grep -F -- "$2" | grep -oP 'packets \K[0-9]+' | head -1)
+    echo "${n:--}"
+  }
+  # Replies received. NOT `… | grep … || echo 0`: under `pipefail` a ping with no
+  # reply fails the pipeline AFTER grep printed its `0`, and the fallback adds a
+  # second one.
+  recv() {
+    local n
+    n=$(dlx container exec "$1" ping -c"$3" -W2 "$2" 2>/dev/null | grep -oP '[0-9]+(?= packets received)')
+    echo "${n:-0}"
+  }
+  local c
+  for c in fwa:fwA fwb:fwA fwc:fwB; do
+    dlx container run -d --name "${c%%:*}" --net chaosnet --namespace "${c##*:}" "$IMAGE" sleep 300 >/dev/null 2>&1
+  done
+  sleep 3
+  local A B C; A=$(ipof fwa); B=$(ipof fwb); C=$(ipof fwc)
+  if [ -z "$A" ] || [ -z "$B" ] || [ -z "$C" ] || [ -z "$(holder_pid)" ] || [ "$(recv fwa "$B" 1)" != 1 ]; then
+    skip "firewall-fail-closed" "containers sem IP ou sem tráfego antes de qualquer regra"
+    dlx container rm -f fwa fwb fwc >/dev/null 2>&1; return
+  fi
+
+  # 1 — the source's egress deny wins over the destination's same-namespace accept.
+  dlx net egress policy fwa deny >/dev/null 2>&1
+  local d0 d1 got
+  d0=$(fwcount "$A" "ip saddr $A counter")
+  got=$(recv fwa "$B" 3)
+  d1=$(fwcount "$A" "ip saddr $A counter")
+  log "egress deny: A→B $got/3 · drop da origem $d0→$d1"
+  if [ "$got" = 0 ] && [ "$d0" != - ] && [ "$d1" != - ] && [ $((d1 - d0)) -ge 3 ]; then
+    ok "firewall-fail-closed/egress-origem (0/3, o drop da origem contou $((d1 - d0)))"
+  else
+    bad "firewall-fail-closed/egress-origem" "A→B $got/3 com egress deny em A; o drop da origem foi $d0→$d1 — o accept do destino contornou-o"
+  fi
+
+  # 2 — a spec with one unrenderable rule is refused whole; the chain stays.
+  #
+  # Sent RAW to the holder's control socket, not through the CLI: the CLI now
+  # refuses the same spec on its own (for an older holder's sake), so going
+  # through it would prove the host check and never reach the holder's — which
+  # is the authoritative one, the last thing before `nft -f`. The spec is
+  # «allow everything out» plus one deny that cannot be rendered: the old holder
+  # skipped the deny, applied the rest, and A's `egress policy deny` was gone.
+  #
+  # Measured towards `fwz`, a container in `default` with NO chain of its own, so
+  # only A's chain decides and case 1's bypass cannot blur this one.
+  dlx container run -d --name fwz --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 2
+  local Z before after reply hex spec
+  Z=$(ipof fwz)
+  spec='{"enabled":true,"policyIn":"","policyOut":"","namespace":"fwA","rules":[{"dir":"out","proto":"any","port":"","src":"","action":"allow"},{"dir":"out","proto":"tcp","port":"80; flush ruleset","src":"","action":"deny"}]}'
+  hex=$(printf '%s' "$spec" | od -An -v -tx1 | tr -d ' \n')
+  chain_of_a() {
+    nft_ list chain ip dlxing "$(nft_ list map ip dlxing fwmap | grep -oP "$A : jump \Kfw[0-9a-f]+")" 2>/dev/null \
+      | sed 's/packets [0-9]* bytes [0-9]*//'
+  }
+  before=$(chain_of_a)
+  reply=$(python3 - "$SANDBOX/run/control.sock" "firewall fwa $A $hex" <<'EOF2'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(30)
+s.connect(sys.argv[1])
+s.sendall((sys.argv[2] + "\n").encode())
+s.shutdown(socket.SHUT_WR)
+print(s.makefile().read().strip())
+EOF2
+)
+  after=$(chain_of_a)
+  got=$([ -n "$Z" ] && recv fwa "$Z" 2 || echo "?")
+  log "spec com regra inválida no holder: resposta '${reply:0:60}' · chain $([ "$before" = "$after" ] && echo intacta || echo MUDOU) · A→Z $got/2"
+  if [ -z "$Z" ] || [ -z "$before" ]; then
+    skip "firewall-fail-closed/regra-invalida" "sem container de controlo ou sem chain de A para comparar"
+  elif [ "$before" = "$after" ] && [ "$got" = 0 ]; then
+    ok "firewall-fail-closed/regra-invalida (o holder recusou a spec inteira, a política anterior continua a cortar)"
+  else
+    bad "firewall-fail-closed/regra-invalida" "o holder aplicou a spec em parte (chain $([ "$before" = "$after" ] && echo intacta || echo alterada), A→Z $got/2) — um deny perdido abriu o tráfego"
+  fi
+  dlx container rm -f fwz >/dev/null 2>&1
+
+  # 3 — removing the last rule keeps the namespace isolation.
+  dlx net ingress allow fwb tcp/8080 >/dev/null 2>&1
+  dlx net ingress rm fwb tcp/8080 >/dev/null 2>&1
+  d0=$(fwcount "$B" "@dlxall ct state new counter")
+  got=$(recv fwc "$B" 2)
+  d1=$(fwcount "$B" "@dlxall ct state new counter")
+  log "após ingress rm: fwB→fwA $got/2 · drop cross-namespace $d0→$d1"
+  if [ "$got" = 0 ] && [ "$d1" != - ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+    ok "firewall-fail-closed/rm-preserva-isolamento"
+  else
+    bad "firewall-fail-closed/rm-preserva-isolamento" "depois de \`ingress rm\` outra namespace chegou ao container ($got/2, drop $d0→$d1)"
+  fi
+  dlx container rm -f fwa fwb fwc >/dev/null 2>&1
+
+  # 4 — a CIDR network is isolated like any other.
+  if ! dlx network create chaoscidr --subnet 172.31.77.0/24 >/dev/null 2>&1; then
+    skip "firewall-fail-closed/rede-cidr" "não consegui criar a rede 172.31.77.0/24"
+    return
+  fi
+  for c in fwd:fwA fwd2:fwA fwe:fwB; do
+    dlx container run -d --name "${c%%:*}" --net chaoscidr --namespace "${c##*:}" "$IMAGE" sleep 300 >/dev/null 2>&1
+  done
+  sleep 3
+  local D D2 E; D=$(ipof fwd); D2=$(ipof fwd2); E=$(ipof fwe)
+  if [ -z "$D" ] || [ -z "$D2" ] || [ -z "$E" ]; then
+    bad "firewall-fail-closed/rede-cidr" "containers na rede CIDR não arrancaram (o isolamento foi recusado?)"
+  else
+    local same
+    d0=$(fwcount "$E" "@dlxall ct state new counter")
+    got=$(recv fwd "$E" 2); same=$(recv fwd "$D2" 1)
+    d1=$(fwcount "$E" "@dlxall ct state new counter")
+    log "rede CIDR: cross-ns $got/2 · mesma ns $same/1 · drop $d0→$d1"
+    if [ "$got" = 0 ] && [ "$same" = 1 ] && [ "$d1" != - ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+      ok "firewall-fail-closed/rede-cidr (fronteira fechada em 172.31.77.0/24)"
+    else
+      bad "firewall-fail-closed/rede-cidr" "cross-ns $got/2, mesma ns $same/1, drop $d0→$d1 — a rede CIDR está fora do isolamento"
+    fi
+  fi
+  dlx container rm -f fwd fwd2 fwe >/dev/null 2>&1
+  dlx network rm chaoscidr >/dev/null 2>&1
+}
+
 # A holder respawn with a POD alive. The container case is `holder_kill` above;
 # this is the same failure for the workload the recovery did not know about.
 #
@@ -1515,7 +1673,7 @@ $(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
   dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in

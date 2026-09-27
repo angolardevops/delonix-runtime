@@ -332,7 +332,10 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
             message: format!("failed to create the pod netns '{netns}': {e}"),
         })
     })?;
-    apply_pod_namespace_isolation(&netns, &ip, &ns);
+    if let Err(e) = apply_pod_namespace_isolation(&netns, &ip, &ns) {
+        infra::detach_container(&netns, &ip);
+        return Err(e);
+    }
     container::warn_if_namespace_isolation_inert(&ns);
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
@@ -436,26 +439,23 @@ fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>>
 /// teardown is already covered: `remove_pod` calls `detach_container`, which
 /// sends `unfirewall <ip>`.
 ///
-/// Best-effort, like the container path: a pod whose isolation could not be
-/// installed still runs, but says so loudly instead of pretending to be fenced.
-pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) {
+/// A pod whose isolation could not be installed does NOT run — same contract as the
+/// container path. It used to be a warning, and a warning here is a pod reachable
+/// from every other namespace while its manifest says it is fenced (NaaS audit
+/// P0-3). The caller undoes the attach it just made.
+pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) -> Result<()> {
     if ns == "default" {
-        return; // `default` is the open SDN — same contract as containers
+        return Ok(()); // `default` is the open SDN — same contract as containers
     }
     let fw = delonix_model::records::ContainerFw {
         enabled: true,
         namespace: ns.to_string(),
         ..Default::default()
     };
-    if let Err(e) = infra::apply_firewall(netns, ip, &fw) {
-        eprintln!(
-            "{}",
-            super::po::tf(
-                "warning: namespace isolation '{namespace}' not applied: {e}",
-                &[("namespace", ns), ("e", &e.to_string())],
-            )
-        );
-    }
+    infra::apply_firewall(netns, ip, &fw).map_err(|e| Error::Runtime {
+        context: "pod",
+        message: format!("namespace isolation '{ns}' not applied, the pod was not started: {e}"),
+    })
 }
 
 pub(crate) fn remove_pod(name: &str, force: bool) -> Result<()> {

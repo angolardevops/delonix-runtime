@@ -45,8 +45,10 @@ pub fn attach_custom_network<N: NetworkProvider>(
 
 /// The pass that starts the container: publish its ports on the attached
 /// address, then record and apply what a custom network carries. On a refusal
-/// the attach is undone and the error returned; a firewall that cannot be
-/// applied is a warning, as it always was.
+/// the attach is undone and the error returned — and that includes the
+/// namespace isolation, which used to be a warning: a container outside
+/// `default` whose isolation did not apply came up reachable from every other
+/// namespace while its record said `--namespace teamA` (NaaS audit P0-3).
 pub fn wire_network<N: NetworkProvider>(
     o: &RunOpts,
     c: &mut Container,
@@ -82,13 +84,12 @@ pub fn wire_network<N: NetworkProvider>(
             let mut fw = c.firewall.clone().unwrap_or_default();
             fw.enabled = true;
             fw.namespace = c.namespace.clone();
-            match net.apply_firewall(&c.id, &ip, &fw) {
-                Ok(()) => c.firewall = Some(fw),
-                Err(e) => notices.push(Notice::new(
-                    "warning: namespace isolation '{namespace}' not applied: {e}",
-                    &[("namespace", &c.namespace), ("e", &e.to_string())],
-                )),
+            if let Err(e) = net.apply_firewall(&c.id, &ip, &fw) {
+                net.unpublish(c);
+                net.detach(&c.id, &ip);
+                return Err(e);
             }
+            c.firewall = Some(fw);
         }
     }
     // `--expose`: persisted, to re-register on `start` and de-register on `rm`;
@@ -293,15 +294,17 @@ mod tests {
             .contains(&"detach c1 10.0.0.5".to_string()));
     }
 
+    /// P0-3: isolation that did not apply is a refusal to start, with the attach
+    /// undone — never a warning over a container reachable from every namespace.
     #[test]
-    fn a_firewall_failure_is_a_warning_and_default_gets_none() {
+    fn a_firewall_failure_refuses_the_start_and_default_gets_none() {
         let net = FakeNet {
             fail_firewall: true,
             ..Default::default()
         };
         let mut c = container("teamA");
         let mut notices = Vec::new();
-        wire_network(
+        assert!(wire_network(
             &RunOpts::default(),
             &mut c,
             Some("lab"),
@@ -309,9 +312,16 @@ mod tests {
             &net,
             &mut notices,
         )
-        .unwrap();
+        .is_err());
         assert!(c.firewall.is_none());
-        assert_eq!(notices.len(), 1);
+        assert!(notices.is_empty(), "{notices:?}");
+        let calls = net.calls.borrow();
+        assert!(calls.contains(&"unpublish c1".to_string()), "{calls:?}");
+        assert!(
+            calls.contains(&"detach c1 10.0.0.5".to_string()),
+            "{calls:?}"
+        );
+        drop(calls);
 
         let net = FakeNet::default();
         let mut c = container("default");

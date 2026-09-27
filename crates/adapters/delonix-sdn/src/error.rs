@@ -195,7 +195,8 @@ pub enum Error {
     FirewallNoIp(String),
 
     /// A firewall spec (hex-decoded JSON) that does not parse as
-    /// `ContainerFw`.
+    /// `ContainerFw`, or that carries a rule or policy the dataplane cannot
+    /// enforce exactly as written (see `infra::validate_container_fw`).
     #[error("{0}")]
     FirewallJsonInvalid(String),
 
