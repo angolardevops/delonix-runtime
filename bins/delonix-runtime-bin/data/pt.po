@@ -3895,9 +3895,6 @@ msgstr "(confirma com: systemd-run --user --scope -p Delegate=yes -- delonix sys
 msgid "Only if the above still says `cpu` is missing (needs root, survives reboot):"
 msgstr "Só se o acima continuar a dizer que falta o `cpu` (precisa de root, sobrevive ao reboot):"
 
-msgid "Re-run with --delegate to write fix 2. (This run changed nothing.)"
-msgstr "Volta a correr com --delegate para escrever a correcção 2. (Esta execução não mudou nada.)"
-
 # ---- ferramentas de host em falta / rede no build (v0.44.1) ---------------
 
 msgid "`{bin}` is not installed. Install it with `sudo apt install {deb}` (Debian/Ubuntu) or `sudo dnf install {rpm}` (Fedora/Rocky)."
@@ -10505,8 +10502,8 @@ msgstr "unidades escritas mas o `systemctl enable --now` falhou — activa-o à 
 msgid "{n} flag(s) are accepted and silently ignored: {flags}"
 msgstr "{n} flag(s) são aceites e ignoradas em silêncio: {flags}"
 
-msgid "sudo delonix system setup --delegate, then log out and back in"
-msgstr "sudo delonix system setup --delegate, e depois sair e voltar a entrar"
+msgid "sudo delonix system setup --delegate, then systemctl restart user@<uid>.service (daemon-reload alone is not enough)"
+msgstr "sudo delonix system setup --delegate, e depois systemctl restart user@<uid>.service (o daemon-reload sozinho não chega)"
 
 msgid "--io-weight and the --device-*-bps flags cannot apply: systemd never delegates the io controller to a rootless user"
 msgstr "o --io-weight e as flags --device-*-bps não se aplicam: o systemd nunca delega o controlador io a um utilizador sem privilégios"
@@ -14316,3 +14313,30 @@ msgstr "Os limites de container funcionam, mas não as flags recusadas acima. S�
 
 msgid "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough"
 msgstr "depois `systemctl daemon-reload` e `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega"
+
+msgid "--delegate writes under /etc/systemd/system and needs root: re-run it with sudo. (This run changed nothing.)"
+msgstr "o --delegate escreve em /etc/systemd/system e precisa de root: volta a correr com sudo. (Esta execução não mudou nada.)"
+
+msgid "To write the drop-in: sudo delonix system setup --delegate. (This run changed nothing.)"
+msgstr "Para escrever o drop-in: sudo delonix system setup --delegate. (Esta execução não mudou nada.)"
+
+msgid "Re-run with --delegate to write it. (This run changed nothing.)"
+msgstr "Volta a correr com --delegate para o escrever. (Esta execução não mudou nada.)"
+
+msgid "reporting for uid {uid}, who runs the rootless containers"
+msgstr "relatório para o uid {uid}, que corre os containers rootless"
+
+msgid "user@{uid}.service is not running (no session, no linger), so there is nothing to read. The drop-in applies the next time it starts."
+msgstr "o user@{uid}.service não está a correr (sem sessão, sem linger), por isso não há nada para ler. O drop-in aplica-se da próxima vez que arrancar."
+
+msgid "(what a container under user@.service gets — a desktop session or `systemd-run --user --scope`; an SSH session scope gets none of it)"
+msgstr "(o que recebe um container debaixo do user@.service — uma sessão gráfica ou `systemd-run --user --scope`; um scope de sessão SSH não recebe nada disto)"
+
+msgid "What fixes this for uid {uid} is the drop-in (root, once per host):"
+msgstr "O que resolve isto para o uid {uid} é o drop-in (root, uma vez por host):"
+
+msgid "Not in effect yet. daemon-reload alone is a false green: user@.service lists the controllers while a new scope is still born without them. Restart the user manager (it ends that user's sessions) or reboot:"
+msgstr "Ainda não está em vigor. O daemon-reload sozinho é um falso verde: o user@.service lista os controladores enquanto um scope novo ainda nasce sem eles. Reinicia o gestor do utilizador (termina as sessões desse utilizador) ou reinicia a máquina:"
+
+msgid "Then check it AS THAT USER, not as root: systemd-run --user --scope -p Delegate=yes -- delonix system setup"
+msgstr "Depois confirma COMO ESSE UTILIZADOR, não como root: systemd-run --user --scope -p Delegate=yes -- delonix system setup"

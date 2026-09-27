@@ -194,7 +194,11 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
                 ],
             ),
             action: Some(Message::new(
-                "sudo delonix system setup --delegate, then log out and back in",
+                // Not «log out and back in»: a lingering user manager, or a
+                // second open session, keeps user@.service running with the old
+                // delegation, and daemon-reload alone is a false green.
+                "sudo delonix system setup --delegate, then systemctl restart \
+                 user@<uid>.service (daemon-reload alone is not enough)",
                 &[],
             )),
         });

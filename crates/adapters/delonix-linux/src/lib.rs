@@ -4452,6 +4452,25 @@ pub fn leaf_controllers() -> Vec<String> {
     have
 }
 
+/// The cgroup of `uid`'s systemd user manager — the delegation boundary a
+/// rootless engine run by that user escapes to (see `user_service_base`).
+pub fn user_manager_cgroup(uid: u32) -> String {
+    format!("/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service")
+}
+
+/// [`leaf_controllers`] asked on behalf of ANOTHER user: what a container leaf
+/// under `uid`'s `<user@uid.service>/dlx-containers` would get.
+///
+/// Exists for `sudo delonix system setup`, where the process is root and
+/// [`leaf_controllers`] answers about `delonix.slice` — a base the user who
+/// typed `sudo` never runs containers in. Only the escape base is read: the
+/// other candidate (a delegated current cgroup) depends on how that user starts
+/// the engine, which a root process cannot see. Empty when the manager is not
+/// running (no session, no linger).
+pub fn user_leaf_controllers(uid: u32) -> Vec<String> {
+    inherited_controllers(&format!("{}/dlx-containers", user_manager_cgroup(uid)))
+}
+
 /// Below this share of stalled time, ranking the resources is reading noise.
 pub const PRESSURE_FLOOR_PCT: f64 = 5.0;
 
