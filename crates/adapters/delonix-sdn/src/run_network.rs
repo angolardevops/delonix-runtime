@@ -301,13 +301,13 @@ mod port_home_tests {
     }
 }
 
-/// O ciclo de vida dos leases de um container: o `stop` guarda-os, o `rm` e o
-/// `prune` devolvem-nos todos (a rede primária E as redes extra).
+/// A container's lease lifecycle: `stop` keeps them, `rm` and `prune` give
+/// them all back (the primary network AND the additional ones).
 #[cfg(test)]
 mod lease_lifecycle_tests {
     use delonix_compute::{Container, ExtraNet};
 
-    /// Os DOIS roots isolados — o teardown fala com o socket de controlo.
+    /// BOTH roots isolated — the teardown talks to the control socket.
     fn with_roots<T>(tag: &str, f: impl FnOnce() -> T) -> T {
         let mut env = crate::testenv::lock();
         let d = std::env::temp_dir().join(format!("dlx-leases-{tag}-{}", std::process::id()));
@@ -320,7 +320,7 @@ mod lease_lifecycle_tests {
         out
     }
 
-    /// Um container numa rede, ligado a uma segunda (`network connect`).
+    /// A container on one network, connected to a second (`network connect`).
     fn multi_homed(id: &str) -> Container {
         let ip = crate::ipam::allocate("10.84", id).unwrap();
         let extra = crate::ipam::allocate("10.85", id).unwrap();
@@ -341,31 +341,31 @@ mod lease_lifecycle_tests {
         c
     }
 
-    /// Achado 3: o `stop` libertava o lease (o `cmd_stop` chamava o mesmo
-    /// teardown do `rm`), contra a premissa do `restore_lease` — um `start`
-    /// depois do attach de outro container podia voltar noutro endereço.
+    /// Finding 3: `stop` freed the lease (`cmd_stop` called the same teardown
+    /// as `rm`), against the premise of `restore_lease` — a `start` after
+    /// another container's attach could come back on a different address.
     #[test]
-    fn o_stop_guarda_os_leases_de_todas_as_redes() {
+    fn stop_keeps_the_leases_of_every_network() {
         with_roots("stop", || {
             let c = multi_homed("stop000000000001");
             super::stop_ports(&c, None);
             assert_eq!(
                 crate::ipam::lookup("10.84", &c.id),
                 c.ip,
-                "o STOP libertou o lease da rede primária"
+                "STOP freed the primary network's lease"
             );
             assert_eq!(
                 crate::ipam::lookup("10.85", &c.id).as_deref(),
                 Some(c.extra_networks[0].ip.as_str()),
-                "o STOP libertou o lease da rede extra"
+                "STOP freed the additional network's lease"
             );
         });
     }
 
-    /// Achado 3, a outra metade: o `rm` libertava a rede primária e deixava o
-    /// lease de cada rede extra para sempre.
+    /// Finding 3, the other half: `rm` freed the primary network and left every
+    /// additional network's lease behind forever.
     #[test]
-    fn o_rm_liberta_os_leases_de_todas_as_redes() {
+    fn rm_frees_the_leases_of_every_network() {
         with_roots("rm", || {
             let c = multi_homed("rm00000000000001");
             super::unpublish_ports(&c, None);
@@ -373,15 +373,15 @@ mod lease_lifecycle_tests {
             assert_eq!(
                 crate::ipam::lookup("10.85", &c.id),
                 None,
-                "o RM deixou o lease da rede extra"
+                "RM left the additional network's lease"
             );
         });
     }
 
-    /// O `container prune` tira containers já parados sem passar pelo
-    /// teardown: sem isto, os leases que o stop guardou ficavam órfãos.
+    /// `container prune` takes out already-stopped containers without going
+    /// through the teardown: without this, the leases the stop kept went orphan.
     #[test]
-    fn o_prune_de_um_parado_liberta_os_leases() {
+    fn pruning_a_stopped_container_frees_its_leases() {
         with_roots("prune", || {
             let c = multi_homed("prune00000000001");
             super::stop_ports(&c, None);

@@ -1165,10 +1165,10 @@ impl NetworkStore {
                 "network '{name}' already exists"
             )));
         }
-        // Uma volta COMPLETA ao espaço a partir do candidato do nome, sobre o
-        // que ESTE root tem ocupado — registos, `NetDef`s e os prefixos
-        // reservados (ver `used_bases`). Sem lugar livre, recusa: a rede nº 55
-        // ficava em silêncio no `/16` de outra.
+        // ONE full circle of the space from the name's candidate, over what
+        // THIS root occupies — records, `NetDef`s and the reserved prefixes (see
+        // `used_bases`). With no free slot, refuse: network no. 55 used to land,
+        // in silence, on another one's `/16`.
         let base = pick_user_base(Network::base_for(name), &used_bases(&self.root()))
             .ok_or_else(|| self.no_free_subnet(name))?;
         delonix_state::write_atomic(&self.path(name), base.to_string().as_bytes())?;
@@ -1365,22 +1365,22 @@ impl NetworkStore {
         }
         // The records AND the realized `NetDef`s: a network only the VM path
         // created has no record here, and its addresses are just as taken.
-        let registos = self
+        let records = self
             .list()
             .unwrap_or_default()
             .into_iter()
             .map(|n| (n.name, n.subnet));
-        let realizadas = infra::network_list_in(&self.root())
+        let realized = infra::network_list_in(&self.root())
             .into_iter()
             .map(|d| (d.name, d.prefix));
-        for (nome, sub) in registos.chain(realizadas) {
-            if nome == name {
+        for (other, subnet) in records.chain(realized) {
+            if other == name {
                 continue;
             }
-            if let Some(c) = Cidr::parse(&sub) {
+            if let Some(c) = Cidr::parse(&subnet) {
                 if c.overlaps(&cidr) {
                     return Err(Error::SubnetOverlap(format!(
-                        "subnet {} overlaps network '{nome}' ({})",
+                        "subnet {} overlaps network '{other}' ({})",
                         cidr.to_string_cidr(),
                         c.to_string_cidr()
                     )));
@@ -1441,10 +1441,10 @@ impl NetworkStore {
         }
         // Under the allocator's lock: a check-then-write of an octet races
         // another creation of the same octet exactly like `create` did.
-        let trinco = self.lock_path();
-        let _lock = flock::ExclusiveLock::acquire(&trinco).ok_or_else(|| {
+        let lock_path = self.lock_path();
+        let _lock = flock::ExclusiveLock::acquire(&lock_path).ok_or_else(|| {
             flock::ExclusiveLock::unavailable(
-                &trinco,
+                &lock_path,
                 "an unsynchronised allocation can put two networks on the same /16",
             )
         })?;
@@ -1595,10 +1595,10 @@ impl NetworkStore {
         if vni == 0 || vni > 0x00ff_ffff {
             return Err(Error::InvalidVni("invalid VNI (1..16777215)".into()));
         }
-        let trinco = self.lock_path();
-        let _lock = flock::ExclusiveLock::acquire(&trinco).ok_or_else(|| {
+        let lock_path = self.lock_path();
+        let _lock = flock::ExclusiveLock::acquire(&lock_path).ok_or_else(|| {
             flock::ExclusiveLock::unavailable(
-                &trinco,
+                &lock_path,
                 "an unsynchronised allocation can put two networks on the same /16",
             )
         })?;
@@ -3446,8 +3446,8 @@ mod tests_alocacao_16 {
 
     #[test]
     fn sem_16_livre_recusa_em_vez_de_entregar_um_duplicado() {
-        // O espaço de UTILIZADOR: o de workloads menos o `/16` do ingress
-        // (10.200), que este teste contava como um lugar livre — 55 em vez de 54.
+        // The USER space: the workload space minus the ingress `/16` (10.200),
+        // which this test used to count as a free slot — 55 instead of 54.
         let capacidade = usize::from(last_user_base() - first_user_base()) + 1;
 
         let store = NetworkStore::open(raiz("tecto")).unwrap();
@@ -3602,15 +3602,15 @@ mod tests_posse_do_slirp {
     }
 }
 
-/// Achado 6 (doc 62 §6 P1): dois alocadores de `/16` que não se viam, e um
-/// `validate_subnet` que aceitava sobrepor o espaço do próprio motor.
+/// Finding 6 (doc 62 §6 P1): two `/16` allocators blind to each other, and a
+/// `validate_subnet` that accepted overlapping the engine's own space.
 #[cfg(test)]
-mod tests_um_alocador {
+mod tests_single_allocator {
     use super::*;
 
     fn with_root<T>(tag: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
         let mut env = crate::testenv::lock();
-        let d = std::env::temp_dir().join(format!("dlx-alocador-{tag}-{}", std::process::id()));
+        let d = std::env::temp_dir().join(format!("dlx-allocator-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join("run")).unwrap();
         env.set("DELONIX_ROOT", &d);
@@ -3621,7 +3621,7 @@ mod tests_um_alocador {
     }
 
     #[test]
-    fn validate_subnet_recusa_o_espaco_do_proprio_motor() {
+    fn validate_subnet_refuses_the_engines_own_space() {
         for s in [
             "10.200.0.0/16",
             "10.200.7.0/24",
@@ -3636,18 +3636,18 @@ mod tests_um_alocador {
         NetworkStore::validate_subnet("10.0.3.0/24").unwrap();
     }
 
-    /// Medido antes: a 53.ª rede de um root vazio caiu em `10.200` — a rede de
-    /// ingress por omissão. Enche-se o espaço inteiro e nenhuma lá cai.
+    /// Measured before: the 53rd network of an empty root landed on `10.200` —
+    /// the default ingress network. Fill the whole space; none lands there.
     #[test]
-    fn o_networkstore_nunca_entrega_o_16_do_ingress() {
+    fn the_network_store_never_hands_out_the_ingress_slash16() {
         with_root("ingress", |root| {
             let store = NetworkStore::open(root).unwrap();
-            let mut vistos = std::collections::HashSet::new();
+            let mut seen = std::collections::HashSet::new();
             for i in 0.. {
                 match store.create(&format!("s2n{i}")) {
                     Ok(n) => {
-                        assert_ne!(n.prefix, "10.200", "rede {i} em cima do ingress");
-                        assert!(vistos.insert(n.prefix.clone()), "{} repetido", n.prefix);
+                        assert_ne!(n.prefix, "10.200", "network {i} on top of the ingress");
+                        assert!(seen.insert(n.prefix.clone()), "{} repeated", n.prefix);
                     }
                     Err(e) => {
                         assert!(e.is_conflict(), "{e}");
@@ -3656,25 +3656,25 @@ mod tests_um_alocador {
                 }
             }
             assert_eq!(
-                vistos.len(),
+                seen.len(),
                 usize::from(last_user_base() - first_user_base()) + 1
             );
         });
     }
 
-    /// Uma rede que só o caminho das VMs realizou (`infra::network_create`, sem
-    /// registo) ocupa o seu `/16` para o `NetworkStore` também.
+    /// A network only the VM path realized (`infra::network_create`, no record)
+    /// occupies its `/16` for the `NetworkStore` too.
     #[test]
-    fn o_networkstore_ve_as_redes_que_so_as_vms_criaram() {
+    fn the_network_store_sees_networks_only_vms_created() {
         with_root("vmnet", |root| {
             let vm = infra::network_create("s2vmnet").unwrap();
             let store = NetworkStore::open(root).unwrap();
             for i in 0..20 {
                 let n = store.create(&format!("s2m{i}")).unwrap();
-                assert_ne!(n.prefix, vm.prefix, "rede {i} no /16 da rede das VMs");
+                assert_ne!(n.prefix, vm.prefix, "network {i} on the VM network's /16");
             }
             let cidr = Cidr::parse(&format!("{}.0.0/16", vm.prefix)).unwrap();
-            let e = store.create_with_cidr("s2sobre", cidr).unwrap_err();
+            let e = store.create_with_cidr("s2over", cidr).unwrap_err();
             assert!(e.is_conflict(), "{e}");
             let base: u8 = vm.prefix.rsplit('.').next().unwrap().parse().unwrap();
             let e = store.create_with_base("s2base", base).unwrap_err();
@@ -3682,34 +3682,34 @@ mod tests_um_alocador {
         });
     }
 
-    /// E ao contrário: o alocador das VMs respeita o registo — uma rede
-    /// declarada é realizada no SEU prefixo, e as outras não caem em cima dela.
+    /// And the other way round: the VM allocator honours the registry — a
+    /// declared network is realized on ITS prefix, and others stay off it.
     #[test]
-    fn o_alocador_das_vms_ve_o_registo() {
-        with_root("registo", |root| {
+    fn the_vm_allocator_sees_the_registry() {
+        with_root("registry", |root| {
             let store = NetworkStore::open(root).unwrap();
-            let decl = store.create_with_base("s2decl", first_user_base()).unwrap();
+            let declared = store.create_with_base("s2decl", first_user_base()).unwrap();
             let cidr = store
                 .create_with_cidr("s2cidr", Cidr::parse("10.202.0.0/16").unwrap())
                 .unwrap();
             let def = infra::network_create("s2decl").unwrap();
             assert_eq!(
-                def.prefix, decl.prefix,
-                "a VM noutra subnet que os containers"
+                def.prefix, declared.prefix,
+                "the VM on a different subnet than the containers"
             );
-            let outra = infra::network_create("s2soVM").unwrap();
-            assert_ne!(outra.prefix, decl.prefix);
+            let vm_only = infra::network_create("s2vmonly").unwrap();
+            assert_ne!(vm_only.prefix, declared.prefix);
             assert_eq!(cidr.subnet, "10.202.0.0/16");
             assert_ne!(
-                outra.prefix, "10.202",
-                "a rede das VMs em cima de uma rede CIDR"
+                vm_only.prefix, "10.202",
+                "the VM network on top of a CIDR one"
             );
         });
     }
 
-    /// `create_with_base` no octeto do ingress é recusado com a razão.
+    /// `create_with_base` on the ingress octet is refused, saying why.
     #[test]
-    fn create_with_base_recusa_o_ingress() {
+    fn create_with_base_refuses_the_ingress() {
         with_root("base200", |root| {
             let store = NetworkStore::open(root).unwrap();
             let e = store.create_with_base("s2ing", 200).unwrap_err();
@@ -3717,11 +3717,11 @@ mod tests_um_alocador {
         });
     }
 
-    /// CONCORRÊNCIA: os dois alocadores em paralelo, no mesmo root, nunca dão
-    /// o mesmo `/16` a duas redes.
+    /// CONCURRENCY: both allocators in parallel on one root never give one
+    /// `/16` to two networks.
     #[test]
-    fn os_dois_alocadores_em_paralelo_nunca_partilham_um_16() {
-        with_root("paralelo", |root| {
+    fn both_allocators_in_parallel_never_share_a_slash16() {
+        with_root("parallel", |root| {
             let root = root.to_path_buf();
             let hs: Vec<_> = (0..24)
                 .map(|i| {
@@ -3737,10 +3737,10 @@ mod tests_um_alocador {
                     })
                 })
                 .collect();
-            let mut vistos = std::collections::HashSet::new();
+            let mut seen = std::collections::HashSet::new();
             for h in hs {
                 let p = h.join().unwrap().unwrap();
-                assert!(vistos.insert(p.clone()), "/16 {p} entregue duas vezes");
+                assert!(seen.insert(p.clone()), "/16 {p} handed out twice");
             }
         });
     }

@@ -2398,8 +2398,8 @@ fn start_dhcp(bridge: &str, prefix: &str) {
 /// symptom would be the worst kind: a VM firewalled at an address nobody uses,
 /// reported as isolated.
 pub fn dhcp_lease_ip(prefix: &str, mac: &str) -> Option<String> {
-    // A aritmética vive no `delonix-net-rules`, partilhada com o IPAM dos
-    // containers, que tem de saber que endereços NÃO pode entregar.
+    // The arithmetic lives in `delonix-net-rules`, shared with the container
+    // IPAM, which has to know which addresses it must NOT hand out.
     crate::vm_dhcp_lease_ip(prefix, mac)
 }
 
@@ -10574,19 +10574,18 @@ mod tests_restore_lease {
     }
 }
 
-/// Achado 5 (doc 62 §6 P1): três dos quatro escritores do `NetDef` escreviam
-/// sem fechadura, e com `fs::write` não atómico.
+/// Finding 5 (doc 62 §6 P1): three of the four `NetDef` writers wrote without a
+/// lock, and with a non-atomic `fs::write`.
 #[cfg(test)]
 mod tests_netdef_lock {
     use super::*;
 
-    /// CONCORRÊNCIA: o holder a registar hosts de egress (`update_netdef_egress`)
-    /// enquanto a CLI reescreve o gateway da mesma rede. Medido antes da
-    /// correcção: 60 escritas de egress, 0 sobreviventes — cada gateway reescrito
-    /// a partir de uma leitura antiga apagava-as, e uma leitura rasgada fazia o
-    /// egress não encontrar a rede.
+    /// CONCURRENCY: the holder registering egress hosts (`update_netdef_egress`)
+    /// while the CLI rewrites the gateway of the same network. Measured before
+    /// the fix: 60 egress writes, 0 survivors — each gateway rewritten from a
+    /// stale read erased them, and a torn read made the egress miss the network.
     #[test]
-    fn escritores_concorrentes_do_netdef_nao_perdem_escritas() {
+    fn concurrent_netdef_writers_lose_no_write() {
         let mut env = crate::testenv::lock();
         let d = std::env::temp_dir().join(format!("dlx-netdef-lock-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&d);
@@ -10600,7 +10599,7 @@ mod tests_netdef_lock {
             for i in 0..n {
                 update_netdef_egress(&bridge, |e| e.hosts.push(format!("h{i}.example")))
                     .unwrap()
-                    .expect("a rede existe");
+                    .expect("the network exists");
             }
         });
         let gw = prefix.clone();
@@ -10614,8 +10613,8 @@ mod tests_netdef_lock {
         b.join().unwrap();
         let got = network_get("s2lock").unwrap();
         let _ = std::fs::remove_dir_all(&d);
-        assert_eq!(got.egress.hosts.len(), n, "escritas de egress perdidas");
-        assert!(got.gateway.is_some(), "a escrita do gateway perdeu-se");
+        assert_eq!(got.egress.hosts.len(), n, "egress writes lost");
+        assert!(got.gateway.is_some(), "the gateway write was lost");
         assert_eq!(got.prefix, prefix);
     }
 }
