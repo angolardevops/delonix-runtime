@@ -37,6 +37,19 @@ the template were removed afterwards; the node was left as it was found).
   `vzsnapshot`, `vzdestroy`. `memory: 128` became `memory.max = 134217728` and `swap: 0` became
   `memory.swap.max = 0` in the container's cgroup. A snapshot on `local-lvm` works
   (`GET …/feature?feature=snapshot` → `hasFeature: 1`).
+- **An image the engine pulled itself can be sent to the node.** `POST …/storage/{storage}/upload`
+  with `content=vztmpl`, `checksum-algorithm=sha256` and the file's sha256 answered 200 with an
+  `imgcopy` task that ended `OK`, and kept the file under the exact name sent
+  (`dlx-alpine-bf8527eb54c3.tar`). The same route with `content=import` is what ADR-0057 uses for
+  VM disks, and its record says a checksum mismatch fails the task.
+- **But only with OCI media types.** `delonix image save` keeps the manifest a registry served,
+  and for `alpine` that is Docker v2 (`application/vnd.docker.distribution.manifest.v2+json`,
+  config `vnd.docker.container.image.v1+json`). The node refuses that archive with `Error while
+  parsing OCI image: Unsupported CPU architecture`, a message that names the wrong cause: the
+  config blob is the same one the node's own pull fetched (`bf8527eb…`, `architecture: amd64`).
+  The same archive rewritten with OCI media types, and nothing else changed, was accepted
+  ("Detected OCI archive", `arch amd64`) and the container started. The control, the unmodified
+  archive, was refused again in the same run.
 
 **What does not, measured:**
 
@@ -59,13 +72,15 @@ the template were removed afterwards; the node was left as it was found).
    `eth0` with only a link-local address). The engine's `task_verdict` reads every exit status
    other than `OK` as a failure, so today it would report this start as FAILED with the container
    running; the verdict is shared by every task this backend waits for, QEMU included.
-6. **The image reference is a tag, and the digest is lost.** The `reference` parameter of
+6. **The node's own pull takes a tag, and the digest is lost.** The `reference` parameter of
    `oci-registry-pull` must end in `:<tag>`, per the node's schema; a `@sha256:` reference does not
    match it. The stored file is named `alpine_3.20.tar`, with no registry, no repository path and
    no digest. Two images with the same last path component and tag map to one file name. The
    `digest` field in the container config is a SHA-1 of the config, not the image's. The pull has
    two parameters, `reference` and `filename`, and no credentials: a registry that needs a login
-   cannot be pulled from through the API.
+   cannot be pulled from through the API. And `filename` is rewritten: `dlx/../Alpine sha256:ab.tar`
+   became `Alpine_sha256_ab.tar.tar` (the path dropped, characters replaced, `.tar` appended). All
+   of this is the pull route only; the upload route above avoids it.
 7. **Every container is a full copy.** The archive is extracted into a new volume per container
    (`rootfs: local-lvm:vm-100-disk-0,size=1G`). There is no layer sharing.
 8. **Nothing of this engine's dataplane applies.** The container sits on a bridge of the remote
@@ -77,8 +92,9 @@ the template were removed afterwards; the node was left as it was found).
 
 1. **A Proxmox LXC container does not serve `kind: Container`.** `Container` is this engine's
    rootless container over the kernel, and consumers use it through `exec`, `logs`, `wait`,
-   `run` in the foreground, digest-pinned images, the SDN and namespace isolation. Points 1, 2, 3,
-   6 and 8 above are not gaps a client can close; the API does not have them. A provider of
+   `run` in the foreground, digest-pinned images, the SDN and namespace isolation. Points 1, 2, 3
+   and 8 above are not gaps a client can close; the API does not have them. (Point 6 is: the
+   engine can pull and verify the image itself and upload it.) A provider of
    `Container` that declares most of `container.*` `unsupported-by-provider` would make every
    caller check for capabilities that the Kind exists to guarantee.
 
@@ -96,8 +112,10 @@ the template were removed afterwards; the node was left as it was found).
    - A task has three outcomes, not two: `OK`, an error, and `WARNINGS: <n>`, whose `WARN:` lines
      are read from the task log and reported. A start with warnings is not a failure and not a
      silent success; the network is judged by `GET …/interfaces` (point 5).
-   - The engine records the registry, repository, tag and the digest it resolved, and refuses a
-     digest-only reference by name; the node's file name is not an identity (point 6).
+   - The image is pulled by the engine, not by the node: digest-verified, with the engine's own
+     registry credentials, written as an archive with OCI media types, and sent with its sha256
+     through the upload route. The node's `oci-registry-pull` is not used; its file name is not an
+     identity (point 6).
    - `exec`, logs and exit status are declared `unsupported-by-provider` with the reason, never
      emulated through a console websocket (points 1–3).
    - The full copy per container is stated in the capability detail (point 7).
@@ -137,9 +155,12 @@ the template were removed afterwards; the node was left as it was found).
 - The six traps are recorded before any code exists, which is when they are cheapest to design
   around. Two of them (points 4 and 5) also apply to the QEMU create path whenever it accepts a
   field the node may overwrite or a warning it may downgrade, and are worth checking there.
-- **Not validated:** the routes were exercised through `pvesh` on the node, not through
-  `delonix-proxmox` over HTTPS, so the matrix does not change. A privileged container
-  (`unprivileged: 0`), `features: nesting=1`, a digest-only reference sent to the live node (the
-  refusal is read from the schema, not measured), and a network where DHCP answers were not tried.
-  Whether QEMU tasks end in `WARNINGS` in practice was not measured; the verdict that would
-  misread them is shared code.
+- The implementation plan, slice by slice, is `docs/discovery/63_PROXMOX_LXC_PLANO.md`.
+- **Not validated:** most routes were exercised through `pvesh` on the node, not through
+  `delonix-proxmox` over HTTPS, so the matrix does not change; the upload was a `curl` on the
+  node with an API token created and deleted there. A digest-only reference WAS sent to the live
+  node and refused (`400 … does not match the regex pattern`). Not tried: a privileged container
+  (`unprivileged: 0`), `features: nesting=1`, a network where DHCP answers, and a `vztmpl` upload
+  with a wrong checksum (the request never produced a task, for a reason not isolated). Whether
+  QEMU tasks end in `WARNINGS` in practice was not measured; the verdict that would misread them
+  is shared code.
