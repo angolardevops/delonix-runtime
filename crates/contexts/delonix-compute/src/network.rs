@@ -147,6 +147,9 @@ mod tests {
         fail_publish: bool,
         /// Refuse only this spec — the second `-p` of a run, say.
         fail_publish_of: Option<&'static str>,
+        /// What each `unpublish` was handed: `(network, ports)`. Kept apart from
+        /// `calls` so the call log stays one short line per call.
+        unpublished: RefCell<Vec<(Option<String>, Vec<String>)>>,
         fail_firewall: bool,
         fail_shape: bool,
     }
@@ -183,7 +186,10 @@ mod tests {
             Ok(())
         }
         fn unpublish(&self, c: &Container) {
-            self.log(format!("unpublish {} {:?} {:?}", c.id, c.network, c.ports));
+            self.log(format!("unpublish {}", c.id));
+            self.unpublished
+                .borrow_mut()
+                .push((c.network.clone(), c.ports.clone()));
         }
         fn apply_firewall(&self, id: &str, _: &str, fw: &ContainerFw) -> Result<()> {
             self.log(format!("firewall {id} {}", fw.namespace));
@@ -347,9 +353,13 @@ mod tests {
             [
                 "publish 10.0.0.5 8080:80",
                 "publish 10.0.0.5 8081:81",
-                "unpublish c1 Some(\"lab\") [\"8080:80\"]",
+                "unpublish c1",
                 "detach c1 10.0.0.5",
             ]
+        );
+        assert_eq!(
+            *net.unpublished.borrow(),
+            [(Some("lab".to_string()), vec!["8080:80".to_string()])]
         );
     }
 
