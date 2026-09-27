@@ -554,7 +554,7 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
-<td>Runs a container with <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> even when this session has no cgroup delegation, instead of refusing (exit 69).</td>
+<td>Runs a container with <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> even when this session has no cgroup delegation, and with <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> even when the container's cgroup lacks the <code>cpuset</code>/<code>io</code> controller (<code>preflight_controller_limits</code>), instead of refusing (exit 69).</td>
 <td>Set (any value) → run, unlimited, with a warning.</td>
 <td>The kernel never sees the limits. See <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation</a>.</td>
 </tr>
@@ -840,6 +840,20 @@ commands. Background: <a class="src" href="https://github.com/angolardevops/delo
 <td>Default bridge for VM NICs on this node.</td>
 <td>A bridge name; the backend's default is <code>vmbr0</code>.</td>
 <td>A per-VM <code>bridge:</code> wins.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_IMPORT_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>The dir storage a local image is uploaded to before a VM imports it (ADR-0057). It must list the <code>import</code> content type; the engine never enables it.</td>
+<td>A storage id; default <code>local</code>.</td>
+<td><code>storage.import</code> in providers.yaml.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_DISK_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>The storage an imported image's boot disk lands on (ADR-0057).</td>
+<td>A storage id; default <code>local-lvm</code>.</td>
+<td><code>storage.disk</code> in providers.yaml.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_VLAN</code></td>
@@ -1152,6 +1166,13 @@ variable when the program runs.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>The node of the same cluster the <code>vm move</code> live cases move a VM to (ADR-0053). Needs a lab cluster of two nodes — never production.</td>
 <td>Unset: the two move cases skip.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_IMAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>A qcow2 of the engine's store the ADR-0057 live case boots a VM from, uploading it to the node. The node's import storage must list <code>import</code>.</td>
+<td>Unset: the case skips.</td>
 <td></td>
 </tr>
 <tr>

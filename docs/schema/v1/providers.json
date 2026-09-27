@@ -90,6 +90,9 @@
             "node": {
               "type": "string"
             },
+            "storage": {
+              "$ref": "#/$defs/Storage"
+            },
             "tls": {
               "$ref": "#/$defs/Tls"
             },
@@ -144,6 +147,27 @@
           ]
         },
         "username": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "Storage": {
+      "additionalProperties": false,
+      "description": "Where a local image goes on the node (ADR-0057): the dir storage it is\nuploaded to (`import`, default `local`) and the storage its disk is\nimported onto (`disk`, default `local-lvm`).",
+      "properties": {
+        "disk": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "import": {
           "default": null,
           "type": [
             "string",

@@ -4244,7 +4244,11 @@ fn enable_slice_controllers(slice: &str) {
         .map(|p| p.to_string_lossy().into_owned());
     // ONE by one, as `setup_kube_cgroup` does: a controller the host does not
     // have must not stop the others from being enabled.
-    for ctrl in ["memory", "cpu", "pids", "io"] {
+    // `cpuset` too: without it the leaf has no `cpuset.cpus`, `--cpuset` was
+    // silently a no-op as root, and `leaf_controllers` now makes `container run`
+    // refuse the flag instead — so the slice has to hand it down for root to
+    // honour a flag it always claimed to.
+    for ctrl in ["memory", "cpu", "pids", "io", "cpuset"] {
         if enable(slice, ctrl) {
             continue;
         }
@@ -4380,19 +4384,72 @@ pub fn enforceable_controllers() -> (Option<String>, Vec<String>) {
     let Some(base) = base else {
         return (None, Vec::new());
     };
+    let list = inherited_controllers(&base);
+    (Some(base), list)
+}
+
+/// The controllers a leaf created under `base` would receive: the base's own
+/// `cgroup.controllers`, or — when the base does not exist yet — what its parent
+/// hands down in `cgroup.subtree_control`, which is precisely the set it WILL
+/// inherit. Unreadable answers «none».
+fn inherited_controllers(base: &str) -> Vec<String> {
     let read = |p: String| std::fs::read_to_string(p).ok();
-    let list = read(format!("{base}/cgroup.controllers"))
+    read(format!("{base}/cgroup.controllers"))
         .or_else(|| {
             // Not created yet — ask the parent what it hands down.
-            let parent = std::path::Path::new(&base)
+            let parent = std::path::Path::new(base)
                 .parent()?
                 .to_string_lossy()
                 .into_owned();
             read(format!("{parent}/cgroup.subtree_control"))
         })
         .map(|t| parse_controller_list(&t))
+        .unwrap_or_default()
+}
+
+/// The cgroup controllers a container leaf created NOW would really have, so a
+/// caller can refuse a limit whose controller is missing BEFORE anything starts.
+///
+/// [`cgroup_limits_apply`] answers «is there delegation at all?», which is what
+/// `memory`/`cpu`/`pids` need. It says nothing about `cpuset`/`io`, and that gap
+/// is where `--device-write-bps 5mb` measured 1.6 GB/s with rc=0 (2026-09-27,
+/// `user@1000.service` delegating `cpu memory pids`). This asks the question per
+/// controller.
+///
+/// Rootless: the UNION of the two bases `setup_cgroup_delegated` tries — the
+/// current cgroup when it is delegable, and `<user@uid.service>/dlx-containers`.
+/// A union and not the first candidate alone because which one wins is decided
+/// at spawn time by the no-internal-processes rule, which a probe cannot
+/// replay; a desktop `app-*.scope` offers `memory pids` while the base the engine
+/// escapes to offers more. Reading one of them would refuse limits the other
+/// honours. The rare case where the winning base lacks a controller the loser
+/// had is what [`warn_unapplied_limits`] still reports after the fact.
+///
+/// Root: what `delonix.slice` hands down after [`ensure_delonix_slice`] — the
+/// same call [`cgroup_limits_apply`] and `admission_check` already make.
+pub fn leaf_controllers() -> Vec<String> {
+    if !is_rootless() {
+        ensure_delonix_slice();
+        return std::fs::read_to_string(format!(
+            "{}/cgroup.subtree_control",
+            delonix_compute::DELONIX_SLICE
+        ))
+        .map(|t| parse_controller_list(&t))
         .unwrap_or_default();
-    (Some(base), list)
+    }
+    let Some(cur) = current_cgroup_v2() else {
+        return Vec::new();
+    };
+    let mut have = Vec::new();
+    if delegated_base_usable(std::path::Path::new(&cur)) {
+        have.extend(inherited_controllers(&cur));
+    }
+    if let Some(base) = user_service_base(&cur) {
+        have.extend(inherited_controllers(&base));
+    }
+    have.sort();
+    have.dedup();
+    have
 }
 
 /// Below this share of stalled time, ranking the resources is reading noise.
@@ -4804,21 +4861,27 @@ fn try_delegated_base(base: &str, c: &Container, pid: i32, move_self: bool) -> b
     true
 }
 
-/// Says which requested limits did NOT land, and how to make them land.
+/// Says which requested limits did NOT land, after the fact.
 ///
 /// The three writes above are best-effort by necessity: a controller the parent
 /// cgroup does not delegate simply has no file to write, and no unprivileged
-/// engine — Podman included — can conjure one. What was missing is the operator
-/// finding out. Measured on this host: `--device-read-bps 1mb` returned 0, said
-/// nothing, and left `io.max` not merely unset but ABSENT — a bandwidth cap
-/// somebody put there to protect a node, that does not exist.
+/// engine — Podman included — can conjure one. Measured on this host:
+/// `--device-read-bps 1mb` returned 0, said nothing, and left `io.max` not
+/// merely unset but ABSENT — a bandwidth cap somebody put there to protect a
+/// node, that does not exist.
 ///
-/// A warning and not a refusal, deliberately: the same command line DOES work
-/// under `systemd-run --user --scope -p Delegate=yes` and as root, so refusing
-/// would break the flag on the hosts where it is honoured. It is checked by
-/// looking for the FILE after writing, not by predicting from
+/// The REFUSAL lives before the spawn (`container run` asks [`leaf_controllers`]
+/// and exits 69 unless `DELONIX_ALLOW_UNENFORCED_LIMITS` is set). This is the
+/// backstop for the two ways past it: that escape hatch, and a probe that
+/// predicted a controller the winning base turned out not to have. It is checked
+/// by looking for the FILE after writing, not by predicting from
 /// `cgroup.controllers` — the controller can be listed and the write still not
 /// take, which is the trap this repo already documented once for delegation.
+///
+/// It no longer suggests `systemd-run --user --scope -p Delegate=yes`: measured
+/// 2026-09-27, that scope still wrote at 1.2 GB/s under `--device-write-bps
+/// 5mb`, because a scope can only receive controllers `user@.service` itself
+/// has. The remedy that reaches `io`/`cpuset` is the drop-in on `user@.service`.
 fn warn_unapplied_limits(leaf: &str, c: &Container) {
     let mut missing: Vec<&str> = Vec::new();
     if c.cpuset.is_some() && !std::path::Path::new(&format!("{leaf}/cpuset.cpus")).exists() {
@@ -4835,8 +4898,8 @@ fn warn_unapplied_limits(leaf: &str, c: &Container) {
     }
     eprintln!(
         "delonix: warning: {} had no effect — this cgroup does not delegate the controller they \
-         need, so the limit is NOT in place. `delonix system setup` diagnoses it; \
-         `systemd-run --user --scope -p Delegate=yes -- delonix run ...` applies it now.",
+         need, so the limit is NOT in place. A `systemd-run --user --scope` does not fix it when \
+         user@.service lacks the controller; `delonix system setup` shows the drop-in that does.",
         missing.join(", ")
     );
 }

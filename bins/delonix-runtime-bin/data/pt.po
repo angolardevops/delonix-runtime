@@ -3886,9 +3886,6 @@ msgstr "SSHKEY {key}: não é uma chave pública, e o ficheiro não existe — p
 msgid "← a Kubernetes node CANNOT boot without this"
 msgstr "← um nó Kubernetes NÃO arranca sem isto"
 
-msgid "← optional; nothing here needs them"
-msgstr "← opcionais; nada aqui precisa deles"
-
 msgid "Try this first — no root, no reboot, works right now:"
 msgstr "Tenta isto primeiro — sem root, sem reiniciar sessão, funciona já:"
 
@@ -14011,6 +14008,52 @@ msgstr "Um `NetworkPolicy` com `scope: vm` pediu regras numa VM de um cluster Pr
 msgid "Enable the firewall at Datacenter level on the cluster (Datacenter › Firewall › Options, or `pvesh set /cluster/firewall/options --enable 1`), after checking the management rules for the nodes, then apply again."
 msgstr "Liga a firewall ao nível de Datacenter no cluster (Datacenter › Firewall › Options, ou `pvesh set /cluster/firewall/options --enable 1`), depois de verificar as regras de gestão dos nós, e aplica outra vez."
 
+# DX-1550/1551/5515/5516/9525 — the Proxmox cluster's own SDN: controllers, prefix lists, route maps, vnet firewall, the global lock
+msgid "invalid Proxmox SDN controller, prefix list or route map"
+msgstr "controlador, prefix list ou route map do SDN do Proxmox inválido"
+
+msgid "A BGP/EVPN controller, prefix list or route map of the cluster's own SDN (not this engine's) was refused before any request: an id outside Proxmox's own format (a controller id starts with a letter; a prefix-list or route-map id is 1 to 32 letters, digits, '-' or '_', and the node reserves some), a missing field the controller type needs (EVPN: an ASN and exactly one of peers/fabric; BGP: a node, an ASN and peers), or an entry field the node would not accept (action other than permit/deny, a prefix length past the address family, an unknown match/set key)."
+msgstr "Um controlador BGP/EVPN, uma prefix list ou um route map do SDN do próprio cluster (não o deste motor) foi recusado antes de qualquer pedido: um id fora do formato do próprio Proxmox (um id de controlador começa por uma letra; um id de prefix list ou de route map tem de 1 a 32 letras, dígitos, '-' ou '_', e o nó reserva alguns), um campo em falta que o tipo de controlador exige (EVPN: um ASN e exactamente um de peers/fabric; BGP: um nó, um ASN e peers), ou um campo de entrada que o nó não aceitaria (acção que não seja permit/deny, um comprimento de prefixo além da família de endereços, uma chave de match/set desconhecida)."
+
+msgid "Correct the field the message names; the node's own `apidoc.js` lists the formats."
+msgstr "Corrige o campo que a mensagem nomeia; o `apidoc.js` do próprio nó lista os formatos."
+
+msgid "invalid Proxmox vnet firewall rule"
+msgstr "regra de firewall de vnet do Proxmox inválida"
+
+msgid "A vnet's firewall filters traffic FORWARDED through the vnet and takes only 'forward' rules — the node refuses 'in' and 'out' there — with an action of ACCEPT, DROP or REJECT (a security group's name is not accepted by this client)."
+msgstr "A firewall de uma vnet filtra o tráfego ENCAMINHADO através da vnet e só aceita regras 'forward' — o nó recusa 'in' e 'out' ali — com uma acção ACCEPT, DROP ou REJECT (o nome de um security group não é aceite por este cliente)."
+
+msgid "Use the rule type 'forward' (the default) and ACCEPT, DROP or REJECT; for traffic to or from one VM, use the VM's own firewall."
+msgstr "Usa o tipo de regra 'forward' (o de omissão) e ACCEPT, DROP ou REJECT; para o tráfego de ou para uma VM, usa a firewall da própria VM."
+
+msgid "the cluster's SDN configuration is locked"
+msgstr "a configuração SDN do cluster está trancada"
+
+msgid "Proxmox VE has one global lock over the SDN configuration (`POST /cluster/sdn/lock`). While another holder has it, every staged SDN write and the apply are refused; the node also says this when the token this client carried is no longer the lock's."
+msgstr "O Proxmox VE tem um único lock global sobre a configuração SDN (`POST /cluster/sdn/lock`). Enquanto outro detentor o tiver, todas as escritas SDN encenadas e o apply são recusados; o nó diz o mesmo quando o token que este cliente levava já não é o do lock."
+
+msgid "Wait for the holder to apply or roll back; if the holder is gone, release the lock with its token (`DELETE /cluster/sdn/lock`), or with `force=1` once you are sure nobody is using it."
+msgstr "Espera que o detentor aplique ou reverta; se o detentor já não existir, liberta o lock com o token dele (`DELETE /cluster/sdn/lock`), ou com `force=1` quando tiveres a certeza de que ninguém o está a usar."
+
+msgid "the cluster has pending SDN changes"
+msgstr "o cluster tem alterações SDN pendentes"
+
+msgid "The SDN lock was refused because the cluster already carries staged SDN changes nobody applied. Taking the lock anyway and applying would push that other work along with this change."
+msgstr "O lock SDN foi recusado porque o cluster já tem alterações SDN encenadas que ninguém aplicou. Tomar o lock na mesma e aplicar empurraria esse outro trabalho junto com esta alteração."
+
+msgid "Find who staged them (`delonix`'s pending-change list, or the node's SDN panel) and have them applied or rolled back first."
+msgstr "Descobre quem as encenou (a lista de alterações pendentes do `delonix`, ou o painel SDN do nó) e pede que sejam aplicadas ou revertidas primeiro."
+
+msgid "discarding a failed SDN change failed too"
+msgstr "descartar uma alteração SDN falhada também falhou"
+
+msgid "A change inside an SDN transaction failed, and the rollback that should have discarded what it had staged (`POST /cluster/sdn/rollback`) failed as well: pending changes, and possibly the SDN lock, are left on the cluster. The message names both failures and the lock token."
+msgstr "Uma alteração dentro de uma transacção SDN falhou, e o rollback que devia descartar o que ela tinha encenado (`POST /cluster/sdn/rollback`) também falhou: ficam no cluster alterações pendentes, e possivelmente o lock SDN. A mensagem nomeia as duas falhas e o token do lock."
+
+msgid "Roll back by hand with the token the message names (`POST /cluster/sdn/rollback` with `lock-token` and `release-lock=1`), then retry the change."
+msgstr "Reverte à mão com o token que a mensagem nomeia (`POST /cluster/sdn/rollback` com `lock-token` e `release-lock=1`) e repete a alteração."
+
 # NetworkPolicy scope: vm (ADR-0052)
 msgid "{kind} '{name}' (scope vm) → target '{target}' is not a declared or existing VirtualMachine"
 msgstr "{kind} '{name}' (scope vm) → o alvo '{target}' não é uma VirtualMachine declarada nem existente"
@@ -14154,6 +14197,34 @@ msgstr "Imprime o JSON Schema do ficheiro de providers.\n\nO mesmo schema public
 
 msgid "the JSON Schema of the providers file, for an editor or a CI check"
 msgstr "o JSON Schema do ficheiro de providers, para um editor ou um check de CI"
+# DX-1539 / DX-6510 / DX-6511 — a Proxmox VM from a local image (ADR-0057)
+msgid "the local image could not be read"
+msgstr "não foi possível ler a imagem local"
+
+msgid "A Proxmox VM created from an image of the engine's store is uploaded to the node first (ADR-0057). The file the image resolved to could not be opened or read, or it is empty."
+msgstr "Uma VM Proxmox criada a partir de uma imagem do store do motor é primeiro enviada para o nó (ADR-0057). O ficheiro para onde a imagem aponta não pôde ser aberto nem lido, ou está vazio."
+
+msgid "Check the image with `delonix image vm ls` and `delonix image vm describe <name>`; pull or build it again if the file is missing."
+msgstr "Verifica a imagem com `delonix image vm ls` e `delonix image vm describe <nome>`; volta a descarregá-la ou a construí-la se o ficheiro faltar."
+
+msgid "the node's import storage does not accept images"
+msgstr "o storage de importação do nó não aceita imagens"
+
+msgid "A Proxmox VM created from a local image is uploaded to a dir storage of the node under `import/`, and the node accepts that only on a storage whose content types include `import` (ADR-0057). The engine never changes a storage's content types: that is administering the node."
+msgstr "Uma VM Proxmox criada a partir de uma imagem local é enviada para um storage do tipo dir do nó, em `import/`, e o nó só o aceita num storage cujos tipos de conteúdo incluam `import` (ADR-0057). O motor nunca muda os tipos de conteúdo de um storage: isso é administrar o nó."
+
+msgid "Enable it on the node (`pvesm set <storage> --content <current types>,import`, or Datacenter › Storage › Edit › Content), or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage that has it."
+msgstr "Liga-o no nó (`pvesm set <storage> --content <tipos actuais>,import`, ou Datacenter › Storage › Edit › Content), ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage que o tenha."
+
+msgid "the node's import storage has no room for the image"
+msgstr "o storage de importação do nó não tem espaço para a imagem"
+
+msgid "The image would be uploaded to the node's import storage, and that storage has less free space than the image. The upload is refused before it starts, because the node's own refusal would come after the bytes had been sent."
+msgstr "A imagem seria enviada para o storage de importação do nó, e esse storage tem menos espaço livre do que a imagem. O envio é recusado antes de começar, porque a recusa do próprio nó só viria depois de os bytes terem sido enviados."
+
+msgid "Free space on the storage, or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage with room."
+msgstr "Liberta espaço no storage, ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage com espaço."
+
 # DX-1538 / DX-5507 — vm move --node (vm.migration.cold/live, ADR-0053)
 msgid "invalid node to move the VM to"
 msgstr "nó inválido para onde mover a VM"
@@ -14200,6 +14271,16 @@ msgstr "move uma VM Proxmox parada para outro nó do seu cluster — a mesma VM,
 msgid "move it while it runs, on a storage the whole cluster shares"
 msgstr "move-a enquanto corre, num storage partilhado por todo o cluster"
 
+# DX-6512 — SDN apply not realized on every node (ADR-0049)
+msgid "the SDN apply ended OK but a node did not realize it"
+msgstr "o apply do SDN terminou OK mas um nó não o realizou"
+
+msgid "An apply of the cluster's SDN configuration (`PUT /cluster/sdn`) forks one `reloadnetworkall` task, and that task ends OK when the entry node's reload succeeds — even if another node's reload failed. The engine then reads each online node's zone content, and at least one vnet was not `available` there. The message names each node, zone and vnet with the node's own reason."
+msgstr "Um apply da configuração SDN do cluster (`PUT /cluster/sdn`) lança uma tarefa `reloadnetworkall`, e essa tarefa termina OK quando o reload do nó de entrada tem sucesso — mesmo que o reload de outro nó tenha falhado. O motor lê então o conteúdo das zonas em cada nó online, e pelo menos uma vnet não estava `available` lá. A mensagem nomeia cada nó, zona e vnet com a razão dada pelo próprio nó."
+
+msgid "Read that node's 'reload network' task log (`pvesh get /nodes/<node>/tasks --typefilter srvreload`), fix what it names — commonly the `dnsmasq` package for a zone with `dhcp=dnsmasq`, or the `source /etc/network/interfaces.d/*` line in `/etc/network/interfaces` — and apply again."
+msgstr "Lê o log da tarefa 'reload network' desse nó (`pvesh get /nodes/<nó>/tasks --typefilter srvreload`), corrige o que ele nomeia — muitas vezes o pacote `dnsmasq` para uma zona com `dhcp=dnsmasq`, ou a linha `source /etc/network/interfaces.d/*` em `/etc/network/interfaces` — e aplica outra vez."
+
 # DX-6509 — quiesced backup on Proxmox (vm.backup.quiesced, ADR-0049)
 msgid "the backup could not be taken with the guest's filesystem frozen"
 msgstr "não foi possível fazer o backup com o sistema de ficheiros do convidado congelado"
@@ -14209,3 +14290,29 @@ msgstr "Um backup consistente congela os sistemas de ficheiros do convidado atra
 
 msgid "Install and start `qemu-guest-agent` in the guest and set `agent=1` on the VM; for a stopped VM, a plain backup is already consistent."
 msgstr "Instala e arranca o `qemu-guest-agent` no convidado e define `agent=1` na VM; para uma VM parada, um backup simples já é consistente."
+
+# ---- io/cpuset sem controlador: recusa em vez de aviso (2026-09-27) ----
+
+msgid "warning: {flags} cannot be enforced: this container's cgroup is missing the controller(s) `{controllers}`, so the kernel will not see the limit — continuing unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+msgstr "aviso: não é possível impor {flags}: ao cgroup deste container falta(m) o(s) controlador(es) `{controllers}`, por isso o kernel não verá o limite — a continuar sem imposição porque DELONIX_ALLOW_UNENFORCED_LIMITS está definida"
+
+msgid "{flags} cannot be enforced: the cgroup this container would run in is missing the controller(s) `{controllers}` — the limit would not exist while this command reports success. `systemd-run --user --scope -p Delegate=yes` does NOT fix this: a scope only receives controllers user@.service itself has, and here it lacks them. Fix, once per host, as root: write `[Service]` and `{delegate}` to {dropin}, run `systemctl daemon-reload`, then `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough, and logging out does not restart a lingering user manager. Or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
+msgstr "não é possível impor {flags}: ao cgroup onde este container correria falta(m) o(s) controlador(es) `{controllers}` — o limite não existiria enquanto este comando reporta sucesso. `systemd-run --user --scope -p Delegate=yes` NÃO resolve isto: um scope só recebe os controladores que o próprio user@.service tem, e aqui faltam-lhe estes. Correcção, uma vez por host, como root: escreve `[Service]` e `{delegate}` em {dropin}, corre `systemctl daemon-reload`, e depois `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega, e sair da sessão não reinicia um gestor de utilizador com linger. Ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
+
+msgid "{flags} cannot be enforced: delonix.slice does not hand down the `{controllers}` controller — the limit would not exist while this command reports success. Check that /sys/fs/cgroup/cgroup.controllers lists them (the kernel may be built without them), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
+msgstr "não é possível impor {flags}: o delonix.slice não passa para baixo o(s) controlador(es) `{controllers}` — o limite não existiria enquanto este comando reporta sucesso. Confirma que /sys/fs/cgroup/cgroup.controllers os lista (o kernel pode ter sido compilado sem eles), ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
+
+msgid "← a Kubernetes node boots without them"
+msgstr "← um nó Kubernetes arranca sem eles"
+
+msgid "← `container run` REFUSES these here (exit 69): the container's cgroup has no controller for them. A `systemd-run --user --scope` does not bring it — a scope only gets what user@.service has."
+msgstr "← o `container run` RECUSA estas aqui (saída 69): o cgroup do container não tem controlador para elas. Um `systemd-run --user --scope` não o traz — um scope só recebe o que o user@.service tem."
+
+msgid "Running as root and delonix.slice does not hand these controllers down: check that /sys/fs/cgroup/cgroup.controllers lists them."
+msgstr "A correr como root e o delonix.slice não passa estes controladores para baixo: confirma que /sys/fs/cgroup/cgroup.controllers os lista."
+
+msgid "Container limits work, but not the refused flags above. Only this fixes them (root, once per host):"
+msgstr "Os limites de container funcionam, mas não as flags recusadas acima. Só isto as resolve (root, uma vez por host):"
+
+msgid "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough"
+msgstr "depois `systemctl daemon-reload` e `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega"
