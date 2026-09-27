@@ -6341,6 +6341,30 @@ segredo do token em qualquer `{:?}`.
   scanner lê o verbo do statement seguinte ao literal, e um `push_str` pelo meio torna a rota
   «não classificada» e contada como não chamada. O #497 já tinha pago o mesmo com `{id}`.
 
+- **Uma tarefa tem três saídas, não duas (ADR-0058, Fatia 0 do plano 63, 2026-09-27).** O
+  `task_verdict` lia tudo o que não fosse `"OK"` como falha. Mas um worker que acaba a fazer o
+  seu trabalho com avisos termina com `exitstatus: "WARNINGS: <n>"`: medido num `vzstart` de
+  LXC cujo DHCP não teve resposta, o container ficou a correr sem endereço. Ler isso como falha
+  faz reenviar a acção por cima de um recurso vivo; ler como `OK` apaga o aviso. Passa a ser
+  `TaskEnd::Warnings(n)`: a chamada tem sucesso, as linhas `WARN:` do log vão para o livro
+  (`ok_with_warnings`) e para `tracing::warn!`. Só a forma exacta `WARNINGS: <número>` conta;
+  qualquer outro texto continua a ser falha. Um log ilegível nunca dá «sem avisos»: o livro diz
+  que houve `n` e que o log não se leu. O cenário
+  `a_task_that_ends_with_warnings_succeeds_and_the_ledger_keeps_them` chumba com a correcção
+  revertida.
+- **Medido no histórico do laboratório, e é o achado maior**: 51 tarefas acabaram em `WARNINGS`
+  nos dois nós, e 50 são `srvreload networking`, o reload de rede por nó que um `PUT
+  /cluster/sdn` desencadeia. As linhas dizem `missing 'source /etc/network/interfaces.d/sdn'
+  directive for SDN support!` (24) e `reloading frr configuration failed` (5). A tarefa que o
+  motor espera, `reloadnetworkall`, acabou em **`OK` nas 61 vezes**: o próprio PVE lança o
+  reload de cada nó em segundo plano e não o acompanha (`PVE/API2/Network/SDN.pm`, com um
+  `FIXME` do upstream a dizê-lo). Logo o terceiro veredicto **não chega** a um apply de SDN: o
+  `OK` dele quer dizer «pedidos enviados», e foi assim que os applies do #493 e do #497 foram
+  aceites e nunca realizados. **Por fechar** (Fatia 0b do plano 63): o `apply_sdn` tem de
+  encontrar o `srvreload networking` de cada nó (tipo, id e hora de início a partir da mãe) e
+  esperar por cada um, com os três veredictos. Não se fez aqui porque o #542 está aberto a
+  mexer no apply de SDN.
+
 **Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
 — a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; um fabric
 com mais de um nó, OSPF, um NetBox/PowerDNS a sério atrás dos controladores e um lease DHCP entregue
