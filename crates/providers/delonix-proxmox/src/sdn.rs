@@ -19,9 +19,11 @@
 //! controllers (`/cluster/sdn/dns`), Fabrics and their nodes
 //! (`/cluster/sdn/fabrics/*` and the node-side reads), a zone's DHCP/IPAM/DNS
 //! fields ([`ZoneOptions`]), a subnet's DHCP ranges ([`SubnetOptions`]), and
-//! IP reservations on a vnet (`.../vnets/{vnet}/ips`). Still left out on
-//! purpose: per-vnet/per-subnet firewalls, EVPN controllers, route maps and
-//! prefix lists, the `wireguard`/`bgp` fabric protocols.
+//! IP reservations on a vnet (`.../vnets/{vnet}/ips`). Since 2026-09-27 the
+//! rest of `/cluster/sdn` lives next door: BGP/EVPN controllers, prefix
+//! lists, route maps and the vnet firewall in `sdn_routing.rs`, the index,
+//! the dry-run, the global lock and rollback in `sdn_lock.rs`. Still left out
+//! on purpose: the `wireguard`/`bgp` fabric protocols.
 //! [`Client::create_sdn_zone`] only ever creates a `simple` zone — an
 //! isolated L3 zone with no VLAN/VXLAN encapsulation, the plainest kind
 //! Proxmox has, and the one that needs no VLAN-capable hardware on the node

@@ -52,6 +52,8 @@ struct Seen {
     /// The decoded request body, form-encoded requests included — captured
     /// so a scenario can check WHAT was sent, not just that something was.
     body: String,
+    /// The decoded query string — where a DELETE carries its parameters.
+    query: String,
 }
 
 struct MockNode {
@@ -185,6 +187,7 @@ fn serve_one(
         method: method.clone(),
         path: path.clone(),
         body: percent_decode(&String::from_utf8_lossy(&body)),
+        query: percent_decode(target.split_once('?').map(|(_, q)| q).unwrap_or_default()),
     });
     let reply = {
         let mut s = script.lock().unwrap();
@@ -1933,4 +1936,388 @@ fn mv(live: bool) -> delonix_compute::vm_backend::MoveOptions {
         live,
         ..Default::default()
     }
+}
+
+// ===========================================================================
+// The cluster's own SDN: the global lock, controllers, prefix lists, route
+// maps, the vnet firewall
+// ===========================================================================
+
+const SDN_LOCK: &str = "/cluster/sdn/lock";
+const SDN_APPLY: &str = "/cluster/sdn";
+const SDN_ROLLBACK: &str = "/cluster/sdn/rollback";
+const RELOAD_UPID: &str = "UPID:pve:0000243A:00014550:6AB8CB63:reloadnetworkall::root@pam:";
+
+fn sdn_client(node: &MockNode) -> Client {
+    Client::connect_with(&token_target(node), fast()).expect("connect")
+}
+
+/// The whole transaction on the wire: the lock first, the token on every
+/// staged write (the DELETE's in its query), then ONE apply that carries the
+/// token AND `release-lock=1` — the node's handler does not apply the
+/// schema's default, so without it the lock outlives the apply.
+#[test]
+fn an_sdn_transaction_carries_the_lock_token_and_applies_with_it() {
+    let node = MockNode::start(script(&[
+        ("POST", SDN_LOCK, ok_data(r#""tok-1""#)),
+        ("POST", "/cluster/sdn/prefix-lists", ok_data("null")),
+        ("DELETE", "/cluster/sdn/zones/z1", ok_data("null")),
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let entries = [delonix_proxmox::PrefixListEntry {
+        action: delonix_proxmox::RoutingAction::Permit,
+        prefix: "10.77.0.0/16",
+        ge: None,
+        le: Some(24),
+        seq: None,
+    }];
+    cli.sdn_transaction(&ledger, || {
+        cli.create_sdn_prefix_list(&ledger, "pl1", &entries)?;
+        cli.delete_sdn_zone(&ledger, "z1")
+    })
+    .expect("transaction");
+
+    let log: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path.starts_with("/cluster/sdn"))
+        .collect();
+    let order: Vec<(&str, &str)> = log
+        .iter()
+        .map(|s| (s.method.as_str(), s.path.as_str()))
+        .collect();
+    assert_eq!(
+        order,
+        vec![
+            ("POST", SDN_LOCK),
+            ("POST", "/cluster/sdn/prefix-lists"),
+            ("DELETE", "/cluster/sdn/zones/z1"),
+            ("PUT", SDN_APPLY),
+        ],
+        "lock, the two writes, one apply — no rollback"
+    );
+    assert!(
+        log[1].body.contains("lock-token=tok-1")
+            && log[1]
+                .body
+                .contains("entries=action=permit,prefix=10.77.0.0/16,le=24"),
+        "{}",
+        log[1].body
+    );
+    assert!(log[2].query.contains("lock-token=tok-1"), "{:?}", log[2]);
+    assert!(
+        log[3].body.contains("lock-token=tok-1") && log[3].body.contains("release-lock=1"),
+        "{}",
+        log[3].body
+    );
+    let ledger_text = std::fs::read_to_string(dir.path().join("proxmox-tasks.json")).unwrap();
+    assert!(
+        ledger_text.contains(RELOAD_UPID) && ledger_text.contains("\"ok\""),
+        "{ledger_text}"
+    );
+    // The token is the transaction's: a write after it carries none.
+    let _ = cli.create_sdn_zone(&ledger, "z2");
+    let late = node
+        .log()
+        .into_iter()
+        .rfind(|s| s.method == "POST" && s.path == "/cluster/sdn/zones")
+        .expect("the late write reached the node");
+    assert!(!late.body.contains("lock-token"), "{}", late.body);
+}
+
+/// A change that fails is rolled back under the lock — with `release-lock=1`
+/// — and nothing is applied: the apply would have pushed the half that did
+/// get staged.
+#[test]
+fn a_failed_sdn_change_is_rolled_back_and_never_applied() {
+    let node = MockNode::start(script(&[
+        ("POST", SDN_LOCK, ok_data(r#""tok-2""#)),
+        ("POST", "/cluster/sdn/prefix-lists", ok_data("null")),
+        (
+            "POST",
+            "/cluster/sdn/controllers",
+            Reply::Json(
+                500,
+                r#"{"data":null,"message":"create sdn controller object failed: route map rm1 does not exist!\n"}"#
+                    .into(),
+            ),
+        ),
+        ("POST", SDN_ROLLBACK, ok_data("null")),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let peers = ["10.0.0.2"];
+    let err = cli
+        .sdn_transaction(&ledger, || {
+            cli.create_sdn_prefix_list(&ledger, "pl1", &[])?;
+            cli.create_sdn_controller(
+                &ledger,
+                "ev1",
+                delonix_proxmox::ControllerKind::Evpn,
+                &delonix_proxmox::ControllerOptions {
+                    asn: Some(65000),
+                    peers: &peers,
+                    route_map_in: Some("rm1"),
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap_err();
+    assert!(err.to_string().contains("route map rm1"), "{err}");
+    assert_eq!(node.count("PUT", SDN_APPLY), 0, "nothing is applied");
+    let rb: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path == SDN_ROLLBACK)
+        .collect();
+    assert_eq!(rb.len(), 1, "one rollback");
+    assert!(
+        rb[0].body.contains("lock-token=tok-2") && rb[0].body.contains("release-lock=1"),
+        "{}",
+        rb[0].body
+    );
+}
+
+/// Someone else's staged changes are waiting: the lock is refused with its own
+/// class (DX-5516), and the change never runs.
+#[test]
+fn the_lock_refused_for_pending_changes_runs_nothing() {
+    let node = MockNode::start(script(&[(
+        "POST",
+        SDN_LOCK,
+        Reply::Json(
+            500,
+            r#"{"data":null,"message":"could not acquire lock for SDN config: configuration has pending changes\n"}"#
+                .into(),
+        ),
+    )]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let mut ran = false;
+    let err = cli
+        .sdn_transaction(&ledger, || {
+            ran = true;
+            Ok(())
+        })
+        .unwrap_err();
+    assert!(!ran, "the change must not run without the lock");
+    assert_eq!(err.number(), 5516, "{err}");
+    assert!(err.is_conflict(), "{err}");
+    let sdn: Vec<Seen> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path.starts_with("/cluster/sdn"))
+        .collect();
+    assert_eq!(sdn.len(), 1, "only the lock request: {sdn:?}");
+}
+
+/// A staged write while another holder has the lock is DX-5515, not a generic
+/// HTTP error.
+#[test]
+fn a_write_under_someone_elses_lock_is_sdn_locked() {
+    let node = MockNode::start(script(&[(
+        "POST",
+        "/cluster/sdn/zones",
+        Reply::Json(
+            500,
+            r#"{"data":null,"message":"create sdn zone object failed: invalid lock token provided! at /usr/share/perl5/PVE/Network/SDN.pm line 305.\n"}"#
+                .into(),
+        ),
+    )]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let err = cli
+        .create_sdn_zone(&Ledger::at(dir.path()), "z1")
+        .unwrap_err();
+    assert_eq!(err.number(), 5515, "{err}");
+    assert!(
+        err.to_string().contains("locked by another holder"),
+        "{err}"
+    );
+}
+
+/// The change failed and the rollback failed too: both are named, with the
+/// token that releases what is left.
+#[test]
+fn a_failed_rollback_names_both_failures_and_the_token() {
+    let node = MockNode::start(script(&[
+        ("POST", SDN_LOCK, ok_data(r#""tok-3""#)),
+        (
+            "DELETE",
+            "/cluster/sdn/zones/z1",
+            Reply::Json(400, r#"{"data":null,"message":"bad"}"#.into()),
+        ),
+        (
+            "POST",
+            SDN_ROLLBACK,
+            Reply::Json(503, r#"{"data":null,"message":"pmxcfs busy"}"#.into()),
+        ),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let err = cli
+        .sdn_transaction(&ledger, || cli.delete_sdn_zone(&ledger, "z1"))
+        .unwrap_err();
+    assert_eq!(err.number(), 9525, "{err}");
+    let text = err.to_string();
+    assert!(
+        text.contains("tok-3") && text.contains("bad") && text.contains("pmxcfs busy"),
+        "{text}"
+    );
+}
+
+/// A vnet's firewall takes `forward` rules only: an `in` rule is refused
+/// before the wire; a staged vnet ("invalid vnet specified") is a not-found
+/// that says to apply first; a rule goes out with `type=forward` and no lock
+/// token even inside a transaction (the Perl route refuses an unknown one).
+#[test]
+fn a_vnet_firewall_rule_is_forward_only_and_never_carries_the_lock() {
+    let rules = "/cluster/sdn/vnets/v1/firewall/rules";
+    let node = MockNode::start(script(&[
+        ("POST", SDN_LOCK, ok_data(r#""tok-4""#)),
+        ("POST", rules, ok_data("null")),
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+        (
+            "GET",
+            "/cluster/sdn/vnets/v2/firewall/rules",
+            Reply::Json(
+                500,
+                r#"{"data":null,"message":"invalid vnet specified at /usr/share/perl5/PVE/API2/Firewall/Helpers.pm line 54.\n"}"#
+                    .into(),
+            ),
+        ),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let inbound = delonix_proxmox::FirewallRuleOpts {
+        rule_type: Some("in"),
+        ..Default::default()
+    };
+    let e = cli
+        .add_sdn_vnet_firewall_rule(&ledger, "v1", "ACCEPT", &inbound)
+        .unwrap_err();
+    assert_eq!(e.number(), 1551, "{e}");
+    assert_eq!(node.count("POST", rules), 0, "refused before the wire");
+
+    let ssh = delonix_proxmox::FirewallRuleOpts {
+        proto: Some("tcp"),
+        dport: Some("22"),
+        ..Default::default()
+    };
+    cli.sdn_transaction(&ledger, || {
+        cli.add_sdn_vnet_firewall_rule(&ledger, "v1", "ACCEPT", &ssh)
+    })
+    .expect("transaction");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == rules)
+        .expect("the rule was sent");
+    assert!(
+        sent.body.contains("type=forward")
+            && sent.body.contains("enable=1")
+            && sent.body.contains("dport=22")
+            && !sent.body.contains("lock-token"),
+        "{}",
+        sent.body
+    );
+
+    let staged = cli.sdn_vnet_firewall_rules("v2").unwrap_err();
+    assert_eq!(staged.number(), 4504, "{staged}");
+    assert!(
+        staged.to_string().contains("running SDN configuration"),
+        "{staged}"
+    );
+}
+
+/// A route-map entry goes to its own path (`{route-map-id}` travels as the
+/// id), its clauses as `key=…,value=…` property strings, and the dry-run's
+/// `null` diffs read as "nothing would change".
+#[test]
+fn a_route_map_entry_and_a_dry_run_read_the_nodes_shapes() {
+    let entry_path = "/cluster/sdn/route-maps/entries/rm1/entry/10";
+    let node = MockNode::start(script(&[
+        ("POST", "/cluster/sdn/route-maps/entries", ok_data("null")),
+        (
+            "GET",
+            entry_path,
+            ok_data(r#"{"route-map-id":"rm1","order":10,"action":"permit"}"#),
+        ),
+        (
+            "GET",
+            "/cluster/sdn/dry-run",
+            ok_data(r#"{"interfaces-diff":null,"frr-diff":null}"#),
+        ),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+    let matches = [delonix_proxmox::RouteMapClause {
+        key: "ip-address-prefix-list",
+        value: Some("pl1"),
+    }];
+    let sets = [delonix_proxmox::RouteMapClause {
+        key: "local-preference",
+        value: Some("200"),
+    }];
+    cli.create_sdn_route_map_entry(
+        &ledger,
+        "rm1",
+        10,
+        &delonix_proxmox::RouteMapEntry {
+            action: delonix_proxmox::RoutingAction::Permit,
+            matches: &matches,
+            sets: &sets,
+            call: None,
+            exit_action: None,
+        },
+    )
+    .expect("entry");
+    let sent = node
+        .log()
+        .into_iter()
+        .find(|s| s.path == "/cluster/sdn/route-maps/entries")
+        .unwrap();
+    assert!(
+        sent.body.contains("route-map-id=rm1")
+            && sent.body.contains("order=10")
+            && sent
+                .body
+                .contains("match=key=ip-address-prefix-list,value=pl1")
+            && sent.body.contains("set=key=local-preference,value=200"),
+        "{}",
+        sent.body
+    );
+    let got = cli.sdn_route_map_entry("rm1", 10).expect("read back");
+    assert_eq!(got.get("action").and_then(|v| v.as_str()), Some("permit"));
+    let dry = cli.sdn_dry_run(None).expect("dry run");
+    assert!(dry.is_empty(), "{dry:?}");
+    let asked = node
+        .log()
+        .into_iter()
+        .find(|s| s.path == "/cluster/sdn/dry-run")
+        .unwrap();
+    assert_eq!(asked.query, "node=pve");
+    let e = cli
+        .create_sdn_route_map_entry(
+            &ledger,
+            "pve_x",
+            1,
+            &delonix_proxmox::RouteMapEntry {
+                action: delonix_proxmox::RoutingAction::Deny,
+                matches: &[],
+                sets: &[],
+                call: None,
+                exit_action: None,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(e.number(), 1550, "a reserved id is refused: {e}");
 }

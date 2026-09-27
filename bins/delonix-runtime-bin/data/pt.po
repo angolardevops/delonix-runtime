@@ -14011,6 +14011,52 @@ msgstr "Um `NetworkPolicy` com `scope: vm` pediu regras numa VM de um cluster Pr
 msgid "Enable the firewall at Datacenter level on the cluster (Datacenter › Firewall › Options, or `pvesh set /cluster/firewall/options --enable 1`), after checking the management rules for the nodes, then apply again."
 msgstr "Liga a firewall ao nível de Datacenter no cluster (Datacenter › Firewall › Options, ou `pvesh set /cluster/firewall/options --enable 1`), depois de verificar as regras de gestão dos nós, e aplica outra vez."
 
+# DX-1550/1551/5515/5516/9525 — the Proxmox cluster's own SDN: controllers, prefix lists, route maps, vnet firewall, the global lock
+msgid "invalid Proxmox SDN controller, prefix list or route map"
+msgstr "controlador, prefix list ou route map do SDN do Proxmox inválido"
+
+msgid "A BGP/EVPN controller, prefix list or route map of the cluster's own SDN (not this engine's) was refused before any request: an id outside Proxmox's own format (a controller id starts with a letter; a prefix-list or route-map id is 1 to 32 letters, digits, '-' or '_', and the node reserves some), a missing field the controller type needs (EVPN: an ASN and exactly one of peers/fabric; BGP: a node, an ASN and peers), or an entry field the node would not accept (action other than permit/deny, a prefix length past the address family, an unknown match/set key)."
+msgstr "Um controlador BGP/EVPN, uma prefix list ou um route map do SDN do próprio cluster (não o deste motor) foi recusado antes de qualquer pedido: um id fora do formato do próprio Proxmox (um id de controlador começa por uma letra; um id de prefix list ou de route map tem de 1 a 32 letras, dígitos, '-' ou '_', e o nó reserva alguns), um campo em falta que o tipo de controlador exige (EVPN: um ASN e exactamente um de peers/fabric; BGP: um nó, um ASN e peers), ou um campo de entrada que o nó não aceitaria (acção que não seja permit/deny, um comprimento de prefixo além da família de endereços, uma chave de match/set desconhecida)."
+
+msgid "Correct the field the message names; the node's own `apidoc.js` lists the formats."
+msgstr "Corrige o campo que a mensagem nomeia; o `apidoc.js` do próprio nó lista os formatos."
+
+msgid "invalid Proxmox vnet firewall rule"
+msgstr "regra de firewall de vnet do Proxmox inválida"
+
+msgid "A vnet's firewall filters traffic FORWARDED through the vnet and takes only 'forward' rules — the node refuses 'in' and 'out' there — with an action of ACCEPT, DROP or REJECT (a security group's name is not accepted by this client)."
+msgstr "A firewall de uma vnet filtra o tráfego ENCAMINHADO através da vnet e só aceita regras 'forward' — o nó recusa 'in' e 'out' ali — com uma acção ACCEPT, DROP ou REJECT (o nome de um security group não é aceite por este cliente)."
+
+msgid "Use the rule type 'forward' (the default) and ACCEPT, DROP or REJECT; for traffic to or from one VM, use the VM's own firewall."
+msgstr "Usa o tipo de regra 'forward' (o de omissão) e ACCEPT, DROP ou REJECT; para o tráfego de ou para uma VM, usa a firewall da própria VM."
+
+msgid "the cluster's SDN configuration is locked"
+msgstr "a configuração SDN do cluster está trancada"
+
+msgid "Proxmox VE has one global lock over the SDN configuration (`POST /cluster/sdn/lock`). While another holder has it, every staged SDN write and the apply are refused; the node also says this when the token this client carried is no longer the lock's."
+msgstr "O Proxmox VE tem um único lock global sobre a configuração SDN (`POST /cluster/sdn/lock`). Enquanto outro detentor o tiver, todas as escritas SDN encenadas e o apply são recusados; o nó diz o mesmo quando o token que este cliente levava já não é o do lock."
+
+msgid "Wait for the holder to apply or roll back; if the holder is gone, release the lock with its token (`DELETE /cluster/sdn/lock`), or with `force=1` once you are sure nobody is using it."
+msgstr "Espera que o detentor aplique ou reverta; se o detentor já não existir, liberta o lock com o token dele (`DELETE /cluster/sdn/lock`), ou com `force=1` quando tiveres a certeza de que ninguém o está a usar."
+
+msgid "the cluster has pending SDN changes"
+msgstr "o cluster tem alterações SDN pendentes"
+
+msgid "The SDN lock was refused because the cluster already carries staged SDN changes nobody applied. Taking the lock anyway and applying would push that other work along with this change."
+msgstr "O lock SDN foi recusado porque o cluster já tem alterações SDN encenadas que ninguém aplicou. Tomar o lock na mesma e aplicar empurraria esse outro trabalho junto com esta alteração."
+
+msgid "Find who staged them (`delonix`'s pending-change list, or the node's SDN panel) and have them applied or rolled back first."
+msgstr "Descobre quem as encenou (a lista de alterações pendentes do `delonix`, ou o painel SDN do nó) e pede que sejam aplicadas ou revertidas primeiro."
+
+msgid "discarding a failed SDN change failed too"
+msgstr "descartar uma alteração SDN falhada também falhou"
+
+msgid "A change inside an SDN transaction failed, and the rollback that should have discarded what it had staged (`POST /cluster/sdn/rollback`) failed as well: pending changes, and possibly the SDN lock, are left on the cluster. The message names both failures and the lock token."
+msgstr "Uma alteração dentro de uma transacção SDN falhou, e o rollback que devia descartar o que ela tinha encenado (`POST /cluster/sdn/rollback`) também falhou: ficam no cluster alterações pendentes, e possivelmente o lock SDN. A mensagem nomeia as duas falhas e o token do lock."
+
+msgid "Roll back by hand with the token the message names (`POST /cluster/sdn/rollback` with `lock-token` and `release-lock=1`), then retry the change."
+msgstr "Reverte à mão com o token que a mensagem nomeia (`POST /cluster/sdn/rollback` com `lock-token` e `release-lock=1`) e repete a alteração."
+
 # NetworkPolicy scope: vm (ADR-0052)
 msgid "{kind} '{name}' (scope vm) → target '{target}' is not a declared or existing VirtualMachine"
 msgstr "{kind} '{name}' (scope vm) → o alvo '{target}' não é uma VirtualMachine declarada nem existente"

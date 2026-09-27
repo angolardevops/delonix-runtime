@@ -55,6 +55,23 @@ pub enum Error {
     #[error("{0}")]
     DatacenterFirewallDisabled(String),
 
+    /// The cluster's global SDN lock (`POST /cluster/sdn/lock`) is held by
+    /// another holder, or the token this client carried is no longer the
+    /// lock's — the node refuses every staged SDN write and the apply.
+    #[error("{0}")]
+    SdnLocked(String),
+    /// The SDN lock was refused because the cluster already has staged SDN
+    /// changes nobody applied: taking it would make the next apply push
+    /// someone else's work along with ours.
+    #[error("{0}")]
+    SdnPendingChanges(String),
+    /// A change inside an SDN transaction failed, and discarding what it had
+    /// staged (`POST /cluster/sdn/rollback`) failed too: pending changes, and
+    /// possibly the lock, are left on the cluster. The message names both
+    /// failures and the lock token.
+    #[error("{0}")]
+    SdnRollbackFailed(String),
+
     /// A quiesced backup was asked of a VM whose filesystem could not be
     /// shown frozen for it: not running, no agent answering, or the node's
     /// backup log without the freeze and the thaw.
@@ -159,6 +176,20 @@ pub enum Error {
     #[error("{0}")]
     InvalidSdnAddress(String),
 
+    /// A BGP/EVPN controller, prefix list or route map this client refuses
+    /// before anything reaches the node: an id outside Proxmox's own format,
+    /// or an entry field (action, prefix length, match/set key) the node
+    /// would not accept.
+    #[error("{0}")]
+    InvalidSdnRouting(String),
+
+    /// A rule of a vnet's firewall that is not a `forward` rule, or whose
+    /// action is not ACCEPT/DROP/REJECT. A vnet's firewall filters traffic
+    /// forwarded through the vnet and nothing else — the node refuses `in`
+    /// and `out` there (measured).
+    #[error("{0}")]
+    InvalidVnetFirewallRule(String),
+
     /// A guest-driven shutdown/reboot timeout this client could not wait out:
     /// the node would still be inside the task when the client's own task
     /// deadline ran out, and the answer would read as a timeout of the CLIENT.
@@ -201,6 +232,11 @@ impl Error {
             Error::InvalidCidr(_) => 1533,
             Error::InvalidSdnAddress(_) => 1534,
             Error::InvalidPowerTimeout(_) => 1535,
+            Error::InvalidSdnRouting(_) => 1550,
+            Error::InvalidVnetFirewallRule(_) => 1551,
+            Error::SdnLocked(_) => 5515,
+            Error::SdnPendingChanges(_) => 5516,
+            Error::SdnRollbackFailed(_) => 9525,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
             Error::InvalidFirewallObjectName(_) => 1531,
@@ -257,7 +293,10 @@ impl From<Error> for Dx {
         let number = e.number();
         let class = match e {
             Error::SnapshotNotFound(text) | Error::NodeNotFound(text) => Dx::NotFound(text),
-            Error::SnapshotTaken(text) | Error::NodeConflict(text) => Dx::Conflict(text),
+            Error::SnapshotTaken(text)
+            | Error::NodeConflict(text)
+            | Error::SdnLocked(text)
+            | Error::SdnPendingChanges(text) => Dx::Conflict(text),
             Error::ClientBuild(text)
             | Error::NodeUnavailable(text)
             | Error::DatacenterFirewallDisabled(text)
@@ -271,7 +310,8 @@ impl From<Error> for Dx {
             | Error::ResponseTooLarge(text)
             | Error::Decode(text)
             | Error::UnexpectedAnswer(text)
-            | Error::TaskFailed(text) => Dx::Registry(text),
+            | Error::TaskFailed(text)
+            | Error::SdnRollbackFailed(text) => Dx::Registry(text),
             Error::Engine(e) => return e,
             e => Dx::Invalid(e.to_string()),
         };
@@ -318,6 +358,11 @@ mod tests {
             Error::InvalidSdnId("invalid Proxmox SDN id 'x': expected a lowercase letter then up to 7 lowercase letters or digits".into()),
             Error::InvalidCidr("invalid Proxmox SDN subnet 'x': expected <address>/<prefix-length>".into()),
             Error::InvalidSdnAddress("invalid Proxmox SDN MAC address 'x': expected XX:XX:XX:XX:XX:XX".into()),
+            Error::InvalidSdnRouting("invalid Proxmox SDN route map id 'pve_x': the prefix 'pve_' is reserved by the node".into()),
+            Error::InvalidVnetFirewallRule("invalid Proxmox vnet firewall rule type 'in': a vnet's firewall only takes 'forward' rules".into()),
+            Error::SdnLocked("proxmox: u returned HTTP 500: invalid lock token provided! — the cluster's SDN configuration is locked by another holder".into()),
+            Error::SdnPendingChanges("proxmox: u returned HTTP 500: configuration has pending changes".into()),
+            Error::SdnRollbackFailed("proxmox: the SDN change failed (x) and discarding it failed too (y)".into()),
             Error::InvalidPowerTimeout("proxmox: a shutdown timeout of 900s does not fit inside this client's 600s task deadline".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),
