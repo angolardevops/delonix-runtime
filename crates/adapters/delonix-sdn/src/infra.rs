@@ -2138,8 +2138,10 @@ fn control_count_ok(s: &str) -> bool {
 /// allowed to be. Before this, `attach`'s `ip`/`gateway`, `netrate`'s `burst`
 /// and every `wg-up`/`wg-peer` field reached their command unchecked:
 ///
-/// * `wg-up ../../../x …` wrote the node's PRIVATE KEY to `<wg dir>/.../../../x`
-///   (`ensure_iface` builds the temp key path from the interface name);
+/// * `wg-up`'s interface name also builds the path of the temp file that holds
+///   the node's PRIVATE KEY (`ensure_iface`). Only the order of operations kept
+///   a `../` in it harmless — `ip link add` runs first and iproute2 refuses a
+///   name with `/` (measured live 2026-09-27) — which is not a guarantee;
 /// * a token that starts with `-` is read by `ip`/`tc`/`wg` as an OPTION —
 ///   `sanitize` keeps `-` (it is a legal interface character), so even the
 ///   sanitized names were exposed.

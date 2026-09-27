@@ -147,8 +147,10 @@ pub fn ensure_iface(
     addr_cidr: &str,
 ) -> Result<()> {
     // Before the first command, not only at the holder's control line: `name`
-    // also builds the temp KEY FILE's path below, so a `../` in it wrote the
-    // node's private key outside the wg dir.
+    // also builds the temp KEY FILE's path below. Until now only the ORDER kept a
+    // `../` in it from escaping the wg dir (`ip link add` runs first, and
+    // iproute2 refuses a name with `/`); checking here makes that independent
+    // of the order and of the `ip` build.
     if !valid_iface_name(name) {
         return Err(Error::InvalidOverlayPeer(format!(
             "not a WireGuard interface name: {name:?}"
