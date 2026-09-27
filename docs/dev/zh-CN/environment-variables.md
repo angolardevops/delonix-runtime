@@ -162,12 +162,14 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
-| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:register_opnsense_with` | 这台设备的 API 端点。设置它就是启用这个 provider 的开关。 | `https://<host>`。 | 需要一份凭据。 |
+| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:opnsense_target_with` | 这台设备的 API 端点。设置它就是启用这个 provider 的开关。 | `https://<host>`。 | 需要一份凭据。 |
 | `DELONIX_OPNSENSE_CREDENTIAL` | `cmd/gatewayproviders.rs:opnsense_auth` | 一个持有凭据的 `kind: Secret` 的名字。 | 带有 `key`+`secret` 字段的 Secret——一对生成出来的 API key/secret，绝不能是某个图形界面账号的用户名/密码（ADR-0051 阶段 0：那些会被这个 API 拒绝）。 | **最先**被检查。 |
 | `DELONIX_OPNSENSE_KEY` | `cmd/gatewayproviders.rs:opnsense_auth` | API key。 | | 和 `DELONIX_OPNSENSE_SECRET` 一起用；在那个 `kind: Secret` 之后被检查。 |
 | `DELONIX_OPNSENSE_SECRET` | `cmd/gatewayproviders.rs:opnsense_auth`（通过 `credential_value`） | API secret。 | 优先用 `DELONIX_OPNSENSE_SECRET_FILE`（一个 `chmod 600` 的路径）。 | |
-| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:register_opnsense_with` | 跳过对这台设备的 TLS 证书校验。 | `1`、`true` 或 `yes` → 跳过；默认要校验。 | 一台开箱即用的 OPNsense 提供的是自签名证书（实机测量过，ADR-0051 阶段 0）。**冒充这台设备应答的另一台机器会拿到凭据。** 只能主动选择加入。 |
-| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:register_opnsense_with` | 除了系统根证书之外，额外为这台设备信任的一份 CA 证书（PEM）。 | PEM 文件的路径；读不了是一个**错误**。 | 用它代替 `DELONIX_OPNSENSE_INSECURE_TLS`。 |
+| `DELONIX_OPNSENSE_KEY_FILE` | `cmd/gatewayproviders.rs:opnsense_auth` | 存放 API key 的文件。 | 路径；读取后去掉首尾空白。 | 优先于 `DELONIX_OPNSENSE_KEY`。`providers.yaml` 的 `auth.keyFile` 会映射到它（ADR-0059 F1）。 |
+| `DELONIX_OPNSENSE_SECRET_FILE` | `cmd/gatewayproviders.rs:opnsense_auth`（通过 `credential_value`） | 存放 API secret 的文件。 | 一个 `chmod 600` 的路径；别人可读时会被拒绝。 | `providers.yaml` 的 `auth.secretFile` 会映射到它（ADR-0059 F1）。 |
+| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:opnsense_target_with` | 跳过对这台设备的 TLS 证书校验。 | `1`、`true` 或 `yes` → 跳过；默认要校验。 | 一台开箱即用的 OPNsense 提供的是自签名证书（实机测量过，ADR-0051 阶段 0）。**冒充这台设备应答的另一台机器会拿到凭据。** 只能主动选择加入。 |
+| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:opnsense_target_with` | 除了系统根证书之外，额外为这台设备信任的一份 CA 证书（PEM）。 | PEM 文件的路径；读不了是一个**错误**。 | 用它代替 `DELONIX_OPNSENSE_INSECURE_TLS`。 |
 
 ### TrueNAS
 

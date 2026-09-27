@@ -121,6 +121,27 @@ pub fn report(host: &SdnHost) -> ProviderReport {
         C::FirewallDefaultDeny => filt(S::Partial { detail: "`policy deny` per direction with the conntrack prologue (2026-07-28); validated live, no battery check" }),
         C::FirewallSourceFiltering => filt(S::Partial { detail: "`allow <port> --from <cidr>` works on published ports for routable sources (never for a loopback client); validated live, no battery" }),
         C::FirewallEgressPolicy => filt(S::Partial { detail: "per-container and per-network egress policy; battery lists (`net egress ls`), does not block" }),
+        // Catalog 1.1.0 (ADR-0059 D2): the node's own SDN against the roles of a remote provider.
+        C::NetGatewayFilter | C::NetGatewayAlias | C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder
+        | C::NetGatewayMultiWan | C::NetGatewayVpn => S::UnsupportedByProvider { reason: "a perimeter appliance's role (ADR-0051, ADR-0059); the node's own rules are the firewall.* rows" },
+        C::NetNatSnat => base(S::Partial { detail: "every network masquerades its traffic out through the holder's uplink; no battery check names outbound traffic" }),
+        C::NetNatDnat => base(S::Supported { evidence: "check:update: publish-add a quente" }),
+        C::NetNatOneToOne => S::UnsupportedByProvider { reason: "a rootless node has no external address of its own to map one-to-one" },
+        C::NetNatNpt => S::UnsupportedByProvider { reason: "IPv6 is disabled in the SDN (net.ipv6)" },
+        C::NetLbL4 | C::NetLbHealthCheck => S::NotImplemented,
+        C::NetDnsRecords | C::NetDnsAuthoritative => S::UnsupportedByProvider { reason: "the holder resolves the engine's own names (net.dns); records in another DNS are a remote provider's role" },
+        C::NetIpamProvider => S::UnsupportedByProvider { reason: "a local provider: its addresses come from the engine's own IPAM (net.ipam)" },
+        C::NetIpamReservation => S::UnsupportedByProvider { reason: "a VM's address is derived from its MAC, not reserved in a ledger" },
+        C::NetIpamDhcp => base(S::Partial { detail: "the holder's DHCP hands a Cloud Hypervisor tap the address derived from its MAC, outside the IPAM ledger (audit 62 §3)" }),
+        C::NetSegmentRemote => S::UnsupportedByProvider { reason: "a local provider: its segments are the holder's bridges (net.bridge)" },
+        C::NetApplyStaged => S::UnsupportedByProvider { reason: "`nft -f` replaces a ruleset atomically in one step; nothing is staged to activate later" },
+        C::NetApplyRollback => S::NotImplemented,
+        C::NetObserve => base(S::Partial { detail: "rules and publishes are read back (`net ingress ls`, `net egress ls`); no comparison with the record yet (ADR-0059 F4)" }),
+        C::NetVerifyDataplane => S::NotImplemented,
+        C::NetOwnershipMarker => S::UnsupportedByProvider { reason: "the holder's tables are the engine's own; ownership among local writers is the single-writer rule, not a marker" },
+        C::FirewallStateless => S::UnsupportedByProvider { reason: "every rule rides the conntrack prologue; a stateless rule is refused, never approximated" },
+        C::FirewallLogging | C::FirewallIcmpType => S::NotImplemented,
+        C::FirewallWorkloadPeer => filt(S::Partial { detail: "namespace peers (`@dlxns_<ns>`) are enforced; label selectors (ADR-0024) are not implemented" }),
         C::ProviderAvailability | C::ResourceReadback | C::Events | C::AsyncOperations
         | C::VmCreate | C::VmStart | C::VmStop | C::VmDestroy | C::VmRestart | C::VmPause
         | C::VmResume | C::VmResumeSameIdentity | C::VmClone | C::VmTemplate | C::VmResizeCold

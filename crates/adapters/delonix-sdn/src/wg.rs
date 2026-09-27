@@ -146,6 +146,26 @@ pub fn ensure_iface(
     listen_port: u16,
     addr_cidr: &str,
 ) -> Result<()> {
+    // Before the first command, not only at the holder's control line: `name`
+    // also builds the temp KEY FILE's path below. Until now only the ORDER kept a
+    // `../` in it from escaping the wg dir (`ip link add` runs first, and
+    // iproute2 refuses a name with `/`); checking here makes that independent
+    // of the order and of the `ip` build.
+    if !valid_iface_name(name) {
+        return Err(Error::InvalidOverlayPeer(format!(
+            "not a WireGuard interface name: {name:?}"
+        )));
+    }
+    if !valid_wg_key(private_key) {
+        return Err(Error::InvalidWgKey(
+            "not a WireGuard private key (value not shown)".into(),
+        ));
+    }
+    if !valid_ipv4_cidr(addr_cidr) {
+        return Err(Error::InvalidOverlayPeer(format!(
+            "not an IPv4 address/prefix for {name}: {addr_cidr:?}"
+        )));
+    }
     let _ = run("ip", &["link", "del", name]); // clears leftovers (best-effort)
     run("ip", &["link", "add", name, "type", "wireguard"])?;
     let dir = wg_dir();
@@ -179,6 +199,12 @@ pub struct Peer {
 
 /// Configures a peer on an interface (`wg set <if> peer <pub> allowed-ips … endpoint …`).
 pub fn set_peer(name: &str, p: &Peer) -> Result<()> {
+    if !valid_iface_name(name) {
+        return Err(Error::InvalidOverlayPeer(format!(
+            "not a WireGuard interface name: {name:?}"
+        )));
+    }
+    validate_peer(p)?;
     let allowed = p.allowed_ips.join(",");
     run(
         "wg",
@@ -225,6 +251,57 @@ pub fn valid_wg_key(s: &str) -> bool {
         && s[..43]
             .chars()
             .all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/')
+}
+
+/// A WireGuard interface name the holder may create: the `sanitize` charset
+/// (`[A-Za-z0-9_-]`), 1–15 chars (IFNAMSIZ), and not starting with `-`.
+///
+/// Stricter than `sanitize` on purpose — it REFUSES instead of cleaning: the
+/// name is also a path component (`.{name}.key.tmp`), and silently turning
+/// `../x` into `x` would configure an interface nobody asked for.
+pub fn valid_iface_name(s: &str) -> bool {
+    (1..=15).contains(&s.len())
+        && !s.starts_with('-')
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
+/// `a.b.c.d/len`, IPv4 only (the overlay is v4, like the whole dataplane).
+fn valid_ipv4_cidr(s: &str) -> bool {
+    let Some((addr, len)) = s.split_once('/') else {
+        return false;
+    };
+    addr.parse::<std::net::Ipv4Addr>().is_ok()
+        && !len.is_empty()
+        && len.bytes().all(|b| b.is_ascii_digit())
+        && len.parse::<u8>().is_ok_and(|l| l <= 32)
+}
+
+/// Every field of a [`Peer`] before it reaches `wg set`: the public key, an
+/// endpoint that is a literal `ip:port` (`std::net::SocketAddr` — no host
+/// name, nothing `wg` could read as an option), and each allowed IP an IPv4
+/// prefix. The caller builds `<node_ip>:<port>` and `<wg_ip>/32`, so nothing a
+/// real peer sends is refused.
+pub fn validate_peer(p: &Peer) -> Result<()> {
+    if !valid_wg_key(&p.public) {
+        return Err(Error::InvalidWgKey(format!(
+            "not a WireGuard public key: {:?}",
+            p.public
+        )));
+    }
+    if p.endpoint.parse::<std::net::SocketAddr>().is_err() {
+        return Err(Error::InvalidOverlayPeer(format!(
+            "WireGuard peer endpoint is not <ip>:<port>: {:?}",
+            p.endpoint
+        )));
+    }
+    if p.allowed_ips.is_empty() || p.allowed_ips.iter().any(|a| !valid_ipv4_cidr(a)) {
+        return Err(Error::InvalidOverlayPeer(format!(
+            "WireGuard allowed-ips must be IPv4 prefixes: {:?}",
+            p.allowed_ips
+        )));
+    }
+    Ok(())
 }
 
 /// Is WireGuard available on this host? (`wg`/`ip` + kernel module).
@@ -281,5 +358,65 @@ mod tests {
         assert!(!valid_wg_key(
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQR"
         ));
+    }
+
+    /// S4: the interface name also names the temp file the private key is
+    /// written to (`.{name}.key.tmp`). Refused at the sink, before any
+    /// command, so the `pub` API is covered and not only the holder's line.
+    #[test]
+    fn ensure_iface_refuses_a_name_that_is_a_path_or_an_option() {
+        let key = format!("{}=", "A".repeat(43));
+        for name in [
+            "../../../tmp/pwn",
+            "wg0/../x",
+            "-h",
+            "",
+            "averyveryverylongname",
+        ] {
+            let err = ensure_iface(name, &key, 51820, "10.99.0.1/24").unwrap_err();
+            assert!(
+                err.to_string().contains("interface name"),
+                "{name:?}: {err}"
+            );
+        }
+        let err = ensure_iface("wg0", "--help", 51820, "10.99.0.1/24").unwrap_err();
+        assert!(
+            !err.to_string().contains("--help"),
+            "a private key is never echoed"
+        );
+        let err = ensure_iface("wg0", &key, 51820, "-6").unwrap_err();
+        assert!(err.to_string().contains("IPv4"), "{err}");
+    }
+
+    #[test]
+    fn set_peer_refuses_fields_wg_would_read_as_something_else() {
+        let good = || Peer {
+            public: format!("{}=", "A".repeat(43)),
+            endpoint: "192.168.1.10:51820".into(),
+            allowed_ips: vec!["10.99.0.2/32".into()],
+        };
+        assert!(validate_peer(&good()).is_ok());
+        let mut p = good();
+        p.endpoint = "-h".into();
+        assert!(set_peer("wg0", &p).is_err());
+        let mut p = good();
+        p.endpoint = "evil.example:51820".into();
+        assert!(set_peer("wg0", &p)
+            .unwrap_err()
+            .to_string()
+            .contains("endpoint"));
+        let mut p = good();
+        p.allowed_ips = vec!["0.0.0.0/0,persistent-keepalive".into()];
+        assert!(set_peer("wg0", &p)
+            .unwrap_err()
+            .to_string()
+            .contains("allowed-ips"));
+        let mut p = good();
+        p.public = "--private-key".into();
+        assert!(set_peer("wg0", &p).is_err());
+        assert!(set_peer("../x", &good())
+            .unwrap_err()
+            .to_string()
+            .contains("interface name"));
     }
 }

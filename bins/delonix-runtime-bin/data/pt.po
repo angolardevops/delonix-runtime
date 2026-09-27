@@ -13136,6 +13136,15 @@ msgstr "Um NetDef de ingress já está realizado num prefixo diferente do que o 
 msgid "Remove the network (`delonix network rm <name>`) and create it again, or keep the recorded subnet."
 msgstr "Remove a rede (`delonix network rm <name>`) e cria-a de novo, ou mantém a subnet registada."
 
+msgid "network is in use"
+msgstr "a rede está em uso"
+
+msgid "The network still has containers, pod members or VMs attached, and removing it would leave them addressed on a bridge that no longer exists."
+msgstr "A rede ainda tem containers, membros de pod ou VMs ligados, e removê-la deixá-los-ia endereçados numa bridge que já não existe."
+
+msgid "Remove or disconnect what the message lists (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`), then remove the network."
+msgstr "Remove ou desliga o que a mensagem lista (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`) e só depois remove a rede."
+
 msgid "'wg' is not available on this host"
 msgstr "o 'wg' não está disponível neste host"
 
@@ -13147,6 +13156,15 @@ msgstr "Instala o wireguard-tools (Debian/Ubuntu: apt install wireguard-tools; F
 
 msgid "a network system call failed"
 msgstr "uma chamada de sistema de rede falhou"
+
+msgid "this management API route no longer changes the network"
+msgstr "esta rota da API de gestão já não altera a rede"
+
+msgid "The route wrote the dataplane without the container's record, so the next reapply undid it and a multi-homed workload kept its other addresses open. The management API is frozen (ADR-0041 D4) and refuses instead of writing half a policy."
+msgstr "A rota escrevia no dataplane sem o registo do container, por isso o reapply seguinte desfazia-a e um workload com várias redes ficava com os outros endereços abertos. A API de gestão está congelada (ADR-0041 D4) e recusa em vez de escrever meia política."
+
+msgid "Use the CLI, which goes through the record: `delonix net ingress`/`net egress` for firewall and egress, `delonix network connect`/`disconnect` for extra networks, `delonix container rm`/`stop` to detach."
+msgstr "Usa a CLI, que passa pelo registo: `delonix net ingress`/`net egress` para firewall e saída, `delonix network connect`/`disconnect` para redes adicionais, `delonix container rm`/`stop` para desligar."
 
 msgid "A host tool this engine shells out to for networking (ip, nft, wg, bridge, a CNI plugin, newuidmap/newgidmap, or a raw syscall) could not be run or exited badly. The message names the operation and carries the tool's own error."
 msgstr "Uma ferramenta do host a que este motor recorre para redes (ip, nft, wg, bridge, um plugin CNI, newuidmap/newgidmap, ou uma syscall crua) não pôde correr ou terminou mal. A mensagem nomeia a operação e leva o erro próprio da ferramenta."
@@ -14313,6 +14331,60 @@ msgstr "Os limites de container funcionam, mas não as flags recusadas acima. S�
 
 msgid "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough"
 msgstr "depois `systemctl daemon-reload` e `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega"
+
+# ---- vm bridge: subnets validadas e root antes do --apply (S4, 2026-09-27) ----
+
+msgid "the network's prefix is not a CIDR: '{prefix}'"
+msgstr "o prefixo da rede não é um CIDR: '{prefix}'"
+
+msgid "the network's prefix /{len} has no room for the bridge's host address"
+msgstr "o prefixo /{len} da rede não tem espaço para o endereço do host na ponte"
+
+msgid "--vm-subnet must be an IPv4 prefix a.b.c.d/len: '{subnet}'"
+msgstr "o --vm-subnet tem de ser um prefixo IPv4 a.b.c.d/len: '{subnet}'"
+
+msgid "--vm-subnet '{subnet}' is every address, not a VM subnet"
+msgstr "o --vm-subnet '{subnet}' abrange todos os endereços, não é uma subrede de VMs"
+
+msgid "--vm-subnet '{subnet}' overlaps the SDN network {sdn}"
+msgstr "o --vm-subnet '{subnet}' sobrepõe-se à rede SDN {sdn}"
+
+msgid "`--apply` needs root: this command changes the host's network namespace (run it with sudo, or drop `--apply` for the dry-run)"
+msgstr "o `--apply` precisa de root: este comando altera o namespace de rede do host (corre-o com sudo, ou tira o `--apply` para ver o plano)"
+
+# ADR-0059 F1 — providers.yaml: type opnsense, networkDefaults
+msgid "{path}: a secret VALUE is never written in this file — use `secretFile` (a 0600 file) or `secretRef` (a `kind: Secret` with `key` and `secret`)"
+msgstr "{path}: um VALOR de segredo nunca se escreve neste ficheiro — usa `secretFile` (um ficheiro 0600) ou `secretRef` (um `kind: Secret` com `key` e `secret`)"
+
+msgid "{path}: defaultProvider is the COMPUTE default and opnsense is not a compute provider — a perimeter gateway goes in `networkDefaults.gateway`"
+msgstr "{path}: o defaultProvider é o de COMPUTAÇÃO e o opnsense não é um provider de computação — um gateway de perímetro vai em `networkDefaults.gateway`"
+
+msgid "{path}: networkDefaults.{role}: no provider serves the role '{role}' in this build (ADR-0059 F5)"
+msgstr "{path}: networkDefaults.{role}: nenhum provider serve o papel '{role}' nesta build (ADR-0059 F5)"
+
+msgid "{path}: networkDefaults.{role}: '{name}' does not serve the role '{role}' (it is served by: {serving})"
+msgstr "{path}: networkDefaults.{role}: '{name}' não serve o papel '{role}' (quem o serve: {serving})"
+
+msgid "{path}: networkDefaults.{role} '{name}' has no entry in this file, so no process can serve it"
+msgstr "{path}: o networkDefaults.{role} '{name}' não tem entrada neste ficheiro, logo nenhum processo o pode servir"
+
+msgid "an OPNsense target is configured but no credential is: use DELONIX_OPNSENSE_CREDENTIAL (a `kind: Secret` with `key`+`secret` fields, preferred), or DELONIX_OPNSENSE_KEY with DELONIX_OPNSENSE_SECRET — in providers.yaml, `auth: {key or keyFile, secretFile or secretRef}`. A GUI account's username/password does not work here — only a generated API key/secret pair does (ADR-0051 Phase 0, measured)."
+msgstr "há um alvo OPNsense configurado mas nenhuma credencial: usa DELONIX_OPNSENSE_CREDENTIAL (um `kind: Secret` com os campos `key`+`secret`, preferível), ou DELONIX_OPNSENSE_KEY com DELONIX_OPNSENSE_SECRET — no providers.yaml, `auth: {key ou keyFile, secretFile ou secretRef}`. O utilizador/palavra-passe de uma conta da interface web não serve aqui — só um par de chave/segredo de API gerado (ADR-0051 fase 0, medido)."
+
+msgid "kind: Secret '{name}'"
+msgstr "kind: Secret '{name}'"
+
+msgid "api key, secret from file {path}"
+msgstr "chave de API, segredo do ficheiro {path}"
+
+msgid "api key, secret from the environment (redacted)"
+msgstr "chave de API, segredo do ambiente (ocultado)"
+
+msgid "nowhere — the secret is missing"
+msgstr "em lado nenhum — falta o segredo"
+
+msgid "Network default:"
+msgstr "Rede por omissão:"
 
 msgid "--delegate writes under /etc/systemd/system and needs root: re-run it with sudo. (This run changed nothing.)"
 msgstr "o --delegate escreve em /etc/systemd/system e precisa de root: volta a correr com sudo. (Esta execução não mudou nada.)"

@@ -6,6 +6,7 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+delonix-compute = { workspace = true }
 delonix-model = { workspace = true }
 delonix-sdn = { workspace = true }
 thiserror = { workspace = true }

@@ -21,9 +21,26 @@
 //! 'vnet'"). Measured too: a rule is inserted at the TOP of the list, as on a
 //! VM's own firewall, and ENFORCING it is the nftables backend's job
 //! (`proxmox-firewall`, turned on per node by the host firewall option
-//! `nftables: 1`) — on a node running the legacy iptables `pve-firewall`, the
-//! rules are stored and read back and nothing compiles them. Reading them back
-//! is what this client can prove; that the node filters with them is not.
+//! `nftables: 1`). Both halves measured on a PVE 9.2.2 node on 2026-09-27,
+//! with the datacenter firewall, the vnet firewall and both rules enabled:
+//! under the iptables `pve-firewall` the rules are stored and read back and
+//! nothing compiles them (no line in `iptables-save` or `nft list ruleset`);
+//! with `nftables: 1` the node compiles them into `chain bridge-<vnet>` of
+//! `table inet proxmox-firewall`, in the file's order, reached through a
+//! `bridge-map` keyed by the vnet's interface from the `forward` hook and the
+//! host's bridge input/output. Note the API creates a rule DISABLED unless
+//! `enable=1` is sent, which is why this client always sends it.
+//!
+//! **What it filters, measured with packets** (same node, same day: network
+//! namespaces on veths in two vnets of one simple zone, listeners on 22 and
+//! 23, a DROP rule for 23 and an ACCEPT rule for 22 on the first vnet): under
+//! nftables, traffic BRIDGED between two ports of that vnet is filtered (23
+//! blocked, 22 open), and traffic ROUTED by the node into or out of it — to or
+//! from another vnet through the gateway — is not (23 open both ways). Under
+//! iptables nothing is filtered, and after turning nftables off again 23 was
+//! open everywhere. The map is keyed by bridge name, which only bridged
+//! traffic carries. So a vnet firewall isolates guests of one vnet from each
+//! other; it is not a boundary between vnets.
 //!
 //! # What is offered, and what is not
 //!
