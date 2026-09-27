@@ -196,12 +196,14 @@ enregistré de la même façon que le backend Proxmox ci-dessus et lu par `cmd::
 
 | Variable | Lue par | Rôle | Valeurs / défaut | Notes |
 |---|---|---|---|---|
-| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:register_opnsense_with` | Point d’accès API de l’appliance. La définir est ce qui active le provider. | `https://<host>`. | Exige un identifiant. |
+| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:opnsense_target_with` | Point d’accès API de l’appliance. La définir est ce qui active le provider. | `https://<host>`. | Exige un identifiant. |
 | `DELONIX_OPNSENSE_CREDENTIAL` | `cmd/gatewayproviders.rs:opnsense_auth` | Nom d’un `kind: Secret` qui porte l’identifiant. | Un Secret avec les champs `key`+`secret` — une paire clé/secret d’API générée, jamais le nom d’utilisateur et le mot de passe d’un compte de l’interface graphique (ADR-0051 phase 0 : ceux-là sont refusés par l’API). | Vérifiée **en premier**. |
 | `DELONIX_OPNSENSE_KEY` | `cmd/gatewayproviders.rs:opnsense_auth` | Clé d’API. | | Utilisée avec `DELONIX_OPNSENSE_SECRET` ; vérifiée après le `kind: Secret`. |
 | `DELONIX_OPNSENSE_SECRET` | `cmd/gatewayproviders.rs:opnsense_auth` (via `credential_value`) | Secret d’API. | Préférez `DELONIX_OPNSENSE_SECRET_FILE` (un chemin en `chmod 600`). | |
-| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:register_opnsense_with` | Saute la vérification du certificat TLS de l’appliance. | `1`, `true` ou `yes` → sauter ; par défaut on vérifie. | Un OPNsense d’origine sert un certificat auto-signé (mesuré en réel, ADR-0051 phase 0). **Une autre machine qui répond au nom de l’appliance reçoit l’identifiant.** Uniquement sur demande explicite. |
-| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:register_opnsense_with` | Un certificat CA (PEM) à faire confiance pour l’appliance, en plus des racines système. | Chemin vers un fichier PEM ; illisible est une **erreur**. | Au lieu de `DELONIX_OPNSENSE_INSECURE_TLS`. |
+| `DELONIX_OPNSENSE_KEY_FILE` | `cmd/gatewayproviders.rs:opnsense_auth` | Un fichier qui contient la clé d’API. | Chemin ; lu et nettoyé. | L’emporte sur `DELONIX_OPNSENSE_KEY`. Le `auth.keyFile` du `providers.yaml` s’y traduit (ADR-0059 F1). |
+| `DELONIX_OPNSENSE_SECRET_FILE` | `cmd/gatewayproviders.rs:opnsense_auth` (via `credential_value`) | Un fichier qui contient le secret d’API. | Un chemin en `chmod 600` ; refusé s’il est lisible par d’autres. | Le `auth.secretFile` du `providers.yaml` s’y traduit (ADR-0059 F1). |
+| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:opnsense_target_with` | Saute la vérification du certificat TLS de l’appliance. | `1`, `true` ou `yes` → sauter ; par défaut on vérifie. | Un OPNsense d’origine sert un certificat auto-signé (mesuré en réel, ADR-0051 phase 0). **Une autre machine qui répond au nom de l’appliance reçoit l’identifiant.** Uniquement sur demande explicite. |
+| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:opnsense_target_with` | Un certificat CA (PEM) à faire confiance pour l’appliance, en plus des racines système. | Chemin vers un fichier PEM ; illisible est une **erreur**. | Au lieu de `DELONIX_OPNSENSE_INSECURE_TLS`. |
 
 ### TrueNAS
 

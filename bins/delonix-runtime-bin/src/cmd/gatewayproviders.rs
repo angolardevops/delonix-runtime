@@ -33,15 +33,40 @@ pub fn register_configured() {
     }
 }
 
+/// The target from the environment when it carries `DELONIX_OPNSENSE_URL`,
+/// else from the providers file's `type: opnsense` entry (ADR-0059 F1, the
+/// ADR-0054 D4 rule: the environment replaces the entry as a whole).
 fn register_opnsense() -> Result<()> {
-    register_opnsense_with(&|key| nonempty(std::env::var(key).ok()))
+    let file = match super::providers_config::loaded() {
+        Ok(f) => f.as_ref().map(|(_, cfg)| cfg),
+        // Unreadable file: the environment can still carry a target, and
+        // `providers_config::install_default` has already said why.
+        Err(_) => None,
+    };
+    let lookup = super::providers_config::opnsense_lookup_with(
+        |key: &str| nonempty(std::env::var(key).ok()),
+        file,
+    );
+    register_opnsense_with(&*lookup)
 }
 
 /// [`register_opnsense`] with the configuration read through `lookup`, so a
 /// test can hand it a map instead of writing the PROCESS environment.
 fn register_opnsense_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()> {
+    match opnsense_target_with(lookup)? {
+        Some(target) => delonix_opnsense::register_with(target),
+        None => Ok(()),
+    }
+}
+
+/// The target `lookup` describes, checked (credential present, secret file
+/// owner-only, CA readable) and NOT registered: `provider config validate`
+/// runs this without touching the registry. `None` = no target configured.
+pub(crate) fn opnsense_target_with(
+    lookup: &dyn Fn(&str) -> Option<String>,
+) -> Result<Option<delonix_opnsense::Target>> {
     let Some(base_url) = lookup("DELONIX_OPNSENSE_URL") else {
-        return Ok(());
+        return Ok(None);
     };
     let auth = opnsense_auth(lookup)?;
     // Opt-in, never a fallback after a TLS error: a stock OPNsense serves a
@@ -60,12 +85,12 @@ fn register_opnsense_with(lookup: &dyn Fn(&str) -> Option<String>) -> Result<()>
             })
         })
         .transpose()?;
-    delonix_opnsense::register_with(delonix_opnsense::Target {
+    Ok(Some(delonix_opnsense::Target {
         base_url,
         auth,
         insecure_tls,
         ca_cert_pem,
-    })
+    }))
 }
 
 /// The credential, preferring a `kind: Secret` over the plain environment
@@ -84,17 +109,23 @@ fn opnsense_auth(lookup: &dyn Fn(&str) -> Option<String>) -> Result<delonix_opns
             &[("name", &name)],
         )));
     }
-    if let (Some(key), Some(secret)) = (
-        lookup("DELONIX_OPNSENSE_KEY"),
-        credential_value(lookup, "DELONIX_OPNSENSE_SECRET")?,
-    ) {
+    let key = match lookup("DELONIX_OPNSENSE_KEY_FILE") {
+        Some(path) => nonempty(Some(std::fs::read_to_string(&path).map_err(|e| {
+            Error::Invalid(format!(
+                "DELONIX_OPNSENSE_KEY_FILE: could not read '{path}': {e}"
+            ))
+        })?)),
+        None => lookup("DELONIX_OPNSENSE_KEY"),
+    };
+    if let (Some(key), Some(secret)) = (key, credential_value(lookup, "DELONIX_OPNSENSE_SECRET")?) {
         return Ok(delonix_opnsense::Auth { key, secret });
     }
     Err(Error::Invalid(
         po::t(
-            "DELONIX_OPNSENSE_URL is set but no credential is: use DELONIX_OPNSENSE_CREDENTIAL \
+            "an OPNsense target is configured but no credential is: use DELONIX_OPNSENSE_CREDENTIAL \
              (a `kind: Secret` with `key`+`secret` fields, preferred), or DELONIX_OPNSENSE_KEY \
-             with DELONIX_OPNSENSE_SECRET. A GUI account's username/password does not work here \
+             with DELONIX_OPNSENSE_SECRET — in providers.yaml, `auth: {key or keyFile, \
+             secretFile or secretRef}`. A GUI account's username/password does not work here \
              — only a generated API key/secret pair does (ADR-0051 Phase 0, measured).",
         )
         .into(),

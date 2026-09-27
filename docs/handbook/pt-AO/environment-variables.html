@@ -897,7 +897,7 @@ da mesma forma que o backend Proxmox acima e lido por <code>cmd::gatewayprovider
 <tbody>
 <tr>
 <td><code>DELONIX_OPNSENSE_URL</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>Endpoint da API do appliance. Defini-lo é o que activa o provider.</td>
 <td><code>https://&lt;host&gt;</code>.</td>
 <td>Exige uma credencial.</td>
@@ -924,15 +924,29 @@ da mesma forma que o backend Proxmox acima e lido por <code>cmd::gatewayprovider
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_OPNSENSE_KEY_FILE</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code></td>
+<td>Um ficheiro com a chave de API.</td>
+<td>Caminho; lido e aparado.</td>
+<td>Ganha a <code>DELONIX_OPNSENSE_KEY</code>. O <code>auth.keyFile</code> do <code>providers.yaml</code> traduz-se nela (ADR-0059 F1).</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_SECRET_FILE</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code> (via <code>credential_value</code>)</td>
+<td>Um ficheiro com o segredo de API.</td>
+<td>Um caminho <code>chmod 600</code>; recusado se outros o puderem ler.</td>
+<td>O <code>auth.secretFile</code> do <code>providers.yaml</code> traduz-se nela (ADR-0059 F1).</td>
+</tr>
+<tr>
 <td><code>DELONIX_OPNSENSE_INSECURE_TLS</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>Salta a verificação do certificado TLS do appliance.</td>
 <td><code>1</code>, <code>true</code> ou <code>yes</code> → salta; por omissão verifica.</td>
 <td>Um OPNsense de fábrica serve um certificado self-signed (medido ao vivo, ADR-0051 Fase 0). <strong>Outra máquina a responder em nome do appliance recebe a credencial.</strong> Só opt-in.</td>
 </tr>
 <tr>
 <td><code>DELONIX_OPNSENSE_CA_FILE</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>Um certificado CA (PEM) a confiar para o appliance, além das raízes do sistema.</td>
 <td>Caminho para um ficheiro PEM; ilegível é um <strong>erro</strong>.</td>
 <td>Em vez de <code>DELONIX_OPNSENSE_INSECURE_TLS</code>.</td>

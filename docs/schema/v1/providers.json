@@ -23,6 +23,88 @@
       },
       "type": "object"
     },
+    "NetworkDefaults": {
+      "additionalProperties": false,
+      "description": "One provider type per network role (ADR-0059 D3). Parsed and shown from\ncatalog 1.1.0 on; the network Kinds resolve through it from ADR-0059 F2.",
+      "properties": {
+        "dns": {
+          "default": null,
+          "description": "No provider serves this role yet (ADR-0059 F5): a value is refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "gateway": {
+          "default": null,
+          "description": "The perimeter gateway of `kind: NetworkGateway` (today: `opnsense`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ipam": {
+          "default": null,
+          "description": "No provider serves this role yet (ADR-0059 F5): a value is refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "nat": {
+          "default": null,
+          "description": "No provider serves this role yet (ADR-0059 F5): a value is refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "segment": {
+          "default": null,
+          "description": "The provider of `kind: NetworkZone` (today: `proxmox`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "OpnsenseAuth": {
+      "additionalProperties": false,
+      "description": "The API key pair, by reference: the key (an identifier, like a Proxmox\n`tokenId`) inline or in a file, the secret only in a 0600 file or a\n`kind: Secret` with `key` and `secret` fields.",
+      "properties": {
+        "key": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "keyFile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secretFile": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "secretRef": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
     "ProviderEntry": {
       "description": "One provider. Tagged by `type`, the same name `--backend` and a VM record use.",
       "oneOf": [
@@ -108,6 +190,38 @@
             "type",
             "url",
             "node",
+            "auth"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "An OPNsense appliance reached through its REST API (ADR-0051, ADR-0059 F1).\nOnly a generated API key/secret pair authenticates (ADR-0051 phase 0).",
+          "properties": {
+            "auth": {
+              "$ref": "#/$defs/OpnsenseAuth"
+            },
+            "name": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "tls": {
+              "$ref": "#/$defs/Tls"
+            },
+            "type": {
+              "const": "opnsense",
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url",
             "auth"
           ],
           "type": "object"
@@ -212,6 +326,17 @@
         "string",
         "null"
       ]
+    },
+    "networkDefaults": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NetworkDefaults"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Which provider answers each network role when nothing names one\n(ADR-0059 D3). `defaultProvider` stays the compute default."
     },
     "providers": {
       "description": "One entry per provider type this node has.",

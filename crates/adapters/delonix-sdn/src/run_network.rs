@@ -265,7 +265,10 @@ impl delonix_compute::ports::NetworkProvider for HostNetwork<'_> {
     }
 
     fn unpublish(&self, container: &Container) {
-        unpublish_ports(container, None);
+        // The record's own pid: with `None` an own-slirp container's slirp was never
+        // reaped here, whatever the record said. `None` is still what arrives for a
+        // container that never started, and then there is no slirp to reap.
+        unpublish_ports(container, container.pid);
     }
 
     fn apply_firewall(&self, id: &str, ip: &str, fw: &ContainerFw) -> Result<()> {

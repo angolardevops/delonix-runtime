@@ -172,8 +172,31 @@ pub fn load_default(conf_dir: &Path) -> Result<Option<NetConfList>> {
     Ok(Some(parse_config(&text)?))
 }
 
+/// Is `typ` a bare plugin NAME — one normal path component, nothing else?
+///
+/// `type` (and `ipam.type`) come from a conflist, and the plugin runs in the
+/// holder, mapped-root with `CAP_NET_ADMIN`. `Path::join` REPLACES the base
+/// with an absolute path, and `..` climbs out of it, so without this a
+/// `"type": "/tmp/x"` or `"../../tmp/x"` executed a binary of the author's
+/// choosing from outside every `CNI_PATH` directory. The CNI spec names a
+/// plugin by its file name; nothing legitimate needs more.
+pub fn valid_plugin_type(typ: &str) -> bool {
+    use std::path::Component;
+    let mut comps = Path::new(typ).components();
+    !typ.is_empty()
+        && !typ.contains('/')
+        && !typ.contains('\0')
+        && matches!(comps.next(), Some(Component::Normal(c)) if c == typ)
+        && comps.next().is_none()
+}
+
 /// Resolves a plugin's binary (`type`) in `CNI_PATH` (first one that exists).
+/// `None` for a `type` that is not a bare name (see [`valid_plugin_type`]) —
+/// it is never joined to a directory at all.
 pub fn resolve_plugin(cni_path: &[PathBuf], typ: &str) -> Option<PathBuf> {
+    if !valid_plugin_type(typ) {
+        return None;
+    }
     cni_path.iter().map(|d| d.join(typ)).find(|p| p.is_file())
 }
 
@@ -293,6 +316,14 @@ fn run_one(
         .get("type")
         .and_then(|t| t.as_str())
         .ok_or_else(|| Error::CniConfigInvalid("CNI plugin without a `type` field".into()))?;
+    // Said as what it is, not as «not found»: a path in `type` is a config
+    // error, and reporting it as a missing plugin would send the reader to
+    // install something.
+    if !valid_plugin_type(typ) {
+        return Err(Error::CniConfigInvalid(format!(
+            "CNI plugin `type` must be a plugin name, not a path: {typ:?}"
+        )));
+    }
     let bin = resolve_plugin(cni_path, typ).ok_or_else(|| {
         Error::CniPluginNotFound(format!("CNI plugin `{typ}` not found in CNI_PATH"))
     })?;
@@ -458,6 +489,12 @@ pub fn readiness(conf_dir: &Path, plugin_dirs: &[PathBuf]) -> Readiness {
             .and_then(|i| i.get("type"))
             .and_then(|t| t.as_str());
         for bin in std::iter::once(typ).chain(ipam) {
+            if !valid_plugin_type(bin) {
+                return Readiness::InvalidConfig(format!(
+                    "CNI config `{}`: plugin `type` must be a plugin name, not a path: {bin:?}",
+                    net.name
+                ));
+            }
             if resolve_plugin(plugin_dirs, bin).is_none() && !missing.iter().any(|m| m == bin) {
                 missing.push(bin.to_string());
             }
@@ -824,6 +861,59 @@ esac
         assert_eq!(r.ips[0].gateway, "10.9.9.1");
         // DEL is best-effort and returns Ok.
         del(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap();
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    /// S4: a conflist `type` that is a path executed a binary from outside
+    /// every `CNI_PATH` directory, in the holder. The exploit is reproduced
+    /// with a real script that leaves a marker when it runs.
+    #[test]
+    fn a_plugin_type_that_is_a_path_never_runs() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = std::env::temp_dir().join(format!("dlx-cni-s4-{}", std::process::id()));
+        let bindir = tmp.join("bin");
+        let conf = tmp.join("net.d");
+        std::fs::create_dir_all(&bindir).unwrap();
+        std::fs::create_dir_all(&conf).unwrap();
+        let marker = tmp.join("ran");
+        let evil = tmp.join("evil");
+        std::fs::write(
+            &evil,
+            format!("#!/bin/sh\ncat >/dev/null\ntouch {}\n", marker.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&evil, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // The readiness probe runs the script once itself: start from no marker.
+        wait_until_executable(&evil);
+        let _ = std::fs::remove_file(&marker);
+        let dirs = vec![bindir.clone()];
+
+        let absolute = evil.to_string_lossy().into_owned();
+        for typ in [
+            absolute.as_str(),
+            "../evil",
+            "./../evil",
+            "..",
+            ".",
+            "",
+            "a/b",
+        ] {
+            assert_eq!(resolve_plugin(&dirs, typ), None, "{typ:?} was resolved");
+            assert!(!valid_plugin_type(typ), "{typ:?}");
+            let json = serde_json::json!({
+                "cniVersion": "1.0.0", "name": "t", "plugins": [{ "type": typ }]
+            })
+            .to_string();
+            let net = parse_config(&json).unwrap();
+            let err = add(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap_err();
+            assert!(err.to_string().contains("not a path"), "{typ:?}: {err}");
+            std::fs::write(conf.join("10-t.conflist"), &json).unwrap();
+            let r = readiness(&conf, &dirs);
+            assert!(matches!(r, Readiness::InvalidConfig(_)), "{typ:?}: {r:?}");
+        }
+        assert!(!marker.exists(), "the out-of-CNI_PATH binary ran");
+        // A bare name is still a plugin name.
+        assert!(valid_plugin_type("bridge") && valid_plugin_type("host-local"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

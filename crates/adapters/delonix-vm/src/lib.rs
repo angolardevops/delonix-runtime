@@ -1239,7 +1239,9 @@ impl VmBackend for CloudHypervisorBackend {
         // isolated bridge + DHCP before the attach. The VMs' SDN lives here.
         on(CreateStage::Network);
         if !matches!(cfg.network.as_str(), "" | "ingress" | "bridge" | "default") {
-            let _ = network()?.ensure_network(&cfg.network);
+            // Not `let _`: a network that could not be created (or recorded) used to
+            // surface one step later as a bare "no such network" from the attach.
+            network()?.ensure_network(&cfg.network)?;
         }
         // The MAC is needed BEFORE the attach now, not after: it is what makes
         // the guest's future DHCP address computable, and that address is what

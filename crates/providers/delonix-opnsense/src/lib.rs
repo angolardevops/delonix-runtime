@@ -56,8 +56,10 @@
 //! [`delonix_sdn::gateway::EnsureOutcome::AlreadyPresent`] and leave it
 //! untouched.
 
+pub mod capabilities;
 mod error;
 
+pub use capabilities::capability_report;
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
 
 use delonix_sdn::gateway::{EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};

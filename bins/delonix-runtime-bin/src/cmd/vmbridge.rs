@@ -26,9 +26,10 @@ use std::path::Path;
 use std::process::Command;
 
 use delonix_model::{Error, Result};
-use delonix_sdn::infra;
+use delonix_sdn::{infra, Cidr};
 
 use super::output;
+use super::po;
 use super::util::state_root;
 
 /// FNV-1a 32-bit — a stable short hash for deterministic interface names
@@ -49,16 +50,98 @@ fn veth_names(network: &str) -> (String, String) {
     (format!("vbh{h:08x}"), format!("vbs{h:08x}"))
 }
 
-/// The host-side SDN address of the bridge link: `<prefix>.255.254`, high in
-/// the /16 to avoid colliding with DHCP-assigned container IPs (which grow from
-/// `.0.2` up). Pure.
-fn host_sdn_ip(prefix: &str) -> String {
-    format!("{prefix}.255.254")
+/// The SDN network's prefix. `NetPlan.prefix` is `a.b.c.d/len` for a network
+/// created with a CIDR and the legacy two-octet `10.210` for an older record;
+/// `Cidr::parse` reads both. This used to assume the second form everywhere —
+/// `format!("{prefix}.255.254")` — so a `172.20.4.0/22` network produced the
+/// address `172.20.4.0/22.255.254` and an `iptables -d 172.20.4.0/22.0.0/16`.
+/// A prefix with no room for a host address besides the gateway and the
+/// broadcast (/31, /32) is refused.
+fn sdn_cidr(prefix: &str) -> Result<Cidr> {
+    let c = Cidr::parse(prefix).ok_or_else(|| {
+        Error::Invalid(po::tf(
+            "the network's prefix is not a CIDR: '{prefix}'",
+            &[("prefix", prefix)],
+        ))
+    })?;
+    if c.len > 30 {
+        return Err(Error::Invalid(po::tf(
+            "the network's prefix /{len} has no room for the bridge's host address",
+            &[("len", &c.len.to_string())],
+        )));
+    }
+    Ok(c)
 }
 
-/// The SDN network CIDR of a `/16` prefix (`10.210` → `10.210.0.0/16`). Pure.
-fn sdn_subnet(prefix: &str) -> String {
-    format!("{prefix}.0.0/16")
+/// The host-side SDN address of the bridge link: the last address before the
+/// broadcast (`.255.254` on a /16), high in the prefix to avoid colliding with
+/// DHCP-assigned container IPs (which grow from the bottom). Pure.
+fn host_sdn_ip(sdn: &Cidr) -> String {
+    Cidr::fmt_u32(sdn.last() - 1)
+}
+
+/// The SDN network CIDR, canonical (`10.210` → `10.210.0.0/16`). Pure.
+fn sdn_subnet(sdn: &Cidr) -> String {
+    sdn.to_string_cidr()
+}
+
+/// Validates the VM subnets BEFORE they reach an argv run as root.
+///
+/// Each one becomes `iptables -I FORWARD -s <sub> …` and `ip route add <sub>`
+/// inside the holder, and `--vm-subnet` took any string: `default` installed a
+/// default route in the holder's netns through the host end, and `0.0.0.0/0`
+/// opened the SDN to every source the host forwards. Accepted: a strict
+/// `a.b.c.d/len`, not `/0`, not overlapping the SDN network itself (the return
+/// route would shadow the bridge's own). Returned canonical (host bits cleared),
+/// so the rule `unbridge` deletes is the rule `bridge` inserted.
+fn validate_vm_subnets(raw: &[String], sdn: &Cidr) -> Result<Vec<String>> {
+    raw.iter()
+        .map(|s| {
+            let strict = s.split_once('/').is_some_and(|(addr, len)| {
+                addr.parse::<std::net::Ipv4Addr>().is_ok()
+                    && !len.is_empty()
+                    && len.bytes().all(|b| b.is_ascii_digit())
+            });
+            let c = Cidr::parse(s).filter(|_| strict).ok_or_else(|| {
+                Error::Invalid(po::tf(
+                    "--vm-subnet must be an IPv4 prefix a.b.c.d/len: '{subnet}'",
+                    &[("subnet", s)],
+                ))
+            })?;
+            if c.len == 0 {
+                return Err(Error::Invalid(po::tf(
+                    "--vm-subnet '{subnet}' is every address, not a VM subnet",
+                    &[("subnet", s)],
+                )));
+            }
+            if c.overlaps(sdn) {
+                return Err(Error::Invalid(po::tf(
+                    "--vm-subnet '{subnet}' overlaps the SDN network {sdn}",
+                    &[("subnet", s), ("sdn", &sdn.to_string_cidr())],
+                )));
+            }
+            Ok(c.to_string_cidr())
+        })
+        .collect()
+}
+
+/// `--apply` runs every step as root, so it is refused up front for anyone
+/// else. Before this, a non-root `--apply` ran the whole tolerated cleanup
+/// plan first — `iptables -D`, `nsenter`, `ip link del`, each failing on
+/// EPERM and ignored — and only then stopped on the first bridge step.
+fn require_root(euid: u32) -> Result<()> {
+    if euid != 0 {
+        return Err(Error::Invalid(String::from(po::t(
+            "`--apply` needs root: this command changes the host's network namespace \
+             (run it with sudo, or drop `--apply` for the dry-run)",
+        ))));
+    }
+    Ok(())
+}
+
+fn current_euid() -> u32 {
+    // SAFETY: geteuid() has no preconditions.
+    unsafe { libc::geteuid() }
 }
 
 /// Builds the ordered list of privileged commands (argv each) that establish
@@ -67,12 +150,12 @@ fn sdn_subnet(prefix: &str) -> String {
 fn bridge_plan(
     holder_pid: &str,
     bridge: &str,
-    prefix: &str,
+    prefix: &Cidr,
     vm_subnets: &[String],
 ) -> Vec<Vec<String>> {
     let (vh, vs) = veth_names(bridge); // keyed on the SDN bridge (1 per network)
     let host_ip = host_sdn_ip(prefix);
-    let host_cidr = format!("{host_ip}/16");
+    let host_cidr = format!("{host_ip}/{}", prefix.len);
     let nsenter = |args: &[&str]| -> Vec<String> {
         let mut v = vec![
             // ROOT enters ONLY the net namespace (-n), NOT the userns (-U):
@@ -130,7 +213,7 @@ fn bridge_plan(
 fn unbridge_plan(
     holder_pid: &str,
     bridge: &str,
-    prefix: &str,
+    prefix: &Cidr,
     vm_subnets: &[String],
 ) -> Vec<Vec<String>> {
     let (vh, _vs) = veth_names(bridge);
@@ -297,15 +380,24 @@ fn run_plan(plan: &[Vec<String>], apply: bool, tolerate: bool) -> Result<()> {
 
 /// `delonix vm bridge <network>` — establish (or dry-run) the host↔SDN bridge.
 pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()> {
+    if apply {
+        require_root(current_euid())?;
+    }
     adopt_invoking_user_root();
     let p = infra::resolve_net(network)?;
-    let (bridge, prefix) = (p.bridge, p.prefix);
+    let bridge = p.bridge;
+    let prefix = sdn_cidr(&p.prefix)?;
     let holder = holder_pid()?;
-    let subs = if vm_subnets.is_empty() {
-        detect_vm_subnets()
-    } else {
-        vm_subnets
-    };
+    // Detected subnets go through the same check: they come from the host's
+    // `ip`, but they reach the same root argv.
+    let subs = validate_vm_subnets(
+        &if vm_subnets.is_empty() {
+            detect_vm_subnets()
+        } else {
+            vm_subnets
+        },
+        &prefix,
+    )?;
     if subs.is_empty() {
         return Err(Error::Invalid(
             "no libvirt VM subnet found (no `virbr*` with an IPv4) — pass `--vm-subnet <cidr>`"
@@ -319,8 +411,8 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
         );
         run_plan(&plan, false, false)?;
         println!(
-            "\nEXPERIMENTAL: this opens VM↔container on '{network}' ({}.0.0/16 ↔ {}). Undo with `delonix vm unbridge {network}`.",
-            prefix,
+            "\nEXPERIMENTAL: this opens VM↔container on '{network}' ({} ↔ {}). Undo with `delonix vm unbridge {network}`.",
+            sdn_subnet(&prefix),
             subs.join(", ")
         );
         return Ok(());
@@ -333,7 +425,8 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
     run_plan(&cleanup, true, true)?;
     run_plan(&plan, true, false)?;
     output::info(&format!(
-        "bridged '{network}' ({prefix}.0.0/16) to the VM network(s) {} — VMs now reach its containers by IP",
+        "bridged '{network}' ({}) to the VM network(s) {} — VMs now reach its containers by IP",
+        sdn_subnet(&prefix),
         subs.join(", ")
     ));
     Ok(())
@@ -341,11 +434,15 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
 
 /// `delonix vm unbridge <network>` — tear the bridge down.
 pub fn unbridge(network: &str, apply: bool) -> Result<()> {
+    if apply {
+        require_root(current_euid())?;
+    }
     adopt_invoking_user_root();
     let p = infra::resolve_net(network)?;
-    let (bridge, prefix) = (p.bridge, p.prefix);
+    let bridge = p.bridge;
+    let prefix = sdn_cidr(&p.prefix)?;
     let holder = holder_pid()?;
-    let subs = detect_vm_subnets();
+    let subs = validate_vm_subnets(&detect_vm_subnets(), &prefix)?;
     let plan = unbridge_plan(&holder, &bridge, &prefix, &subs);
     if !apply {
         output::warn("DRY-RUN — re-run with `--apply` (as root) to tear down:");
@@ -384,8 +481,8 @@ mod tests {
 
     #[test]
     fn host_sdn_ip_fica_alto_no_16() {
-        assert_eq!(host_sdn_ip("10.200"), "10.200.255.254");
-        assert_eq!(host_sdn_ip("10.210"), "10.210.255.254");
+        assert_eq!(host_sdn_ip(&sdn_cidr("10.200").unwrap()), "10.200.255.254");
+        assert_eq!(host_sdn_ip(&sdn_cidr("10.210").unwrap()), "10.210.255.254");
     }
 
     #[test]
@@ -408,7 +505,8 @@ mod tests {
 
     #[test]
     fn bridge_plan_tem_a_ordem_e_os_passos_certos() {
-        let plan = bridge_plan("4242", "delonix0", "10.200", &["192.168.122.0/24".into()]);
+        let sdn = sdn_cidr("10.200").unwrap();
+        let plan = bridge_plan("4242", "delonix0", &sdn, &["192.168.122.0/24".into()]);
         // veth criado ANTES de mover para a netns; enslave DENTRO do holder.
         assert_eq!(plan[0][..3], ["ip", "link", "add"]);
         assert!(plan[1].contains(&"netns".to_string()) && plan[1].contains(&"4242".to_string()));
@@ -437,13 +535,14 @@ mod tests {
 
     #[test]
     fn sdn_subnet_deriva_o_16() {
-        assert_eq!(sdn_subnet("10.210"), "10.210.0.0/16");
-        assert_eq!(sdn_subnet("10.200"), "10.200.0.0/16");
+        assert_eq!(sdn_subnet(&sdn_cidr("10.210").unwrap()), "10.210.0.0/16");
+        assert_eq!(sdn_subnet(&sdn_cidr("10.200").unwrap()), "10.200.0.0/16");
     }
 
     #[test]
     fn unbridge_plan_apaga_forward_rota_e_veth() {
-        let plan = unbridge_plan("4242", "delonix0", "10.200", &["192.168.122.0/24".into()]);
+        let sdn = sdn_cidr("10.200").unwrap();
+        let plan = unbridge_plan("4242", "delonix0", &sdn, &["192.168.122.0/24".into()]);
         // Remove as regras FORWARD (espelho do bridge)…
         assert!(plan.iter().any(|c| c[..2] == ["iptables", "-D"]));
         // …a rota de retorno…
@@ -454,5 +553,67 @@ mod tests {
         let last = plan.last().unwrap();
         assert_eq!(last[..3], ["ip", "link", "del"]);
         assert!(last[3].starts_with("vbh"));
+    }
+
+    #[test]
+    fn host_sdn_ip_follows_a_cidr_prefix_not_two_octets() {
+        // The two-octet assumption turned this into `172.20.4.0/22.255.254`.
+        let sdn = sdn_cidr("172.20.4.0/22").unwrap();
+        assert_eq!(host_sdn_ip(&sdn), "172.20.7.254");
+        assert_eq!(sdn_subnet(&sdn), "172.20.4.0/22");
+        let plan = bridge_plan("4242", "dlxnabc", &sdn, &["192.168.122.0/24".into()]);
+        assert!(plan
+            .iter()
+            .any(|c| c.contains(&"172.20.7.254/22".to_string())));
+        assert!(plan.iter().all(|c| c.iter().all(|a| !a.contains("/22."))));
+        // No host address left beside gateway and broadcast.
+        assert!(sdn_cidr("10.0.0.0/31").is_err());
+        assert!(sdn_cidr("not-a-prefix").is_err());
+    }
+
+    #[test]
+    fn vm_subnet_refuses_what_would_reach_the_root_argv_as_something_else() {
+        let sdn = sdn_cidr("10.200").unwrap();
+        for bad in [
+            "default",   // `ip route add default via …` in the holder
+            "0.0.0.0/0", // FORWARD ACCEPT from every source
+            "-j",        // read by iptables as an option
+            "--help",
+            "192.168.122.0/24;id",
+            "192.168.122.0", // no prefix length
+            "192.168.122.0/+24",
+            "+192.168.122.0/24",
+            "10.200.5.0/24", // inside the SDN network itself
+            "../../etc/x",
+        ] {
+            assert!(
+                validate_vm_subnets(&[bad.to_string()], &sdn).is_err(),
+                "{bad:?} must be refused"
+            );
+        }
+        assert_eq!(
+            validate_vm_subnets(&["192.168.122.1/24".to_string()], &sdn).unwrap(),
+            vec!["192.168.122.0/24".to_string()],
+            "a legitimate subnet passes, canonical"
+        );
+    }
+
+    #[test]
+    fn apply_is_refused_without_root_before_any_command() {
+        assert!(require_root(1000).is_err());
+        assert!(require_root(0).is_ok());
+        if current_euid() == 0 {
+            return; // the ordering below is only observable without root
+        }
+        // The root refusal comes FIRST: before resolving the network, before
+        // the holder, before the tolerated cleanup plan. A network that does
+        // not exist would otherwise be the error reported.
+        for r in [
+            bridge("no-such-net-s4", vec!["-j".into()], true),
+            unbridge("no-such-net-s4", true),
+        ] {
+            let msg = r.unwrap_err().to_string();
+            assert!(msg.contains("needs root"), "{msg}");
+        }
     }
 }

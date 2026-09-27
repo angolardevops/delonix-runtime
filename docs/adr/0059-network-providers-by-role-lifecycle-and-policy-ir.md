@@ -438,3 +438,45 @@ lock; nothing measured OPNsense's rollback timer); OPNsense's API answering live
 was not started and this session has no key); the drafted reports as code; the golden table;
 the digest's stability across engine versions; per-node verification beyond PR #542's
 observation.
+
+## Addendum 2026-09-27 — F1 built
+
+What F1 delivered, against its exit criterion:
+
+- **Catalog 1.1.0** (`delonix_compute::capability`): the 27 entries of D2 (23 `net.*`, 4
+  `firewall.*`), all of kind `network`; the catalog has 127 entries. Every provider answers
+  every new row in the same change — the `match` of each report has no wildcard arm, so a
+  missing answer does not compile.
+- **`ProviderKind::Gateway`** (`gateway`), with `ProviderKind::catalog_kind()`: a gateway
+  report walks the `network` rows and keeps its own kind. In `provider matrix` it is a column
+  of the network table, labelled `opnsense (gateway)`; the node-api's equality test reads that
+  label back as `(gateway, opnsense)`. `--kind gateway` works on `provider ls/describe` and on
+  `GET /v1/providers?kind=gateway`; the proto comment of `ProviderInfo.kind` lists the fifth
+  word.
+- **The OPNsense report** (`delonix_opnsense::capability_report`), declared, never probed:
+  3 supported (`net.gateway.filter`, `net.gateway.alias`, `net.apply.staged`, all citing the
+  live test of ADR-0051 phase 2), 1 partial, 23 unsupported, 2 requiring an external
+  component (the load balancer), 18 not implemented. It is composed in both provider lists
+  (`cmd/provider.rs` and `delonix-node-api/src/providers.rs`). The declared network table:
+  `linux` 8 of 47 supported, `proxmox` 0 of 47, `opnsense` 3 of 47.
+- **`providers.yaml`**: `type: opnsense` (`url`, `auth.key`/`keyFile`, `auth.secretFile` or
+  `secretRef`, `tls`), an inline `secret` refused by name, the entry translated into the
+  `DELONIX_OPNSENSE_*` keys the one registration reads, the environment replacing the entry as
+  a whole. `networkDefaults` with the five roles: `segment` accepts only `proxmox`, `gateway`
+  only `opnsense`, `nat`/`ipam`/`dns` are refused naming F5, `defaultProvider: opnsense` is
+  refused as compute's key. `provider config validate` checks what the entry points at (the
+  secret file owner-only, the CA readable) without registering; `provider config show` prints
+  the entry and the network defaults, the secret only by where it comes from. The published
+  schema (`docs/schema/v1/providers.json`) is regenerated.
+
+**One behaviour change, on purpose:** a node whose `providers.yaml` has a `type: opnsense`
+entry now REGISTERS the appliance from the file (ADR-0054 D4's rule, applied to the gateway),
+where before only `DELONIX_OPNSENSE_*` did. Registering contacts nothing (ADR-0008). No Kind
+resolves through `networkDefaults` yet — that is F2.
+
+**Measured with the tree's binary** (isolated `DELONIX_ROOT`, a providers file pointing at
+`https://fw.invalid`): `provider config validate` passes; `provider ls --kind gateway` lists
+`opnsense gateway yes NotProbed 3/1/23/2/18`; every report carries `catalog_version 1.1.0`;
+without the file the row is `NotConfigured`; `defaultProvider: opnsense`, `networkDefaults.nat`
+and a secret file others can read each exit 1 with the reason; `--kind firewall` is refused
+naming the five kinds.

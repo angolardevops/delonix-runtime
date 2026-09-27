@@ -642,16 +642,19 @@ mod tests {
     /// **Esgotar um prefixo por inteiro** — a prova anti-colisão que um /16
     /// nunca dá, porque ninguém enche 65 mil endereços num teste.
     ///
-    /// Num /28 há 16 endereços e 13 utilizáveis. A sonda tem de devolver os 13,
-    /// todos distintos e todos dentro, e depois dizer que não há mais — em vez
-    /// de repetir um (colisão silenciosa: dois containers com o mesmo IP, e a
-    /// rede a funcionar para um deles) ou de devolver um de fora.
+    /// A /28 has 16 addresses and 13 usable: 2 of them are the VM DHCP pool
+    /// (`crate::vm_dhcp_pool`), so the probe must return the other 11, all
+    /// distinct, all inside, none in the pool — and then say there is no more,
+    /// instead of repeating one (a silent collision: two containers on one IP)
+    /// or handing out one from outside.
     #[test]
     fn esgotar_um_28_da_13_enderecos_distintos_e_depois_nada() {
         let cidr = "192.168.1.0/28";
         let net = crate::Cidr::parse(cidr).unwrap();
         let mut usados: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for i in 0..13 {
+        let (_, pool) = crate::vm_dhcp_pool(cidr).unwrap();
+        let for_containers = 13 - pool as usize;
+        for i in 0..for_containers {
             let refs: std::collections::HashSet<&str> = usados.iter().map(String::as_str).collect();
             let preferido = crate::derive_ip_in(cidr, &format!("{i:08x}"));
             let ip = probe_free(cidr, &preferido, &refs)
@@ -661,9 +664,10 @@ mod tests {
             assert_ne!(a, net.base);
             assert_ne!(a, net.base + 1);
             assert_ne!(a, net.last());
+            assert!(!crate::in_vm_dhcp_pool(cidr, &ip), "{ip} is in the VM pool");
             assert!(usados.insert(ip.clone()), "REPETIU {ip}");
         }
-        assert_eq!(usados.len(), 13);
+        assert_eq!(usados.len(), 11);
         // E agora está mesmo cheio.
         let refs: std::collections::HashSet<&str> = usados.iter().map(String::as_str).collect();
         assert_eq!(
