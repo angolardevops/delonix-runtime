@@ -51,15 +51,21 @@ the template were removed afterwards; the node was left as it was found).
 4. **`entrypoint` and `env` are silently replaced on create.** A create from an OCI archive with
    `--entrypoint /bin/true --env FOO=bar` stored `entrypoint: /bin/sh` and the image's `PATH`,
    with `FOO` dropped. The task said `OK`. A `PUT …/config` afterwards is stored as sent.
-5. **A network that fails does not fail the start.** With `net0: ip=dhcp` the node enables
-   "host-managed" networking (the image has no DHCP client) and runs `dhclient` itself. With no
-   offer, the start task ends `OK` with `WARNINGS: 1`, and the container runs with no IPv4 address
-   (`GET …/interfaces`: `eth0` with only a link-local address).
+5. **A network that fails ends the start in a third state.** With `net0: ip=dhcp` the node
+   enables "host-managed" networking (the image has no DHCP client) and runs `dhclient` itself.
+   With no offer, the `vzstart` task ends with `exitstatus: "WARNINGS: 1"` — neither `OK` nor an
+   error — and its log (`GET /nodes/{node}/tasks/{upid}/log`) carries the reason on a `WARN:` line
+   (`DHCP failed … exit code 2`). The container runs with no IPv4 address (`GET …/interfaces`:
+   `eth0` with only a link-local address). The engine's `task_verdict` reads every exit status
+   other than `OK` as a failure, so today it would report this start as FAILED with the container
+   running; the verdict is shared by every task this backend waits for, QEMU included.
 6. **The image reference is a tag, and the digest is lost.** The `reference` parameter of
    `oci-registry-pull` must end in `:<tag>`, per the node's schema; a `@sha256:` reference does not
    match it. The stored file is named `alpine_3.20.tar`, with no registry, no repository path and
    no digest. Two images with the same last path component and tag map to one file name. The
-   `digest` field in the container config is a SHA-1 of the config, not the image's.
+   `digest` field in the container config is a SHA-1 of the config, not the image's. The pull has
+   two parameters, `reference` and `filename`, and no credentials: a registry that needs a login
+   cannot be pulled from through the API.
 7. **Every container is a full copy.** The archive is extracted into a new volume per container
    (`rootfs: local-lvm:vm-100-disk-0,size=1G`). There is no layer sharing.
 8. **Nothing of this engine's dataplane applies.** The container sits on a bridge of the remote
@@ -87,8 +93,9 @@ the template were removed afterwards; the node was left as it was found).
    here so they are not rediscovered one incident at a time:
    - `entrypoint`/`env` are set by `PUT …/config` after the create and read back, never trusted
      from the create call (point 4).
-   - A start is judged by the task's warnings and by `GET …/interfaces`, never by `OK` alone
-     (point 5).
+   - A task has three outcomes, not two: `OK`, an error, and `WARNINGS: <n>`, whose `WARN:` lines
+     are read from the task log and reported. A start with warnings is not a failure and not a
+     silent success; the network is judged by `GET …/interfaces` (point 5).
    - The engine records the registry, repository, tag and the digest it resolved, and refuses a
      digest-only reference by name; the node's file name is not an identity (point 6).
    - `exec`, logs and exit status are declared `unsupported-by-provider` with the reason, never
@@ -133,5 +140,6 @@ the template were removed afterwards; the node was left as it was found).
 - **Not validated:** the routes were exercised through `pvesh` on the node, not through
   `delonix-proxmox` over HTTPS, so the matrix does not change. A privileged container
   (`unprivileged: 0`), `features: nesting=1`, a digest-only reference sent to the live node (the
-  refusal is read from the schema, not measured), a registry that needs credentials, and a network
-  where DHCP answers were not tried.
+  refusal is read from the schema, not measured), and a network where DHCP answers were not tried.
+  Whether QEMU tasks end in `WARNINGS` in practice was not measured; the verdict that would
+  misread them is shared code.
