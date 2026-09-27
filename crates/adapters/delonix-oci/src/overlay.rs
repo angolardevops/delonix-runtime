@@ -351,6 +351,19 @@ impl ImageStore {
 
     /// Mounts the overlay rootfs of a container and returns the `merged` path.
     pub fn mount_rootfs(&self, image: &Image, container_id: &str) -> Result<PathBuf> {
+        self.mount_rootfs_with(image, container_id, false)
+    }
+
+    /// [`Self::mount_rootfs`], optionally `volatile` (ADR-0056). A `volatile`
+    /// overlay leaves `work/work/incompat/volatile` behind and the kernel refuses
+    /// to mount that workdir again, even after a clean unmount — so the workdir
+    /// is emptied first. It is scratch and holds no state.
+    fn mount_rootfs_with(
+        &self,
+        image: &Image,
+        container_id: &str,
+        volatile: bool,
+    ) -> Result<PathBuf> {
         let lowers = self.ensure_layers(image)?;
         if lowers.is_empty() {
             return Err(Error::NoLayers);
@@ -359,6 +372,9 @@ impl ImageStore {
         let upper = base.join("upper");
         let work = base.join("work");
         let merged = base.join("merged");
+        if volatile {
+            let _ = std::fs::remove_dir_all(&work);
+        }
         for d in [&upper, &work, &merged] {
             std::fs::create_dir_all(d)?;
         }
@@ -374,15 +390,26 @@ impl ImageStore {
             upper.display(),
             work.display()
         );
-
-        mount(
-            Some("overlay"),
-            &merged,
-            Some("overlay"),
-            MsFlags::empty(),
-            Some(opts.as_str()),
-        )
-        .map_err(|e| Error::OverlayMount(e.to_string()))?;
+        let mount_with = |opts: &str| {
+            mount(
+                Some("overlay"),
+                &merged,
+                Some("overlay"),
+                MsFlags::empty(),
+                Some(opts),
+            )
+        };
+        let mounted = if volatile {
+            // A kernel without `volatile` (before 5.10) refuses it with EINVAL: the
+            // container still starts, without the optimisation (ADR-0056 D3).
+            match mount_with(&format!("{opts},volatile")) {
+                Err(nix::errno::Errno::EINVAL) => mount_with(&opts),
+                other => other,
+            }
+        } else {
+            mount_with(&opts)
+        };
+        mounted.map_err(|e| Error::OverlayMount(e.to_string()))?;
 
         Ok(merged)
     }
@@ -397,6 +424,13 @@ impl ImageStore {
     /// mount needs has to survive that boundary. A sibling file next to
     /// `merged/` does; a struct built before the re-exec does not.
     pub const LOWERS_FILE: &'static str = "overlay-lowers";
+
+    /// Marker next to [`Self::LOWERS_FILE`]: this container's overlay is mounted
+    /// `volatile` (ADR-0056). Written only for a container whose write layer is
+    /// discarded when it exits (`--rm`), because `volatile` skips every sync of the
+    /// upper filesystem — and with it the wait, at exit, for everything dirty on
+    /// the host filesystem.
+    pub const VOLATILE_FILE: &'static str = "overlay-volatile";
 
     /// The extracted layer directories of an image, highest first — the exact
     /// `lowerdir=` order. Extracts and caches them if needed.
@@ -428,7 +462,15 @@ impl ImageStore {
     /// I/O on every `run`. The layers under `layers/<hex>/` were already shared
     /// and already had the right ownership for the container's uid map; nothing
     /// pointed at them.
-    pub fn prepare_overlay(&self, image: &Image, container_id: &str) -> Result<PathBuf> {
+    ///
+    /// `volatile` writes [`Self::VOLATILE_FILE`], and its absence REMOVES one: a
+    /// marker left by an earlier preparation must never outlive the decision.
+    pub fn prepare_overlay(
+        &self,
+        image: &Image,
+        container_id: &str,
+        volatile: bool,
+    ) -> Result<PathBuf> {
         let lowers = self.ensure_layers(image)?;
         if lowers.is_empty() {
             return Err(Error::NoLayers);
@@ -457,6 +499,14 @@ impl ImageStore {
             .collect::<Vec<_>>()
             .join("\n");
         std::fs::write(base.join(Self::LOWERS_FILE), body)?;
+        let marker = base.join(Self::VOLATILE_FILE);
+        if volatile {
+            std::fs::write(&marker, b"")?;
+        } else if let Err(e) = std::fs::remove_file(&marker) {
+            if e.kind() != std::io::ErrorKind::NotFound {
+                return Err(e.into());
+            }
+        }
         Ok(base.join("merged"))
     }
 
@@ -480,13 +530,22 @@ impl ImageStore {
     /// work because the rootless map is `0 <euid> 1`, so uid 0 INSIDE the namespace
     /// IS the invoking uid on the host, and the files already read as `root` to the
     /// container. That is also what lets one extracted layer serve every container.
-    pub fn prepare_container_rootfs(&self, img: &Image, id: &str) -> Result<PathBuf> {
+    ///
+    /// `ephemeral` is a container whose write layer is discarded when it exits
+    /// (`--rm`): its overlay is mounted `volatile` (ADR-0056), so its exit does
+    /// not wait for everything dirty on the host filesystem.
+    pub fn prepare_container_rootfs(
+        &self,
+        img: &Image,
+        id: &str,
+        ephemeral: bool,
+    ) -> Result<PathBuf> {
         if delonix_node::is_rootless() {
             // Does not mount — an unprivileged `mount(2)` on the host is EPERM. The
             // mount happens inside the clone, where we own the user namespace.
-            self.prepare_overlay(img, id)
+            self.prepare_overlay(img, id, ephemeral)
         } else {
-            self.mount_rootfs(img, id)
+            self.mount_rootfs_with(img, id, ephemeral)
         }
     }
 
@@ -942,6 +1001,36 @@ mod parallel_extract_tests {
             assert!(dir.join(".extracted").exists());
         }
         assert!(scratch_left(&root).is_empty(), "{:?}", scratch_left(&root));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// ADR-0056: an ephemeral container's overlay carries the `volatile` marker,
+    /// and preparing the same container again as a kept one REMOVES it — a
+    /// stale marker would mount a kept container's write layer without syncs.
+    #[test]
+    fn the_volatile_marker_follows_the_last_preparation() {
+        let (s, root) = store("volatile");
+        let d = s.cas().write(&layer("a.txt", b"a")).unwrap();
+        let img = image(vec![d]);
+        let marker = root
+            .join("containers")
+            .join("c1")
+            .join(ImageStore::VOLATILE_FILE);
+        s.prepare_overlay(&img, "c1", true).unwrap();
+        assert!(
+            marker.exists(),
+            "an ephemeral container must be marked volatile"
+        );
+        s.prepare_overlay(&img, "c1", false).unwrap();
+        assert!(
+            !marker.exists(),
+            "a kept container must not inherit the marker"
+        );
+        s.prepare_overlay(&img, "c2", false).unwrap();
+        assert!(!root
+            .join("containers/c2")
+            .join(ImageStore::VOLATILE_FILE)
+            .exists());
         let _ = std::fs::remove_dir_all(&root);
     }
 

@@ -1665,13 +1665,30 @@ pub fn mount_overlay_if_marked(rootfs: &str) -> nix::Result<()> {
     // that reaches this function gets a working overlay, whatever cleanup ran
     // before it. `upper/` is deliberately NOT created — if it is missing, this
     // container's writes are gone and the honest outcome is the mount failing.
+    //
+    // A `volatile` overlay (ADR-0056, marker written for `--rm`) leaves
+    // `work/work/incompat/volatile` behind, and the kernel refuses to mount that
+    // workdir again even after a clean unmount. A `--rm` container can still be
+    // mounted twice — `--restart` re-creates it over the same directory — so the
+    // workdir is emptied first. It is scratch: nothing in it is state.
+    let volatile = base.join("overlay-volatile").exists();
+    if volatile {
+        let _ = std::fs::remove_dir_all(base.join("work"));
+    }
     for d in ["merged", "work"] {
         let _ = std::fs::create_dir_all(base.join(d));
     }
     let upperdir = base.join("upper");
     let workdir = base.join("work");
-    fsopen_overlay(&lower_paths, &upperdir, &workdir, merged)
-        .map_err(|e| nix::errno::Errno::from_i32(e.raw_os_error()))
+    let mounted = match fsopen_overlay(&lower_paths, &upperdir, &workdir, merged, volatile) {
+        // A kernel without `volatile` (before 5.10) refuses the flag with EINVAL:
+        // the container still starts, without the optimisation (ADR-0056 D3).
+        Err(e) if volatile && e == rustix::io::Errno::INVAL => {
+            fsopen_overlay(&lower_paths, &upperdir, &workdir, merged, false)
+        }
+        other => other,
+    };
+    mounted.map_err(|e| nix::errno::Errno::from_i32(e.raw_os_error()))
 }
 
 /// The new-mount-API half of [`mount_overlay_if_marked`] — split out so the
@@ -1685,10 +1702,11 @@ fn fsopen_overlay(
     upperdir: &std::path::Path,
     workdir: &std::path::Path,
     target: &std::path::Path,
+    volatile: bool,
 ) -> rustix::io::Result<()> {
     use rustix::mount::{
-        fsconfig_create, fsconfig_set_string, fsmount, fsopen, move_mount, FsMountFlags,
-        FsOpenFlags, MountAttrFlags, MoveMountFlags,
+        fsconfig_create, fsconfig_set_flag, fsconfig_set_string, fsmount, fsopen, move_mount,
+        FsMountFlags, FsOpenFlags, MountAttrFlags, MoveMountFlags,
     };
     let fs = fsopen("overlay", FsOpenFlags::FSOPEN_CLOEXEC)?;
     // Highest layer first, same order `lower_dirs`/the old joined string
@@ -1699,6 +1717,9 @@ fn fsopen_overlay(
     }
     fsconfig_set_string(&fs, "upperdir", upperdir.to_string_lossy().as_ref())?;
     fsconfig_set_string(&fs, "workdir", workdir.to_string_lossy().as_ref())?;
+    if volatile {
+        fsconfig_set_flag(&fs, "volatile")?;
+    }
     fsconfig_create(&fs)?;
     let mount_fd = fsmount(&fs, FsMountFlags::FSMOUNT_CLOEXEC, MountAttrFlags::empty())?;
     move_mount(
