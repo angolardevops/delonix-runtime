@@ -263,7 +263,7 @@ pub fn reserve(prefix: &str, id: &str, ip: &str) -> Result<()> {
              network's DHCP server hands it to a VM; pick an address outside it"
         )));
     }
-    reserve_in(&key, id, ip)
+    reserve_in(&key, id, ip, "pick another address")
 }
 
 /// The lease of a VM's DHCP address — the pool's half of [`reserve`].
@@ -281,10 +281,20 @@ pub fn reserve_vm_dhcp(prefix: &str, id: &str, ip: &str) -> Result<()> {
             "IP {ip} is not in the VM DHCP pool of {prefix}"
         )));
     }
-    reserve_in(&key, id, ip)
+    // A VM does not choose its address: the DHCP derives it from the MAC, and
+    // the MAC from the VM's name. "Pick another address" is advice it cannot
+    // follow (measured: that is what the refusal said).
+    reserve_in(
+        &key,
+        id,
+        ip,
+        "a VM's DHCP address comes from its MAC, which comes from its NAME — create it \
+         under another name",
+    )
 }
 
-fn reserve_in(key: &str, id: &str, ip: &str) -> Result<()> {
+/// `remedy` is the one thing the refused caller can actually do about it.
+fn reserve_in(key: &str, id: &str, ip: &str, remedy: &str) -> Result<()> {
     if !crate::valid_ip_in_subnet(key, ip) {
         return Err(Error::IpNotInSubnet(format!(
             "IP {ip} is not a usable address of {key}"
@@ -301,7 +311,7 @@ fn reserve_in(key: &str, id: &str, ip: &str) -> Result<()> {
     {
         return Err(Error::IpInUse(format!(
             "IP {ip} is already leased to '{other}' — two owners of one address \
-             would collide on the wire; pick another address"
+             would collide on the wire; {remedy}"
         )));
     }
     map.insert(id.to_string(), ip.to_string());
@@ -1210,6 +1220,7 @@ mod tests_transactional {
             reserve_vm_dhcp("10.86", "vm-a", "10.86.254.77").unwrap();
             let e = reserve_vm_dhcp("10.86", "vm-b", "10.86.254.77").unwrap_err();
             assert!(matches!(e, Error::IpInUse(_)), "{e}");
+            assert!(format!("{e}").contains("another name"), "{e}");
             assert_eq!(
                 leases_of("vm-a"),
                 vec![("10.86".into(), "vm-a".into(), "10.86.254.77".into())]

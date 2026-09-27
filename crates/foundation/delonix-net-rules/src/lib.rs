@@ -258,26 +258,36 @@ impl Cidr {
     }
 }
 
-/// The third octet of the VM DHCP pool inside a `/16`, and the pool's bounds:
-/// `<a>.<b>.254.10` to `<a>.<b>.254.249` (240 addresses).
+/// The VM DHCP pool of a `/16`: `<a>.<b>.254.10` to `<a>.<b>.254.249` (240
+/// addresses). Every VM that exists today was addressed from this exact range,
+/// so a `/16` keeps it byte for byte.
 const VM_DHCP_POOL_OCTET: u32 = 254;
 const VM_DHCP_POOL_FIRST: u32 = 10;
 const VM_DHCP_POOL_SIZE: u32 = 240;
 
-/// The two network octets of a prefix the VM DHCP serves, or `None`.
+/// The VM DHCP pool of network `prefix`, as `(first address, size)`, or `None`
+/// for something that is not a network.
 ///
-/// A bridge's DHCP server only exists for a `/16` (that is where the `.254.x`
-/// pool fits), and the registry records that `/16` in TWO forms: the legacy
-/// `10.210` and a CIDR `10.210.0.0/16`. Both are the same network, and the
-/// second one gave `None` here — a VM on a network created with `--subnet` had
-/// no predicted address, and so sat outside isolation and the address registry.
-fn vm_dhcp_net(prefix: &str) -> Option<[u8; 2]> {
+/// A `/16` keeps its historic `.254.10–.249`, in either spelling (`10.210` or
+/// `10.210.0.0/16` — the CIDR one used to give `None`, and a VM on a network
+/// created with `--subnet` had no predicted address).
+///
+/// Any other length gets `min(240, size/8)` addresses at the TOP of the prefix,
+/// just below the broadcast. Before this, the server always served the `/16`
+/// the gateway's first two octets named: on `172.20.9.0/24` a VM was offered
+/// `172.20.254.x/16` with router `172.20.0.1` — none of it on its network —
+/// and came up unreachable, outside the address registry and outside isolation
+/// (measured: `IP <none>`, and its MAC never reached the bridge's neighbours).
+pub fn vm_dhcp_pool(prefix: &str) -> Option<(u32, u32)> {
     let net = Cidr::parse(prefix)?;
-    if net.len != 16 {
-        return None;
+    if net.len == 16 {
+        let first = net.base + (VM_DHCP_POOL_OCTET << 8) + VM_DHCP_POOL_FIRST;
+        return Some((first, VM_DHCP_POOL_SIZE));
     }
-    let b = net.base.to_be_bytes();
-    Some([b[0], b[1]])
+    net.usable_for_network().ok()?;
+    let size = (net.size() / 8).clamp(1, VM_DHCP_POOL_SIZE);
+    // `last()` is the broadcast: the pool ends one below it.
+    Some((net.last() - size, size))
 }
 
 /// The address the VM DHCP hands `mac` on network `prefix` — derived from the
@@ -289,30 +299,25 @@ fn vm_dhcp_net(prefix: &str) -> Option<[u8; 2]> {
 /// diverge the day the pool changed, and the symptom would be a container on a
 /// VM's IP.
 pub fn vm_dhcp_lease_ip(prefix: &str, mac: &str) -> Option<String> {
-    let [o0, o1] = vm_dhcp_net(prefix)?;
+    let (first, size) = vm_dhcp_pool(prefix)?;
     // The server hashes the MAC as it renders it off the wire: lowercase,
     // `:`-separated. Normalizing here (and not at each call site) is what stops
     // an upper-case MAC from a record producing a different, unused address.
-    let host = VM_DHCP_POOL_FIRST + fnv32(&mac.to_lowercase()) % VM_DHCP_POOL_SIZE;
-    Some(format!("{o0}.{o1}.{VM_DHCP_POOL_OCTET}.{host}"))
+    Some(Cidr::fmt_u32(first + fnv32(&mac.to_lowercase()) % size))
 }
 
 /// `true` when `ip` falls in the VM DHCP pool of network `prefix`.
 ///
-/// It is the border between a `/16`'s two address authorities: the VM DHCP
+/// It is the border between a network's two address authorities: the VM DHCP
 /// owns the pool, the container IPAM everything else. Without it the IPAM
-/// probed the whole `/16` — the pool included — and a container whose id
+/// probed the whole network — the pool included — and a container whose id
 /// landed there got a VM's address (measured: `allocate` handed out exactly the
 /// `dhcp_lease_ip` of a MAC).
 pub fn in_vm_dhcp_pool(prefix: &str, ip: &str) -> bool {
-    let (Some([o0, o1]), Some(addr)) = (vm_dhcp_net(prefix), Cidr::parse_addr(ip)) else {
+    let (Some((first, size)), Some(addr)) = (vm_dhcp_pool(prefix), Cidr::parse_addr(ip)) else {
         return false;
     };
-    let [a, b, c, d] = addr.to_be_bytes();
-    a == o0
-        && b == o1
-        && u32::from(c) == VM_DHCP_POOL_OCTET
-        && (VM_DHCP_POOL_FIRST..VM_DHCP_POOL_FIRST + VM_DHCP_POOL_SIZE).contains(&u32::from(d))
+    (first..first + size).contains(&addr)
 }
 
 /// **Preferred** IP (deterministic, pure) in an arbitrary `/16` (`<prefix>.A.B`),
@@ -672,9 +677,35 @@ COMMIT
             vm_dhcp_lease_ip("10.210", &mac.to_lowercase()),
             Some(legacy)
         );
-        // No pool outside a /16.
-        assert_eq!(vm_dhcp_lease_ip("172.20.9.0/24", mac), None);
+    }
+
+    /// A network that is not a `/16` gets a pool INSIDE itself. Before, the
+    /// server offered a `/24`'s VMs an address of the `/16` named by the
+    /// gateway's first two octets — `172.20.254.x`, off their network.
+    #[test]
+    fn a_non_slash16_network_gets_a_pool_inside_itself() {
+        let net = Cidr::parse("172.20.9.0/24").unwrap();
+        // size/8 = 32 addresses, just below the broadcast.
+        assert_eq!(vm_dhcp_pool("172.20.9.0/24"), Some((net.last() - 32, 32)));
+        for i in 0..500 {
+            let mac = format!("52:54:00:00:{:02x}:{:02x}", i >> 8, i & 0xff);
+            let ip = vm_dhcp_lease_ip("172.20.9.0/24", &mac).unwrap();
+            let a = Cidr::parse_addr(&ip).unwrap();
+            assert!(net.contains(a), "{ip} outside the network");
+            assert!(
+                a > net.base + 1 && a < net.last(),
+                "{ip} is network/gateway/broadcast"
+            );
+            assert!(in_vm_dhcp_pool("172.20.9.0/24", &ip));
+        }
         assert!(!in_vm_dhcp_pool("172.20.9.0/24", "172.20.9.10"));
+        assert!(!in_vm_dhcp_pool("172.20.9.0/24", "172.20.9.255"));
+        // The smallest usable network still has one, and never the broadcast.
+        let (first, size) = vm_dhcp_pool("10.9.9.0/28").unwrap();
+        assert_eq!(size, 2);
+        assert_eq!(first + size, Cidr::parse("10.9.9.0/28").unwrap().last());
+        // Not a network: no pool.
+        assert_eq!(vm_dhcp_pool("10.9.9.0/30"), None);
     }
 
     /// The pool's bounds, one by one: `.254.10` to `.254.249` and nothing else.

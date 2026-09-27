@@ -35,7 +35,7 @@ use std::process::{Command, Stdio};
 pub(crate) use delonix_net_rules::fnv32;
 pub use delonix_net_rules::{
     bridge_name, derive_ip_in, in_vm_dhcp_pool, matches_labels, parse_overlay_peer, service_vip,
-    valid_ip_in_subnet, vm_dhcp_lease_ip, Cidr,
+    valid_ip_in_subnet, vm_dhcp_lease_ip, vm_dhcp_pool, Cidr,
 };
 
 pub mod bpf;

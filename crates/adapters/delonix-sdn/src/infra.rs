@@ -2331,12 +2331,15 @@ fn ensure_net_bridge(bridge: &str, fallback_addr: &str) -> Result<()> {
             &["add", "element", "ip", INGRESS_TABLE, target, &element],
         );
     }
-    // the network's DHCP server (for VMs/clients that request an IP). It takes the
-    // TWO-OCTET form and nothing else — `dhcp_serve`/`dhcp_lease_ip` both bail out
-    // on `oct.len() != 2`, and bailing out means no server at all, in silence. So
-    // it is derived from the bridge's own address (never from a declared gateway,
-    // which would move the whole pool onto the appliance's octets).
-    start_dhcp(bridge, &prefix_of(gateway));
+    // The network's DHCP server (for VMs/clients that request an IP), given the
+    // network's REAL prefix. It used to get the two octets of the bridge's
+    // address, which named the right network only on a `/16`: on a `/24` the
+    // server offered an address, a mask and a router of a `/16` the VM was not
+    // on (measured: `172.20.254.110/16` via `172.20.0.1` on `172.20.9.0/24`).
+    // With no `NetDef` (the infra bridge) the two octets are still the network
+    // — a legacy `/16`. Never a declared gateway: that would move the pool onto
+    // the appliance.
+    start_dhcp(bridge, &dhcp_network(cidr, gateway));
     // Re-applies the PERSISTED egress intent when the bridge is (re)created — it's what
     // makes it survive the holder's respawn (the nft and the FQDN registry live in the
     // ephemeral netns). Only on `!exists` (new bridge): idempotent and cheap.
@@ -2365,6 +2368,14 @@ fn ensure_net_bridge(bridge: &str, fallback_addr: &str) -> Result<()> {
     Ok(())
 }
 
+/// The network a bridge's DHCP server serves: the `NetDef`'s real prefix, or —
+/// with no `NetDef` (the infra bridge) — the legacy `/16` named by the first two
+/// octets of the bridge's own address. PURE, so the choice is testable: the
+/// server itself is only reachable inside the holder's netns.
+fn dhcp_network(cidr: Option<crate::Cidr>, bridge_addr: &str) -> String {
+    cidr.map_or_else(|| prefix_of(bridge_addr), |c| c.to_string_cidr())
+}
+
 /// Bridges that already have the native DHCP server running (one thread per bridge).
 static DHCP_STARTED: std::sync::Mutex<std::collections::BTreeSet<String>> =
     std::sync::Mutex::new(std::collections::BTreeSet::new());
@@ -2383,8 +2394,9 @@ fn start_dhcp(bridge: &str, prefix: &str) {
     std::thread::spawn(move || dhcp_serve(b, p));
 }
 
-/// The IPv4 address the holder's native DHCP server will hand to `mac` on a
-/// bridge whose `prefix` is `<o0>.<o1>` — pool `<prefix>.254.10–.254.249`.
+/// The IPv4 address the holder's native DHCP server will hand to `mac` on the
+/// network `prefix` (a CIDR, or the legacy two-octet `/16`) — see
+/// [`crate::vm_dhcp_pool`] for where the pool sits.
 ///
 /// Deterministic from the MAC, and deliberately so: it is the ONLY reason the
 /// HOST side can know a VM's address before the guest has even booted, which is
@@ -2404,17 +2416,17 @@ pub fn dhcp_lease_ip(prefix: &str, mac: &str) -> Option<String> {
 }
 
 /// Native DHCPv4 server of a bridge: listens on UDP `:67` (only on that bridge, via
-/// `SO_BINDTODEVICE`) and responds to DISCOVER/REQUEST with an IP from the pool
-/// `<prefix>.254.10–.254.250` (deterministic from the MAC), **gateway/DNS = ingress**.
+/// `SO_BINDTODEVICE`) and answers DISCOVER/REQUEST with the address of the pool
+/// [`crate::vm_dhcp_pool`] that is derived from the MAC, with the network's own
+/// mask and **gateway/DNS = the holder's address on the bridge**.
+///
+/// `prefix` is the network: a CIDR, or the legacy two-octet form of a `/16`.
 fn dhcp_serve(bridge: String, prefix: String) {
     use std::os::unix::io::FromRawFd;
-    let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
-    if oct.len() != 2 {
+    if crate::vm_dhcp_pool(&prefix).is_none() {
         return;
     }
-    let (o0, o1) = (oct[0], oct[1]);
-    let gw = [o0, o1, 0, 1]; // gateway/server/DNS = <prefix>.0.1 (the ingress)
-                             // SAFETY: UDP socket; setsockopt REUSEADDR/PORT/BROADCAST/BINDTODEVICE; bind :67.
+    // SAFETY: UDP socket; setsockopt REUSEADDR/PORT/BROADCAST/BINDTODEVICE; bind :67.
     let sock = unsafe {
         let fd = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0);
         if fd < 0 {
@@ -2462,51 +2474,67 @@ fn dhcp_serve(bridge: String, prefix: String) {
             Ok(n) => n,
             Err(_) => continue,
         };
-        if n < 240 || buf[236..240] != [99, 130, 83, 99] {
-            continue; // BOOTP + magic cookie
+        if let Some(r) = dhcp_reply(&prefix, &buf[..n]) {
+            let _ = sock.send_to(&r, "255.255.255.255:68");
         }
-        let reply_type = match dhcp_opt(&buf[240..n], 53).and_then(|v| v.first().copied()) {
-            Some(1) => 2u8, // DISCOVER → OFFER
-            Some(3) => 5u8, // REQUEST → ACK
-            _ => continue,
-        };
-        let mac = &buf[28..34];
-        let macs = mac
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(":");
-        // Same arithmetic the host side used at attach time — see `dhcp_lease_ip`.
-        let host = match dhcp_lease_ip(&prefix, &macs)
-            .and_then(|ip| ip.rsplit('.').next().and_then(|h| h.parse::<u8>().ok()))
-        {
-            Some(h) => h,
-            None => continue,
-        };
-        let yi = [o0, o1, 254, host];
-        let mut r = vec![0u8; 240];
-        r[0] = 2; // BOOTREPLY
-        r[1] = 1; // htype ethernet
-        r[2] = 6; // hlen
-        r[4..8].copy_from_slice(&buf[4..8]); // xid
-        r[10..12].copy_from_slice(&buf[10..12]); // flags
-        r[16..20].copy_from_slice(&yi); // yiaddr
-        r[20..24].copy_from_slice(&gw); // siaddr (server)
-        r[28..34].copy_from_slice(mac); // chaddr
-        r[236..240].copy_from_slice(&[99, 130, 83, 99]); // magic
-        r.extend_from_slice(&[53, 1, reply_type]); // message type
-        r.extend_from_slice(&[54, 4]);
-        r.extend_from_slice(&gw); // server id
-        r.extend_from_slice(&[51, 4]);
-        r.extend_from_slice(&3600u32.to_be_bytes()); // lease time
-        r.extend_from_slice(&[1, 4, 255, 255, 0, 0]); // subnet mask /16
-        r.extend_from_slice(&[3, 4]);
-        r.extend_from_slice(&gw); // router
-        r.extend_from_slice(&[6, 4]);
-        r.extend_from_slice(&gw); // DNS (our server)
-        r.push(255); // end
-        let _ = sock.send_to(&r, "255.255.255.255:68");
     }
+}
+
+/// The OFFER/ACK for one DHCP request on network `prefix`, or `None` when the
+/// packet is not a DISCOVER/REQUEST or the network has no pool. PURE — the
+/// whole reply is testable without a socket.
+///
+/// Address, mask and router all come from the network itself. They used to be
+/// `<a>.<b>.254.<h>`, `255.255.0.0` and `<a>.<b>.0.1` whatever the network was,
+/// which is only right on a `/16`.
+fn dhcp_reply(prefix: &str, req: &[u8]) -> Option<Vec<u8>> {
+    let net = crate::Cidr::parse(prefix)?;
+    if req.len() < 240 || req[236..240] != [99, 130, 83, 99] {
+        return None; // BOOTP + magic cookie
+    }
+    let reply_type = match dhcp_opt(&req[240..], 53).and_then(|v| v.first().copied()) {
+        Some(1) => 2u8, // DISCOVER → OFFER
+        Some(3) => 5u8, // REQUEST → ACK
+        _ => return None,
+    };
+    let mac = &req[28..34];
+    let macs = mac
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    // Same arithmetic the host side used at attach time — see `dhcp_lease_ip`.
+    let yi = crate::Cidr::parse_addr(&dhcp_lease_ip(prefix, &macs)?)?.to_be_bytes();
+    // The holder's own address on the bridge: server, router and resolver.
+    let gw = crate::Cidr::parse_addr(&net.gateway()?)?.to_be_bytes();
+    let mask = if net.len == 0 {
+        0
+    } else {
+        u32::MAX << (32 - u32::from(net.len))
+    };
+    let mut r = vec![0u8; 240];
+    r[0] = 2; // BOOTREPLY
+    r[1] = 1; // htype ethernet
+    r[2] = 6; // hlen
+    r[4..8].copy_from_slice(&req[4..8]); // xid
+    r[10..12].copy_from_slice(&req[10..12]); // flags
+    r[16..20].copy_from_slice(&yi); // yiaddr
+    r[20..24].copy_from_slice(&gw); // siaddr (server)
+    r[28..34].copy_from_slice(mac); // chaddr
+    r[236..240].copy_from_slice(&[99, 130, 83, 99]); // magic
+    r.extend_from_slice(&[53, 1, reply_type]); // message type
+    r.extend_from_slice(&[54, 4]);
+    r.extend_from_slice(&gw); // server id
+    r.extend_from_slice(&[51, 4]);
+    r.extend_from_slice(&3600u32.to_be_bytes()); // lease time
+    r.extend_from_slice(&[1, 4]);
+    r.extend_from_slice(&mask.to_be_bytes()); // subnet mask
+    r.extend_from_slice(&[3, 4]);
+    r.extend_from_slice(&gw); // router
+    r.extend_from_slice(&[6, 4]);
+    r.extend_from_slice(&gw); // DNS (our server)
+    r.push(255); // end
+    Some(r)
 }
 
 /// Extracts the value of a DHCP option (TLV) from the options block.
@@ -10616,5 +10644,81 @@ mod tests_netdef_lock {
         assert_eq!(got.egress.hosts.len(), n, "egress writes lost");
         assert!(got.gateway.is_some(), "the gateway write was lost");
         assert_eq!(got.prefix, prefix);
+    }
+}
+
+/// The DHCP reply is the network's, whatever its length (doc 62, finding 4).
+#[cfg(test)]
+mod tests_dhcp_reply {
+    use super::dhcp_reply;
+
+    /// A DISCOVER from `mac`, the minimum the server reads.
+    fn discover(mac: [u8; 6]) -> Vec<u8> {
+        let mut p = vec![0u8; 240];
+        p[0] = 1;
+        p[4..8].copy_from_slice(&[1, 2, 3, 4]);
+        p[28..34].copy_from_slice(&mac);
+        p[236..240].copy_from_slice(&[99, 130, 83, 99]);
+        p.extend_from_slice(&[53, 1, 1, 255]);
+        p
+    }
+
+    fn opt(r: &[u8], code: u8) -> Vec<u8> {
+        super::dhcp_opt(&r[240..], code).unwrap()
+    }
+
+    /// A `/24`: address inside the network, mask `/24`, router = the bridge.
+    /// Before: `172.20.254.x`, `255.255.0.0`, router `172.20.0.1`.
+    #[test]
+    fn a_slash24_reply_is_all_on_the_network() {
+        let mac = [0x52, 0x54, 0, 0xc4, 0xb1, 0xe4];
+        let r = dhcp_reply("172.20.9.0/24", &discover(mac)).unwrap();
+        let yi = std::net::Ipv4Addr::new(r[16], r[17], r[18], r[19]);
+        assert_eq!(&r[16..19], &[172, 20, 9], "yiaddr {yi} off the network");
+        assert_eq!(
+            yi.to_string(),
+            crate::vm_dhcp_lease_ip("172.20.9.0/24", "52:54:00:c4:b1:e4").unwrap()
+        );
+        assert_eq!(opt(&r, 1), vec![255, 255, 255, 0]);
+        assert_eq!(opt(&r, 3), vec![172, 20, 9, 1]);
+        assert_eq!(opt(&r, 53), vec![2], "DISCOVER answers OFFER");
+    }
+
+    /// A `/16` answers exactly what it always did — every existing VM keeps its
+    /// address, mask and router.
+    #[test]
+    fn a_slash16_reply_is_unchanged() {
+        let mac = [0x52, 0x54, 0, 0x72, 0x00, 0xce];
+        for net in ["10.210", "10.210.0.0/16"] {
+            let r = dhcp_reply(net, &discover(mac)).unwrap();
+            assert_eq!(&r[16..19], &[10, 210, 254]);
+            assert!((10..250).contains(&r[19]));
+            assert_eq!(opt(&r, 1), vec![255, 255, 0, 0]);
+            assert_eq!(opt(&r, 3), vec![10, 210, 0, 1]);
+        }
+    }
+
+    /// The server is started with the network's REAL prefix. It got the two
+    /// octets of the bridge's address, and on a `/24` served a `/16` it was not
+    /// on — measured live, with the reply code already fixed and this call not.
+    #[test]
+    fn the_server_serves_the_networks_own_prefix() {
+        let c = crate::Cidr::parse("172.20.9.0/24");
+        assert_eq!(super::dhcp_network(c, "172.20.9.1"), "172.20.9.0/24");
+        assert_eq!(super::dhcp_network(None, "10.200.0.1"), "10.200");
+        let r = dhcp_reply(
+            &super::dhcp_network(c, "172.20.9.1"),
+            &discover([0x52, 0x54, 0, 0xc4, 0xb1, 0xe4]),
+        )
+        .unwrap();
+        assert_eq!(&r[16..19], &[172, 20, 9]);
+    }
+
+    #[test]
+    fn what_is_not_a_request_gets_no_reply() {
+        let mut p = discover([0x52, 0x54, 0, 1, 2, 3]);
+        p[242] = 7; // RELEASE
+        assert!(dhcp_reply("10.210", &p).is_none());
+        assert!(dhcp_reply("10.210", &[0u8; 100]).is_none());
     }
 }
