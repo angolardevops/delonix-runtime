@@ -13139,6 +13139,15 @@ msgstr "Um NetDef de ingress já está realizado num prefixo diferente do que o 
 msgid "Remove the network (`delonix network rm <name>`) and create it again, or keep the recorded subnet."
 msgstr "Remove a rede (`delonix network rm <name>`) e cria-a de novo, ou mantém a subnet registada."
 
+msgid "network is in use"
+msgstr "a rede está em uso"
+
+msgid "The network still has containers, pod members or VMs attached, and removing it would leave them addressed on a bridge that no longer exists."
+msgstr "A rede ainda tem containers, membros de pod ou VMs ligados, e removê-la deixá-los-ia endereçados numa bridge que já não existe."
+
+msgid "Remove or disconnect what the message lists (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`), then remove the network."
+msgstr "Remove ou desliga o que a mensagem lista (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`) e só depois remove a rede."
+
 msgid "'wg' is not available on this host"
 msgstr "o 'wg' não está disponível neste host"
 
@@ -13150,6 +13159,15 @@ msgstr "Instala o wireguard-tools (Debian/Ubuntu: apt install wireguard-tools; F
 
 msgid "a network system call failed"
 msgstr "uma chamada de sistema de rede falhou"
+
+msgid "this management API route no longer changes the network"
+msgstr "esta rota da API de gestão já não altera a rede"
+
+msgid "The route wrote the dataplane without the container's record, so the next reapply undid it and a multi-homed workload kept its other addresses open. The management API is frozen (ADR-0041 D4) and refuses instead of writing half a policy."
+msgstr "A rota escrevia no dataplane sem o registo do container, por isso o reapply seguinte desfazia-a e um workload com várias redes ficava com os outros endereços abertos. A API de gestão está congelada (ADR-0041 D4) e recusa em vez de escrever meia política."
+
+msgid "Use the CLI, which goes through the record: `delonix net ingress`/`net egress` for firewall and egress, `delonix network connect`/`disconnect` for extra networks, `delonix container rm`/`stop` to detach."
+msgstr "Usa a CLI, que passa pelo registo: `delonix net ingress`/`net egress` para firewall e saída, `delonix network connect`/`disconnect` para redes adicionais, `delonix container rm`/`stop` para desligar."
 
 msgid "A host tool this engine shells out to for networking (ip, nft, wg, bridge, a CNI plugin, newuidmap/newgidmap, or a raw syscall) could not be run or exited badly. The message names the operation and carries the tool's own error."
 msgstr "Uma ferramenta do host a que este motor recorre para redes (ip, nft, wg, bridge, um plugin CNI, newuidmap/newgidmap, ou uma syscall crua) não pôde correr ou terminou mal. A mensagem nomeia a operação e leva o erro próprio da ferramenta."

@@ -538,7 +538,13 @@ networkDefaults:
   sobre ela — para isso existe a CLI, com <code>-o json</code>. As rotas dela estão
   <strong>congeladas</strong> (só correcções) enquanto o contrato local de nó que a substitui
   é decidido (ADR-0040 e ADR-0041, ambos <em>Proposed</em>); uma promessa para esse
-  contrato só entra nesta página quando a primeira vaga dele fechar.</li>
+  contrato só entra nesta página quando a primeira vaga dele fechar.
+  As rotas que mudavam a rede <strong>sem o registo do container</strong> —
+  <code>/v1/net/firewall/:ip</code>, <code>/v1/net/egress[/:bridge]</code>, <code>/v1/net/attach-extra…</code> e
+  <code>DELETE /v1/net/attach/:id/:ip</code> — passaram a responder <strong><code>501</code> com
+  <code>DX-6302</code></strong>: o reapply seguinte desfazia o que escreviam, e só cobriam o IP
+  primário de um container com várias redes. O caminho é a CLI (<code>net ingress</code>,
+  <code>net egress</code>, <code>network connect</code>/<code>disconnect</code>), que passa pelo registo.</li>
 <li><strong>O nome do executável <code>delonix</code> é deste motor.</strong> O control plane deixa de
   produzir um binário com esse nome (ADR 0038 do control plane); um <code>delonix</code>
   instalado por este projecto é sempre a CLI descrita nesta página.</li>

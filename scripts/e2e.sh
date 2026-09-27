@@ -3779,6 +3779,26 @@ SH
   check "net netns down é idempotente" ok "$BIN" net netns down
 fi
 
+section "net — ciclo de vida: o que fica no holder depois de um rm"
+
+# Porque esta secção existe (auditoria NaaS, doc 62 §6 P1, sessão S3): `network
+# rm` apagava a rede debaixo de um container a correr, e o `netdel` só tirava o
+# link — `@dlxbr`, `@netpair`, a regra de egress e a thread DHCP ficavam, e a rede
+# recriada com o mesmo nome nascia sem DHCP e com o `deny` da anterior. Um publish
+# que falhava a meio deixava a primeira porta a escutar no host sem dono, e a rede
+# que uma VM criava não tinha registo (`network ls` não a via, `rm` dizia 4).
+# Medido contra `d3d6f394`: 8/8 chumbam. Cada check CONTA o que resta (nft, ss,
+# `network ls`, portas do host) em vez de confiar no código de saída do comando.
+#
+# A lógica vive em `scripts/net-lifecycle-leaks.sh` para correr sozinha contra
+# dois binários; aqui é UM check, e o detalhe sai nas linhas do FAIL.
+if [[ -z "${DELONIX_ROOT:-}" || -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "net: ciclo de vida sem fugas" "exige DELONIX_ROOT E DELONIX_NET_RUNTIME_DIR (ver cabeçalho)"
+else
+  check "net: ciclo de vida sem fugas (rm, DHCP, egress, publish, rede de VM)" ok \
+    env E2E_IMAGE="$IMG" bash "$(dirname "$0")/net-lifecycle-leaks.sh" "$BIN" "lk$PFX"
+fi
+
 section "api-resources: o registo que os outros verbos leem"
 ########################################
 # É o primeiro comando da árvore-alvo a aterrar, e o único da CLI-2 que não

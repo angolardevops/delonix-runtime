@@ -366,6 +366,12 @@ networkDefaults:
   **congeladas** (só correcções) enquanto o contrato local de nó que a substitui
   é decidido (ADR-0040 e ADR-0041, ambos *Proposed*); uma promessa para esse
   contrato só entra nesta página quando a primeira vaga dele fechar.
+  As rotas que mudavam a rede **sem o registo do container** —
+  `/v1/net/firewall/:ip`, `/v1/net/egress[/:bridge]`, `/v1/net/attach-extra…` e
+  `DELETE /v1/net/attach/:id/:ip` — passaram a responder **`501` com
+  `DX-6302`**: o reapply seguinte desfazia o que escreviam, e só cobriam o IP
+  primário de um container com várias redes. O caminho é a CLI (`net ingress`,
+  `net egress`, `network connect`/`disconnect`), que passa pelo registo.
 * **O nome do executável `delonix` é deste motor.** O control plane deixa de
   produzir um binário com esse nome (ADR 0038 do control plane); um `delonix`
   instalado por este projecto é sempre a CLI descrita nesta página.
