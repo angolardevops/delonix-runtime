@@ -2,9 +2,9 @@
 
 - **Status:** Accepted (2026-09-24) — the catalog, the four declarations, `delonix provider
   ls|describe|matrix`, the evidence gate and the `virsh` inventory exist and are measured (D1–D4);
-  the request-time refusal (D6) is built and was run live against the three VM providers on
-  2026-09-24 (see the addendum at the end). The node-contract readback (D5) stays where D5 puts
-  it: it is one handler when `delonix-node-api` exists, and this ADR does not wait for it
+  the request-time refusal (D6) is built (#479) and was measured on 2026-09-27 against libvirt
+  and Cloud Hypervisor (see "Proven vs not validated"); the node-contract readback (D5) is served
+  by `delonix-node-api` since 2026-09-25 (#525)
 - **Date:** 2026-09-23
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0049 (the Proxmox matrix this is the local counterpart of: a named denominator,
@@ -319,8 +319,21 @@ rows and probes libvirt (`Ok`, `qemu:///system` answering), Cloud Hypervisor (`O
 31/276 with the multi-line argv sites included (the first version missed five, caught by comparing
 with a hand list, and fixed by joining a `vec![` block onto its first line).
 
-**Not validated:** the readback over the node contract (D5 — nothing serves it); the request-time
-refusal (D6 — not built); the report of a CONFIGURED Proxmox target (declared only, by design);
+**Proven later.** D5 (2026-09-25, #525): `ListProviders` answers over gRPC and HTTP/JSON on the
+node socket, and the E2E battery diffs it against `provider ls -o json`. D6 (2026-09-27, a
+binary built from the tree, isolated `DELONIX_ROOT`, on a host with libvirt and Cloud Hypervisor
+both available): an unknown name exits 1 with DX-1527; an explicit backend lacking the entry
+exits 69 with DX-6507, naming the entry and its state; no VM record is left behind. That
+measurement also found that **the auto-selection did not filter by the requirement**: a cloud
+image (no `--kernel`) asked for libvirt by name, so `--require vm.namespace-isolation` was refused
+naming libvirt while Cloud Hypervisor, which supports it, was never asked. Fixed in the same
+change: libvirt stays a preference for a firmware boot only when it meets the requirements
+(`firmware_boot_preference`); otherwise the walk chooses, and when no candidate serves, the
+refusal names what each one lacks. The live run against the three VM providers that this record
+used to claim for 2026-09-24 has no trace: Proxmox is not re-measured here.
+
+**Not validated:** the request-time refusal against a configured Proxmox target; the report of a
+CONFIGURED Proxmox target (declared only, by design);
 Debian/Rocky/root-mode hosts for the Linux probes; whether `br_netfilter` read from the host's
 `/proc/sys` when the holder is down matches what a fresh holder inherits (the code says which value
 it read, it does not claim they agree); and the claim, implicit in every `partial`, that the row is

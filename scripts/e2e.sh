@@ -2791,7 +2791,18 @@ check "vm create --require com nome desconhecido recusa (1)" 1 "$BIN" vm create 
 check "vm create --require de capacidade que o CH não tem recusa (69)" 69 "$BIN" vm create "vm-$PFX-req" --disk /nao/existe.qcow2 --backend cloud-hypervisor --require vm.snapshot.memory
 check "vm create --require de capacidade que o libvirt não tem recusa (69)" 69 "$BIN" vm create "vm-$PFX-req" --disk /nao/existe.qcow2 --backend libvirt --require vm.namespace-isolation
 check "vm create --require: a recusa nomeia a capacidade e o estado" ok bash -c "\"$BIN\" vm create vm-$PFX-req --disk /nao/existe.qcow2 --backend libvirt --require vm.namespace-isolation 2>&1 | grep -q 'vm.namespace-isolation: unsupported-by-provider'"
-check "vm create --require: nenhum registo de VM ficou para trás" fail "$BIN" vm inspect "vm-$PFX-req"
+# `describe`, e não `vm inspect`: este verbo deixou de existir, e o check
+# passava por «unrecognized subcommand» (rc=2), nunca por a VM não existir.
+check "vm create --require: nenhum registo de VM ficou para trás (4)" 4 "$BIN" describe virtualmachines "vm-$PFX-req"
+# The auto-selection filters by the requirement (ADR-0050 D6). A cloud image
+# PREFERS libvirt, and asking for it by name when it lacks the requirement
+# refused the VM with Cloud Hypervisor installed and able to serve it.
+if command -v cloud-hypervisor >/dev/null && command -v virsh >/dev/null; then
+  check "vm create --require sem --backend: um requisito que só o CH cumpre não é recusado pelo libvirt" ok bash -c "! \"\$0\" vm create vm-$PFX-req --disk /nao/existe.qcow2 --require vm.namespace-isolation 2>&1 | grep -q \"'libvirt' backend does not support\"" "$BIN"
+  check "vm create --require sem --backend: nenhum candidato serve, a recusa nomeia os dois (69)" 69 "$BIN" vm create "vm-$PFX-req" --disk /nao/existe.qcow2 --require vm.namespace-isolation --require vm.snapshot.memory
+else
+  skip "vm create --require sem --backend (auto-selecção)" "precisa de cloud-hypervisor e libvirt instalados"
+fi
 # `vm resize`: tudo o que se pode recusar recusa-se ANTES de tocar num backend,
 # por isso estas classes medem-se sem hipervisor nenhum.
 check "vm resize sem --vcpus nem --memory recusa (1)" 1 "$BIN" vm resize "vm-$PFX-nada"
