@@ -1,6 +1,8 @@
 # ADR-0059: Network providers answer by role, through small ports negotiated by capability, and every change goes through validate → plan → apply → observe → verify
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-09-27, by the owner, on the text of PR #547) — from here the ADR
+  is not rewritten: what F1–F6 find goes into dated addenda with evidence, and a change of
+  decision is a new ADR
 - **Date:** 2026-09-27
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0050 (the capability catalog this extends to 1.1.0 and to a fifth
@@ -16,7 +18,7 @@
   the IR of D6 keeps)
 - **Evidence:** `docs/discovery/62_NAAS_FASE0_AUDITORIA.md` (PR #544: §4 capability matrix,
   §6 P2, §7 session S5, §10 question 3) and the spike of this ADR,
-  `docs/discovery/63_NET_PROVIDER_CONTRATO_SPIKE.md`
+  `docs/discovery/64_NET_PROVIDER_CONTRATO_SPIKE.md`
 
 ## Context
 
@@ -417,7 +419,7 @@ long-running operation and `import/adopt` (the ownership marker comes first); ev
   already enforced by `arch_fitness.py`) and ADR-0054 (`providers.yaml`, slices 2–4 built on
   `main`). F1 does not start before ADR-0054 is accepted.
 
-## Proven vs not validated (the spike, `docs/discovery/63_…`)
+## Proven vs not validated (the spike, `docs/discovery/64_…`)
 
 **Proven:** the Proxmox lab node (PVE 9.2.2, two-node cluster `lab`, read-only calls) lists
 the SDN sections, zone types (`evpn faucet qinq simple vlan vxlan`), IPAM plugins

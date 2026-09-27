@@ -1,6 +1,8 @@
 # ADR-0054: Providers are configured in one file per node, and a caller never has to name one
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-09-27, by the owner) — slices 1–4 built; slice 5 (the node contract's
+  optional provider field) and slice 6 (`provider-lifecycle.sh` from the file alone) remain.
+  ADR-0059 F1 extends the file with `type: opnsense` and `networkDefaults`
 - **Date:** 2026-09-26
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0008 (the backend registry and why a remote target is not a manifest

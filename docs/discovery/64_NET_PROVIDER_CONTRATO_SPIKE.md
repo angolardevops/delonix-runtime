@@ -1,4 +1,4 @@
-# 63 — Spike do ADR-0059: o que os providers de rede sabem dizer de si, medido
+# 64 — Spike do ADR-0059: o que os providers de rede sabem dizer de si, medido
 
 **Data:** 2026-09-27 · **Base:** medido em `origin/main` `d3d6f394` (v4.4.0 + 68); relido sobre `f46a73e9` (+ #544, #541, #545 e #542; as linhas citadas foram reconferidas) ·
 **ADR:** [0059](../adr/0059-network-providers-by-role-lifecycle-and-policy-ir.md) (Proposed) ·

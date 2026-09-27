@@ -304,6 +304,16 @@ pub enum TaskState {
     Failed {
         reason: String,
     },
+    /// Finished with `WARNINGS: <n>`: the effect happened, and the node said
+    /// something went wrong on the way. Holds the `WARN:` lines of the task's
+    /// log. Measured on PVE 9.2.2: a container start whose DHCP got no offer
+    /// ends like this, running and without an address — read as a failure it
+    /// would be retried on top of itself, read as `ok` the missing address
+    /// would be nobody's news.
+    #[serde(rename = "ok_with_warnings")]
+    OkWithWarnings {
+        warnings: Vec<String>,
+    },
     /// This client stopped waiting; the node may still be running it.
     TimedOut,
 }
@@ -905,26 +915,58 @@ struct TaskStatus {
     exitstatus: Option<String>,
 }
 
+/// How a finished task ended. There are three outcomes, not two.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TaskEnd {
+    Ok,
+    /// `WARNINGS: <n>`: the task did its work and logged `n` warnings.
+    Warnings(u32),
+    Failed(String),
+}
+
 /// What a task's terminal state means. Pure, and the reason it exists is that
 /// the obvious reading is wrong.
 ///
 /// * still running → `None`
-/// * finished, `exitstatus == "OK"` → `Some(Ok(()))`
-/// * finished, anything else → `Some(Err(reason))`
+/// * finished, `exitstatus == "OK"` → `Ok`
+/// * finished, `exitstatus == "WARNINGS: <n>"` → `Warnings(n)`
+/// * finished, anything else → `Failed(reason)`
 ///
 /// `status: "stopped"` is NOT failure — it is how Proxmox says the task is
 /// over. Reading it as the result inverts every verdict this backend makes.
-fn task_verdict(status: &str, exitstatus: Option<&str>) -> Option<std::result::Result<(), String>> {
+/// And `WARNINGS: <n>` is not failure either: the worker finished and said
+/// so; only the exact `WARNINGS: <number>` form is read that way, any other
+/// text stays a failure.
+fn task_verdict(status: &str, exitstatus: Option<&str>) -> Option<TaskEnd> {
     if status != "stopped" {
         return None;
     }
     match exitstatus {
-        Some("OK") => Some(Ok(())),
-        Some(other) => Some(Err(other.to_string())),
+        Some("OK") => Some(TaskEnd::Ok),
+        Some(other) => Some(match warnings_count(other) {
+            Some(n) => TaskEnd::Warnings(n),
+            None => TaskEnd::Failed(other.to_string()),
+        }),
         // Finished with no exit status recorded: unknown, and unknown is not
         // success. Reporting OK here would be inventing a result.
-        None => Some(Err("finished without an exit status".into())),
+        None => Some(TaskEnd::Failed("finished without an exit status".into())),
     }
+}
+
+/// `Some(n)` for an exit status of exactly `WARNINGS: <n>`, with `n` a number.
+fn warnings_count(exitstatus: &str) -> Option<u32> {
+    exitstatus.strip_prefix("WARNINGS: ")?.trim().parse().ok()
+}
+
+/// The `WARN:` lines of a task log, without the prefix. The closing
+/// `TASK WARNINGS: <n>` line is the count, not a warning, and is left out.
+fn task_log_warn_lines(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .filter_map(|l| l.trim().strip_prefix("WARN:"))
+        .map(|w| w.trim().to_string())
+        .filter(|w| !w.is_empty())
+        .collect()
 }
 
 /// The outcome of a guest command [`Client::agent_exec`] started, as
@@ -3763,9 +3805,10 @@ impl Client {
                 started_unix: now_unix(),
                 state: TaskState::Submitted,
             });
-            let verdict = self.wait_task(&upid);
+            let verdict = self.wait_task_warnings(&upid);
             ledger.settle(&upid, state_of(&verdict));
-            verdict
+            report_warnings(&upid, &verdict?);
+            Ok(())
         })
     }
 
@@ -3807,7 +3850,7 @@ impl Client {
     }
 
     /// One look at a task: `None` while it runs, else its verdict.
-    fn task_status(&self, upid: &str) -> Result<(String, Option<std::result::Result<(), String>>)> {
+    fn task_status(&self, upid: &str) -> Result<(String, Option<TaskEnd>)> {
         // The UPID names the node the worker runs on, which is not always
         // this client's: a `qmigrate` stays on the SOURCE node, and the next
         // operation on the moved VM settles the ledger through a client for
@@ -3826,12 +3869,10 @@ impl Client {
         for rec in ledger.pending() {
             let (_, verdict) = self.task_status(&rec.upid)?;
             match verdict {
-                Some(v) => ledger.settle(
-                    &rec.upid,
-                    state_of(
-                        &v.map_err(|why| Error::TaskFailed(format!("proxmox: task failed: {why}"))),
-                    ),
-                ),
+                Some(end) => {
+                    let outcome = self.outcome_of(&rec.upid, end);
+                    ledger.settle(&rec.upid, state_of(&outcome));
+                }
                 None => running.push(rec),
             }
         }
@@ -3847,11 +3888,49 @@ impl Client {
                 continue;
             }
             tracing::info!(vmid, action = %rec.action, upid = %rec.upid, "proxmox: a task from an earlier run is still in flight — waiting for it first");
-            let verdict = self.wait_task(&rec.upid);
+            let verdict = self.wait_task_warnings(&rec.upid);
             ledger.settle(&rec.upid, state_of(&verdict));
-            verdict?;
+            report_warnings(&rec.upid, &verdict?);
         }
         Ok(())
+    }
+
+    /// A finished task's outcome: `Ok` with its warnings (none for `OK`), or
+    /// the failure. For `Failed` the log's last `ERROR:` line is added when the
+    /// exit status alone does not carry the reason.
+    fn outcome_of(&self, upid: &str, end: TaskEnd) -> Result<Vec<String>> {
+        match end {
+            TaskEnd::Ok => Ok(Vec::new()),
+            TaskEnd::Warnings(n) => Ok(self.task_warnings(upid, n)),
+            TaskEnd::Failed(why) => {
+                let why = match self.task_error_line(upid) {
+                    Some(line) if !why.contains(&line) => format!("{why}: {line}"),
+                    _ => why,
+                };
+                Err(Error::TaskFailed(format!("proxmox: task failed: {why}")))
+            }
+        }
+    }
+
+    /// The `WARN:` lines of a task that ended with `WARNINGS: <n>`. Never an
+    /// empty list: a count with no readable line still says there were `n`,
+    /// because "no warnings" would be the one false answer here.
+    fn task_warnings(&self, upid: &str, n: u32) -> Vec<String> {
+        match self.task_log(upid) {
+            Ok(lines) => {
+                let found = task_log_warn_lines(&lines);
+                if found.is_empty() {
+                    vec![format!(
+                        "the task ended with {n} warning(s) and its log names none"
+                    )]
+                } else {
+                    found
+                }
+            }
+            Err(e) => vec![format!(
+                "the task ended with {n} warning(s); its log could not be read: {e}"
+            )],
+        }
     }
 
     /// The last `ERROR:` line of a failed task's own log (`GET
@@ -3898,21 +3977,23 @@ impl Client {
     ///
     /// Returning when the POST succeeds would report a VM created before
     /// anything exists — every lifecycle call here answers with a task id.
+    /// A task that ends with `WARNINGS: <n>` succeeded; its warnings are
+    /// logged here. [`Self::wait_task_warnings`] hands them to the caller.
     pub fn wait_task(&self, upid: &str) -> Result<()> {
+        let warnings = self.wait_task_warnings(upid)?;
+        report_warnings(upid, &warnings);
+        Ok(())
+    }
+
+    /// [`Self::wait_task`], returning the `WARN:` lines of a task that ended
+    /// with `WARNINGS: <n>` (empty for `OK`).
+    pub fn wait_task_warnings(&self, upid: &str) -> Result<Vec<String>> {
         let deadline = Instant::now() + self.task_timeout;
         let mut wait = POLL_MIN;
         loop {
             let (status, verdict) = self.task_status(upid)?;
-            match verdict {
-                Some(Ok(())) => return Ok(()),
-                Some(Err(why)) => {
-                    let why = match self.task_error_line(upid) {
-                        Some(line) if !why.contains(&line) => format!("{why}: {line}"),
-                        _ => why,
-                    };
-                    return Err(Error::TaskFailed(format!("proxmox: task failed: {why}")));
-                }
-                None => {}
+            if let Some(end) = verdict {
+                return self.outcome_of(upid, end);
             }
             if Instant::now() >= deadline {
                 return Err(Error::TaskTimeout(format!(
@@ -3963,9 +4044,20 @@ fn upid_or_done(body: &str, what: &str, null_is_done: bool) -> Result<Option<Str
     )))
 }
 
-fn state_of(verdict: &Result<()>) -> TaskState {
+/// Each warning of a finished task, at `warn`: the task succeeded, and what
+/// the node said on the way is not dropped.
+fn report_warnings(upid: &str, warnings: &[String]) {
+    for w in warnings {
+        tracing::warn!(%upid, warning = %w, "proxmox: the task finished with a warning");
+    }
+}
+
+fn state_of(verdict: &Result<Vec<String>>) -> TaskState {
     match verdict {
-        Ok(()) => TaskState::Ok,
+        Ok(w) if w.is_empty() => TaskState::Ok,
+        Ok(w) => TaskState::OkWithWarnings {
+            warnings: w.clone(),
+        },
         Err(Error::TaskTimeout(_)) => TaskState::TimedOut,
         Err(e) => TaskState::Failed {
             reason: e.to_string(),
@@ -6644,17 +6736,62 @@ mod tests {
         // The trap the spike found, and the whole reason this function exists:
         // `status: "stopped"` is how Proxmox says the task is OVER. Reading it
         // as the result inverts every verdict.
-        assert!(matches!(task_verdict("stopped", Some("OK")), Some(Ok(()))));
+        assert_eq!(task_verdict("stopped", Some("OK")), Some(TaskEnd::Ok));
         assert!(task_verdict("running", None).is_none());
         assert!(task_verdict("running", Some("OK")).is_none());
         // A real failure carries its reason.
         match task_verdict("stopped", Some("command 'qm start 900' failed")) {
-            Some(Err(why)) => assert!(why.contains("qm start")),
+            Some(TaskEnd::Failed(why)) => assert!(why.contains("qm start")),
             other => panic!("expected a failure, got {other:?}"),
         }
         // Finished with nothing recorded is UNKNOWN, and unknown is not
         // success — reporting OK there would be inventing a result.
-        assert!(matches!(task_verdict("stopped", None), Some(Err(_))));
+        assert!(matches!(
+            task_verdict("stopped", None),
+            Some(TaskEnd::Failed(_))
+        ));
+    }
+
+    #[test]
+    fn warnings_is_a_third_outcome_and_only_its_exact_form_counts() {
+        // The exit status of a `vzstart` whose DHCP got no offer, read from a
+        // PVE 9.2.2 node: the container ran, without an address.
+        assert_eq!(
+            task_verdict("stopped", Some("WARNINGS: 1")),
+            Some(TaskEnd::Warnings(1))
+        );
+        assert_eq!(
+            task_verdict("stopped", Some("WARNINGS: 12")),
+            Some(TaskEnd::Warnings(12))
+        );
+        // Anything that only looks like it stays a failure.
+        for text in ["WARNINGS: many", "WARNINGS:", "WARNINGS 1", "warnings: 1"] {
+            assert!(
+                matches!(
+                    task_verdict("stopped", Some(text)),
+                    Some(TaskEnd::Failed(_))
+                ),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_warn_lines_of_a_log_are_read_and_the_count_line_is_not() {
+        // The log of that same `vzstart`, as the node returned it.
+        let log: Vec<String> = [
+            "WARN: DHCP failed - command 'lxc-attach -n 100 …' failed: exit code 2",
+            "",
+            "TASK WARNINGS: 1",
+        ]
+        .iter()
+        .map(|l| l.to_string())
+        .collect();
+        assert_eq!(
+            task_log_warn_lines(&log),
+            vec!["DHCP failed - command 'lxc-attach -n 100 …' failed: exit code 2".to_string()]
+        );
+        assert!(task_log_warn_lines(&["TASK OK".to_string()]).is_empty());
     }
 
     #[test]
@@ -7933,7 +8070,13 @@ mod tests {
 
     #[test]
     fn a_timeout_is_recorded_as_timed_out_not_as_failed() {
-        assert_eq!(state_of(&Ok(())), TaskState::Ok);
+        assert_eq!(state_of(&Ok(Vec::new())), TaskState::Ok);
+        assert_eq!(
+            state_of(&Ok(vec!["DHCP failed".to_string()])),
+            TaskState::OkWithWarnings {
+                warnings: vec!["DHCP failed".to_string()]
+            }
+        );
         assert_eq!(
             state_of(&Err(Error::TaskTimeout("x".into()))),
             TaskState::TimedOut
