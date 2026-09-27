@@ -785,13 +785,27 @@ impl Client {
     /// goes out, and the file is reopened if a 401 forces a second attempt.
     /// The whole blob used to be in memory three times over (the read, a
     /// `to_vec`, and a `clone` per attempt) — ~6 GiB for a 2 GiB VM image.
-    fn push_blob_file(&mut self, digest: &str, path: &std::path::Path, size: u64) -> Result<()> {
+    fn push_blob_file(
+        &mut self,
+        digest: &str,
+        path: &std::path::Path,
+        size: u64,
+        meter: Option<&MeterSlot>,
+    ) -> Result<()> {
         self.push_blob_with(digest, &|| {
-            Ok(reqwest::blocking::Body::sized(
-                std::fs::File::open(path)?,
-                size,
-            ))
-        })
+            let body = MeteredFile {
+                file: std::fs::File::open(path)?,
+                pos: 0,
+                meter: meter.cloned(),
+            };
+            Ok(reqwest::blocking::Body::sized(body, size))
+        })?;
+        // Done, including a blob the registry already had (HEAD) or whose
+        // answer was lost: the bar must not stop short of it.
+        if let Some(m) = meter {
+            m.set(size);
+        }
+        Ok(())
     }
 
     /// How many times one blob's upload is tried. Same budget as the pull's
@@ -993,6 +1007,69 @@ fn layer_media_type(data: &[u8]) -> &'static str {
     }
 }
 
+/// Progress of an upload: `(bytes sent, bytes to send)`, called as the bodies
+/// go out. Shared across threads, since layers upload in parallel.
+pub type PushProgress = std::sync::Arc<dyn Fn(u64, u64) + Send + Sync>;
+
+/// The aggregate progress of an upload of several blobs. Each blob owns a
+/// slot holding its OWN position, set (not added to) as its body is read —
+/// so a retried upload, which reads the file from zero again, moves its slot
+/// back instead of counting the same bytes twice.
+struct PushMeter {
+    sent: Vec<std::sync::atomic::AtomicU64>,
+    total: u64,
+    report: PushProgress,
+}
+
+impl PushMeter {
+    fn new(slots: usize, total: u64, report: PushProgress) -> std::sync::Arc<Self> {
+        std::sync::Arc::new(Self {
+            sent: (0..slots)
+                .map(|_| std::sync::atomic::AtomicU64::new(0))
+                .collect(),
+            total,
+            report,
+        })
+    }
+}
+
+/// One blob's place in a [`PushMeter`].
+#[derive(Clone)]
+struct MeterSlot {
+    meter: std::sync::Arc<PushMeter>,
+    slot: usize,
+}
+
+impl MeterSlot {
+    fn set(&self, pos: u64) {
+        use std::sync::atomic::Ordering::Relaxed;
+        self.meter.sent[self.slot].store(pos, Relaxed);
+        let done: u64 = self.meter.sent.iter().map(|a| a.load(Relaxed)).sum();
+        // Not clamped to the total: a retry resets its slot, so the sum can
+        // never pass it — and a clamp would hide exactly the double count a
+        // missing reset would produce.
+        (self.meter.report)(done, self.meter.total);
+    }
+}
+
+/// A blob's file as the body of its upload, counting what has gone out.
+struct MeteredFile {
+    file: std::fs::File,
+    pos: u64,
+    meter: Option<MeterSlot>,
+}
+
+impl std::io::Read for MeteredFile {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.file.read(buf)?;
+        self.pos += n as u64;
+        if let Some(m) = &self.meter {
+            m.set(self.pos);
+        }
+        Ok(n)
+    }
+}
+
 /// What one blob-upload attempt ended in, when it did not succeed.
 enum UploadFailure {
     /// Transport failure, or a 5xx/408/429 — another attempt may succeed.
@@ -1123,6 +1200,25 @@ impl RegistryClient {
     /// Raw bytes of a blob (by digest).
     pub fn get_blob(&mut self, digest: &str) -> Result<Vec<u8>> {
         self.inner.blob(digest)
+    }
+    /// Publishes a single-blob artifact under `tag` in THIS client's
+    /// repository, with `layer_annotations` on its layer descriptor — see
+    /// [`push_oci_artifact_with_layer_annotations`], which does the same on a
+    /// client of its own.
+    pub fn push_signature(
+        &mut self,
+        tag: &str,
+        layer_media_type: &str,
+        data: &[u8],
+        layer_annotations: &BTreeMap<String, String>,
+    ) -> Result<String> {
+        push_layer_annotated(
+            &mut self.inner,
+            tag,
+            layer_media_type,
+            data,
+            layer_annotations,
+        )
     }
 }
 
@@ -1532,6 +1628,22 @@ fn docker_manifest(store: &ImageStore, image: &Image) -> Result<ImageManifest> {
 }
 
 pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Result<String> {
+    push_to_registry_with_progress(store, source, target, None)
+}
+
+/// Layers uploaded at once. The same cap as the pull, for the same reason: a
+/// registry throttles per client, and past the point the link saturates more
+/// sockets only make a 429 likelier.
+const PUSH_WORKERS: usize = 4;
+
+/// [`push_to_registry`], reporting `(bytes sent, bytes to send)` for the
+/// layers as they go out.
+pub fn push_to_registry_with_progress(
+    store: &ImageStore,
+    source: &str,
+    target: &str,
+    progress: Option<PushProgress>,
+) -> Result<String> {
     let image = store.resolve(source)?;
     let (host, repo, refr) = parse_reference(target);
     // A layer is a transfer of unknown size, like a VM artifact: a fixed
@@ -1553,23 +1665,61 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
     let config_data = store.cas().read(&image.id)?;
     c.push_blob(&with_prefix(&image.id), &config_data)?;
 
-    // 2) send the layers (those missing from the registry).
-    let total = image.layers.len();
-    for (i, dg) in image.layers.iter().enumerate() {
-        tracing::debug!(
-            index = i + 1,
-            total,
-            digest = %&dg[..dg.len().min(19)],
-            "pushing layer {}/{}",
-            i + 1,
-            total
-        );
-        // From the CAS file, never the whole layer in memory.
-        c.push_blob_file(
-            &with_prefix(dg),
-            &store.cas().path(dg),
-            store.cas().size(dg)?,
-        )?;
+    // 2) the layers (those missing from the registry), IN PARALLEL: they went
+    // one after another, so an image of N layers took the sum of their times
+    // on a link whose ceiling is per connection — the pull already measured
+    // that four connections move 3.2x what one does. Each straight from its
+    // CAS file, never the whole layer in memory.
+    let sizes = image
+        .layers
+        .iter()
+        .map(|dg| store.cas().size(dg))
+        .collect::<Result<Vec<u64>>>()?;
+    let meter = progress.map(|cb| PushMeter::new(sizes.len(), sizes.iter().sum(), cb));
+    let workers = image.layers.len().min(PUSH_WORKERS);
+    let next = std::sync::Mutex::new(image.layers.iter().enumerate());
+    let errors = std::sync::Mutex::new(Vec::<String>::new());
+    std::thread::scope(|scope| {
+        for _ in 0..workers {
+            // A clone per worker, as in the pull: the connection pool is
+            // shared, and a clone starts with the token already obtained.
+            let mut cw = c.clone();
+            let (next, errors, sizes, meter) = (&next, &errors, &sizes, &meter);
+            let store = &store;
+            scope.spawn(move || loop {
+                let Some((i, dg)) = next.lock().unwrap().next() else {
+                    return;
+                };
+                tracing::debug!(
+                    index = i + 1,
+                    total = sizes.len(),
+                    digest = %&dg[..dg.len().min(19)],
+                    "pushing layer {}/{}",
+                    i + 1,
+                    sizes.len()
+                );
+                let slot = meter.as_ref().map(|m| MeterSlot {
+                    meter: m.clone(),
+                    slot: i,
+                });
+                if let Err(e) = cw.push_blob_file(
+                    &with_prefix(dg),
+                    &store.cas().path(dg),
+                    sizes[i],
+                    slot.as_ref(),
+                ) {
+                    errors
+                        .lock()
+                        .unwrap()
+                        .push(format!("layer {dg}: {}", delonix_model::Error::from(e)));
+                }
+            });
+        }
+    });
+    // Every failure, not just the first — the same rule as the pull's.
+    let errs = errors.into_inner().unwrap();
+    if !errs.is_empty() {
+        return Err(Error::Registry(errs.join("; ")));
     }
 
     // 3) Docker schema-2 manifest (`oci_spec::image::ImageManifest`) + publication
@@ -1637,21 +1787,21 @@ pub fn push_oci_artifact_file(
     layer_media_type: &str,
     path: &std::path::Path,
     annotations: &BTreeMap<String, String>,
+    progress: Option<PushProgress>,
 ) -> Result<String> {
     push_artifact(
         root,
         target,
         layer_media_type,
-        ArtifactLayer::File(path),
+        ArtifactLayer::File(path, progress),
         annotations,
     )
 }
 
 /// Where the single layer of an artifact comes from.
-#[derive(Clone, Copy)]
 enum ArtifactLayer<'a> {
     Bytes(&'a [u8]),
-    File(&'a std::path::Path),
+    File(&'a std::path::Path, Option<PushProgress>),
 }
 
 fn push_artifact(
@@ -1677,9 +1827,9 @@ fn push_artifact(
     let config_digest = with_prefix(&sha256_hex(EMPTY_CONFIG_BYTES));
     c.push_blob(&config_digest, EMPTY_CONFIG_BYTES)?;
 
-    let (layer_digest, layer_size) = match layer {
+    let (layer_digest, layer_size) = match &layer {
         ArtifactLayer::Bytes(data) => (with_prefix(&sha256_hex(data)), data.len() as u64),
-        ArtifactLayer::File(path) => (
+        ArtifactLayer::File(path, _) => (
             with_prefix(&crate::cas::sha256_file(path)?),
             std::fs::metadata(path)?.len(),
         ),
@@ -1691,7 +1841,13 @@ fn push_artifact(
     );
     match layer {
         ArtifactLayer::Bytes(data) => c.push_blob(&layer_digest, data)?,
-        ArtifactLayer::File(path) => c.push_blob_file(&layer_digest, path, layer_size)?,
+        ArtifactLayer::File(path, progress) => {
+            let slot = progress.map(|cb| MeterSlot {
+                meter: PushMeter::new(1, layer_size, cb),
+                slot: 0,
+            });
+            c.push_blob_file(&layer_digest, path, layer_size, slot.as_ref())?
+        }
     }
 
     // OCI 1.1 artifact manifest (`oci_spec::image::ImageManifest` with
@@ -1748,12 +1904,26 @@ pub fn push_oci_artifact_with_layer_annotations(
     let creds = crate::auth::lookup(root, &host);
     let mut c = Client {
         http,
-        host: host.clone(),
-        repo: repo.clone(),
+        host,
+        repo,
         token: None,
         creds,
     };
+    push_layer_annotated(&mut c, &refr, layer_media_type, data, layer_annotations)
+}
 
+/// The body of [`push_oci_artifact_with_layer_annotations`], on a client the
+/// caller already has — `image sign` reuses the one that read the manifest
+/// it is signing, instead of a second client with its own TLS handshake and
+/// token flow for the same repository.
+fn push_layer_annotated(
+    c: &mut Client,
+    refr: &str,
+    layer_media_type: &str,
+    data: &[u8],
+    layer_annotations: &BTreeMap<String, String>,
+) -> Result<String> {
+    let (host, repo) = (c.host.clone(), c.repo.clone());
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing signature artifact {repo}:{refr} to {host}");
 
     let config_digest = with_prefix(&sha256_hex(EMPTY_CONFIG_BYTES));
@@ -1788,7 +1958,7 @@ pub fn push_oci_artifact_with_layer_annotations(
         .build()
         .map_err(oci_err)?;
     let manifest_bytes = serde_json::to_vec(&manifest)?;
-    c.push_manifest(&refr, &manifest_bytes, MediaType::ImageManifest.as_ref())?;
+    c.push_manifest(refr, &manifest_bytes, MediaType::ImageManifest.as_ref())?;
 
     let digest = format!("sha256:{}", sha256_hex(&manifest_bytes));
     tracing::info!(host = %host, repo = %repo, reference = %refr, digest = %digest, "pushed: {host}/{repo}:{refr}");
@@ -2852,15 +3022,17 @@ mod tests {
     #[test]
     fn container_push_uses_the_transfer_client() {
         let src = include_str!("registry.rs");
-        let start = src.find("pub fn push_to_registry(").unwrap();
+        // The client is built by the variant with progress; the plain entry
+        // point only delegates to it.
+        let start = src.find("pub fn push_to_registry_with_progress(").unwrap();
         let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
         assert!(
             body.contains("transfer_client()"),
-            "push_to_registry must use transfer_client"
+            "the container push must use transfer_client"
         );
         assert!(
             !body.contains(".timeout("),
-            "push_to_registry must not set its own ceiling"
+            "the container push must not set its own ceiling"
         );
     }
 
@@ -3003,6 +3175,7 @@ mod tests {
             "application/vnd.delonix.vmimage.v1.qcow2",
             &src,
             &std::collections::BTreeMap::new(),
+            None,
         )
         .expect("push from file");
         let dest = dir.join("back.qcow2");
@@ -3111,7 +3284,7 @@ mod tests {
         std::fs::write(&path, &payload).unwrap();
         let digest = format!("sha256:{}", sha256_hex(&payload));
         let mut c = test_client(&format!("127.0.0.1:{port}"), "r");
-        c.push_blob_file(&digest, &path, payload.len() as u64)
+        c.push_blob_file(&digest, &path, payload.len() as u64, None)
             .expect("the push must retry the PUT after the 401");
 
         let puts = seen.lock().unwrap().clone();
@@ -3211,6 +3384,25 @@ mod tests {
     }
 
     fn push_with_script(script: Vec<PutAct>) -> (crate::Result<()>, usize) {
+        let (res, puts, _) = push_with_script_metered(script);
+        (res, puts)
+    }
+
+    /// [`push_with_script`], also returning every `(sent, total)` the upload
+    /// reported.
+    fn push_with_script_metered(
+        script: Vec<PutAct>,
+    ) -> (crate::Result<()>, usize, Vec<(u64, u64)>) {
+        let reports = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let sink = reports.clone();
+        let meter = Some(crate::registry::MeterSlot {
+            meter: crate::registry::PushMeter::new(
+                1,
+                200_000,
+                std::sync::Arc::new(move |d, t| sink.lock().unwrap().push((d, t))),
+            ),
+            slot: 0,
+        });
         let (port, puts) = serve_scripted_push(script);
         let dir = scratch("push-retry");
         let path = dir.join("blob");
@@ -3218,9 +3410,28 @@ mod tests {
         std::fs::write(&path, &payload).unwrap();
         let digest = format!("sha256:{}", sha256_hex(&payload));
         let mut c = test_client(&format!("127.0.0.1:{port}"), "r");
-        let res = c.push_blob_file(&digest, &path, payload.len() as u64);
+        let res = c.push_blob_file(&digest, &path, payload.len() as u64, meter.as_ref());
         let _ = std::fs::remove_dir_all(&dir);
-        (res, puts.load(std::sync::atomic::Ordering::SeqCst))
+        let seen = reports.lock().unwrap().clone();
+        (res, puts.load(std::sync::atomic::Ordering::SeqCst), seen)
+    }
+
+    /// The push now reports progress, and a retried upload reads its file
+    /// from zero again. Its slot must move back rather than add: the bar
+    /// never passes the total, and ends exactly on it.
+    #[test]
+    fn push_progress_survives_a_retry_without_double_counting() {
+        let (res, puts, reports) =
+            push_with_script_metered(vec![PutAct::Status(503), PutAct::Status(201)]);
+        res.expect("the retry succeeds");
+        assert_eq!(puts, 2);
+        assert!(!reports.is_empty(), "nothing was reported");
+        assert!(
+            reports.iter().all(|&(d, t)| d <= t),
+            "progress passed the total: {:?}",
+            reports.iter().max()
+        );
+        assert_eq!(reports.last(), Some(&(200_000, 200_000)));
     }
 
     /// The push had no retry: a dropped connection or a registry hiccup
