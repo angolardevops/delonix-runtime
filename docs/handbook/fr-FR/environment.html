@@ -466,8 +466,9 @@ pas root :</p>
 un drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code> avec <code>[Service]</code> et
 <code>Delegate=cpu cpuset io memory pids</code>, puis <code>systemctl daemon-reload</code> <strong>et</strong> <code>systemctl restart user@&lt;uid&gt;.service</code>
 (daemon-reload seul ne suffit pas). <code>delonix system setup</code> l’affiche, et liste sous <code>refused:</code> les options que
-<code>container run</code> refusera sur cet hôte. <code>delonix system setup --delegate</code> écrit ce drop-in
-(nécessite root) lorsque le contrôleur <code>cpu</code> lui-même est absent.</p>
+<code>container run</code> refusera sur cet hôte. <code>sudo delonix system setup --delegate</code> écrit ce drop-in quel
+que soit le diagnostic, lance <code>daemon-reload</code>, et affiche le <code>systemctl restart user@&lt;uid&gt;.service</code> qui
+reste à faire ; sous <code>sudo</code>, il rend compte du <code>user@&lt;uid&gt;.service</code> de l’appelant (via <code>SUDO_UID</code>), pas de root.</p>
 <h3 id="a-stale-delonix-on-your-path">Un <code>delonix</code> obsolète dans votre <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
 <p>Si Delonix est installé sur la machine, le <code>delonix</code> de votre <code>PATH</code> est la release installée, pas votre
 arbre. Exécutez toujours <code>./target/debug/delonix</code> (ou <code>target/release/delonix</code>) lorsque vous testez une modification.

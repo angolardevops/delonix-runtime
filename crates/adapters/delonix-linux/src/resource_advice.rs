@@ -167,6 +167,13 @@ const DISK_FLOOR: u64 = 10 * GIB;
 /// answer, and the CPU ceiling should become one too.
 const HOT_C: u64 = 85;
 
+/// The remedy for a controller `user@.service` does not delegate, shared by
+/// the rules that need it. Not «log out and back in»: a lingering user
+/// manager, or a second open session, keeps user@.service running with the
+/// old delegation, and daemon-reload alone is a false green.
+const DELEGATE_ACTION: &str = "sudo delonix system setup --delegate, then systemctl restart \
+                               user@<uid>.service (daemon-reload alone is not enough)";
+
 /// Every finding this host earns, most severe first.
 pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
     let mut out = Vec::new();
@@ -193,17 +200,17 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
                     ("flags", ignored.join(" ")),
                 ],
             ),
-            action: Some(Message::new(
-                "sudo delonix system setup --delegate, then log out and back in",
-                &[],
-            )),
+            action: Some(Message::new(DELEGATE_ACTION, &[])),
         });
     }
 
-    // Never `Blocking`, and never with an action: systemd does not delegate
-    // `io` to an unprivileged user, so no rootless engine — this one, podman,
-    // docker — can write `io.max`. Telling the operator to run `system setup`
-    // would send them after a fix that does not exist.
+    // Separate from 001 and never `Blocking`: since `container run` refuses
+    // these flags without `io` (exit 69), nothing here is silently ignored.
+    // It DOES have an action. This rule used to say systemd never delegates
+    // `io` to a rootless user and so offered none; the stock `user@.service`
+    // does not, but the drop-in `system setup --delegate` writes does —
+    // measured 2026-08-19, after the drop-in and a restart of user@,
+    // `--device-write-bps 4mb` ran at 4.0 MB/s against 2.7 GB/s uncapped.
     if s.rootless && !has("io") {
         out.push(Advice {
             id: "DLX-RES-002",
@@ -211,11 +218,11 @@ pub fn advise(s: &ResourceSnapshot) -> Vec<Advice> {
             severity: Severity::Info,
             class: Class::Config,
             finding: Message::new(
-                "--io-weight and the --device-*-bps flags cannot apply: systemd never \
-                 delegates the io controller to a rootless user",
+                "--io-weight and the --device-* flags are refused here (exit 69): this \
+                 user's systemd manager does not delegate the io controller",
                 &[],
             ),
-            action: None,
+            action: Some(Message::new(DELEGATE_ACTION, &[])),
         });
     }
 
@@ -696,18 +703,20 @@ mod tests {
         // Most severe first, so a truncated report still shows what matters.
         assert_eq!(a[0].severity, Severity::Blocking);
         assert!(a[0].finding.render().contains("--cpuset"));
-        // `io` is NOT in the blocking flag list: it is a separate, unfixable
-        // finding, and mixing them would put an impossible action on a gate.
+        // `io` is NOT in the blocking flag list: its flags are refused, not
+        // ignored, so it is a separate, non-blocking finding.
         assert!(!a[0].finding.render().contains("--io-weight"));
         assert_eq!(a[2].id, "DLX-RES-002");
         assert_eq!(
             a.iter().map(|x| x.subject).collect::<Vec<_>>(),
             vec!["cgroup", "slice", "io"]
         );
-        assert!(
-            a[2].action.is_none(),
-            "não se manda corrigir o incorrigível"
-        );
+        // The drop-in delegates `io` (measured 2026-08-19), so the rule has
+        // an action — and it names the restart, not just daemon-reload.
+        let action = a[2].action.as_ref().expect("io is fixable").render();
+        assert!(action.contains("setup --delegate"), "{action}");
+        assert!(action.contains("restart user@"), "{action}");
+        assert!(!a[2].finding.render().contains("never"));
     }
 
     #[test]
