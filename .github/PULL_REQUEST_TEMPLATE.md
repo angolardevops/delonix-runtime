@@ -12,8 +12,17 @@
 
 ## Checklist
 
-- [ ] `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
-      `cargo fmt --all --check`, and `cargo test --workspace` are all clean
+- [ ] `cargo fmt --all --check`, `cargo clippy --workspace --all-targets --locked -- -D warnings`
+      and `cargo test --workspace --locked` are all clean
+- [ ] The ratchets and structure gates pass: `python3 scripts/lang_ratchet.py` and
+      `python3 scripts/arch_fitness.py`. If a count went DOWN, the baseline is lowered in this
+      same PR (`lang_ratchet.py --update`); both fail on a drop that was not recorded
+- [ ] If this touches `proto/`: `python3 scripts/contract_gate.py` passes (it needs `buf`;
+      `docs/api/openapi.yaml` is generated, never edited by hand)
+- [ ] If this changes the CLI or anything `docs/` is generated from: `python3 docs/gen.py` was
+      run and its output is committed. If it touches `docs/dev/`: `python3 scripts/dev_docs.py
+      --check` and `python3 scripts/dev_docs_site.py --check` pass
+- [ ] If this touches a `scripts/*.py` gate: its `scripts/test_*.py` passes
 - [ ] New user-facing strings are English in the source, wrapped in `po::t`/`po::tf`, with a
       Portuguese entry added to `bins/delonix-runtime-bin/data/pt.po` (not applicable if this PR
       doesn't touch CLI output)
