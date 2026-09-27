@@ -118,7 +118,7 @@ pub fn report(host: &LinuxHost) -> ProviderReport {
         | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts | C::NetRoutesBetweenNetworks
         | C::NetNamespaceIsolation | C::NetL7Proxy | C::NetTunnelEgress | C::NetIpv6 | C::NetRateLimit
         | C::NetPacketCapture | C::FirewallPerWorkload | C::FirewallDefaultDeny
-        | C::FirewallSourceFiltering | C::FirewallEgressPolicy | C::VolumeLocal | C::VolumeBind
+        | C::FirewallSourceFiltering | C::FirewallEgressPolicy | C::NetGatewayFilter | C::NetGatewayAlias | C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder | C::NetGatewayMultiWan | C::NetGatewayVpn | C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt | C::NetLbL4 | C::NetLbHealthCheck | C::NetDnsRecords | C::NetDnsAuthoritative | C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp | C::NetSegmentRemote | C::NetApplyStaged | C::NetApplyRollback | C::NetObserve | C::NetVerifyDataplane | C::NetOwnershipMarker | C::FirewallStateless | C::FirewallLogging | C::FirewallIcmpType | C::FirewallWorkloadPeer | C::VolumeLocal | C::VolumeBind
         | C::VolumeNfs | C::VolumeCifs | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot
         | C::VolumeProvisionNas | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph => {
             S::UnsupportedByProvider { reason: "not a compute capability: answered by the network/storage provider" }

@@ -314,8 +314,12 @@ o têm, em vez de o omitir.
 
 ## O ficheiro de providers do nó — `config.delonix.io/v1`
 
-O `providers.yaml` (ADR-0054) diz que providers de VM o nó tem, como o motor
-chega a cada um e qual serve um pedido que não nomeia nenhum. Procura-se por
+O `providers.yaml` (ADR-0054) diz que providers o nó tem, como o motor chega a
+cada um e qual serve um pedido que não nomeia nenhum. Desde o catálogo 1.1.0
+(ADR-0059 F1) aceita também um appliance OPNsense (`type: opnsense`) e o bloco
+`networkDefaults`, que diz que provider responde a cada papel de rede
+(`segment`, `gateway`; `nat`, `ipam` e `dns` são recusados até existir quem os
+sirva). O `defaultProvider` continua a ser só o de computação. Procura-se por
 esta ordem, e **o primeiro ficheiro que existe ganha, sem fusão**:
 `DELONIX_PROVIDERS_CONFIG`, `$XDG_CONFIG_HOME/delonix/providers.yaml` (ou
 `~/.config/…`), `/etc/delonix/providers.yaml`.
@@ -330,13 +334,13 @@ A verdade é o schema, gerado dos tipos que o motor lê:
 [`schema/v1/providers.json`](schema/v1/providers.json), com o mesmo teste a
 falhar se o publicado deixar de ser o gerado. O schema recusa uma chave
 desconhecida, outra versão, um tipo de provider que não existe e um segredo
-escrito no próprio ficheiro (`tokenSecret`, `password` — só por referência:
-`tokenSecretFile`, `passwordFile`, `secretRef`).
+escrito no próprio ficheiro (`tokenSecret`, `password`, `secret` — só por
+referência: `tokenSecretFile`, `passwordFile`, `secretFile`, `secretRef`).
 
 O schema diz se o ficheiro está **bem escrito**; o
 **`delonix provider config validate`** diz se ele **serve**: um
-`defaultProvider` sem entrada no ficheiro, um ficheiro de token legível por
-outros utilizadores, uma CA que não existe. Nenhum dos dois contacta um nó.
+`defaultProvider` ou um `networkDefaults` sem entrada no ficheiro, um ficheiro
+de token ou de segredo legível por outros utilizadores, uma CA que não existe. Nenhum dos dois contacta um nó.
 
 ```yaml
 # yaml-language-server: $schema=https://angolardevops.github.io/delonix-runtime/schema/v1/providers.json
@@ -344,6 +348,11 @@ apiVersion: config.delonix.io/v1
 defaultProvider: libvirt
 providers:
   - type: libvirt
+  - type: opnsense
+    url: https://fw.example
+    auth: { keyFile: /etc/delonix/opnsense.key, secretFile: /etc/delonix/opnsense.secret }
+networkDefaults:
+  gateway: opnsense
 ```
 
 ## NÃO estável — pode mudar em qualquer versão
@@ -366,8 +375,10 @@ providers:
   estados" por construir. Sem promessa de campos até `compose`/`cri`/`oci`
   entrarem — o formato pode mudar de forma para os acomodar.
 * **`provider`** — `ls`/`describe`/`matrix`: o que cada provider (libvirt,
-  cloud-hypervisor, proxmox, linux) declara contra o catálogo de capacidades
-  (ADR-0050), medido no host. Os NOMES das capacidades (`vm.snapshot.memory`,
+  cloud-hypervisor, proxmox, linux, opnsense) declara contra o catálogo de
+  capacidades (ADR-0050, 1.1.0 desde o ADR-0059), medido no host. Os tipos são
+  `compute`, `network`, `storage`, `image` e `gateway`; um `gateway` responde às
+  linhas de rede. Os NOMES das capacidades (`vm.snapshot.memory`,
   `net.namespace-isolation`, …) e os seis estados são o que um script lê, e
   seguem a versão do catálogo (`catalog_version` no JSON): uma entrada nova sobe
   o minor, renomear ou remover sobe o major. As colunas da tabela e a forma do

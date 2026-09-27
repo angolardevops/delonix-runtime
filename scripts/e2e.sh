@@ -532,7 +532,7 @@ check "provider ls -o json: cada capacidade leva name/supported/state/detail" ok
   "'$BIN' provider ls -o json | python3 -c '
 import json,sys
 for p in json.load(sys.stdin):
-    assert p[\"id\"] and p[\"kind\"] in (\"compute\",\"network\",\"storage\"), p
+    assert p[\"id\"] and p[\"kind\"] in (\"compute\",\"network\",\"storage\",\"gateway\"), p
     assert p[\"health\"][\"reason\"], p[\"id\"]
     for c in p[\"capabilities\"]:
         assert set(c) >= {\"name\",\"supported\",\"state\",\"detail\",\"domain\"}, c
@@ -540,6 +540,11 @@ for p in json.load(sys.stdin):
 '"
 check "provider ls --kind network só traz a rede" ok bash -c \
   "'$BIN' provider ls --kind network -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v and all(p[\"kind\"]==\"network\" for p in v), [p[\"kind\"] for p in v]'"
+# ADR-0059 F1: the perimeter appliance is a `gateway` provider, listed whether or
+# not a target is registered, and it answers the network rows (catalog 1.1.0).
+check "provider ls --kind gateway traz o opnsense e responde às linhas de rede" ok bash -c \
+  "'$BIN' provider ls --kind gateway -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert [p[\"id\"] for p in v]==[\"opnsense\"] and all(p[\"kind\"]==\"gateway\" for p in v), v; assert any(c[\"name\"]==\"net.gateway.filter\" for c in v[0][\"capabilities\"])'"
+check "provider describe opnsense" ok "$BIN" provider describe opnsense
 check "provider describe libvirt" ok "$BIN" provider describe libvirt
 check "provider describe linux --kind storage" ok "$BIN" provider describe linux --kind storage
 check "provider describe de um provider inexistente diz 4" 4 "$BIN" provider describe naoexiste
@@ -573,6 +578,8 @@ if [[ -x "$NODEBIN" ]]; then
     "curl -s --unix-socket '$NODESOCK' http://localhost/v1/providers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(set(c)>={\"name\",\"supported\",\"state\",\"detail\"} for p in d[\"providers\"] for c in p[\"capabilities\"]); assert all(p[\"catalog_version\"] for p in d[\"providers\"])'"
   check "GET /v1/providers?kind=network só traz a rede" ok bash -c \
     "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=network' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert d and all(p[\"kind\"]==\"network\" for p in d)'"
+  check "GET /v1/providers?kind=gateway traz o opnsense (ADR-0059 F1)" ok bash -c \
+    "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=gateway' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert [p[\"id\"] for p in d]==[\"opnsense\"], d'"
   check "GET /v1/providers?kind=ceph é 400 com google.rpc.Status code 3" ok bash -c \
     "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph') == 400 ]] && curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph' | grep -q '\"code\":3'"
   # BUG REAL, medido na 1.ª corrida deste check: o fallback do router do tonic

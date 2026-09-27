@@ -14336,3 +14336,37 @@ msgstr "o --vm-subnet '{subnet}' sobrepõe-se à rede SDN {sdn}"
 
 msgid "`--apply` needs root: this command changes the host's network namespace (run it with sudo, or drop `--apply` for the dry-run)"
 msgstr "o `--apply` precisa de root: este comando altera o namespace de rede do host (corre-o com sudo, ou tira o `--apply` para ver o plano)"
+
+# ADR-0059 F1 — providers.yaml: type opnsense, networkDefaults
+msgid "{path}: a secret VALUE is never written in this file — use `secretFile` (a 0600 file) or `secretRef` (a `kind: Secret` with `key` and `secret`)"
+msgstr "{path}: um VALOR de segredo nunca se escreve neste ficheiro — usa `secretFile` (um ficheiro 0600) ou `secretRef` (um `kind: Secret` com `key` e `secret`)"
+
+msgid "{path}: defaultProvider is the COMPUTE default and opnsense is not a compute provider — a perimeter gateway goes in `networkDefaults.gateway`"
+msgstr "{path}: o defaultProvider é o de COMPUTAÇÃO e o opnsense não é um provider de computação — um gateway de perímetro vai em `networkDefaults.gateway`"
+
+msgid "{path}: networkDefaults.{role}: no provider serves the role '{role}' in this build (ADR-0059 F5)"
+msgstr "{path}: networkDefaults.{role}: nenhum provider serve o papel '{role}' nesta build (ADR-0059 F5)"
+
+msgid "{path}: networkDefaults.{role}: '{name}' does not serve the role '{role}' (it is served by: {serving})"
+msgstr "{path}: networkDefaults.{role}: '{name}' não serve o papel '{role}' (quem o serve: {serving})"
+
+msgid "{path}: networkDefaults.{role} '{name}' has no entry in this file, so no process can serve it"
+msgstr "{path}: o networkDefaults.{role} '{name}' não tem entrada neste ficheiro, logo nenhum processo o pode servir"
+
+msgid "an OPNsense target is configured but no credential is: use DELONIX_OPNSENSE_CREDENTIAL (a `kind: Secret` with `key`+`secret` fields, preferred), or DELONIX_OPNSENSE_KEY with DELONIX_OPNSENSE_SECRET — in providers.yaml, `auth: {key or keyFile, secretFile or secretRef}`. A GUI account's username/password does not work here — only a generated API key/secret pair does (ADR-0051 Phase 0, measured)."
+msgstr "há um alvo OPNsense configurado mas nenhuma credencial: usa DELONIX_OPNSENSE_CREDENTIAL (um `kind: Secret` com os campos `key`+`secret`, preferível), ou DELONIX_OPNSENSE_KEY com DELONIX_OPNSENSE_SECRET — no providers.yaml, `auth: {key ou keyFile, secretFile ou secretRef}`. O utilizador/palavra-passe de uma conta da interface web não serve aqui — só um par de chave/segredo de API gerado (ADR-0051 fase 0, medido)."
+
+msgid "kind: Secret '{name}'"
+msgstr "kind: Secret '{name}'"
+
+msgid "api key, secret from file {path}"
+msgstr "chave de API, segredo do ficheiro {path}"
+
+msgid "api key, secret from the environment (redacted)"
+msgstr "chave de API, segredo do ambiente (ocultado)"
+
+msgid "nowhere — the secret is missing"
+msgstr "em lado nenhum — falta o segredo"
+
+msgid "Network default:"
+msgstr "Rede por omissão:"
