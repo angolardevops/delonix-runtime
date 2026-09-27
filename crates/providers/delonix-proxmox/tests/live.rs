@@ -3516,6 +3516,83 @@ fn a_running_vm_moves_live_on_shared_storage_and_keeps_running() {
     assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
 }
 
+/// `vm move --node --live --with-local-disks` (ADR-0053): a RUNNING VM whose
+/// disk is on the source's local storage moves while it runs, the node
+/// mirroring the disk over NBD onto `--target-storage`. Without the flag the
+/// live move is refused by name (DX-5507) and the VM stays where it was;
+/// with it, the VM is running on the target and its config names the target
+/// storage, not the source one.
+#[test]
+fn a_running_vm_with_a_local_disk_moves_live_and_its_disk_is_mirrored() {
+    let Some(t) = target() else {
+        return;
+    };
+    let Some((to, shared)) = move_env() else {
+        return;
+    };
+    let local =
+        std::env::var("DELONIX_PROXMOX_TEST_STORAGE").unwrap_or_else(|_| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+    let stage = |_: CreateStage| {};
+
+    let name = format!("dlxmvmirror{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: format!("{local}:1"),
+        vcpus: 1,
+        memory: "512M".into(),
+        ..Default::default()
+    };
+    let boot = b.boot(vmdir, &cfg, &cfg.disk, &stage).expect("boot");
+    let mut vm = record_of(&name, &cfg, &boot);
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    assert!(b.is_running(&vm), "the VM must be running for a live move");
+
+    let err = b
+        .move_to_node(vmdir, &vm, &to, &mv(true))
+        .expect_err("a live move of a local disk without the flag");
+    assert_eq!(err.number(), 5507, "{err}");
+    assert!(err.to_string().contains("--with-local-disks"), "{err}");
+    assert_eq!(
+        client.locate_vm(vmid).unwrap().as_deref(),
+        Some(t.node.as_str())
+    );
+
+    let mirror = delonix_compute::vm_backend::MoveOptions {
+        live: true,
+        with_local_disks: true,
+        target_storage: Some(shared.clone()),
+    };
+    let handle = b
+        .move_to_node(vmdir, &vm, &to, &mirror)
+        .expect("live move mirroring the local disk");
+    assert_eq!(handle, format!("proxmox:{to}:{vmid}"));
+    assert_eq!(
+        client.locate_vm(vmid).unwrap().as_deref(),
+        Some(to.as_str()),
+        "the cluster does not list the VM on the target"
+    );
+    let on_target = client.for_node(&to).unwrap();
+    assert_eq!(
+        on_target.status_current(vmid).expect("status"),
+        "running",
+        "a live move must leave it running"
+    );
+    let moved = serde_json::to_string(&on_target.config(vmid).expect("config")).unwrap();
+    assert!(
+        moved.contains(&format!("{shared}:"))
+            && !moved.contains(&format!("{local}:vm-{vmid}-disk")),
+        "the disk was not mirrored onto {shared}: {moved}"
+    );
+    vm.api_socket = handle;
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
+}
+
 /// The prepared agent guest (`DELONIX_PROXMOX_TEST_AGENT_VMID`) as a record
 /// the backend can address: running, on the configured node.
 fn agent_guest(t: &Target) -> Option<(u32, delonix_compute::Vm)> {
