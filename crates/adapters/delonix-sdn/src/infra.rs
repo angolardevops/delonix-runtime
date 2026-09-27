@@ -2588,22 +2588,63 @@ fn ensure_net_bridge(bridge: &str, fallback_addr: &str) -> Result<()> {
     Ok(())
 }
 
-/// Bridges that already have the native DHCP server running (one thread per bridge).
-static DHCP_STARTED: std::sync::Mutex<std::collections::BTreeSet<String>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
+/// The native DHCP servers running in this holder, one thread per bridge, each
+/// with the flag that stops it.
+///
+/// **It used to be a set of names that only ever grew.** `do_netdel` deleted the
+/// bridge and left the entry — and the thread, still blocked in `recv` on a socket
+/// bound to an ifindex that no longer exists. A network recreated under the same
+/// name gets the same bridge name, `start_dhcp` found it "already running" and
+/// returned: measured, the recreated network had NO server on `:67` (the old
+/// socket showed up as `0.0.0.0%if4:67`), so every VM on it waited for a lease
+/// forever. The flag is what lets `do_netdel` end the old thread, and removing the
+/// entry is what lets the next create start a fresh one.
+struct DhcpServers(
+    std::sync::Mutex<
+        std::collections::BTreeMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    >,
+);
+
+impl DhcpServers {
+    const fn new() -> Self {
+        DhcpServers(std::sync::Mutex::new(std::collections::BTreeMap::new()))
+    }
+
+    /// The stop flag of a NEW server for `bridge`, or `None` if one is running.
+    fn claim(&self, bridge: &str) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        let mut m = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        if m.contains_key(bridge) {
+            return None;
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        m.insert(bridge.to_string(), stop.clone());
+        Some(stop)
+    }
+
+    /// Stops `bridge`'s server (it notices within one receive timeout) and forgets
+    /// it, so a bridge recreated under the same name gets a server of its own.
+    fn release(&self, bridge: &str) {
+        let mut m = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(stop) = m.remove(bridge) {
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
+static DHCP_SERVERS: DhcpServers = DhcpServers::new();
+
+/// How long a DHCP server blocks in `recv` before it looks at its stop flag.
+const DHCP_RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Starts a network bridge's **NATIVE** (Rust) DHCP server, if it isn't already
 /// running. Replaces `busybox udhcpd` — the holder becomes self-contained
 /// (no dependency on host binaries). One thread per bridge.
 fn start_dhcp(bridge: &str, prefix: &str) {
-    {
-        let mut s = DHCP_STARTED.lock().unwrap();
-        if !s.insert(bridge.to_string()) {
-            return; // already has a DHCP server
-        }
-    }
+    let Some(stop) = DHCP_SERVERS.claim(bridge) else {
+        return; // already has a DHCP server
+    };
     let (b, p) = (bridge.to_string(), prefix.to_string());
-    std::thread::spawn(move || dhcp_serve(b, p));
+    std::thread::spawn(move || dhcp_serve(b, p, stop));
 }
 
 /// The IPv4 address the holder's native DHCP server will hand to `mac` on a
@@ -2635,7 +2676,7 @@ pub fn dhcp_lease_ip(prefix: &str, mac: &str) -> Option<String> {
 /// Native DHCPv4 server of a bridge: listens on UDP `:67` (only on that bridge, via
 /// `SO_BINDTODEVICE`) and responds to DISCOVER/REQUEST with an IP from the pool
 /// `<prefix>.254.10–.254.250` (deterministic from the MAC), **gateway/DNS = ingress**.
-fn dhcp_serve(bridge: String, prefix: String) {
+fn dhcp_serve(bridge: String, prefix: String, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     use std::os::unix::io::FromRawFd;
     let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
     if oct.len() != 2 {
@@ -2685,11 +2726,30 @@ fn dhcp_serve(bridge: String, prefix: String) {
         }
         std::net::UdpSocket::from_raw_fd(fd)
     };
+    // A bounded `recv` so the thread can see `do_netdel`'s stop flag; without a
+    // timeout it would block forever on a socket whose device is gone.
+    let _ = sock.set_read_timeout(Some(DHCP_RECV_TIMEOUT));
     let mut buf = [0u8; 1024];
     loop {
+        if stop.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let n = match sock.recv(&mut buf) {
             Ok(n) => n,
-            Err(_) => continue,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue
+            }
+            // Any other error would repeat on the next call: pace it instead of
+            // spinning a core until the flag comes.
+            Err(_) => {
+                std::thread::sleep(DHCP_RECV_TIMEOUT);
+                continue;
+            }
         };
         if n < 240 || buf[236..240] != [99, 130, 83, 99] {
             continue; // BOOTP + magic cookie
@@ -3480,7 +3540,19 @@ fn do_wg_peer_del(iface: &str, key: &str) -> Result<()> {
     crate::wg::remove_peer(&sanitize(iface), key)
 }
 
-/// Removes a private network's bridge from the infra netns (on `network rm`).
+/// Removes a private network's bridge from the infra netns (on `network rm`), and
+/// everything the holder built AROUND it.
+///
+/// **It used to delete the link and nothing else.** Measured on `network rm` of a
+/// network with an egress policy: the bridge went, and `@dlxbr` still listed it,
+/// `@netpair` still held its self-pair, `fwdeny` still carried its `deny` rule and
+/// its DHCP thread kept running. Recreating the network under the same name (same
+/// bridge name) then came up with no DHCP server and with the OLD `deny` in force
+/// while `net egress show` answered `allow` — the record and the dataplane
+/// disagreeing, in the direction nobody asked for.
+///
+/// Also the teardown of a VXLAN uplink (`vxlan_remove`): that device is not a
+/// network bridge and owns none of this, so only the link goes.
 fn do_netdel(bridge: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     if bridge == INFRA_BRIDGE {
@@ -3488,8 +3560,64 @@ fn do_netdel(bridge: &str) -> Result<()> {
             "the default ingress bridge cannot be removed".into(),
         ));
     }
+    if bridge.starts_with("dlxn") {
+        DHCP_SERVERS.release(&bridge);
+        // The default state is "allow, no hosts": it removes this bridge's rules and
+        // inserts none — the same function that wrote them, so the two cannot
+        // disagree about what a rule of this bridge looks like.
+        let _ = apply_egress_from_state(&bridge, &EgressState::default());
+        fqdn_forget(&bridge);
+        let pairs = crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, NETPAIR_MAP])
+            .unwrap_or_default();
+        for spec in netdel_nft_deletes(&bridge, &pairs) {
+            let args: Vec<&str> = spec.iter().map(String::as_str).collect();
+            run_ok("nft", &args);
+        }
+    }
     run_ok("ip", &["link", "del", &bridge]);
     Ok(())
+}
+
+/// The `nft delete element` argument vectors that take `bridge` out of the
+/// isolation model: its `@dlxbr` member, and EVERY `@netpair` key that names it —
+/// the self-pair [`isolation_elements`] installed, and any route pair whose record
+/// was already gone (a pair naming a bridge that no longer exists would silently
+/// open a path to whatever network gets that bridge name next).
+///
+/// PURE: `netpair_listing` is the output of `nft list map`, so what gets deleted is
+/// checkable without a holder. The self-pair is always included, even when the
+/// listing came back empty — a failed read must not turn into "nothing to delete".
+fn netdel_nft_deletes(bridge: &str, netpair_listing: &str) -> Vec<Vec<String>> {
+    let del = |set: &str, element: String| -> Vec<String> {
+        ["delete", "element", "ip", INGRESS_TABLE, set]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(std::iter::once(element))
+            .collect()
+    };
+    let mut pairs: Vec<(String, String)> = vec![(bridge.to_string(), bridge.to_string())];
+    // Quoted strings are the odd fields of a split on `"`; two of them joined by a
+    // bare `.` are one `ifname . ifname` key.
+    let fields: Vec<&str> = netpair_listing.split('"').collect();
+    let mut i = 1;
+    while i + 2 < fields.len() {
+        if fields[i + 1].trim() == "." {
+            let (a, b) = (fields[i], fields[i + 2]);
+            if (a == bridge || b == bridge) && !pairs.iter().any(|(x, y)| x == a && y == b) {
+                pairs.push((a.to_string(), b.to_string()));
+            }
+            i += 4;
+        } else {
+            i += 2;
+        }
+    }
+    let mut out = vec![del(DLXBR_SET, format!("{{ \"{bridge}\" }}"))];
+    out.extend(
+        pairs
+            .into_iter()
+            .map(|(a, b)| del(NETPAIR_MAP, format!("{{ \"{a}\" . \"{b}\" }}"))),
+    );
+    out
 }
 
 /// Installs the DNAT of a published port in the `dlxing`'s `pre` chain (runs in the
@@ -5272,6 +5400,18 @@ fn fqdn_register(bridge: &str, set: &str, hosts: &[String]) {
     }
 }
 
+/// Forgets a removed bridge's FQDN allowlist: the DNS thread stops feeding its set,
+/// and the set itself goes (its rules were removed first, or nft would refuse).
+fn fqdn_forget(bridge: &str) {
+    if let Ok(mut g) = FQDN_ALLOW.lock() {
+        g.retain(|(b, _, _)| b != bridge);
+    }
+    run_ok(
+        "nft",
+        &["delete", "set", "ip", INGRESS_TABLE, &fqdn_set(bridge)],
+    );
+}
+
 fn networks_dir() -> PathBuf {
     ingress_dir().join("networks")
 }
@@ -6600,7 +6740,14 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
                 namespace: namespace.to_string(),
                 ..Default::default()
             };
-            apply_firewall(&format!("vm-{vm}"), ip, &fw)?;
+            // A refused chain undoes the whole attach. The `?` used to return with
+            // the tap on the bridge, the address in the namespace sets and the
+            // `vm-<name>` ref marker held — a VM that never booted keeping the
+            // holder up and a tap nobody would delete, until a `system prune`.
+            if let Err(e) = apply_firewall(&format!("vm-{vm}"), ip, &fw) {
+                vm_detach(vm, Some(ip));
+                return Err(e);
+            }
         }
     }
     Ok(tap)
@@ -6615,6 +6762,10 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
 pub fn vm_detach(vm: &str, ip: Option<&str>) {
     if let Some(ip) = ip {
         clear_firewall(ip);
+        // The membership `vmtap` gave the address in `@dlxall`/`@dlxns_*`. Nothing
+        // took it back, so every VM that ever ran in a namespace stayed a member —
+        // the container detach already sends this line for the same reason.
+        let _ = control_send(&format!("nsleave {ip}"));
     }
     let _ = control_send(&format!("vmtapdel {}", vm_tap_name(vm)));
     release(&format!("vm-{vm}"));
@@ -6766,7 +6917,23 @@ pub fn publish_port(cip: &str, spec: &str) -> Result<()> {
         host_addr.as_deref(),
     )?;
     // tap0:host_port → container:cont_port (DNAT in the infra netns, via the holder).
-    control_send(&format!("publish {proto} {host_port} {cip} {cont_port}"))
+    //
+    // If the DNAT is refused, the hostfwd above has to go with it. It used to stay:
+    // the caller got an error and no record, and the host port stayed LISTENING in
+    // the shared slirp with nothing behind it and nobody who would ever remove it —
+    // the same orphan `wire_network`'s rollback left (see there). A successful `add_hostfwd` means the bind was ours — the slirp refuses a
+    // second one on the same address — so removing that exact entry never takes
+    // another publication with it.
+    if let Err(e) = control_send(&format!("publish {proto} {host_port} {cip} {cont_port}")) {
+        slirp_remove_hostfwd_exact(
+            &slirp_sock_path(),
+            &host_port,
+            &proto,
+            &crate::publish_bind_addr(host_addr.as_deref()),
+        );
+        return Err(e);
+    }
+    Ok(())
 }
 
 // REMOVED: `publish_port_allow` / the `publish-allow` control verb — a pre-DNAT
@@ -6989,32 +7156,70 @@ fn hostfwd_entries(v: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
 /// the record still claiming `18100:53/tcp` while nothing was bound and `curl` got
 /// nothing. Removal now mirrors publication.
 pub fn slirp_remove_hostfwd_proto(sock: &Path, host_port: &str, proto: Option<&str>) -> Result<()> {
+    slirp_remove_hostfwd_matching(sock, host_port, proto, None)
+}
+
+/// Removes ONLY the hostfwd a publish of ours has just added: same port, same
+/// proto, same host address. The rollback of [`publish_port`].
+///
+/// Narrower than [`slirp_remove_hostfwd_proto`] on purpose. Two publications of
+/// one port on two different host addresses coexist in the slirp (`127.0.0.1:8080`
+/// and `192.168.1.5:8080` both bind), and undoing OUR half-done publish must not
+/// take down another container's working one.
+fn slirp_remove_hostfwd_exact(sock: &Path, host_port: &str, proto: &str, host_addr: &str) {
+    let _ = slirp_remove_hostfwd_matching(sock, host_port, Some(proto), Some(host_addr));
+}
+
+fn slirp_remove_hostfwd_matching(
+    sock: &Path,
+    host_port: &str,
+    proto: Option<&str>,
+    host_addr: Option<&str>,
+) -> Result<()> {
     trace_unpublish("slirp_remove_hostfwd", host_port);
     let hp: u32 = host_port
         .parse()
         .map_err(|_| Error::InvalidPort("invalid port".into()))?;
     let listed = slirp_api(sock, r#"{"execute":"list_hostfwd"}"#)?;
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
-    if let Some(entries) = hostfwd_entries(&v) {
-        for e in entries {
-            if e.get("host_port").and_then(|p| p.as_u64()) != Some(hp as u64) {
-                continue;
-            }
-            // An entry whose proto the slirp doesn't report is NOT skipped when a proto
-            // was asked for — better to remove a publication we can't disambiguate than
-            // to leave the host port held by something the record no longer knows about.
-            if let (Some(want), Some(have)) = (proto, e.get("proto").and_then(|p| p.as_str())) {
-                if !have.eq_ignore_ascii_case(want) {
-                    continue;
-                }
-            }
-            if let Some(id) = e.get("id").and_then(|i| i.as_u64()) {
-                let cmd = format!(r#"{{"execute":"remove_hostfwd","arguments":{{"id":{id}}}}}"#);
-                let _ = slirp_api(sock, &cmd);
-            }
-        }
+    for id in hostfwd_ids_matching(&v, hp, proto, host_addr) {
+        let cmd = format!(r#"{{"execute":"remove_hostfwd","arguments":{{"id":{id}}}}}"#);
+        let _ = slirp_api(sock, &cmd);
     }
     Ok(())
+}
+
+/// The ids of the `list_hostfwd` entries on `host_port`, narrowed by `proto` and
+/// `host_addr` when given. PURE — the matching is what decides whose publication
+/// goes, so it is testable against a canned listing.
+fn hostfwd_ids_matching(
+    v: &serde_json::Value,
+    host_port: u32,
+    proto: Option<&str>,
+    host_addr: Option<&str>,
+) -> Vec<u64> {
+    let Some(entries) = hostfwd_entries(v) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter(|e| e.get("host_port").and_then(|p| p.as_u64()) == Some(host_port as u64))
+        // An entry whose proto the slirp doesn't report is NOT skipped when a proto
+        // was asked for — better to remove a publication we can't disambiguate than
+        // to leave the host port held by something the record no longer knows about.
+        .filter(|e| match (proto, e.get("proto").and_then(|p| p.as_str())) {
+            (Some(want), Some(have)) => have.eq_ignore_ascii_case(want),
+            _ => true,
+        })
+        // The address, by contrast, is only ever asked for by the rollback, which
+        // knows exactly what it added: an entry that does not say is not ours to
+        // take.
+        .filter(|e| match host_addr {
+            Some(want) => e.get("host_addr").and_then(|a| a.as_str()) == Some(want),
+            None => true,
+        })
+        .filter_map(|e| e.get("id").and_then(|i| i.as_u64()))
+        .collect()
 }
 
 /// [`slirp_remove_hostfwd_proto`] for every proto on the port (teardown paths:
@@ -11024,6 +11229,96 @@ mod tests_restore_lease {
                 Some("10.88.1.1")
             );
         });
+    }
+}
+
+/// `network rm` in the holder: what `do_netdel` takes out, and the DHCP registry
+/// that lets a recreated bridge get a server again.
+#[cfg(test)]
+mod tests_netdel {
+    use super::*;
+
+    /// The listing is `nft list map` as the kernel prints it: the bridge's own
+    /// self-pair, a route pair naming it (its record already gone), and pairs of
+    /// OTHER bridges that must not be touched.
+    #[test]
+    fn netdel_takes_every_element_naming_the_bridge_and_nothing_else() {
+        let listing = r#"table ip dlxing {
+	map netpair {
+		type ifname . ifname : verdict
+		counter
+		elements = { "dlxnaaaa0001" . "dlxnaaaa0001" counter packets 3 bytes 180 : accept,
+			     "dlxnaaaa0001" . "dlxnbbbb0002" counter packets 0 bytes 0 : accept,
+			     "dlxnbbbb0002" . "dlxnbbbb0002" counter packets 0 bytes 0 : accept,
+			     "dlxnbbbb0002" . "dlxncccc0003" counter packets 0 bytes 0 : accept }
+	}
+}"#;
+        let got: Vec<String> = netdel_nft_deletes("dlxnaaaa0001", listing)
+            .into_iter()
+            .map(|v| v.join(" "))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                r#"delete element ip dlxing dlxbr { "dlxnaaaa0001" }"#,
+                r#"delete element ip dlxing netpair { "dlxnaaaa0001" . "dlxnaaaa0001" }"#,
+                r#"delete element ip dlxing netpair { "dlxnaaaa0001" . "dlxnbbbb0002" }"#,
+            ]
+        );
+    }
+
+    /// A listing that could not be read is not "nothing to delete": the self-pair
+    /// and the set member are what `isolation_elements` always installs.
+    #[test]
+    fn netdel_without_a_listing_still_removes_what_create_installed() {
+        let got = netdel_nft_deletes("dlxnaaaa0001", "");
+        assert_eq!(got.len(), 2);
+        let installed: Vec<(&str, String)> = isolation_elements("dlxnaaaa0001");
+        assert_eq!(got[0][4], installed[0].0);
+        assert_eq!(got[1][4], installed[1].0);
+    }
+
+    /// The registry that used to be a set that only grew: a released bridge is
+    /// stopped AND forgotten, so claiming it again starts a fresh server.
+    #[test]
+    fn a_released_dhcp_server_is_stopped_and_can_be_claimed_again() {
+        let reg = DhcpServers::new();
+        let first = reg
+            .claim("dlxnaaaa0001")
+            .expect("first claim starts a server");
+        assert!(reg.claim("dlxnaaaa0001").is_none(), "one server per bridge");
+        reg.release("dlxnaaaa0001");
+        assert!(
+            first.load(std::sync::atomic::Ordering::SeqCst),
+            "old thread told to stop"
+        );
+        let second = reg
+            .claim("dlxnaaaa0001")
+            .expect("a recreated bridge gets a server");
+        assert!(!second.load(std::sync::atomic::Ordering::SeqCst));
+        reg.release("dlxnunknown"); // releasing what is not there is a no-op
+    }
+
+    /// The rollback removes the entry it added and not a sibling on another
+    /// address or protocol; the unpublish path keeps matching by port and proto.
+    #[test]
+    fn the_publish_rollback_removes_only_its_own_hostfwd() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"entries":[
+                {"id":1,"proto":"tcp","host_addr":"127.0.0.1","host_port":8080,"guest_port":8080},
+                {"id":2,"proto":"tcp","host_addr":"192.168.1.5","host_port":8080,"guest_port":8080},
+                {"id":3,"proto":"udp","host_addr":"127.0.0.1","host_port":8080,"guest_port":8080},
+                {"id":4,"proto":"tcp","host_addr":"127.0.0.1","host_port":9090,"guest_port":9090}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            hostfwd_ids_matching(&v, 8080, Some("tcp"), Some("127.0.0.1")),
+            [1]
+        );
+        assert_eq!(hostfwd_ids_matching(&v, 8080, Some("tcp"), None), [1, 2]);
+        assert_eq!(hostfwd_ids_matching(&v, 8080, None, None), [1, 2, 3]);
+        assert!(hostfwd_ids_matching(&v, 7070, None, None).is_empty());
     }
 }
 
