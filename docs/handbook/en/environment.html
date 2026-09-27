@@ -464,8 +464,9 @@ per-command fix needs no root:</p>
 a drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code> with <code>[Service]</code> and
 <code>Delegate=cpu cpuset io memory pids</code>, then <code>systemctl daemon-reload</code> <strong>and</strong> <code>systemctl restart user@&lt;uid&gt;.service</code>
 (daemon-reload alone is not enough). <code>delonix system setup</code> prints it, and lists under <code>refused:</code> the flags <code>container run</code>
-will refuse on this host. <code>delonix system setup --delegate</code> writes that drop-in (needs root) when
-the <code>cpu</code> controller itself is missing.</p>
+will refuse on this host. <code>sudo delonix system setup --delegate</code> writes that drop-in whatever the
+diagnosis says, runs <code>daemon-reload</code>, and prints the <code>systemctl restart user@&lt;uid&gt;.service</code> still to
+do; under <code>sudo</code> it reports on the invoking user's <code>user@&lt;uid&gt;.service</code> (from <code>SUDO_UID</code>), not on root.</p>
 <h3 id="a-stale-delonix-on-your-path">A stale <code>delonix</code> on your <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
 <p>If Delonix is installed on the machine, <code>delonix</code> on your <code>PATH</code> is the installed release, not your
 tree. Always run <code>./target/debug/delonix</code> (or <code>target/release/delonix</code>) when you test a change.

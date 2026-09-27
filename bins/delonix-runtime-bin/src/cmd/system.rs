@@ -2586,8 +2586,226 @@ pub(crate) fn missing_controllers(have: &[String]) -> (Vec<&'static str>, Vec<&'
     (absent(FATAL_CONTROLLERS), absent(NICE_CONTROLLERS))
 }
 
+/// Whose delegation `system setup` reports on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SetupSubject {
+    /// A rootless run: this process's own cgroup.
+    Rootless,
+    /// Root with nobody behind it (a root login, a unit): `delonix.slice`.
+    Root,
+    /// Root through `sudo`, on behalf of the user who typed it.
+    ///
+    /// That user runs the rootless containers. Root's own view answers nothing
+    /// about them: the `sudo` process sits in THEIR session scope, and the
+    /// root probes ask about `delonix.slice`, a base they never use — so a
+    /// host whose `user@.service` lacks `io` was told «Nothing to do.».
+    Sudo(u32),
+}
+
+/// **Pure.** A `SUDO_UID` of `0` (sudo from a root shell) is plain root, and
+/// so is one that does not parse.
+pub(crate) fn setup_subject(rootless: bool, sudo_uid: Option<&str>) -> SetupSubject {
+    if rootless {
+        return SetupSubject::Rootless;
+    }
+    match sudo_uid.and_then(|s| s.trim().parse::<u32>().ok()) {
+        Some(uid) if uid != 0 => SetupSubject::Sudo(uid),
+        _ => SetupSubject::Root,
+    }
+}
+
+/// What the diagnosis concluded, before anything is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Verdict {
+    /// Nothing the drop-in adds is missing.
+    NothingToDo,
+    /// Something is missing that the drop-in on `user@.service` brings.
+    DropinFixes,
+    /// Something is wrong that the drop-in does not touch (root without
+    /// cgroup v2, `delonix.slice` not handing controllers down).
+    OtherCause,
+}
+
+/// What `system setup` does about the drop-in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum DropinStep {
+    /// Print the diagnosis; write nothing.
+    Report,
+    /// Write the drop-in.
+    Write,
+    /// `--delegate` was asked for a drop-in that is needed, without root.
+    NeedsRoot,
+}
+
+/// **Pure**, and the reason it exists: `--delegate` as root used to be
+/// decided INSIDE the diagnosis branches, and only one of them — rootless
+/// view, limits apply, `cpu` missing — reached the write. Under `sudo` the
+/// process is root, so the root view ran, and it returned «Nothing to do.»
+/// (or «delegation is not the blocker») without writing. The command the
+/// `container run` refusal and the docs point at almost never wrote the file.
+///
+/// Now the diagnosis only reports, and this decides once: as root,
+/// `--delegate` writes whatever the diagnosis said — the operator asked for
+/// the file, and it is idempotent.
+pub(crate) fn dropin_step(delegate: bool, subject: SetupSubject, needed: bool) -> DropinStep {
+    match (delegate, subject) {
+        (false, _) => DropinStep::Report,
+        (true, SetupSubject::Rootless) if needed => DropinStep::NeedsRoot,
+        (true, SetupSubject::Rootless) => DropinStep::Report,
+        (true, SetupSubject::Root | SetupSubject::Sudo(_)) => DropinStep::Write,
+    }
+}
+
 fn cmd_setup(delegate: bool) -> Result<()> {
-    let rootless = runtime::is_rootless();
+    let subject = setup_subject(
+        runtime::is_rootless(),
+        std::env::var("SUDO_UID").ok().as_deref(),
+    );
+    // Reports only. No branch in here writes or returns early past the
+    // decision below — that is what kept `sudo … --delegate` from writing.
+    let verdict = match subject {
+        SetupSubject::Sudo(uid) => diagnose_invoking_user(uid),
+        SetupSubject::Rootless | SetupSubject::Root => {
+            diagnose_this_process(subject == SetupSubject::Rootless)
+        }
+    };
+    let needed = verdict == Verdict::DropinFixes;
+    match dropin_step(delegate, subject, needed) {
+        DropinStep::Write => write_delegate_dropin(subject),
+        DropinStep::NeedsRoot => Err(Error::Invalid(
+            super::po::t(
+                "--delegate writes under /etc/systemd/system and needs root: re-run it with \
+                 sudo. (This run changed nothing.)",
+            )
+            .to_string(),
+        )),
+        DropinStep::Report => {
+            match verdict {
+                Verdict::NothingToDo => println!("\n{}", super::po::t("Nothing to do.")),
+                Verdict::DropinFixes if subject == SetupSubject::Rootless => println!(
+                    "\n{}",
+                    super::po::t(
+                        "To write the drop-in: sudo delonix system setup --delegate. (This run \
+                         changed nothing.)"
+                    )
+                ),
+                Verdict::DropinFixes => println!(
+                    "\n{}",
+                    super::po::t("Re-run with --delegate to write it. (This run changed nothing.)")
+                ),
+                Verdict::OtherCause => {}
+            }
+            Ok(())
+        }
+    }
+}
+
+/// The `controllers:`/`missing:`/`absent:`/`refused:` lines, shared by both
+/// views so they cannot word the same fact two ways. Returns the missing
+/// controllers that break a Kubernetes node.
+fn print_controller_lines(have: &[String], refused: &[&str]) -> Vec<&'static str> {
+    println!(
+        "  controllers: {}",
+        if have.is_empty() {
+            "<none readable>".to_string()
+        } else {
+            have.join(" ")
+        }
+    );
+    let (fatal, nice) = missing_controllers(have);
+    if !fatal.is_empty() {
+        println!(
+            "  missing:  {}  {}",
+            fatal.join(" "),
+            super::po::t("← a Kubernetes node CANNOT boot without this")
+        );
+    }
+    if !nice.is_empty() {
+        println!(
+            "  absent:   {}  {}",
+            nice.join(" "),
+            super::po::t("← a Kubernetes node boots without them")
+        );
+    }
+    if !refused.is_empty() {
+        println!(
+            "  refused:  {}  {}",
+            refused.join(" "),
+            super::po::t(
+                "← `container run` REFUSES these here (exit 69): the container's cgroup has no \
+                 controller for them. A `systemd-run --user --scope` does not bring it — a scope \
+                 only gets what user@.service has."
+            )
+        );
+    }
+    fatal
+}
+
+/// The follow-up the drop-in needs, for `uid` when it is known. The msgid
+/// carries a literal `user@<uid>.service` in every language, so the real uid
+/// is substituted after translation.
+fn restart_follow_up(uid: Option<u32>) -> String {
+    let text = super::po::t(
+        "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends \
+         that user's sessions) or reboot — daemon-reload alone is not enough",
+    );
+    match uid {
+        Some(uid) => text.replace("<uid>", &uid.to_string()),
+        None => text.to_string(),
+    }
+}
+
+/// The report as root through `sudo`: about `uid`'s user manager, where that
+/// user's rootless containers get their cgroup — not about root's.
+fn diagnose_invoking_user(uid: u32) -> Verdict {
+    let manager = runtime::user_manager_cgroup(uid);
+    println!("{}", super::po::t("cgroup delegation"));
+    println!(
+        "  mode:     root (sudo) — {}",
+        super::po::tf(
+            "reporting for uid {uid}, who runs the rootless containers",
+            &[("uid", &uid.to_string())]
+        )
+    );
+    println!("  cgroup:   {manager}");
+    if !std::path::Path::new(&manager).is_dir() {
+        println!(
+            "\n{}",
+            super::po::tf(
+                "user@{uid}.service is not running (no session, no linger), so there is nothing \
+                 to read. The drop-in applies the next time it starts.",
+                &[("uid", &uid.to_string())]
+            )
+        );
+        return Verdict::DropinFixes;
+    }
+    println!(
+        "            {}",
+        super::po::t(
+            "(what a container under user@.service gets — a desktop session or `systemd-run \
+             --user --scope`; an SSH session scope gets none of it)"
+        )
+    );
+    let have = runtime::user_leaf_controllers(uid);
+    let refused = refused_flags(&have);
+    let fatal = print_controller_lines(&have, &refused);
+    if fatal.is_empty() && refused.is_empty() {
+        return Verdict::NothingToDo;
+    }
+    println!(
+        "\n{}\n\n     {DELEGATE_DROPIN}\n       [Service]\n       {DELEGATE_LINE}\n\n     {}",
+        super::po::tf(
+            "What fixes this for uid {uid} is the drop-in (root, once per host):",
+            &[("uid", &uid.to_string())]
+        ),
+        restart_follow_up(Some(uid)),
+    );
+    Verdict::DropinFixes
+}
+
+/// The report about this process's own cgroup: rootless, or root with nobody
+/// behind it.
+fn diagnose_this_process(rootless: bool) -> Verdict {
     let ok = runtime::cgroup_limits_apply();
     let cur = runtime::current_cgroup_v2().unwrap_or_else(|| "<unknown>".into());
 
@@ -2603,52 +2821,17 @@ fn cmd_setup(delegate: bool) -> Result<()> {
         }
     );
 
-    let have = delegated_controllers(&cur);
-    println!(
-        "  controllers: {}",
-        if have.is_empty() {
-            "<none readable>".to_string()
-        } else {
-            have.join(" ")
-        }
-    );
-    let (fatal, nice) = missing_controllers(&have);
-    if !fatal.is_empty() {
-        println!(
-            "  missing:  {}  {}",
-            fatal.join(" "),
-            super::po::t("← a Kubernetes node CANNOT boot without this")
-        );
-    }
-    if !nice.is_empty() {
-        println!(
-            "  absent:   {}  {}",
-            nice.join(" "),
-            super::po::t("← a Kubernetes node boots without them")
-        );
-    }
     // Asked of what a container leaf would REALLY get, not of `cur`: the same
     // probe `container run` refuses on, so the two cannot disagree.
     let refused = refused_flags(&runtime::leaf_controllers());
-    if !refused.is_empty() {
-        println!(
-            "  refused:  {}  {}",
-            refused.join(" "),
-            super::po::t(
-                "← `container run` REFUSES these here (exit 69): the container's cgroup has no \
-                 controller for them. A `systemd-run --user --scope` does not bring it — a scope \
-                 only gets what user@.service has."
-            )
-        );
-    }
+    let fatal = print_controller_lines(&delegated_controllers(&cur), &refused);
 
     if ok && fatal.is_empty() {
         if refused.is_empty() {
             // `cpuset`/`io` absent is the NORMAL state on a stock Ubuntu and a
             // Kubernetes node boots without them — but that is only «nothing to
             // do» while nobody asks for the limits they carry.
-            println!("\n{}", super::po::t("Nothing to do."));
-            return Ok(());
+            return Verdict::NothingToDo;
         }
         if !rootless {
             println!(
@@ -2658,7 +2841,7 @@ fn cmd_setup(delegate: bool) -> Result<()> {
                      check that /sys/fs/cgroup/cgroup.controllers lists them."
                 )
             );
-            return Ok(());
+            return Verdict::OtherCause;
         }
         println!(
             "\n{}\n\n     {DELEGATE_DROPIN}\n       [Service]\n       {DELEGATE_LINE}\n\n     {}",
@@ -2666,12 +2849,9 @@ fn cmd_setup(delegate: bool) -> Result<()> {
                 "Container limits work, but not the refused flags above. Only this fixes them \
                  (root, once per host):"
             ),
-            super::po::t(
-                "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends \
-                 that user's sessions) or reboot — daemon-reload alone is not enough"
-            ),
+            restart_follow_up(None),
         );
-        return Ok(());
+        return Verdict::DropinFixes;
     }
     // Limits apply but a controller a k8s node needs is absent. Reporting
     // "nothing to do" here — which is what this did — sends the operator into a
@@ -2701,18 +2881,9 @@ fn cmd_setup(delegate: bool) -> Result<()> {
             super::po::t(
                 "Only if the above still says `cpu` is missing (needs root, survives reboot):"
             ),
-            super::po::t(
-                "then log out and back in — a running user@.service keeps the old setting"
-            ),
+            restart_follow_up(None),
         );
-        if !delegate {
-            println!(
-                "\n{}",
-                super::po::t("Re-run with --delegate to write fix 2. (This run changed nothing.)")
-            );
-            return Ok(());
-        }
-        return write_delegate_dropin();
+        return Verdict::DropinFixes;
     }
     if !rootless {
         // As root the engine owns `delonix.slice` outright; a missing delegation
@@ -2725,10 +2896,9 @@ fn cmd_setup(delegate: bool) -> Result<()> {
                  mounted (`stat -fc %T /sys/fs/cgroup` should say `cgroup2fs`)."
             )
         );
-        return Ok(());
+        return Verdict::OtherCause;
     }
 
-    let session_scope = is_login_session_scope(&cur);
     println!(
         "\n{}",
         super::po::t("Two fixes, for two different problems:")
@@ -2737,7 +2907,7 @@ fn cmd_setup(delegate: bool) -> Result<()> {
         "\n  1. {}\n     systemd-run --user --scope -p Delegate=yes -- delonix container run ...",
         super::po::t("THIS shell, right now (no root):")
     );
-    if session_scope {
+    if is_login_session_scope(&cur) {
         println!(
             "     {}",
             super::po::t(
@@ -2750,28 +2920,19 @@ fn cmd_setup(delegate: bool) -> Result<()> {
         "\n  2. {}\n     {DELEGATE_DROPIN}",
         super::po::t("every FUTURE user session (needs root, survives reboot):")
     );
-
-    if !delegate {
-        println!(
-            "\n{}",
-            super::po::t("Re-run with --delegate to write fix 2. (This run changed nothing.)")
-        );
-        return Ok(());
-    }
-
-    write_delegate_dropin()
+    Verdict::DropinFixes
 }
 
-/// Writes the system-wide delegation drop-in. Shared by both paths that reach
-/// it — "no delegation at all" and "delegation without the controllers a
-/// Kubernetes node needs" — so the remedy cannot drift between them.
-fn write_delegate_dropin() -> Result<()> {
+/// Writes the system-wide delegation drop-in. The ONE place it is written, so
+/// the remedy cannot drift between the diagnoses that lead here.
+fn write_delegate_dropin(subject: SetupSubject) -> Result<()> {
+    // `dropin_step` never sends a rootless run here; this is the last guard.
     // SAFETY: geteuid() has no preconditions.
     if unsafe { libc::geteuid() } != 0 {
         return Err(Error::Invalid(
             super::po::t(
-                "--delegate writes under /etc/systemd/system and needs root: re-run with sudo. \
-                 Fix 1 above needs no privilege and works right now.",
+                "--delegate writes under /etc/systemd/system and needs root: re-run it with \
+                 sudo. (This run changed nothing.)",
             )
             .to_string(),
         ));
@@ -2804,12 +2965,27 @@ fn write_delegate_dropin() -> Result<()> {
             super::po::t("systemctl daemon-reload: FAILED — run it by hand")
         }
     );
+    // NOT done here: restarting user@ ends that user's sessions — possibly the
+    // one this `sudo` runs in. And NOT optional: measured 2026-08-19,
+    // daemon-reload makes user@.service LIST `io` while a new `Delegate=yes`
+    // scope is still born without it — the user manager only re-enables its
+    // subtree on restart. «Next login» was wrong too: a lingering manager, or
+    // a second open session, keeps it running.
+    let unit = match subject {
+        SetupSubject::Sudo(uid) => format!("user@{uid}.service"),
+        SetupSubject::Root | SetupSubject::Rootless => "user@<uid>.service".to_string(),
+    };
     println!(
-        "\n{}",
+        "\n{}\n     systemctl restart {unit}\n{}",
         super::po::t(
-            "Takes effect on the NEXT login (an already-running user@.service keeps the old \
-             setting). For this shell, use fix 1."
-        )
+            "Not in effect yet. daemon-reload alone is a false green: user@.service lists the \
+             controllers while a new scope is still born without them. Restart the user \
+             manager (it ends that user's sessions) or reboot:"
+        ),
+        super::po::t(
+            "Then check it AS THAT USER, not as root: \
+             systemd-run --user --scope -p Delegate=yes -- delonix system setup"
+        ),
     );
     Ok(())
 }
@@ -2889,6 +3065,83 @@ mod setup_tests {
             "cpu is delegated: {refused:?}"
         );
         assert!(super::refused_flags(&have(&["cpu", "cpuset", "io", "memory", "pids"])).is_empty());
+    }
+
+    /// `sudo delonix system setup --delegate` is the command the `container
+    /// run` refusal and the docs send people to, and before this it wrote
+    /// the file only in ONE diagnosis branch (rootless view, `cpu` missing),
+    /// which a root process never takes: under sudo it printed «Nothing to
+    /// do.» or «delegation is not the blocker» and returned. As root,
+    /// `--delegate` must write whatever the diagnosis concluded.
+    #[test]
+    fn delegate_as_root_always_writes() {
+        use super::{dropin_step, DropinStep, SetupSubject};
+        for subject in [SetupSubject::Root, SetupSubject::Sudo(1000)] {
+            for needed in [false, true] {
+                assert_eq!(
+                    dropin_step(true, subject, needed),
+                    DropinStep::Write,
+                    "{subject:?}, needed={needed}"
+                );
+            }
+        }
+    }
+
+    /// Without `--delegate` nothing is written, root or not; rootless,
+    /// `--delegate` is refused only when the drop-in would change something.
+    #[test]
+    fn without_delegate_nothing_is_written_and_rootless_needs_root() {
+        use super::{dropin_step, DropinStep, SetupSubject};
+        for subject in [
+            SetupSubject::Rootless,
+            SetupSubject::Root,
+            SetupSubject::Sudo(1000),
+        ] {
+            for needed in [false, true] {
+                assert_eq!(dropin_step(false, subject, needed), DropinStep::Report);
+            }
+        }
+        assert_eq!(
+            dropin_step(true, SetupSubject::Rootless, true),
+            DropinStep::NeedsRoot
+        );
+        assert_eq!(
+            dropin_step(true, SetupSubject::Rootless, false),
+            DropinStep::Report
+        );
+    }
+
+    /// Under sudo the report is about the user who typed it: their
+    /// `user@.service` is where the rootless containers get a cgroup.
+    #[test]
+    fn sudo_uid_names_the_subject() {
+        use super::{setup_subject, SetupSubject};
+        assert_eq!(setup_subject(false, Some("1000")), SetupSubject::Sudo(1000));
+        assert_eq!(
+            setup_subject(false, Some(" 1001\n")),
+            SetupSubject::Sudo(1001)
+        );
+        // sudo from a root shell, no sudo at all, garbage: plain root.
+        assert_eq!(setup_subject(false, Some("0")), SetupSubject::Root);
+        assert_eq!(setup_subject(false, None), SetupSubject::Root);
+        assert_eq!(setup_subject(false, Some("walter")), SetupSubject::Root);
+        // A rootless process with a stale SUDO_UID (`sudo -u walter …`) is
+        // still reporting about itself.
+        assert_eq!(setup_subject(true, Some("1000")), SetupSubject::Rootless);
+    }
+
+    /// The follow-up names the real unit when the uid is known, in every
+    /// language — the msgid carries a literal `user@<uid>.service`.
+    #[test]
+    fn the_follow_up_names_the_restart_with_the_real_uid() {
+        let known = super::restart_follow_up(Some(1000));
+        assert!(
+            known.contains("systemctl restart user@1000.service"),
+            "{known}"
+        );
+        assert!(known.contains("daemon-reload"), "{known}");
+        assert!(!known.contains("<uid>"), "{known}");
+        assert!(super::restart_follow_up(None).contains("user@<uid>.service"));
     }
 
     /// The `container run` refusal quotes `DELEGATE_LINE`; the file
