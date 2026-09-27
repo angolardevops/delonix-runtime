@@ -45,8 +45,10 @@ pub fn attach_custom_network<N: NetworkProvider>(
 
 /// The pass that starts the container: publish its ports on the attached
 /// address, then record and apply what a custom network carries. On a refusal
-/// the attach is undone and the error returned; a firewall that cannot be
-/// applied is a warning, as it always was.
+/// the attach is undone and the error returned — and that includes the
+/// namespace isolation, which used to be a warning: a container outside
+/// `default` whose isolation did not apply came up reachable from every other
+/// namespace while its record said `--namespace teamA` (NaaS audit P0-3).
 pub fn wire_network<N: NetworkProvider>(
     o: &RunOpts,
     c: &mut Container,
@@ -82,13 +84,12 @@ pub fn wire_network<N: NetworkProvider>(
             let mut fw = c.firewall.clone().unwrap_or_default();
             fw.enabled = true;
             fw.namespace = c.namespace.clone();
-            match net.apply_firewall(&c.id, &ip, &fw) {
-                Ok(()) => c.firewall = Some(fw),
-                Err(e) => notices.push(Notice::new(
-                    "warning: namespace isolation '{namespace}' not applied: {e}",
-                    &[("namespace", &c.namespace), ("e", &e.to_string())],
-                )),
+            if let Err(e) = net.apply_firewall(&c.id, &ip, &fw) {
+                net.unpublish(c);
+                net.detach(&c.id, &ip);
+                return Err(e);
             }
+            c.firewall = Some(fw);
         }
     }
     // `--expose`: persisted, to re-register on `start` and de-register on `rm`;
@@ -104,6 +105,36 @@ pub fn wire_network<N: NetworkProvider>(
             }
             return Err(e);
         }
+    }
+    Ok(())
+}
+
+/// The namespace isolation of a SHARED network namespace — a pod's, which every
+/// member joins — or the attach undone and the refusal returned.
+///
+/// Same contract as the isolation step of [`wire_network`], for the workload that
+/// does not go through it: the pod's netns is attached once for all its members,
+/// by `pod create` and again by a member's `start` when the holder came back
+/// without it. Both used to print a warning and carry on, which is a pod
+/// reachable from every other namespace while its manifest says `namespace:
+/// teamA` (NaaS audit P0-3). `default` is the open SDN and has nothing to apply.
+pub fn isolate_shared_netns<N: NetworkProvider>(
+    net: &N,
+    netns: &str,
+    ip: &str,
+    namespace: &str,
+) -> Result<()> {
+    if namespace == "default" {
+        return Ok(());
+    }
+    let fw = delonix_model::records::ContainerFw {
+        enabled: true,
+        namespace: namespace.to_string(),
+        ..Default::default()
+    };
+    if let Err(e) = net.apply_firewall(netns, ip, &fw) {
+        net.detach(netns, ip);
+        return Err(e);
     }
     Ok(())
 }
@@ -363,15 +394,17 @@ mod tests {
         );
     }
 
+    /// P0-3: isolation that did not apply is a refusal to start, with the attach
+    /// undone — never a warning over a container reachable from every namespace.
     #[test]
-    fn a_firewall_failure_is_a_warning_and_default_gets_none() {
+    fn a_firewall_failure_refuses_the_start_and_default_gets_none() {
         let net = FakeNet {
             fail_firewall: true,
             ..Default::default()
         };
         let mut c = container("teamA");
         let mut notices = Vec::new();
-        wire_network(
+        assert!(wire_network(
             &RunOpts::default(),
             &mut c,
             Some("lab"),
@@ -379,9 +412,16 @@ mod tests {
             &net,
             &mut notices,
         )
-        .unwrap();
+        .is_err());
         assert!(c.firewall.is_none());
-        assert_eq!(notices.len(), 1);
+        assert!(notices.is_empty(), "{notices:?}");
+        let calls = net.calls.borrow();
+        assert!(calls.contains(&"unpublish c1".to_string()), "{calls:?}");
+        assert!(
+            calls.contains(&"detach c1 10.0.0.5".to_string()),
+            "{calls:?}"
+        );
+        drop(calls);
 
         let net = FakeNet::default();
         let mut c = container("default");
@@ -395,6 +435,35 @@ mod tests {
         )
         .unwrap();
         assert!(!net.calls.borrow().iter().any(|l| l.starts_with("firewall")));
+    }
+
+    /// P0-3 on the pod path. A pod's netns whose isolation did not apply is
+    /// detached and the refusal returned — the caller never gets to start members
+    /// into it. Before: a warning, and the pod ran reachable from teamB.
+    #[test]
+    fn a_pod_netns_whose_isolation_fails_is_detached_and_refused() {
+        let net = FakeNet {
+            fail_firewall: true,
+            ..Default::default()
+        };
+        assert!(isolate_shared_netns(&net, "pod-web", "10.200.0.7", "teamA").is_err());
+        assert_eq!(
+            *net.calls.borrow(),
+            ["firewall pod-web teamA", "detach pod-web 10.200.0.7"]
+        );
+
+        // Applied: nothing undone.
+        let net = FakeNet::default();
+        isolate_shared_netns(&net, "pod-web", "10.200.0.7", "teamA").unwrap();
+        assert_eq!(*net.calls.borrow(), ["firewall pod-web teamA"]);
+
+        // `default` is the open SDN: no chain, and so nothing that can fail.
+        let net = FakeNet {
+            fail_firewall: true,
+            ..Default::default()
+        };
+        isolate_shared_netns(&net, "pod-web", "10.200.0.7", "default").unwrap();
+        assert!(net.calls.borrow().is_empty());
     }
 
     #[test]
