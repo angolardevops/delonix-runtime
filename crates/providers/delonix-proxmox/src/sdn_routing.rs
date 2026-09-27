@@ -21,9 +21,16 @@
 //! 'vnet'"). Measured too: a rule is inserted at the TOP of the list, as on a
 //! VM's own firewall, and ENFORCING it is the nftables backend's job
 //! (`proxmox-firewall`, turned on per node by the host firewall option
-//! `nftables: 1`) — on a node running the legacy iptables `pve-firewall`, the
-//! rules are stored and read back and nothing compiles them. Reading them back
-//! is what this client can prove; that the node filters with them is not.
+//! `nftables: 1`). Both halves measured on a PVE 9.2.2 node on 2026-09-27,
+//! with the datacenter firewall, the vnet firewall and both rules enabled:
+//! under the iptables `pve-firewall` the rules are stored and read back and
+//! nothing compiles them (no line in `iptables-save` or `nft list ruleset`);
+//! with `nftables: 1` the node compiles them into `chain bridge-<vnet>` of
+//! `table inet proxmox-firewall`, in the file's order, reached through a
+//! `bridge-map` keyed by the vnet's interface from the `forward` hook and the
+//! host's bridge input/output. Note the API creates a rule DISABLED unless
+//! `enable=1` is sent, which is why this client always sends it. What stays
+//! unproven here is a packet: no test sends traffic through the vnet.
 //!
 //! # What is offered, and what is not
 //!
