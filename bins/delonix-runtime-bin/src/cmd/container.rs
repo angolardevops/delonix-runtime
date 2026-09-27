@@ -18,7 +18,7 @@ use serde::{Deserialize, Serialize};
 use super::manifest::{self, ManifestDoc};
 use super::output;
 use super::util::{container_writable_dir, find, open_stores, resolve_or_pull};
-use delonix_sdn::run_network::{publish_with_retry, unpublish_ports};
+use delonix_sdn::run_network::{publish_with_retry, stop_ports, unpublish_ports};
 
 /// `spec` for `kind: Container` — mirrors `ContainerCmd::Run` (minus `name`,
 /// which comes from `metadata.name`). **`detach` defaults to `true`** (unlike the
@@ -3842,9 +3842,11 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         if let Some(ip) = c.ip.clone() {
             for spec in &c.ports {
                 if let Err(e) = infra::publish_port(&ip, spec) {
-                    // Custom network: cleanup in the ingress, no own slirp.
-                    unpublish_ports(&c, None);
-                    infra::detach_container(&c.id, &ip);
+                    // Custom network: cleanup in the ingress, no own slirp. A
+                    // `start` that fails keeps the container's leases — it still
+                    // exists, and its next `start` must come back on them.
+                    stop_ports(&c, None);
+                    infra::detach_container_keep_lease(&c.id, &ip);
                     return Err(e.into());
                 }
             }
@@ -3948,7 +3950,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         if let Ok(ip) = std::env::var("DELONIX_REEXEC_IP") {
             for spec in &c.ports {
                 if let Err(e) = publish_with_retry(&ip, spec) {
-                    unpublish_ports(&c, None);
+                    stop_ports(&c, None);
                     return Err(e);
                 }
             }
@@ -4101,7 +4103,9 @@ fn reexec_start(id: &str, netns: &str, ip: &str, owns_netns: bool) -> Result<()>
         // network down too, and free an IPAM lease that is still in use, over one
         // member failing to come back.
         if owns_netns {
-            infra::detach_container(id, ip);
+            // The wire only: the container survives a failed start, and so
+            // does its lease (see `detach_container_keep_lease`).
+            infra::detach_container_keep_lease(id, ip);
         }
         return Err(Error::Invalid(super::po::tf(
             "the container did not restart inside the network '{netns}' (exit {code})",
@@ -4131,7 +4135,9 @@ pub(crate) fn cmd_stop(store: &Store, id: &str, time: u64) -> Result<()> {
         }
         return Err(e.into());
     }
-    unpublish_ports(&c, pid);
+    // `stop_ports`, not `unpublish_ports`: a stopped container keeps its
+    // addresses; `rm` frees them.
+    stop_ports(&c, pid);
     delonix_node::events::emit(
         &super::util::state_root(),
         "container",

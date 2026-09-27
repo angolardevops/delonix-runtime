@@ -341,6 +341,8 @@ pub(crate) fn sweep_containers(images: &ImageStore, store: &Store) -> Result<Con
         }
         let size = measure(&images.container_path(&c.id));
         let _ = delonix_linux::remove(store, &c, true);
+        // A stop keeps the container's addresses; its removal gives them back.
+        delonix_sdn::run_network::release_leases(&c);
         let _ = images.unmount_rootfs(&c.id);
         if images.remove_container_dir(&c.id) {
             out.freed.add(size);

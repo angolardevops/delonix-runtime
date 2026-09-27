@@ -62,7 +62,62 @@ fn publish_with_retry_local(ip: &str, spec: &str) -> crate::Result<()> {
 /// would give `None` for every caller that already stopped the container — the
 /// slirp would never be reaped and the bug above would stand. Hence an explicit
 /// parameter instead of coming from the record.
+///
+/// This is the teardown of a container that is GOING AWAY (`rm`, `--rm`, a
+/// failed `run`): its leases go with it — the primary network's AND every
+/// additional network's, which nothing freed before (a `network connect`ed
+/// container left its extra address leased forever on `rm`). A `stop` uses
+/// [`stop_ports`], which keeps them.
 pub fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
+    teardown(c, slirp_pid, Leases::Free);
+}
+
+/// [`unpublish_ports`] for a `stop` (or a `start` that failed): the ports and the
+/// wire go, the container's leases STAY — on the primary network and on every
+/// additional one — so the next `start` comes back on the same addresses. See
+/// [`crate::infra::detach_container_keep_lease`] for why a stop must not free them.
+pub fn stop_ports(c: &Container, slirp_pid: Option<i32>) {
+    teardown(c, slirp_pid, Leases::Keep);
+}
+
+/// Frees a REMOVED container's leases — the registry only, nothing on the wire.
+///
+/// For the removal that does not go through [`unpublish_ports`]: `container
+/// prune` takes out containers that were already stopped, whose wire went at
+/// the `stop` and whose leases, since the stop keeps them, would otherwise stay
+/// behind for the reaper. It deliberately touches no port: a stopped
+/// container's host port may already be published by a live one.
+pub fn release_leases(c: &Container) {
+    if let Some(ip) = &c.ip {
+        crate::ipam::release(&crate::ipam::key_for_ip(ip), &c.id);
+    }
+    for en in &c.extra_networks {
+        crate::ipam::release(&crate::ipam::key_for_ip(&en.ip), &c.id);
+    }
+}
+
+/// What a teardown does with the container's IPAM leases.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Leases {
+    /// The container is going away.
+    Free,
+    /// The container will come back (`stop`, a failed `start`).
+    Keep,
+}
+
+fn teardown(c: &Container, slirp_pid: Option<i32>, leases: Leases) {
+    // The additional networks first, while the primary netns is still there
+    // to remove their `veth`s from.
+    if c.network.is_some() {
+        for en in &c.extra_networks {
+            match leases {
+                Leases::Free => crate::infra::detach_extra_container(&c.id, en.idx, &en.ip),
+                Leases::Keep => {
+                    crate::infra::detach_extra_container_keep_lease(&c.id, en.idx, &en.ip)
+                }
+            }
+        }
+    }
     match port_home(c.network.is_some(), c.pod.is_some(), !c.ports.is_empty()) {
         PortHome::Ingress { detach } => {
             // 1) ports: release the hostfwd/DNAT in the ingress (idempotent — removing
@@ -83,7 +138,10 @@ pub fn unpublish_ports(c: &Container, slirp_pid: Option<i32>) {
             //    `system prune` reaper (`reap_orphan_refs`) is the backstop for
             //    containers that die and are never `rm`'d at all.
             if let (true, Some(ip)) = (detach, &c.ip) {
-                crate::infra::detach_container(&c.id, ip);
+                match leases {
+                    Leases::Free => crate::infra::detach_container(&c.id, ip),
+                    Leases::Keep => crate::infra::detach_container_keep_lease(&c.id, ip),
+                }
             }
         }
         PortHome::OwnSlirp => {
@@ -240,5 +298,95 @@ mod port_home_tests {
         );
         assert_eq!(port_home(false, false, true), PortHome::OwnSlirp);
         assert_eq!(port_home(false, false, false), PortHome::Nowhere);
+    }
+}
+
+/// O ciclo de vida dos leases de um container: o `stop` guarda-os, o `rm` e o
+/// `prune` devolvem-nos todos (a rede primária E as redes extra).
+#[cfg(test)]
+mod lease_lifecycle_tests {
+    use delonix_compute::{Container, ExtraNet};
+
+    /// Os DOIS roots isolados — o teardown fala com o socket de controlo.
+    fn with_roots<T>(tag: &str, f: impl FnOnce() -> T) -> T {
+        let mut env = crate::testenv::lock();
+        let d = std::env::temp_dir().join(format!("dlx-leases-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("run")).unwrap();
+        env.set("DELONIX_ROOT", &d);
+        env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
+        let out = f();
+        let _ = std::fs::remove_dir_all(&d);
+        out
+    }
+
+    /// Um container numa rede, ligado a uma segunda (`network connect`).
+    fn multi_homed(id: &str) -> Container {
+        let ip = crate::ipam::allocate("10.84", id).unwrap();
+        let extra = crate::ipam::allocate("10.85", id).unwrap();
+        let mut c = Container::new(
+            id.into(),
+            "t".into(),
+            "img".into(),
+            vec!["sh".into()],
+            "max".into(),
+        );
+        c.network = Some("n".into());
+        c.ip = Some(ip);
+        c.extra_networks = vec![ExtraNet {
+            network: "x".into(),
+            ip: extra,
+            idx: 1,
+        }];
+        c
+    }
+
+    /// Achado 3: o `stop` libertava o lease (o `cmd_stop` chamava o mesmo
+    /// teardown do `rm`), contra a premissa do `restore_lease` — um `start`
+    /// depois do attach de outro container podia voltar noutro endereço.
+    #[test]
+    fn o_stop_guarda_os_leases_de_todas_as_redes() {
+        with_roots("stop", || {
+            let c = multi_homed("stop000000000001");
+            super::stop_ports(&c, None);
+            assert_eq!(
+                crate::ipam::lookup("10.84", &c.id),
+                c.ip,
+                "o STOP libertou o lease da rede primária"
+            );
+            assert_eq!(
+                crate::ipam::lookup("10.85", &c.id).as_deref(),
+                Some(c.extra_networks[0].ip.as_str()),
+                "o STOP libertou o lease da rede extra"
+            );
+        });
+    }
+
+    /// Achado 3, a outra metade: o `rm` libertava a rede primária e deixava o
+    /// lease de cada rede extra para sempre.
+    #[test]
+    fn o_rm_liberta_os_leases_de_todas_as_redes() {
+        with_roots("rm", || {
+            let c = multi_homed("rm00000000000001");
+            super::unpublish_ports(&c, None);
+            assert_eq!(crate::ipam::lookup("10.84", &c.id), None);
+            assert_eq!(
+                crate::ipam::lookup("10.85", &c.id),
+                None,
+                "o RM deixou o lease da rede extra"
+            );
+        });
+    }
+
+    /// O `container prune` tira containers já parados sem passar pelo
+    /// teardown: sem isto, os leases que o stop guardou ficavam órfãos.
+    #[test]
+    fn o_prune_de_um_parado_liberta_os_leases() {
+        with_roots("prune", || {
+            let c = multi_homed("prune00000000001");
+            super::stop_ports(&c, None);
+            super::release_leases(&c);
+            assert!(crate::ipam::all_leases().is_empty());
+        });
     }
 }

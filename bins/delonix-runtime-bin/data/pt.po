@@ -13139,6 +13139,15 @@ msgstr "Um NetDef de ingress já está realizado num prefixo diferente do que o 
 msgid "Remove the network (`delonix network rm <name>`) and create it again, or keep the recorded subnet."
 msgstr "Remove a rede (`delonix network rm <name>`) e cria-a de novo, ou mantém a subnet registada."
 
+msgid "address already taken"
+msgstr "endereço já ocupado"
+
+msgid "The address asked for is already leased to another container, or it belongs to the pool the network's DHCP server hands to VMs."
+msgstr "O endereço pedido já está arrendado a outro container, ou pertence ao pool que o servidor DHCP da rede entrega às VMs."
+
+msgid "Pick another address (`delonix network ipam ls` shows the leased ones), or leave the address to the engine."
+msgstr "Escolhe outro endereço (`delonix network ipam ls` mostra os arrendados), ou deixa o endereço ao motor."
+
 msgid "'wg' is not available on this host"
 msgstr "o 'wg' não está disponível neste host"
 

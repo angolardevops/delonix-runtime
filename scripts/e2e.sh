@@ -1433,6 +1433,83 @@ fi
 "$BIN" network rm "$NET2" >/dev/null 2>&1
 
 ########################################
+section "network: IPAM sem leases órfãos (S2, doc 62 §6 P1)"
+########################################
+# O registo de endereços (`network ipam ls`) ANTES e DEPOIS de cada caminho de
+# saída tem de ter o MESMO número de leases órfãos — zero novos. Medido contra a
+# v4.4.0+68: numa rede criada com `--subnet 10.X.0.0/16` o lease era gravado em
+# `10.X.0.0_16` e libertado em `10.X`, por isso `rm -f` e `network rm` deixavam
+# DOIS órfãos por container multi-homed (a rede primária e a extra). E o `stop`
+# que liberta o lease (outra metade do mesmo achado) mudava o IP no `start`.
+#
+# Conta-se pelo JSON e não pela tabela: a coluna OWNER diz `<orphaned>` para um
+# id sem registo, e é exactamente isso que se quer contar.
+ipam_orfaos() {
+  "$BIN" network ipam ls -o json 2>/dev/null | python3 -c \
+    'import json,sys; print(sum(1 for r in json.load(sys.stdin) if r["owner"]=="<orphaned>"))'
+}
+# Os leases de um container, pelo NOME do dono (o `ls` resolve id → nome).
+ipam_de() {
+  "$BIN" network ipam ls -o json 2>/dev/null | python3 -c \
+    'import json,sys; print(" ".join(sorted(r["ip"] for r in json.load(sys.stdin) if r["owner"]==sys.argv[1])))' "$1"
+}
+LC="lc-$PFX"; NET3="net3-$PFX"
+ORF0=$(ipam_orfaos)
+if [ -n "$ORF0" ] && "$BIN" network create "$NET3" --subnet 10.250.0.0/16 >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$LC" --net "$NET" "$IMG" sleep 600 >/dev/null 2>&1 \
+   && "$BIN" network connect "$NET3" "$LC" >/dev/null 2>&1; then
+  IPS0=$(ipam_de "$LC")
+  check "ipam: um container multi-homed tem um lease por rede" ok bash -c \
+    "[ \"\$(wc -w <<<'$IPS0')\" = 2 ]"
+  "$BIN" container stop "$LC" >/dev/null 2>&1
+  # A expansão `$(ipam_de ...)` corre AQUI, depois do stop — o `bash -c` só
+  # compara; é o mesmo padrão dos checks abaixo.
+  check "ipam: o stop guarda os leases (as duas redes)" ok bash -c "[ \"$(ipam_de "$LC")\" = '$IPS0' ]"
+  "$BIN" container start "$LC" >/dev/null 2>&1
+  check "ipam: o start volta aos MESMOS endereços" ok bash -c "[ \"$(ipam_de "$LC")\" = '$IPS0' ]"
+  "$BIN" container rm -f "$LC" >/dev/null 2>&1
+  check "ipam: rm -f não deixa lease nenhum do container" ok bash -c "[ -z \"$(ipam_de "$LC")\" ]"
+  check "ipam: rm -f não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
+  "$BIN" network rm "$NET3" >/dev/null 2>&1
+  check "ipam: network rm não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
+else
+  "$BIN" container rm -f "$LC" >/dev/null 2>&1
+  "$BIN" network rm "$NET3" >/dev/null 2>&1
+  skip "ipam: ciclo run/connect/stop/start/rm" "rede ou container em rede custom indisponível neste host"
+fi
+# O mesmo pelo caminho declarativo: uma rede com CIDR e um container nela, e o
+# `stack destroy` tem de levar os leases com eles.
+IWORK="$OUT/ipam-$PFX"; mkdir -p "$IWORK"
+cat >"$IWORK/m.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: in-$PFX
+spec:
+  driver: bridge
+  subnet: 10.249.0.0/16
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: ic-$PFX
+spec:
+  image: $IMG
+  command: ["sleep", "600"]
+  network: in-$PFX
+YAML
+ORF0=$(ipam_orfaos)
+if "$BIN" stack apply -f "$IWORK/m.yaml" >/dev/null 2>&1 && [ -n "$(ipam_de "ic-$PFX")" ]; then
+  "$BIN" stack destroy -f "$IWORK/m.yaml" >/dev/null 2>&1
+  check "ipam: stack destroy não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
+  check "ipam: nenhum lease fica na rede destruída" ok bash -c \
+    "! '$BIN' network ipam ls -o json | grep -q '10\\.249\\.'"
+else
+  "$BIN" stack destroy -f "$IWORK/m.yaml" >/dev/null 2>&1
+  skip "ipam: stack apply/destroy de rede + container" "o apply não passou neste host"
+fi
+
+########################################
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"

@@ -279,6 +279,11 @@ pub enum Error {
     #[error("{0}")]
     NetworkPrefixConflict(String),
 
+    /// An address the IPAM cannot hand to this owner: another container
+    /// already leases it, or it sits in the VM DHCP pool of its network.
+    #[error("{0}")]
+    IpInUse(String),
+
     // ---- unavailable ------------------------------------------------------
     /// The `wg` binary is missing from the host.
     #[error("{0}")]
@@ -383,6 +388,7 @@ impl Error {
             Error::NetworkSubnetImmutable(_) => 5304,
             Error::BaseOctetTaken(_) => 5305,
             Error::NetworkPrefixConflict(_) => 5306,
+            Error::IpInUse(_) => 5307,
             Error::WgMissing(_) => 6301,
             Error::Command { .. } => 9301,
             Error::Engine(e) => e.number(),
@@ -428,7 +434,8 @@ impl From<Error> for Dx {
             | Error::SubnetOverlap(text)
             | Error::NetworkSubnetImmutable(text)
             | Error::BaseOctetTaken(text)
-            | Error::NetworkPrefixConflict(text) => Dx::Conflict(text),
+            | Error::NetworkPrefixConflict(text)
+            | Error::IpInUse(text) => Dx::Conflict(text),
             Error::WgMissing(text) => Dx::Unavailable(text),
             Error::Command { context, message } => Dx::Runtime { context, message },
             Error::Engine(e) => return e,
@@ -511,6 +518,7 @@ mod tests {
             Error::NetworkSubnetImmutable("network 'x' already exists as 10.50.0.0/16".into()),
             Error::BaseOctetTaken("10.50.0.0/16 is already used by network 'x'".into()),
             Error::NetworkPrefixConflict("network 'x' is already realized on 10.50".into()),
+            Error::IpInUse("IP 10.50.3.3 is already leased to 'x'".into()),
             Error::WgMissing("'wg' is not available on this host".into()),
             Error::Command {
                 context: "spawn",
