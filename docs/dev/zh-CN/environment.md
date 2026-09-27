@@ -207,7 +207,9 @@ systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container r
 写一个 drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf`，内容为 `[Service]` 和
 `Delegate=cpu cpuset io memory pids`，然后 `systemctl daemon-reload` **并且** `systemctl restart user@<uid>.service`（只做 daemon-reload 不够）。
 `delonix system setup` 会打印它，并在 `refused:` 下列出这台宿主机上 `container run` 会拒绝的 flag。
-当 `cpu` 控制器本身都缺失时，`delonix system setup --delegate` 会写这个 drop-in（需要 root）。
+`sudo delonix system setup --delegate` 无论诊断结果如何都会写这个 drop-in，执行 `daemon-reload`，
+并打印仍需执行的 `systemctl restart user@<uid>.service`；在 `sudo` 下它报告的是调用者（来自 `SUDO_UID`）的
+`user@<uid>.service`，而不是 root 自己。
 
 ### `PATH` 上一个过期的 `delonix`
 

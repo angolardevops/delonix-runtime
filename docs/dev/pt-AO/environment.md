@@ -210,8 +210,9 @@ um `systemd-run --user --scope -p Delegate=yes` só recebe o que o próprio `use
 host — um drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf` com `[Service]` e
 `Delegate=cpu cpuset io memory pids`, depois `systemctl daemon-reload` **e** `systemctl restart user@<uid>.service`
 (o daemon-reload sozinho não chega). O `delonix system setup` imprime-o, e lista em `refused:` as flags que o `container run`
-vai recusar neste host. O `delonix system setup --delegate` escreve esse drop-in (precisa de root)
-quando falta o próprio controlador `cpu`.
+vai recusar neste host. O `sudo delonix system setup --delegate` escreve esse drop-in seja qual for
+o diagnóstico, corre o `daemon-reload`, e imprime o `systemctl restart user@<uid>.service` que ainda
+falta; debaixo de `sudo` reporta sobre o `user@<uid>.service` de quem o chamou (do `SUDO_UID`), não sobre a root.
 
 ### Um `delonix` antigo no teu `PATH`
 

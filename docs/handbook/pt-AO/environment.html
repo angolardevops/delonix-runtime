@@ -467,8 +467,9 @@ um <code>systemd-run --user --scope -p Delegate=yes</code> só recebe o que o pr
 host — um drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code> com <code>[Service]</code> e
 <code>Delegate=cpu cpuset io memory pids</code>, depois <code>systemctl daemon-reload</code> <strong>e</strong> <code>systemctl restart user@&lt;uid&gt;.service</code>
 (o daemon-reload sozinho não chega). O <code>delonix system setup</code> imprime-o, e lista em <code>refused:</code> as flags que o <code>container run</code>
-vai recusar neste host. O <code>delonix system setup --delegate</code> escreve esse drop-in (precisa de root)
-quando falta o próprio controlador <code>cpu</code>.</p>
+vai recusar neste host. O <code>sudo delonix system setup --delegate</code> escreve esse drop-in seja qual for
+o diagnóstico, corre o <code>daemon-reload</code>, e imprime o <code>systemctl restart user@&lt;uid&gt;.service</code> que ainda
+falta; debaixo de <code>sudo</code> reporta sobre o <code>user@&lt;uid&gt;.service</code> de quem o chamou (do <code>SUDO_UID</code>), não sobre a root.</p>
 <h3 id="a-stale-delonix-on-your-path">Um <code>delonix</code> antigo no teu <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
 <p>Se o Delonix estiver instalado na máquina, o <code>delonix</code> do teu <code>PATH</code> é a release instalada, não a tua
 árvore. Corre sempre <code>./target/debug/delonix</code> (ou <code>target/release/delonix</code>) quando testas uma mudança.

@@ -121,16 +121,21 @@ delegated cgroup::
     ExecStart=/usr/local/bin/delonix container run ...
 
 **2. A drop-in on** ``user@.service`` (``sudo delonix system setup --delegate``).
-Needs root, survives reboots, and is only worth writing when step 1 still
-reports ``cpu`` missing — that means the distro itself does not delegate it.
-Note it fixes *future* logins, not the shell you are in: an SSH
-``session-N.scope`` is a **sibling** of ``user@.service`` and inherits nothing
-from it, so you still enter a scope (or log out and back in) afterwards.
+Needs root and survives reboots. Worth writing when step 1 still reports
+``cpu`` missing, or when you need ``--cpuset``, ``--io-weight`` or the
+``--device-*`` limits: ``container run`` refuses those (exit 69) while the
+container's cgroup lacks ``cpuset``/``io``, and a scope cannot bring a
+controller ``user@.service`` itself lacks. Under ``sudo`` the command reports
+on *your* ``user@<uid>.service``, writes the drop-in and runs
+``daemon-reload`` — then restart the user manager, which ends your sessions::
 
-``cpuset`` and ``io`` are a separate matter: on a stock Ubuntu the root-owned
-``user.slice`` passes only ``cpu memory pids`` down, so no drop-in of yours can
-make them appear. Nothing in this engine needs them — ``system setup`` lists
-them as *absent*, not *missing*.
+    sudo systemctl restart user@$(id -u).service
+
+``daemon-reload`` alone is a false green: ``user@.service`` lists the
+controllers while a new scope is still born without them. Logging out is not
+enough either when the user lingers or has another session open. And an SSH
+``session-N.scope`` is a **sibling** of ``user@.service`` and inherits nothing
+from it, so you still enter a scope afterwards.
 
 Verify it took effect — this is the check worth putting in your provisioning::
 
