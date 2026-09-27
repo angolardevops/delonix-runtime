@@ -684,6 +684,8 @@ fn config_show(output: super::output::OutputFormat) -> Result<()> {
             "insecureSkipVerify": px_lookup("DELONIX_PROXMOX_INSECURE_TLS").is_some(),
             "bridge": px_lookup("DELONIX_PROXMOX_BRIDGE"),
             "vlan": px_lookup("DELONIX_PROXMOX_VLAN"),
+            "importStorage": px_lookup("DELONIX_PROXMOX_IMPORT_STORAGE"),
+            "diskStorage": px_lookup("DELONIX_PROXMOX_DISK_STORAGE"),
         }));
     }
 
@@ -734,7 +736,16 @@ fn config_show(output: super::output::OutputFormat) -> Result<()> {
                     "  {t:<18}{}",
                     super::po::tf("from {source}", &[("source", src)])
                 );
-                for key in ["url", "node", "credential", "caFile", "bridge", "vlan"] {
+                for key in [
+                    "url",
+                    "node",
+                    "credential",
+                    "caFile",
+                    "bridge",
+                    "vlan",
+                    "importStorage",
+                    "diskStorage",
+                ] {
                     if let Some(v) = r.get(key).and_then(|v| v.as_str()) {
                         println!("    {key:<16}{v}");
                     }

@@ -60,6 +60,17 @@ pub enum Error {
     /// backup log without the freeze and the thaw.
     #[error("{0}")]
     BackupNotQuiesced(String),
+    /// The import storage does not list `import` among its content types, so a
+    /// local image cannot be uploaded to it (ADR-0057). Never enabled for the
+    /// operator: that is administering the provider.
+    #[error("{0}")]
+    ImportNotEnabled(String),
+    /// The import storage has less free space than the image being uploaded.
+    #[error("{0}")]
+    ImportNoSpace(String),
+    /// A local image to upload could not be read or is not an image.
+    #[error("{0}")]
+    ImageUnreadable(String),
     /// A body past the size this client reads into memory.
     #[error("{0}")]
     ResponseTooLarge(String),
@@ -213,6 +224,9 @@ impl Error {
             Error::NodeUnavailable(_) => 6506,
             Error::DatacenterFirewallDisabled(_) => 6508,
             Error::BackupNotQuiesced(_) => 6509,
+            Error::ImportNotEnabled(_) => 6510,
+            Error::ImportNoSpace(_) => 6511,
+            Error::ImageUnreadable(_) => 1539,
             Error::Unauthorized(_) => 9515,
             Error::Forbidden(_) => 9516,
             Error::ResponseTooLarge(_) => 9517,
@@ -261,7 +275,9 @@ impl From<Error> for Dx {
             Error::ClientBuild(text)
             | Error::NodeUnavailable(text)
             | Error::DatacenterFirewallDisabled(text)
-            | Error::BackupNotQuiesced(text) => Dx::Unavailable(text),
+            | Error::BackupNotQuiesced(text)
+            | Error::ImportNotEnabled(text)
+            | Error::ImportNoSpace(text) => Dx::Unavailable(text),
             Error::TaskTimeout(text) | Error::LockTimeout(text) => Dx::Timeout(text),
             Error::BadRequest(text) => Dx::Invalid(text),
             Error::Request(text)

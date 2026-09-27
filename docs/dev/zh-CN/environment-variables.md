@@ -150,6 +150,8 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 | `DELONIX_PROXMOX_PASSWORD_FILE` | `cmd/vmbackends.rs:credential_value` | 存放该密码的文件路径；优先于 `DELONIX_PROXMOX_PASSWORD`。 | 一个路径。 | 除非只有属主可读（`chmod 600`），否则拒绝。providers 文件中的 `passwordFile` 会映射到它。 |
 | `DELONIX_PROXMOX_INSECURE_TLS` | `cmd/vmbackends.rs:register_proxmox_with` | 跳过对这个节点的 TLS 证书校验。 | `1`、`true` 或 `yes` → 跳过；默认要校验。 | **冒充这个节点应答的另一台机器会拿到凭据。** 只能主动选择加入，绝不会在 TLS 出错后作为回退被应用。 |
 | `DELONIX_PROXMOX_BRIDGE` | `cmd/vmbackends.rs:register_proxmox_with` | 这个节点上 VM 网卡的默认网桥。 | 一个网桥的名字；这个 backend 的默认值是 `vmbr0`。 | 每个 VM 自己的 `bridge:` 优先。 |
+| `DELONIX_PROXMOX_IMPORT_STORAGE` | `cmd/vmbackends.rs:register_proxmox_with` | 在 VM 导入之前，本地镜像上传到的 dir 类型存储（ADR-0057）。它必须包含 `import` 内容类型；引擎从不替你启用它。 | 一个存储 ID；默认 `local`。 | providers.yaml 中的 `storage.import`。 |
+| `DELONIX_PROXMOX_DISK_STORAGE` | `cmd/vmbackends.rs:register_proxmox_with` | 导入镜像的启动盘所在的存储（ADR-0057）。 | 一个存储 ID；默认 `local-lvm`。 | providers.yaml 中的 `storage.disk`。 |
 | `DELONIX_PROXMOX_VLAN` | `cmd/vmbackends.rs:parse_vlan` | 这个节点上 VM 网卡的默认 VLAN 标签。 | 1–4094。超出范围是一个**错误**，绝不会被悄悄丢弃。 | |
 | `DELONIX_PROXMOX_CA_FILE` | `cmd/vmbackends.rs:register_proxmox_with` | 除了系统根证书之外，额外为这个节点信任的一份 CA 证书（PEM）。 | PEM 文件的路径；读不了是一个**错误**。 | 校验一个证书是由内部 CA 签发的节点的方式，用它代替 `DELONIX_PROXMOX_INSECURE_TLS`。 |
 | `DELONIX_PROXMOX_TRACE_ROUTES` | `cmd/vmbackends.rs:register_proxmox_with`（读取一次，作为 `ClientOptions::trace_routes` 交给客户端；`crates/providers/delonix-proxmox/src/lib.rs` 里的常量 `TRACE_ROUTES_ENV` 点名了它）以及 `crates/providers/delonix-proxmox/tests/live.rs:backend`（实机测试组，它的一次运行被提交为 `docs/proxmox/trace-9.2.2.routes`） | 把每一次请求的 `METHOD /path` 追加到这个文件里——覆盖率矩阵（ADR-0049）的分子。 | 一个文件的路径；空 = 关闭。 | 把它喂给 `scripts/proxmox_api_inventory.py --trace`，就能把路由标记为 `supported+tested`。 |
@@ -220,6 +222,7 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 | `DELONIX_PROXMOX_TEST_BACKUP_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | 备份归档落地的存储——节点可能不接受在磁盘存储上放备份内容（一个 thin-LVM 池就不行）。 | 默认：和 `DELONIX_PROXMOX_TEST_STORAGE` 一样。 | |
 | `DELONIX_PROXMOX_TEST_MOVE_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | `move_disk` 会把测试 VM 的启动磁盘移到的**第二个**存储——节点会拒绝移到格式相同的同一个存储，所以这个必须是真正不同的一个池。 | 默认 `local`（必须在它上面启用了 `content=images`）。 | |
 | `DELONIX_PROXMOX_TEST_MOVE_NODE` | `crates/providers/delonix-proxmox/tests/live.rs` | `vm move` 实机用例把 VM 移到的同一集群中的节点（ADR-0053）。需要一个两节点的实验集群——绝不能是生产环境。 | 未设置：两个移动用例会跳过。 | |
+| `DELONIX_PROXMOX_TEST_IMAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | ADR-0057 实机用例用来启动 VM 的引擎镜像库中的 qcow2，它会被上传到节点。节点的导入存储必须包含 `import`。 | 未设置：该用例跳过。 | |
 | `DELONIX_PROXMOX_TEST_SHARED_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | 集群所有节点共享的存储（NFS、Ceph RBD），移动用例把 VM 的磁盘放在这里——位于本地存储上的磁盘会被拒绝，而不是被复制。 | 未设置：两个移动用例会跳过。 | |
 | `DELONIX_PROXMOX_TEST_CALLBACK_ADDR` | `crates/providers/delonix-proxmox/tests/live.rs:sdn_controllers_fabric_dhcp_and_ip_reservations_round_trip_through_the_node` | 节点能够访问到这台机器的地址：测试会启动一个桩 HTTP 服务器，把 `http://<addr>:<port>/…` 作为一个 IPAM 控制器和一个 DNS 控制器的 URL 交给节点，因为节点会通过调用它们来验证两者。 | 一个节点能路由到的 IP（一个 libvirt-NAT 实验节点用 `192.168.122.1`）。 | 没有它，那个测试里控制器那一半会被跳过；其余部分照常运行。 |
 | `DELONIX_PROXMOX_TEST_AGENT_VMID` | `crates/providers/delonix-proxmox/tests/live.rs:o_ip_vem_do_agente_de_um_convidado_a_serio` | 一个已经存在、跑着 QEMU guest agent 的 VM，测试会读取它的 IP。 | 一个 VM id。 | 未设置时跳过，即使 URL 已经设置了也一样。 |

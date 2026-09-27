@@ -13,8 +13,9 @@
   routes never seen in a live trace (the third is the lost-answer `GET /nodes/{node}/tasks`,
   reached only through failure injection). **Slice 3** has its read-only half: cluster
   discovery (`provider describe proxmox --probe`, #505), measured on the lab node and on
-  `ngola-lda` itself. The route matrix says **122 of 675 routes called (18.1 %), 121 in a live
-  trace** (`docs/proxmox/matrix-9.2.2.md`). Slice 3's first write, a migration with an
+  `ngola-lda` itself. The route matrix says **124 of 675 routes called (18.4 %), 123 in a live
+  trace** (`docs/proxmox/matrix-9.2.2.md`); the last two are the storage status read and the
+  image upload of ADR-0057 (a VM from a local store image, 2026-09-27). Slice 3's first write, a migration with an
   explicitly named target node, is done on a two-node lab cluster with shared storage
   (`vm move --node`, ADR-0053, 2026-09-26); HA resources stay excluded by D3. Accepting the
   ADR before them is the owner's call, not a consequence of this record

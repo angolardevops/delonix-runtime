@@ -118,6 +118,10 @@ pub(crate) fn proxmox_target_with(
     let vlan = lookup("DELONIX_PROXMOX_VLAN")
         .map(|v| parse_vlan(&v))
         .transpose()?;
+    // Where a local image goes on the node (ADR-0057): the dir storage it is
+    // uploaded to and the storage its disk is imported onto. Node facts too.
+    let import_storage = lookup("DELONIX_PROXMOX_IMPORT_STORAGE").filter(|v| !v.trim().is_empty());
+    let disk_storage = lookup("DELONIX_PROXMOX_DISK_STORAGE").filter(|v| !v.trim().is_empty());
     // A CA to verify the node with, instead of switching verification off:
     // the honest answer for a node whose certificate an internal CA signed.
     let ca_cert_pem = lookup("DELONIX_PROXMOX_CA_FILE")
@@ -147,6 +151,8 @@ pub(crate) fn proxmox_target_with(
             bridge,
             vlan,
             ca_cert_pem,
+            import_storage,
+            disk_storage,
         },
         opts,
     )))

@@ -167,6 +167,11 @@ pub struct Target {
     /// system roots — the way to verify a node whose certificate an internal
     /// CA signed, instead of switching verification off with `insecure_tls`.
     pub ca_cert_pem: Option<Vec<u8>>,
+    /// The dir storage a local image is uploaded to (content `import`) before
+    /// a VM imports it (ADR-0057). `None` → `local`. Describes the node.
+    pub import_storage: Option<String>,
+    /// The storage an imported image's disk lands on. `None` → `local-lvm`.
+    pub disk_storage: Option<String>,
 }
 
 /// A VM's power state read from `…/status/current` ([`Client::power_state`]).
@@ -926,6 +931,8 @@ pub struct Client {
     ticket: std::sync::RwLock<Option<Ticket>>,
     bridge: String,
     vlan: Option<u16>,
+    import_storage: String,
+    disk_storage: String,
     task_timeout: Duration,
     trace_routes: Option<PathBuf>,
     /// VMs found on another node of the cluster than their handle said
@@ -963,6 +970,8 @@ impl Client {
             ticket: std::sync::RwLock::new(ticket),
             bridge: self.bridge.clone(),
             vlan: self.vlan,
+            import_storage: self.import_storage.clone(),
+            disk_storage: self.disk_storage.clone(),
             task_timeout: self.task_timeout,
             trace_routes: self.trace_routes.clone(),
             relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -1025,6 +1034,14 @@ impl Client {
             ticket: std::sync::RwLock::new(None),
             bridge: target.bridge.clone().unwrap_or_else(|| "vmbr0".to_string()),
             vlan: target.vlan,
+            import_storage: target
+                .import_storage
+                .clone()
+                .unwrap_or_else(|| "local".to_string()),
+            disk_storage: target
+                .disk_storage
+                .clone()
+                .unwrap_or_else(|| "local-lvm".to_string()),
             task_timeout: opts.task_timeout,
             trace_routes: opts.trace_routes,
             relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
@@ -1338,7 +1355,40 @@ impl Client {
         storage: &str,
         gib: u32,
     ) -> Result<()> {
-        let mut form = create_form(vmid, name, cfg, storage, gib, &self.net0_arg(cfg));
+        self.create_vm_with(ledger, vmid, name, cfg, &format!("{storage}:{gib}"))
+    }
+
+    /// Creates a VM whose boot disk is imported from `volid` onto
+    /// `storage` (`scsi0: <storage>:0,import-from=<volid>`, ADR-0057). The
+    /// disk lands at the image's virtual size; the rest of the create is the
+    /// same as [`Self::create_vm`].
+    pub fn create_vm_import(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        cfg: &VmConfig,
+        storage: &str,
+        volid: &str,
+    ) -> Result<()> {
+        self.create_vm_with(
+            ledger,
+            vmid,
+            name,
+            cfg,
+            &format!("{storage}:0,import-from={volid}"),
+        )
+    }
+
+    fn create_vm_with(
+        &self,
+        ledger: &Ledger,
+        vmid: u32,
+        name: &str,
+        cfg: &VmConfig,
+        scsi0: &str,
+    ) -> Result<()> {
+        let mut form = create_form(vmid, name, cfg, scsi0, &self.net0_arg(cfg));
         // Extra disks and NICs ride in the SAME create: one task, and either the
         // VM exists with all of them or it does not exist. A second `POST
         // …/config` after the create would be a window where the VM is on the
@@ -1690,6 +1740,189 @@ impl Client {
                 Some((volid, size))
             })
             .collect())
+    }
+
+    /// What the import path needs to know about a storage (ADR-0057), read
+    /// from `GET …/storage/{storage}/status`: its content types, its free
+    /// bytes, and whether the node has it active.
+    pub fn storage_status(&self, storage: &str) -> Result<StorageStatus> {
+        if !valid_storage_id(storage) {
+            return Err(Error::InvalidDiskSpec(format!(
+                "proxmox: '{storage}' is not a storage id"
+            )));
+        }
+        let body = self.get(&format!("/nodes/{}/storage/{storage}/status", self.node))?;
+        let w: Wrapped<serde_json::Value> = parse(&body, "storage status")?;
+        Ok(parse_storage_status(&w.data))
+    }
+
+    /// The `import` volumes a storage holds (`volid`s), read from the same
+    /// `GET …/storage/{storage}/content` route as [`Self::list_backups`]. It
+    /// is how the import cache is checked: a read of one missing volume
+    /// answers «failed to stat … no format» (measured on PVE 9.2.2), which
+    /// does not say «does not exist», so it cannot tell a miss from a fault.
+    pub fn list_import_volumes(&self, storage: &str) -> Result<Vec<String>> {
+        let body = self.get(&format!(
+            "/nodes/{}/storage/{storage}/content?content=import",
+            self.node
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "content")?;
+        Ok(w.data
+            .iter()
+            .filter_map(|v| Some(v.get("volid")?.as_str()?.to_string()))
+            .collect())
+    }
+
+    /// Uploads a local image to `storage` under `import/<filename>` and waits
+    /// for the node's `imgcopy` task (ADR-0057).
+    ///
+    /// The upload carries the file's sha256 (`checksum`,
+    /// `checksum-algorithm`), so the NODE verifies what it received and a
+    /// damaged transfer fails the task instead of being kept. The text fields
+    /// go before the file: the node reads the multipart body as a stream.
+    ///
+    /// Not in the per-VM ledger: no VM exists yet, and a lost answer is
+    /// settled by the caller listing the storage for the volume.
+    pub fn upload_import(
+        &self,
+        storage: &str,
+        local: &Path,
+        filename: &str,
+        sha256: &str,
+    ) -> Result<()> {
+        if !valid_storage_id(storage) {
+            return Err(Error::InvalidDiskSpec(format!(
+                "proxmox: '{storage}' is not a storage id"
+            )));
+        }
+        let size = std::fs::metadata(local)
+            .map_err(|e| {
+                Error::ImageUnreadable(format!("proxmox: cannot read '{}': {e}", local.display()))
+            })?
+            .len();
+        let body = self.post_multipart(
+            &format!("/nodes/{}/storage/{storage}/upload", self.node),
+            local,
+            filename,
+            sha256,
+            upload_timeout(size),
+        )?;
+        match upid_or_done(&body, "upload", true)? {
+            Some(upid) => self.wait_task(&upid),
+            None => Ok(()),
+        }
+    }
+
+    /// Puts a local image on the node for a VM to import (ADR-0057): checks
+    /// the import storage accepts `import` and has room, uploads the image
+    /// unless the node already has it (named by content), and returns the
+    /// volume to import from and the size to grow to after the import.
+    ///
+    /// Everything that can be refused is refused before a byte is sent: a
+    /// `diskSize` smaller than the image, a storage without `import`, a
+    /// storage without room. The engine never changes a storage's content
+    /// types (ADR-0049 D3).
+    pub fn stage_import(&self, path: &Path, disk_size_gib: Option<u32>) -> Result<StagedImport> {
+        let img = inspect_image(path)?;
+        let grow_gib = import_grow_plan(img.virtual_size, disk_size_gib)?;
+        let storage = self.import_storage.clone();
+        let st = self.storage_status(&storage)?;
+        if !st.active || !st.content.iter().any(|c| c == "import") {
+            return Err(Error::ImportNotEnabled(format!(
+                "proxmox: storage '{storage}' on node '{}' does not accept images for import (its \
+                 content types are: {}) — enable `import` on it (`pvesm set {storage} --content \
+                 {},import`), or point DELONIX_PROXMOX_IMPORT_STORAGE at a storage that has it",
+                self.node,
+                if st.content.is_empty() {
+                    "none".to_string()
+                } else {
+                    st.content.join(",")
+                },
+                st.content.join(",")
+            )));
+        }
+        let filename = import_filename(&img.sha256, img.ext);
+        let volid = format!("{storage}:import/{filename}");
+        let cached = self.list_import_volumes(&storage)?.contains(&volid);
+        if !cached {
+            if let Some(avail) = st.avail {
+                if avail < img.file_size {
+                    return Err(Error::ImportNoSpace(format!(
+                        "proxmox: storage '{storage}' on node '{}' has {avail} bytes free and the \
+                         image '{}' is {} bytes",
+                        self.node,
+                        path.display(),
+                        img.file_size
+                    )));
+                }
+            }
+            match self.upload_import(&storage, path, &filename, &img.sha256) {
+                Ok(()) => {}
+                // A lost answer is not a lost upload: if the node now lists the
+                // volume, it verified the checksum and kept it.
+                Err(Error::Request(why)) => {
+                    if !self.list_import_volumes(&storage)?.contains(&volid) {
+                        return Err(Error::Request(why));
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(StagedImport {
+            volid,
+            grow_gib,
+            uploaded: !cached,
+        })
+    }
+
+    /// A multipart `POST` of one file with the import fields, re-authenticating
+    /// once on a 401 like [`Self::send_authed`]. Written out because the file
+    /// has to be reopened for the retry, and opening can fail.
+    ///
+    /// The body is built here rather than with `reqwest`'s `multipart`
+    /// feature, which would pull two crates in for one form: a prefix, the
+    /// file and a suffix, chained as one reader of known length, so the image
+    /// is streamed and never held in memory.
+    fn post_multipart(
+        &self,
+        path: &str,
+        local: &Path,
+        filename: &str,
+        sha256: &str,
+        timeout: Duration,
+    ) -> Result<String> {
+        let url = self.url(path);
+        let boundary = format!("delonix-{}", &sha256[..sha256.len().min(32)]);
+        let (head, tail) = multipart_frame(&boundary, filename, sha256);
+        let build = || -> Result<reqwest::blocking::RequestBuilder> {
+            let unreadable = |e: std::io::Error| {
+                Error::ImageUnreadable(format!("proxmox: cannot read '{}': {e}", local.display()))
+            };
+            let file = std::fs::File::open(local).map_err(unreadable)?;
+            let len = file.metadata().map_err(unreadable)?.len();
+            let total = head.len() as u64 + len + tail.len() as u64;
+            let reader = std::io::Read::chain(
+                std::io::Read::chain(std::io::Cursor::new(head.clone()), file),
+                std::io::Cursor::new(tail.clone()),
+            );
+            Ok(self
+                .http
+                .post(&url)
+                .header(
+                    "Content-Type",
+                    format!("multipart/form-data; boundary={boundary}"),
+                )
+                .body(reqwest::blocking::Body::sized(reader, total))
+                .timeout(timeout))
+        };
+        match self.send("POST", path, build()?, true) {
+            Err(e) if matches!(self.auth, Auth::Password { .. }) && is_unauthorized(&e) => {
+                tracing::debug!("proxmox: ticket rejected, logging in again");
+                self.login()?;
+                self.send("POST", path, build()?, true)
+            }
+            other => other,
+        }
     }
 
     /// The disk volumes `storage` holds for VM `vmid` (`volid`s), read from
@@ -3931,6 +4164,9 @@ enum DiskSpec {
     Template(u32),
     /// `<storage>:<gib>` — a fresh empty disk.
     New { storage: String, gib: u32 },
+    /// A local image file (what the engine resolved a store image to): uploaded
+    /// to the node and imported (ADR-0057).
+    Image(PathBuf),
 }
 
 /// Parses `cfg.disk` for the Proxmox backend.
@@ -3943,10 +4179,15 @@ fn parse_disk_spec(disk: &str) -> Result<DiskSpec> {
     let bad = || {
         Error::InvalidDiskSpec(format!(
             "proxmox: '{disk}' does not name anything on the node — use `template:<vmid>` to \
-             clone a template, or `<storage>:<size-in-GiB>` for a fresh disk (e.g. \
-             `local-lvm:8`). A local path has no meaning on a remote node"
+             clone a template, `<storage>:<size-in-GiB>` for a fresh disk (e.g. \
+             `local-lvm:8`), or an image of the engine's store, which is uploaded to the node \
+             (`delonix image vm ls`)"
         ))
     };
+    let path = Path::new(disk);
+    if path.is_absolute() && path.is_file() {
+        return Ok(DiskSpec::Image(path.to_path_buf()));
+    }
     let (head, tail) = disk.split_once(':').ok_or_else(bad)?;
     if disk.contains('/') {
         return Err(bad());
@@ -4679,8 +4920,7 @@ fn create_form(
     vmid: u32,
     name: &str,
     cfg: &VmConfig,
-    storage: &str,
-    gib: u32,
+    scsi0: &str,
     net0: &str,
 ) -> Vec<(&'static str, String)> {
     let ci = cloud_init_form(cfg);
@@ -4691,7 +4931,7 @@ fn create_form(
         ("cores", cfg.vcpus.max(1).to_string()),
         ("ostype", "l26".into()),
         ("scsihw", "virtio-scsi-single".into()),
-        ("scsi0", format!("{storage}:{gib}")),
+        ("scsi0", scsi0.to_string()),
         // A NIC on a bridge of the node. `virtio` alone is the model — the
         // value goes in the property's default key, and spelling that key out
         // (`model=virtio`) is what the API refuses. The ADR recorded this shape
@@ -4722,6 +4962,9 @@ fn create_form(
     }
     form.extend(ci);
     if has_ci {
+        // The cloud-init drive goes on the boot disk's storage — the part of
+        // `scsi0` before its first `:` (`local-lvm:8`, `local-lvm:0,import-from=…`).
+        let storage = scsi0.split(':').next().unwrap_or(scsi0);
         form.push(("ide2", format!("{storage}:cloudinit")));
     }
     form
@@ -4807,6 +5050,179 @@ fn task_log_error_line(lines: &[serde_json::Value]) -> Option<String> {
         .filter(|t| !t.trim_start().starts_with("TASK "))
         .filter_map(|t| t.find("ERROR:").map(|i| t[i..].trim().to_string()))
         .next_back()
+}
+
+/// A storage as the import path reads it ([`Client::storage_status`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageStatus {
+    /// The content types the storage accepts (`images`, `import`, …).
+    pub content: Vec<String>,
+    /// Free bytes, when the node said.
+    pub avail: Option<u64>,
+    /// Whether the node has the storage active.
+    pub active: bool,
+}
+
+/// `GET …/storage/{storage}/status` as the node answered it. Pure.
+fn parse_storage_status(v: &serde_json::Value) -> StorageStatus {
+    StorageStatus {
+        content: v
+            .get("content")
+            .and_then(|c| c.as_str())
+            .map(|c| {
+                c.split(',')
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        avail: v.get("avail").and_then(|a| a.as_u64()),
+        active: v
+            .get("active")
+            .is_some_and(|a| a.as_u64() == Some(1) || a.as_bool() == Some(true)),
+    }
+}
+
+/// A local image staged on the node ([`Client::stage_import`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedImport {
+    /// The volume to import from (`local:import/delonix-<sha>.qcow2`).
+    pub volid: String,
+    /// The size to grow the imported disk to, when `diskSize` asked for more
+    /// than the image's virtual size.
+    pub grow_gib: Option<u32>,
+    /// Whether this call uploaded it (`false`: the node already had it).
+    pub uploaded: bool,
+}
+
+/// What the upload needs to know about a local image.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct LocalImage {
+    ext: &'static str,
+    virtual_size: u64,
+    file_size: u64,
+    sha256: String,
+}
+
+/// Reads a local image's format, virtual size and sha256. A qcow2 is told by
+/// its magic and its virtual size read from its header; anything else is
+/// uploaded as raw, whose virtual size is its length.
+fn inspect_image(path: &Path) -> Result<LocalImage> {
+    use sha2::Digest;
+    use std::io::Read;
+    let unreadable = |e: std::io::Error| {
+        Error::ImageUnreadable(format!("proxmox: cannot read '{}': {e}", path.display()))
+    };
+    let mut f = std::fs::File::open(path).map_err(unreadable)?;
+    let file_size = f.metadata().map_err(unreadable)?.len();
+    if file_size == 0 {
+        return Err(Error::ImageUnreadable(format!(
+            "proxmox: '{}' is empty",
+            path.display()
+        )));
+    }
+    let mut hasher = sha2::Sha256::new();
+    let mut header = Vec::with_capacity(32);
+    let mut buf = vec![0u8; 1 << 20];
+    loop {
+        let n = f.read(&mut buf).map_err(unreadable)?;
+        if n == 0 {
+            break;
+        }
+        if header.len() < 32 {
+            let take = (32 - header.len()).min(n);
+            header.extend_from_slice(&buf[..take]);
+        }
+        hasher.update(&buf[..n]);
+    }
+    let sha256: String = hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    let (ext, virtual_size) = match qcow2_virtual_size(&header) {
+        Some(v) => ("qcow2", v),
+        None => ("raw", file_size),
+    };
+    Ok(LocalImage {
+        ext,
+        virtual_size,
+        file_size,
+        sha256,
+    })
+}
+
+/// A qcow2's virtual size from its header (magic `QFI\xfb`, size at bytes
+/// 24..32, big-endian), or `None` when the header is not a qcow2's. Pure.
+fn qcow2_virtual_size(header: &[u8]) -> Option<u64> {
+    if header.len() < 32 || header[..4] != *b"QFI\xfb" {
+        return None;
+    }
+    Some(u64::from_be_bytes(header[24..32].try_into().ok()?))
+}
+
+/// The name an image is uploaded under: its content, so one image is one
+/// upload per node however many VMs use it. Pure.
+fn import_filename(sha256: &str, ext: &str) -> String {
+    format!("delonix-{}.{ext}", &sha256[..sha256.len().min(16)])
+}
+
+/// What `diskSize` means for an imported disk, which lands at the image's
+/// virtual size: `None` when there is nothing to grow, `Some(gib)` to grow
+/// to, and a refusal — before the upload, with both numbers — for a size
+/// smaller than the image. Pure.
+fn import_grow_plan(virtual_size: u64, asked: Option<u32>) -> Result<Option<u32>> {
+    let Some(asked) = asked else {
+        return Ok(None);
+    };
+    let want = u64::from(asked) * GIB;
+    if want < virtual_size {
+        return Err(Error::InvalidDiskSpec(format!(
+            "proxmox: diskSize {asked} GiB is smaller than the image, whose virtual size is {} \
+             bytes ({:.1} GiB) — an imported disk can grow, never shrink",
+            virtual_size,
+            virtual_size as f64 / GIB as f64
+        )));
+    }
+    Ok((want > virtual_size).then_some(asked))
+}
+
+/// The multipart framing around the one file of an import upload: the
+/// `content`, `checksum-algorithm` and `checksum` fields, then the file part's
+/// header (`head`), and the closing boundary (`tail`). Pure.
+fn multipart_frame(boundary: &str, filename: &str, sha256: &str) -> (Vec<u8>, Vec<u8>) {
+    let field = |name: &str, value: &str| {
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"{name}\"\r\n\r\n{value}\r\n"
+        )
+    };
+    // THIS ORDER, and only this one. pveproxy (PVE 9.2.2,
+    // `file_upload_multipart`) pulls `content`, then `checksum-algorithm`, then
+    // `checksum` off the FRONT of the buffer, each with a lazy regex that runs
+    // on to the next `; name="<field>"` it finds: a field out of order is
+    // swallowed into the one before it and the node answers 400 «wrong
+    // Content-Disposition». Measured: `checksum` before `checksum-algorithm`
+    // failed exactly so.
+    let mut head = String::new();
+    head.push_str(&field("content", "import"));
+    head.push_str(&field("checksum-algorithm", "sha256"));
+    head.push_str(&field("checksum", sha256));
+    head.push_str(&format!(
+        "--{boundary}\r\nContent-Disposition: form-data; name=\"filename\"; \
+         filename=\"{filename}\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+    ));
+    (
+        head.into_bytes(),
+        format!("\r\n--{boundary}--\r\n").into_bytes(),
+    )
+}
+
+/// How long an upload of `size` bytes may take: the client's ordinary
+/// ceiling is for API calls, and an image is hundreds of MiB. A floor of ten
+/// minutes, plus a minute per 100 MiB (1.7 MiB/s, slower than the lab LAN).
+fn upload_timeout(size: u64) -> Duration {
+    Duration::from_secs(600 + size / (100 * 1024 * 1024) * 60)
 }
 
 /// A Proxmox storage id as the node accepts one: a letter, then letters,
@@ -5098,6 +5514,12 @@ impl VmBackend for ProxmoxBackend {
             }
             _ => None,
         };
+        // A local image is uploaded BEFORE a vmid is asked for (ADR-0057): a
+        // refusal or a failed upload then leaves nothing on the node to undo.
+        let import = match &spec {
+            DiskSpec::Image(path) => Some(self.client.stage_import(path, cfg.disk_size_gib)?),
+            _ => None,
+        };
         let ledger = Ledger::at(vmdir);
         let vmid = self.client.next_vmid()?;
         on(CreateStage::Define);
@@ -5145,6 +5567,22 @@ impl VmBackend for ProxmoxBackend {
             DiskSpec::New { storage, gib } => self
                 .client
                 .create_vm(&ledger, vmid, &cfg.name, cfg, &storage, gib)?,
+            DiskSpec::Image(_) => {
+                let staged = import.expect("staged above for an image disk");
+                self.client.create_vm_import(
+                    &ledger,
+                    vmid,
+                    &cfg.name,
+                    cfg,
+                    &self.client.disk_storage,
+                    &staged.volid,
+                )?;
+                if let Some(gib) = staged.grow_gib {
+                    self.client
+                        .resize_disk(&ledger, vmid, "scsi0", gib)
+                        .map_err(undo)?;
+                }
+            }
         }
         on(CreateStage::Start);
         self.client.start(&ledger, vmid).map_err(undo)?;
@@ -6048,7 +6486,7 @@ mod tests {
             },
         ];
         for cfg in &cases {
-            let f = create_form(100, &cfg.name, cfg, "local-lvm", 8, "virtio,bridge=vmbr0");
+            let f = create_form(100, &cfg.name, cfg, "local-lvm:8", "virtio,bridge=vmbr0");
             let mut keys: Vec<&str> = f.iter().map(|(k, _)| *k).collect();
             keys.sort_unstable();
             let n = keys.len();
@@ -6056,14 +6494,14 @@ mod tests {
             assert_eq!(n, keys.len(), "key repeated in the create: {f:?}");
         }
         // An explicit hostname wins over the VM name, as in configure_clone.
-        let f = create_form(100, "no1", &cases[2], "local-lvm", 8, "virtio");
+        let f = create_form(100, "no1", &cases[2], "local-lvm:8", "virtio");
         assert!(f.contains(&("name", "other".into())), "{f:?}");
         assert!(
             f.contains(&("ipconfig0", "ip=10.0.0.5/24,gw=10.0.0.1".into())),
             "{f:?}"
         );
         // An appliance gets neither cloud-init network config nor a drive.
-        let f = create_form(100, "no1", &cases[3], "local-lvm", 8, "virtio");
+        let f = create_form(100, "no1", &cases[3], "local-lvm:8", "virtio");
         assert!(
             !f.iter().any(|(k, _)| *k == "ipconfig0" || *k == "ide2"),
             "{f:?}"
@@ -6330,6 +6768,8 @@ mod tests {
             ticket: std::sync::RwLock::new(None),
             bridge: "vmbr0".into(),
             vlan: None,
+            import_storage: "local".into(),
+            disk_storage: "local-lvm".into(),
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
             relocated: Default::default(),
@@ -6905,6 +7345,8 @@ mod tests {
             ticket: std::sync::RwLock::new(None),
             bridge: bridge.unwrap_or("vmbr0").to_string(),
             vlan,
+            import_storage: "local".into(),
+            disk_storage: "local-lvm".into(),
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
             relocated: Default::default(),
@@ -7246,6 +7688,8 @@ mod tests {
             bridge: None,
             vlan: None,
             ca_cert_pem: None,
+            import_storage: None,
+            disk_storage: None,
         };
         let shown = format!("{t:?}");
         assert!(!shown.contains("s3cr3t"), "{shown}");
@@ -7397,6 +7841,74 @@ mod tests {
     /// target is in `allowed_nodes` AND a key of `not_allowed_nodes` with an
     /// empty object — reading "is a key there" as "refused" would refuse every
     /// move.
+    /// ADR-0057's pure pieces: a qcow2 told by its header, the name by
+    /// content, what `diskSize` means for an import, the storage status as the
+    /// node answered it (measured on PVE 9.2.2), the multipart framing, and a
+    /// local image file as the third disk form.
+    #[test]
+    fn a_local_image_is_read_named_sized_and_framed_for_the_node() {
+        let mut h = b"QFI\xfb".to_vec();
+        h.extend_from_slice(&[0, 0, 0, 3]);
+        h.extend_from_slice(&[0u8; 16]);
+        h.extend_from_slice(&(3 * GIB).to_be_bytes());
+        assert_eq!(qcow2_virtual_size(&h), Some(3 * GIB));
+        assert_eq!(qcow2_virtual_size(&h[..31]), None, "a short header");
+        assert_eq!(qcow2_virtual_size(&[0u8; 32]), None, "raw bytes");
+
+        assert_eq!(
+            import_filename("0123456789abcdef0123456789abcdef", "qcow2"),
+            "delonix-0123456789abcdef.qcow2"
+        );
+
+        assert_eq!(import_grow_plan(3 * GIB, None).unwrap(), None);
+        assert_eq!(import_grow_plan(3 * GIB, Some(3)).unwrap(), None);
+        assert_eq!(import_grow_plan(3 * GIB, Some(8)).unwrap(), Some(8));
+        let err = import_grow_plan(3 * GIB, Some(2)).unwrap_err();
+        assert!(err.to_string().contains("never shrink"), "{err}");
+
+        let measured = serde_json::json!({
+            "active": 1, "avail": 3950174208u64,
+            "content": "import,backup,iso,vztmpl,snippets,images",
+            "enabled": 1, "shared": 0, "total": 8940331008u64, "type": "dir",
+            "used": 4513894400u64
+        });
+        let st = parse_storage_status(&measured);
+        assert!(st.active && st.content.iter().any(|c| c == "import"));
+        assert_eq!(st.avail, Some(3950174208));
+        let lvm = parse_storage_status(&serde_json::json!({"active":1,"content":"rootdir,images"}));
+        assert!(!lvm.content.iter().any(|c| c == "import"));
+        assert!(!parse_storage_status(&serde_json::json!({})).active);
+
+        let (head, tail) = multipart_frame("B", "delonix-x.qcow2", "abc");
+        let head = String::from_utf8(head).unwrap();
+        assert!(head.starts_with(
+            "--B\r\nContent-Disposition: form-data; name=\"content\"\r\n\r\nimport\r\n"
+        ));
+        assert!(head.contains("name=\"checksum\"\r\n\r\nabc\r\n"));
+        // The order pveproxy parses them in: content, algorithm, checksum, file.
+        let at = |needle: &str| head.find(needle).unwrap();
+        assert!(at("name=\"content\"") < at("name=\"checksum-algorithm\""));
+        assert!(at("name=\"checksum-algorithm\"") < at("name=\"checksum\""));
+        assert!(at("name=\"checksum\"") < at("name=\"filename\""));
+        assert!(head.ends_with(
+            "filename=\"delonix-x.qcow2\"\r\nContent-Type: application/octet-stream\r\n\r\n"
+        ));
+        assert_eq!(tail, b"\r\n--B--\r\n");
+
+        let dir = std::env::temp_dir().join(format!("dlx-img-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("a.qcow2");
+        std::fs::write(&file, &h).unwrap();
+        assert!(matches!(
+            parse_disk_spec(&file.to_string_lossy()),
+            Ok(DiskSpec::Image(p)) if p == file
+        ));
+        assert!(parse_disk_spec(&dir.join("missing.qcow2").to_string_lossy()).is_err());
+        let err = parse_disk_spec("images/x").err().unwrap().to_string();
+        assert!(err.contains("image of the engine's store"), "{err}");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     #[test]
     fn the_migrate_precheck_is_read_as_the_node_answered_it() {
         let measured = serde_json::json!({

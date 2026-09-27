@@ -224,6 +224,7 @@ _METHOD_HINTS = (
     ("put_form(", "PUT"),
     (".put(", "PUT"),
     ("post_form(", "POST"),
+    ("post_multipart(", "POST"),
     (".post(", "POST"),
     (".get(", "GET"),
 )
