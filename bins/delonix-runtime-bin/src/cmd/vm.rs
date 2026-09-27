@@ -804,9 +804,16 @@ pub enum VmCmd {
         apply: bool,
     },
     /// Tear down a `vm bridge` (dry-run without `--apply`).
+    ///
+    /// Removes the subnets `vm bridge --apply` recorded. A bridge made before
+    /// that record existed falls back to the auto-detected `virbr*`.
     Unbridge {
         #[arg(add = ArgValueCandidates::new(super::complete::networks))]
         network: String,
+        /// VM subnet(s) to close as well (default: the ones `vm bridge` recorded). Repeatable.
+        #[arg(long = "vm-subnet")]
+        vm_subnet: Vec<String>,
+        /// Actually run the privileged teardown (requires root). Without it: dry-run.
         #[arg(long)]
         apply: bool,
     },
@@ -2701,7 +2708,11 @@ pub fn run(action: VmCmd) -> Result<()> {
             vm_subnet,
             apply,
         } => super::vmbridge::bridge(&network, vm_subnet, apply),
-        VmCmd::Unbridge { network, apply } => super::vmbridge::unbridge(&network, apply),
+        VmCmd::Unbridge {
+            network,
+            vm_subnet,
+            apply,
+        } => super::vmbridge::unbridge(&network, vm_subnet, apply),
         VmCmd::Destroy {
             names,
             force,

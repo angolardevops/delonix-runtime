@@ -15,14 +15,17 @@
 //! blast radius is "VMs on that libvirt network + the host", not the internet.
 //! The container's per-container nft chain still governs the traffic (a VM IP
 //! is not in `@dlxall`, so namespace isolation lets it through like a gateway;
-//! explicit `ingress` rules still apply). `unbridge` tears it all down.
+//! explicit `ingress` rules still apply). `unbridge` tears it all down: the
+//! subnets `bridge --apply` opened are recorded under `ingress/`, so the rules
+//! and the return route it removes are the ones that were inserted, not the
+//! ones a `virbr*` detection happens to see at teardown time.
 //!
 //! NOTE: shipped on a feature branch, NOT merged/released — it has not been
 //! run end-to-end in this dev sandbox (no root here). The command GENERATION is
 //! pure and unit-tested; the privileged execution is validated by the operator
 //! on a real host (dry-run first).
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use delonix_model::{Error, Result};
@@ -261,6 +264,72 @@ fn unbridge_plan(
     plan
 }
 
+/// Where `bridge --apply` records the VM subnets it opened on a network's SDN
+/// bridge: one canonical CIDR per line, next to the holder's pid.
+fn applied_subnets_path(root: &Path, bridge: &str) -> PathBuf {
+    root.join("ingress")
+        .join(format!("vmbridge-{bridge}.subnets"))
+}
+
+/// The subnets a previous `bridge --apply` recorded, or `None` when there is
+/// no record (never bridged, or bridged before the record existed). An empty
+/// or unreadable file counts as no record: detection is the fallback, and the
+/// entries go through `validate_vm_subnets` like any other before reaching
+/// the root argv.
+fn read_applied_subnets(path: &Path) -> Option<Vec<String>> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let subs: Vec<String> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(String::from)
+        .collect();
+    (!subs.is_empty()).then_some(subs)
+}
+
+/// Records the subnets `bridge --apply` is about to open. Written BEFORE the
+/// plan runs, so a bridge that fails half-way is still undone by `unbridge`.
+/// A bridge whose undo cannot be recorded is not opened.
+fn write_applied_subnets(path: &Path, subs: &[String]) -> Result<()> {
+    let mut body = subs.join("\n");
+    body.push('\n');
+    path.parent()
+        .map_or(Ok(()), std::fs::create_dir_all)
+        .and_then(|()| std::fs::write(path, body))
+        .map_err(|e| Error::Runtime {
+            context: "vm bridge",
+            message: po::tf(
+                "could not record the bridged subnets in {path}: {err}",
+                &[
+                    ("path", &path.display().to_string()),
+                    ("err", &e.to_string()),
+                ],
+            ),
+        })
+}
+
+/// Which VM subnets a teardown removes. PURE (`detect` is only called when
+/// needed). The record `bridge --apply` left is the truth, plus any explicit
+/// `--vm-subnet`. Without a record — a bridge made before it existed — the
+/// explicit subnets, or else the `virbr*` detection. Before the record,
+/// `unbridge` always detected: a bridge made with `--vm-subnet` (or on a host
+/// with no `virbr*`) lost only its veth, and both FORWARD ACCEPT rules and
+/// the holder's return route stayed open.
+fn teardown_subnets(
+    explicit: Vec<String>,
+    recorded: Option<Vec<String>>,
+    detect: impl FnOnce() -> Vec<String>,
+) -> Vec<String> {
+    let mut subs = match recorded {
+        Some(rec) => rec.into_iter().chain(explicit).collect(),
+        None if !explicit.is_empty() => explicit,
+        None => detect(),
+    };
+    let mut seen = std::collections::HashSet::new();
+    subs.retain(|s| seen.insert(s.clone()));
+    subs
+}
+
 /// Extracts the home directory (field 6) from a `getent passwd` line. Pure.
 fn home_from_passwd_line(line: &str) -> Option<String> {
     let home = line.trim().split(':').nth(5)?.trim();
@@ -421,8 +490,16 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
     // respawn (a dangling host-side veth) FIRST, tolerated, so `bridge` doesn't
     // fail on "RTNETLINK: File exists". This is the auto-cleanup of orphans —
     // full lifecycle teardown (on holder death) is the persistence follow-up.
-    let cleanup = unbridge_plan(&holder, &bridge, &prefix, &subs);
+    // The cleanup covers what the previous bridge recorded too: re-bridging
+    // with other subnets must not leave the old ones open.
+    let record = applied_subnets_path(&state_root(), &bridge);
+    let previous = validate_vm_subnets(
+        &teardown_subnets(subs.clone(), read_applied_subnets(&record), Vec::new),
+        &prefix,
+    )?;
+    let cleanup = unbridge_plan(&holder, &bridge, &prefix, &previous);
     run_plan(&cleanup, true, true)?;
+    write_applied_subnets(&record, &subs)?;
     run_plan(&plan, true, false)?;
     output::info(&format!(
         "bridged '{network}' ({}) to the VM network(s) {} — VMs now reach its containers by IP",
@@ -432,8 +509,10 @@ pub fn bridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()>
     Ok(())
 }
 
-/// `delonix vm unbridge <network>` — tear the bridge down.
-pub fn unbridge(network: &str, apply: bool) -> Result<()> {
+/// `delonix vm unbridge <network>` — tear the bridge down: the subnets the
+/// bridge recorded, plus `vm_subnets`; without a record, `vm_subnets` or the
+/// `virbr*` detection (see `teardown_subnets`).
+pub fn unbridge(network: &str, vm_subnets: Vec<String>, apply: bool) -> Result<()> {
     if apply {
         require_root(current_euid())?;
     }
@@ -442,7 +521,11 @@ pub fn unbridge(network: &str, apply: bool) -> Result<()> {
     let bridge = p.bridge;
     let prefix = sdn_cidr(&p.prefix)?;
     let holder = holder_pid()?;
-    let subs = validate_vm_subnets(&detect_vm_subnets(), &prefix)?;
+    let record = applied_subnets_path(&state_root(), &bridge);
+    let subs = validate_vm_subnets(
+        &teardown_subnets(vm_subnets, read_applied_subnets(&record), detect_vm_subnets),
+        &prefix,
+    )?;
     let plan = unbridge_plan(&holder, &bridge, &prefix, &subs);
     if !apply {
         output::warn("DRY-RUN — re-run with `--apply` (as root) to tear down:");
@@ -450,6 +533,17 @@ pub fn unbridge(network: &str, apply: bool) -> Result<()> {
         return Ok(());
     }
     run_plan(&plan, true, true)?;
+    match std::fs::remove_file(&record) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => output::warn(&po::tf(
+            "could not remove the bridge record {path}: {err}",
+            &[
+                ("path", &record.display().to_string()),
+                ("err", &e.to_string()),
+            ],
+        )),
+    }
     output::info(&format!("unbridged '{network}'"));
     Ok(())
 }
@@ -598,6 +692,106 @@ mod tests {
         );
     }
 
+    /// Unique temp dir (without depending on the `tempfile` crate).
+    fn tmp_root(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!(
+            "delonix-vmbridge-{tag}-{}-{}",
+            // SAFETY: `getpid` takes no arguments and has no preconditions.
+            unsafe { libc::getpid() },
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ));
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn detect_must_not_run() -> Vec<String> {
+        panic!("the virbr* detection ran although the bridge left a record")
+    }
+
+    #[test]
+    fn unbridge_removes_the_recorded_subnet_not_the_detected_one() {
+        // Measured 2026-09-27: `bridge --vm-subnet 192.168.200.0/24 --apply`,
+        // then `unbridge --apply` detected only virbr0's 192.168.122.0/24 and
+        // left both FORWARD ACCEPT rules and the holder's return route for .200.
+        let root = tmp_root("record");
+        let record = applied_subnets_path(&root, "dlxnabc");
+        assert!(record.starts_with(root.join("ingress")));
+        write_applied_subnets(&record, &["192.168.200.0/24".into()]).unwrap();
+
+        let subs = teardown_subnets(
+            Vec::new(),
+            read_applied_subnets(&record),
+            detect_must_not_run,
+        );
+        assert_eq!(subs, vec!["192.168.200.0/24".to_string()]);
+
+        let sdn = sdn_cidr("172.20.4.0/22").unwrap();
+        let plan = unbridge_plan("4242", "dlxnabc", &sdn, &subs);
+        let shown: Vec<String> = plan.iter().map(|c| c.join(" ")).collect();
+        for want in [
+            "iptables -D FORWARD -s 192.168.200.0/24 -d 172.20.4.0/22 -j ACCEPT",
+            "iptables -D FORWARD -s 172.20.4.0/22 -d 192.168.200.0/24 -j ACCEPT",
+            "nsenter -t 4242 -n -- ip route del 192.168.200.0/24 via 172.20.7.254",
+        ] {
+            assert!(
+                shown.iter().any(|c| c == want),
+                "missing {want:?} in {shown:#?}"
+            );
+        }
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn without_a_record_the_teardown_falls_back_to_explicit_then_detection() {
+        let root = tmp_root("absent");
+        let record = applied_subnets_path(&root, "dlxnabc");
+        assert_eq!(read_applied_subnets(&record), None, "no file, no record");
+        // An empty file is no record either: detection still has a chance.
+        std::fs::create_dir_all(record.parent().unwrap()).unwrap();
+        std::fs::write(&record, "\n  \n").unwrap();
+        assert_eq!(read_applied_subnets(&record), None);
+
+        let detected = || vec!["192.168.122.0/24".to_string()];
+        assert_eq!(teardown_subnets(Vec::new(), None, detected), detected());
+        // An explicit `--vm-subnet` on a bridge from before the record wins
+        // over detection…
+        assert_eq!(
+            teardown_subnets(vec!["192.168.200.0/24".into()], None, detect_must_not_run),
+            vec!["192.168.200.0/24".to_string()]
+        );
+        // …and adds to a record, without repeating what is already there.
+        assert_eq!(
+            teardown_subnets(
+                vec!["192.168.200.0/24".into(), "10.9.0.0/24".into()],
+                Some(vec!["192.168.200.0/24".into()]),
+                detect_must_not_run,
+            ),
+            vec!["192.168.200.0/24".to_string(), "10.9.0.0/24".to_string()]
+        );
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn the_record_round_trips_one_canonical_cidr_per_line() {
+        let root = tmp_root("roundtrip");
+        // The `ingress/` directory may not exist yet: the write creates it.
+        let record = applied_subnets_path(&root, "delonix0");
+        let subs = vec![
+            "192.168.122.0/24".to_string(),
+            "192.168.200.0/24".to_string(),
+        ];
+        write_applied_subnets(&record, &subs).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&record).unwrap(),
+            "192.168.122.0/24\n192.168.200.0/24\n"
+        );
+        assert_eq!(read_applied_subnets(&record), Some(subs));
+        std::fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn apply_is_refused_without_root_before_any_command() {
         assert!(require_root(1000).is_err());
@@ -610,7 +804,7 @@ mod tests {
         // not exist would otherwise be the error reported.
         for r in [
             bridge("no-such-net-s4", vec!["-j".into()], true),
-            unbridge("no-such-net-s4", true),
+            unbridge("no-such-net-s4", vec!["-j".into()], true),
         ] {
             let msg = r.unwrap_err().to_string();
             assert!(msg.contains("needs root"), "{msg}");
