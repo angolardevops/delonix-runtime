@@ -59,6 +59,8 @@ CRATE_SOURCE = [
     Path("crates/providers/delonix-proxmox/src/lib.rs"),
     Path("crates/providers/delonix-proxmox/src/sdn.rs"),
     Path("crates/providers/delonix-proxmox/src/cluster.rs"),
+    Path("crates/providers/delonix-proxmox/src/sdn_lock.rs"),
+    Path("crates/providers/delonix-proxmox/src/sdn_routing.rs"),
 ]
 
 SUPPORTED_TESTED = "supported+tested"
@@ -240,6 +242,9 @@ def normalise(raw: str) -> str:
     p = p.replace("/snapshot/{name}/", "/snapshot/{snapname}/")
     p = p.replace("/content/{}", "/content/{volume}")
     p = p.replace("/firewall/ipset/{name}/{}", "/firewall/ipset/{name}/{cidr}")
+    # A Rust `format!` name cannot carry a `-`: the crate writes `{route_map_id}`
+    # where the schema says `{route-map-id}`.
+    p = p.replace("{route_map_id}", "{route-map-id}")
     return p
 
 

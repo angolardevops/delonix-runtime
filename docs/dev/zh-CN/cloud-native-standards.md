@@ -707,10 +707,12 @@ NoCloud 种子（seed），其网络配置要与它的网卡匹配。
 测量）。没有委派时，`container run` 会以退出码 69 拒绝 `-m`/`--cpus`/
 `--cpu-weight`（`bins/delonix-runtime-bin/src/cmd/container.rs` 里的
 `preflight_resource_limits`；`DELONIX_ALLOW_UNENFORCED_LIMITS=1` 会让它不受限地
-运行，并附带一条警告）。那次探测只覆盖了 `memory`/`cpu`/`pids` 这个基础组合：
+运行，并附带一条警告）。那次探测只覆盖了 `memory`/`cpu`/`pids` 这个基础组合；
 `--cpuset`、`--io-weight` 以及 `--device-*-bps`/`--device-*-iops` 这些标志位
-仍然会被尽力接受——而在标准的 Ubuntu 上，`cpuset` 和 `io` 通常并不会被委派给用户
-会话——所以这些标志位可能被接受了却没有实际效果。参见
+有自己按控制器的探测（`preflight_controller_limits`），容器的 cgroup 缺少 `cpuset`/`io`
+时以退出码 69 拒绝——这在标准的 Ubuntu 上是常态：`user@.service` 只拿到
+`cpu memory pids`，`Delegate=yes` 的 scope 也拿不到更多。补救办法是由 root 给
+`user@.service` 加一个 drop-in（`Delegate=cpu cpuset io memory pids`）。参见
 [准备你的环境](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced)
 和 [ADR-0015](../adr/0015-intermediate-cgroup-level.md)。
 

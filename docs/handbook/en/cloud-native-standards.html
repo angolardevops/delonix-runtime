@@ -825,9 +825,11 @@ for the contract, in <a class="src" href="https://github.com/angolardevops/delon
 delegation <code>container run</code> refuses <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> with exit 69
 (<code>preflight_resource_limits</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>;
 <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> runs unenforced, with a warning). That probe covers only the
-<code>memory</code>/<code>cpu</code>/<code>pids</code> base: <code>--cpuset</code>, <code>--io-weight</code> and the <code>--device-*-bps</code>/<code>--device-*-iops</code>
-flags are still accepted best-effort, and <code>cpuset</code> and <code>io</code> are usually not delegated to user
-sessions on stock Ubuntu — so those can be accepted without effect. See
+<code>memory</code>/<code>cpu</code>/<code>pids</code> base; <code>--cpuset</code>, <code>--io-weight</code> and the <code>--device-*-bps</code>/<code>--device-*-iops</code>
+flags have their own per-controller probe (<code>preflight_controller_limits</code>) and are refused with exit
+69 when the container's cgroup lacks <code>cpuset</code>/<code>io</code> — usual on stock Ubuntu, where <code>user@.service</code>
+gets <code>cpu memory pids</code> and a <code>Delegate=yes</code> scope cannot receive more. The remedy is a root drop-in
+on <code>user@.service</code> (<code>Delegate=cpu cpuset io memory pids</code>). See
 <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">Environment</a> and <a href="https://github.com/angolardevops/delonix-runtime/blob/main/docs/adr/0015-intermediate-cgroup-level.md" target="_blank" rel="noopener">ADR-0015</a>.</p>
 <p><strong>Where to start reading.</strong> <code>cgroup_limits_apply</code> → <code>user_service_base</code> → <code>try_delegated_base</code> →
 <code>transient_scope_argv</code>, all in <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/adapters/delonix-linux/src/lib.rs" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux/src/lib.rs</code></a>.</p>
