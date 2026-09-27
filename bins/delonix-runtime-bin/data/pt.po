@@ -2202,6 +2202,21 @@ msgstr "Valida o manifesto SEM tocar em nada (dry-run): resolve as referências 
 msgid "Static IP (libvirt nat mode): DHCP reservation on the libvirt network."
 msgstr "IP estático (modo nat do libvirt): reserva DHCP na rede libvirt."
 
+msgid "libvirt nat/bridge only: do NOT attach the anti-spoofing filter to this VM's NIC, so the guest may send frames with any source MAC (a nested hypervisor's guests on a bridge need it). Weakens isolation on the L2; off by default, persisted, shown by `vm describe` (ADR-0055)"
+msgstr "só libvirt nat/bridge: NÃO liga o filtro anti-spoofing à NIC desta VM, e o guest pode enviar tramas com qualquer MAC de origem (os guests de um hipervisor aninhado numa bridge precisam disso). Enfraquece o isolamento no L2; desligado por omissão, persistido, mostrado pelo `vm describe` (ADR-0055)"
+
+msgid "vm/{name}: anti-spoofing is OFF (--allow-mac-spoofing) — this guest may send frames with any source MAC and answer ARP for any address on its L2"
+msgstr "vm/{name}: o anti-spoofing está DESLIGADO (--allow-mac-spoofing) — este guest pode enviar tramas com qualquer MAC de origem e responder ARP por qualquer endereço no seu L2"
+
+msgid "OFF — allowMacSpoofing (any source MAC; ADR-0055)"
+msgstr "DESLIGADO — allowMacSpoofing (qualquer MAC de origem; ADR-0055)"
+
+msgid "on (delonix-antispoof: MAC + ARP)"
+msgstr "ligado (delonix-antispoof: MAC + ARP)"
+
+msgid "a hypervisor whose own guests bridge onto the network — drops the MAC/ARP anti-spoofing filter for THIS VM only, and `vm describe` says so"
+msgstr "um hipervisor cujos guests saem para a rede por bridge — tira o filtro anti-spoofing de MAC/ARP SÓ a esta VM, e o `vm describe` di-lo"
+
 msgid "user-mode network: this VM will have no reachable IP — join the `libvirt` group (nat mode then becomes the default), or pass `--net-mode nat|bridge`"
 msgstr "rede user-mode: esta VM não terá IP alcançável — entra no grupo `libvirt` (o modo nat passa a ser o default), ou usa `--net-mode nat|bridge`"
 
