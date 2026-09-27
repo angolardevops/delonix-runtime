@@ -264,6 +264,8 @@ Estas são lidas apenas por testes. Sem elas, os testes ao vivo **saltam** e imp
 | `DELONIX_PROXMOX_TEST_NODE` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Nome do nó. | Omissão `pve`. | |
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Conta para autenticação por password. | Por exemplo `root@pam`. Obrigatória. | A verificação TLS está desligada nestes testes. |
 | `DELONIX_PROXMOX_TEST_PASS` | `crates/providers/delonix-proxmox/tests/live.rs:target` | A sua password. | Obrigatória. | |
+| `DELONIX_PROXMOX_TEST_TOKEN_ID` | `crates/providers/delonix-proxmox/tests/live.rs:target` | O id de um token de API em vez da conta (`user@realm!nome`). | Opcional; com `DELONIX_PROXMOX_TEST_TOKEN` é usado antes da conta. | Revogável no nó; uma corrida de lab pode criá-lo sem a password de ninguém. |
+| `DELONIX_PROXMOX_TEST_TOKEN` | `crates/providers/delonix-proxmox/tests/live.rs:target` | O seu segredo. | Opcional, com o id. | |
 | `DELONIX_PROXMOX_TEST_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage para o disco da VM de teste. | Omissão `local-lvm`. | |
 | `DELONIX_PROXMOX_TEST_BACKUP_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage onde o arquivo de backup aterra — o nó pode não aceitar conteúdo de backup no storage do disco (uma pool thin-LVM não pode). | Omissão: igual a `DELONIX_PROXMOX_TEST_STORAGE`. | |
 | `DELONIX_PROXMOX_TEST_MOVE_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Um SEGUNDO storage para onde o `move_disk` move o disco de arranque da VM de teste — o nó recusa um move para o mesmo storage com o mesmo formato, por isso tem de ser mesmo uma pool diferente. | Omissão `local` (tem de ter `content=images` activado). | |

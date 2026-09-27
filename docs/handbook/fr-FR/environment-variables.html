@@ -1154,6 +1154,20 @@ variable au moment où le programme s’exécute.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN_ID</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>Un identifiant de jeton d’API à la place du compte (<code>user@realm!nom</code>).</td>
+<td>Facultatif ; avec <code>DELONIX_PROXMOX_TEST_TOKEN</code>, il passe avant le compte.</td>
+<td>Révocable sur le nœud ; un essai de labo peut en créer un sans le mot de passe de personne.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>Son secret.</td>
+<td>Facultatif, avec l’identifiant.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_STORAGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Stockage du disque de la VM de test.</td>

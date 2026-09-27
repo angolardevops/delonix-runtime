@@ -295,7 +295,8 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let mut rec = s.load(&name).unwrap_or_default();
     if !rec.provider.is_empty() && rec.provider != spec.provider {
         return Err(Error::Conflict(super::po::tf(
-            "networkgateway/{name} is recorded on provider '{old}', not '{new}' — replace the              document (`--replace NetworkGateway/{name}`) to move it",
+            "networkgateway/{name} is recorded on provider '{old}', not '{new}' — replace the \
+             document (`--replace NetworkGateway/{name}`) to move it",
             &[("name", &name), ("old", &rec.provider), ("new", &spec.provider)],
         )));
     }

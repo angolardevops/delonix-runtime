@@ -220,6 +220,8 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 | `DELONIX_PROXMOX_TEST_NODE` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 节点名字。 | 默认 `pve`。 | |
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 用密码认证的账号。 | 比如 `root@pam`。必填。 | 这些测试里 TLS 校验是关闭的。 |
 | `DELONIX_PROXMOX_TEST_PASS` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 它的密码。 | 必填。 | |
+| `DELONIX_PROXMOX_TEST_TOKEN_ID` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 用 API 令牌 id 代替账号（`user@realm!名字`）。 | 可选；和 `DELONIX_PROXMOX_TEST_TOKEN` 一起给时优先于账号。 | 可在节点上撤销；实验室运行无需任何人的密码即可创建。 |
+| `DELONIX_PROXMOX_TEST_TOKEN` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 它的密钥。 | 可选，与 id 一起。 | |
 | `DELONIX_PROXMOX_TEST_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | 测试用 VM 磁盘所在的存储。 | 默认 `local-lvm`。 | |
 | `DELONIX_PROXMOX_TEST_BACKUP_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | 备份归档落地的存储——节点可能不接受在磁盘存储上放备份内容（一个 thin-LVM 池就不行）。 | 默认：和 `DELONIX_PROXMOX_TEST_STORAGE` 一样。 | |
 | `DELONIX_PROXMOX_TEST_MOVE_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | `move_disk` 会把测试 VM 的启动磁盘移到的**第二个**存储——节点会拒绝移到格式相同的同一个存储，所以这个必须是真正不同的一个池。 | 默认 `local`（必须在它上面启用了 `content=images`）。 | |
