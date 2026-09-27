@@ -71,7 +71,11 @@ impl Cas {
         let dst = self.dir().join(&hex);
         if !dst.exists() {
             let tmp = self.tmp_path();
-            fs::write(&tmp, data)?;
+            {
+                let mut f = fs::File::create(&tmp)?;
+                f.write_all(data)?;
+                f.sync_all()?;
+            }
             self.adopt(&tmp, &hex)?;
         }
         Ok(format!("sha256:{hex}"))
@@ -105,6 +109,9 @@ impl Cas {
             return Ok(());
         }
         fs::rename(tmp, &dst)?;
+        // And the rename itself, or the name can vanish on a crash while the
+        // content stays.
+        fs::File::open(self.dir())?.sync_all()?;
         Ok(())
     }
 
@@ -192,7 +199,11 @@ impl StreamingBlob {
                     }
                 }
             }
-            file.flush()
+            file.flush()?;
+            // On disk before the rename makes it a blob: `Cas::has` only asks
+            // whether the name exists, so a blob renamed into place and then
+            // lost to a power cut would read as present — empty — for good.
+            file.sync_all()
         });
         Self {
             tx: Some(tx),
