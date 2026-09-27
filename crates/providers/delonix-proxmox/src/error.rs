@@ -54,6 +54,12 @@ pub enum Error {
     /// operator's decision — this backend never flips it.
     #[error("{0}")]
     DatacenterFirewallDisabled(String),
+
+    /// A quiesced backup was asked of a VM whose filesystem could not be
+    /// shown frozen for it: not running, no agent answering, or the node's
+    /// backup log without the freeze and the thaw.
+    #[error("{0}")]
+    BackupNotQuiesced(String),
     /// A body past the size this client reads into memory.
     #[error("{0}")]
     ResponseTooLarge(String),
@@ -206,6 +212,7 @@ impl Error {
             Error::NodeConflict(_) => 5504,
             Error::NodeUnavailable(_) => 6506,
             Error::DatacenterFirewallDisabled(_) => 6508,
+            Error::BackupNotQuiesced(_) => 6509,
             Error::Unauthorized(_) => 9515,
             Error::Forbidden(_) => 9516,
             Error::ResponseTooLarge(_) => 9517,
@@ -253,7 +260,8 @@ impl From<Error> for Dx {
             Error::SnapshotTaken(text) | Error::NodeConflict(text) => Dx::Conflict(text),
             Error::ClientBuild(text)
             | Error::NodeUnavailable(text)
-            | Error::DatacenterFirewallDisabled(text) => Dx::Unavailable(text),
+            | Error::DatacenterFirewallDisabled(text)
+            | Error::BackupNotQuiesced(text) => Dx::Unavailable(text),
             Error::TaskTimeout(text) | Error::LockTimeout(text) => Dx::Timeout(text),
             Error::BadRequest(text) => Dx::Invalid(text),
             Error::Request(text)
@@ -288,6 +296,7 @@ mod tests {
             Error::BadRequest("proxmox: u returned HTTP 400: x".into()),
             Error::NodeUnavailable("proxmox: u returned HTTP 503: x".into()),
             Error::DatacenterFirewallDisabled("proxmox: the datacenter firewall of u is off".into()),
+            Error::BackupNotQuiesced("proxmox: VM 100's guest agent does not answer".into()),
             Error::ResponseTooLarge("proxmox: the answer from /x exceeded 16 MiB".into()),
             Error::Decode("proxmox: could not read the answer from x: y".into()),
             Error::UnexpectedAnswer("proxmox: could not read a VM id from /cluster/nextid: x".into()),
