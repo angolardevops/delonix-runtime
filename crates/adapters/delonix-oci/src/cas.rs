@@ -63,9 +63,44 @@ impl Cas {
         Ok(fs::read(self.path(digest))?)
     }
 
+    /// Size of a blob in bytes, without reading it.
+    pub fn size(&self, digest: &str) -> Result<u64> {
+        Ok(fs::metadata(self.path(digest))?.len())
+    }
+
+    /// The first `n` bytes of a blob (fewer if the blob is shorter). Enough to
+    /// sniff a compression magic number without pulling a whole layer into
+    /// memory — a manifest needs the size and the media type, never the bytes.
+    pub fn head(&self, digest: &str, n: usize) -> Result<Vec<u8>> {
+        use std::io::Read;
+        let mut buf = Vec::with_capacity(n);
+        fs::File::open(self.path(digest))?
+            .take(n as u64)
+            .read_to_end(&mut buf)?;
+        Ok(buf)
+    }
+
     /// Verifies integrity: `sha256(content) == digest`.
     pub fn verify(&self, digest: &str) -> Result<bool> {
         let data = self.read(digest)?;
         Ok(sha256_hex(&data) == strip(digest))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn size_and_head_do_not_need_the_whole_blob() {
+        let dir = std::env::temp_dir().join(format!("delonix-cas-head-{}", std::process::id()));
+        let cas = Cas::open(&dir).unwrap();
+        let dg = cas.write(&[0x1f, 0x8b, 7, 7, 7, 7]).unwrap();
+        assert_eq!(cas.size(&dg).unwrap(), 6);
+        assert_eq!(cas.head(&dg, 4).unwrap(), vec![0x1f, 0x8b, 7, 7]);
+        // Shorter than asked: returns what there is, never an error.
+        assert_eq!(cas.head(&dg, 64).unwrap().len(), 6);
+        assert!(cas.size("sha256:0000").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
