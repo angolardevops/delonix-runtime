@@ -71,6 +71,11 @@ pub enum Error {
     /// failures and the lock token.
     #[error("{0}")]
     SdnRollbackFailed(String),
+    /// An SDN apply's task ended OK, but a vnet is not `available` on some
+    /// online node: that node's own reload failed, and the task's exit status
+    /// only reflects the entry node. The message names node, zone and vnet.
+    #[error("{0}")]
+    SdnNotRealized(String),
 
     /// A quiesced backup was asked of a VM whose filesystem could not be
     /// shown frozen for it: not running, no agent answering, or the node's
@@ -248,6 +253,7 @@ impl Error {
             Error::SdnLocked(_) => 5515,
             Error::SdnPendingChanges(_) => 5516,
             Error::SdnRollbackFailed(_) => 9525,
+            Error::SdnNotRealized(_) => 6512,
             Error::UnsupportedField(_) => 1524,
             Error::InvalidFirewallRule(_) => 1528,
             Error::InvalidFirewallObjectName(_) => 1531,
@@ -316,7 +322,8 @@ impl From<Error> for Dx {
             | Error::DatacenterFirewallDisabled(text)
             | Error::BackupNotQuiesced(text)
             | Error::ImportNotEnabled(text)
-            | Error::ImportNoSpace(text) => Dx::Unavailable(text),
+            | Error::ImportNoSpace(text)
+            | Error::SdnNotRealized(text) => Dx::Unavailable(text),
             Error::TaskTimeout(text) | Error::LockTimeout(text) => Dx::Timeout(text),
             Error::BadRequest(text) => Dx::Invalid(text),
             Error::Request(text)
@@ -379,6 +386,7 @@ mod tests {
             Error::SdnLocked("proxmox: u returned HTTP 500: invalid lock token provided! — the cluster's SDN configuration is locked by another holder".into()),
             Error::SdnPendingChanges("proxmox: u returned HTTP 500: configuration has pending changes".into()),
             Error::SdnRollbackFailed("proxmox: the SDN change failed (x) and discarding it failed too (y)".into()),
+            Error::SdnNotRealized("proxmox: the SDN apply task ended OK but these vnets are not realized: pve2/z/v: error (vnet is not generated)".into()),
             Error::InvalidPowerTimeout("proxmox: a shutdown timeout of 900s does not fit inside this client's 600s task deadline".into()),
             Error::UnsupportedField("the 'proxmox' backend cannot honour: kernel".into()),
             Error::NoHandle("VM 'x' has no Proxmox handle in its record".into()),

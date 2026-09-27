@@ -75,6 +75,9 @@ fn stock(method: &str, path: &str) -> Reply {
             r#"{"data":{"ticket":"PVE:root@pam:TICKET-1","CSRFPreventionToken":"CSRF-1"}}"#.into(),
         ),
         ("GET", "/nodes") => Reply::Json(200, r#"{"data":[{"node":"pve"}]}"#.into()),
+        // An SDN apply reads the zones back to check them on every node; a
+        // cluster with none has nothing to check.
+        ("GET", "/cluster/sdn/zones") => Reply::Json(200, r#"{"data":[]}"#.into()),
         (_, p) if p.contains("/tasks/") && p.ends_with("/status") => Reply::Json(
             200,
             r#"{"data":{"status":"stopped","exitstatus":"OK"}}"#.into(),
@@ -1987,7 +1990,7 @@ fn an_sdn_transaction_carries_the_lock_token_and_applies_with_it() {
     let log: Vec<Seen> = node
         .log()
         .into_iter()
-        .filter(|s| s.path.starts_with("/cluster/sdn"))
+        .filter(|s| s.path.starts_with("/cluster/sdn") && s.method != "GET")
         .collect();
     let order: Vec<(&str, &str)> = log
         .iter()
@@ -2118,6 +2121,100 @@ fn the_lock_refused_for_pending_changes_runs_nothing() {
         .filter(|s| s.path.starts_with("/cluster/sdn"))
         .collect();
     assert_eq!(sdn.len(), 1, "only the lock request: {sdn:?}");
+}
+
+const THREE_NODES: &str = r#"[{"node":"pve","status":"online"},{"node":"pve2","status":"online"},{"node":"pve3","status":"offline"}]"#;
+
+/// The apply's task ends OK when only the ENTRY node's reload succeeded —
+/// measured on a two-node cluster, 2026-09-27: `reloadnetworkall` OK, the
+/// second node's `srvreload` failed on a missing `dnsmasq`, its vnet `error`.
+/// So the apply reads every online node's zone content and refuses with
+/// DX-6512 naming node, zone and vnet; an offline node is not asked.
+#[test]
+fn an_sdn_apply_the_second_node_did_not_realize_is_refused() {
+    let content_ok = r#"{"data":[{"vnet":"v1","status":"available","statusmsg":null}]}"#;
+    let content_err = r#"{"data":[{"vnet":"v1","status":"error","statusmsg":"vnet is not generated. Please check the 'reload network' task log."}]}"#;
+    let node = MockNode::start(script(&[
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+        (
+            "GET",
+            "/cluster/sdn/zones",
+            ok_data(r#"[{"zone":"z1","type":"simple"}]"#),
+        ),
+        // Twice: `connect` reads the node list too.
+        ("GET", "/nodes", ok_data(THREE_NODES)),
+        ("GET", "/nodes", ok_data(THREE_NODES)),
+        (
+            "GET",
+            "/nodes/pve/sdn/zones/z1/content",
+            Reply::Json(200, content_ok.into()),
+        ),
+        (
+            "GET",
+            "/nodes/pve2/sdn/zones/z1/content",
+            Reply::Json(200, content_err.into()),
+        ),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    let err = cli.apply_sdn(&Ledger::at(dir.path())).unwrap_err();
+    let shown = err.to_string();
+    assert_eq!(delonix_model::Error::from(err).number(), 6512, "{shown}");
+    assert!(shown.contains("pve2/z1/v1: error"), "{shown}");
+    assert!(
+        !shown.contains("pve/z1"),
+        "the realized node is not named: {shown}"
+    );
+    let asked: Vec<String> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path.ends_with("/content"))
+        .map(|s| s.path)
+        .collect();
+    assert_eq!(
+        asked,
+        vec![
+            "/nodes/pve/sdn/zones/z1/content",
+            "/nodes/pve2/sdn/zones/z1/content"
+        ],
+        "every online node, and not the offline one"
+    );
+}
+
+/// The same apply with every online node realizing the vnet is plain success.
+#[test]
+fn an_sdn_apply_every_online_node_realized_succeeds() {
+    let content_ok = r#"{"data":[{"vnet":"v1","status":"available","statusmsg":null}]}"#;
+    let node = MockNode::start(script(&[
+        ("PUT", SDN_APPLY, ok_data(&format!("\"{RELOAD_UPID}\""))),
+        (
+            "GET",
+            "/cluster/sdn/zones",
+            ok_data(r#"[{"zone":"z1","type":"simple"}]"#),
+        ),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+        ("GET", "/nodes", ok_data(TWO_NODES)),
+        (
+            "GET",
+            "/nodes/pve/sdn/zones/z1/content",
+            Reply::Json(200, content_ok.into()),
+        ),
+        (
+            "GET",
+            "/nodes/pve2/sdn/zones/z1/content",
+            Reply::Json(200, content_ok.into()),
+        ),
+    ]));
+    let cli = sdn_client(&node);
+    let dir = tempfile::tempdir().unwrap();
+    cli.apply_sdn(&Ledger::at(dir.path()))
+        .expect("both nodes realized it");
+    let asked = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path.ends_with("/content"))
+        .count();
+    assert_eq!(asked, 2, "both online nodes were read");
 }
 
 /// A staged write while another holder has the lock is DX-5515, not a generic

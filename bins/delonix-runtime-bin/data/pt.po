@@ -14274,6 +14274,16 @@ msgstr "move uma VM Proxmox parada para outro nó do seu cluster — a mesma VM,
 msgid "move it while it runs, on a storage the whole cluster shares"
 msgstr "move-a enquanto corre, num storage partilhado por todo o cluster"
 
+# DX-6512 — SDN apply not realized on every node (ADR-0049)
+msgid "the SDN apply ended OK but a node did not realize it"
+msgstr "o apply do SDN terminou OK mas um nó não o realizou"
+
+msgid "An apply of the cluster's SDN configuration (`PUT /cluster/sdn`) forks one `reloadnetworkall` task, and that task ends OK when the entry node's reload succeeds — even if another node's reload failed. The engine then reads each online node's zone content, and at least one vnet was not `available` there. The message names each node, zone and vnet with the node's own reason."
+msgstr "Um apply da configuração SDN do cluster (`PUT /cluster/sdn`) lança uma tarefa `reloadnetworkall`, e essa tarefa termina OK quando o reload do nó de entrada tem sucesso — mesmo que o reload de outro nó tenha falhado. O motor lê então o conteúdo das zonas em cada nó online, e pelo menos uma vnet não estava `available` lá. A mensagem nomeia cada nó, zona e vnet com a razão dada pelo próprio nó."
+
+msgid "Read that node's 'reload network' task log (`pvesh get /nodes/<node>/tasks --typefilter srvreload`), fix what it names — commonly the `dnsmasq` package for a zone with `dhcp=dnsmasq`, or the `source /etc/network/interfaces.d/*` line in `/etc/network/interfaces` — and apply again."
+msgstr "Lê o log da tarefa 'reload network' desse nó (`pvesh get /nodes/<nó>/tasks --typefilter srvreload`), corrige o que ele nomeia — muitas vezes o pacote `dnsmasq` para uma zona com `dhcp=dnsmasq`, ou a linha `source /etc/network/interfaces.d/*` em `/etc/network/interfaces` — e aplica outra vez."
+
 # DX-6509 — quiesced backup on Proxmox (vm.backup.quiesced, ADR-0049)
 msgid "the backup could not be taken with the guest's filesystem frozen"
 msgstr "não foi possível fazer o backup com o sistema de ficheiros do convidado congelado"
