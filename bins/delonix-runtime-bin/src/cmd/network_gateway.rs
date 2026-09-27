@@ -297,7 +297,11 @@ fn apply_one(doc: &ManifestDoc) -> Result<()> {
         return Err(Error::Conflict(super::po::tf(
             "networkgateway/{name} is recorded on provider '{old}', not '{new}' — replace the \
              document (`--replace NetworkGateway/{name}`) to move it",
-            &[("name", &name), ("old", &rec.provider), ("new", &spec.provider)],
+            &[
+                ("name", &name),
+                ("old", &rec.provider),
+                ("new", &spec.provider),
+            ],
         )));
     }
     let owner = owner_mark(&mut rec)?;
