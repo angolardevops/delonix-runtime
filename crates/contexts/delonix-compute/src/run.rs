@@ -108,7 +108,7 @@ where
     mounts.extend(edits.mounts);
     let image = images.resolve(&o.image)?;
     let config = images.config(&image);
-    let rootfs = images.prepare_rootfs(&image, &id, second_pass)?;
+    let rootfs = images.prepare_rootfs(&image, &id, second_pass, o.rm)?;
 
     let mut env_files = Vec::with_capacity(o.env_file.len());
     for f in &o.env_file {
@@ -607,7 +607,13 @@ mod tests {
                 working_dir: "/app".into(),
             }
         }
-        fn prepare_rootfs(&self, _: &String, id: &str, second_pass: bool) -> Result<String> {
+        fn prepare_rootfs(
+            &self,
+            _: &String,
+            id: &str,
+            second_pass: bool,
+            _ephemeral: bool,
+        ) -> Result<String> {
             self.log(format!("rootfs {id} second_pass={second_pass}"));
             Ok(format!("/roots/{id}"))
         }

@@ -1,6 +1,6 @@
 # ADR-0056: An ephemeral container's overlay is mounted `volatile`, so its exit stops waiting for the host's writeback
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-09-27) — implemented for `--rm`; see «Implementation» below
 - **Date:** 2026-09-27
 - **Deciders:** Walter Angolar
 - **Relates to:** ADR-0016 (ext4 under the state root), ADR-0037 (the overlay is mounted with
@@ -65,11 +65,13 @@ namespace, with the spike above run first.
 **D1 — An ephemeral container's overlay is mounted `volatile`.** An ephemeral container is one
 whose upper dir is deleted when it exits, so no write in it can outlive the container:
 
-- a container run with `--rm`;
-- a `build` work container (`build.rs`: `retire_container` stops and removes it; the layer is
-  committed from its rootfs before that).
+- a container run with `--rm`.
 
-For these, `volatile` costs nothing. Durability of the upper does not matter because the upper
+*Correction at implementation:* this list also named the `build` work containers. They do not
+use an overlay at all — `build` prepares a flat rootfs (`prepare_rootfs_flat`), so there is no
+overlay unmount for their exit to wait on. `--rm` is the only case.
+
+For it, `volatile` costs nothing. Durability of the upper does not matter because the upper
 is discarded, and the `incompat` mark is never seen because that overlay is never mounted again.
 
 **D2 — How it is carried.** The overlay is mounted inside the container's init, from a contract
@@ -130,3 +132,27 @@ That is a different trade-off from D1, and it needs its own measurement and its 
 - Before merging an implementation: a `delonix-runtime-sec` pass on the mount path (guardrail 5
   asks for one on any change at a namespace boundary), and the measurement of #533 repeated with
   the implementation.
+
+## Implementation
+
+Measured with the implementation, isolated state root, rootless, same host as the spike:
+
+| 1 GB written to another file on the same disk | `run … alpine true` |
+|---|---|
+| `--rm` (mount options inside show `fsync=volatile`) | **0.16 s · 0.14 s** |
+| kept container (no `volatile` in its mount options) | 9.5 s · 14.0 s |
+
+- **The marker.** `ImageStore::prepare_overlay(…, volatile)` writes `overlay-volatile`, and
+  REMOVES a stale one when the container is kept. Test:
+  `the_volatile_marker_follows_the_last_preparation`.
+- **The mount.** `mount_overlay_if_marked` sets the `volatile` flag through `fsconfig`. The
+  rootful path (`mount_rootfs_with`) adds `,volatile` to its options.
+  - Both retry without the flag on `EINVAL` (D3).
+  - Both empty `work/` first. A `--rm` container can be mounted twice, because `--restart` is
+    not refused alongside `--rm`, and the kernel would refuse the marked workdir.
+  - Measured: `run -d --rm --restart always` restarted twice in 12 s with no mount error, and a
+    file in its write layer kept accumulating across the restarts.
+- **Not validated:** the rootful path (`mount_rootfs_with`), which cannot be run on this
+  production host; and a kernel older than 5.10 (the `EINVAL` fallback).
+- **Seen on the way, not changed here:** a `--rm --restart always` container stopped with
+  `stop` is not removed.

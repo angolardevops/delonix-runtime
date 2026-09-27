@@ -37,8 +37,17 @@ pub trait ImageStore {
 
     /// The root filesystem for container `id`. `second_pass` is the re-exec into
     /// a custom network's namespace, where a rootfs the first pass already
-    /// prepared is reused instead of being unpacked again.
-    fn prepare_rootfs(&self, image: &Self::Image, id: &str, second_pass: bool) -> Result<String>;
+    /// prepared is reused instead of being unpacked again. `ephemeral` is a
+    /// container whose write layer is discarded when it exits (`--rm`), which the
+    /// store may prepare so its exit does not wait for the host's writeback
+    /// (ADR-0056).
+    fn prepare_rootfs(
+        &self,
+        image: &Self::Image,
+        id: &str,
+        second_pass: bool,
+        ephemeral: bool,
+    ) -> Result<String>;
 
     /// `--user <uid[:gid]|name[:group]>` resolved against the prepared rootfs.
     fn resolve_user(&self, rootfs: &str, spec: &str) -> Result<(u32, Option<u32>)>;
