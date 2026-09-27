@@ -45,10 +45,19 @@ pub mod cluster;
 mod error;
 mod network_zone;
 mod sdn;
+mod sdn_lock;
+mod sdn_routing;
 pub mod vm_firewall;
 pub use sdn::{
     validate_fabric_id, validate_ip, validate_mac, DhcpRange, FabricProtocol, IpamKind,
     SubnetOptions, ZoneOptions,
+};
+pub use sdn_lock::{SdnDryRun, SdnLockToken, SdnPendingChange};
+pub use sdn_routing::{
+    validate_controller_id, validate_prefix_list_id, validate_route_map_id,
+    validate_routing_list_id, ControllerKind, ControllerOptions, PrefixListEntry,
+    PrefixListEntryUpdate, RouteMapClause, RouteMapEntry, RouteMapEntryUpdate, RoutingAction,
+    VnetFirewallOptions,
 };
 
 pub use network_zone::{ProxmoxNetworkZoneProvider, ID as NETWORK_ZONE_PROVIDER_ID};
@@ -569,6 +578,37 @@ enum TaskKind {
     AddSdnIp,
     UpdateSdnIp,
     DeleteSdnIp,
+    /// `POST/PUT/DELETE /cluster/sdn/controllers[/{controller}]` — a BGP
+    /// or EVPN controller. STAGED like a zone (see `sdn_routing`).
+    CreateSdnController,
+    UpdateSdnController,
+    DeleteSdnController,
+    /// `POST/PUT/DELETE /cluster/sdn/prefix-lists[/{id}]` — a prefix list,
+    /// and its entries under `…/entries[/{url_seq}]`. STAGED.
+    CreateSdnPrefixList,
+    UpdateSdnPrefixList,
+    DeleteSdnPrefixList,
+    AddSdnPrefixListEntry,
+    UpdateSdnPrefixListEntry,
+    DeleteSdnPrefixListEntry,
+    /// `POST/PUT/DELETE /cluster/sdn/route-maps/entries[/{route-map-id}/entry/{order}]`
+    /// — one entry of a route map. STAGED; a route map exists while it has
+    /// an entry.
+    CreateSdnRouteMapEntry,
+    UpdateSdnRouteMapEntry,
+    DeleteSdnRouteMapEntry,
+    /// `PUT …/vnets/{vnet}/firewall/options` and the `…/firewall/rules`
+    /// writes — the node's own firewall for traffic FORWARDED through a
+    /// vnet. NOT staged: written to `/etc/pve/sdn/firewall/<vnet>.fw` at once.
+    SdnVnetFirewallOptions,
+    AddSdnVnetFirewallRule,
+    UpdateSdnVnetFirewallRule,
+    DeleteSdnVnetFirewallRule,
+    /// `DELETE /cluster/sdn/lock` — releases the cluster's global SDN lock.
+    ReleaseSdnLock,
+    /// `POST /cluster/sdn/rollback` — discards every pending SDN change,
+    /// putting the running configuration back in the pending files.
+    RollbackSdn,
     /// `PUT /cluster/sdn` (no body) — reloads the PENDING SDN configuration
     /// onto every node in the cluster. The one SDN call that genuinely forks
     /// a cluster-wide task; every other SDN write above is very likely
@@ -639,6 +679,24 @@ impl TaskKind {
             TaskKind::AddSdnIp => "add-sdn-ip",
             TaskKind::UpdateSdnIp => "update-sdn-ip",
             TaskKind::DeleteSdnIp => "delete-sdn-ip",
+            TaskKind::CreateSdnController => "create-sdn-controller",
+            TaskKind::UpdateSdnController => "update-sdn-controller",
+            TaskKind::DeleteSdnController => "delete-sdn-controller",
+            TaskKind::CreateSdnPrefixList => "create-sdn-prefix-list",
+            TaskKind::UpdateSdnPrefixList => "update-sdn-prefix-list",
+            TaskKind::DeleteSdnPrefixList => "delete-sdn-prefix-list",
+            TaskKind::AddSdnPrefixListEntry => "add-sdn-prefix-list-entry",
+            TaskKind::UpdateSdnPrefixListEntry => "update-sdn-prefix-list-entry",
+            TaskKind::DeleteSdnPrefixListEntry => "delete-sdn-prefix-list-entry",
+            TaskKind::CreateSdnRouteMapEntry => "create-sdn-route-map-entry",
+            TaskKind::UpdateSdnRouteMapEntry => "update-sdn-route-map-entry",
+            TaskKind::DeleteSdnRouteMapEntry => "delete-sdn-route-map-entry",
+            TaskKind::SdnVnetFirewallOptions => "sdn-vnet-firewall-options",
+            TaskKind::AddSdnVnetFirewallRule => "sdn-vnet-firewall-add-rule",
+            TaskKind::UpdateSdnVnetFirewallRule => "sdn-vnet-firewall-update-rule",
+            TaskKind::DeleteSdnVnetFirewallRule => "sdn-vnet-firewall-delete-rule",
+            TaskKind::ReleaseSdnLock => "release-sdn-lock",
+            TaskKind::RollbackSdn => "rollback-sdn",
             TaskKind::ApplySdn => "apply-sdn",
         }
     }
@@ -798,6 +856,29 @@ impl TaskKind {
             TaskKind::AddSdnIp => "sdnipadd",
             TaskKind::UpdateSdnIp => "sdnipupdate",
             TaskKind::DeleteSdnIp => "sdnipdelete",
+            // NEVER OBSERVED, and measured NOT to fork: a live run against PVE
+            // 9.2.2 (2026-09-27) had every one of these answer inline (`null`
+            // from the Perl routes, and from the Rust-side prefix-list and
+            // route-map routes too). Placeholders that keep the match
+            // exhaustive, never something a ledger has recorded.
+            TaskKind::CreateSdnController => "sdncontrollercreate",
+            TaskKind::UpdateSdnController => "sdncontrollerupdate",
+            TaskKind::DeleteSdnController => "sdncontrollerdelete",
+            TaskKind::CreateSdnPrefixList => "sdnprefixlistcreate",
+            TaskKind::UpdateSdnPrefixList => "sdnprefixlistupdate",
+            TaskKind::DeleteSdnPrefixList => "sdnprefixlistdelete",
+            TaskKind::AddSdnPrefixListEntry => "sdnprefixentryadd",
+            TaskKind::UpdateSdnPrefixListEntry => "sdnprefixentryupdate",
+            TaskKind::DeleteSdnPrefixListEntry => "sdnprefixentrydelete",
+            TaskKind::CreateSdnRouteMapEntry => "sdnroutemapcreate",
+            TaskKind::UpdateSdnRouteMapEntry => "sdnroutemapupdate",
+            TaskKind::DeleteSdnRouteMapEntry => "sdnroutemapdelete",
+            TaskKind::SdnVnetFirewallOptions => "pvefw",
+            TaskKind::AddSdnVnetFirewallRule => "pvefw",
+            TaskKind::UpdateSdnVnetFirewallRule => "pvefw",
+            TaskKind::DeleteSdnVnetFirewallRule => "pvefw",
+            TaskKind::ReleaseSdnLock => "sdnunlock",
+            TaskKind::RollbackSdn => "sdnrollback",
             // Read from a live PVE 9.2.2 task log (`docs/proxmox/trace-9.2.2.routes`),
             // not assumed: `PUT /cluster/sdn` forks `reloadnetworkall`, not the
             // `srvreload` this guess was originally written as.
@@ -941,6 +1022,13 @@ pub struct Client {
     /// its node by the next call without a second search, and the engine can
     /// persist the new handle (`VmBackend::current_handle`).
     relocated: std::sync::Mutex<std::collections::HashMap<u32, String>>,
+    /// The token of the cluster's global SDN lock while
+    /// [`Client::sdn_transaction`] holds it, and the thread that opened the
+    /// transaction. Every SDN config write sent FROM THAT THREAD carries the
+    /// token (see [`sdn_lock::lock_token_applies`]); a write from another
+    /// thread does not, and the node refuses it — which is the lock doing its
+    /// job, not something to work around.
+    sdn_lock: std::sync::Mutex<Option<(std::thread::ThreadId, String)>>,
 }
 
 impl Client {
@@ -975,6 +1063,7 @@ impl Client {
             task_timeout: self.task_timeout,
             trace_routes: self.trace_routes.clone(),
             relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
+            sdn_lock: std::sync::Mutex::new(None),
         })
     }
 
@@ -1045,6 +1134,7 @@ impl Client {
             task_timeout: opts.task_timeout,
             trace_routes: opts.trace_routes,
             relocated: std::sync::Mutex::new(std::collections::HashMap::new()),
+            sdn_lock: std::sync::Mutex::new(None),
         };
         me.login()?;
         // Prove the credential AND the node name before anything is created:
@@ -1158,21 +1248,32 @@ impl Client {
     }
 
     fn delete(&self, path: &str) -> Result<String> {
-        let url = self.url(path);
+        let mut url = self.url(path);
+        // A DELETE's parameters travel in the query (a body makes the
+        // proxy answer 501), the lock token included.
+        if let Some(token) = self.sdn_lock_token_for("DELETE", path) {
+            url.push(if url.contains('?') { '&' } else { '?' });
+            url.push_str("lock-token=");
+            url.push_str(&token);
+        }
         self.send_authed("DELETE", path, || self.http.delete(&url))
     }
 
     fn post_form(&self, path: &str, form: &[(&str, &str)], authed: bool) -> Result<String> {
         let url = self.url(path);
+        let token = self.sdn_lock_token_for("POST", path);
+        let form = sdn_lock::with_lock_token(form, token.as_deref());
         if !authed {
-            return self.send("POST", path, self.http.post(&url).form(form), false);
+            return self.send("POST", path, self.http.post(&url).form(&form), false);
         }
-        self.send_authed("POST", path, || self.http.post(&url).form(form))
+        self.send_authed("POST", path, || self.http.post(&url).form(&form))
     }
 
     fn put_form(&self, path: &str, form: &[(&str, &str)]) -> Result<String> {
         let url = self.url(path);
-        self.send_authed("PUT", path, || self.http.put(&url).form(form))
+        let token = self.sdn_lock_token_for("PUT", path);
+        let form = sdn_lock::with_lock_token(form, token.as_deref());
+        self.send_authed("PUT", path, || self.http.put(&url).form(&form))
     }
 
     /// The whole `GET …/status/current` answer: besides the state, the
@@ -3926,6 +4027,25 @@ fn classify_status(status: reqwest::StatusCode, base: &str, path: &str, body: &s
             Error::NodeNotFound(format!("Proxmox resource at {path_only}: {text}"))
         }
         500 if body.contains("already exists") => Error::NodeConflict(text),
+        // The cluster's global SDN lock (`POST /cluster/sdn/lock`): held by
+        // someone else, or our token is stale. Measured: the node says the
+        // same words whether no token or a wrong one was sent.
+        500 if body.contains("invalid lock token provided") => Error::SdnLocked(format!(
+            "{text} — the cluster's SDN configuration is locked by another holder \
+             (`DELETE /cluster/sdn/lock` with its token releases it)"
+        )),
+        500 if body.contains("configuration has pending changes") => {
+            Error::SdnPendingChanges(format!(
+                "{text} — someone else's staged SDN changes are waiting to be applied or \
+                 rolled back; taking the lock would make this apply push them too"
+            ))
+        }
+        // The vnet firewall routes look the vnet up in the RUNNING SDN
+        // configuration only: a vnet that is merely staged is "invalid".
+        500 if body.contains("invalid vnet specified") => Error::NodeNotFound(format!(
+            "Proxmox resource at {path_only}: {text} — the vnet is not in the running SDN \
+             configuration (a staged vnet needs `PUT /cluster/sdn` first)"
+        )),
         _ => Error::HttpStatus(text),
     }
 }
@@ -6773,6 +6893,7 @@ mod tests {
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
             relocated: Default::default(),
+            sdn_lock: Default::default(),
         };
         let e = cli.cloudinit_dump(100, "bogus").unwrap_err();
         assert!(e.is_invalid_argument(), "{e}");
@@ -7219,7 +7340,12 @@ mod tests {
     /// exactly the blind spot this test exists to close.
     #[test]
     fn every_write_to_the_node_goes_through_the_task_path() {
-        let sources = [include_str!("lib.rs"), include_str!("sdn.rs")];
+        let sources = [
+            include_str!("lib.rs"),
+            include_str!("sdn.rs"),
+            include_str!("sdn_lock.rs"),
+            include_str!("sdn_routing.rs"),
+        ];
         // Writes are what these helpers send; `fn post_form`/`fn delete`
         // themselves are definitions, not call sites.
         let write_calls = ["self.post_form(", "self.put_form(", "self.delete("];
@@ -7227,6 +7353,11 @@ mod tests {
             (
                 "login",
                 "exchanges the credential for a ticket; it writes nothing on the node",
+            ),
+            (
+                "acquire_sdn_lock",
+                "the node answers the lock's TOKEN inline — a string that is not a UPID, and \
+                 no task is forked; a lost answer is reported with what releases the lock",
             ),
             (
                 "agent_ping",
@@ -7350,6 +7481,7 @@ mod tests {
             task_timeout: TASK_TIMEOUT,
             trace_routes: None,
             relocated: Default::default(),
+            sdn_lock: Default::default(),
         };
         let cfg = VmConfig::default();
         assert_eq!(cli(None, None).net0_arg(&cfg), "virtio,bridge=vmbr0");
