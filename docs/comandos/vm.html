@@ -446,7 +446,8 @@ SEE ALSO:
   delonix › vm › start</code></pre></div>
 <h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Voltar a arrancar uma VM parada, sem repetir as flags do create</div><div class='cap lang-en'>Boot a stopped VM again, without repeating the create flags</div><pre><code>delonix vm start dev</code></pre></div>
 <h2 id='unbridge'><code>vm unbridge</code></h2>
-<p class='intro'>Tear down a <code>vm bridge</code> (dry-run without <code>--apply</code>)</p>
+<p class='intro'>Tear down a <code>vm bridge</code> (dry-run without <code>--apply</code>).</p>
+<p class='intro'>Removes the subnets <code>vm bridge --apply</code> recorded. A bridge made before that record existed falls back to the auto-detected <code>virbr*</code>.</p>
 <div class='help'><pre><code>Usage: delonix vm unbridge [OPTIONS] &lt;NETWORK&gt;
 
 Arguments:
@@ -454,11 +455,14 @@ Arguments:
           
 
 Options:
-      --apply
-          
-
       --l18n &lt;en|pt&gt;
           Output language: `en` (default) or `pt` (Portuguese, pt_AO). Also settable via `$DELONIX_L18N`. Global — works before any subcommand
+
+      --vm-subnet &lt;VM_SUBNET&gt;
+          VM subnet(s) to close as well (default: the ones `vm bridge` recorded). Repeatable
+
+      --apply
+          Actually run the privileged teardown (requires root). Without it: dry-run
 
   -h, --help
           Print help (see a summary with &#x27;-h&#x27;)
@@ -467,14 +471,18 @@ EXAMPLES:
   # what the teardown would remove, without removing it
   delonix vm unbridge app
 
-  # actually tear the veth and the routes down, as root
+  # actually tear the veth and the routes down, as root — the subnets `vm
+  # bridge --apply` recorded, whatever `virbr*` exists now
   sudo delonix vm unbridge app --apply
+
+  # also close a subnet a bridge from before the record opened
+  sudo delonix vm unbridge app --apply --vm-subnet 192.168.200.0/24
 
 SEE ALSO:
   delonix vm bridge · delonix vm reach · delonix network ls
 
   delonix › vm › unbridge</code></pre></div>
-<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Fechar a ponte VM↔container</div><div class='cap lang-en'>Close the VM↔container bridge</div><pre><code>sudo delonix vm unbridge minha-rede</code></pre></div>
+<h3><span class='lang-pt'>Exemplos</span><span class='lang-en'>Examples</span></h3><div class="ex"><div class='cap lang-pt'>Fechar a ponte VM↔container — as subnets que o `vm bridge --apply` registou</div><div class='cap lang-en'>Close the VM↔container bridge — the subnets `vm bridge --apply` recorded</div><pre><code>sudo delonix vm unbridge minha-rede --apply</code></pre></div><div class="ex"><div class='cap lang-pt'>Fechar também uma subnet de uma ponte anterior ao registo</div><div class='cap lang-en'>Also close a subnet from a bridge older than the record</div><pre><code>sudo delonix vm unbridge minha-rede --apply --vm-subnet 192.168.200.0/24</code></pre></div>
 <h2 id='bridge'><code>vm bridge</code></h2>
 <p class='intro'>EXPERIMENTAL (root): give a libvirt VM DIRECT IP reachability to a container SDN network.</p>
 <p class='intro'>A veth from the host into the holder netns, plus routes. Defaults to a DRY-RUN; add <code>--apply</code> (as root) to establish it.</p>
