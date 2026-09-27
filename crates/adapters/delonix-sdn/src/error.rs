@@ -388,7 +388,7 @@ impl Error {
             Error::NetworkSubnetImmutable(_) => 5304,
             Error::BaseOctetTaken(_) => 5305,
             Error::NetworkPrefixConflict(_) => 5306,
-            Error::IpInUse(_) => 5307,
+            Error::IpInUse(_) => 5308,
             Error::WgMissing(_) => 6301,
             Error::Command { .. } => 9301,
             Error::Engine(e) => e.number(),

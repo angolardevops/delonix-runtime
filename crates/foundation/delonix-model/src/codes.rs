@@ -912,7 +912,7 @@ pub static CATALOG: &[Code] = &[
         "ingress network already realized on a different prefix",
         "An ingress NetDef is already realized on a prefix different from the one the registry now asks for.",
         "Remove the network (`delonix network rm <name>`) and create it again, or keep the recorded subnet."),
-    code!(5307, "network.ip_in_use", Conflict, Network, 5,
+    code!(5308, "network.ip_in_use", Conflict, Network, 5,
         "address already taken",
         "The address asked for is already leased to another container, or it belongs to the pool the network's DHCP server hands to VMs.",
         "Pick another address (`delonix network ipam ls` shows the leased ones), or leave the address to the engine."),
