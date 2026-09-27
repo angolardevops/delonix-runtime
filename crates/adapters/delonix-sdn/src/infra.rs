@@ -2036,10 +2036,168 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
     std::process::exit(0);
 }
 
+/// A strict dotted IPv4 address — `std`'s parser, which refuses the `+1`
+/// octets and the short forms `Cidr::parse_addr`/`Cidr::parse` tolerate.
+fn control_ipv4_ok(s: &str) -> bool {
+    s.parse::<std::net::Ipv4Addr>().is_ok()
+}
+
+/// A strict `a.b.c.d/len` — the address strict as above, the length digits
+/// only, and the whole thing a prefix [`crate::Cidr`] accepts.
+fn control_ipv4_cidr_ok(s: &str) -> bool {
+    let Some((addr, len)) = s.split_once('/') else {
+        return false;
+    };
+    control_ipv4_ok(addr)
+        && !len.is_empty()
+        && len.bytes().all(|b| b.is_ascii_digit())
+        && crate::Cidr::parse(s).is_some()
+}
+
+/// A count sent as bare decimal digits (`u64` so the holder never truncates
+/// what the host computed). `str::parse` alone would also take a leading `+`.
+fn control_count_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 20
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && s.parse::<u64>().is_ok()
+}
+
+/// **Every token of a control line, checked BEFORE the dispatch runs a single
+/// command** (S4 of the NaaS audit, doc 62 §6 P1).
+///
+/// The holder is mapped-root with `CAP_NET_ADMIN` over the infra netns, and
+/// each token below lands verbatim in an `ip`/`tc`/`wg`/`nft` argv — or, for
+/// the WireGuard interface, in a FILE NAME. `SO_PEERCRED` limits who may speak
+/// on the socket, not what a value that came from a manifest or a flag is
+/// allowed to be. Before this, `attach`'s `ip`/`gateway`, `netrate`'s `burst`
+/// and every `wg-up`/`wg-peer` field reached their command unchecked:
+///
+/// * `wg-up ../../../x …` wrote the node's PRIVATE KEY to `<wg dir>/.../../../x`
+///   (`ensure_iface` builds the temp key path from the interface name);
+/// * a token that starts with `-` is read by `ip`/`tc`/`wg` as an OPTION —
+///   `sanitize` keeps `-` (it is a legal interface character), so even the
+///   sanitized names were exposed.
+///
+/// Two layers: a universal one (no argv-bound token may start with `-`; the
+/// only exception is the literal `-` placeholder of `vxlan`'s peer list) and a
+/// typed one per verb for the fields that are not names. Names keep going
+/// through `sanitize` at their `do_*`, as before.
+///
+/// **Compatibility**: the wire format does not change — every line a client of
+/// this build or an older one legitimately sends passes. What changes is that
+/// a holder started from THIS binary refuses values it used to pass on. A
+/// holder still running from an older binary keeps the old behaviour until it
+/// is respawned (`delonix net netns down` + `up`); the client needs nothing.
+fn validate_control_tokens(parts: &[&str]) -> Result<()> {
+    let refuse = |field: &str, v: &str| {
+        Err(Error::InvalidControlCommand(format!(
+            "control token refused: {field} {v:?}"
+        )))
+    };
+    let Some((verb, args)) = parts.split_first() else {
+        return Ok(());
+    };
+    // The logical namespace is the one token that never reaches an argv: it is
+    // canonicalised by `namespace_isolation_key` and HASHED into a set name.
+    // Holding it to the option rule would refuse a namespace the rest of the
+    // engine accepts, for no gain.
+    let ns_pos = match (*verb, args.len()) {
+        ("attach", 5) | ("vmtap", 5) => Some(4),
+        ("attach-extra", 6) => Some(5),
+        _ => None,
+    };
+    for (i, t) in args.iter().enumerate() {
+        if Some(i) != ns_pos && t.starts_with('-') && *t != "-" {
+            return refuse("option-like", t);
+        }
+    }
+    match parts {
+        ["attach", _, ip, _, gw] | ["attach", _, ip, _, gw, _] => {
+            if !control_ipv4_ok(ip) {
+                return refuse("attach ip", ip);
+            }
+            if !control_ipv4_ok(gw) {
+                return refuse("attach gateway", gw);
+            }
+        }
+        ["attach-extra", _, _, ip, _, gw] | ["attach-extra", _, _, ip, _, gw, _] => {
+            if !control_ipv4_ok(ip) {
+                return refuse("attach-extra ip", ip);
+            }
+            if !control_ipv4_ok(gw) {
+                return refuse("attach-extra gateway", gw);
+            }
+        }
+        ["vmtap", _, _, gw] | ["vmtap", _, _, gw, _, _] | ["vxlan", _, _, _, gw, _] => {
+            if !control_ipv4_ok(gw) {
+                return refuse("gateway", gw);
+            }
+            if let ["vmtap", _, _, _, ip, _] = parts {
+                if !control_ipv4_ok(ip) {
+                    return refuse("vmtap ip", ip);
+                }
+            }
+        }
+        ["netrate", _, rate, burst] => {
+            if !control_count_ok(rate) {
+                return refuse("netrate rate", rate);
+            }
+            if !control_count_ok(burst) {
+                return refuse("netrate burst", burst);
+            }
+        }
+        ["l4guard", rate, max] => {
+            if !control_count_ok(rate) || rate.parse::<u32>().is_err() {
+                return refuse("l4guard rate", rate);
+            }
+            if !control_count_ok(max) || max.parse::<u32>().is_err() {
+                return refuse("l4guard max", max);
+            }
+        }
+        ["wg-up", iface, port, key, addr] => {
+            if !crate::wg::valid_iface_name(iface) {
+                return refuse("wg-up iface", iface);
+            }
+            if !control_count_ok(port) || port.parse::<u16>().map_or(true, |p| p == 0) {
+                return refuse("wg-up port", port);
+            }
+            if !crate::wg::valid_wg_key(key) {
+                // Never echo a private key back, not even a malformed one.
+                return refuse("wg-up private key", "<redacted>");
+            }
+            if !control_ipv4_cidr_ok(addr) {
+                return refuse("wg-up addr", addr);
+            }
+        }
+        ["wg-peer", iface, key, endpoint, allowed] => {
+            if !crate::wg::valid_iface_name(iface) {
+                return refuse("wg-peer iface", iface);
+            }
+            let peer = crate::wg::Peer {
+                public: key.to_string(),
+                endpoint: endpoint.to_string(),
+                allowed_ips: allowed.split(',').map(str::to_string).collect(),
+            };
+            crate::wg::validate_peer(&peer)?;
+        }
+        ["wg-peer-del", iface, _] if !crate::wg::valid_iface_name(iface) => {
+            return refuse("wg-peer-del iface", iface);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Dispatches a control command (`attach <netns> <ip>`, `detach <netns>`,
 /// `ping`) and returns the reply (`ok\n` or `err: <msg>\n`).
 fn handle_control(line: &str) -> String {
     let parts: Vec<&str> = line.split_whitespace().collect();
+    // Before ANY branch below, the read-only queries included: see
+    // `validate_control_tokens`.
+    if let Err(e) = validate_control_tokens(&parts) {
+        return format!("err: {e}\n");
+    }
     // CNI (rootless): the plugin runs HERE, in the holder — mapped-root and owner of the netns
     // (the host, the user's uid, wouldn't have CAP_NET_ADMIN in it). `cni-add` returns
     // the assigned IP in the reply body (`ok <cidr>`), for the host to register.
@@ -10460,5 +10618,119 @@ mod tests_restore_lease {
                 Some("10.88.1.1")
             );
         });
+    }
+}
+
+/// S4 (NaaS audit, doc 62 §6 P1): every token of the holder's control line is
+/// checked before a single command runs. Each test drives `handle_control`
+/// with the exploit line itself and requires the VALIDATOR's refusal — with
+/// the check removed the same line reaches `ip`/`tc`/`wg` and fails (or not)
+/// with a different message, so these tests fail too.
+#[cfg(test)]
+mod tests_control_tokens {
+    use super::{handle_control, validate_control_tokens};
+
+    fn key() -> String {
+        format!("{}=", "A".repeat(43))
+    }
+
+    fn assert_refused(line: &str) {
+        let reply = handle_control(line);
+        assert!(
+            reply.starts_with("err: control token refused"),
+            "{line:?} must be refused by the validator, got {reply:?}"
+        );
+    }
+
+    #[test]
+    fn attach_ip_and_gateway_cannot_smuggle_an_option() {
+        assert_refused("attach abc123 -batch delonix0 10.200.0.1");
+        assert_refused("attach abc123 10.200.0.5 delonix0 -force");
+        // Not an option, but not an address either: `ip route add default via dev`.
+        assert_refused("attach abc123 10.200.0.5 delonix0 dev");
+        assert_refused("attach abc123 10.200.0.5/8 delonix0 10.200.0.1");
+        assert_refused("attach abc123 +10.200.0.5 delonix0 10.200.0.1 team-a");
+        assert_refused("attach-extra abc123 eth1 10.201.0.5 dlxnabc help");
+        assert_refused("vmtap tap1 delonix0 10.200.0.1 all team-a");
+    }
+
+    #[test]
+    fn a_sanitized_name_is_no_longer_an_option_either() {
+        // `sanitize` keeps `-`: `ip netns add -n` was reachable.
+        assert_refused("attach -n 10.200.0.5 delonix0 10.200.0.1");
+        assert_refused("detach -all");
+        assert_refused("netdel -force");
+    }
+
+    #[test]
+    fn netrate_burst_and_rate_are_byte_counts_only() {
+        assert_refused("netrate vh1234 1000000 -help");
+        assert_refused("netrate vh1234 1000000 1mb");
+        assert_refused("netrate vh1234 +1000000 12500");
+        assert_refused("netrate vh1234 fast 12500");
+    }
+
+    #[test]
+    fn wg_up_iface_cannot_walk_the_private_key_out_of_the_wg_dir() {
+        let k = key();
+        assert_refused(&format!("wg-up ../../../tmp/pwn 51820 {k} 10.99.0.1/24"));
+        assert_refused(&format!("wg-up wg0/../x 51820 {k} 10.99.0.1/24"));
+        assert_refused(&format!("wg-up wg0 99999 {k} 10.99.0.1/24"));
+        assert_refused(&format!("wg-up wg0 51820 {k} 10.99.0.1"));
+        assert_refused("wg-up wg0 51820 not-a-key 10.99.0.1/24");
+    }
+
+    #[test]
+    fn wg_up_never_echoes_a_private_key() {
+        let secret = format!("{}!", "S".repeat(43));
+        let reply = handle_control(&format!("wg-up wg0 51820 {secret} 10.99.0.1/24"));
+        assert!(reply.starts_with("err: control token refused"), "{reply:?}");
+        assert!(!reply.contains(&secret), "the key leaked into {reply:?}");
+    }
+
+    #[test]
+    fn wg_peer_fields_are_a_key_an_ip_port_and_ipv4_prefixes() {
+        let k = key();
+        assert_refused(&format!("wg-peer ../x {k} 192.168.1.10:51820 10.99.0.2/32"));
+        assert_refused("wg-peer wg0 -private-key 192.168.1.10:51820 10.99.0.2/32");
+        let reply = handle_control(&format!("wg-peer wg0 {k} evil.example:51820 10.99.0.2/32"));
+        assert!(reply.contains("endpoint"), "{reply:?}");
+        let reply = handle_control(&format!("wg-peer wg0 {k} 192.168.1.10:51820 0/0,x"));
+        assert!(reply.contains("allowed-ips"), "{reply:?}");
+    }
+
+    /// Compatibility: the wire format did not change, and every line a client
+    /// of this build (or an older one) legitimately emits still passes. The
+    /// shapes are those of the `format!`s in `attach_container`,
+    /// `attach_extra`, `set_net_rate`, `set_wg_iface`, `set_wg_peer`,
+    /// `set_vxlan`, `vmtap_line`, `set_l4_guard`.
+    #[test]
+    fn every_legitimate_line_still_passes() {
+        let k = key();
+        for line in [
+            "ping".to_string(),
+            "attach abc123def456 10.200.0.5 delonix0 10.200.0.1".into(),
+            "attach abc123def456 172.20.4.9 dlxnabc 172.20.4.1 team-a".into(),
+            // A namespace is hashed, never an argv: a leading `-` stays legal there.
+            "attach abc123def456 10.200.0.5 delonix0 10.200.0.1 -odd".into(),
+            "attach-extra abc123def456 eth1 10.201.0.5 dlxnabc 10.201.0.1".into(),
+            "attach-extra abc123def456 eth1 10.201.0.5 dlxnabc 10.201.0.1 team-a".into(),
+            "netrate vh1a2b3c4d 1000000 12500".into(),
+            "l4guard 50 200".into(),
+            format!("wg-up wgo000064 51820 {k} 10.99.0.1/24"),
+            format!("wg-peer wgo000064 {k} 192.168.1.10:51820 10.99.0.2/32"),
+            format!("wg-peer-del wgo000064 {k}"),
+            "vxlan dlxv000064 100 dlxnabc 10.201.0.1 -".into(),
+            "vxlan dlxv000064 100 dlxnabc 10.201.0.1 192.168.1.10,192.168.1.11".into(),
+            "vmtap dlxt1234 delonix0 10.200.0.1".into(),
+            "vmtap dlxt1234 delonix0 10.200.0.1 10.200.0.9 team-a".into(),
+        ] {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            assert!(
+                validate_control_tokens(&parts).is_ok(),
+                "{line:?} is a legitimate line: {:?}",
+                validate_control_tokens(&parts)
+            );
+        }
     }
 }

@@ -14316,3 +14316,23 @@ msgstr "Os limites de container funcionam, mas não as flags recusadas acima. S�
 
 msgid "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough"
 msgstr "depois `systemctl daemon-reload` e `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega"
+
+# ---- vm bridge: subnets validadas e root antes do --apply (S4, 2026-09-27) ----
+
+msgid "the network's prefix is not a CIDR: '{prefix}'"
+msgstr "o prefixo da rede não é um CIDR: '{prefix}'"
+
+msgid "the network's prefix /{len} has no room for the bridge's host address"
+msgstr "o prefixo /{len} da rede não tem espaço para o endereço do host na ponte"
+
+msgid "--vm-subnet must be an IPv4 prefix a.b.c.d/len: '{subnet}'"
+msgstr "o --vm-subnet tem de ser um prefixo IPv4 a.b.c.d/len: '{subnet}'"
+
+msgid "--vm-subnet '{subnet}' is every address, not a VM subnet"
+msgstr "o --vm-subnet '{subnet}' abrange todos os endereços, não é uma subrede de VMs"
+
+msgid "--vm-subnet '{subnet}' overlaps the SDN network {sdn}"
+msgstr "o --vm-subnet '{subnet}' sobrepõe-se à rede SDN {sdn}"
+
+msgid "`--apply` needs root: this command changes the host's network namespace (run it with sudo, or drop `--apply` for the dry-run)"
+msgstr "o `--apply` precisa de root: este comando altera o namespace de rede do host (corre-o com sudo, ou tira o `--apply` para ver o plano)"
