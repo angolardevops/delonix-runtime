@@ -239,3 +239,53 @@ Matrix: 117/675 called, 114 in a live trace.
 **Still out, as decided:** a VM with local disks is refused, not copied (the lab measured that
 `--with-local-disks` works — an NBD mirror, 21 s for 1 GiB — so a later flag is feasible); no
 creation on another node; HA excluded; no cross-cluster move.
+
+## Addendum 2026-09-26 — local disks copied, only when asked
+
+Decision 4 refused a VM with local disks because copying them is a cost the caller had not asked
+for. It now stays refused by default, and `--with-local-disks` is the ask: the node copies them
+(`with-local-disks=1` — a full copy offline, an NBD block mirror with `--live`, the path the lab
+measured at 21 s for 1 GiB). `--target-storage <id>` sends `targetstorage`, naming the target's
+storage the copies land on; without it each disk keeps its storage id.
+
+- **Carried as `MoveOptions`** (`live`, `with_local_disks`, `target_storage`) through
+  `VmBackend::move_to_node`, instead of a growing list of booleans. The engine refuses an empty
+  `--target-storage` and one given without `--with-local-disks` (DX-1538) before the backend is
+  asked; the Proxmox backend refuses a storage id the node would not accept (DX-1538) before the
+  precheck.
+- **A local CD-ROM is always refused** (DX-5507). Measured on the lab cluster: a VM with
+  `local:iso/…` attached as `media=cdrom` makes the node abort the migrate ("Problem found while
+  scanning volumes"), with `with-local-disks` and without it. The precheck lists it in
+  `local_disks` with `cdrom: 1`, and it is now parsed apart (`MigratePrecheck::local_cdroms`), so
+  the refusal names the medium and says to eject it. **A cloud-init drive also says `cdrom: 1`**
+  (with `is_cloudinit: 1`), and the node copies it like a disk: an offline migrate of a VM whose
+  only local volume was its cloud-init drive finished. So it is counted with the disks. The first
+  version of this change sorted by `cdrom` alone and refused every VM with a local cloud-init
+  drive, which is most VMs this backend creates; the live case found it.
+- **A target outside `allowed_nodes` goes ahead when the copies are mapped.** The node lists a
+  target as not allowed when it lacks the SOURCE storage (`unavailable_storages`), which is
+  exactly what `targetstorage` answers; with both flags the move is sent and the node checks the
+  mapping itself. Without a target storage the refusal says `--target-storage` would map them.
+
+**Tested:** engine (the two target-storage refusals); unit (the precheck with a cloud-init drive
+and an ISO, as the node answered them); failure injection
+(`a_disk_copying_move_refuses_a_cdrom_and_a_bad_storage_id`,
+`a_disk_copying_move_sends_the_copy_and_the_target_storage`, which check both parameters in the
+form the node received, and the unmapped refusal; the local-disk refusal now names the flag);
+battery checks for the CLI refusals; and live against the lab cluster
+(`a_stopped_vm_moves_to_another_node_and_the_cluster_lists_it_there`, which now copies its
+local-disk VM with `--with-local-disks --target-storage nfs-lab`, and
+`a_running_vm_moves_live_on_shared_storage_and_keeps_running`: 2 passed on 2026-09-27). The
+node's task log for the copy: `found local disk 'local-lvm:vm-101-disk-0'`, `copying local disk
+images`, then the cloud-init drive and the 1 GiB disk imported as `nfs-lab:101/…raw`, about 5 s
+offline. The lock retry fired again: 5 `POST …/migrate` for 3 completed moves. `vm.migration.cold`
+keeps citing the same live case, which now also covers the copy.
+
+**Two lab faults found on the way, neither in the engine.** After the nodes had been paused for a
+day their clocks were 18 hours behind, with chrony still reporting itself synchronised; the first
+live move then failed with HTTP 596 and the node finished the migrate anyway. Setting the clocks
+cleared it. And a start on `pve2` right after a move failed with `mkdir
+/mnt/pve/nfs-lab/images/100: File exists`: `pve2` both exports and mounts `nfs-lab`, and its NFS
+client cached the directory's absence. The storage now mounts with `lookupcache=positive`.
+
+**Not covered:** a disk copy with `--live` (an NBD block mirror) has no live case of its own.
