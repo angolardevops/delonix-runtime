@@ -2448,7 +2448,7 @@ mod tests {
     /// previous binary: after `allow` + `rm` on a `team` container, the chain was gone,
     /// the record was `None`, and a container of another namespace reached it 2/2.
     #[test]
-    fn remover_a_ultima_regra_so_descarta_o_firewall_na_namespace_default() {
+    fn removing_the_last_rule_drops_the_firewall_only_in_the_default_namespace() {
         let empty = delonix_model::records::ContainerFw {
             enabled: true,
             namespace: "teamA".into(),
@@ -2473,7 +2473,7 @@ mod tests {
     /// lost it) still gets its namespace enforced; and a record that has to be CREATED
     /// for it inherits its namespace instead of `default`, which inverted the isolation.
     #[test]
-    fn a_namespace_do_container_e_um_firewall_a_impor_mesmo_sem_registo() {
+    fn the_container_namespace_is_a_firewall_to_enforce_even_without_a_record() {
         use super::super::container::{firewall_or_new, firewall_to_enforce};
         let c = sdn_container("teamA");
         let fw = firewall_to_enforce(&c).expect("teamA has isolation to enforce");

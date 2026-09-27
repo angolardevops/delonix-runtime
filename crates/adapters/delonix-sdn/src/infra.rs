@@ -9329,7 +9329,7 @@ Inter-|   Receive                                                |  Transmit
     /// its own base chain, evaluated before the destination's, so an accept there only
     /// ends that chain and a drop there is final.
     #[test]
-    fn o_egress_da_origem_e_avaliado_numa_base_chain_propria_antes_do_destino() {
+    fn the_source_egress_is_its_own_base_chain_evaluated_before_the_destination() {
         let rs = ingress_table_ruleset();
         let chains = forward_base_chains(&rs);
         let holding = |rule: &str| -> Vec<(String, i32)> {
@@ -9365,7 +9365,7 @@ Inter-|   Receive                                                |  Transmit
     /// dispatch forever. The migration applied on reattach has to end in exactly the
     /// shape a fresh setup has, and has to be safe to run twice (every restart).
     #[test]
-    fn a_migracao_do_dispatch_deixa_a_mesma_forma_que_uma_instalacao_nova() {
+    fn the_dispatch_migration_ends_in_the_shape_of_a_fresh_install() {
         let script = fw_dispatch_migration_script();
         let fresh = forward_base_chains(&ingress_table_ruleset());
         for (chain, prio, rule) in fw_dispatch_chains() {
@@ -9423,7 +9423,7 @@ Inter-|   Receive                                                |  Transmit
     /// Now the whole spec is refused before a line of nft exists — which is what keeps
     /// the previous ruleset in force.
     #[test]
-    fn uma_regra_invalida_recusa_o_firewall_inteiro_em_vez_de_a_saltar() {
+    fn an_invalid_rule_refuses_the_whole_firewall_instead_of_being_skipped() {
         let ip = ["10.200.0.5"];
         let good = fw_rule("out", "tcp", "5432", "10.200.0.9", "deny");
         let ok = firewall_script(&ip, &fw_with(vec![good.clone()]), "", &[]).expect("valid");
@@ -9471,7 +9471,7 @@ Inter-|   Receive                                                |  Transmit
     /// `172.30.5.0/24`. A usable host of a DECLARED network is now a workload address;
     /// anything else is still refused, because the text goes into nft.
     #[test]
-    fn um_container_numa_rede_cidr_declarada_tem_firewall() {
+    fn a_container_on_a_declared_cidr_network_gets_a_firewall() {
         let defs = [
             NetDef::new("lab", "172.30.5.0/24"),
             NetDef::new("old", "10.201"),
