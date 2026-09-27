@@ -182,8 +182,11 @@ bash scripts/install.sh --no-binary
   跑起来，只是不加限制。
 - `--cpuset`、`--io-weight` 以及
   `--device-read-bps`/`--device-write-bps`/`--device-read-iops`/`--device-write-iops` 这一
-  族，**不会**被那个探测检查：它们会被接受，并尽力应用，所以没有 `cpuset`/`io`
-  控制器时，它们就是不生效，也不会报任何错误。
+  族，会**按控制器**检查（`preflight_controller_limits`，它询问
+  `crates/adapters/delonix-linux` 里的 `leaf_controllers`）：容器的 cgroup 里没有
+  `cpuset`/`io` 控制器时，`container run` 会以退出码 **69** 拒绝，逃生口同样是
+  `DELONIX_ALLOW_UNENFORCED_LIMITS=1`。2026-09-27 实测：在此之前，
+  `--device-write-bps 5mb` 以 1.6 GB/s 写入并退出 0。
 
 没有 `--pids-limit` 这个 flag；pids 的上限是引擎那个 cgroup 组本身的属性，不是
 `container run` 的属性。
@@ -197,10 +200,14 @@ bash scripts/install.sh --no-binary
 systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 ```
 
-对长期运行的工作负载，用一个带 `Delegate=yes` 的 systemd **user** unit。有些宿主机只把
-`cpu memory pids` 委派给用户会话；`cpuset` 和 `io` 在 rootless 下可能永远都拿不到，
-`delonix system resources` 会点名哪些 flag 将会被忽略。当 `cpu` 控制器本身都缺失时，
-`delonix system setup --delegate` 会写一个系统级的 drop-in（需要 root，在下次登录时生效）。
+对长期运行的工作负载，用一个带 `Delegate=yes` 的 systemd **user** unit。很多宿主机只把
+`cpu memory pids` 委派给 `user@.service`，这时**任何 scope 都解决不了 `cpuset`/`io`**：
+`systemd-run --user --scope -p Delegate=yes` 只能拿到 `user@.service` 自己拥有的控制器
+（实测：`--device-write-bps 5mb` 下仍是 1.2 GB/s）。补救只能由 root 做、每台宿主机一次——
+写一个 drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf`，内容为 `[Service]` 和
+`Delegate=cpu cpuset io memory pids`，然后 `systemctl daemon-reload` 并重启用户管理器。
+`delonix system setup` 会打印它，并在 `refused:` 下列出这台宿主机上 `container run` 会拒绝的 flag。
+当 `cpu` 控制器本身都缺失时，`delonix system setup --delegate` 会写这个 drop-in（需要 root）。
 
 ### `PATH` 上一个过期的 `delonix`
 

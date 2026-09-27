@@ -715,10 +715,12 @@ la racine est disponible pour la session appelante.
 `container run` refuse `-m`/`--cpus`/`--cpu-weight` avec le code de sortie 69
 (`preflight_resource_limits` dans `bins/delonix-runtime-bin/src/cmd/container.rs` ;
 `DELONIX_ALLOW_UNENFORCED_LIMITS=1` exécute sans application, avec un avertissement). Cette sonde ne
-couvre que la base `memory`/`cpu`/`pids` : `--cpuset`, `--io-weight` et les flags
-`--device-*-bps`/`--device-*-iops` sont toujours acceptés au mieux, et `cpuset` et `io` ne sont
-généralement pas délégués aux sessions utilisateur sur un Ubuntu standard — ils peuvent donc être
-acceptés sans effet. Voir
+couvre que la base `memory`/`cpu`/`pids` ; `--cpuset`, `--io-weight` et les flags
+`--device-*-bps`/`--device-*-iops` ont leur propre sonde par contrôleur
+(`preflight_controller_limits`) et sont refusés avec le code 69 lorsque le cgroup du container n’a
+pas `cpuset`/`io` — le cas habituel sur un Ubuntu standard, où `user@.service` reçoit
+`cpu memory pids` et un scope `Delegate=yes` ne peut rien recevoir de plus. Le remède est un
+drop-in root sur `user@.service` (`Delegate=cpu cpuset io memory pids`). Voir
 [Environnement](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) et [ADR-0015](../../adr/0015-intermediate-cgroup-level.md).
 
 **Par où commencer la lecture.** `cgroup_limits_apply` → `user_service_base` → `try_delegated_base` →

@@ -183,8 +183,11 @@ exigence. Sans délégation, le moteur fait deux choses différentes, selon l’
   `bins/delonix-runtime-bin/src/cmd/container.rs`). `DELONIX_ALLOW_UNENFORCED_LIMITS=1` exécute
   malgré tout le container, sans limite, avec un avertissement.
 - `--cpuset`, `--io-weight` et la famille `--device-read-bps`/`--device-write-bps`/`--device-read-iops`/
-  `--device-write-iops` ne sont **pas** vérifiés par cette sonde : ils sont acceptés et appliqués
-  au mieux, donc sans les contrôleurs `cpuset`/`io` ils n’ont aucun effet et rien n’échoue.
+  `--device-write-iops` sont vérifiés **par contrôleur** (`preflight_controller_limits`, qui
+  interroge `leaf_controllers` dans `crates/adapters/delonix-linux`) : sans le contrôleur
+  `cpuset`/`io` dans le cgroup du container, `container run` refuse avec le code de sortie **69**,
+  avec la même échappatoire `DELONIX_ALLOW_UNENFORCED_LIMITS=1`. Mesuré le 2026-09-27 : avant cela,
+  `--device-write-bps 5mb` écrivait à 1,6 Go/s et sortait avec 0.
 
 Il n’existe pas d’option `--pids-limit` ; le plafond de pids est une propriété du groupe de cgroups du moteur, pas
 de `container run`.
@@ -199,11 +202,15 @@ pas root :
 systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 ```
 
-Pour les workloads de longue durée, utilisez une unité systemd **utilisateur** avec `Delegate=yes`. Certains hôtes ne délèguent que
-`cpu memory pids` aux sessions utilisateur ; `cpuset` et `io` peuvent ne jamais être disponibles en rootless, et
-`delonix system resources` nomme les options qui seront ignorées. `delonix system setup --delegate`
-écrit un drop-in à l’échelle du système (nécessite root, prend effet à la prochaine connexion) lorsque le contrôleur
-`cpu` lui-même est absent.
+Pour les workloads de longue durée, utilisez une unité systemd **utilisateur** avec `Delegate=yes`. Beaucoup d’hôtes ne délèguent que
+`cpu memory pids` à `user@.service`, et alors **aucun scope ne règle `cpuset`/`io`** : un
+`systemd-run --user --scope -p Delegate=yes` ne reçoit que ce que `user@.service` possède lui-même
+(mesuré : toujours 1,2 Go/s avec `--device-write-bps 5mb`). Le remède exige root, une fois par hôte —
+un drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf` avec `[Service]` et
+`Delegate=cpu cpuset io memory pids`, puis `systemctl daemon-reload` et un redémarrage du
+gestionnaire utilisateur. `delonix system setup` l’affiche, et liste sous `refused:` les options que
+`container run` refusera sur cet hôte. `delonix system setup --delegate` écrit ce drop-in
+(nécessite root) lorsque le contrôleur `cpu` lui-même est absent.
 
 ### Un `delonix` obsolète dans votre `PATH`
 

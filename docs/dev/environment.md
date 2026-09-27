@@ -181,8 +181,11 @@ requirement. Without delegation the engine does two different things, depending 
   `bins/delonix-runtime-bin/src/cmd/container.rs`). `DELONIX_ALLOW_UNENFORCED_LIMITS=1` runs the
   container anyway, unlimited, with a warning.
 - `--cpuset`, `--io-weight` and the `--device-read-bps`/`--device-write-bps`/`--device-read-iops`/
-  `--device-write-iops` family are **not** checked by that probe: they are accepted and applied
-  best-effort, so without the `cpuset`/`io` controllers they have no effect and nothing fails.
+  `--device-write-iops` family are checked **per controller** (`preflight_controller_limits`, which
+  asks `leaf_controllers` in `crates/adapters/delonix-linux`): without the `cpuset`/`io` controller
+  in the container's cgroup, `container run` refuses with exit **69**, under the same
+  `DELONIX_ALLOW_UNENFORCED_LIMITS=1` escape hatch. Measured on 2026-09-27: before this,
+  `--device-write-bps 5mb` wrote at 1.6 GB/s and exited 0.
 
 There is no `--pids-limit` flag; the pids ceiling is a property of the engine's cgroup group, not
 of `container run`.
@@ -196,11 +199,15 @@ per-command fix needs no root:
 systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 ```
 
-For long-lived workloads, use a systemd **user** unit with `Delegate=yes`. Some hosts delegate only
-`cpu memory pids` to user sessions; `cpuset` and `io` may never be available rootless, and
-`delonix system resources` names the flags that will be ignored. `delonix system setup --delegate`
-writes a system-wide drop-in (needs root, takes effect at the next login) when the `cpu`
-controller itself is missing.
+For long-lived workloads, use a systemd **user** unit with `Delegate=yes`. Many hosts delegate only
+`cpu memory pids` to `user@.service`, and then **no scope fixes `cpuset`/`io`**: a
+`systemd-run --user --scope -p Delegate=yes` only receives what `user@.service` itself has
+(measured: still 1.2 GB/s under `--device-write-bps 5mb`). The remedy is root-only, once per host —
+a drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf` with `[Service]` and
+`Delegate=cpu cpuset io memory pids`, then `systemctl daemon-reload` and a restart of the user
+manager. `delonix system setup` prints it, and lists under `refused:` the flags `container run`
+will refuse on this host. `delonix system setup --delegate` writes that drop-in (needs root) when
+the `cpu` controller itself is missing.
 
 ### A stale `delonix` on your `PATH`
 

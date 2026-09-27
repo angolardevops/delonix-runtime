@@ -694,9 +694,11 @@ for the contract, in `crates/adapters/delonix-linux/src/lib.rs`:
 delegation `container run` refuses `-m`/`--cpus`/`--cpu-weight` with exit 69
 (`preflight_resource_limits` in `bins/delonix-runtime-bin/src/cmd/container.rs`;
 `DELONIX_ALLOW_UNENFORCED_LIMITS=1` runs unenforced, with a warning). That probe covers only the
-`memory`/`cpu`/`pids` base: `--cpuset`, `--io-weight` and the `--device-*-bps`/`--device-*-iops`
-flags are still accepted best-effort, and `cpuset` and `io` are usually not delegated to user
-sessions on stock Ubuntu — so those can be accepted without effect. See
+`memory`/`cpu`/`pids` base; `--cpuset`, `--io-weight` and the `--device-*-bps`/`--device-*-iops`
+flags have their own per-controller probe (`preflight_controller_limits`) and are refused with exit
+69 when the container's cgroup lacks `cpuset`/`io` — usual on stock Ubuntu, where `user@.service`
+gets `cpu memory pids` and a `Delegate=yes` scope cannot receive more. The remedy is a root drop-in
+on `user@.service` (`Delegate=cpu cpuset io memory pids`). See
 [Environment](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) and [ADR-0015](../adr/0015-intermediate-cgroup-level.md).
 
 **Where to start reading.** `cgroup_limits_apply` → `user_service_base` → `try_delegated_base` →

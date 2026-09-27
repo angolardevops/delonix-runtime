@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="Manual do contribuidor"><div class="group"><div class="gtitle">Visão geral</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — Manual do Contribuidor</span></a></div><div class="group"><div class="gtitle">Começar</div><a href="start-here.html"><span class="n">01</span><span>Começa aqui</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS e cloud native — onde o motor encaixa</span></a></div><div class="group"><div class="gtitle">Fundamentos</div><a href="linux-foundations.html"><span class="n">03</span><span>Fundações de Linux</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>Introdução ao cloud native</span></a><a href="rust-primer.html"><span class="n">05</span><span>Introdução ao Rust para esta base de código</span></a></div><div class="group"><div class="gtitle">Preparar e compilar</div><a class="on" aria-current="page" href="environment.html"><span class="n">06</span><span>Preparar o teu ambiente</span></a><a href="build-and-test.html"><span class="n">07</span><span>Clonar, compilar e testar</span></a></div><div class="group"><div class="gtitle">Arquitectura</div><a href="project-structure.html"><span class="n">08</span><span>Estrutura do projecto</span></a><a href="architecture.html"><span class="n">09</span><span>Arquitectura</span></a><a href="crates.html"><span class="n">10</span><span>Os crates</span></a><a href="system-design-interview.html"><span class="n">11</span><span>System Design Interview — o Delonix Engine</span></a></div><div class="group"><div class="gtitle">Imagens e microVMs</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile e VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>Construir microVMs</span></a></div><div class="group"><div class="gtitle">Operar e diagnosticar</div><a href="troubleshooting.html"><span class="n">14</span><span>Diagnóstico de problemas</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>Como os nomes chegam ao /etc/hosts</span></a></div><div class="group"><div class="gtitle">Contribuir</div><a href="coding-conventions.html"><span class="n">16</span><span>Convenções de código</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>Acrescentar um Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>Fluxo de contribuição</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>Releases e estabilidade</span></a><a href="publishing-docs.html"><span class="n">20</span><span>Publicar a documentação</span></a></div><div class="group"><div class="gtitle">Referência</div><a href="cloud-native-standards.html"><span class="n">21</span><span>Padrões cloud native, camada a camada</span></a><a href="environment-variables.html"><span class="n">22</span><span>Variáveis de ambiente (DELONIX_*)</span></a><a href="glossary.html"><span class="n">23</span><span>Glossário</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">Preparar e compilar</p>
-<h1 id="preparing-your-environment">Preparar o teu ambiente</h1>
+<div class="notice" role="note"><span>Esta tradução pode estar atrás da página inglesa, que mudou depois de ser traduzida. <a href="../en/environment.html">Ler a página em inglês</a></span></div><h1 id="preparing-your-environment">Preparar o teu ambiente</h1>
 <p><strong>Antes de leres:</strong> <a href="start-here.html#day-0-in-30-minutes">Começa aqui</a> (Dia 0) e <a href="linux-foundations.html">Fundações de Linux</a> — as armadilhas do host abaixo são explicadas em termos de user namespaces e delegação de cgroup.</p>
 <p>O Delonix Runtime é <strong>só para Linux</strong>: todos os primitivos que usa — namespaces, cgroups v2, nftables,
 <code>pivot_root</code>, a nova API de mount — vivem no kernel Linux. Consegues <em>compilar</em> a maior parte do
@@ -446,8 +446,11 @@ tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, confo
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> corre o
   container na mesma, sem limites, com um aviso.</li>
 <li><code>--cpuset</code>, <code>--io-weight</code> e a família <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/
-  <code>--device-write-iops</code> <strong>não</strong> são verificados por essa sonda: são aceites e aplicados em melhor
-  esforço, por isso sem os controladores <code>cpuset</code>/<code>io</code> não têm efeito e nada falha.</li>
+  <code>--device-write-iops</code> são verificados <strong>por controlador</strong> (<code>preflight_controller_limits</code>, que
+  pergunta ao <code>leaf_controllers</code> em <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a>): sem o controlador <code>cpuset</code>/<code>io</code>
+  no cgroup do container, o <code>container run</code> recusa com saída <strong>69</strong>, com a mesma válvula
+  <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code>. Medido a 2026-09-27: antes disto, <code>--device-write-bps 5mb</code>
+  escrevia a 1,6 GB/s e saía 0.</li>
 </ul>
 <p>Não existe a flag <code>--pids-limit</code>; o tecto de pids é uma propriedade do grupo de cgroup do motor, não
 do <code>container run</code>.</p>
@@ -457,11 +460,15 @@ consegue mover para lá sozinha — o porquê, com os comandos para o veres, est
 correcção por comando não precisa de root:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copiar</span></button></div><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 </code></pre></div>
-<p>Para workloads de longa duração, usa uma unit systemd de <strong>utilizador</strong> com <code>Delegate=yes</code>. Alguns
-hosts delegam às sessões de utilizador só <code>cpu memory pids</code>; <code>cpuset</code> e <code>io</code> podem nunca estar
-disponíveis em rootless, e o <code>delonix system resources</code> nomeia as flags que vão ser ignoradas. O
-<code>delonix system setup --delegate</code> escreve um drop-in para todo o sistema (precisa de root, faz efeito
-no próximo login) quando falta o próprio controlador <code>cpu</code>.</p>
+<p>Para workloads de longa duração, usa uma unit systemd de <strong>utilizador</strong> com <code>Delegate=yes</code>. Muitos
+hosts delegam ao <code>user@.service</code> só <code>cpu memory pids</code>, e aí <strong>nenhum scope resolve <code>cpuset</code>/<code>io</code></strong>:
+um <code>systemd-run --user --scope -p Delegate=yes</code> só recebe o que o próprio <code>user@.service</code> tem
+(medido: continua a 1,2 GB/s com <code>--device-write-bps 5mb</code>). O remédio é só de root, uma vez por
+host — um drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code> com <code>[Service]</code> e
+<code>Delegate=cpu cpuset io memory pids</code>, depois <code>systemctl daemon-reload</code> e reiniciar o gestor do
+utilizador. O <code>delonix system setup</code> imprime-o, e lista em <code>refused:</code> as flags que o <code>container run</code>
+vai recusar neste host. O <code>delonix system setup --delegate</code> escreve esse drop-in (precisa de root)
+quando falta o próprio controlador <code>cpu</code>.</p>
 <h3 id="a-stale-delonix-on-your-path">Um <code>delonix</code> antigo no teu <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
 <p>Se o Delonix estiver instalado na máquina, o <code>delonix</code> do teu <code>PATH</code> é a release instalada, não a tua
 árvore. Corre sempre <code>./target/debug/delonix</code> (ou <code>target/release/delonix</code>) quando testas uma mudança.

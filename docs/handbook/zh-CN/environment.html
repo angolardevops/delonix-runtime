@@ -209,7 +209,7 @@ th:first-child,td:first-child{white-space:nowrap}
 <nav class="side" aria-label="贡献者手册"><div class="group"><div class="gtitle">概览</div><a href="index.html"><span class="n">·</span><span>Delonix Runtime — 贡献者手册</span></a></div><div class="group"><div class="gtitle">入门</div><a href="start-here.html"><span class="n">01</span><span>从这里开始</span></a><a href="iaas-and-cloud-native.html"><span class="n">02</span><span>IaaS 与云原生——引擎的定位</span></a></div><div class="group"><div class="gtitle">基础</div><a href="linux-foundations.html"><span class="n">03</span><span>Linux 基础</span></a><a href="cloud-native-primer.html"><span class="n">04</span><span>云原生入门</span></a><a href="rust-primer.html"><span class="n">05</span><span>本代码库的 Rust 入门</span></a></div><div class="group"><div class="gtitle">环境与构建</div><a class="on" aria-current="page" href="environment.html"><span class="n">06</span><span>准备你的环境</span></a><a href="build-and-test.html"><span class="n">07</span><span>克隆、构建与测试</span></a></div><div class="group"><div class="gtitle">架构</div><a href="project-structure.html"><span class="n">08</span><span>项目结构</span></a><a href="architecture.html"><span class="n">09</span><span>架构</span></a><a href="crates.html"><span class="n">10</span><span>各个 crate</span></a><a href="system-design-interview.html"><span class="n">11</span><span>系统设计面试 — Delonix 引擎</span></a></div><div class="group"><div class="gtitle">镜像与 microVM</div><a href="delonixfile-and-vmfile.html"><span class="n">12</span><span>Delonixfile 与 VMfile</span></a><a href="microvm-setup.html"><span class="n">13</span><span>构建 microVM</span></a></div><div class="group"><div class="gtitle">运维与排障</div><a href="troubleshooting.html"><span class="n">14</span><span>排查问题</span></a><a href="service-names-and-hosts.html"><span class="n">15</span><span>名称是如何抵达 /etc/hosts 的</span></a></div><div class="group"><div class="gtitle">贡献</div><a href="coding-conventions.html"><span class="n">16</span><span>编码规范</span></a><a href="adding-a-kind.html"><span class="n">17</span><span>新增一个 Kind</span></a><a href="contributing-workflow.html"><span class="n">18</span><span>贡献流程</span></a><a href="releases-and-stability.html"><span class="n">19</span><span>发布与稳定性</span></a><a href="publishing-docs.html"><span class="n">20</span><span>发布文档</span></a></div><div class="group"><div class="gtitle">参考</div><a href="cloud-native-standards.html"><span class="n">21</span><span>云原生标准，逐层展开</span></a><a href="environment-variables.html"><span class="n">22</span><span>环境变量（DELONIX_*）</span></a><a href="glossary.html"><span class="n">23</span><span>术语表</span></a></div></nav>
 <main><div class="content">
 <p class="kicker">环境与构建</p>
-<h1 id="preparing-your-environment">准备你的环境</h1>
+<div class="notice" role="note"><span>英文页面在翻译之后已有改动，本译文可能已经过时。 <a href="../en/environment.html">阅读英文页面</a></span></div><h1 id="preparing-your-environment">准备你的环境</h1>
 <p><strong>阅读之前：</strong><a href="start-here.html#day-0-in-30-minutes">从这里开始</a>（第 0 天）和 <a href="linux-foundations.html">Linux 基础</a> —— 下面这些宿主机陷阱，都是用用户命名空间和 cgroup 委派的术语来解释的。</p>
 <p>Delonix Runtime <strong>只支持 Linux</strong>：它用到的每一个原语 —— 命名空间、cgroups v2、
 nftables、<code>pivot_root</code>、新的 mount API —— 都活在 Linux 内核里。你可以在任何装有下面这套
@@ -443,8 +443,11 @@ v4.2.0 起才有（v4.1.0 的发布里一个都没有）。
   跑起来，只是不加限制。</li>
 <li><code>--cpuset</code>、<code>--io-weight</code> 以及
   <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/<code>--device-write-iops</code> 这一
-  族，<strong>不会</strong>被那个探测检查：它们会被接受，并尽力应用，所以没有 <code>cpuset</code>/<code>io</code>
-  控制器时，它们就是不生效，也不会报任何错误。</li>
+  族，会<strong>按控制器</strong>检查（<code>preflight_controller_limits</code>，它询问
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a> 里的 <code>leaf_controllers</code>）：容器的 cgroup 里没有
+  <code>cpuset</code>/<code>io</code> 控制器时，<code>container run</code> 会以退出码 <strong>69</strong> 拒绝，逃生口同样是
+  <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code>。2026-09-27 实测：在此之前，
+  <code>--device-write-bps 5mb</code> 以 1.6 GB/s 写入并退出 0。</li>
 </ul>
 <p>没有 <code>--pids-limit</code> 这个 flag；pids 的上限是引擎那个 cgroup 组本身的属性，不是
 <code>container run</code> 的属性。</p>
@@ -454,10 +457,14 @@ v4.2.0 起才有（v4.1.0 的发布里一个都没有）。
 不需要 root：</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>复制</span></button></div><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 </code></pre></div>
-<p>对长期运行的工作负载，用一个带 <code>Delegate=yes</code> 的 systemd <strong>user</strong> unit。有些宿主机只把
-<code>cpu memory pids</code> 委派给用户会话；<code>cpuset</code> 和 <code>io</code> 在 rootless 下可能永远都拿不到，
-<code>delonix system resources</code> 会点名哪些 flag 将会被忽略。当 <code>cpu</code> 控制器本身都缺失时，
-<code>delonix system setup --delegate</code> 会写一个系统级的 drop-in（需要 root，在下次登录时生效）。</p>
+<p>对长期运行的工作负载，用一个带 <code>Delegate=yes</code> 的 systemd <strong>user</strong> unit。很多宿主机只把
+<code>cpu memory pids</code> 委派给 <code>user@.service</code>，这时<strong>任何 scope 都解决不了 <code>cpuset</code>/<code>io</code></strong>：
+<code>systemd-run --user --scope -p Delegate=yes</code> 只能拿到 <code>user@.service</code> 自己拥有的控制器
+（实测：<code>--device-write-bps 5mb</code> 下仍是 1.2 GB/s）。补救只能由 root 做、每台宿主机一次——
+写一个 drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code>，内容为 <code>[Service]</code> 和
+<code>Delegate=cpu cpuset io memory pids</code>，然后 <code>systemctl daemon-reload</code> 并重启用户管理器。
+<code>delonix system setup</code> 会打印它，并在 <code>refused:</code> 下列出这台宿主机上 <code>container run</code> 会拒绝的 flag。
+当 <code>cpu</code> 控制器本身都缺失时，<code>delonix system setup --delegate</code> 会写这个 drop-in（需要 root）。</p>
 <h3 id="a-stale-delonix-on-your-path"><code>PATH</code> 上一个过期的 <code>delonix</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
 <p>如果这台机器上装了 Delonix，<code>PATH</code> 上的 <code>delonix</code> 就是那个已安装的发行版，不是你的
 代码树。测试改动时，永远运行 <code>./target/debug/delonix</code>（或者 <code>target/release/delonix</code>）。

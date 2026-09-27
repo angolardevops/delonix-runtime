@@ -443,8 +443,11 @@ requirement. Without delegation the engine does two different things, depending 
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/delonix-runtime-bin/src/cmd/container.rs</code></a>). <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> runs the
   container anyway, unlimited, with a warning.</li>
 <li><code>--cpuset</code>, <code>--io-weight</code> and the <code>--device-read-bps</code>/<code>--device-write-bps</code>/<code>--device-read-iops</code>/
-  <code>--device-write-iops</code> family are <strong>not</strong> checked by that probe: they are accepted and applied
-  best-effort, so without the <code>cpuset</code>/<code>io</code> controllers they have no effect and nothing fails.</li>
+  <code>--device-write-iops</code> family are checked <strong>per controller</strong> (<code>preflight_controller_limits</code>, which
+  asks <code>leaf_controllers</code> in <a class="src" href="https://github.com/angolardevops/delonix-runtime/tree/main/crates/adapters/delonix-linux" target="_blank" rel="noopener"><code>crates/adapters/delonix-linux</code></a>): without the <code>cpuset</code>/<code>io</code> controller
+  in the container's cgroup, <code>container run</code> refuses with exit <strong>69</strong>, under the same
+  <code>DELONIX_ALLOW_UNENFORCED_LIMITS=1</code> escape hatch. Measured on 2026-09-27: before this,
+  <code>--device-write-bps 5mb</code> wrote at 1.6 GB/s and exited 0.</li>
 </ul>
 <p>There is no <code>--pids-limit</code> flag; the pids ceiling is a property of the engine's cgroup group, not
 of <code>container run</code>.</p>
@@ -454,11 +457,15 @@ session cannot move itself in — why, with the commands to see it, is in
 per-command fix needs no root:</p>
 <div class="code" data-shell><div class="code-head"><span class="lang">shell</span><button class="copy" type="button"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></svg><span>Copy</span></button></div><pre><code class="language-bash">systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 </code></pre></div>
-<p>For long-lived workloads, use a systemd <strong>user</strong> unit with <code>Delegate=yes</code>. Some hosts delegate only
-<code>cpu memory pids</code> to user sessions; <code>cpuset</code> and <code>io</code> may never be available rootless, and
-<code>delonix system resources</code> names the flags that will be ignored. <code>delonix system setup --delegate</code>
-writes a system-wide drop-in (needs root, takes effect at the next login) when the <code>cpu</code>
-controller itself is missing.</p>
+<p>For long-lived workloads, use a systemd <strong>user</strong> unit with <code>Delegate=yes</code>. Many hosts delegate only
+<code>cpu memory pids</code> to <code>user@.service</code>, and then <strong>no scope fixes <code>cpuset</code>/<code>io</code></strong>: a
+<code>systemd-run --user --scope -p Delegate=yes</code> only receives what <code>user@.service</code> itself has
+(measured: still 1.2 GB/s under <code>--device-write-bps 5mb</code>). The remedy is root-only, once per host —
+a drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code> with <code>[Service]</code> and
+<code>Delegate=cpu cpuset io memory pids</code>, then <code>systemctl daemon-reload</code> and a restart of the user
+manager. <code>delonix system setup</code> prints it, and lists under <code>refused:</code> the flags <code>container run</code>
+will refuse on this host. <code>delonix system setup --delegate</code> writes that drop-in (needs root) when
+the <code>cpu</code> controller itself is missing.</p>
 <h3 id="a-stale-delonix-on-your-path">A stale <code>delonix</code> on your <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>
 <p>If Delonix is installed on the machine, <code>delonix</code> on your <code>PATH</code> is the installed release, not your
 tree. Always run <code>./target/debug/delonix</code> (or <code>target/release/delonix</code>) when you test a change.

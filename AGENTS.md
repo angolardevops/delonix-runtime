@@ -6755,6 +6755,21 @@ editor ganhou `cpu` a meio de uma sessão de 2026-08-09), e o mesmo comando recu
 avançou. `system setup` e o preflight do `cluster create` lêem a mesma coisa; o que varia é o
 host.
 
+**Adenda (2026-09-27): «opcionais» só para um nó Kubernetes.** Para quem pede os limites que
+esses controladores carregam, a ausência era uma mentira com rc=0. Medido neste host com o motor
+4.4.0 (`user@1000.service` com `cpu memory pids`): `container run --device-write-bps 5mb` escreveu
+a 1,6 GB/s e saiu 0, com um aviso que mandava usar `systemd-run --user --scope -p Delegate=yes`
+— e esse scope, corrido a sério, **continuou a 1,2 GB/s**: um scope só recebe o que o
+`user@.service` tem. Agora `--cpuset`, `--io-weight` e `--device-*` são RECUSADOS antes de criar
+nada (saída 69, `preflight_controller_limits`, válvula `DELONIX_ALLOW_UNENFORCED_LIMITS`), com uma
+sonda por controlador (`leaf_controllers` no `delonix-linux`) porque o `cgroup_limits_apply` passa
+num host que delega `cpu memory pids`. O `system setup` lista-os em `refused:` e deixou de dizer
+«nothing here needs them». O remédio que o erro indica é o drop-in `Delegate=cpu cpuset io memory
+pids` no `user@.service`: quem escreve o `subtree_control` do `user.slice` é o systemd (PID 1), não
+o utilizador, pelo que o «nunca podem aparecer» acima vale para o que se consegue SEM root. **Não
+medido aqui** — exige root e reiniciar o `user@1000`. Testes que chumbam se voltar o aviso:
+`controller_limits_preflight_tests` em `cmd/container.rs`.
+
 ## O cgroup de um container desaparece com ele (medido 2026-08-09)
 
 Relevante para quem for fazer o `OOMKilled` do CRI, que é uma das lacunas reais: **não há

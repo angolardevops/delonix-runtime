@@ -185,8 +185,11 @@ tem o mesmo requisito. Sem delegação o motor faz duas coisas diferentes, confo
   `bins/delonix-runtime-bin/src/cmd/container.rs`). `DELONIX_ALLOW_UNENFORCED_LIMITS=1` corre o
   container na mesma, sem limites, com um aviso.
 - `--cpuset`, `--io-weight` e a família `--device-read-bps`/`--device-write-bps`/`--device-read-iops`/
-  `--device-write-iops` **não** são verificados por essa sonda: são aceites e aplicados em melhor
-  esforço, por isso sem os controladores `cpuset`/`io` não têm efeito e nada falha.
+  `--device-write-iops` são verificados **por controlador** (`preflight_controller_limits`, que
+  pergunta ao `leaf_controllers` em `crates/adapters/delonix-linux`): sem o controlador `cpuset`/`io`
+  no cgroup do container, o `container run` recusa com saída **69**, com a mesma válvula
+  `DELONIX_ALLOW_UNENFORCED_LIMITS=1`. Medido a 2026-09-27: antes disto, `--device-write-bps 5mb`
+  escrevia a 1,6 GB/s e saía 0.
 
 Não existe a flag `--pids-limit`; o tecto de pids é uma propriedade do grupo de cgroup do motor, não
 do `container run`.
@@ -200,11 +203,15 @@ correcção por comando não precisa de root:
 systemd-run --user --scope -p Delegate=yes -- ./target/debug/delonix container run -d -m 128M alpine sleep 60
 ```
 
-Para workloads de longa duração, usa uma unit systemd de **utilizador** com `Delegate=yes`. Alguns
-hosts delegam às sessões de utilizador só `cpu memory pids`; `cpuset` e `io` podem nunca estar
-disponíveis em rootless, e o `delonix system resources` nomeia as flags que vão ser ignoradas. O
-`delonix system setup --delegate` escreve um drop-in para todo o sistema (precisa de root, faz efeito
-no próximo login) quando falta o próprio controlador `cpu`.
+Para workloads de longa duração, usa uma unit systemd de **utilizador** com `Delegate=yes`. Muitos
+hosts delegam ao `user@.service` só `cpu memory pids`, e aí **nenhum scope resolve `cpuset`/`io`**:
+um `systemd-run --user --scope -p Delegate=yes` só recebe o que o próprio `user@.service` tem
+(medido: continua a 1,2 GB/s com `--device-write-bps 5mb`). O remédio é só de root, uma vez por
+host — um drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf` com `[Service]` e
+`Delegate=cpu cpuset io memory pids`, depois `systemctl daemon-reload` e reiniciar o gestor do
+utilizador. O `delonix system setup` imprime-o, e lista em `refused:` as flags que o `container run`
+vai recusar neste host. O `delonix system setup --delegate` escreve esse drop-in (precisa de root)
+quando falta o próprio controlador `cpu`.
 
 ### Um `delonix` antigo no teu `PATH`
 

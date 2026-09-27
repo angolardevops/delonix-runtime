@@ -2489,7 +2489,12 @@ pub(crate) fn is_login_session_scope(cgroup: &str) -> bool {
 /// The system-wide drop-in that gives every user's `user@.service` a delegated
 /// cgroup. System scope, so it needs root — and it is the only half that
 /// persists across reboots.
-const DELEGATE_DROPIN: &str = "/etc/systemd/system/user@.service.d/50-delonix-delegate.conf";
+pub(crate) const DELEGATE_DROPIN: &str =
+    "/etc/systemd/system/user@.service.d/50-delonix-delegate.conf";
+/// The line of [`DELEGATE_BODY`] that does the work, named on its own so the
+/// `container run` refusal quotes the SAME controller list the drop-in writes
+/// (a test holds the two together).
+pub(crate) const DELEGATE_LINE: &str = "Delegate=cpu cpuset io memory pids";
 const DELEGATE_BODY: &str = "# Written by `delonix system setup --delegate`.\n\
                              # Gives each user's systemd manager a delegated cgroup subtree, so\n\
                              # rootless containers can carry --memory/--cpus/--pids-limit AND a\n\
@@ -2540,11 +2545,28 @@ const FATAL_CONTROLLERS: &[&str] = &["cpu"];
 /// not.
 ///
 /// `cpuset` and `io` are missing on plenty of hosts where a node boots fine —
-/// on Ubuntu 24.04 the root passes them down but `user.slice` does not, and
-/// that `subtree_control` belongs to root, so NO drop-in on `user@.service` can
-/// conjure them. Reporting their absence as a failure would send people to edit
-/// `/etc` for something that was never going to work and that they do not need.
+/// on Ubuntu 24.04 the root passes them down but `user.slice` does not.
+/// Optional for a NODE, and only for a node: `container run` REFUSES
+/// `--cpuset`/`--io-weight`/`--device-*` without them (see
+/// [`refused_flags`]), so the report must not call them «optional» to
+/// someone who asks for those limits.
 const NICE_CONTROLLERS: &[&str] = &["cpuset", "io", "memory", "pids"];
+
+/// The controllers `container run` refuses flags for when they are absent
+/// (`preflight_controller_limits`). `memory`/`cpu` are not here: their refusal
+/// hangs off whether there is delegation at all, which the `limits:` line says.
+const REFUSING_CONTROLLERS: &[&str] = &["cpuset", "io"];
+
+/// The `container run` flags refused on a host whose container cgroup has only
+/// `have`. **Pure**; the flag names come from `flags_of_controller`, the same
+/// source the refusal itself quotes.
+pub(crate) fn refused_flags(have: &[String]) -> Vec<&'static str> {
+    REFUSING_CONTROLLERS
+        .iter()
+        .filter(|c| !have.iter().any(|h| h == *c))
+        .flat_map(|c| runtime::flags_of_controller(c).iter().copied())
+        .collect()
+}
 
 /// Splits the missing controllers into the ones that BREAK a Kubernetes node
 /// and the ones that merely limit it. **Pure**, so the rule is testable without
@@ -2602,15 +2624,53 @@ fn cmd_setup(delegate: bool) -> Result<()> {
         println!(
             "  absent:   {}  {}",
             nice.join(" "),
-            super::po::t("← optional; nothing here needs them")
+            super::po::t("← a Kubernetes node boots without them")
+        );
+    }
+    // Asked of what a container leaf would REALLY get, not of `cur`: the same
+    // probe `container run` refuses on, so the two cannot disagree.
+    let refused = refused_flags(&runtime::leaf_controllers());
+    if !refused.is_empty() {
+        println!(
+            "  refused:  {}  {}",
+            refused.join(" "),
+            super::po::t(
+                "← `container run` REFUSES these here (exit 69): the container's cgroup has no \
+                 controller for them. A `systemd-run --user --scope` does not bring it — a scope \
+                 only gets what user@.service has."
+            )
         );
     }
 
     if ok && fatal.is_empty() {
-        // `cpuset`/`io` absent is the NORMAL state on a stock Ubuntu and breaks
-        // nothing. Calling that "something to do" sent people to edit /etc for a
-        // delegation their distro's `user.slice` will never pass down anyway.
-        println!("\n{}", super::po::t("Nothing to do."));
+        if refused.is_empty() {
+            // `cpuset`/`io` absent is the NORMAL state on a stock Ubuntu and a
+            // Kubernetes node boots without them — but that is only «nothing to
+            // do» while nobody asks for the limits they carry.
+            println!("\n{}", super::po::t("Nothing to do."));
+            return Ok(());
+        }
+        if !rootless {
+            println!(
+                "\n{}",
+                super::po::t(
+                    "Running as root and delonix.slice does not hand these controllers down: \
+                     check that /sys/fs/cgroup/cgroup.controllers lists them."
+                )
+            );
+            return Ok(());
+        }
+        println!(
+            "\n{}\n\n     {DELEGATE_DROPIN}\n       [Service]\n       {DELEGATE_LINE}\n\n     {}",
+            super::po::t(
+                "Container limits work, but not the refused flags above. Only this fixes them \
+                 (root, once per host):"
+            ),
+            super::po::t(
+                "then `systemctl daemon-reload` and restart the user manager (log out of all its \
+                 sessions, or reboot) — a running user@.service keeps the old set"
+            ),
+        );
         return Ok(());
     }
     // Limits apply but a controller a k8s node needs is absent. Reporting
@@ -2811,6 +2871,38 @@ mod setup_tests {
         let (fatal, nice) =
             super::missing_controllers(&have(&["cpu", "cpuset", "io", "memory", "pids"]));
         assert!(fatal.is_empty() && nice.is_empty());
+    }
+
+    /// «Optional» only for a node. The host measured on 2026-09-27 (`cpu
+    /// memory pids`) must be shown the flags `container run` refuses — it
+    /// used to say «optional; nothing here needs them» while
+    /// `--device-write-bps` was accepted and ignored.
+    #[test]
+    fn without_io_or_cpuset_the_report_names_the_refused_flags() {
+        let have = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let refused = super::refused_flags(&have(&["cpu", "memory", "pids"]));
+        for flag in ["--cpuset", "--io-weight", "--device-write-bps"] {
+            assert!(refused.contains(&flag), "{flag} missing: {refused:?}");
+        }
+        assert!(
+            !refused.contains(&"--cpus"),
+            "cpu is delegated: {refused:?}"
+        );
+        assert!(super::refused_flags(&have(&["cpu", "cpuset", "io", "memory", "pids"])).is_empty());
+    }
+
+    /// The `container run` refusal quotes `DELEGATE_LINE`; the file
+    /// `--delegate` writes is `DELEGATE_BODY`. If they diverge, the error tells
+    /// the operator to write one thing and setup writes another.
+    #[test]
+    fn the_written_drop_in_contains_the_quoted_line() {
+        assert!(super::DELEGATE_BODY.contains(super::DELEGATE_LINE));
+        for ctrl in ["cpu", "cpuset", "io", "memory", "pids"] {
+            assert!(
+                super::DELEGATE_LINE.split(['=', ' ']).any(|w| w == ctrl),
+                "{ctrl}"
+            );
+        }
     }
 }
 
