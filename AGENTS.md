@@ -3712,10 +3712,9 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
   192.168.200.0/24 --apply` como root numa rede `172.20.4.0/22` põe `172.20.7.254/22`
   na ponta do host; ping host→containers e container→host com 0% de perda. As
   recusas medidas: `--apply` sem root, `default`, `0.0.0.0/0`, uma subnet sobreposta à
-  SDN, e uma sem comprimento. **Lacuna por fechar**: o `unbridge` não aceita
-  `--vm-subnet` e volta a DETECTAR as subnets pelos `virbr*`. Uma ponte feita com
-  `--vm-subnet` explícito deixa as duas regras `iptables FORWARD … ACCEPT` e a rota
-  de retorno no holder; só o veth sai. Medido: 2 regras e a rota ficaram.
+  SDN, e uma sem comprimento. A lacuna que esta passagem mediu — o `unbridge` a
+  deixar as duas regras `iptables FORWARD … ACCEPT` e a rota de retorno de uma ponte
+  feita com `--vm-subnet` — está fechada pelo registo das subnets (bullet acima).
 - **VALIDADO E2E ao vivo** (kaeso-sys-01, 2026-07-21): de DENTRO de uma VM libvirt
   (`ubuntu@192.168.122.50`) → `ping`/`curl` a um container da `kaeso-net` por IP
   DIRECTO (`10.210.37.150:8069` → HTTP 200, ttl=63 = uma hop pelo forward do
