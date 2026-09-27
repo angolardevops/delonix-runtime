@@ -668,7 +668,10 @@ COMMIT
         assert!(in_vm_dhcp_pool("10.210", &legado));
         assert!(in_vm_dhcp_pool("10.210.0.0/16", &legado));
         // Maiúsculas e minúsculas são o mesmo MAC.
-        assert_eq!(vm_dhcp_lease_ip("10.210", &mac.to_lowercase()), Some(legado));
+        assert_eq!(
+            vm_dhcp_lease_ip("10.210", &mac.to_lowercase()),
+            Some(legado)
+        );
         // Sem pool fora de um /16.
         assert_eq!(vm_dhcp_lease_ip("172.20.9.0/24", mac), None);
         assert!(!in_vm_dhcp_pool("172.20.9.0/24", "172.20.9.10"));

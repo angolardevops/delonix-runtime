@@ -1021,7 +1021,10 @@ mod tests_transaccional {
     }
 
     fn leases_de(id: &str) -> Vec<(String, String, String)> {
-        all_leases().into_iter().filter(|(_, i, _)| i == id).collect()
+        all_leases()
+            .into_iter()
+            .filter(|(_, i, _)| i == id)
+            .collect()
     }
 
     /// Achado 1: uma rede criada com `--subnet 10.X.0.0/16` arrendava em
@@ -1067,7 +1070,10 @@ mod tests_transaccional {
             let id = "c1d20000feed0003";
             let ip = allocate(&def.prefix, id).unwrap();
             assert_eq!(
-                leases_de(id).into_iter().map(|(p, _, _)| p).collect::<Vec<_>>(),
+                leases_de(id)
+                    .into_iter()
+                    .map(|(p, _, _)| p)
+                    .collect::<Vec<_>>(),
                 vec![registry_key(&def.prefix)],
                 "o `ipam ls` mostrava o stem do ficheiro (`…_24`), que nunca casava com o filtro"
             );
@@ -1088,8 +1094,11 @@ mod tests_transaccional {
                 r#"{ "vivo00000000mig1": "10.83.0.7" }"#,
             )
             .unwrap();
-            std::fs::write(ipam.join("10.83.json"), r#"{ "velho0000000mig2": "10.83.9.9" }"#)
-                .unwrap();
+            std::fs::write(
+                ipam.join("10.83.json"),
+                r#"{ "velho0000000mig2": "10.83.9.9" }"#,
+            )
+            .unwrap();
             // Antes de qualquer operação trancada, o `lookup` já o vê.
             assert_eq!(
                 lookup("10.83.0.0/16", "vivo00000000mig1").as_deref(),
@@ -1097,7 +1106,10 @@ mod tests_transaccional {
             );
             let ip = allocate("10.83.0.0/16", "vivo00000000mig1").unwrap();
             assert_eq!(ip, "10.83.0.7", "o endereço do container vivo mudou");
-            assert!(!ipam.join("10.83.0.0_16.json").exists(), "o ficheiro cru ficou");
+            assert!(
+                !ipam.join("10.83.0.0_16.json").exists(),
+                "o ficheiro cru ficou"
+            );
             assert_eq!(
                 lookup("10.83", "velho0000000mig2").as_deref(),
                 Some("10.83.9.9")
@@ -1233,7 +1245,10 @@ mod tests_transaccional {
             let map = load("10.87").unwrap();
             let mut vistos = std::collections::HashSet::new();
             for (id, ip) in &map {
-                assert!(vistos.insert(ip.clone()), "{ip} duplicado (id {id}): {map:?}");
+                assert!(
+                    vistos.insert(ip.clone()),
+                    "{ip} duplicado (id {id}): {map:?}"
+                );
             }
             assert!(map.values().any(|v| v == alvo), "ninguém ficou com o alvo");
         });

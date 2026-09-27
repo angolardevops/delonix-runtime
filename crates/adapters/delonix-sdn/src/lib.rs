@@ -892,7 +892,10 @@ impl Network {
 /// gateway and resolver ambiguous inside every container that has both.
 const RESERVED_PREFIXES: &[(&str, &str)] = &[
     ("10.200.0.0/16", "the engine's default ingress network"),
-    ("10.0.2.0/24", "the network libslirp emulates for published ports"),
+    (
+        "10.0.2.0/24",
+        "the network libslirp emulates for published ports",
+    ),
 ];
 
 /// The reserved prefix `c` overlaps, with what it is — `None` if none.
@@ -3619,7 +3622,13 @@ mod tests_um_alocador {
 
     #[test]
     fn validate_subnet_recusa_o_espaco_do_proprio_motor() {
-        for s in ["10.200.0.0/16", "10.200.7.0/24", "10.0.0.0/8", "10.0.2.0/24", "10.0.0.0/16"] {
+        for s in [
+            "10.200.0.0/16",
+            "10.200.7.0/24",
+            "10.0.0.0/8",
+            "10.0.2.0/24",
+            "10.0.0.0/16",
+        ] {
             let e = NetworkStore::validate_subnet(s).unwrap_err();
             assert!(format!("{e}").contains("overlaps"), "{s}: {e}");
         }
@@ -3684,11 +3693,17 @@ mod tests_um_alocador {
                 .create_with_cidr("s2cidr", Cidr::parse("10.202.0.0/16").unwrap())
                 .unwrap();
             let def = infra::network_create("s2decl").unwrap();
-            assert_eq!(def.prefix, decl.prefix, "a VM noutra subnet que os containers");
+            assert_eq!(
+                def.prefix, decl.prefix,
+                "a VM noutra subnet que os containers"
+            );
             let outra = infra::network_create("s2soVM").unwrap();
             assert_ne!(outra.prefix, decl.prefix);
             assert_eq!(cidr.subnet, "10.202.0.0/16");
-            assert_ne!(outra.prefix, "10.202", "a rede das VMs em cima de uma rede CIDR");
+            assert_ne!(
+                outra.prefix, "10.202",
+                "a rede das VMs em cima de uma rede CIDR"
+            );
         });
     }
 

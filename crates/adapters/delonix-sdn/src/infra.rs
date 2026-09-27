@@ -3562,10 +3562,11 @@ fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     // Persists the new policy and re-applies the COMPLETE chain (policy + existing
     // FQDN hosts) — so `egress net` and `egress host` compose.
-    let state = update_netdef_egress(&bridge, |e| e.policy = norm.clone())?.unwrap_or(EgressState {
-        policy: norm,
-        hosts: Vec::new(),
-    });
+    let state =
+        update_netdef_egress(&bridge, |e| e.policy = norm.clone())?.unwrap_or(EgressState {
+            policy: norm,
+            hosts: Vec::new(),
+        });
     apply_egress_from_state(&bridge, &state)
 }
 
