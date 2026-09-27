@@ -4851,8 +4851,10 @@ pub struct MigratePrecheck {
     /// Volumes on storages the target does not share (`local_disks`): a
     /// move would have to copy them. CD-ROMs are listed apart.
     pub local_disks: Vec<String>,
-    /// Local CD-ROM media (`local_disks` entries with `cdrom: 1`): the node
-    /// does not copy a CD-ROM even with `with-local-disks`.
+    /// Local CD-ROM media (`local_disks` entries with `cdrom: 1` and
+    /// `is_cloudinit: 0`): the node aborts a migrate over one, flag or not
+    /// (measured on PVE 9.2.2). A cloud-init drive also says `cdrom: 1`, but
+    /// the node copies it like a disk, so it is listed in `local_disks`.
     pub local_cdroms: Vec<String>,
     /// Devices bound to the source node (`local_resources`: USB, PCI…).
     pub local_resources: Vec<String>,
@@ -4882,7 +4884,10 @@ fn parse_migrate_precheck(data: &serde_json::Value, target: &str) -> MigratePrec
             .and_then(|a| a.as_array())
             .map(|a| {
                 a.iter()
-                    .filter(|d| truthy(d.get("cdrom")) == cdroms)
+                    .filter(|d| {
+                        let medium = truthy(d.get("cdrom")) && !truthy(d.get("is_cloudinit"));
+                        medium == cdroms
+                    })
                     .map(|d| {
                         d.get("volid")
                             .and_then(|v| v.as_str())
@@ -7432,6 +7437,27 @@ mod tests {
         assert_eq!(p.unavailable_storages, vec!["fast-ssd".to_string()]);
         assert_eq!(p.local_resources, vec!["usb0".to_string()]);
         assert!(!parse_migrate_precheck(&serde_json::json!({}), "pve2").target_allowed);
+
+        // Measured 2026-09-27: a cloud-init drive and an ISO both say
+        // `cdrom: 1`. The node copies the first (an offline migrate of a VM
+        // whose only local volume is its cloud-init drive finished), and
+        // aborts over the second, `with-local-disks` or not.
+        let media = serde_json::json!({
+            "allowed_nodes": ["pve2"], "local_resources": [],
+            "not_allowed_nodes": {"pve2": {}}, "running": 0,
+            "local_disks": [
+                {"cdrom": 1, "drivename": "ide2", "is_cloudinit": 1, "shared": 0,
+                 "volid": "local-lvm:vm-199-cloudinit"},
+                {"cdrom": 1, "drivename": "ide3", "is_cloudinit": 0, "shared": 0,
+                 "volid": "local:iso/probe.iso"}
+            ]
+        });
+        let p = parse_migrate_precheck(&media, "pve2");
+        assert_eq!(
+            p.local_disks,
+            vec!["local-lvm:vm-199-cloudinit".to_string()]
+        );
+        assert_eq!(p.local_cdroms, vec!["local:iso/probe.iso".to_string()]);
     }
 
     /// The agent's answers as PVE 9.2.2 relayed them from a Debian 12 guest
