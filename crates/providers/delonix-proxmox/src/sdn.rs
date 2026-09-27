@@ -19,9 +19,11 @@
 //! controllers (`/cluster/sdn/dns`), Fabrics and their nodes
 //! (`/cluster/sdn/fabrics/*` and the node-side reads), a zone's DHCP/IPAM/DNS
 //! fields ([`ZoneOptions`]), a subnet's DHCP ranges ([`SubnetOptions`]), and
-//! IP reservations on a vnet (`.../vnets/{vnet}/ips`). Still left out on
-//! purpose: per-vnet/per-subnet firewalls, EVPN controllers, route maps and
-//! prefix lists, the `wireguard`/`bgp` fabric protocols.
+//! IP reservations on a vnet (`.../vnets/{vnet}/ips`). Since 2026-09-27 the
+//! rest of `/cluster/sdn` lives next door: BGP/EVPN controllers, prefix
+//! lists, route maps and the vnet firewall in `sdn_routing.rs`, the index,
+//! the dry-run, the global lock and rollback in `sdn_lock.rs`. Still left out
+//! on purpose: the `wireguard`/`bgp` fabric protocols.
 //! [`Client::create_sdn_zone`] only ever creates a `simple` zone — an
 //! isolated L3 zone with no VLAN/VXLAN encapsulation, the plainest kind
 //! Proxmox has, and the one that needs no VLAN-capable hardware on the node
@@ -573,7 +575,67 @@ impl Client {
             TaskKind::ApplySdn,
             || self.put_form("/cluster/sdn", &[]),
             None,
-        )
+        )?;
+        self.verify_sdn_realized()
+    }
+
+    /// Checks that the configuration an apply just reloaded is real on every
+    /// ONLINE node: each vnet of each zone must read `available` in that
+    /// node's own `GET /nodes/{node}/sdn/zones/{zone}/content`.
+    ///
+    /// The apply's task is not that proof. Measured on a two-node PVE 9.2.2
+    /// cluster on 2026-09-27: the `reloadnetworkall` task the apply forks
+    /// ended `OK` while the second node's `srvreload` had failed (a zone with
+    /// `dhcp=dnsmasq` on a node without the `dnsmasq` package), the vnet read
+    /// `error` there and its bridge did not exist. Only the entry node's
+    /// reload decides the task's exit status.
+    ///
+    /// Every vnet not `available` is named in one [`Error::SdnNotRealized`],
+    /// with the node's own message. An offline node is not asked — it has
+    /// nothing running to read — and is logged, not counted as realized.
+    pub fn verify_sdn_realized(&self) -> Result<()> {
+        let zones: Vec<String> = self
+            .sdn_zones()?
+            .iter()
+            .filter_map(|z| z.get("zone").and_then(|v| v.as_str()))
+            .map(str::to_string)
+            .collect();
+        if zones.is_empty() {
+            return Ok(());
+        }
+        let mut failed = Vec::new();
+        for node in self.cluster_nodes()? {
+            if !node.online {
+                tracing::warn!(
+                    node = %node.name,
+                    "proxmox: SDN applied with this node offline; its vnets were not checked"
+                );
+                continue;
+            }
+            let on_node = self.for_node(&node.name)?;
+            for zone in &zones {
+                for vnet in on_node.sdn_zone_content(zone)? {
+                    let status = vnet.get("status").and_then(|v| v.as_str()).unwrap_or("");
+                    if status == "available" {
+                        continue;
+                    }
+                    let name = vnet.get("vnet").and_then(|v| v.as_str()).unwrap_or("?");
+                    let msg = vnet
+                        .get("statusmsg")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("no message");
+                    failed.push(format!("{}/{zone}/{name}: {status} ({msg})", node.name));
+                }
+            }
+        }
+        if failed.is_empty() {
+            return Ok(());
+        }
+        Err(Error::SdnNotRealized(format!(
+            "proxmox: the SDN apply task ended OK but these vnets are not realized: {} — \
+             read the 'reload network' task of each node named",
+            failed.join("; ")
+        )))
     }
 }
 

@@ -150,6 +150,16 @@ class ClientRoutes(unittest.TestCase):
             "/nodes/{node}/qemu/{vmid}/firewall/ipset/{name}/{cidr}",
         )
 
+    def test_a_route_map_id_placeholder_matches_the_schemas_dashed_name(self):
+        # A Rust `format!` name cannot carry a `-`: the crate writes
+        # `{route_map_id}` where the schema says `{route-map-id}`. Without this
+        # rule the three single-entry route-map routes would read as calls the
+        # schema does not have.
+        self.assertEqual(
+            inv.normalise("/cluster/sdn/route-maps/entries/{route_map_id}/entry/{order}"),
+            "/cluster/sdn/route-maps/entries/{route-map-id}/entry/{order}",
+        )
+
 
 class Trace(unittest.TestCase):
     def test_a_concrete_route_maps_to_the_longest_template(self):

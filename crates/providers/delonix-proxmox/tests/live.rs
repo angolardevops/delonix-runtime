@@ -48,6 +48,8 @@ fn target() -> Option<Target> {
         bridge: None,
         vlan: None,
         ca_cert_pem: None,
+        import_storage: None,
+        disk_storage: None,
     })
 }
 
@@ -3755,4 +3757,735 @@ fn mv(live: bool) -> delonix_compute::vm_backend::MoveOptions {
         live,
         ..Default::default()
     }
+}
+
+/// Best-effort teardown for the SDN routing case when an assertion fails
+/// halfway: the lab is shared, and a pending change or a held lock left by a
+/// failed run would make every later run (and anyone else's SDN apply) fail
+/// on it. Forcing the lock away is acceptable HERE only — a lab node this
+/// run owns for its duration; nothing in the crate does it on its own.
+struct SdnLabCleanup<'a> {
+    client: &'a delonix_proxmox::Client,
+    ledger: &'a delonix_proxmox::Ledger,
+    controllers: [String; 2],
+    route_map: String,
+    prefix_list: String,
+    vnet: String,
+    zone: String,
+    armed: bool,
+}
+
+impl Drop for SdnLabCleanup<'_> {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let (c, l) = (self.client, self.ledger);
+        let _ = c.force_release_sdn_lock(l);
+        let _ = c.rollback_sdn(l, None);
+        for rule in (0..4).rev() {
+            let _ = c.delete_sdn_vnet_firewall_rule(l, &self.vnet, rule);
+        }
+        for ctl in &self.controllers {
+            let _ = c.delete_sdn_controller(l, ctl);
+        }
+        let _ = c.delete_sdn_route_map_entry(l, &self.route_map, 10);
+        let _ = c.delete_sdn_prefix_list(l, &self.prefix_list);
+        let _ = c.delete_sdn_vnet(l, &self.vnet);
+        let _ = c.delete_sdn_zone(l, &self.zone);
+        let _ = c.apply_sdn(l);
+    }
+}
+
+/// The routing layer of the cluster's own SDN, the vnet firewall, and the
+/// global lock that makes an SDN change a transaction — every read back from
+/// the node, never from what a call returned.
+///
+/// 1. The lock on its own: a write without the token is refused (DX-5515); a
+///    rollback with the token releases it only because `release-lock=1` is
+///    sent; staged work nobody applied makes the lock refuse (DX-5516), and a
+///    rollback discards it.
+/// 2. A transaction whose change fails (an EVPN controller naming a route map
+///    that does not exist) is rolled back: nothing pending, the lock free.
+/// 3. The chain prefix list → route-map entry → EVPN controller (+ a BGP
+///    controller, a zone and a vnet) staged under the lock, the dry-run's FRR
+///    diff carrying the chain, applied; then the RUNNING configuration holds
+///    it, nothing is pending, the dry-run is empty, and the vnet is available.
+/// 4. The vnet firewall: options, forward rules inserted at the top, a move,
+///    deletes — read back; an `in` rule refused before the wire.
+/// 5. The teardown, under the lock again, and the node back as it was found.
+#[test]
+fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
+    use delonix_proxmox::{
+        ControllerKind, ControllerOptions, FirewallRuleOpts, PrefixListEntry,
+        PrefixListEntryUpdate, RouteMapClause, RouteMapEntry, RouteMapEntryUpdate, RoutingAction,
+        VnetFirewallOptions,
+    };
+    let Some(t) = target() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let shared = b.client();
+    let client: &delonix_proxmox::Client = &shared;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+
+    let s = std::process::id() % 1_000_000;
+    let pl = format!("dlxsdnpl{s}");
+    let rm = format!("dlxsdnrm{s}");
+    let ev = format!("dlxsdnev{s}");
+    let bg = format!("dlxsdnbg{s}");
+    let zone = format!("ds{s}");
+    let vnet = format!("dv{s}");
+    // Peers: the entry node's own address (which the node skips when it
+    // renders its own session) and TEST-NET-1 addresses, which no router
+    // answers — FRR tries them and nothing else happens.
+    let host = t
+        .base_url
+        .trim_start_matches("https://")
+        .split(':')
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let evpn_peers: Vec<&str> = if host.parse::<std::net::Ipv4Addr>().is_ok() {
+        vec![host.as_str(), "192.0.2.10"]
+    } else {
+        vec!["192.0.2.10", "192.0.2.11"]
+    };
+    let bgp_peers = ["192.0.2.10"];
+
+    assert!(
+        client.sdn_pending_changes().expect("pending").is_empty(),
+        "the node carries someone else's staged SDN changes; this run would apply them"
+    );
+    let mut cleanup = SdnLabCleanup {
+        client,
+        ledger: &ledger,
+        controllers: [bg.clone(), ev.clone()],
+        route_map: rm.clone(),
+        prefix_list: pl.clone(),
+        vnet: vnet.clone(),
+        zone: zone.clone(),
+        armed: true,
+    };
+
+    // --- the indexes ---------------------------------------------------------
+    let ids: Vec<String> = client
+        .sdn_index()
+        .expect("GET /cluster/sdn")
+        .iter()
+        .filter_map(|e| e.get("id").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    for want in [
+        "zones",
+        "vnets",
+        "controllers",
+        "prefix-lists",
+        "route-maps",
+        "fabrics",
+    ] {
+        assert!(ids.iter().any(|i| i == want), "{want} missing from {ids:?}");
+    }
+    let subdirs: Vec<String> = client
+        .sdn_fabrics_index()
+        .expect("GET /cluster/sdn/fabrics")
+        .iter()
+        .filter_map(|e| e.get("subdir").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    assert_eq!(subdirs, ["fabric", "node", "all"], "{subdirs:?}");
+    client
+        .sdn_fabric_nodes_all(false)
+        .expect("GET /cluster/sdn/fabrics/node");
+    assert!(
+        client.sdn_dry_run(None).expect("dry-run").is_empty(),
+        "nothing pending, nothing to render"
+    );
+
+    // --- 1. the lock on its own ------------------------------------------------
+    let tok = client.acquire_sdn_lock(false).expect("lock");
+    let refused = client.create_sdn_zone(&ledger, &zone).unwrap_err();
+    assert_eq!(
+        refused.number(),
+        5515,
+        "a write without the token: {refused}"
+    );
+    client.release_sdn_lock(&ledger, &tok).expect("release");
+    let tok = client
+        .acquire_sdn_lock(false)
+        .expect("the lock is free again");
+    client
+        .rollback_sdn(&ledger, Some(&tok))
+        .expect("rollback with the token");
+    let stale = client
+        .acquire_sdn_lock(false)
+        .expect("the rollback released the lock (release-lock=1)");
+    client.release_sdn_lock(&ledger, &stale).expect("release");
+    // Measured: releasing a lock nobody holds succeeds whatever the token — so
+    // the stale token is tried while ANOTHER holder has the lock.
+    let held = client.acquire_sdn_lock(false).expect("lock");
+    let wrong = client
+        .release_sdn_lock(&ledger, &stale)
+        .expect_err("a token that is no longer the lock's");
+    assert_eq!(wrong.number(), 5515, "{wrong}");
+    client.release_sdn_lock(&ledger, &held).expect("release");
+
+    client
+        .create_sdn_zone(&ledger, &zone)
+        .expect("a staged zone, outside any lock");
+    let pending = client.sdn_pending_changes().expect("pending");
+    assert!(
+        pending
+            .iter()
+            .any(|p| p.kind == "zone" && p.id == zone && p.state == "new"),
+        "{pending:?}"
+    );
+    let busy = client.acquire_sdn_lock(false).unwrap_err();
+    assert_eq!(busy.number(), 5516, "pending work refuses the lock: {busy}");
+    client
+        .rollback_sdn(&ledger, None)
+        .expect("rollback without a lock");
+    assert!(
+        client.sdn_pending_changes().expect("pending").is_empty(),
+        "the rollback discarded the staged zone"
+    );
+
+    // --- 2. a failed transaction is rolled back ---------------------------------
+    let failed = client
+        .sdn_transaction(&ledger, || {
+            client.create_sdn_prefix_list(&ledger, &pl, &[])?;
+            client.create_sdn_controller(
+                &ledger,
+                &ev,
+                ControllerKind::Evpn,
+                &ControllerOptions {
+                    asn: Some(65077),
+                    peers: &evpn_peers,
+                    route_map_in: Some(&rm),
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap_err();
+    assert!(
+        failed.to_string().contains(&rm),
+        "the node's own reason names the missing route map: {failed}"
+    );
+    assert!(
+        client.sdn_pending_changes().expect("pending").is_empty(),
+        "the staged prefix list was rolled back"
+    );
+    assert!(client.sdn_prefix_list(&pl).is_err(), "no prefix list left");
+    let tok = client
+        .acquire_sdn_lock(false)
+        .expect("the rollback left the lock free");
+    client.release_sdn_lock(&ledger, &tok).expect("release");
+
+    // --- 3. the chain, staged and applied under the lock ------------------------
+    let dry = client
+        .sdn_transaction(&ledger, || {
+            client.create_sdn_prefix_list(
+                &ledger,
+                &pl,
+                &[
+                    PrefixListEntry {
+                        action: RoutingAction::Permit,
+                        prefix: "10.77.0.0/16",
+                        ge: None,
+                        le: Some(24),
+                        seq: Some(10),
+                    },
+                    PrefixListEntry {
+                        action: RoutingAction::Deny,
+                        prefix: "0.0.0.0/0",
+                        ge: None,
+                        le: None,
+                        seq: Some(100),
+                    },
+                ],
+            )?;
+            client.add_sdn_prefix_list_entry(
+                &ledger,
+                &pl,
+                &PrefixListEntry {
+                    action: RoutingAction::Permit,
+                    prefix: "10.78.0.0/16",
+                    ge: None,
+                    le: None,
+                    seq: Some(20),
+                },
+            )?;
+            client.update_sdn_prefix_list_entry(
+                &ledger,
+                &pl,
+                20,
+                &PrefixListEntryUpdate {
+                    le: Some(24),
+                    ..Default::default()
+                },
+            )?;
+            let e20 = client.sdn_prefix_list_entry(&pl, 20)?;
+            assert_eq!(e20.get("le").and_then(|v| v.as_u64()), Some(24), "{e20}");
+            let entries = client.sdn_prefix_list_entries(&pl)?;
+            assert_eq!(entries.len(), 3, "{entries:?}");
+
+            client.create_sdn_route_map_entry(
+                &ledger,
+                &rm,
+                10,
+                &RouteMapEntry {
+                    action: RoutingAction::Permit,
+                    matches: &[RouteMapClause {
+                        key: "ip-address-prefix-list",
+                        value: Some(&pl),
+                    }],
+                    sets: &[RouteMapClause {
+                        key: "local-preference",
+                        value: Some("200"),
+                    }],
+                    call: None,
+                    exit_action: None,
+                },
+            )?;
+            client.update_sdn_route_map_entry(
+                &ledger,
+                &rm,
+                10,
+                &RouteMapEntryUpdate {
+                    sets: Some(&[RouteMapClause {
+                        key: "local-preference",
+                        value: Some("300"),
+                    }]),
+                    ..Default::default()
+                },
+            )?;
+            let e10 = client.sdn_route_map_entry(&rm, 10)?;
+            assert_eq!(
+                e10.pointer("/set/0").and_then(|v| v.as_str()),
+                Some("key=local-preference,value=300"),
+                "{e10}"
+            );
+            assert!(
+                client
+                    .sdn_route_map_entries(&rm)?
+                    .iter()
+                    .any(|e| e.get("order").and_then(|v| v.as_u64()) == Some(10)),
+                "the map lists its entry"
+            );
+            assert!(
+                client
+                    .sdn_route_maps()?
+                    .iter()
+                    .any(|m| m.get("id").and_then(|v| v.as_str()) == Some(rm.as_str())),
+                "the map exists while it has an entry"
+            );
+
+            client.create_sdn_controller(
+                &ledger,
+                &ev,
+                ControllerKind::Evpn,
+                &ControllerOptions {
+                    asn: Some(65077),
+                    peers: &evpn_peers,
+                    route_map_in: Some(&rm),
+                    ..Default::default()
+                },
+            )?;
+            client.create_sdn_controller(
+                &ledger,
+                &bg,
+                ControllerKind::Bgp,
+                &ControllerOptions {
+                    asn: Some(65077),
+                    peers: &bgp_peers,
+                    node: Some(&t.node),
+                    ..Default::default()
+                },
+            )?;
+            client.update_sdn_controller(
+                &ledger,
+                &ev,
+                &ControllerOptions {
+                    ebgp_multihop: Some(3),
+                    ..Default::default()
+                },
+                &[],
+            )?;
+            // Stored and read back — and, measured, NOT rendered: both
+            // controllers share one ASN, so the sessions are iBGP and FRR's
+            // `ebgp-multihop` has nothing to apply to.
+            let evc = client.sdn_controller(&ev)?;
+            assert_eq!(
+                evc.get("ebgp-multihop").and_then(|v| v.as_u64()),
+                Some(3),
+                "{evc}"
+            );
+            assert!(
+                client
+                    .sdn_controllers(false)?
+                    .iter()
+                    .any(|c| c.get("controller").and_then(|v| v.as_str()) == Some(bg.as_str())),
+                "the bgp controller is staged"
+            );
+
+            client.create_sdn_zone(&ledger, &zone)?;
+            client.create_sdn_vnet(&ledger, &vnet, &zone, None)?;
+
+            let pending = client.sdn_pending_changes()?;
+            for (kind, id) in [
+                ("prefix-list", pl.as_str()),
+                ("route-map-entry", rm.as_str()),
+                ("controller", ev.as_str()),
+                ("controller", bg.as_str()),
+                ("zone", zone.as_str()),
+                ("vnet", vnet.as_str()),
+            ] {
+                assert!(
+                    pending.iter().any(|p| p.kind == kind && p.id == id),
+                    "{kind} {id} not pending: {pending:?}"
+                );
+            }
+            client.sdn_dry_run(None)
+        })
+        .expect("the staged chain, applied under the lock");
+    let frr = dry.frr_diff.clone().unwrap_or_default();
+    for want in [
+        "+router bgp 65077".to_string(),
+        format!("+ip prefix-list {pl} seq 10 permit 10.77.0.0/16 le 24"),
+        format!("+ip prefix-list {pl} seq 20 permit 10.78.0.0/16 le 24"),
+        format!("+ip prefix-list {pl} seq 100 deny 0.0.0.0/0"),
+        format!("+route-map {rm} permit 10"),
+        format!("+ match ip address prefix-list {pl}"),
+        "+ set local-preference 300".to_string(),
+        format!("+ call {rm}"),
+        "+ neighbor 192.0.2.10 peer-group BGP".to_string(),
+    ] {
+        assert!(frr.contains(&want), "the dry-run misses `{want}`:\n{frr}");
+    }
+
+    // Applied: nothing pending, the rendered files are the pending config, and
+    // the RUNNING configuration holds the chain.
+    assert!(
+        client.sdn_pending_changes().expect("pending").is_empty(),
+        "nothing pending after the apply"
+    );
+    let after = client.sdn_dry_run(None).expect("dry-run");
+    assert!(
+        after.is_empty(),
+        "the node's files already match: {after:?}"
+    );
+    let running: Vec<String> = client
+        .sdn_controllers(true)
+        .expect("running controllers")
+        .iter()
+        .filter_map(|c| {
+            c.get("controller")
+                .and_then(|v| v.as_str())
+                .map(str::to_string)
+        })
+        .collect();
+    assert!(
+        running.contains(&ev) && running.contains(&bg),
+        "{running:?}"
+    );
+    assert!(
+        client
+            .sdn_route_map_entries_all(true)
+            .expect("running route maps")
+            .iter()
+            .any(|e| e.get("route-map-id").and_then(|v| v.as_str()) == Some(rm.as_str())),
+        "the route map is running"
+    );
+    let content = client.sdn_zone_content(&zone).expect("zone content");
+    assert!(
+        content.iter().any(|v| {
+            v.get("vnet").and_then(|x| x.as_str()) == Some(vnet.as_str())
+                && v.get("status").and_then(|x| x.as_str()) == Some("available")
+        }),
+        "the vnet is realized: {content:?}"
+    );
+    let tok = client
+        .acquire_sdn_lock(false)
+        .expect("the apply released the lock (release-lock=1)");
+    client.release_sdn_lock(&ledger, &tok).expect("release");
+
+    // --- 4. the vnet firewall ----------------------------------------------------
+    let names: Vec<String> = client
+        .sdn_vnet_firewall_index(&vnet)
+        .expect("vnet firewall index")
+        .iter()
+        .filter_map(|e| e.get("name").and_then(|v| v.as_str()).map(str::to_string))
+        .collect();
+    assert!(
+        names.contains(&"rules".to_string()) && names.contains(&"options".to_string()),
+        "{names:?}"
+    );
+    let inbound = FirewallRuleOpts {
+        rule_type: Some("in"),
+        ..Default::default()
+    };
+    let e = client
+        .add_sdn_vnet_firewall_rule(&ledger, &vnet, "ACCEPT", &inbound)
+        .unwrap_err();
+    assert_eq!(e.number(), 1551, "{e}");
+    client
+        .set_sdn_vnet_firewall_options(
+            &ledger,
+            &vnet,
+            &VnetFirewallOptions {
+                enable: Some(true),
+                policy_forward: Some("DROP"),
+                ..Default::default()
+            },
+        )
+        .expect("options");
+    let opts = client.sdn_vnet_firewall_options(&vnet).expect("options");
+    assert_eq!(
+        opts.get("policy_forward").and_then(|v| v.as_str()),
+        Some("DROP"),
+        "{opts}"
+    );
+    assert_eq!(
+        opts.get("enable").and_then(|v| v.as_u64()),
+        Some(1),
+        "{opts}"
+    );
+    client
+        .add_sdn_vnet_firewall_rule(
+            &ledger,
+            &vnet,
+            "DROP",
+            &FirewallRuleOpts {
+                comment: Some("dlxsdn-drop"),
+                ..Default::default()
+            },
+        )
+        .expect("drop rule");
+    client
+        .add_sdn_vnet_firewall_rule(
+            &ledger,
+            &vnet,
+            "ACCEPT",
+            &FirewallRuleOpts {
+                comment: Some("dlxsdn-ssh"),
+                proto: Some("tcp"),
+                dport: Some("22"),
+                ..Default::default()
+            },
+        )
+        .expect("ssh rule");
+    let comments = |c: &delonix_proxmox::Client| -> Vec<String> {
+        c.sdn_vnet_firewall_rules(&vnet)
+            .expect("rules")
+            .iter()
+            .map(|r| {
+                assert_eq!(
+                    r.get("type").and_then(|v| v.as_str()),
+                    Some("forward"),
+                    "{r}"
+                );
+                r.get("comment")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string()
+            })
+            .collect()
+    };
+    assert_eq!(
+        comments(client),
+        ["dlxsdn-ssh", "dlxsdn-drop"],
+        "the node inserts a rule at the top"
+    );
+    let r0 = client.sdn_vnet_firewall_rule(&vnet, 0).expect("rule 0");
+    assert_eq!(r0.get("dport").and_then(|v| v.as_str()), Some("22"), "{r0}");
+    client
+        .update_sdn_vnet_firewall_rule(
+            &ledger,
+            &vnet,
+            1,
+            &FirewallRuleOpts {
+                comment: Some("dlxsdn-drop-all"),
+                ..Default::default()
+            },
+            None,
+        )
+        .expect("update");
+    client
+        .update_sdn_vnet_firewall_rule(&ledger, &vnet, 0, &FirewallRuleOpts::default(), Some(2))
+        .expect("move");
+    assert_eq!(
+        comments(client),
+        ["dlxsdn-drop-all", "dlxsdn-ssh"],
+        "the first rule moved below the second"
+    );
+    client
+        .delete_sdn_vnet_firewall_rule(&ledger, &vnet, 0)
+        .expect("delete");
+    client
+        .delete_sdn_vnet_firewall_rule(&ledger, &vnet, 0)
+        .expect("delete");
+    assert!(comments(client).is_empty(), "no rule left");
+    client
+        .set_sdn_vnet_firewall_options(
+            &ledger,
+            &vnet,
+            &VnetFirewallOptions {
+                delete: &["enable", "policy_forward"],
+                ..Default::default()
+            },
+        )
+        .expect("clear options");
+    let opts = client.sdn_vnet_firewall_options(&vnet).expect("options");
+    assert!(opts.get("policy_forward").is_none(), "{opts}");
+
+    // --- 5. the teardown, under the lock -----------------------------------------
+    client
+        .sdn_transaction(&ledger, || {
+            client.update_sdn_prefix_list(
+                &ledger,
+                &pl,
+                &[PrefixListEntry {
+                    action: RoutingAction::Permit,
+                    prefix: "10.79.0.0/16",
+                    ge: None,
+                    le: None,
+                    seq: Some(30),
+                }],
+            )?;
+            let left = client.sdn_prefix_list_entries(&pl)?;
+            assert_eq!(
+                left.len(),
+                1,
+                "a list update replaces the entries: {left:?}"
+            );
+            client.delete_sdn_prefix_list_entry(&ledger, &pl, 30)?;
+            client.delete_sdn_controller(&ledger, &bg)?;
+            client.delete_sdn_controller(&ledger, &ev)?;
+            client.delete_sdn_route_map_entry(&ledger, &rm, 10)?;
+            client.delete_sdn_prefix_list(&ledger, &pl)?;
+            client.delete_sdn_vnet(&ledger, &vnet)?;
+            client.delete_sdn_zone(&ledger, &zone)
+        })
+        .expect("the teardown, applied under the lock");
+    assert!(
+        client.sdn_pending_changes().expect("pending").is_empty(),
+        "nothing pending after the teardown"
+    );
+    assert!(
+        client.sdn_dry_run(None).expect("dry-run").is_empty(),
+        "the node's files match the running config"
+    );
+    let running = client.sdn_controllers(true).expect("running controllers");
+    assert!(
+        !running.iter().any(|c| {
+            let id = c.get("controller").and_then(|v| v.as_str());
+            id == Some(ev.as_str()) || id == Some(bg.as_str())
+        }),
+        "{running:?}"
+    );
+    assert!(
+        !client
+            .sdn_prefix_lists()
+            .expect("prefix lists")
+            .iter()
+            .any(|p| p.get("id").and_then(|v| v.as_str()) == Some(pl.as_str())),
+        "the prefix list is gone"
+    );
+    let tok = client.acquire_sdn_lock(false).expect("the lock is free");
+    client.release_sdn_lock(&ledger, &tok).expect("release");
+
+    // Every staged write and every vnet firewall write answered inline: the
+    // ledger holds the applies and nothing else.
+    let ledger_json: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(dir.path().join("proxmox-tasks.json")).expect("the ledger"),
+    )
+    .expect("json");
+    let actions: std::collections::BTreeSet<&str> = ledger_json
+        .as_array()
+        .expect("a list")
+        .iter()
+        .filter_map(|e| e.get("action").and_then(|a| a.as_str()))
+        .collect();
+    assert_eq!(
+        actions,
+        std::collections::BTreeSet::from(["apply-sdn"]),
+        "only the applies forked a task"
+    );
+    cleanup.armed = false;
+}
+
+/// ADR-0057: a VM boots from a LOCAL image (`DELONIX_PROXMOX_TEST_IMAGE`, a
+/// qcow2 of the engine's store) with no template on the node. The image is
+/// uploaded to the import storage named by its content (or found there from
+/// an earlier run), the VM's boot disk is imported onto the disk storage and
+/// grown to `diskSize`, and a second staging of the same image uploads
+/// nothing. The node must have `import` enabled on the import storage.
+#[test]
+fn a_vm_boots_from_a_local_store_image_uploaded_and_imported() {
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(image) = std::env::var("DELONIX_PROXMOX_TEST_IMAGE") else {
+        return;
+    };
+    let import = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let disk = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+
+    let name = format!("dlximport{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: image.clone(),
+        vcpus: 1,
+        memory: "512M".into(),
+        disk_size_gib: Some(5),
+        ..Default::default()
+    };
+    let boot = b
+        .boot(vmdir, &cfg, &cfg.disk, &|_: CreateStage| {})
+        .expect("boot from the local image");
+    let vm = record_of(&name, &cfg, &boot);
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    assert!(b.is_running(&vm), "the imported VM is not running");
+
+    let after = client.list_import_volumes(&import).expect("list");
+    let ours: Vec<_> = after
+        .iter()
+        .filter(|v| v.starts_with(&format!("{import}:import/delonix-")))
+        .collect();
+    assert!(!ours.is_empty(), "no delonix image on {import}: {after:?}");
+    let config = serde_json::to_string(&client.config(vmid).expect("config")).unwrap();
+    assert!(
+        config.contains(&format!("{disk}:vm-{vmid}-disk-0")) && config.contains("size=5G"),
+        "the boot disk was not imported onto {disk} and grown to 5G: {config}"
+    );
+
+    // The same image again: nothing is uploaded.
+    let again = client
+        .stage_import(std::path::Path::new(&image), None)
+        .expect("stage again");
+    assert!(!again.uploaded, "the same image was uploaded a second time");
+    assert!(after.contains(&again.volid), "{again:?} not in {after:?}");
+
+    // The node verifies what it received: the same bytes announced with a
+    // wrong sha256 fail the upload, and nothing is kept under that name.
+    let bogus = format!("delonix-badsum{}.qcow2", std::process::id() % 10000);
+    let err = client
+        .upload_import(
+            &import,
+            std::path::Path::new(&image),
+            &bogus,
+            &"0".repeat(64),
+        )
+        .expect_err("a wrong checksum must fail the upload");
+    let listed = client.list_import_volumes(&import).expect("list");
+    assert!(
+        !listed.contains(&format!("{import}:import/{bogus}")),
+        "the node kept a file whose checksum did not match ({err}): {listed:?}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
 }

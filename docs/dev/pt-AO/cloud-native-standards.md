@@ -704,9 +704,11 @@ importa para o contrato, em `crates/adapters/delonix-linux/src/lib.rs`:
 delegação, o `container run` recusa `-m`/`--cpus`/`--cpu-weight` com exit 69
 (`preflight_resource_limits` em `bins/delonix-runtime-bin/src/cmd/container.rs`;
 `DELONIX_ALLOW_UNENFORCED_LIMITS=1` corre sem imposição, com um aviso). Essa sonda só cobre a base
-`memory`/`cpu`/`pids`: `--cpuset`, `--io-weight` e as flags `--device-*-bps`/`--device-*-iops`
-continuam a ser aceites em melhor esforço, e o `cpuset` e o `io` normalmente não são delegados às
-sessões de utilizador num Ubuntu de fábrica — por isso podem ser aceites sem efeito. Vê
+`memory`/`cpu`/`pids`; `--cpuset`, `--io-weight` e as flags `--device-*-bps`/`--device-*-iops` têm
+a sua própria sonda por controlador (`preflight_controller_limits`) e são recusadas com saída 69
+quando o cgroup do container não tem `cpuset`/`io` — o normal num Ubuntu de fábrica, onde o
+`user@.service` recebe `cpu memory pids` e um scope `Delegate=yes` não consegue receber mais. O
+remédio é um drop-in de root no `user@.service` (`Delegate=cpu cpuset io memory pids`). Vê
 [Ambiente](environment.md#cgroup-delegation-some-limits-are-refused-others-are-not-enforced) e o [ADR-0015](../../adr/0015-intermediate-cgroup-level.md).
 
 **Por onde começar a ler.** `cgroup_limits_apply` → `user_service_base` → `try_delegated_base` →
