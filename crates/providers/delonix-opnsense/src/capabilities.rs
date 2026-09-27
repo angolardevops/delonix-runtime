@@ -45,7 +45,8 @@ pub fn capability_report(configured: bool) -> ProviderReport {
         C::NetSegmentRemote => S::UnsupportedByProvider { reason: "creating interfaces (VLAN, VXLAN, bridges) is administering the appliance, not a segment the engine owns" },
         C::NetApplyRollback => S::NotImplemented,
         C::NetObserve => S::Partial { detail: "`search_rule` and the alias read back what exists before a write; no comparison with the record yet (ADR-0059 F4)" },
-        C::NetVerifyDataplane | C::NetOwnershipMarker => S::NotImplemented,
+        C::NetVerifyDataplane => S::NotImplemented,
+        C::NetOwnershipMarker => S::Partial { detail: "every alias and rule carries a firewall category `delonix-owner:<token>`; one without it is refused, never adopted or deleted, and the commit refuses someone else's staged change — tested on the TLS mock, not yet measured against a live appliance (S6)" },
         C::NetBridge | C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted
         | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts | C::NetRoutesBetweenNetworks
         | C::NetNamespaceIsolation | C::NetL7Proxy | C::NetTunnelEgress | C::NetIpv6
