@@ -599,6 +599,88 @@ fn a_task_verdict_is_read_from_exitstatus_and_the_ledger_records_it() {
     assert!(matches!(&recs[1].state, TaskState::Failed { reason } if reason.contains("powerdown")));
 }
 
+/// `WARNINGS: <n>` is the third outcome: the worker finished its work and
+/// logged warnings. Measured on PVE 9.2.2 with a container start whose DHCP got
+/// no offer — the container ran, without an address. Read as a failure, the
+/// start would be retried on top of a running guest; read as a plain `ok`,
+/// the missing address would be nobody's news. It is a success with its
+/// `WARN:` lines kept in the ledger.
+#[test]
+fn a_task_that_ends_with_warnings_succeeds_and_the_ledger_keeps_them() {
+    let status = "/nodes/pve/tasks/UPID:pve:0001A2B3:0000C4D5:66F0:qmstart:100:root@pam:/status";
+    let log = "/nodes/pve/tasks/UPID:pve:0001A2B3:0000C4D5:66F0:qmstart:100:root@pam:/log";
+    let node = MockNode::start(script(&[
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/start",
+            ok_data(&format!(r#""{UPID}""#)),
+        ),
+        (
+            "GET",
+            status,
+            ok_data(r#"{"status":"stopped","exitstatus":"WARNINGS: 1"}"#),
+        ),
+        (
+            "GET",
+            log,
+            ok_data(
+                r#"[{"n":1,"t":"WARN: DHCP failed - command 'dhclient' failed: exit code 2"},{"n":2,"t":""},{"n":3,"t":"TASK WARNINGS: 1"}]"#,
+            ),
+        ),
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/start",
+            ok_data(&format!(r#""{UPID}""#)),
+        ),
+        (
+            "GET",
+            status,
+            ok_data(r#"{"status":"stopped","exitstatus":"WARNINGS: 2"}"#),
+        ),
+        ("GET", log, Reply::Json(500, r#"{"data":null}"#.into())),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let ledger = Ledger::at(dir.path());
+
+    client
+        .start(&ledger, 100)
+        .expect("WARNINGS is not a failure");
+    let recs = ledger.records();
+    assert_eq!(recs.len(), 1);
+    assert_eq!(
+        recs[0].state,
+        TaskState::OkWithWarnings {
+            warnings: vec!["DHCP failed - command 'dhclient' failed: exit code 2".into()]
+        },
+        "the WARN line is kept, the count line is not"
+    );
+    assert_eq!(
+        node.count("POST", "/nodes/pve/qemu/100/status/start"),
+        1,
+        "not resent"
+    );
+
+    // A log that cannot be read still leaves the warnings on record: "no
+    // warnings" would be the one false answer.
+    client
+        .start(&ledger, 100)
+        .expect("an unreadable log does not turn warnings into a failure");
+    let recs = ledger.records();
+    match &recs[1].state {
+        TaskState::OkWithWarnings { warnings } => assert!(
+            warnings.len() == 1 && warnings[0].contains("2 warning(s)"),
+            "{warnings:?}"
+        ),
+        other => panic!("expected ok_with_warnings, got {other:?}"),
+    }
+    let on_disk = std::fs::read_to_string(dir.path().join("proxmox-tasks.json")).unwrap();
+    assert!(
+        on_disk.contains(r#""state": "ok_with_warnings""#),
+        "{on_disk}"
+    );
+}
+
 #[test]
 fn a_wait_that_gives_up_is_timed_out_in_the_ledger_and_not_failed() {
     let status = "/nodes/pve/tasks/UPID:pve:0001A2B3:0000C4D5:66F0:qmstart:100:root@pam:/status";
