@@ -47,15 +47,18 @@
 //! [`ensure_rule`](GatewayProvider::ensure_rule) and
 //! [`commit`](GatewayProvider::commit) — with default implementations that
 //! REFUSE (never silently ignore, per this repo's own no-silent-failure
-//! rule). [`NativeGatewayProvider`] overrides none of them: it has no alias
-//! or rule concept to offer, and its masquerade/forward dataplane is
-//! unconditional, so [`GatewayProvider::commit`]'s default (a no-op `Ok`)
-//! is honest for it, while the other four default to a clear "not
-//! supported by this provider" instead of pretending to do nothing useful.
+//! rule). [`NativeGatewayProvider`] overrides only the two removals: it has
+//! no alias or rule concept to offer, so there is never one to remove
+//! (`Absent` is the truth, and a teardown must be able to finish), its
+//! masquerade/forward dataplane is unconditional, so
+//! [`GatewayProvider::commit`]'s default (a no-op `Ok`) is honest for it,
+//! while the two `ensure_*` default to a clear "not supported by this
+//! provider" instead of pretending to do nothing useful.
 //! `crates/providers/delonix-opnsense` (also Phase 2) is the first provider
 //! that overrides all five for real, against what Phase 0 measured.
 
 use crate::error::{Error, Result};
+use crate::ownership::{OwnerMark, RemoveOutcome};
 
 /// The canonical id of the always-registered native provider.
 pub const NATIVE_ID: &str = "native";
@@ -73,9 +76,11 @@ pub enum AliasKind {
     Network,
 }
 
-/// An address alias to ensure exists on a gateway provider, identified by
-/// NAME — the appliance's own identity for one (ADR-0051 Phase 0: `alias/
-/// get`/`get_item` key every alias by `name` at the top level).
+/// An address alias to ensure exists on a gateway provider, found by NAME —
+/// the appliance's own key for one (ADR-0051 Phase 0: `alias/get`/`get_item`
+/// key every alias by `name` at the top level). Found is not owned: an alias
+/// with that name is this engine's only when its description carries the
+/// caller's [`OwnerMark`] (see [`crate::ownership`]).
 #[derive(Debug, Clone)]
 pub struct GatewayAlias {
     pub name: String,
@@ -87,11 +92,11 @@ pub struct GatewayAlias {
     pub description: String,
 }
 
-/// A perimeter filter rule to ensure exists, identified by its
-/// DESCRIPTION — the appliance has no other stable name for a rule, and
-/// this is the identity the OPNsense docs' own worked example uses to
-/// find-or-create one (`search_rule` by `description`, then `add_rule` if
-/// absent).
+/// A perimeter filter rule to ensure exists, found by its DESCRIPTION — the
+/// appliance has no other stable name for a rule (the OPNsense docs' own
+/// worked example finds-or-creates by `description`). The description
+/// written to the appliance is this one plus the caller's [`OwnerMark`]; a
+/// rule whose description matches WITHOUT the mark is someone else's.
 #[derive(Debug, Clone)]
 pub struct GatewayRule {
     pub description: String,
@@ -107,14 +112,14 @@ pub struct GatewayRule {
     pub protocol: Option<String>,
 }
 
-/// Whether an `ensure_*` call created something or found it already there.
-/// Never "updated": Phase 2 does not implement update-in-place (`set_item`/
+/// Whether an `ensure_*` call created something or found it already there
+/// — already there meaning OWNED by the caller's mark and matching the
+/// declaration; an owned object that no longer matches is an error
+/// (`RemoteObjectDrifted`), never `AlreadyPresent`. Never "updated": Phase 2 does not implement update-in-place (`set_item`/
 /// `set_rule`'s exact request shape — the verbose form `get` returns, or
 /// the flat form `add_item` accepts — was not part of the ADR-0051 Phase 0
 /// spike, and guessing it risks the same trap the rest of this module
-/// exists to avoid). An `ensure_*` call against a name/description that
-/// already exists with DIFFERENT content returns `AlreadyPresent` without
-/// touching it — a caller that needs to change an existing alias/rule
+/// exists to avoid). A caller that needs to change an existing alias/rule
 /// removes and re-creates it today.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EnsureOutcome {
@@ -137,37 +142,78 @@ pub trait GatewayProvider {
     /// already knows, not by connecting to the appliance.
     fn available(&self) -> bool;
 
-    /// Ensures an address alias exists, by name. Default: refuses — a
-    /// provider with no alias concept (the native one) has nothing honest
-    /// to do here.
-    fn ensure_alias(&self, alias: &GatewayAlias) -> delonix_model::Result<EnsureOutcome> {
-        let _ = alias;
+    /// Ensures an address alias exists, by name, OWNED by `owner`: one
+    /// found under that name without the mark is refused
+    /// (`RemoteObjectNotOwned`), one with the mark whose content differs is
+    /// refused too (`RemoteObjectDrifted`). Default: refuses — a provider
+    /// with no alias concept (the native one) has nothing honest to do here.
+    fn ensure_alias(
+        &self,
+        alias: &GatewayAlias,
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<EnsureOutcome> {
+        let _ = (alias, owner);
         Err(unsupported(self.id(), "ensure_alias"))
     }
 
-    /// Removes an alias by name. Default: refuses, same reasoning as
+    /// Removes an alias by name — only if `owner` owns it; anything else
+    /// under that name is left alone and reported
+    /// ([`RemoveOutcome::NotOwned`]). Default: refuses, same reasoning as
     /// [`ensure_alias`](Self::ensure_alias).
-    fn remove_alias(&self, name: &str) -> delonix_model::Result<()> {
-        let _ = name;
+    fn remove_alias(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+        let _ = (name, owner);
         Err(unsupported(self.id(), "remove_alias"))
     }
 
-    /// Ensures a perimeter filter rule exists, by description. Default:
-    /// refuses, same reasoning as [`ensure_alias`](Self::ensure_alias).
-    fn ensure_rule(&self, rule: &GatewayRule) -> delonix_model::Result<EnsureOutcome> {
-        let _ = rule;
+    /// Ensures a perimeter filter rule exists, by description, owned by
+    /// `owner` — the same refusals as [`ensure_alias`](Self::ensure_alias).
+    /// Default: refuses.
+    fn ensure_rule(
+        &self,
+        rule: &GatewayRule,
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<EnsureOutcome> {
+        let _ = (rule, owner);
         Err(unsupported(self.id(), "ensure_rule"))
     }
 
-    /// Removes a rule by description. Default: refuses, same reasoning as
-    /// [`ensure_alias`](Self::ensure_alias).
-    fn remove_rule(&self, description: &str) -> delonix_model::Result<()> {
-        let _ = description;
+    /// Removes the rules with this description that `owner` owns; one that
+    /// matches without the mark is left alone and reported. Default:
+    /// refuses.
+    fn remove_rule(
+        &self,
+        description: &str,
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<RemoveOutcome> {
+        let _ = (description, owner);
         Err(unsupported(self.id(), "remove_rule"))
+    }
+
+    /// Retires `owner` on the provider once a teardown removed everything it
+    /// marked — the label object an OPNsense owner mark lives in. Default:
+    /// `Absent` — a provider whose mark is not an object of its own has
+    /// nothing to retire.
+    fn release_owner(&self, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+        let _ = owner;
+        Ok(RemoveOutcome::Absent)
+    }
+
+    /// Refuses (`RemoteForeignPending`) when the provider already carries
+    /// staged changes nobody applied — called BEFORE the first staged write,
+    /// so a refusal leaves nothing of this engine's behind. The
+    /// [`commit`](Self::commit) checks again, for what was staged in
+    /// between. Default: `Ok(())` — a provider with nothing staged, ever,
+    /// has nothing pending.
+    fn check_no_foreign_pending(&self) -> delonix_model::Result<()> {
+        Ok(())
     }
 
     /// Activates whatever [`ensure_alias`](Self::ensure_alias)/
     /// [`ensure_rule`](Self::ensure_rule)/removal staged.
+    ///
+    /// A provider whose commit applies everything staged — OPNsense's does,
+    /// the whole `config.xml` — must refuse (`RemoteForeignPending`) when
+    /// something staged is not what THIS value staged, before applying.
     ///
     /// Default: `Ok(())` — a provider with no alias/rule concept has
     /// nothing staged, ever, so there is nothing dishonest about this one
@@ -207,6 +253,25 @@ impl GatewayProvider for NativeGatewayProvider {
     }
     fn available(&self) -> bool {
         true
+    }
+    /// Nothing to remove, truthfully: the native provider has no alias to
+    /// have created. Refusing here instead would make the teardown of a
+    /// `kind: NetworkGateway` whose apply the native provider refused
+    /// impossible — its record is saved before the first remote write.
+    fn remove_alias(
+        &self,
+        _name: &str,
+        _owner: &OwnerMark,
+    ) -> delonix_model::Result<RemoveOutcome> {
+        Ok(RemoveOutcome::Absent)
+    }
+    /// Same as [`remove_alias`](Self::remove_alias): no rule ever exists here.
+    fn remove_rule(
+        &self,
+        _description: &str,
+        _owner: &OwnerMark,
+    ) -> delonix_model::Result<RemoveOutcome> {
+        Ok(RemoveOutcome::Absent)
     }
 }
 
@@ -402,16 +467,27 @@ mod tests {
     }
 
     #[test]
-    fn native_refuses_alias_and_rule_operations() {
+    fn native_refuses_to_ensure_and_has_nothing_to_remove() {
         let native = gateway_provider_for(NATIVE_ID)
             .expect("native must resolve")
             .expect("native never fails to build");
-        let err = native.ensure_alias(&sample_alias()).unwrap_err();
+        let owner = OwnerMark::new("dlx-0123456789abcdef").unwrap();
+        let err = native.ensure_alias(&sample_alias(), &owner).unwrap_err();
         assert!(err.to_string().contains("ensure_alias"));
         assert!(err.to_string().contains(NATIVE_ID));
-        assert!(native.remove_alias("example").is_err());
-        assert!(native.ensure_rule(&sample_rule()).is_err());
-        assert!(native.remove_rule("test").is_err());
+        assert!(native.ensure_rule(&sample_rule(), &owner).is_err());
+        // Removing is answered, not refused: nothing can exist to remove.
+        assert_eq!(
+            native.remove_alias("example", &owner).unwrap(),
+            RemoveOutcome::Absent
+        );
+        assert_eq!(
+            native.remove_rule("test", &owner).unwrap(),
+            RemoveOutcome::Absent
+        );
+        native
+            .check_no_foreign_pending()
+            .expect("nothing is ever staged on the native provider");
     }
 
     #[test]

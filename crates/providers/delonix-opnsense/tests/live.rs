@@ -10,14 +10,24 @@
 //!   cargo test -p delonix-opnsense --test live -- --nocapture --test-threads=1
 //! ```
 //!
-//! Runs the full cycle ADR-0051's Phase 0 spike ran by hand with `curl`:
-//! create an alias, create a rule referencing it, commit (reconfigure +
-//! apply), confirm both read back correctly, then remove both and commit
-//! again — leaving the appliance exactly as it found it, the same way the
-//! hand-run spike was cleaned up and confirmed via `firewall/filter/get`.
+//! Two scenarios, each leaving the appliance as it found it:
+//!
+//! * the full cycle ADR-0051's Phase 0 spike ran by hand with `curl` —
+//!   create an alias and a rule referencing it, commit, read back, remove,
+//!   commit — now under an owner mark;
+//! * the ownership rules of audit 62 (§6 P1) and ADR-0059 D1.5 (the owner
+//!   mark is a firewall category) against the real thing: a rule
+//!   made by hand with the same description is refused, never adopted and
+//!   never deleted; a hand-made change staged and not applied refuses the
+//!   commit before anything is applied; an owned rule disabled on the
+//!   appliance is drift.
+//!
+//! The appliance must start CLEAN — nothing staged and not applied — or the
+//! first pre-check refuses, which is the behaviour under test, not a flake.
 
 use delonix_opnsense::{Auth, OpnsenseGatewayProvider, Target};
 use delonix_sdn::gateway::{AliasKind, EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
+use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
 
 fn target() -> Option<Target> {
     Some(Target {
@@ -31,6 +41,89 @@ fn target() -> Option<Target> {
     })
 }
 
+/// A fresh mark per run — `RandomState` is seeded from the OS, which is all
+/// a test needs to keep two runs (or two scenarios) apart.
+fn fresh_mark() -> OwnerMark {
+    use std::hash::{BuildHasher, Hasher};
+    let mut bytes = [0u8; 16];
+    for half in bytes.chunks_mut(8) {
+        let n = std::collections::hash_map::RandomState::new()
+            .build_hasher()
+            .finish();
+        half.copy_from_slice(&n.to_le_bytes());
+    }
+    OwnerMark::from_random(&bytes)
+}
+
+/// The appliance's API WITHOUT this crate — the operator's hand, making a
+/// rule with no owner mark.
+struct Hand {
+    http: reqwest::blocking::Client,
+    t: Target,
+}
+
+impl Hand {
+    fn new(t: &Target) -> Self {
+        let http = reqwest::blocking::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        Self { http, t: t.clone() }
+    }
+
+    fn post(&self, path: &str, body: serde_json::Value) -> serde_json::Value {
+        self.http
+            .post(format!("{}/api/{path}", self.t.base_url))
+            .basic_auth(&self.t.auth.key, Some(&self.t.auth.secret))
+            .json(&body)
+            .send()
+            .and_then(|r| r.json())
+            .unwrap_or_else(|e| panic!("POST {path}: {e}"))
+    }
+
+    fn add_rule(&self, description: &str) -> String {
+        let answer = self.post(
+            "firewall/filter/add_rule",
+            serde_json::json!({ "rule": {
+                "description": description,
+                "source_net": "any",
+                "destination_net": "10.77.0.0/24",
+            }}),
+        );
+        answer["uuid"]
+            .as_str()
+            .unwrap_or_else(|| panic!("add_rule answered no uuid: {answer}"))
+            .to_string()
+    }
+
+    fn del_rule(&self, uuid: &str) {
+        self.post(
+            &format!("firewall/filter/del_rule/{uuid}"),
+            serde_json::json!({}),
+        );
+    }
+
+    fn disable_rule(&self, uuid: &str) {
+        self.post(
+            &format!("firewall/filter/toggle_rule/{uuid}/0"),
+            serde_json::json!({}),
+        );
+    }
+
+    fn rule_uuid(&self, description_prefix: &str) -> Option<String> {
+        let rows = self.post(
+            "firewall/filter/search_rule",
+            serde_json::json!({ "current": 1, "rowCount": -1 }),
+        );
+        rows["rows"].as_array()?.iter().find_map(|r| {
+            r["description"]
+                .as_str()?
+                .starts_with(description_prefix)
+                .then(|| r["uuid"].as_str().map(str::to_string))?
+        })
+    }
+}
+
 #[test]
 fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
     let Some(t) = target() else {
@@ -38,6 +131,7 @@ fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
         return;
     };
     let provider = OpnsenseGatewayProvider::connect(&t).expect("connect and authenticate");
+    let owner = fresh_mark();
 
     let alias = GatewayAlias {
         name: "delonix_opnsense_live_test".into(),
@@ -52,71 +146,153 @@ fn ensures_and_removes_an_alias_and_a_rule_against_a_real_appliance() {
         protocol: Some("TCP".into()),
     };
 
-    // Clean slate: a previous failed run may have left these behind.
-    let _ = provider.remove_rule(&rule.description);
-    let _ = provider.remove_alias(&alias.name);
+    provider
+        .check_no_foreign_pending()
+        .expect("the appliance must start with nothing staged");
 
-    let outcome = provider.ensure_alias(&alias).expect("create the alias");
-    assert_eq!(outcome, EnsureOutcome::Created);
-    let outcome = provider
-        .ensure_alias(&alias)
-        .expect("a second ensure_alias must not fail");
     assert_eq!(
-        outcome,
-        EnsureOutcome::AlreadyPresent,
-        "ensure_alias must be idempotent"
+        provider
+            .ensure_alias(&alias, &owner)
+            .expect("create the alias"),
+        EnsureOutcome::Created
     );
-
-    let outcome = provider.ensure_rule(&rule).expect("create the rule");
-    assert_eq!(outcome, EnsureOutcome::Created);
-    let outcome = provider
-        .ensure_rule(&rule)
-        .expect("a second ensure_rule must not fail");
     assert_eq!(
-        outcome,
+        provider
+            .ensure_alias(&alias, &owner)
+            .expect("a second ensure_alias"),
         EnsureOutcome::AlreadyPresent,
-        "ensure_rule must be idempotent"
+        "ensure_alias must be idempotent for its owner"
     );
-
+    assert_eq!(
+        provider
+            .ensure_rule(&rule, &owner)
+            .expect("create the rule"),
+        EnsureOutcome::Created
+    );
+    assert_eq!(
+        provider
+            .ensure_rule(&rule, &owner)
+            .expect("a second ensure_rule"),
+        EnsureOutcome::AlreadyPresent,
+        "ensure_rule must be idempotent for its owner"
+    );
     provider
         .commit()
-        .expect("reconfigure aliases and apply the filter");
+        .expect("reconfigure aliases and apply the filter — and prove both running");
 
-    // Remove the RULE first, alias second — the appliance validates a
-    // rule's source against the alias table on write (measured here: doing
-    // this in the other order and re-proving removal with the same
-    // alias-referencing rule fails with "not a valid source IP address or
-    // alias", because the alias is already gone by then). A plain-CIDR
-    // rule proves removal without that ordering dependency.
-    provider
-        .remove_rule(&rule.description)
-        .expect("remove the rule");
-    provider
-        .remove_alias(&alias.name)
-        .expect("remove the alias");
-    provider
-        .commit()
-        .expect("reconfigure and apply the removal");
+    // Another record's mark finds the same names and must not own them.
+    let stranger = fresh_mark();
+    let err = GatewayProvider::ensure_alias(&provider, &alias, &stranger).unwrap_err();
+    assert_eq!(err.number(), 5340, "{err}");
+    assert!(matches!(
+        provider.remove_rule(&rule.description, &stranger).unwrap(),
+        RemoveOutcome::NotOwned(Owner::Other(_))
+    ));
 
-    // Prove the rule was actually removed, not just unlisted: a plain-CIDR
-    // rule (no alias dependency) that ensure_rule would report
-    // AlreadyPresent for if the earlier removal had silently failed.
-    let proof = GatewayRule {
-        description: rule.description.clone(),
-        source: "192.168.1.0/24".into(),
-        destination: rule.destination.clone(),
-        protocol: rule.protocol.clone(),
+    // Rule first, alias second (the appliance validates a rule's source
+    // against the alias table on write).
+    assert_eq!(
+        provider.remove_rule(&rule.description, &owner).unwrap(),
+        RemoveOutcome::Removed
+    );
+    assert_eq!(
+        provider.remove_alias(&alias.name, &owner).unwrap(),
+        RemoveOutcome::Removed
+    );
+    provider.commit().expect("apply the removal");
+    assert_eq!(
+        provider.remove_rule(&rule.description, &owner).unwrap(),
+        RemoveOutcome::Absent,
+        "the rule must be gone, not just unlisted"
+    );
+    assert_eq!(
+        provider
+            .release_owner(&owner)
+            .expect("retire the owner category"),
+        RemoveOutcome::Removed
+    );
+    provider
+        .check_no_foreign_pending()
+        .expect("the appliance is left with nothing staged");
+}
+
+#[test]
+fn a_hand_made_rule_is_never_adopted_and_a_hand_made_pending_change_blocks_the_commit() {
+    // No SKIP line: a print in a library crate's tests is counted debt, and
+    // the first case already says it.
+    let Some(t) = target() else {
+        return;
     };
-    let outcome = provider
-        .ensure_rule(&proof)
-        .expect("recreate after removal to prove it was gone");
+    let hand = Hand::new(&t);
+    let provider = OpnsenseGatewayProvider::connect(&t).expect("connect");
+    let owner = fresh_mark();
+    let description = "delonix-opnsense live ownership - safe to delete";
+    let rule = GatewayRule {
+        description: description.into(),
+        source: "any".into(),
+        destination: "10.77.0.0/24".into(),
+        protocol: None,
+    };
+    provider
+        .check_no_foreign_pending()
+        .expect("the appliance must start with nothing staged");
+
+    // 1. The operator saves a rule with the same description, not applied.
+    let theirs = hand.add_rule(description);
+
+    // 2. Ours with that description: refused, not adopted.
+    let err = provider.ensure_rule(&rule, &owner).unwrap_err();
+    assert_eq!(err.number(), 5340, "{err}");
+
+    // 3. The commit sees the operator's unapplied rule and refuses.
+    let err = provider.commit().unwrap_err();
+    assert_eq!(err.number(), 5342, "{err}");
+    assert!(err.to_string().contains(&theirs), "{err}");
+
+    // 4. A teardown of ours leaves theirs alone.
     assert_eq!(
-        outcome,
-        EnsureOutcome::Created,
-        "the rule must have actually been removed, not just unlisted"
+        provider.remove_rule(description, &owner).unwrap(),
+        RemoveOutcome::NotOwned(Owner::Unmarked)
+    );
+    assert_eq!(
+        hand.rule_uuid(description).as_deref(),
+        Some(theirs.as_str())
+    );
+
+    // The operator takes it back out; created-then-deleted is not pending.
+    hand.del_rule(&theirs);
+    provider
+        .check_no_foreign_pending()
+        .expect("a rule created and deleted before any apply leaves nothing staged");
+
+    // 5. Ours, then disabled by hand on the appliance: drift, not present.
+    assert_eq!(
+        provider.ensure_rule(&rule, &owner).unwrap(),
+        EnsureOutcome::Created
+    );
+    provider.commit().expect("apply ours");
+    let ours = hand
+        .rule_uuid(description)
+        .expect("our rule is on the appliance");
+    hand.disable_rule(&ours);
+    let err = provider.ensure_rule(&rule, &owner).unwrap_err();
+    assert_eq!(err.number(), 5341, "{err}");
+    assert!(err.to_string().contains("disabled"), "{err}");
+
+    // Clean up: our removal covers our own disabled-not-applied change.
+    assert_eq!(
+        provider.remove_rule(description, &owner).unwrap(),
+        RemoveOutcome::Removed
+    );
+    provider.commit().expect("apply the removal");
+    assert!(hand.rule_uuid(description).is_none());
+    assert_eq!(
+        provider
+            .release_owner(&owner)
+            .expect("retire the owner category"),
+        RemoveOutcome::Removed
     );
     provider
-        .remove_rule(&proof.description)
-        .expect("remove the proof rule");
-    provider.commit().expect("final commit");
+        .check_no_foreign_pending()
+        .expect("the appliance is left with nothing staged");
 }

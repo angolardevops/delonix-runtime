@@ -31,6 +31,7 @@
 //! answer this engine gives every ambiguity it will not resolve silently.
 
 use crate::error::Error;
+use crate::ownership::{OwnerMark, RemoveOutcome};
 
 /// Whether an `ensure_*` call created something or found it already there.
 /// Never "updated" — same reasoning as `gateway::EnsureOutcome`: a caller
@@ -54,7 +55,9 @@ pub struct NetworkZoneSpec {
     pub name: String,
 }
 
-/// A vnet to ensure exists inside a zone.
+/// A vnet to ensure exists inside a zone. `alias` is the declared,
+/// human-readable part; the provider writes it followed by the caller's
+/// [`OwnerMark`] — the vnet's only free-text field is where the mark lives.
 #[derive(Debug, Clone)]
 pub struct VNetSpec {
     pub name: String,
@@ -71,21 +74,48 @@ pub trait NetworkZoneProvider {
     /// trip — same contract as `gateway::GatewayProvider::available`.
     fn available(&self) -> bool;
 
+    /// Ensures a zone exists. A zone has no free-text field to carry an
+    /// [`OwnerMark`] (Proxmox VE 9.2.2: `pvesh usage /cluster/sdn/zones`
+    /// lists none), so this answers only whether it was there: whether an
+    /// `AlreadyPresent` zone is the CALLER's is the caller's own record to
+    /// decide (`cmd::network_zone` refuses one it did not create).
     fn ensure_zone(&self, zone: &NetworkZoneSpec) -> delonix_model::Result<EnsureOutcome>;
     /// Removes a zone by name. The provider itself refuses this while a
     /// vnet still references it (Proxmox's own business logic, surfaced as
     /// an ordinary error) — a caller with both to remove orders vnets
-    /// first; see `cmd::network_zone::remove_for_replace`.
+    /// first; see `cmd::network_zone::remove_for_replace`. Only a zone the
+    /// caller's record says it created is ever passed here.
     fn remove_zone(&self, name: &str) -> delonix_model::Result<()>;
 
-    fn ensure_vnet(&self, vnet: &VNetSpec) -> delonix_model::Result<EnsureOutcome>;
-    fn remove_vnet(&self, name: &str) -> delonix_model::Result<()>;
+    /// Ensures a vnet exists, OWNED by `owner` (its alias carries the mark):
+    /// one of that name without the mark is refused
+    /// (`RemoteObjectNotOwned`); one with it, in another zone or with another
+    /// alias, is drift (`RemoteObjectDrifted`).
+    fn ensure_vnet(
+        &self,
+        vnet: &VNetSpec,
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<EnsureOutcome>;
+    /// Removes a vnet only when `owner` owns it; anything else of that name
+    /// is left alone and reported.
+    fn remove_vnet(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome>;
 
-    /// Reloads whatever `ensure_*`/removal staged onto every node in the
-    /// cluster — Proxmox's own `PUT /cluster/sdn`. No default implementation:
-    /// unlike `GatewayProvider::commit`, there is no provider registered
-    /// here with nothing ever staged to make a no-op honest.
-    fn commit(&self) -> delonix_model::Result<()>;
+    /// Runs `change` — the `ensure_*`/`remove_*` calls of one apply or one
+    /// teardown — as ONE unit on the cluster, and makes it live:
+    ///
+    /// * refused BEFORE `change` runs when the cluster already carries
+    ///   staged changes nobody applied, or someone else holds the SDN lock
+    ///   (an apply pushes everything staged, not only this caller's);
+    /// * `change` failing discards what it staged, so nothing half-done is
+    ///   ever applied;
+    /// * `change` succeeding applies it (Proxmox's `PUT /cluster/sdn`).
+    ///
+    /// No default implementation: there is no provider here with nothing
+    /// ever staged to make a plain `change()` honest.
+    fn transaction(
+        &self,
+        change: &mut dyn FnMut() -> delonix_model::Result<()>,
+    ) -> delonix_model::Result<()>;
 }
 
 /// Builds a [`NetworkZoneProvider`], or reports why it could not.
@@ -223,14 +253,21 @@ mod tests {
         fn remove_zone(&self, _n: &str) -> delonix_model::Result<()> {
             Ok(())
         }
-        fn ensure_vnet(&self, _v: &VNetSpec) -> delonix_model::Result<EnsureOutcome> {
+        fn ensure_vnet(
+            &self,
+            _v: &VNetSpec,
+            _o: &OwnerMark,
+        ) -> delonix_model::Result<EnsureOutcome> {
             Ok(EnsureOutcome::Created)
         }
-        fn remove_vnet(&self, _n: &str) -> delonix_model::Result<()> {
-            Ok(())
+        fn remove_vnet(&self, _n: &str, _o: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+            Ok(RemoveOutcome::Removed)
         }
-        fn commit(&self) -> delonix_model::Result<()> {
-            Ok(())
+        fn transaction(
+            &self,
+            change: &mut dyn FnMut() -> delonix_model::Result<()>,
+        ) -> delonix_model::Result<()> {
+            change()
         }
     }
 

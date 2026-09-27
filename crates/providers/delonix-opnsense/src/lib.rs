@@ -52,9 +52,30 @@
 //! `add_item` accepts — was not part of the Phase 0 spike, and guessing it
 //! risks the exact trap this module doc exists to avoid.
 //! [`Client::ensure_alias`]/[`Client::ensure_rule`] never update an
-//! existing alias/rule found under the same identity; they report it
-//! [`delonix_sdn::gateway::EnsureOutcome::AlreadyPresent`] and leave it
-//! untouched.
+//! existing alias/rule found under the same identity: one of this engine's
+//! that still matches is [`delonix_sdn::gateway::EnsureOutcome::AlreadyPresent`],
+//! one that was edited on the appliance is [`Error::Drifted`].
+//!
+//! # Ownership (audit 62, §6 P1)
+//!
+//! The name of an alias and the description of a rule are how they are
+//! FOUND, not who OWNS them. Every alias and rule this crate creates carries
+//! the caller's [`OwnerMark`] as a firewall CATEGORY named
+//! `delonix-owner:<token>` in its `categories` (ADR-0059 D1.5) — the
+//! description stays exactly the declared text — and:
+//!
+//! * an `ensure_*` that finds the name/description WITHOUT the mark refuses
+//!   ([`Error::NotOwned`]) instead of answering "already present" — the old
+//!   answer is how an operator's hand-made rule was adopted and later
+//!   deleted by a teardown;
+//! * a `remove_*` deletes only what carries the mark, by uuid, and reports
+//!   what it left ([`RemoveOutcome::NotOwned`]);
+//! * the commit ([`Client::commit`]) applies only when everything staged on
+//!   the appliance is what this caller staged ([`Staging`]), because
+//!   `filter/apply` and `alias/reconfigure` push ALL of `config.xml`. The
+//!   appliance has no "pending" flag to ask; [`Client::pending_changes`]
+//!   compares the configured state with the running one, and its doc says
+//!   what that comparison cannot see.
 
 pub mod capabilities;
 mod error;
@@ -63,6 +84,7 @@ pub use capabilities::capability_report;
 pub use error::{Error, Result, MAX_RESPONSE_BYTES};
 
 use delonix_sdn::gateway::{EnsureOutcome, GatewayAlias, GatewayProvider, GatewayRule};
+use delonix_sdn::ownership::{Owner, OwnerMark, RemoveOutcome};
 use serde::Serialize;
 use serde_json::Value;
 use std::time::Duration;
@@ -122,6 +144,10 @@ struct AliasWrite {
     /// same field on read).
     content: String,
     description: String,
+    /// The owner category's uuid (a `ModelRelationField`, comma-joined uuids
+    /// on write and on read).
+    #[serde(skip_serializing_if = "String::is_empty")]
+    categories: String,
 }
 
 fn alias_write(alias: &GatewayAlias) -> AliasWrite {
@@ -133,6 +159,7 @@ fn alias_write(alias: &GatewayAlias) -> AliasWrite {
         },
         content: alias.content.join("\n"),
         description: alias.description.clone(),
+        categories: String::new(),
     }
 }
 
@@ -146,6 +173,8 @@ struct RuleWrite {
     destination_net: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     protocol: Option<String>,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    categories: String,
 }
 
 fn rule_write(rule: &GatewayRule) -> RuleWrite {
@@ -154,6 +183,7 @@ fn rule_write(rule: &GatewayRule) -> RuleWrite {
         source_net: rule.source.clone(),
         destination_net: rule.destination.clone(),
         protocol: rule.protocol.clone(),
+        categories: String::new(),
     }
 }
 
@@ -271,101 +301,537 @@ impl Client {
         Ok(json)
     }
 
-    fn find_uuid_by(
-        &self,
-        search_path: &str,
-        rows_key_match: impl Fn(&Value) -> bool,
-    ) -> Result<Option<String>> {
+    /// The firewall categories that are owner labels (`delonix-owner:<token>`)
+    /// — `(uuid, name)`. An operator's own categories are left out: they say
+    /// nothing about who owns an object.
+    fn owner_categories(&self) -> Result<Vec<(String, String)>> {
+        Ok(self
+            .search_rows("firewall/category/search_item")?
+            .iter()
+            .filter_map(|r| {
+                let name = str_field(r, "name");
+                delonix_sdn::ownership::token_of_label(&name)?;
+                Some((r.get("uuid")?.as_str()?.to_string(), name))
+            })
+            .collect())
+    }
+
+    /// The uuid of `owner`'s category, when it exists.
+    fn owner_category(&self, owner: &OwnerMark) -> Result<Option<String>> {
+        let label = owner.label();
+        Ok(self
+            .owner_categories()?
+            .into_iter()
+            .find(|(_, name)| *name == label)
+            .map(|(uuid, _)| uuid))
+    }
+
+    /// The uuid of `owner`'s category, created the first time this record
+    /// writes anything. A category is configuration only (nothing in pf), so
+    /// creating it stages nothing an apply would push.
+    fn ensure_owner_category(&self, owner: &OwnerMark) -> Result<String> {
+        if let Some(uuid) = self.owner_category(owner)? {
+            return Ok(uuid);
+        }
+        let answer = self.request(
+            reqwest::Method::POST,
+            "firewall/category/add_item",
+            Some(&serde_json::json!({ "category": { "name": owner.label(), "auto": "0" } })),
+        )?;
+        answer
+            .get("uuid")
+            .and_then(Value::as_str)
+            .filter(|u| is_uuid(u))
+            .map(str::to_string)
+            .ok_or_else(|| {
+                Error::Decode(format!(
+                    "firewall/category/add_item saved the owner category '{}' without answering \
+                     its uuid: {}",
+                    owner.label(),
+                    truncate_chars(&answer.to_string(), 200)
+                ))
+            })
+    }
+
+    /// Deletes `owner`'s category once nothing carries it — the last step of
+    /// a teardown. The appliance itself refuses while an alias or rule still
+    /// uses it ("Category in use"), which is surfaced, never forced.
+    pub fn release_owner(&self, owner: &OwnerMark) -> Result<RemoveOutcome> {
+        let Some(uuid) = self.owner_category(owner)? else {
+            return Ok(RemoveOutcome::Absent);
+        };
+        self.request(
+            reqwest::Method::POST,
+            &format!("firewall/category/del_item/{uuid}"),
+            None,
+        )?;
+        Ok(RemoveOutcome::Removed)
+    }
+
+    /// Every row of a `search_*` route — `rowCount: -1` is the grid's own
+    /// "all rows" (`UIModelGrid::fetchBindRequest`, OPNsense 26.1.2), so an
+    /// appliance with more aliases or rules than one page never hides the
+    /// one this engine is looking for.
+    fn search_rows(&self, search_path: &str) -> Result<Vec<Value>> {
         let body = self.request(
             reqwest::Method::POST,
             search_path,
-            Some(&serde_json::json!({})),
+            Some(&serde_json::json!({ "current": 1, "rowCount": -1 })),
         )?;
-        let rows = body
+        Ok(body
             .get("rows")
             .and_then(Value::as_array)
             .cloned()
-            .unwrap_or_default();
-        Ok(rows
-            .iter()
-            .find(|row| rows_key_match(row))
-            .and_then(|row| row.get("uuid"))
-            .and_then(Value::as_str)
-            .map(str::to_string))
+            .unwrap_or_default())
     }
 
-    /// Ensures an address alias exists, by name. Never updates one already
-    /// there (see the module doc).
-    pub fn ensure_alias(&self, alias: &GatewayAlias) -> Result<EnsureOutcome> {
-        let name = alias.name.clone();
-        if self
-            .find_uuid_by("firewall/alias/search_item", move |row| {
-                row.get("name").and_then(Value::as_str) == Some(name.as_str())
-            })?
-            .is_some()
-        {
+    /// Ensures an address alias exists, by name, owned by `owner` (see the
+    /// module doc, «Ownership»). Created: the description carries the mark,
+    /// and `staging` records the name so the commit knows it is ours.
+    /// Found: ours and matching is [`EnsureOutcome::AlreadyPresent`]; ours
+    /// and different is [`Error::Drifted`]; not ours is [`Error::NotOwned`].
+    pub fn ensure_alias(
+        &self,
+        alias: &GatewayAlias,
+        owner: &OwnerMark,
+        staging: &Staging,
+    ) -> Result<EnsureOutcome> {
+        let rows = self.search_rows("firewall/alias/search_item")?;
+        if let Some(row) = rows.iter().find(|r| str_field(r, "name") == alias.name) {
+            let found = owner_of_row(row, owner, &self.owner_categories()?);
+            if found != Owner::Ours {
+                return Err(Error::NotOwned(format!(
+                    "alias '{}' already exists on the appliance and is {} — refusing to adopt \
+                     it by name; rename the alias in the manifest, or remove the one on the \
+                     appliance if it is really stale",
+                    alias.name,
+                    found.describe()
+                )));
+            }
+            let drift = alias_drift(row, alias);
+            if !drift.is_empty() {
+                return Err(Error::Drifted(format!(
+                    "alias '{}' (this engine's) was changed on the appliance: {} — put it back, \
+                     or replace the document so the engine recreates it",
+                    alias.name,
+                    drift.join("; ")
+                )));
+            }
             return Ok(EnsureOutcome::AlreadyPresent);
         }
-        let write = alias_write(alias);
+        let mut write = alias_write(alias);
+        write.categories = self.ensure_owner_category(owner)?;
         self.request(
             reqwest::Method::POST,
             "firewall/alias/add_item",
             Some(&serde_json::json!({ "alias": write })),
         )?;
+        staging.record(StagedChange::alias(&alias.name, StagedOp::Created));
         Ok(EnsureOutcome::Created)
     }
 
-    /// Removes an alias by name; a no-op if none exists.
-    pub fn remove_alias(&self, name: &str) -> Result<()> {
-        let want = name.to_string();
-        let uuid = self.find_uuid_by("firewall/alias/search_item", move |row| {
-            row.get("name").and_then(Value::as_str) == Some(want.as_str())
-        })?;
-        if let Some(uuid) = uuid {
-            self.request(
-                reqwest::Method::POST,
-                &format!("firewall/alias/del_item/{uuid}"),
-                None,
-            )?;
+    /// Removes an alias by name — only when `owner` owns it. Anything else
+    /// under that name is left untouched and reported.
+    pub fn remove_alias(
+        &self,
+        name: &str,
+        owner: &OwnerMark,
+        staging: &Staging,
+    ) -> Result<RemoveOutcome> {
+        let rows = self.search_rows("firewall/alias/search_item")?;
+        let Some(row) = rows.iter().find(|r| str_field(r, "name") == name) else {
+            return Ok(RemoveOutcome::Absent);
+        };
+        let found = owner_of_row(row, owner, &self.owner_categories()?);
+        if found != Owner::Ours {
+            return Ok(RemoveOutcome::NotOwned(found));
         }
-        Ok(())
+        let uuid = row_uuid(row, "firewall/alias/search_item")?;
+        self.request(
+            reqwest::Method::POST,
+            &format!("firewall/alias/del_item/{uuid}"),
+            None,
+        )?;
+        staging.record(StagedChange::alias(name, StagedOp::Deleted));
+        Ok(RemoveOutcome::Removed)
     }
 
-    /// Ensures a perimeter filter rule exists, by description. Never
-    /// updates one already there (see the module doc).
-    pub fn ensure_rule(&self, rule: &GatewayRule) -> Result<EnsureOutcome> {
-        let description = rule.description.clone();
-        if self
-            .find_uuid_by("firewall/filter/search_rule", move |row| {
-                row.get("description").and_then(Value::as_str) == Some(description.as_str())
-            })?
-            .is_some()
+    /// Ensures a perimeter filter rule exists, by description, owned by
+    /// `owner`. The rules looked at are those whose description WITHOUT an
+    /// owner mark equals the declared one: any of them not ours is a
+    /// refusal (the operator's rule of the same name would be the one
+    /// adopted, then deleted, under the old identity); two of ours is a
+    /// drift (a duplicate nobody declared).
+    pub fn ensure_rule(
+        &self,
+        rule: &GatewayRule,
+        owner: &OwnerMark,
+        staging: &Staging,
+    ) -> Result<EnsureOutcome> {
+        let rows = self.search_rows("firewall/filter/search_rule")?;
+        let same: Vec<&Value> = rows
+            .iter()
+            .filter(|r| str_field(r, "description") == rule.description)
+            .collect();
+        let labels = if same.is_empty() {
+            Vec::new()
+        } else {
+            self.owner_categories()?
+        };
+        if let Some(foreign) = same
+            .iter()
+            .map(|r| owner_of_row(r, owner, &labels))
+            .find(|o| *o != Owner::Ours)
         {
-            return Ok(EnsureOutcome::AlreadyPresent);
+            return Err(Error::NotOwned(format!(
+                "a rule described '{}' already exists on the appliance and is {} — refusing \
+                 to adopt it by description; change the description in the manifest, or \
+                 remove the rule on the appliance if it is really stale",
+                rule.description,
+                foreign.describe()
+            )));
         }
-        let write = rule_write(rule);
-        self.request(
+        match same.as_slice() {
+            [] => {}
+            [row] => {
+                let drift = rule_drift(row, rule);
+                if !drift.is_empty() {
+                    return Err(Error::Drifted(format!(
+                        "rule '{}' (this engine's) was changed on the appliance: {} — put it \
+                         back, or replace the document so the engine recreates it",
+                        rule.description,
+                        drift.join("; ")
+                    )));
+                }
+                return Ok(EnsureOutcome::AlreadyPresent);
+            }
+            many => {
+                return Err(Error::Drifted(format!(
+                    "{} rules described '{}' carry this engine's mark, and it created one — \
+                     remove the copies on the appliance",
+                    many.len(),
+                    rule.description
+                )));
+            }
+        }
+        let mut write = rule_write(rule);
+        write.categories = self.ensure_owner_category(owner)?;
+        let answer = self.request(
             reqwest::Method::POST,
             "firewall/filter/add_rule",
             Some(&serde_json::json!({ "rule": write })),
         )?;
+        // The uuid is the rule's pf label once applied (`FilterRuleField::
+        // serialize`), which is how the commit tells this rule from someone
+        // else's staged one. Without it the commit would refuse our own rule.
+        let uuid = answer
+            .get("uuid")
+            .and_then(Value::as_str)
+            .filter(|u| is_uuid(u))
+            .ok_or_else(|| {
+                Error::Decode(format!(
+                    "firewall/filter/add_rule saved the rule '{}' without answering its uuid: {}",
+                    rule.description,
+                    truncate_chars(&answer.to_string(), 200)
+                ))
+            })?;
+        staging.record(StagedChange::rule(
+            uuid,
+            &rule.description,
+            StagedOp::Created,
+        ));
         Ok(EnsureOutcome::Created)
     }
 
-    /// Removes a rule by description; a no-op if none exists.
-    pub fn remove_rule(&self, description: &str) -> Result<()> {
-        let want = description.to_string();
-        let uuid = self.find_uuid_by("firewall/filter/search_rule", move |row| {
-            row.get("description").and_then(Value::as_str) == Some(want.as_str())
-        })?;
-        if let Some(uuid) = uuid {
+    /// Removes the rules with this description that `owner` owns. A rule
+    /// that matches without the mark is left alone and reported.
+    pub fn remove_rule(
+        &self,
+        description: &str,
+        owner: &OwnerMark,
+        staging: &Staging,
+    ) -> Result<RemoveOutcome> {
+        let rows = self.search_rows("firewall/filter/search_rule")?;
+        let same: Vec<&Value> = rows
+            .iter()
+            .filter(|r| str_field(r, "description") == description)
+            .collect();
+        if same.is_empty() {
+            return Ok(RemoveOutcome::Absent);
+        }
+        let labels = self.owner_categories()?;
+        let mut removed = false;
+        let mut left = None;
+        for row in same {
+            let found = owner_of_row(row, owner, &labels);
+            if found != Owner::Ours {
+                left = Some(found);
+                continue;
+            }
+            let uuid = row_uuid(row, "firewall/filter/search_rule")?;
             self.request(
                 reqwest::Method::POST,
                 &format!("firewall/filter/del_rule/{uuid}"),
                 None,
             )?;
+            staging.record(StagedChange::rule(&uuid, description, StagedOp::Deleted));
+            removed = true;
         }
+        Ok(match (removed, left) {
+            (_, Some(found)) => RemoveOutcome::NotOwned(found),
+            (true, None) => RemoveOutcome::Removed,
+            (false, None) => RemoveOutcome::Absent,
+        })
+    }
+
+    /// Every change the appliance has staged and not applied, as far as its
+    /// API lets it be SEEN — there is no "pending" or "dirty" flag in the
+    /// firewall API (OPNsense 26.1.2: neither `FilterBaseController` nor
+    /// `AliasController` has one; `apply`/`reconfigure` reload the whole
+    /// `config.xml`). So the configured state is compared with the RUNNING
+    /// one:
+    ///
+    /// * **rules** — the configured filter rules (`search_rule`) against the
+    ///   labels loaded in pf (`diagnostics/firewall/list_rule_ids`, read from
+    ///   `pfctl -vvPsr`). An MVC rule's pf label IS its uuid
+    ///   (`FilterRuleField::serialize`). An enabled rule not loaded, a
+    ///   disabled one still loaded, and a loaded uuid no longer configured
+    ///   are each pending.
+    /// * **aliases** — the configured `host`/`network` aliases against pf's
+    ///   tables (`alias_util/aliases`, `pfctl -sT`) and, for an alias whose
+    ///   entries are all literal addresses, the table's content
+    ///   (`alias_util/list/<name>`). A table left for an alias no longer
+    ///   configured is pending too.
+    ///
+    /// What this does NOT see: an edit to a rule's match fields (source,
+    /// destination, protocol…) that kept its uuid and its enabled state, and
+    /// an alias whose entries are host names (resolved by the appliance, not
+    /// comparable). Said here rather than implied by a green commit.
+    pub fn pending_changes(&self) -> Result<Vec<PendingChange>> {
+        let mut out = Vec::new();
+
+        let rules = self.search_rows("firewall/filter/search_rule")?;
+        let running = self.request(
+            reqwest::Method::GET,
+            "diagnostics/firewall/list_rule_ids",
+            None,
+        )?;
+        let running: std::collections::BTreeSet<String> = running
+            .get("items")
+            .and_then(Value::as_array)
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(|i| i.get("id").and_then(Value::as_str))
+                    .filter(|id| is_uuid(id))
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut configured = std::collections::BTreeSet::new();
+        for row in &rules {
+            let Some(uuid) = row.get("uuid").and_then(Value::as_str) else {
+                continue;
+            };
+            configured.insert(uuid.to_string());
+            let enabled = str_field(row, "enabled") != "0";
+            let loaded = running.contains(uuid);
+            let what = match (enabled, loaded) {
+                (true, false) => "created or enabled, not applied",
+                (false, true) => "disabled, not applied",
+                _ => continue,
+            };
+            out.push(PendingChange {
+                kind: "rule",
+                id: uuid.to_string(),
+                label: str_field(row, "description"),
+                what,
+            });
+        }
+        for uuid in running.difference(&configured) {
+            out.push(PendingChange {
+                kind: "rule",
+                id: uuid.clone(),
+                label: String::new(),
+                what: "deleted, not applied",
+            });
+        }
+
+        let aliases = self.search_rows("firewall/alias/search_item")?;
+        let tables: std::collections::BTreeSet<String> = self
+            .request(reqwest::Method::GET, "firewall/alias_util/aliases", None)?
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut names = std::collections::BTreeSet::new();
+        for row in &aliases {
+            let name = str_field(row, "name");
+            names.insert(name.clone());
+            let kind = str_field(row, "type");
+            if kind != "host" && kind != "network" || str_field(row, "enabled") == "0" {
+                continue;
+            }
+            if !tables.contains(&name) {
+                out.push(PendingChange {
+                    kind: "alias",
+                    id: name,
+                    label: str_field(row, "description"),
+                    what: "created, not applied",
+                });
+                continue;
+            }
+            let Some(want) = literal_entries(&str_field(row, "content")) else {
+                continue;
+            };
+            let listed = self.search_rows_get(&format!("firewall/alias_util/list/{name}"))?;
+            let have: std::collections::BTreeSet<String> = listed
+                .iter()
+                .filter_map(|r| r.get("ip").and_then(Value::as_str))
+                .map(canonical_entry)
+                .collect();
+            if have != want {
+                out.push(PendingChange {
+                    kind: "alias",
+                    id: name,
+                    label: str_field(row, "description"),
+                    what: "content changed, not applied",
+                });
+            }
+        }
+        for table in tables.difference(&names) {
+            if is_internal_table(table) {
+                continue;
+            }
+            out.push(PendingChange {
+                kind: "alias",
+                id: table.clone(),
+                label: String::new(),
+                what: "deleted, not applied",
+            });
+        }
+        Ok(out)
+    }
+
+    /// `GET` of a route answering `{"rows": [...]}`.
+    fn search_rows_get(&self, path: &str) -> Result<Vec<Value>> {
+        let body = self.request(reqwest::Method::GET, path, None)?;
+        Ok(body
+            .get("rows")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
+    }
+
+    /// Refuses ([`Error::ForeignPending`]) when anything staged on the
+    /// appliance is not in `staging`.
+    pub fn check_no_foreign_pending(&self, staging: &Staging) -> Result<()> {
+        let foreign: Vec<PendingChange> = self
+            .pending_changes()?
+            .into_iter()
+            .filter(|p| !staging.covers(p))
+            .collect();
+        if foreign.is_empty() {
+            return Ok(());
+        }
+        let list: Vec<String> = foreign.iter().map(PendingChange::to_string).collect();
+        Err(Error::ForeignPending(format!(
+            "the appliance has {} staged change(s) that are not this engine's: {} — its apply \
+             pushes everything staged, so nothing was applied; have them applied or reverted \
+             on the appliance first",
+            foreign.len(),
+            list.join("; ")
+        )))
+    }
+
+    /// Applies what `staging` staged — and only when that is ALL that is
+    /// staged. Checks again (someone may have staged since the pre-check),
+    /// then `alias/reconfigure` and `filter/apply`, then proves the result:
+    /// nothing of ours may still be pending afterwards.
+    ///
+    /// When the second check refuses, what this engine CREATED is deleted
+    /// again (rules before aliases), so a later apply by the operator does
+    /// not push it; what it DELETED cannot be restored and is named in the
+    /// error.
+    pub fn commit(&self, staging: &Staging) -> Result<()> {
+        if let Err(refused) = self.check_no_foreign_pending(staging) {
+            return Err(self.discard_staged(staging, refused));
+        }
+        self.reconfigure_aliases()?;
+        self.apply_filter()?;
+        let ours: Vec<String> = self
+            .pending_changes()?
+            .into_iter()
+            .filter(|p| staging.covers(p))
+            .map(|p| p.to_string())
+            .collect();
+        if !ours.is_empty() {
+            return Err(Error::HttpStatus(format!(
+                "the appliance answered the apply, but these changes of this engine are still \
+                 not running: {}",
+                ours.join("; ")
+            )));
+        }
+        staging.clear();
         Ok(())
+    }
+
+    /// Deletes again what `staging` created (rules first: an alias a rule
+    /// still references is refused by the appliance), and returns `refused`
+    /// with what could not be undone appended.
+    fn discard_staged(&self, staging: &Staging, refused: Error) -> Error {
+        let changes = staging.take();
+        let mut left = Vec::new();
+        let mut order: Vec<&StagedChange> = changes.iter().filter(|c| c.kind == "rule").collect();
+        order.extend(changes.iter().filter(|c| c.kind == "alias"));
+        for c in order {
+            if c.op == StagedOp::Deleted {
+                left.push(format!("{} '{}' deleted", c.kind, c.label));
+                continue;
+            }
+            let undo = if c.kind == "rule" {
+                self.request(
+                    reqwest::Method::POST,
+                    &format!("firewall/filter/del_rule/{}", c.id),
+                    None,
+                )
+                .map(drop)
+            } else {
+                self.search_rows("firewall/alias/search_item")
+                    .and_then(
+                        |rows| match rows.iter().find(|r| str_field(r, "name") == c.id) {
+                            Some(row) => row_uuid(row, "firewall/alias/search_item"),
+                            None => Err(Error::Decode(format!("alias '{}' not found", c.id))),
+                        },
+                    )
+                    .and_then(|uuid| {
+                        self.request(
+                            reqwest::Method::POST,
+                            &format!("firewall/alias/del_item/{uuid}"),
+                            None,
+                        )
+                        .map(drop)
+                    })
+            };
+            if let Err(e) = undo {
+                left.push(format!("{} '{}' created ({e})", c.kind, c.label));
+            }
+        }
+        if left.is_empty() {
+            return refused;
+        }
+        let text = format!(
+            "{refused} — and these changes of this engine are still staged on the appliance: {}",
+            left.join("; ")
+        );
+        match refused {
+            Error::ForeignPending(_) => Error::ForeignPending(text),
+            _ => Error::HttpStatus(text),
+        }
     }
 
     /// Activates staged alias changes. A SEPARATE call from
@@ -386,6 +852,265 @@ impl Client {
         self.request(reqwest::Method::POST, "firewall/filter/apply", None)?;
         Ok(())
     }
+}
+
+/// Whether a change staged on the appliance was made or undone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StagedOp {
+    Created,
+    Deleted,
+}
+
+/// One write this engine staged and has not applied yet: a rule by uuid
+/// (its pf label once applied), an alias by name (its pf table).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StagedChange {
+    pub kind: &'static str,
+    pub id: String,
+    /// The rule's description or the alias's name, for a message.
+    pub label: String,
+    pub op: StagedOp,
+}
+
+impl StagedChange {
+    fn alias(name: &str, op: StagedOp) -> Self {
+        Self {
+            kind: "alias",
+            id: name.to_string(),
+            label: name.to_string(),
+            op,
+        }
+    }
+
+    fn rule(uuid: &str, description: &str, op: StagedOp) -> Self {
+        Self {
+            kind: "rule",
+            id: uuid.to_string(),
+            label: description.to_string(),
+            op,
+        }
+    }
+}
+
+/// What ONE caller staged — one `NetworkGateway` apply or teardown, through
+/// one [`OpnsenseGatewayProvider`] — so its commit can tell its own staged
+/// changes from everybody else's. Separate from [`Client`] on purpose: the
+/// client is shared by every provider value the registry builds.
+#[derive(Debug, Default)]
+pub struct Staging(std::sync::Mutex<Vec<StagedChange>>);
+
+impl Staging {
+    fn record(&self, change: StagedChange) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(change);
+    }
+
+    fn covers(&self, pending: &PendingChange) -> bool {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .any(|c| c.kind == pending.kind && c.id == pending.id)
+    }
+
+    fn take(&self) -> Vec<StagedChange> {
+        std::mem::take(&mut *self.0.lock().unwrap_or_else(|e| e.into_inner()))
+    }
+
+    fn clear(&self) {
+        drop(self.take());
+    }
+
+    /// What is staged now, for a test or a message.
+    pub fn changes(&self) -> Vec<StagedChange> {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+}
+
+/// One change the appliance has configured and not applied, as
+/// [`Client::pending_changes`] sees it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingChange {
+    /// `rule` or `alias`.
+    pub kind: &'static str,
+    /// A rule's uuid, an alias's name.
+    pub id: String,
+    /// A rule's description, an alias's description — empty when the object
+    /// is only in the running state (deleted, not applied).
+    pub label: String,
+    pub what: &'static str,
+}
+
+impl std::fmt::Display for PendingChange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.label.is_empty() {
+            write!(f, "{} {} ({})", self.kind, self.id, self.what)
+        } else {
+            write!(
+                f,
+                "{} {} '{}' ({})",
+                self.kind, self.id, self.label, self.what
+            )
+        }
+    }
+}
+
+/// Whose a row is: its `categories` (comma-joined category uuids) against
+/// the owner labels. Our label wins over another record's on the same
+/// object; no owner label at all is [`Owner::Unmarked`].
+fn owner_of_row(row: &Value, owner: &OwnerMark, labels: &[(String, String)]) -> Owner {
+    let mut other = None;
+    for id in str_field(row, "categories")
+        .split(',')
+        .map(str::trim)
+        .filter(|i| !i.is_empty())
+    {
+        let Some((_, name)) = labels.iter().find(|(uuid, _)| uuid == id) else {
+            continue;
+        };
+        match owner.owner_of_label(name) {
+            Some(Owner::Ours) => return Owner::Ours,
+            Some(o) => other = Some(o),
+            None => {}
+        }
+    }
+    other.unwrap_or(Owner::Unmarked)
+}
+
+/// A string field of a search row — the grid answers the RAW value under the
+/// field's name (and a display form under `%<field>`, never read here).
+fn str_field(row: &Value, field: &str) -> String {
+    match row.get(field) {
+        Some(Value::String(s)) => s.clone(),
+        Some(Value::Null) | None => String::new(),
+        Some(other) => other.to_string(),
+    }
+}
+
+fn row_uuid(row: &Value, route: &str) -> Result<String> {
+    row.get("uuid")
+        .and_then(Value::as_str)
+        .filter(|u| is_uuid(u))
+        .map(str::to_string)
+        .ok_or_else(|| Error::Decode(format!("{route}: a row without a uuid: {row}")))
+}
+
+/// `8-4-4-4-12` hexadecimal — an MVC object's uuid, and the only shape a
+/// uuid read from the appliance may have before it goes into a URL path.
+fn is_uuid(s: &str) -> bool {
+    let parts: Vec<&str> = s.split('-').collect();
+    parts.len() == 5
+        && parts
+            .iter()
+            .zip([8, 4, 4, 4, 12])
+            .all(|(p, n)| p.len() == n && p.bytes().all(|b| b.is_ascii_hexdigit()))
+}
+
+/// The entries of an alias's `content` as a set — the grid joins them with a
+/// newline or a comma depending on the version, so both separate.
+fn entries(content: &str) -> std::collections::BTreeSet<String> {
+    content
+        .split(['\n', ','])
+        .map(str::trim)
+        .filter(|e| !e.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+/// An address or CIDR as pf lists it: a single-host CIDR (`/32`, `/128`) is
+/// shown as the bare address.
+fn canonical_entry(e: &str) -> String {
+    let e = e.trim();
+    match e.split_once('/') {
+        Some((ip, "32")) if ip.parse::<std::net::Ipv4Addr>().is_ok() => ip.to_string(),
+        Some((ip, "128")) if ip.parse::<std::net::Ipv6Addr>().is_ok() => ip.to_string(),
+        _ => e.to_string(),
+    }
+}
+
+/// The alias's entries in pf's form when EVERY one is a literal address or
+/// CIDR; `None` when one is a host name, which the appliance resolves and
+/// this engine cannot compare.
+fn literal_entries(content: &str) -> Option<std::collections::BTreeSet<String>> {
+    let all = entries(content);
+    all.iter()
+        .all(|e| {
+            let ip = e.split_once('/').map_or(e.as_str(), |(ip, _)| ip);
+            ip.parse::<std::net::IpAddr>().is_ok()
+        })
+        .then(|| all.iter().map(|e| canonical_entry(e)).collect())
+}
+
+/// pf tables the appliance keeps without a configured alias of the same
+/// name: the per-interface `__<if>_network` tables and the built-in ones.
+fn is_internal_table(name: &str) -> bool {
+    name.starts_with("__")
+        || matches!(
+            name,
+            "bogons" | "bogonsv6" | "sshlockout" | "virusprot" | "webConfiguratorlockout"
+        )
+}
+
+/// How an owned alias differs from the declaration, field by field.
+fn alias_drift(row: &Value, want: &GatewayAlias) -> Vec<String> {
+    let mut out = Vec::new();
+    let kind = alias_write(want).kind;
+    let have_kind = str_field(row, "type");
+    if have_kind != kind {
+        out.push(format!("type is '{have_kind}', declared '{kind}'"));
+    }
+    let have = entries(&str_field(row, "content"));
+    let declared: std::collections::BTreeSet<String> =
+        want.content.iter().map(|e| e.trim().to_string()).collect();
+    if have != declared {
+        out.push(format!(
+            "content is [{}], declared [{}]",
+            have.into_iter().collect::<Vec<_>>().join(", "),
+            declared.into_iter().collect::<Vec<_>>().join(", ")
+        ));
+    }
+    let description = str_field(row, "description");
+    if description != want.description.trim() {
+        out.push(format!(
+            "description is '{description}', declared '{}'",
+            want.description.trim()
+        ));
+    }
+    if str_field(row, "enabled") == "0" {
+        out.push("it is disabled".to_string());
+    }
+    out
+}
+
+/// How an owned rule differs from the declaration, field by field. An
+/// absent protocol is the appliance's `any`.
+fn rule_drift(row: &Value, want: &GatewayRule) -> Vec<String> {
+    let mut out = Vec::new();
+    for (field, declared) in [
+        ("source_net", want.source.as_str()),
+        ("destination_net", want.destination.as_str()),
+    ] {
+        let have = str_field(row, field);
+        if have != declared {
+            out.push(format!("{field} is '{have}', declared '{declared}'"));
+        }
+    }
+    let have = str_field(row, "protocol");
+    let have = if have.is_empty() {
+        "any".to_string()
+    } else {
+        have
+    };
+    let declared = want.protocol.as_deref().unwrap_or("any");
+    if !have.eq_ignore_ascii_case(declared) {
+        out.push(format!("protocol is '{have}', declared '{declared}'"));
+    }
+    if str_field(row, "enabled") == "0" {
+        out.push("it is disabled".to_string());
+    }
+    out
 }
 
 /// Reads at most [`MAX_RESPONSE_BYTES`]; one byte more is a refusal, never
@@ -450,6 +1175,8 @@ fn validation_failure(body: &Value) -> Option<Error> {
 /// firewall API, wrapped.
 pub struct OpnsenseGatewayProvider {
     client: std::sync::Arc<Client>,
+    /// What THIS value staged — one per apply, while the client is shared.
+    staging: Staging,
 }
 
 impl OpnsenseGatewayProvider {
@@ -461,7 +1188,10 @@ impl OpnsenseGatewayProvider {
     /// [`register_with`]'s cached factory hands back on every selection
     /// after the first, instead of reconnecting.
     fn sharing(client: std::sync::Arc<Client>) -> Self {
-        Self { client }
+        Self {
+            client,
+            staging: Staging::default(),
+        }
     }
 }
 
@@ -500,6 +1230,9 @@ pub fn register_with(target: Target) -> delonix_model::Result<()> {
     Ok(())
 }
 
+// Every failure crosses the trait with its dictionary number
+// (`delonix_model::Error::from`), never `into_root`, which strips the carrier:
+// measured live on the zone provider, a DX-5340 refusal arrived as a bare 5000.
 impl GatewayProvider for OpnsenseGatewayProvider {
     fn id(&self) -> &'static str {
         ID
@@ -512,28 +1245,57 @@ impl GatewayProvider for OpnsenseGatewayProvider {
         true
     }
 
-    fn ensure_alias(&self, alias: &GatewayAlias) -> delonix_model::Result<EnsureOutcome> {
-        self.client.ensure_alias(alias).map_err(Error::into_root)
-    }
-
-    fn remove_alias(&self, name: &str) -> delonix_model::Result<()> {
-        self.client.remove_alias(name).map_err(Error::into_root)
-    }
-
-    fn ensure_rule(&self, rule: &GatewayRule) -> delonix_model::Result<EnsureOutcome> {
-        self.client.ensure_rule(rule).map_err(Error::into_root)
-    }
-
-    fn remove_rule(&self, description: &str) -> delonix_model::Result<()> {
+    fn ensure_alias(
+        &self,
+        alias: &GatewayAlias,
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<EnsureOutcome> {
         self.client
-            .remove_rule(description)
-            .map_err(Error::into_root)
+            .ensure_alias(alias, owner, &self.staging)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn remove_alias(&self, name: &str, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+        self.client
+            .remove_alias(name, owner, &self.staging)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn ensure_rule(
+        &self,
+        rule: &GatewayRule,
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<EnsureOutcome> {
+        self.client
+            .ensure_rule(rule, owner, &self.staging)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn remove_rule(
+        &self,
+        description: &str,
+        owner: &OwnerMark,
+    ) -> delonix_model::Result<RemoveOutcome> {
+        self.client
+            .remove_rule(description, owner, &self.staging)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn release_owner(&self, owner: &OwnerMark) -> delonix_model::Result<RemoveOutcome> {
+        self.client
+            .release_owner(owner)
+            .map_err(delonix_model::Error::from)
+    }
+
+    fn check_no_foreign_pending(&self) -> delonix_model::Result<()> {
+        self.client
+            .check_no_foreign_pending(&self.staging)
+            .map_err(delonix_model::Error::from)
     }
 
     fn commit(&self) -> delonix_model::Result<()> {
         self.client
-            .reconfigure_aliases()
-            .map_err(Error::into_root)?;
-        self.client.apply_filter().map_err(Error::into_root)
+            .commit(&self.staging)
+            .map_err(delonix_model::Error::from)
     }
 }

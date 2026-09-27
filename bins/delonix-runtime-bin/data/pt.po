@@ -14388,3 +14388,42 @@ msgstr "em lado nenhum — falta o segredo"
 
 msgid "Network default:"
 msgstr "Rede por omissão:"
+
+msgid "remote object not owned by this engine"
+msgstr "objecto remoto que não pertence a este motor"
+
+msgid "An object with the name (or rule description) being ensured or removed already exists on the remote provider — an OPNsense appliance, a Proxmox cluster's SDN — without this engine's owner mark. It belongs to someone else, and this engine refuses to adopt it by name, and never deletes it."
+msgstr "Já existe no provider remoto — um appliance OPNsense, a SDN de um cluster Proxmox — um objecto com o nome (ou a descrição de regra) que se pediu para garantir ou remover, sem a marca de posse deste motor. É de outra pessoa: este motor recusa adoptá-lo pelo nome, e nunca o apaga."
+
+msgid "Rename the object in the manifest, or remove or rename the one on the provider if it is really stale. The mark is a firewall category named `delonix-owner:<token>` (OPNsense) or `[delonix-owner:<token>]` at the end of the vnet alias (Proxmox); a Proxmox zone has no text field and is owned only when this engine's own record says it created it."
+msgstr "Muda o nome do objecto no manifesto, ou remove ou renomeia o que está no provider se estiver mesmo abandonado. A marca é uma categoria de firewall chamada `delonix-owner:<token>` (OPNsense) ou `[delonix-owner:<token>]` no fim do alias da vnet (Proxmox); uma zona do Proxmox não tem campo de texto e só é deste motor quando o registo do próprio motor diz que foi ele a criá-la."
+
+msgid "remote object drifted from the declaration"
+msgstr "objecto remoto divergiu do declarado"
+
+msgid "An object this engine created on the remote provider was edited there, and no longer matches the manifest. The provider has no update in place in this engine, so the object is neither overwritten nor reported as present."
+msgstr "Um objecto que este motor criou no provider remoto foi editado lá e já não corresponde ao manifesto. Este motor não tem actualização no lugar para esse provider, por isso o objecto nem é sobrescrito nem é dado como presente."
+
+msgid "Put the object back as declared on the provider, or replace it (`delonix stack apply --replace <Kind>/<name>`) so the engine removes and recreates it."
+msgstr "Repõe o objecto como foi declarado no provider, ou substitui-o (`delonix stack apply --replace <Kind>/<nome>`) para o motor o remover e recriar."
+
+msgid "remote provider has staged changes that are not this engine's"
+msgstr "o provider remoto tem alterações preparadas que não são deste motor"
+
+msgid "The remote provider applies everything that is staged at once (OPNsense `filter/apply` and `alias/reconfigure`, Proxmox `PUT /cluster/sdn`). Other staged changes are waiting there, so committing now would push someone else's half-finished work along with this engine's."
+msgstr "O provider remoto aplica de uma vez tudo o que está preparado (`filter/apply` e `alias/reconfigure` do OPNsense, `PUT /cluster/sdn` do Proxmox). Há outras alterações preparadas à espera, por isso aplicar agora empurraria o trabalho a meio de outra pessoa junto com o deste motor."
+
+msgid "Have whoever staged them apply or discard them on the provider (the message lists what was found), then apply again."
+msgstr "Pede a quem as preparou que as aplique ou descarte no provider (a mensagem lista o que foi encontrado) e volta a aplicar."
+
+msgid "networkgateway/{name}: {kind} '{object}' left on the appliance: {why}"
+msgstr "networkgateway/{name}: {kind} '{object}' ficou no appliance: {why}"
+
+msgid "networkgateway/{name} is recorded on provider '{old}', not '{new}' — replace the document (`--replace NetworkGateway/{name}`) to move it"
+msgstr "networkgateway/{name} está registado no provider '{old}', não em '{new}' — substitui o documento (`--replace NetworkGateway/{name}`) para o mudar"
+
+msgid "networkzone/{name}: {kind} '{object}' left on the cluster: {why}"
+msgstr "networkzone/{name}: {kind} '{object}' ficou no cluster: {why}"
+
+msgid "zone '{name}' already exists in the cluster's SDN and this engine did not create it — refusing to adopt it by name; pick another zone name, or remove the zone on the cluster if it is really stale"
+msgstr "a zona '{name}' já existe na SDN do cluster e não foi este motor que a criou — recuso adoptá-la pelo nome; escolhe outro nome de zona, ou remove a zona no cluster se estiver mesmo abandonada"

@@ -280,6 +280,26 @@ pub enum Error {
     #[error("{0}")]
     NetworkPrefixConflict(String),
 
+    /// An object with the identity a remote provider (OPNsense, the SDN of a
+    /// Proxmox cluster) was asked to ensure or remove already exists there
+    /// WITHOUT this engine's owner mark (`crate::ownership`) — someone else's.
+    /// Refused instead of adopted: adopting by name is how a hand-made rule
+    /// came to be deleted by a teardown.
+    #[error("{0}")]
+    RemoteObjectNotOwned(String),
+
+    /// An object this engine owns on a remote provider no longer matches what
+    /// was declared (someone edited it there). There is no update in place,
+    /// so it is reported instead of being reported as present.
+    #[error("{0}")]
+    RemoteObjectDrifted(String),
+
+    /// The remote provider carries staged changes that are not this
+    /// engine's; its commit applies EVERYTHING staged, so committing would
+    /// push them too. Refused before anything is applied.
+    #[error("{0}")]
+    RemoteForeignPending(String),
+
     // ---- unavailable ------------------------------------------------------
     /// The `wg` binary is missing from the host.
     #[error("{0}")]
@@ -384,6 +404,9 @@ impl Error {
             Error::NetworkSubnetImmutable(_) => 5304,
             Error::BaseOctetTaken(_) => 5305,
             Error::NetworkPrefixConflict(_) => 5306,
+            Error::RemoteObjectNotOwned(_) => 5340,
+            Error::RemoteObjectDrifted(_) => 5341,
+            Error::RemoteForeignPending(_) => 5342,
             Error::WgMissing(_) => 6301,
             Error::Command { .. } => 9301,
             Error::Engine(e) => e.number(),
@@ -429,7 +452,10 @@ impl From<Error> for Dx {
             | Error::SubnetOverlap(text)
             | Error::NetworkSubnetImmutable(text)
             | Error::BaseOctetTaken(text)
-            | Error::NetworkPrefixConflict(text) => Dx::Conflict(text),
+            | Error::NetworkPrefixConflict(text)
+            | Error::RemoteObjectNotOwned(text)
+            | Error::RemoteObjectDrifted(text)
+            | Error::RemoteForeignPending(text) => Dx::Conflict(text),
             Error::WgMissing(text) => Dx::Unavailable(text),
             Error::Command { context, message } => Dx::Runtime { context, message },
             Error::Engine(e) => return e,
@@ -512,6 +538,9 @@ mod tests {
             Error::NetworkSubnetImmutable("network 'x' already exists as 10.50.0.0/16".into()),
             Error::BaseOctetTaken("10.50.0.0/16 is already used by network 'x'".into()),
             Error::NetworkPrefixConflict("network 'x' is already realized on 10.50".into()),
+            Error::RemoteObjectNotOwned("alias 'x' on opnsense is not this engine's".into()),
+            Error::RemoteObjectDrifted("rule 'x' on opnsense: source differs".into()),
+            Error::RemoteForeignPending("opnsense: 1 staged change is not this engine's".into()),
             Error::WgMissing("'wg' is not available on this host".into()),
             Error::Command {
                 context: "spawn",

@@ -26,6 +26,17 @@
 //! from the manifest under `stack apply --prune`), which removes every
 //! alias/rule the registry last recorded, not just what the new spec says.
 //!
+//! **Ownership on the far end** (audit 62, §6 P1). The registry says which
+//! aliases/rules a document declared; it does not prove the appliance's
+//! objects of those names are this engine's. Each record carries an owner
+//! token ([`delonix_sdn::ownership::OwnerMark`]), generated and SAVED before
+//! the first remote write, that the provider attaches to every alias and rule
+//! it creates (on OPNsense, a firewall category `delonix-owner:<token>`): an
+//! object of the same name without it is refused on apply and left alone (and
+//! named) on teardown, and the teardown retires the category last. A record written before the token
+//! existed has none — its objects were never marked, so its teardown removes
+//! nothing on the appliance and says so per object.
+//!
 //! **No new CLI leaf** beyond the generic `get`/`describe`/`delete
 //! networkgateways` verbs (`cmd/verbs.rs`) — reached the same way `kind:
 //! Service`/`kind: NetworkAccessRule` already are, through `delonix apply
@@ -39,6 +50,7 @@ use super::output::OutputFormat;
 use super::util::state_root;
 use delonix_model::{Error, Result};
 use delonix_sdn::gateway::{AliasKind, GatewayAlias, GatewayProvider, GatewayRule};
+use delonix_sdn::ownership::{OwnerMark, RemoveOutcome};
 use delonix_state::JsonStore;
 
 /// `spec` of `kind: NetworkGateway`.
@@ -100,6 +112,10 @@ struct NetworkGatewayRecord {
     labels: BTreeMap<String, String>,
     #[serde(default)]
     annotations: BTreeMap<String, String>,
+    /// The owner token written into every alias/rule this record created on
+    /// the appliance. Empty in a record from before the token existed.
+    #[serde(default)]
+    owner: String,
 }
 
 fn store() -> Result<JsonStore<NetworkGatewayRecord>> {
@@ -228,28 +244,77 @@ pub(crate) fn actual() -> Result<Vec<super::reconcile::Actual>> {
         .collect())
 }
 
-/// Applies one document: ensures every declared alias, then every declared
+/// The record's owner token, generating one when the record has none yet.
+/// A NEW record gets a token; an OLD record (written before tokens existed)
+/// keeps none on teardown — see [`remove_for_replace`] — but gets one on its
+/// next apply, since its unmarked objects are refused either way.
+fn owner_mark(rec: &mut NetworkGatewayRecord) -> Result<OwnerMark> {
+    if rec.owner.is_empty() {
+        let mut bytes = [0u8; 16];
+        delonix_state::cred_vault::random_bytes(&mut bytes)?;
+        rec.owner = OwnerMark::from_random(&bytes).token().to_string();
+    }
+    Ok(OwnerMark::new(&rec.owner)?)
+}
+
+/// Every entry of `old` whose key is not in `new`, then `new` — the
+/// write-ahead list: what a teardown after a failure halfway must look for.
+fn union_by<T: Clone>(old: &[T], new: &[T], key: impl Fn(&T) -> &str) -> Vec<T> {
+    let mut out: Vec<T> = old
+        .iter()
+        .filter(|o| !new.iter().any(|n| key(n) == key(o)))
+        .cloned()
+        .collect();
+    out.extend(new.iter().cloned());
+    out
+}
+
+/// Applies one document: refuses if the appliance has changes staged that
+/// are not this engine's, ensures every declared alias, then every declared
 /// rule (aliases first — a rule referencing one that does not exist yet is
 /// refused by a real appliance, measured live in ADR-0051 Phase 2), commits,
 /// and overwrites the registry record — preserving any existing ownership
 /// stamp, the same two-step apply-then-stamp order every other ownable Kind
 /// here follows.
+///
+/// The record is saved BEFORE the first remote write too (write-ahead): the
+/// owner token, and every alias/rule about to be ensured. A teardown after a
+/// failure halfway then looks for all of them — and removes only those that
+/// carry the mark, so an entry that was never created costs nothing.
 fn apply_one(doc: &ManifestDoc) -> Result<()> {
     let spec: NetworkGatewaySpec = manifest::spec_of(doc)?;
     let provider = resolve_provider(&spec.provider)?;
-    for a in &spec.aliases {
-        provider.ensure_alias(&to_alias(a)?)?;
-    }
-    for r in &spec.rules {
-        provider.ensure_rule(&to_rule(r))?;
-    }
-    provider.commit()?;
+    let aliases = spec
+        .aliases
+        .iter()
+        .map(to_alias)
+        .collect::<Result<Vec<_>>>()?;
 
     let name = doc.metadata.name.clone();
     let s = store()?;
     let mut rec = s.load(&name).unwrap_or_default();
+    if !rec.provider.is_empty() && rec.provider != spec.provider {
+        return Err(Error::Conflict(super::po::tf(
+            "networkgateway/{name} is recorded on provider '{old}', not '{new}' — replace the              document (`--replace NetworkGateway/{name}`) to move it",
+            &[("name", &name), ("old", &rec.provider), ("new", &spec.provider)],
+        )));
+    }
+    let owner = owner_mark(&mut rec)?;
     rec.name = name.clone();
     rec.provider = spec.provider.clone();
+    rec.aliases = union_by(&rec.aliases, &spec.aliases, |a| a.name.as_str());
+    rec.rules = union_by(&rec.rules, &spec.rules, |r| r.description.as_str());
+    s.save(&name, &rec)?;
+
+    provider.check_no_foreign_pending()?;
+    for a in &aliases {
+        provider.ensure_alias(a, &owner)?;
+    }
+    for r in &spec.rules {
+        provider.ensure_rule(&to_rule(r), &owner)?;
+    }
+    provider.commit()?;
+
     rec.aliases = spec.aliases.clone();
     rec.rules = spec.rules.clone();
     s.save(&name, &rec)?;
@@ -309,20 +374,72 @@ pub(crate) fn stamp(name: &str, stack: &str, fields: &BTreeMap<String, String>) 
 /// entirely has no new spec to consult), commits, then drops the record.
 /// Idempotent: a name with no record is not an error (`JsonStore::load`'s
 /// absence maps to nothing to remove).
+///
+/// Removes only what carries the record's owner mark; an alias/rule of the
+/// same name that does not is left on the appliance, and a line says so.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let s = store()?;
     let Ok(rec) = s.load(name) else {
         return Ok(());
     };
+    if rec.owner.is_empty() {
+        // Written before owner tokens: nothing on the appliance is provably
+        // this record's, so nothing there is touched.
+        for r in &rec.rules {
+            report_left(
+                name,
+                "rule",
+                &r.description,
+                "no owner mark (record predates marks)",
+            );
+        }
+        for a in &rec.aliases {
+            report_left(
+                name,
+                "alias",
+                &a.name,
+                "no owner mark (record predates marks)",
+            );
+        }
+        return s.remove(name).map_err(Into::into);
+    }
+    let owner = OwnerMark::new(&rec.owner)?;
     let provider = resolve_provider(&rec.provider)?;
+    provider.check_no_foreign_pending()?;
     for r in &rec.rules {
-        provider.remove_rule(&r.description)?;
+        if let RemoveOutcome::NotOwned(who) = provider.remove_rule(&r.description, &owner)? {
+            report_left(name, "rule", &r.description, &who.describe());
+        }
     }
     for a in &rec.aliases {
-        provider.remove_alias(&a.name)?;
+        if let RemoveOutcome::NotOwned(who) = provider.remove_alias(&a.name, &owner)? {
+            report_left(name, "alias", &a.name, &who.describe());
+        }
     }
     provider.commit()?;
+    // The owner mark's own object (an OPNsense category) goes last; the
+    // appliance refuses while anything still carries it, and that is said,
+    // not forced.
+    if let Err(e) = provider.release_owner(&owner) {
+        report_left(name, "owner mark", &owner.label(), &e.to_string());
+    }
     s.remove(name).map_err(Into::into)
+}
+
+/// The audible half of a teardown that skipped an object.
+fn report_left(name: &str, kind: &str, object: &str, why: &str) {
+    println!(
+        "{}",
+        super::po::tf(
+            "networkgateway/{name}: {kind} '{object}' left on the appliance: {why}",
+            &[
+                ("name", name),
+                ("kind", kind),
+                ("object", object),
+                ("why", why)
+            ],
+        )
+    );
 }
 
 /// For `stack ls`/`describe`: declared vs. what the registry last recorded.
