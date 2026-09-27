@@ -109,6 +109,36 @@ pub fn wire_network<N: NetworkProvider>(
     Ok(())
 }
 
+/// The namespace isolation of a SHARED network namespace — a pod's, which every
+/// member joins — or the attach undone and the refusal returned.
+///
+/// Same contract as the isolation step of [`wire_network`], for the workload that
+/// does not go through it: the pod's netns is attached once for all its members,
+/// by `pod create` and again by a member's `start` when the holder came back
+/// without it. Both used to print a warning and carry on, which is a pod
+/// reachable from every other namespace while its manifest says `namespace:
+/// teamA` (NaaS audit P0-3). `default` is the open SDN and has nothing to apply.
+pub fn isolate_shared_netns<N: NetworkProvider>(
+    net: &N,
+    netns: &str,
+    ip: &str,
+    namespace: &str,
+) -> Result<()> {
+    if namespace == "default" {
+        return Ok(());
+    }
+    let fw = delonix_model::records::ContainerFw {
+        enabled: true,
+        namespace: namespace.to_string(),
+        ..Default::default()
+    };
+    if let Err(e) = net.apply_firewall(netns, ip, &fw) {
+        net.detach(netns, ip);
+        return Err(e);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,6 +365,35 @@ mod tests {
         )
         .unwrap();
         assert!(!net.calls.borrow().iter().any(|l| l.starts_with("firewall")));
+    }
+
+    /// P0-3 on the pod path. A pod's netns whose isolation did not apply is
+    /// detached and the refusal returned — the caller never gets to start members
+    /// into it. Before: a warning, and the pod ran reachable from teamB.
+    #[test]
+    fn a_pod_netns_whose_isolation_fails_is_detached_and_refused() {
+        let net = FakeNet {
+            fail_firewall: true,
+            ..Default::default()
+        };
+        assert!(isolate_shared_netns(&net, "pod-web", "10.200.0.7", "teamA").is_err());
+        assert_eq!(
+            *net.calls.borrow(),
+            ["firewall pod-web teamA", "detach pod-web 10.200.0.7"]
+        );
+
+        // Applied: nothing undone.
+        let net = FakeNet::default();
+        isolate_shared_netns(&net, "pod-web", "10.200.0.7", "teamA").unwrap();
+        assert_eq!(*net.calls.borrow(), ["firewall pod-web teamA"]);
+
+        // `default` is the open SDN: no chain, and so nothing that can fail.
+        let net = FakeNet {
+            fail_firewall: true,
+            ..Default::default()
+        };
+        isolate_shared_netns(&net, "pod-web", "10.200.0.7", "default").unwrap();
+        assert!(net.calls.borrow().is_empty());
     }
 
     #[test]

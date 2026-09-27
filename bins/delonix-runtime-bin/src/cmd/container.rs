@@ -3973,10 +3973,7 @@ pub(crate) fn cmd_start(images: &ImageStore, store: &Store, id: &str) -> Result<
         if !reexec {
             if !infra::holder_serves_netns(&pn) {
                 let (_, ip) = infra::attach_container(&pn, "ingress", &c.namespace)?;
-                if let Err(e) = super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace) {
-                    infra::detach_container(&pn, &ip);
-                    return Err(e);
-                }
+                super::pod::apply_pod_namespace_isolation(&pn, &ip, &c.namespace)?;
             }
             let ip = infra::container_ip(&pn);
             return reexec_start(&c.id, &pn, &ip, false);

@@ -332,10 +332,7 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
             message: format!("failed to create the pod netns '{netns}': {e}"),
         })
     })?;
-    if let Err(e) = apply_pod_namespace_isolation(&netns, &ip, &ns) {
-        infra::detach_container(&netns, &ip);
-        return Err(e);
-    }
+    apply_pod_namespace_isolation(&netns, &ip, &ns)?;
     container::warn_if_namespace_isolation_inert(&ns);
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
@@ -439,22 +436,23 @@ fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>>
 /// teardown is already covered: `remove_pod` calls `detach_container`, which
 /// sends `unfirewall <ip>`.
 ///
-/// A pod whose isolation could not be installed does NOT run — same contract as the
-/// container path. It used to be a warning, and a warning here is a pod reachable
-/// from every other namespace while its manifest says it is fenced (NaaS audit
-/// P0-3). The caller undoes the attach it just made.
+/// A pod whose isolation could not be installed does NOT run, and the attach of
+/// its netns is undone — the rule is `delonix_compute::network::isolate_shared_netns`
+/// (NaaS audit P0-3), reached here through the host's `NetworkProvider`, which is
+/// what makes that rule testable without a holder.
 pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) -> Result<()> {
-    if ns == "default" {
-        return Ok(()); // `default` is the open SDN — same contract as containers
-    }
-    let fw = delonix_model::records::ContainerFw {
-        enabled: true,
-        namespace: ns.to_string(),
-        ..Default::default()
+    let net = delonix_sdn::run_network::HostNetwork {
+        state_root: super::util::state_root(),
+        on_attached: &|_| {},
+        register_expose: &|_, _, _, _| Ok(()),
     };
-    infra::apply_firewall(netns, ip, &fw).map_err(|e| Error::Runtime {
-        context: "pod",
-        message: format!("namespace isolation '{ns}' not applied, the pod was not started: {e}"),
+    delonix_compute::network::isolate_shared_netns(&net, netns, ip, ns).map_err(|e| {
+        Error::Runtime {
+            context: "pod",
+            message: format!(
+                "namespace isolation '{ns}' not applied, the pod was not started: {e}"
+            ),
+        }
     })
 }
 
