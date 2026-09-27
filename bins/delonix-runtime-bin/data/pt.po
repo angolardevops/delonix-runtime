@@ -3886,9 +3886,6 @@ msgstr "SSHKEY {key}: não é uma chave pública, e o ficheiro não existe — p
 msgid "← a Kubernetes node CANNOT boot without this"
 msgstr "← um nó Kubernetes NÃO arranca sem isto"
 
-msgid "← optional; nothing here needs them"
-msgstr "← opcionais; nada aqui precisa deles"
-
 msgid "Try this first — no root, no reboot, works right now:"
 msgstr "Tenta isto primeiro — sem root, sem reiniciar sessão, funciona já:"
 
@@ -14237,3 +14234,29 @@ msgstr "Um backup consistente congela os sistemas de ficheiros do convidado atra
 
 msgid "Install and start `qemu-guest-agent` in the guest and set `agent=1` on the VM; for a stopped VM, a plain backup is already consistent."
 msgstr "Instala e arranca o `qemu-guest-agent` no convidado e define `agent=1` na VM; para uma VM parada, um backup simples já é consistente."
+
+# ---- io/cpuset sem controlador: recusa em vez de aviso (2026-09-27) ----
+
+msgid "warning: {flags} cannot be enforced: this container's cgroup is missing the controller(s) `{controllers}`, so the kernel will not see the limit — continuing unenforced because DELONIX_ALLOW_UNENFORCED_LIMITS is set"
+msgstr "aviso: não é possível impor {flags}: ao cgroup deste container falta(m) o(s) controlador(es) `{controllers}`, por isso o kernel não verá o limite — a continuar sem imposição porque DELONIX_ALLOW_UNENFORCED_LIMITS está definida"
+
+msgid "{flags} cannot be enforced: the cgroup this container would run in is missing the controller(s) `{controllers}` — the limit would not exist while this command reports success. `systemd-run --user --scope -p Delegate=yes` does NOT fix this: a scope only receives controllers user@.service itself has, and here it lacks them. Fix, once per host, as root: write `[Service]` and `{delegate}` to {dropin}, run `systemctl daemon-reload`, then `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough, and logging out does not restart a lingering user manager. Or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
+msgstr "não é possível impor {flags}: ao cgroup onde este container correria falta(m) o(s) controlador(es) `{controllers}` — o limite não existiria enquanto este comando reporta sucesso. `systemd-run --user --scope -p Delegate=yes` NÃO resolve isto: um scope só recebe os controladores que o próprio user@.service tem, e aqui faltam-lhe estes. Correcção, uma vez por host, como root: escreve `[Service]` e `{delegate}` em {dropin}, corre `systemctl daemon-reload`, e depois `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega, e sair da sessão não reinicia um gestor de utilizador com linger. Ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
+
+msgid "{flags} cannot be enforced: delonix.slice does not hand down the `{controllers}` controller — the limit would not exist while this command reports success. Check that /sys/fs/cgroup/cgroup.controllers lists them (the kernel may be built without them), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit."
+msgstr "não é possível impor {flags}: o delonix.slice não passa para baixo o(s) controlador(es) `{controllers}` — o limite não existiria enquanto este comando reporta sucesso. Confirma que /sys/fs/cgroup/cgroup.controllers os lista (o kernel pode ter sido compilado sem eles), ou define DELONIX_ALLOW_UNENFORCED_LIMITS=1 para correr sem o limite."
+
+msgid "← a Kubernetes node boots without them"
+msgstr "← um nó Kubernetes arranca sem eles"
+
+msgid "← `container run` REFUSES these here (exit 69): the container's cgroup has no controller for them. A `systemd-run --user --scope` does not bring it — a scope only gets what user@.service has."
+msgstr "← o `container run` RECUSA estas aqui (saída 69): o cgroup do container não tem controlador para elas. Um `systemd-run --user --scope` não o traz — um scope só recebe o que o user@.service tem."
+
+msgid "Running as root and delonix.slice does not hand these controllers down: check that /sys/fs/cgroup/cgroup.controllers lists them."
+msgstr "A correr como root e o delonix.slice não passa estes controladores para baixo: confirma que /sys/fs/cgroup/cgroup.controllers os lista."
+
+msgid "Container limits work, but not the refused flags above. Only this fixes them (root, once per host):"
+msgstr "Os limites de container funcionam, mas não as flags recusadas acima. Só isto as resolve (root, uma vez por host):"
+
+msgid "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough"
+msgstr "depois `systemctl daemon-reload` e `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega"

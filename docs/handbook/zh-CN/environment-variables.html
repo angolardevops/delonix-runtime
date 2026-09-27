@@ -516,7 +516,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
-<td>即使这个会话没有 cgroup 委派，也让 <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> 跑起来，而不是拒绝（退出码 69）。</td>
+<td>即使这个会话没有 cgroup 委派，也让 <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> 跑起来；即使容器的 cgroup 缺少 <code>cpuset</code>/<code>io</code> 控制器，也让 <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> 跑起来（<code>preflight_controller_limits</code>），而不是拒绝（退出码 69）。</td>
 <td>设置（任意值）→ 带着警告不受限地跑。</td>
 <td>内核根本看不到这些限制。见<a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup 委派</a>。</td>
 </tr>

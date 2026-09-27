@@ -553,7 +553,7 @@ n’a sa place dans une configuration de production. Lisez la section de <a clas
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
-<td>Exécute un container avec <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> même lorsque cette session n’a pas de délégation de cgroup, au lieu de refuser (code de sortie 69).</td>
+<td>Exécute un container avec <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> même lorsque cette session n’a pas de délégation de cgroup, et avec <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> même lorsque le cgroup du container n’a pas le contrôleur <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), au lieu de refuser (code de sortie 69).</td>
 <td>Définie (n’importe quelle valeur) → exécution, sans limite, avec un avertissement.</td>
 <td>Le noyau ne voit jamais les limites. Voir <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">délégation de cgroup</a>.</td>
 </tr>

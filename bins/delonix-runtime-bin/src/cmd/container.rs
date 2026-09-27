@@ -2157,10 +2157,10 @@ pub(crate) fn warn_if_namespace_isolation_inert(namespace: &str) {
 /// `user@.service` routinely does NOT delegate even when `memory`/`cpu` are
 /// fine — see this repo's own measurement of that split (AGENTS.md, "cgroup
 /// delegation: cpu fatal, cpuset/io optional"). Refusing `--cpuset`/
-/// `--io-weight`/`--io-max` on the same signal would be
+/// `--io-weight`/`--device-*` on the same signal would be
 /// inventing a precision this probe was never built to have, and would refuse
-/// requests this host can actually satisfy. Those three keep the pre-existing
-/// best-effort behaviour until they get their own controller-specific probe.
+/// requests this host can actually satisfy. Those have their own
+/// controller-specific probe: [`preflight_controller_limits`].
 ///
 /// # Escape hatch
 ///
@@ -2201,6 +2201,212 @@ fn resource_limits_decision(asked: bool, delegated: bool, escape_hatch: bool) ->
         )
         .to_string(),
     ))
+}
+
+/// Refuses `--cpuset`, `--io-weight` and `--device-read/write-bps/iops` when
+/// the cgroup this container would run in does not have the controller they
+/// need — the same refusal `-m`/`--cpus` already get, asked per controller.
+///
+/// # Why a refusal, and why its own probe
+///
+/// Measured 2026-09-27 on a host whose `user@1000.service` delegates `cpu memory
+/// pids`: `container run --device-write-bps 5mb` wrote at 1.6 GB/s and exited 0,
+/// with a warning that pointed at `systemd-run --user --scope -p Delegate=yes` —
+/// which, run for real, still wrote at 1.2 GB/s. A scope can only receive
+/// controllers its parent has, and `user@.service` has no `io` to pass down. A
+/// limit nobody enforces, reported as success, with a remedy that does not
+/// remedy: the shape `preflight_resource_limits` closed for `-m`.
+///
+/// `cgroup_limits_apply()` cannot answer this — it proves delegation of the
+/// base, and a base delegating `cpu memory pids` passes it. So this asks
+/// [`runtime::leaf_controllers`], which reads what a leaf would really get, and
+/// only when one of these flags was given: nothing asked, nothing probed.
+///
+/// # Escape hatch
+///
+/// The same `DELONIX_ALLOW_UNENFORCED_LIMITS` as `-m`/`--cpus`: one switch for
+/// «I know the kernel will not see my limits», not one per controller.
+fn preflight_controller_limits(opts: &RunOpts) -> Result<()> {
+    let wanted = controllers_wanted(opts);
+    if wanted.is_empty() {
+        return Ok(());
+    }
+    let escape_hatch = std::env::var_os("DELONIX_ALLOW_UNENFORCED_LIMITS").is_some();
+    controller_limits_decision(
+        &wanted,
+        &runtime::leaf_controllers(),
+        runtime::is_rootless(),
+        escape_hatch,
+    )
+}
+
+/// The cgroup controllers the flags in `opts` need. `-m`/`--cpus`/
+/// `--cpu-weight` are not here: [`preflight_resource_limits`] owns them.
+fn controllers_wanted(opts: &RunOpts) -> Vec<&'static str> {
+    let mut wanted = Vec::new();
+    if opts.cpuset.is_some() {
+        wanted.push("cpuset");
+    }
+    if opts.io_weight.is_some() || opts.io_max.is_some() {
+        wanted.push("io");
+    }
+    wanted
+}
+
+/// The decision `preflight_controller_limits` makes, pure so the refusal is
+/// tested without a cgroup2 tree — including the one that must not come back:
+/// a warning and exit 0.
+fn controller_limits_decision(
+    wanted: &[&'static str],
+    have: &[String],
+    rootless: bool,
+    escape_hatch: bool,
+) -> Result<()> {
+    let missing: Vec<&str> = wanted
+        .iter()
+        .copied()
+        .filter(|c| !have.iter().any(|h| h == c))
+        .collect();
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let flags = missing
+        .iter()
+        .flat_map(|c| runtime::flags_of_controller(c).iter().copied())
+        .collect::<Vec<_>>()
+        .join(", ");
+    let controllers = missing.join(" ");
+    if escape_hatch {
+        eprintln!(
+            "{}",
+            super::po::tf(
+                "warning: {flags} cannot be enforced: this container's cgroup is missing the controller(s) \
+                 `{controllers}`, so the kernel will not see the limit — continuing unenforced because \
+                 DELONIX_ALLOW_UNENFORCED_LIMITS is set",
+                &[("flags", &flags), ("controllers", &controllers)],
+            )
+        );
+        return Ok(());
+    }
+    let msg = if rootless {
+        super::po::tf(
+            "{flags} cannot be enforced: the cgroup this container would run in is missing \
+             the controller(s) `{controllers}` — the limit would not exist while this command reports \
+             success. `systemd-run --user --scope -p Delegate=yes` does NOT fix this: a scope \
+             only receives controllers user@.service itself has, and here it lacks them. Fix, once per host, as root: write `[Service]` and `{delegate}` to \
+             {dropin}, run `systemctl daemon-reload`, then `systemctl restart user@<uid>.service` \
+             (it ends that user's sessions) or reboot — daemon-reload alone is not enough, and \
+             logging out does not restart a lingering user manager. Or set \
+             DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit.",
+            &[
+                ("flags", &flags),
+                ("controllers", &controllers),
+                ("delegate", super::system::DELEGATE_LINE),
+                ("dropin", super::system::DELEGATE_DROPIN),
+            ],
+        )
+    } else {
+        super::po::tf(
+            "{flags} cannot be enforced: delonix.slice does not hand down the `{controllers}` \
+             controller — the limit would not exist while this command reports success. \
+             Check that /sys/fs/cgroup/cgroup.controllers lists them (the kernel may be built \
+             without them), or set DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit.",
+            &[("flags", &flags), ("controllers", &controllers)],
+        )
+    };
+    Err(delonix_model::Error::Unavailable(msg))
+}
+
+#[cfg(test)]
+mod controller_limits_preflight_tests {
+    use super::{controller_limits_decision, controllers_wanted, RunOpts};
+
+    fn have(list: &str) -> Vec<String> {
+        list.split_whitespace().map(str::to_string).collect()
+    }
+
+    /// THE regression: the host measured on 2026-09-27 (`cpu memory pids`)
+    /// with `--device-write-bps`. Before this, a warning and exit 0 while the
+    /// disk took 1.6 GB/s. Reverting to the warning makes this `Ok` and fails.
+    #[test]
+    fn io_requested_without_the_controller_refuses_with_exit_69() {
+        let err =
+            controller_limits_decision(&["io"], &have("cpu memory pids"), true, false).unwrap_err();
+        assert_eq!(
+            crate::cmd::exitcode::for_error(&err),
+            crate::cmd::exitcode::UNAVAILABLE
+        );
+        let msg = err.to_string();
+        assert!(msg.contains("--device-write-bps"), "{msg}");
+        assert!(msg.contains("--io-weight"), "{msg}");
+    }
+
+    #[test]
+    fn cpuset_requested_without_the_controller_refuses() {
+        let err = controller_limits_decision(&["cpuset"], &have("cpu memory pids"), true, false)
+            .unwrap_err();
+        assert!(err.to_string().contains("--cpuset"), "{err}");
+    }
+
+    /// The error must name the remedy that works — the drop-in with the full
+    /// controller list — and say that the scope does not, because the scope is
+    /// what the old warning sent people to and it was measured not to work.
+    #[test]
+    fn rootless_message_names_the_drop_in_and_rules_out_the_scope() {
+        let msg = controller_limits_decision(&["io"], &[], true, false)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("Delegate=cpu cpuset io memory pids"), "{msg}");
+        assert!(
+            msg.contains("/etc/systemd/system/user@.service.d/"),
+            "{msg}"
+        );
+        assert!(msg.contains("does NOT fix"), "{msg}");
+        assert!(msg.contains("DELONIX_ALLOW_UNENFORCED_LIMITS"), "{msg}");
+    }
+
+    #[test]
+    fn with_the_controller_it_proceeds() {
+        assert!(controller_limits_decision(
+            &["io", "cpuset"],
+            &have("cpuset cpu io memory pids"),
+            true,
+            false
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn the_escape_hatch_lets_it_run() {
+        assert!(controller_limits_decision(&["io"], &have("cpu memory pids"), true, true).is_ok());
+    }
+
+    /// Only the controller that is really missing is named: a host with `io`
+    /// and no `cpuset` must not be told its I/O flags are refused.
+    #[test]
+    fn names_only_the_missing_controller() {
+        let msg = controller_limits_decision(&["io", "cpuset"], &have("io"), true, false)
+            .unwrap_err()
+            .to_string();
+        assert!(msg.contains("--cpuset"), "{msg}");
+        assert!(!msg.contains("--device-write-bps"), "{msg}");
+    }
+
+    #[test]
+    fn only_requested_flags_become_controllers() {
+        assert!(controllers_wanted(&RunOpts::default()).is_empty());
+        let io = RunOpts {
+            io_max: Some("wbps=5242880".into()),
+            ..RunOpts::default()
+        };
+        assert_eq!(controllers_wanted(&io), vec!["io"]);
+        let both = RunOpts {
+            cpuset: Some("0".into()),
+            io_weight: Some("200".into()),
+            ..RunOpts::default()
+        };
+        assert_eq!(controllers_wanted(&both), vec!["cpuset", "io"]);
+    }
 }
 
 #[cfg(test)]
@@ -2297,6 +2503,7 @@ pub(crate) fn cmd_run(images: &ImageStore, store: &Store, opts: RunOpts) -> Resu
     // Same reasoning, same place as the policy check above: refuse before
     // anything is created, not after. See `preflight_resource_limits`.
     preflight_resource_limits(&opts)?;
+    preflight_controller_limits(&opts)?;
     // The combinations of flags that cannot mean anything, refused before any
     // side effect — see `delonix_compute::preflight` for the two that used to be
     // checked only after the workload had run, or never.

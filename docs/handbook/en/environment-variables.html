@@ -554,7 +554,7 @@ them belongs in a production configuration. Read the linked <a class="src" href=
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
-<td>Runs a container with <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> even when this session has no cgroup delegation, instead of refusing (exit 69).</td>
+<td>Runs a container with <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> even when this session has no cgroup delegation, and with <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> even when the container's cgroup lacks the <code>cpuset</code>/<code>io</code> controller (<code>preflight_controller_limits</code>), instead of refusing (exit 69).</td>
 <td>Set (any value) → run, unlimited, with a warning.</td>
 <td>The kernel never sees the limits. See <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup delegation</a>.</td>
 </tr>
