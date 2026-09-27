@@ -3799,6 +3799,142 @@ else
     env E2E_IMAGE="$IMG" bash "$(dirname "$0")/net-lifecycle-leaks.sh" "$BIN" "lk$PFX"
 fi
 
+section "providers remotos: NetworkGateway e NetworkZone — posse pela marca, não pelo nome"
+########################################
+# Auditoria 62, §6 P1 (S6). O que se prova em QUALQUER máquina é a recusa
+# honesta sem appliance. O resto — a marca de posse, a recusa de adoptar por
+# nome, a recusa com pendentes alheios — só existe contra um OPNsense e um
+# cluster Proxmox reais; sem eles cada check sai como SKIP com a razão, que o
+# resumo conta como NÃO COBERTO. Nunca PASS por omissão.
+RWORK="$OUT/remote-$PFX"; mkdir -p "$RWORK"
+GW="gw-$PFX"
+ZN="z$(( $$ % 100000 ))"            # id SDN: letra + até 7 minúsculas/dígitos
+VN="v$(( $$ % 100000 ))a"
+
+cat > "$RWORK/gw-native.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: $GW-native }
+spec:
+  provider: native
+  aliases: [{ name: dlx_$PFX, kind: host, content: ["10.99.0.1"] }]
+YAML
+check "NetworkGateway no provider native recusa (não tem aliases nem regras)" fail \
+  "$BIN" apply -f "$RWORK/gw-native.yaml"
+# O registo é gravado ANTES da primeira escrita remota (write-ahead), por isso
+# um apply recusado deixa-o; o delete tem de o conseguir tirar.
+check "delete de um NetworkGateway recusado termina" ok \
+  "$BIN" delete networkgateways "$GW-native"
+check "... e o registo desaparece" ok bash -c \
+  "! '$BIN' get networkgateways 2>/dev/null | grep -q '$GW-native'"
+
+cat > "$RWORK/zone.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkZone
+metadata: { name: $ZN }
+spec:
+  vnets: [{ name: $VN, alias: "e2e $PFX" }]
+YAML
+if [[ -z "${DELONIX_PROXMOX_URL:-}" ]]; then
+  check "NetworkZone sem provider configurado recusa" fail "$BIN" apply -f "$RWORK/zone.yaml"
+fi
+
+# --- OPNsense ---------------------------------------------------------------
+if [[ -n "${DELONIX_OPNSENSE_URL:-}" && -n "${DELONIX_OPNSENSE_KEY:-}" && -n "${DELONIX_OPNSENSE_SECRET:-}" ]]; then
+  opn() {  # opn <rota> [json] — a mão do operador, SEM a marca do motor
+    curl -sk -u "$DELONIX_OPNSENSE_KEY:$DELONIX_OPNSENSE_SECRET" -H 'Content-Type: application/json' \
+      -X POST -d "${2:-{\}}" "$DELONIX_OPNSENSE_URL/api/$1"
+  }
+  opn_rule_uuid() {  # uuid da regra cuja descrição é EXACTAMENTE $1
+    opn firewall/filter/search_rule '{"current":1,"rowCount":-1}' | python3 -c \
+      'import json,sys; d=sys.argv[1]; print(next((r["uuid"] for r in json.load(sys.stdin)["rows"] if r.get("description")==d), ""))' "$1"
+  }
+  cat > "$RWORK/gw.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: $GW }
+spec:
+  provider: opnsense
+  aliases: [{ name: dlx_$PFX, kind: host, content: ["10.99.0.1"], description: "e2e $PFX" }]
+  rules: [{ description: "e2e $PFX", source: dlx_$PFX, destination: "10.0.0.0/24", protocol: TCP }]
+YAML
+  check "NetworkGateway aplica alias e regra no OPNsense" ok "$BIN" apply -f "$RWORK/gw.yaml"
+  check "... e o segundo apply é idempotente" ok "$BIN" apply -f "$RWORK/gw.yaml"
+  check "... a regra no appliance leva a categoria de posse delonix-owner:" ok bash -c \
+    "curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{}' \"\$DELONIX_OPNSENSE_URL/api/firewall/category/search_item\" > '$RWORK/cats.json' && curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{\"current\":1,\"rowCount\":-1}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/search_rule\" | python3 -c 'import json,sys; cats={c[\"uuid\"]:c[\"name\"] for c in json.load(open(\"$RWORK/cats.json\"))[\"rows\"]}; r=[x for x in json.load(sys.stdin)[\"rows\"] if x.get(\"description\")==\"e2e $PFX\"]; sys.exit(0 if r and any(cats.get(u,\"\").startswith(\"delonix-owner:dlx-\") for u in r[0].get(\"categories\",\"\").split(\",\")) else 1)'"
+  # Uma regra feita à mão (e APLICADA) com a mesma descrição de outro
+  # documento: recusada com 5, nunca adoptada; o teardown desse documento não
+  # lhe toca.
+  HAND="e2e $PFX hand"
+  opn firewall/filter/add_rule "{\"rule\":{\"description\":\"$HAND\",\"source_net\":\"any\",\"destination_net\":\"10.77.0.0/24\"}}" >/dev/null
+  opn firewall/filter/apply >/dev/null
+  HAND_UUID="$(opn_rule_uuid "$HAND")"
+  sed "s/name: $GW }/name: $GW-hand }/; s/description: \"e2e $PFX\", source/description: \"$HAND\", source/; s/name: dlx_$PFX,/name: dlx_${PFX}h,/; s/source: dlx_$PFX,/source: dlx_${PFX}h,/" \
+    "$RWORK/gw.yaml" > "$RWORK/gw-hand.yaml"
+  check "regra à mão com a mesma descrição: apply recusa com 5 (não adopta)" 5 \
+    "$BIN" apply -f "$RWORK/gw-hand.yaml"
+  check "delete do documento recusado deixa a regra à mão" ok bash -c \
+    "'$BIN' delete networkgateways '$GW-hand' >/dev/null && [ -n '$HAND_UUID' ] && curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -X POST -H 'Content-Type: application/json' -d '{}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/get_rule/$HAND_UUID\" | grep -q '$HAND'"
+  # A mesma regra apagada à mão e NÃO aplicada: uma alteração pendente
+  # alheia. O apply recusa (5) antes de escrever, e a apagada continua a
+  # correr no pf até o operador aplicar.
+  opn "firewall/filter/del_rule/$HAND_UUID" >/dev/null
+  check "com uma alteração pendente alheia no appliance, o apply recusa com 5" 5 \
+    "$BIN" apply -f "$RWORK/gw.yaml"
+  opn firewall/filter/apply >/dev/null
+  check "delete do NetworkGateway tira o alias e a regra dele" ok \
+    "$BIN" delete networkgateways "$GW"
+  check "... e no appliance não sobra a regra dele" ok bash -c \
+    "[ -z \"\$(curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{\"current\":1,\"rowCount\":-1}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/search_rule\" | grep -o '\"description\":\"e2e $PFX\"')\" ]"
+else
+  for n in "NetworkGateway aplica no OPNsense com a marca de posse" \
+           "regra à mão com a mesma descrição é recusada, não adoptada" \
+           "delete tira só o que tem a marca"; do
+    skip "$n" "sem DELONIX_OPNSENSE_URL/_KEY/_SECRET: não há appliance OPNsense, a posse não foi medida aqui"
+  done
+fi
+
+# --- Proxmox SDN ------------------------------------------------------------
+if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n "${DELONIX_PROXMOX_TOKEN:-}" ]]; then
+  pve() {  # pve <método> <caminho> [--data ...] — a mão do operador
+    local m="$1" p="$2"; shift 2
+    curl -sk -X "$m" -H "Authorization: PVEAPIToken=$DELONIX_PROXMOX_TOKEN_ID=$DELONIX_PROXMOX_TOKEN" \
+      "$DELONIX_PROXMOX_URL/api2/json$p" "$@"
+  }
+  check "NetworkZone aplica zona e vnet no cluster" ok "$BIN" apply -f "$RWORK/zone.yaml"
+  check "... e o segundo apply é idempotente" ok "$BIN" apply -f "$RWORK/zone.yaml"
+  check "... a vnet leva a marca de posse no alias" ok bash -c \
+    "curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/vnets/$VN\" | grep -q 'delonix-owner:dlx-'"
+  # Uma zona que já existe e que o motor não criou: recusada, nunca adoptada.
+  HZ="h$(( $$ % 100000 ))"
+  pve POST /cluster/sdn/zones --data-urlencode "zone=$HZ" --data-urlencode type=simple >/dev/null
+  pve PUT /cluster/sdn >/dev/null; sleep 3
+  sed "s/name: $ZN }/name: $HZ }/; s/name: $VN,/name: ${VN}h,/" "$RWORK/zone.yaml" > "$RWORK/zone-hand.yaml"
+  check "zona feita à mão com o mesmo nome: apply recusa com 5 (não adopta)" 5 \
+    "$BIN" apply -f "$RWORK/zone-hand.yaml"
+  check "delete desse documento deixa a zona à mão de pé" ok bash -c \
+    "'$BIN' delete networkzones '$HZ' >/dev/null; curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones/$HZ\" | grep -q '\"zone\":\"$HZ\"'"
+  pve DELETE "/cluster/sdn/zones/$HZ" >/dev/null; pve PUT /cluster/sdn >/dev/null; sleep 3
+  # Uma alteração pendente de outro (staged, não aplicada): o apply recusa
+  # ANTES de escrever, e a alteração do outro continua pendente, não aplicada.
+  pve POST /cluster/sdn/zones --data-urlencode "zone=$HZ" --data-urlencode type=simple >/dev/null
+  check "com uma alteração SDN pendente alheia, o apply recusa com 5" 5 \
+    "$BIN" apply -f "$RWORK/zone.yaml"
+  check "... e a alteração alheia continua pendente (não foi empurrada)" ok bash -c \
+    "curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones?pending=1\" | python3 -c 'import json,sys; z=[x for x in json.load(sys.stdin)[\"data\"] if x.get(\"zone\")==\"$HZ\"]; sys.exit(0 if z and z[0].get(\"state\")==\"new\" else 1)'"
+  pve POST /cluster/sdn/rollback >/dev/null
+  check "delete do NetworkZone tira a vnet e a zona dele" ok "$BIN" delete networkzones "$ZN"
+  check "... e a zona já não existe no cluster" ok bash -c \
+    "! curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones\" | grep -q '\"zone\":\"$ZN\"'"
+else
+  for n in "NetworkZone aplica zona e vnet com a marca de posse" \
+           "zona à mão com o mesmo nome é recusada, não adoptada" \
+           "alteração SDN pendente alheia recusa o apply" \
+           "delete tira só a zona e as vnets do motor"; do
+    skip "$n" "sem DELONIX_PROXMOX_URL/_TOKEN_ID/_TOKEN: não há cluster Proxmox, a posse na SDN não foi medida aqui"
+  done
+fi
+
 section "api-resources: o registo que os outros verbos leem"
 ########################################
 # É o primeiro comando da árvore-alvo a aterrar, e o único da CLI-2 que não
