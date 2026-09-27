@@ -150,10 +150,10 @@ fn actual_network_fields(
 
 /// Destroys a network so the normal creation path can rebuild it. Every
 /// container attached to it loses that attachment — hence the explicit
-/// `--replace`.
+/// `--replace`, and why this skips the in-use refusal `network rm` has.
 pub(crate) fn remove_for_replace(name: &str) -> Result<()> {
     let store = NetworkStore::open(state_root())?;
-    cmd_rm(&store, name)
+    remove_unchecked(&store, name)
 }
 
 /// The FDB destination of an overlay peer: its `wg_ip` when the overlay is
@@ -1440,7 +1440,88 @@ fn describe_one(n: &Network) {
     d.print();
 }
 
+/// `network rm`: refuses while anything is still attached, then removes.
+///
+/// **It removed a network out from under its containers.** Measured on v4.4.0+68:
+/// `network rm` of a network with a running container answered `rc=0`, the bridge
+/// went, and the container stayed "Up" with an address on a bridge that no longer
+/// existed — and `network create` of the same name then handed that /16 out again.
+/// Docker refuses this (`has active endpoints`); so does this, and it says what is
+/// attached so the operator does not have to go and find it.
+///
+/// `stack --replace`/`destroy` go through [`remove_for_replace`] instead: there the
+/// removal is explicit and the manifest owns what was attached.
 pub(crate) fn cmd_rm(store: &NetworkStore, name: &str) -> Result<()> {
+    if let Ok(net) = store.get(name) {
+        let attached = network_dependents(name, &net.subnet)?;
+        if !attached.is_empty() {
+            return Err(Error::coded(
+                5307,
+                Error::Conflict(super::po::tf(
+                    "network '{name}' is in use by {what} — remove or disconnect them first",
+                    &[("name", name), ("what", &attached.join(", "))],
+                )),
+            ));
+        }
+    }
+    remove_unchecked(store, name)
+}
+
+/// Everything recorded as attached to network `name`, as `container <name>` /
+/// `vm <name>` labels.
+///
+/// **Fails closed.** A container or VM store that cannot be read is an error, not
+/// an empty list: "I could not tell" must not turn into "nothing is attached" on
+/// the one path that deletes the bridge.
+fn network_dependents(name: &str, subnet: &str) -> Result<Vec<String>> {
+    let root = state_root();
+    let containers = delonix_state::Store::open(root.join("containers"))?.list()?;
+    let vms: Vec<(String, String)> = delonix_vm::list(&root)?
+        .into_iter()
+        .map(|v| (v.name, v.network))
+        .collect();
+    Ok(dependents_of(name, subnet, &containers, &vms))
+}
+
+/// PURE half of [`network_dependents`]: who, among these records, is on `name`.
+///
+/// A POD member carries no `network` — membership is the `pod` field, and the
+/// pod's netns is what sits on the bridge. The address the pod really got is on
+/// every member (`pod::POD_IP_LABEL`), so a member is attached when that address
+/// is inside this network's subnet.
+fn dependents_of(
+    name: &str,
+    subnet: &str,
+    containers: &[delonix_compute::Container],
+    vms: &[(String, String)],
+) -> Vec<String> {
+    let cidr = delonix_sdn::Cidr::parse(subnet);
+    let in_subnet = |ip: &str| {
+        cidr.as_ref()
+            .zip(delonix_sdn::Cidr::parse_addr(ip))
+            .is_some_and(|(c, a)| c.contains(a))
+    };
+    let mut out: Vec<String> = containers
+        .iter()
+        .filter(|c| {
+            c.network.as_deref() == Some(name)
+                || c.extra_networks.iter().any(|e| e.network == name)
+                || (c.pod.is_some()
+                    && c.labels
+                        .get(super::pod::POD_IP_LABEL)
+                        .is_some_and(|ip| in_subnet(ip)))
+        })
+        .map(|c| format!("container {}", c.name))
+        .collect();
+    out.extend(
+        vms.iter()
+            .filter(|(_, net)| net == name)
+            .map(|(vm, _)| format!("vm {vm}")),
+    );
+    out
+}
+
+fn remove_unchecked(store: &NetworkStore, name: &str) -> Result<()> {
     // Read the VXLAN device name BEFORE the record goes: it is derived from the
     // `vni`, which only the store record carries. Removing the uplink first
     // also avoids the state that leaked before — a device mastered on a bridge
@@ -1632,6 +1713,70 @@ fn cmd_node(action: NodeCmd) -> Result<()> {
         NodeCmd::Key => println!("{}", key.public),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod dependents_tests {
+    use super::dependents_of;
+    use delonix_compute::{Container, ExtraNet};
+
+    fn c(name: &str) -> Container {
+        Container::new(
+            format!("id-{name}"),
+            name.into(),
+            "img".into(),
+            vec!["sh".into()],
+            "64M".into(),
+        )
+    }
+
+    /// Every way a workload is attached counts: primary network, extra network,
+    /// pod member (by the pod's address) and VM. The one that is on ANOTHER
+    /// network, and the pod member whose pod is elsewhere, do not.
+    #[test]
+    fn a_network_in_use_names_everything_attached_to_it() {
+        let mut primary = c("web");
+        primary.network = Some("blue".into());
+        let mut extra = c("db");
+        extra.network = Some("red".into());
+        extra.extra_networks.push(ExtraNet {
+            network: "blue".into(),
+            ip: "10.250.3.4".into(),
+            idx: 1,
+        });
+        let mut member = c("pod-a-c0");
+        member.pod = Some("pod-a".into());
+        member
+            .labels
+            .insert(super::super::pod::POD_IP_LABEL.into(), "10.250.9.9".into());
+        let mut elsewhere = c("pod-b-c0");
+        elsewhere.pod = Some("pod-b".into());
+        elsewhere
+            .labels
+            .insert(super::super::pod::POD_IP_LABEL.into(), "10.200.9.9".into());
+        let mut other = c("cache");
+        other.network = Some("red".into());
+        let vms = vec![
+            ("v1".to_string(), "blue".to_string()),
+            ("v2".to_string(), "red".to_string()),
+        ];
+        let got = dependents_of(
+            "blue",
+            "10.250.0.0/16",
+            &[primary, extra, member, elsewhere, other],
+            &vms,
+        );
+        assert_eq!(
+            got,
+            [
+                "container web",
+                "container db",
+                "container pod-a-c0",
+                "vm v1"
+            ]
+        );
+        assert!(dependents_of("green", "10.251.0.0/16", &[], &vms).is_empty());
+    }
 }
 
 #[cfg(test)]
