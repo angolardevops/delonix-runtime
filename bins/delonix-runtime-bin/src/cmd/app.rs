@@ -321,7 +321,6 @@ fn apply_one(images: &ImageStore, store: &Store, doc: &ManifestDoc) -> Result<()
         &spec.builder,
         &format!("{reg_ip}:5000/{name}"),
     );
-    let cache_volume = plan.cache_volume.clone();
     let mounts: Vec<String> = plan
         .mounts()
         .into_iter()
@@ -377,8 +376,11 @@ fn apply_one(images: &ImageStore, store: &Store, doc: &ManifestDoc) -> Result<()
     // already uses for any other registry.
     let remote_ref = format!("127.0.0.1:{host_port}/{name}");
     let pulled = delonix_oci::pull_from_registry(images, &remote_ref);
+    // The layer cache volume (`cnb-cache-<app>`) is KEPT: ADR-0035 has it
+    // persist across re-applies of the same app, and deleting it here made
+    // every buildpack build a cold one — dependencies downloaded again each
+    // time. `delonix volume rm cnb-cache-<app>` clears it by hand.
     teardown_build_resources(images, store, name);
-    let _ = std::fs::remove_dir_all(state_root().join("volumes").join(&cache_volume));
     match pulled {
         Ok(_) => {
             images.tag(&remote_ref, &spec.image)?;
@@ -396,6 +398,20 @@ fn apply_one(images: &ImageStore, store: &Store, doc: &ManifestDoc) -> Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// ADR-0035: the per-app layer cache (`cnb-cache-<app>`) persists across
+    /// re-applies of the same app. The build path deleted it after every
+    /// build, so every buildpack build was a cold one. Nothing outside the
+    /// user's own `volume rm` may remove it.
+    #[test]
+    fn a_build_keeps_the_layer_cache_volume() {
+        let src = include_str!("app.rs");
+        let code = &src[..src.find("#[cfg(test)]").unwrap()];
+        assert!(
+            !code.contains("remove_dir_all"),
+            "the app build path must not delete directories (the cnb cache volume)"
+        );
+    }
 
     fn spec(builder: &str, run_image: Option<&str>) -> AppSpec {
         AppSpec {
