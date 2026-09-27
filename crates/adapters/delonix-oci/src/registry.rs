@@ -283,6 +283,10 @@ struct Client {
     token: Option<String>,
     /// Credentials (`delonix login`), if any, for private registries.
     creds: Option<(String, String)>,
+    /// A repository ON THE SAME REGISTRY that already holds this image's blobs
+    /// (U6): an upload asks the registry to MOUNT the blob from there instead of
+    /// sending its bytes. `None` is a plain upload.
+    mount_from: Option<String>,
 }
 
 impl Client {
@@ -770,7 +774,26 @@ impl Client {
                 .unwrap_or("")
                 .to_string();
             let scope = format!("repository:{}:pull,push", self.repo);
-            self.token = Some(self.get_token(&www, Some(&scope))?);
+            self.token = Some(match &self.mount_from {
+                // A mount needs `pull` on the source repository too. A token
+                // server grants the scopes it can and drops the rest, so a source
+                // this account cannot read turns the mount into a plain upload
+                // (202). One that refuses the whole request instead is asked
+                // again without it, and the mount is dropped — a push must never
+                // fail because an optimisation did.
+                Some(from) => {
+                    let wide = format!("{scope}&scope=repository:{from}:pull");
+                    match self.get_token(&www, Some(&wide)) {
+                        Ok(t) => t,
+                        Err(e) => {
+                            tracing::debug!("token with the mount scope refused ({e}); uploading without mounts");
+                            self.mount_from = None;
+                            self.get_token(&www, Some(&scope))?
+                        }
+                    }
+                }
+                None => self.get_token(&www, Some(&scope))?,
+            });
             return send(&self.http, &self.token);
         }
         Ok(Ok(resp))
@@ -881,11 +904,12 @@ impl Client {
         digest: &str,
         body: &dyn Fn() -> Result<reqwest::blocking::Body>,
     ) -> std::result::Result<(), UploadFailure> {
-        let start = format!(
-            "{}://{}/v2/{}/blobs/uploads/",
+        let start = upload_start_url(
             scheme_for(&self.host),
-            self.host,
-            self.repo
+            &self.host,
+            &self.repo,
+            digest,
+            self.mount_from.as_deref(),
         );
         let resp = match self.write_req_raw(&|http| Ok(http.post(&start))) {
             Err(e) => return Err(UploadFailure::Fatal(e)),
@@ -894,6 +918,14 @@ impl Client {
             }
             Ok(Ok(r)) => r,
         };
+        // 201 on a mount request: the registry linked the blob from the source
+        // repository, and no byte has to move. A 202 is an ordinary upload
+        // session — the source did not have it, or this token cannot read it —
+        // and the upload continues below exactly as without a mount.
+        if self.mount_from.is_some() && resp.status() == reqwest::StatusCode::CREATED {
+            tracing::debug!("blob {digest} mounted from {:?}", self.mount_from);
+            return Ok(());
+        }
         if resp.status() != reqwest::StatusCode::ACCEPTED {
             let status = resp.status();
             let msg = format!(
@@ -1176,6 +1208,7 @@ pub fn registry_client(store: &ImageStore, reference: &str) -> Result<RegistryCl
             repo,
             token: None,
             creds,
+            mount_from: None,
         },
         reference: refr,
     })
@@ -1351,6 +1384,7 @@ pub fn pull_from_registry_with_creds_full(
         repo: repo.clone(),
         token: None,
         creds,
+        mount_from: None,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pulling {repo}:{refr} from {host}");
@@ -1635,6 +1669,33 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
 /// sockets only make a 429 likelier.
 const PUSH_WORKERS: usize = 4;
 
+/// The repository an upload can MOUNT this image's blobs from (U6): another
+/// repository on the same registry that one of the image's own tags names.
+/// Promoting `app:dev` to `app-prod:1` on one registry then moves no layer
+/// bytes. `None` when no tag is on `host`, or every one is `repo` itself.
+fn mount_source(tags: &[String], host: &str, repo: &str) -> Option<String> {
+    tags.iter().find_map(|t| {
+        let (h, r, _) = parse_reference(t);
+        (h == host && r != repo).then_some(r)
+    })
+}
+
+/// The `POST` that opens a blob upload, asking for a mount when there is a
+/// source (`?mount=<digest>&from=<repo>`, OCI distribution spec).
+fn upload_start_url(
+    scheme: &str,
+    host: &str,
+    repo: &str,
+    digest: &str,
+    from: Option<&str>,
+) -> String {
+    let base = format!("{scheme}://{host}/v2/{repo}/blobs/uploads/");
+    match from {
+        Some(from) => format!("{base}?mount={digest}&from={from}"),
+        None => base,
+    }
+}
+
 /// [`push_to_registry`], reporting `(bytes sent, bytes to send)` for the
 /// layers as they go out.
 pub fn push_to_registry_with_progress(
@@ -1656,6 +1717,7 @@ pub fn push_to_registry_with_progress(
         repo: repo.clone(),
         token: None,
         creds,
+        mount_from: mount_source(&image.repo_tags, &host, &repo),
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing {repo}:{refr} to {host}");
@@ -1819,6 +1881,7 @@ fn push_artifact(
         repo: repo.clone(),
         token: None,
         creds,
+        mount_from: None,
     };
 
     tracing::info!(repo = %repo, reference = %refr, host = %host, "pushing artifact {repo}:{refr} to {host}");
@@ -1907,6 +1970,7 @@ pub fn push_oci_artifact_with_layer_annotations(
         repo,
         token: None,
         creds,
+        mount_from: None,
     };
     push_layer_annotated(&mut c, &refr, layer_media_type, data, layer_annotations)
 }
@@ -1978,6 +2042,7 @@ pub fn list_remote_tags(root: &std::path::Path, source: &str) -> Result<Vec<Stri
         repo,
         token: None,
         creds,
+        mount_from: None,
     };
     c.list_tags()
 }
@@ -2016,6 +2081,7 @@ pub fn describe_remote_artifact(
         repo,
         token: None,
         creds,
+        mount_from: None,
     };
     let url = c.manifest_url(tag);
     let bytes = read_capped(
@@ -2076,6 +2142,7 @@ pub fn pull_oci_artifact_with_meta(
         repo,
         token: None,
         creds,
+        mount_from: None,
     };
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
@@ -2162,6 +2229,7 @@ pub fn pull_oci_artifact_to_file(
         repo,
         token: None,
         creds,
+        mount_from: None,
     };
 
     let accept = "application/vnd.oci.image.manifest.v1+json";
@@ -2542,6 +2610,7 @@ mod tests {
             repo: repo.to_string(),
             token: None,
             creds: None,
+            mount_from: None,
         }
     }
 
@@ -4082,5 +4151,48 @@ mod tests {
              não a soma dos totais parciais"
         );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+}
+
+#[cfg(test)]
+mod cross_repo_mount_tests {
+    use super::{mount_source, parse_reference, upload_start_url};
+
+    fn tags(t: &[&str]) -> Vec<String> {
+        t.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// A tag in another repository of the same registry is the source; the
+    /// target's own repository and other registries are not.
+    #[test]
+    fn the_mount_source_is_another_repo_on_the_same_registry() {
+        let (host, repo, _) = parse_reference("ghcr.io/org/app-prod:1");
+        assert_eq!(
+            mount_source(&tags(&["ghcr.io/org/app:dev"]), &host, &repo).as_deref(),
+            Some("org/app")
+        );
+        assert_eq!(
+            mount_source(&tags(&["ghcr.io/org/app-prod:0.9"]), &host, &repo),
+            None,
+            "the target repository itself is not a source"
+        );
+        assert_eq!(
+            mount_source(&tags(&["quay.io/org/app:dev"]), &host, &repo),
+            None,
+            "a blob cannot be mounted across registries"
+        );
+        assert_eq!(mount_source(&[], &host, &repo), None);
+    }
+
+    #[test]
+    fn the_upload_start_asks_for_a_mount_only_with_a_source() {
+        assert_eq!(
+            upload_start_url("https", "ghcr.io", "org/b", "sha256:ab", None),
+            "https://ghcr.io/v2/org/b/blobs/uploads/"
+        );
+        assert_eq!(
+            upload_start_url("https", "ghcr.io", "org/b", "sha256:ab", Some("org/a")),
+            "https://ghcr.io/v2/org/b/blobs/uploads/?mount=sha256:ab&from=org/a"
+        );
     }
 }
