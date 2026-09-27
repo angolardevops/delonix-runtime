@@ -48,6 +48,8 @@ fn target() -> Option<Target> {
         bridge: None,
         vlan: None,
         ca_cert_pem: None,
+        import_storage: None,
+        disk_storage: None,
     })
 }
 
@@ -4409,4 +4411,81 @@ fn sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node() {
         "only the applies forked a task"
     );
     cleanup.armed = false;
+}
+
+/// ADR-0057: a VM boots from a LOCAL image (`DELONIX_PROXMOX_TEST_IMAGE`, a
+/// qcow2 of the engine's store) with no template on the node. The image is
+/// uploaded to the import storage named by its content (or found there from
+/// an earlier run), the VM's boot disk is imported onto the disk storage and
+/// grown to `diskSize`, and a second staging of the same image uploads
+/// nothing. The node must have `import` enabled on the import storage.
+#[test]
+fn a_vm_boots_from_a_local_store_image_uploaded_and_imported() {
+    let Some(t) = target() else {
+        return;
+    };
+    let Ok(image) = std::env::var("DELONIX_PROXMOX_TEST_IMAGE") else {
+        return;
+    };
+    let import = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let disk = t.disk_storage.clone().unwrap_or_else(|| "local-lvm".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let vmdir = dir.path();
+
+    let name = format!("dlximport{}", std::process::id() % 10000);
+    let cfg = VmConfig {
+        name: name.clone(),
+        disk: image.clone(),
+        vcpus: 1,
+        memory: "512M".into(),
+        disk_size_gib: Some(5),
+        ..Default::default()
+    };
+    let boot = b
+        .boot(vmdir, &cfg, &cfg.disk, &|_: CreateStage| {})
+        .expect("boot from the local image");
+    let vm = record_of(&name, &cfg, &boot);
+    let vmid: u32 = boot.api_socket.rsplit(':').next().unwrap().parse().unwrap();
+    assert!(b.is_running(&vm), "the imported VM is not running");
+
+    let after = client.list_import_volumes(&import).expect("list");
+    let ours: Vec<_> = after
+        .iter()
+        .filter(|v| v.starts_with(&format!("{import}:import/delonix-")))
+        .collect();
+    assert!(!ours.is_empty(), "no delonix image on {import}: {after:?}");
+    let config = serde_json::to_string(&client.config(vmid).expect("config")).unwrap();
+    assert!(
+        config.contains(&format!("{disk}:vm-{vmid}-disk-0")) && config.contains("size=5G"),
+        "the boot disk was not imported onto {disk} and grown to 5G: {config}"
+    );
+
+    // The same image again: nothing is uploaded.
+    let again = client
+        .stage_import(std::path::Path::new(&image), None)
+        .expect("stage again");
+    assert!(!again.uploaded, "the same image was uploaded a second time");
+    assert!(after.contains(&again.volid), "{again:?} not in {after:?}");
+
+    // The node verifies what it received: the same bytes announced with a
+    // wrong sha256 fail the upload, and nothing is kept under that name.
+    let bogus = format!("delonix-badsum{}.qcow2", std::process::id() % 10000);
+    let err = client
+        .upload_import(
+            &import,
+            std::path::Path::new(&image),
+            &bogus,
+            &"0".repeat(64),
+        )
+        .expect_err("a wrong checksum must fail the upload");
+    let listed = client.list_import_volumes(&import).expect("list");
+    assert!(
+        !listed.contains(&format!("{import}:import/{bogus}")),
+        "the node kept a file whose checksum did not match ({err}): {listed:?}"
+    );
+
+    b.destroy(vmdir, &vm).expect("destroy");
+    assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
 }

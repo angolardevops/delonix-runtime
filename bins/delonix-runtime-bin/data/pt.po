@@ -14200,6 +14200,34 @@ msgstr "Imprime o JSON Schema do ficheiro de providers.\n\nO mesmo schema public
 
 msgid "the JSON Schema of the providers file, for an editor or a CI check"
 msgstr "o JSON Schema do ficheiro de providers, para um editor ou um check de CI"
+# DX-1539 / DX-6510 / DX-6511 — a Proxmox VM from a local image (ADR-0057)
+msgid "the local image could not be read"
+msgstr "não foi possível ler a imagem local"
+
+msgid "A Proxmox VM created from an image of the engine's store is uploaded to the node first (ADR-0057). The file the image resolved to could not be opened or read, or it is empty."
+msgstr "Uma VM Proxmox criada a partir de uma imagem do store do motor é primeiro enviada para o nó (ADR-0057). O ficheiro para onde a imagem aponta não pôde ser aberto nem lido, ou está vazio."
+
+msgid "Check the image with `delonix image vm ls` and `delonix image vm describe <name>`; pull or build it again if the file is missing."
+msgstr "Verifica a imagem com `delonix image vm ls` e `delonix image vm describe <nome>`; volta a descarregá-la ou a construí-la se o ficheiro faltar."
+
+msgid "the node's import storage does not accept images"
+msgstr "o storage de importação do nó não aceita imagens"
+
+msgid "A Proxmox VM created from a local image is uploaded to a dir storage of the node under `import/`, and the node accepts that only on a storage whose content types include `import` (ADR-0057). The engine never changes a storage's content types: that is administering the node."
+msgstr "Uma VM Proxmox criada a partir de uma imagem local é enviada para um storage do tipo dir do nó, em `import/`, e o nó só o aceita num storage cujos tipos de conteúdo incluam `import` (ADR-0057). O motor nunca muda os tipos de conteúdo de um storage: isso é administrar o nó."
+
+msgid "Enable it on the node (`pvesm set <storage> --content <current types>,import`, or Datacenter › Storage › Edit › Content), or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage that has it."
+msgstr "Liga-o no nó (`pvesm set <storage> --content <tipos actuais>,import`, ou Datacenter › Storage › Edit › Content), ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage que o tenha."
+
+msgid "the node's import storage has no room for the image"
+msgstr "o storage de importação do nó não tem espaço para a imagem"
+
+msgid "The image would be uploaded to the node's import storage, and that storage has less free space than the image. The upload is refused before it starts, because the node's own refusal would come after the bytes had been sent."
+msgstr "A imagem seria enviada para o storage de importação do nó, e esse storage tem menos espaço livre do que a imagem. O envio é recusado antes de começar, porque a recusa do próprio nó só viria depois de os bytes terem sido enviados."
+
+msgid "Free space on the storage, or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage with room."
+msgstr "Liberta espaço no storage, ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage com espaço."
+
 # DX-1538 / DX-5507 — vm move --node (vm.migration.cold/live, ADR-0053)
 msgid "invalid node to move the VM to"
 msgstr "nó inválido para onde mover a VM"

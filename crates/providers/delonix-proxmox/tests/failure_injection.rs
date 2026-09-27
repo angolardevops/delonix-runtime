@@ -299,6 +299,8 @@ fn token_target(node: &MockNode) -> Target {
         bridge: None,
         vlan: None,
         ca_cert_pem: None,
+        import_storage: None,
+        disk_storage: None,
     }
 }
 
@@ -351,6 +353,8 @@ fn a_certificate_the_client_cannot_verify_is_refused_and_the_same_one_as_ca_is_a
     let with_ca = Target {
         insecure_tls: false,
         ca_cert_pem: Some(node.cert_pem.clone().into_bytes()),
+        import_storage: None,
+        disk_storage: None,
         ..token_target(&node)
     };
     Client::connect_with(&with_ca, fast()).expect("verified against the CA given");
@@ -2320,4 +2324,238 @@ fn a_route_map_entry_and_a_dry_run_read_the_nodes_shapes() {
         )
         .unwrap_err();
     assert_eq!(e.number(), 1550, "a reserved id is refused: {e}");
+}
+
+// ===========================================================================
+// ADR-0057: a VM from a local image, uploaded and imported by the node
+// ===========================================================================
+
+const LOCAL_STATUS: &str = "/nodes/pve/storage/local/status";
+const LOCAL_CONTENT: &str = "/nodes/pve/storage/local/content";
+const LOCAL_UPLOAD: &str = "/nodes/pve/storage/local/upload";
+const NEXTID: &str = "/cluster/nextid";
+const CREATE: &str = "/nodes/pve/qemu";
+
+/// A small qcow2: a real header (magic, version 3, virtual size `gib` GiB at
+/// bytes 24..32) and a payload, which is all the client reads.
+fn tiny_qcow2(dir: &std::path::Path, gib: u64) -> std::path::PathBuf {
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"QFI\xfb");
+    bytes.extend_from_slice(&3u32.to_be_bytes());
+    bytes.extend_from_slice(&[0u8; 16]);
+    bytes.extend_from_slice(&(gib * 1024 * 1024 * 1024).to_be_bytes());
+    bytes.extend_from_slice(b"delonix test image payload");
+    let path = dir.join("image.qcow2");
+    std::fs::write(&path, &bytes).unwrap();
+    path
+}
+
+fn sha256_hex(path: &std::path::Path) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(std::fs::read(path).unwrap())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
+}
+
+fn image_cfg(disk: &std::path::Path, size: Option<u32>) -> VmConfig {
+    VmConfig {
+        name: "img".into(),
+        disk: disk.to_string_lossy().into_owned(),
+        vcpus: 1,
+        memory: "512M".into(),
+        disk_size_gib: size,
+        ..Default::default()
+    }
+}
+
+fn status_reply(content: &str, avail: u64) -> Reply {
+    ok_data(&format!(
+        r#"{{"active":1,"avail":{avail},"content":"{content}","enabled":1,"type":"dir"}}"#
+    ))
+}
+
+/// The import storage does not list `import`: refused (DX-6510) naming the
+/// storage and the command, before any upload and before a vmid is asked for.
+#[test]
+fn an_image_on_a_storage_without_import_is_refused_before_anything_is_uploaded() {
+    use delonix_compute::vm_backend::{CreateStage, VmBackend};
+    let node = MockNode::start(script(&[(
+        "GET",
+        LOCAL_STATUS,
+        status_reply("images,iso,backup", 1 << 40),
+    )]));
+    let dir = tempfile::tempdir().unwrap();
+    let img = tiny_qcow2(dir.path(), 2);
+    let b = backend_on(&node);
+    let cfg = image_cfg(&img, None);
+    let Err(err) = b.boot(dir.path(), &cfg, &cfg.disk, &|_: CreateStage| {}) else {
+        panic!("a storage without `import` cannot take the image");
+    };
+    assert_eq!(err.number(), 6510, "{err}");
+    let shown = err.to_string();
+    assert!(
+        shown.contains("'local'") && shown.contains("pvesm set local"),
+        "{shown}"
+    );
+    assert_eq!(
+        node.count("POST", LOCAL_UPLOAD),
+        0,
+        "the image was uploaded"
+    );
+    assert_eq!(node.count("GET", NEXTID), 0, "a vmid was asked for");
+}
+
+/// The node does not have the image: it is uploaded ONCE, named by its
+/// content, with its sha256 for the node to verify, the text fields before
+/// the file; then the VM is created importing it onto the disk storage.
+#[test]
+fn an_image_is_uploaded_with_its_checksum_and_imported_onto_the_disk_storage() {
+    use delonix_compute::vm_backend::{CreateStage, VmBackend};
+    const UPLOAD_UPID: &str = "UPID:pve:00000100:00000200:6AB90000:imgcopy::root@pam:";
+    const CREATE_UPID: &str = "UPID:pve:00000101:00000201:6AB90001:qmcreate:100:root@pam:";
+    const START_UPID: &str = "UPID:pve:00000102:00000202:6AB90002:qmstart:100:root@pam:";
+    let node = MockNode::start(script(&[
+        ("GET", LOCAL_STATUS, status_reply("images,import", 1 << 40)),
+        ("GET", LOCAL_CONTENT, ok_data("[]")),
+        ("POST", LOCAL_UPLOAD, ok_data(&format!("\"{UPLOAD_UPID}\""))),
+        ("GET", NEXTID, ok_data("\"100\"")),
+        ("POST", CREATE, ok_data(&format!("\"{CREATE_UPID}\""))),
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/start",
+            ok_data(&format!("\"{START_UPID}\"")),
+        ),
+    ]));
+    let dir = tempfile::tempdir().unwrap();
+    let img = tiny_qcow2(dir.path(), 2);
+    let sha = sha256_hex(&img);
+    let b = backend_on(&node);
+    let cfg = image_cfg(&img, None);
+    let boot = b
+        .boot(dir.path(), &cfg, &cfg.disk, &|_: CreateStage| {})
+        .expect("boot from a local image");
+    assert_eq!(boot.api_socket, "proxmox:pve:100");
+
+    let uploads: Vec<_> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.method == "POST" && s.path == LOCAL_UPLOAD)
+        .collect();
+    assert_eq!(uploads.len(), 1, "the image is uploaded exactly once");
+    let body = &uploads[0].body;
+    let volume = format!("delonix-{}.qcow2", &sha[..16]);
+    for want in [
+        "name=\"content\"\r\n\r\nimport\r\n".to_string(),
+        format!("name=\"checksum\"\r\n\r\n{sha}\r\n"),
+        "name=\"checksum-algorithm\"\r\n\r\nsha256\r\n".to_string(),
+        format!("filename=\"{volume}\""),
+        "delonix test image payload".to_string(),
+    ] {
+        assert!(body.contains(&want), "upload body lacks {want:?}: {body:?}");
+    }
+    assert!(
+        body.find("name=\"content\"").unwrap() < body.find("filename=").unwrap(),
+        "the fields must come before the file: {body:?}"
+    );
+
+    let create = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == CREATE)
+        .expect("the create");
+    assert!(
+        create.body.contains(&format!(
+            "scsi0=local-lvm:0,import-from=local:import/{volume}"
+        )),
+        "{}",
+        create.body
+    );
+}
+
+/// The node already has the image (same content, same name): nothing is
+/// uploaded, and the create imports the volume that is there.
+#[test]
+fn an_image_the_node_already_has_is_not_uploaded_again() {
+    use delonix_compute::vm_backend::{CreateStage, VmBackend};
+    let dir = tempfile::tempdir().unwrap();
+    let img = tiny_qcow2(dir.path(), 2);
+    let sha = sha256_hex(&img);
+    let volid = format!("local:import/delonix-{}.qcow2", &sha[..16]);
+    let node = MockNode::start(script(&[
+        ("GET", LOCAL_STATUS, status_reply("images,import", 1 << 40)),
+        (
+            "GET",
+            LOCAL_CONTENT,
+            ok_data(&format!(r#"[{{"volid":"{volid}","content":"import"}}]"#)),
+        ),
+        ("GET", NEXTID, ok_data("\"100\"")),
+        (
+            "POST",
+            CREATE,
+            ok_data("\"UPID:pve:1:2:3:qmcreate:100:root@pam:\""),
+        ),
+        (
+            "POST",
+            "/nodes/pve/qemu/100/status/start",
+            ok_data("\"UPID:pve:1:2:4:qmstart:100:root@pam:\""),
+        ),
+    ]));
+    let b = backend_on(&node);
+    let cfg = image_cfg(&img, None);
+    b.boot(dir.path(), &cfg, &cfg.disk, &|_: CreateStage| {})
+        .expect("boot from a cached image");
+    assert_eq!(
+        node.count("POST", LOCAL_UPLOAD),
+        0,
+        "the image was uploaded again"
+    );
+    let create = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == CREATE)
+        .unwrap();
+    assert!(
+        create.body.contains(&format!("import-from={volid}")),
+        "{}",
+        create.body
+    );
+}
+
+/// Less free space than the image (DX-6511), and a `diskSize` smaller than
+/// the image's virtual size (DX-1522): both refused before anything is sent —
+/// the second before the storage is even asked about.
+#[test]
+fn an_image_without_room_or_asked_to_shrink_is_refused_before_the_upload() {
+    use delonix_compute::vm_backend::{CreateStage, VmBackend};
+    let dir = tempfile::tempdir().unwrap();
+    let img = tiny_qcow2(dir.path(), 2);
+
+    let node = MockNode::start(script(&[
+        ("GET", LOCAL_STATUS, status_reply("images,import", 10)),
+        ("GET", LOCAL_CONTENT, ok_data("[]")),
+    ]));
+    let b = backend_on(&node);
+    let cfg = image_cfg(&img, None);
+    let Err(err) = b.boot(dir.path(), &cfg, &cfg.disk, &|_: CreateStage| {}) else {
+        panic!("no room for the image");
+    };
+    assert_eq!(err.number(), 6511, "{err}");
+    assert_eq!(
+        node.count("POST", LOCAL_UPLOAD),
+        0,
+        "the image was uploaded"
+    );
+    assert_eq!(node.count("GET", NEXTID), 0, "a vmid was asked for");
+
+    let node = MockNode::start(script(&[]));
+    let b = backend_on(&node);
+    let before = node.log().len();
+    let cfg = image_cfg(&img, Some(1));
+    let Err(err) = b.boot(dir.path(), &cfg, &cfg.disk, &|_: CreateStage| {}) else {
+        panic!("a diskSize smaller than the image cannot shrink it");
+    };
+    assert_eq!(err.number(), 1522, "{err}");
+    assert!(err.to_string().contains("never shrink"), "{err}");
+    assert_eq!(node.log().len(), before, "the refusal reached the node");
 }

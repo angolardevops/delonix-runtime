@@ -845,6 +845,20 @@ impede os outros comandos. Contexto: <a class="src" href="https://github.com/ang
 <td>Um <code>bridge:</code> por VM ganha.</td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_IMPORT_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>O storage do tipo dir para onde uma imagem local é enviada antes de uma VM a importar (ADR-0057). Tem de ter o tipo de conteúdo <code>import</code>; o motor nunca o liga.</td>
+<td>Um id de storage; omissão <code>local</code>.</td>
+<td><code>storage.import</code> no providers.yaml.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_DISK_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>O storage onde fica o disco de arranque de uma imagem importada (ADR-0057).</td>
+<td>Um id de storage; omissão <code>local-lvm</code>.</td>
+<td><code>storage.disk</code> no providers.yaml.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_VLAN</code></td>
 <td><code>cmd/<wbr>vmbackends.<wbr>rs:parse_vlan</code></td>
 <td>Tag VLAN de omissão para as NICs das VMs neste nó.</td>
@@ -1155,6 +1169,13 @@ variável quando o programa corre.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>O nó do mesmo cluster para onde os casos ao vivo do <code>vm move</code> movem uma VM (ADR-0053). Precisa de um cluster de laboratório com dois nós — nunca produção.</td>
 <td>Por definir: os dois casos de move saltam.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_IMAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Um qcow2 do store do motor a partir do qual o caso ao vivo do ADR-0057 arranca uma VM, enviando-o para o nó. O storage de importação do nó tem de ter <code>import</code>.</td>
+<td>Por definir: o caso salta.</td>
 <td></td>
 </tr>
 <tr>
