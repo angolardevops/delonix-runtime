@@ -1,6 +1,6 @@
 # 63 — Spike do ADR-0059: o que os providers de rede sabem dizer de si, medido
 
-**Data:** 2026-09-27 · **Base:** medido em `origin/main` `d3d6f394` (v4.4.0 + 68); relido sobre `021ed419` (+ #544 e #541, sem mudança no código de rede — as linhas citadas foram reconferidas) ·
+**Data:** 2026-09-27 · **Base:** medido em `origin/main` `d3d6f394` (v4.4.0 + 68); relido sobre `f46a73e9` (+ #544, #541, #545 e #542; as linhas citadas foram reconferidas) ·
 **ADR:** [0059](../adr/0059-network-providers-by-role-lifecycle-and-policy-ir.md) (Proposed) ·
 **Origem:** auditoria 62 (`docs/discovery/62_NAAS_FASE0_AUDITORIA.md`, #544), §7 sessão S5 e §10 pergunta 3.
 
@@ -29,7 +29,7 @@ têm do outro lado uma API que os sirva, ou se ficam `not-implemented` / `unsupp
   (`crates/adapters/delonix-sdn/src/gateway.rs`) não tem `ReportFactory`, e a lista de
   relatórios é composta duas vezes sem ele (`cmd/provider.rs:117`,
   `delonix-node-api/src/providers.rs:18`).
-- O relatório de rede do Proxmox (`delonix-proxmox/src/lib.rs:6180`) dá `net.ipam` e `net.dns`
+- O relatório de rede do Proxmox (`delonix-proxmox/src/lib.rs:6300`) dá `net.ipam` e `net.dns`
   como `not-implemented`, embora o cliente SDN tenha rotas de IPAM e DNS testadas ao vivo
   (ADR-0049 fatia 2, #500). Está **certo**: nenhuma porta as alcança a partir de um Kind. É o
   intervalo que o F5 do ADR-0059 fecha.
@@ -79,10 +79,11 @@ POST /cluster/sdn/vnets/{v}/firewall/rules  type ∈ {in,out,forward,group}, act
 ### O que isto decide
 
 1. **Há transacção nativa.** O lock global recusa por omissão enquanto houver alterações
-   pendentes de outro, e aceita `rollback` com o token antes de aplicar. O PR #542 já o usa e
-   mediu-o (`Client::sdn_transaction`, DX-5516/9525). Para o ADR-0059: `net.apply.staged` e
-   `net.apply.rollback` são `supported` no Proxmox quando o #542 entrar, com esse teste ao
-   vivo como evidência; e «sem pendentes alheios» (S6) é uma pré-condição que o próprio nó
+   pendentes de outro, e aceita `rollback` com o token antes de aplicar. O #542 (fundido
+   durante esta sessão) já o usa e mediu-o (`Client::sdn_transaction`,
+   `sdn_lock.rs:452`, DX-5516/9525). Para o ADR-0059: `net.apply.staged` e
+   `net.apply.rollback` podem nascer `supported` no Proxmox, com o teste ao vivo
+   `sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node` como evidência; e «sem pendentes alheios» (S6) é uma pré-condição que o próprio nó
    impõe.
 2. **Há digest por objecto** (IPAM, opções de firewall). Entra na impressão digital do
    `observe` do D4 — um plano fica obsoleto quando o digest de um objecto que usa muda, sem ter
@@ -115,7 +116,7 @@ POST /cluster/sdn/vnets/{v}/firewall/rules  type ∈ {in,out,forward,group}, act
 | `net.dns.records` | requires-external-component | só PowerDNS, que o motor não traz |
 | `net.nat.snat` | not-implemented | `snat` da subnet existe; sem porta |
 | `net.nat.dnat`, `net.nat.one-to-one`, `net.lb.*` | unsupported-by-provider | a SDN não tem |
-| `net.apply.staged`, `net.apply.rollback` | partial → supported com o #542 | lock + rollback medidos no #542 |
+| `net.apply.staged`, `net.apply.rollback` | supported | live:`crates/providers/delonix-proxmox/tests/live.rs::sdn_routing_chain_vnet_firewall_and_the_lock_round_trip_through_the_node` (#542) |
 | `net.observe` | partial | leitura de zonas/VNets/IPAM existe; sem comparação com o registo |
 | `net.verify.dataplane` | not-implemented | nenhum probe de tráfego |
 | `net.ownership-marker` | not-implemented | S6 |
