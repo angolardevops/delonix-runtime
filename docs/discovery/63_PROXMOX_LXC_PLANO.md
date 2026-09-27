@@ -22,7 +22,7 @@ código e travada por um teste antes do passo seguinte.
 |---|---|---|---|
 | T1 | Sem `exec`, sem logs, sem código de saída na API | Fatia 3 | capacidades `unsupported-by-provider` com a razão; os verbos recusam por nome |
 | T2 | `entrypoint` e `env` substituídos em silêncio na criação a partir de OCI | Fatia 3 | criar sem eles, `PUT …/config`, reler, comparar; divergência é erro |
-| T3 | Um arranque com DHCP falhado acaba em `WARNINGS: 1`, e o motor lê-o como falha | **Fatia 0** | terceiro veredicto de tarefa, com as linhas `WARN:` lidas do log |
+| T3 | Um arranque com DHCP falhado acaba em `WARNINGS: 1`, e o motor lê-o como falha | **Fatia 0** (#546) e 0b | terceiro veredicto de tarefa, com as linhas `WARN:` lidas do log; no SDN, as tarefas-filhas de cada nó |
 | T4 | O pull do nó só aceita tags, perde o digest, não aceita credenciais, e reescreve o nome | Fatias 1 e 2 | o motor puxa e verifica a imagem e envia-a por `upload`; o `oci-registry-pull` não é usado |
 | T5 | O nó recusa um arquivo com media types Docker v2 («Unsupported CPU architecture») | Fatia 1 | o arquivo enviado leva media types OCI; teste com um manifesto Docker v2 real |
 | T6 | Cada container é uma cópia inteira da imagem | Fatia 3 | dito no detalhe da capacidade; nada a corrigir, só a não esconder |
@@ -54,7 +54,7 @@ seguinte (um reenvio) duplicaria a acção.
 - `task_verdict` passa a devolver `Ok`, `Warnings(n)` ou `Failed(razão)`. `WARNINGS: <n>` com
   `n` numérico é o único formato aceite como aviso; qualquer outro texto continua a ser falha.
 - Com `Warnings`, o cliente lê `GET /nodes/{node}/tasks/{upid}/log` e guarda as linhas `WARN:`.
-  É uma rota nova no inventário (`tasks/{upid}/log`).
+  A rota já era chamada (`task_error_line`, `task_log`), por isso o inventário não muda.
 - O livro de tarefas ganha o estado `ok_with_warnings { warnings }`. A chamada devolve sucesso e
   os avisos sobem ao chamador (`tracing::warn!` no crate, impressos pela CLI). Um aviso nunca é
   descartado em silêncio, e nunca é contado como falha.
@@ -63,6 +63,30 @@ seguinte (um reenvio) duplicaria a acção.
   e não só o `Ok`; e a mesma leitura contra o histórico de tarefas do laboratório, para dizer se
   alguma tarefa QEMU real já acabou em `WARNINGS` (medido, não suposto).
 - **Não precisa de D1 a D4.**
+- **Feita no #546** (2026-09-27): o cenário de injecção chumba com a correcção revertida. A
+  medição do histórico do laboratório deu 51 tarefas em `WARNINGS`, e o que mostrou está na
+  Fatia 0b.
+
+## Fatia 0b — Um apply de SDN espera pelo reload de cada nó
+
+**Porquê:** das 51 tarefas em `WARNINGS` no histórico do laboratório, 50 são `srvreload
+networking`, o reload de rede por nó que um `PUT /cluster/sdn` desencadeia. Os avisos incluem
+`missing 'source /etc/network/interfaces.d/sdn' directive` (24) e `reloading frr configuration
+failed` (5). A tarefa que o motor espera, `reloadnetworkall`, acabou em `OK` nas 61 vezes: o PVE
+lança o reload de cada nó em segundo plano e não o acompanha (`PVE/API2/Network/SDN.pm`, com um
+`FIXME` do próprio upstream). O `OK` de um apply quer dizer «pedidos enviados», e foi assim que os
+applies do #493 e do #497 foram aceites e nunca realizados.
+
+- Depois do `reloadnetworkall`, o `apply_sdn` procura em cada nó do cluster a tarefa
+  `srvreload` com id `networking` iniciada a partir da hora da mãe, e espera por cada uma com os
+  três veredictos da Fatia 0. Um nó sem essa tarefa dentro de um prazo é um erro com o nome do
+  nó, nunca um sucesso.
+- Os avisos das filhas sobem ao chamador com o nome do nó. Uma filha falhada faz o apply falhar,
+  mesmo com a mãe em `OK`.
+- **Portão:** cenário de injecção com a mãe em `OK` e uma filha em `WARNINGS`, e outro com uma
+  filha falhada; ao vivo, um apply no laboratório com a directiva `source` retirada de um nó
+  tem de devolver o aviso desse nó.
+- **Espera pelo #542**, que está a mexer no apply de SDN. Não precisa de D1 a D4.
 
 ## Fatia 1 — O arquivo que o nó aceita
 
