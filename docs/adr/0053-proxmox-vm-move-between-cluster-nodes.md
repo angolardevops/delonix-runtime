@@ -288,4 +288,9 @@ cleared it. And a start on `pve2` right after a move failed with `mkdir
 /mnt/pve/nfs-lab/images/100: File exists`: `pve2` both exports and mounts `nfs-lab`, and its NFS
 client cached the directory's absence. The storage now mounts with `lookupcache=positive`.
 
-**Not covered:** a disk copy with `--live` (an NBD block mirror) has no live case of its own.
+**The live copy, measured 2026-09-27.** `a_running_vm_with_a_local_disk_moves_live_and_its_disk_is_mirrored`
+moves a RUNNING VM with its disk on `local-lvm`: without `--with-local-disks` the live move is
+refused (DX-5507) and the VM stays; with it and `--target-storage nfs-lab` the VM is running on
+the target and its config names `nfs-lab`. The node's task log shows `drive mirror is starting for
+drive-scsi0`, 1 GiB transferred in 3 s, then `switching mirror jobs to actively synced mode`; the
+cloud-init drive was copied ahead of it. With the two cases above, 3 live move cases passed.
