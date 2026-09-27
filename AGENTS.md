@@ -3408,10 +3408,14 @@ ou de uma flag podia ser. Corrigido:
   estritos; `rate`/`burst` do `netrate` e os dois do `l4guard` são só dígitos (antes
   `unwrap_or` silencioso); `wg-up`/`wg-peer`/`wg-peer-del` validam interface, porta,
   chave, endereço, endpoint `ip:porta` e allowed-ips.
-- **`wg-up ../../x` escrevia a chave PRIVADA do nó fora do directório `wg`**: o nome
-  da interface compõe o ficheiro temporário `.{name}.key.tmp`. `wg::ensure_iface` e
-  `wg::set_peer` validam agora no próprio sink (`valid_iface_name`, `validate_peer`),
-  cobrindo a API `pub` e não só a linha do holder. A resposta nunca ecoa a chave.
+- **O nome da interface do `wg-up` compõe o caminho do ficheiro temporário com a
+  chave PRIVADA** (`.{name}.key.tmp`). **Correcção de 2026-09-27 ao que o #552
+  afirmou**: um `../` no nome NÃO chegava a escrever a chave fora do directório `wg`
+  — o `ip link add` corre antes e o iproute2 recusa um nome com `/` («not a valid
+  ifname», medido ao vivo no iproute2 6.1). Era só a ORDEM das operações a proteger.
+  `wg::ensure_iface` e `wg::set_peer` validam agora no próprio sink
+  (`valid_iface_name`, `validate_peer`), o que deixa de depender dessa ordem e cobre
+  a API `pub`, não só a linha do holder. A resposta nunca ecoa a chave.
 - **`cni::resolve_plugin`** recusa `type` que não seja um nome simples: `Path::join`
   substitui a base por um caminho absoluto e `..` sai dela, por isso um conflist com
   `"type": "/tmp/x"` executava um binário arbitrário no holder. `run_one` e
@@ -3421,6 +3425,15 @@ ou de uma flag podia ser. Corrigido:
   `every_legitimate_line_still_passes`). Um holder ainda a correr de um binário antigo
   mantém o comportamento antigo até ser recriado (`delonix net netns down` + `up`);
   o cliente não precisa de nada.
+- **Validado ao vivo (2026-09-27, VM descartável Ubuntu 24.04, binário `79648b55`)**,
+  só caminhos legítimos: `attach` numa rede CIDR `172.20.4.0/22` (IP `172.20.7.x/22`,
+  gateway `172.20.4.1`); `attach` de 6 tokens com `--namespace`; `--net-connect`
+  (`eth1` em `10.231.0.2`); `--net-rate 10mbit`; overlay cifrado (`wgo000064` com
+  `10.99.0.1/24`, peer com endpoint `ip:porta` e allowed-ips `/32`, sem ficheiro
+  temporário da chave deixado para trás); `vm bridge --apply` como root (secção
+  própria). Nove arranques a frio iguais com o binário anterior e com este.
+  **Visto de caminho e NÃO do S4**: numa rede CIDR fora de 10.200–10.254 o tráfego
+  entre namespaces passa (P0-5, S1); na `10.231` é cortado (100% de perda).
 
 ## Ciclo de vida VM no libvirt (`vm stop/rm`) — managed save, órfãos, `--force`
 
@@ -3685,6 +3698,14 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
 - **Robustez**: regras `iptables -I FORWARD` ACCEPT nos dois sentidos
   (`<vm-subnet>↔<sdn>`) contra o REJECT default do libvirt; establish
   IDEMPOTENTE (limpa um veth órfão antes de criar, p.ex. após respawn do holder).
+- **Validado numa rede CIDR (2026-09-27, S4)**: `vm bridge s4cidr --vm-subnet
+  192.168.200.0/24 --apply` como root numa rede `172.20.4.0/22` põe `172.20.7.254/22`
+  na ponta do host; ping host→containers e container→host com 0% de perda. As
+  recusas medidas: `--apply` sem root, `default`, `0.0.0.0/0`, uma subnet sobreposta à
+  SDN, e uma sem comprimento. **Lacuna por fechar**: o `unbridge` não aceita
+  `--vm-subnet` e volta a DETECTAR as subnets pelos `virbr*`. Uma ponte feita com
+  `--vm-subnet` explícito deixa as duas regras `iptables FORWARD … ACCEPT` e a rota
+  de retorno no holder; só o veth sai. Medido: 2 regras e a rota ficaram.
 - **VALIDADO E2E ao vivo** (kaeso-sys-01, 2026-07-21): de DENTRO de uma VM libvirt
   (`ubuntu@192.168.122.50`) → `ping`/`curl` a um container da `kaeso-net` por IP
   DIRECTO (`10.210.37.150:8069` → HTTP 200, ttl=63 = uma hop pelo forward do
