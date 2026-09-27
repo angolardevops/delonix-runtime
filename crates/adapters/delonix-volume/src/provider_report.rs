@@ -90,7 +90,7 @@ pub fn report(host: &StorageHost) -> ProviderReport {
         | C::VmSnapshotRestore | C::VmSnapshotDelete | C::VmSnapshotPersistent | C::VmBackupDisk
         | C::VmBackupQuiesced | C::VmBackupRestore | C::ContainerBackupRestore | C::VmMigrationCold
         | C::VmMigrationLive | C::VmReplication | C::VmHighAvailability | C::FirewallPerWorkload
-        | C::FirewallDefaultDeny | C::FirewallSourceFiltering | C::FirewallEgressPolicy
+        | C::FirewallDefaultDeny | C::FirewallSourceFiltering | C::FirewallEgressPolicy | C::NetGatewayFilter | C::NetGatewayAlias | C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder | C::NetGatewayMultiWan | C::NetGatewayVpn | C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt | C::NetLbL4 | C::NetLbHealthCheck | C::NetDnsRecords | C::NetDnsAuthoritative | C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp | C::NetSegmentRemote | C::NetApplyStaged | C::NetApplyRollback | C::NetObserve | C::NetVerifyDataplane | C::NetOwnershipMarker | C::FirewallStateless | C::FirewallLogging | C::FirewallIcmpType | C::FirewallWorkloadPeer
         | C::VmConsoleSerial | C::VmConsoleVnc | C::VmGuestAgent | C::VmIpObserved
         | C::MetricsPrometheus | C::MetricsPerWorkloadNetwork | C::HostHealth | C::HostCapacity
         | C::TransportVerified | C::CredentialInVault => {

@@ -79,7 +79,7 @@ message Capability {
 
 message ProviderInfo {
   string id = 1;
-  string kind = 2; // "compute" | "network" | "storage" | "image"
+  string kind = 2; // "compute" | "network" | "storage" | "image" | "gateway" (catalog 1.1.0, ADR-0059)
   bool available = 3;
   repeated Capability capabilities = 4;
   Condition health = 5;

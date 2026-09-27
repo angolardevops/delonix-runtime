@@ -898,6 +898,7 @@ dependencies = [
  "delonix-linux",
  "delonix-model",
  "delonix-node",
+ "delonix-opnsense",
  "delonix-proxmox",
  "delonix-sdn",
  "delonix-vm",
@@ -959,6 +960,7 @@ dependencies = [
 name = "delonix-opnsense"
 version = "4.4.0"
 dependencies = [
+ "delonix-compute",
  "delonix-model",
  "delonix-sdn",
  "rcgen",

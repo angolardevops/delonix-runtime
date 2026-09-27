@@ -35,10 +35,10 @@ fn not_yet(rpc: &str) -> Status {
 pub async fn list_providers(req: ListProvidersRequest) -> Result<ListProvidersResponse, Status> {
     let kind = match req.kind.as_str() {
         "" => None,
-        k @ ("compute" | "network" | "storage" | "image") => Some(k.to_string()),
+        k @ ("compute" | "network" | "storage" | "image" | "gateway") => Some(k.to_string()),
         other => {
             return Err(Status::invalid_argument(format!(
-                "unknown provider kind '{other}': compute, network, storage or image"
+                "unknown provider kind '{other}': compute, network, storage, image or gateway"
             )))
         }
     };

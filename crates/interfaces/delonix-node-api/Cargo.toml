@@ -21,6 +21,7 @@ delonix-proxmox = { workspace = true }
 delonix-linux = { workspace = true }
 delonix-sdn = { workspace = true }
 delonix-volume = { workspace = true }
+delonix-opnsense = { workspace = true }
 tonic = { workspace = true }
 prost = { workspace = true }
 pbjson = { workspace = true }

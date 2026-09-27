@@ -709,6 +709,7 @@ flowchart TB
   delonix_node_api --> delonix_linux
   delonix_node_api --> delonix_model
   delonix_node_api --> delonix_node
+  delonix_node_api --> delonix_opnsense
   delonix_node_api --> delonix_proxmox
   delonix_node_api --> delonix_sdn
   delonix_node_api --> delonix_vm
@@ -720,6 +721,7 @@ flowchart TB
   delonix_oci --> delonix_model
   delonix_oci --> delonix_node
   delonix_oci --> delonix_state
+  delonix_opnsense --> delonix_compute
   delonix_opnsense --> delonix_model
   delonix_opnsense --> delonix_sdn
   delonix_proxmox --> delonix_compute
