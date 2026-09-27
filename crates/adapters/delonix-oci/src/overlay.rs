@@ -7,6 +7,10 @@ use crate::{Error, Result};
 use nix::mount::{mount, umount2, MntFlags, MsFlags};
 use std::path::{Path, PathBuf};
 
+/// Layers extracted at the same time on a first run. Each is decompression plus
+/// many small writes; past a handful, they only contend for the same disk.
+const EXTRACT_WORKERS: usize = 4;
+
 /// Recursive `chown` of a directory (for user namespace support).
 fn chown_recursive(path: &Path, uid: u32, gid: u32) -> Result<()> {
     use std::os::unix::fs::chown;
@@ -21,19 +25,30 @@ fn chown_recursive(path: &Path, uid: u32, gid: u32) -> Result<()> {
 
 /// Extracts a *layer* (tar, optionally gzip or zstd) into a directory.
 /// Detects the compression by *magic bytes* (gzip `1f 8b`, zstd `28 b5 2f fd`).
+#[cfg(test)]
 fn extract_layer(data: &[u8], dest: &Path) -> Result<()> {
-    let is_gzip = data.len() >= 2 && data[0] == 0x1f && data[1] == 0x8b;
-    let is_zstd =
-        data.len() >= 4 && data[0] == 0x28 && data[1] == 0xb5 && data[2] == 0x2f && data[3] == 0xfd;
+    extract_layer_from(data, dest)
+}
+
+/// [`extract_layer`] over any reader: the blob is decompressed and unpacked as
+/// it is read, so extracting a layer costs a buffer and not the layer's size in
+/// memory — which matters once several layers extract at the same time.
+fn extract_layer_from(reader: impl std::io::Read, dest: &Path) -> Result<()> {
+    use std::io::BufRead;
+    let mut reader = std::io::BufReader::with_capacity(1 << 20, reader);
+    let head = reader
+        .fill_buf()
+        .map_err(|e| Error::Layer(format!("failed to read layer: {e}")))?;
+    let is_gzip = head.starts_with(&[0x1f, 0x8b]);
+    let is_zstd = head.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]);
     let result = if is_gzip {
-        let gz = flate2::read::GzDecoder::new(data);
-        tar::Archive::new(gz).unpack(dest)
+        tar::Archive::new(flate2::read::GzDecoder::new(reader)).unpack(dest)
     } else if is_zstd {
-        let zd = zstd::stream::read::Decoder::new(data)
+        let zd = zstd::stream::read::Decoder::with_buffer(reader)
             .map_err(|e| Error::Layer(format!("failed to open zstd: {e}")))?;
         tar::Archive::new(zd).unpack(dest)
     } else {
-        tar::Archive::new(data).unpack(dest)
+        tar::Archive::new(reader).unpack(dest)
     };
     result.map_err(|e| Error::Layer(format!("failed to extract layer: {e}")))
 }
@@ -236,39 +251,97 @@ impl ImageStore {
     /// then is renamed to the final destination. This way, several `run`s of the SAME
     /// image in parallel do not trample each other writing the same files
     /// (robustness under concurrency — see `tools/stress.sh`).
+    ///
+    /// The missing layers extract **in parallel**, up to [`EXTRACT_WORKERS`] at a
+    /// time: each goes to its own directory, so nothing orders them — the order
+    /// that matters is the overlay's `lowerdir`, and that comes from the returned
+    /// list, which keeps the image's order. A digest the image lists twice (empty
+    /// layers repeat) is extracted once: two workers on one digest would share
+    /// its scratch directory.
     fn ensure_layers(&self, image: &Image) -> Result<Vec<PathBuf>> {
-        let mut dirs = Vec::new();
-        for digest in &image.layers {
-            let hex = strip(digest);
-            let dir = self.root().join("layers").join(hex);
-            let marker = dir.join(".extracted");
-            if !marker.exists() {
-                let layers_dir = self.root().join("layers");
-                std::fs::create_dir_all(&layers_dir)?;
-                // temp exclusive to this process (pid + digest).
-                let tmp = layers_dir.join(format!(".{hex}.{}.tmp", std::process::id()));
-                let _ = std::fs::remove_dir_all(&tmp);
-                std::fs::create_dir_all(&tmp)?;
-                let data = self.cas().read(digest)?;
-                extract_layer(&data, &tmp)?;
-                std::fs::write(tmp.join(".extracted"), b"ok")?;
-                // Publish atomically. If another process already finished (the
-                // marker appeared while we were extracting our own copy), theirs
-                // wins and we discard ours — same outcome either way, since both
-                // are correct extractions of the same immutable digest. Otherwise
-                // `publish_layer_dir` REPLACES whatever is at `dir` (missing,
-                // or a stale/broken leftover with no marker) with our fresh copy —
-                // seeing `dir` merely EXIST here is not proof it is valid.
-                if marker.exists() {
-                    let _ = std::fs::remove_dir_all(&tmp);
-                } else if let Err(e) = publish_layer_dir(&tmp, &dir) {
-                    let _ = std::fs::remove_dir_all(&tmp);
-                    return Err(e);
-                }
+        let layers_dir = self.root().join("layers");
+        let dirs: Vec<PathBuf> = image
+            .layers
+            .iter()
+            .map(|d| layers_dir.join(strip(d)))
+            .collect();
+        let mut missing: Vec<&str> = Vec::new();
+        for (digest, dir) in image.layers.iter().zip(&dirs) {
+            if !dir.join(".extracted").exists()
+                && !missing.iter().any(|m| strip(m) == strip(digest))
+            {
+                missing.push(digest);
             }
-            dirs.push(dir);
         }
-        Ok(dirs)
+        if missing.is_empty() {
+            return Ok(dirs);
+        }
+        std::fs::create_dir_all(&layers_dir)?;
+        let workers = std::thread::available_parallelism()
+            .map_or(1, |n| n.get())
+            .clamp(1, EXTRACT_WORKERS)
+            .min(missing.len());
+        let next = std::sync::atomic::AtomicUsize::new(0);
+        let failure: std::sync::Mutex<Option<Error>> = std::sync::Mutex::new(None);
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                scope.spawn(|| loop {
+                    let i = next.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let Some(digest) = missing.get(i) else { break };
+                    if failure.lock().map_or(true, |f| f.is_some()) {
+                        break;
+                    }
+                    if let Err(e) = self.extract_one(digest, &layers_dir) {
+                        if let Ok(mut f) = failure.lock() {
+                            f.get_or_insert(e);
+                        }
+                        break;
+                    }
+                });
+            }
+        });
+        match failure.into_inner() {
+            Ok(Some(e)) => Err(e),
+            Ok(None) => Ok(dirs),
+            Err(_) => Err(Error::Layer("a layer extraction thread panicked".into())),
+        }
+    }
+
+    /// Extracts one layer into `layers/<hex>/`, atomically — see [`Self::ensure_layers`].
+    fn extract_one(&self, digest: &str, layers_dir: &Path) -> Result<()> {
+        let hex = strip(digest);
+        let dir = layers_dir.join(hex);
+        let marker = dir.join(".extracted");
+        if marker.exists() {
+            return Ok(());
+        }
+        // temp exclusive to this process (pid + digest); `ensure_layers` hands
+        // each digest to one worker only.
+        let tmp = layers_dir.join(format!(".{hex}.{}.tmp", std::process::id()));
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp)?;
+        let extracted = std::fs::File::open(self.cas().path(digest))
+            .map_err(Error::from)
+            .and_then(|f| extract_layer_from(f, &tmp))
+            .and_then(|()| std::fs::write(tmp.join(".extracted"), b"ok").map_err(Error::from));
+        if let Err(e) = extracted {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+        // Publish atomically. If another process already finished (the
+        // marker appeared while we were extracting our own copy), theirs
+        // wins and we discard ours — same outcome either way, since both
+        // are correct extractions of the same immutable digest. Otherwise
+        // `publish_layer_dir` REPLACES whatever is at `dir` (missing,
+        // or a stale/broken leftover with no marker) with our fresh copy —
+        // seeing `dir` merely EXIST here is not proof it is valid.
+        if marker.exists() {
+            let _ = std::fs::remove_dir_all(&tmp);
+        } else if let Err(e) = publish_layer_dir(&tmp, &dir) {
+            let _ = std::fs::remove_dir_all(&tmp);
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// The base directory of a container in the image store.
@@ -788,5 +861,105 @@ mod tests {
             "camada"
         );
         std::fs::remove_dir_all(&dir).ok();
+    }
+}
+
+#[cfg(test)]
+mod parallel_extract_tests {
+    use crate::image::{Image, ImageConfig, ImageStore};
+
+    fn layer(name: &str, content: &[u8]) -> Vec<u8> {
+        let mut b = tar::Builder::new(Vec::new());
+        let mut h = tar::Header::new_gnu();
+        h.set_size(content.len() as u64);
+        h.set_mode(0o644);
+        b.append_data(&mut h, name, content).unwrap();
+        let tar = b.into_inner().unwrap();
+        let mut gz = Vec::new();
+        {
+            use std::io::Write;
+            let mut enc = flate2::write::GzEncoder::new(&mut gz, flate2::Compression::fast());
+            enc.write_all(&tar).unwrap();
+            enc.finish().unwrap();
+        }
+        gz
+    }
+
+    fn store(tag: &str) -> (ImageStore, std::path::PathBuf) {
+        let dir = std::env::temp_dir().join(format!("delonix-par-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        (ImageStore::open(&dir).unwrap(), dir)
+    }
+
+    fn image(layers: Vec<String>) -> Image {
+        Image {
+            id: "sha256:img".into(),
+            repo_tags: vec![],
+            layers,
+            config: ImageConfig::default(),
+            created_unix: 0,
+        }
+    }
+
+    fn scratch_left(root: &std::path::Path) -> Vec<String> {
+        std::fs::read_dir(root.join("layers"))
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| n.ends_with(".tmp"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// Six layers, one of them listed twice: every directory comes back in the
+    /// image's order (the overlay's `lowerdir` is built from it), each holds
+    /// its own layer's file, and no scratch directory is left behind.
+    #[test]
+    fn parallel_extraction_keeps_the_image_order_and_each_layers_content() {
+        let (s, root) = store("order");
+        let mut digests = Vec::new();
+        for i in 0..6 {
+            let d = s
+                .cas()
+                .write(&layer(
+                    &format!("f{i}.txt"),
+                    format!("layer {i}").as_bytes(),
+                ))
+                .unwrap();
+            digests.push(d);
+        }
+        digests.push(digests[1].clone());
+        let dirs = s.ensure_layers(&image(digests.clone())).unwrap();
+        assert_eq!(dirs.len(), 7);
+        for (i, (d, dir)) in digests.iter().zip(&dirs).enumerate() {
+            assert!(dir.ends_with(crate::cas::strip(d)), "position {i}");
+            let n = if i == 6 { 1 } else { i };
+            assert_eq!(
+                std::fs::read_to_string(dir.join(format!("f{n}.txt"))).unwrap(),
+                format!("layer {n}")
+            );
+            assert!(dir.join(".extracted").exists());
+        }
+        assert!(scratch_left(&root).is_empty(), "{:?}", scratch_left(&root));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    /// A layer that does not decompress fails the call, is not marked
+    /// extracted, and leaves no scratch directory; the next call tries again.
+    #[test]
+    fn a_broken_layer_fails_and_leaves_nothing_half_done() {
+        let (s, root) = store("broken");
+        let good = s.cas().write(&layer("ok.txt", b"ok")).unwrap();
+        let mut bad = layer("bad.txt", b"bad");
+        let n = bad.len();
+        bad.truncate(n / 2);
+        let bad = s.cas().write(&bad).unwrap();
+        let err = s.ensure_layers(&image(vec![good.clone(), bad.clone()]));
+        assert!(err.is_err());
+        let bad_dir = root.join("layers").join(crate::cas::strip(&bad));
+        assert!(!bad_dir.join(".extracted").exists());
+        assert!(scratch_left(&root).is_empty(), "{:?}", scratch_left(&root));
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
