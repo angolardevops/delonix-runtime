@@ -553,7 +553,7 @@ n’a sa place dans une configuration de production. Lisez la section de <a clas
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
-<td>Exécute un container avec <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> même lorsque cette session n’a pas de délégation de cgroup, au lieu de refuser (code de sortie 69).</td>
+<td>Exécute un container avec <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> même lorsque cette session n’a pas de délégation de cgroup, et avec <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> même lorsque le cgroup du container n’a pas le contrôleur <code>cpuset</code>/<code>io</code> (<code>preflight_controller_limits</code>), au lieu de refuser (code de sortie 69).</td>
 <td>Définie (n’importe quelle valeur) → exécution, sans limite, avec un avertissement.</td>
 <td>Le noyau ne voit jamais les limites. Voir <a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">délégation de cgroup</a>.</td>
 </tr>
@@ -839,6 +839,20 @@ commandes. Contexte : <a class="src" href="https://github.com/angolardevops/del
 <td>Bridge par défaut des cartes réseau des VM sur ce nœud.</td>
 <td>Un nom de bridge ; le défaut du backend est <code>vmbr0</code>.</td>
 <td>Un <code>bridge:</code> propre à la VM l’emporte.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_IMPORT_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>Le stockage de type dir vers lequel une image locale est envoyée avant qu’une VM l’importe (ADR-0057). Il doit accepter le type de contenu <code>import</code> ; le moteur ne l’active jamais.</td>
+<td>Un identifiant de stockage ; défaut <code>local</code>.</td>
+<td><code>storage.import</code> dans providers.yaml.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_DISK_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>Le stockage où atterrit le disque de démarrage d’une image importée (ADR-0057).</td>
+<td>Un identifiant de stockage ; défaut <code>local-lvm</code>.</td>
+<td><code>storage.disk</code> dans providers.yaml.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_VLAN</code></td>
@@ -1151,6 +1165,13 @@ variable au moment où le programme s’exécute.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Le nœud du même cluster vers lequel les cas en direct de <code>vm move</code> déplacent une VM (ADR-0053). Nécessite un cluster de laboratoire de deux nœuds — jamais la production.</td>
 <td>Non défini : les deux cas de déplacement sont sautés.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_IMAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Un qcow2 du store du moteur à partir duquel le cas en direct de l’ADR-0057 démarre une VM, en l’envoyant au nœud. Le stockage d’import du nœud doit accepter <code>import</code>.</td>
+<td>Non défini : le cas est sauté.</td>
 <td></td>
 </tr>
 <tr>

@@ -516,7 +516,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <tr>
 <td><code>DELONIX_ALLOW_UNENFORCED_LIMITS</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/bins/delonix-runtime-bin/src/cmd/container.rs" target="_blank" rel="noopener"><code>bins/<wbr>delonix-runtime-bin/<wbr>src/<wbr>cmd/<wbr>container.<wbr>rs:preflight_resource_limits</code></a></td>
-<td>即使这个会话没有 cgroup 委派，也让 <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> 跑起来，而不是拒绝（退出码 69）。</td>
+<td>即使这个会话没有 cgroup 委派，也让 <code>-m</code>/<code>--cpus</code>/<code>--cpu-weight</code> 跑起来；即使容器的 cgroup 缺少 <code>cpuset</code>/<code>io</code> 控制器，也让 <code>--cpuset</code>/<code>--io-weight</code>/<code>--device-*</code> 跑起来（<code>preflight_controller_limits</code>），而不是拒绝（退出码 69）。</td>
 <td>设置（任意值）→ 带着警告不受限地跑。</td>
 <td>内核根本看不到这些限制。见<a href="environment.html#cgroup-delegation-some-limits-are-refused-others-are-not-enforced">cgroup 委派</a>。</td>
 </tr>
@@ -796,6 +796,20 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td>这个节点上 VM 网卡的默认网桥。</td>
 <td>一个网桥的名字；这个 backend 的默认值是 <code>vmbr0</code>。</td>
 <td>每个 VM 自己的 <code>bridge:</code> 优先。</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_IMPORT_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>在 VM 导入之前，本地镜像上传到的 dir 类型存储（ADR-0057）。它必须包含 <code>import</code> 内容类型；引擎从不替你启用它。</td>
+<td>一个存储 ID；默认 <code>local</code>。</td>
+<td>providers.yaml 中的 <code>storage.import</code>。</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_DISK_STORAGE</code></td>
+<td><code>cmd/<wbr>vmbackends.<wbr>rs:register_proxmox_with</code></td>
+<td>导入镜像的启动盘所在的存储（ADR-0057）。</td>
+<td>一个存储 ID；默认 <code>local-lvm</code>。</td>
+<td>providers.yaml 中的 <code>storage.disk</code>。</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_VLAN</code></td>
@@ -1102,6 +1116,13 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td><code>vm move</code> 实机用例把 VM 移到的同一集群中的节点（ADR-0053）。需要一个两节点的实验集群——绝不能是生产环境。</td>
 <td>未设置：两个移动用例会跳过。</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_IMAGE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>ADR-0057 实机用例用来启动 VM 的引擎镜像库中的 qcow2，它会被上传到节点。节点的导入存储必须包含 <code>import</code>。</td>
+<td>未设置：该用例跳过。</td>
 <td></td>
 </tr>
 <tr>

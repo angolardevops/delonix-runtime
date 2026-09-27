@@ -104,6 +104,8 @@ pub struct ProxmoxEntry {
     pub tls: Tls,
     #[serde(default)]
     pub network: Network,
+    #[serde(default)]
+    pub storage: Storage,
 }
 
 /// The credential, by reference only. The two value fields exist so they are
@@ -147,6 +149,18 @@ pub struct Network {
     pub bridge: Option<String>,
     #[serde(default)]
     pub vlan: Option<u16>,
+}
+
+/// Where a local image goes on the node (ADR-0057): the dir storage it is
+/// uploaded to (`import`, default `local`) and the storage its disk is
+/// imported onto (`disk`, default `local-lvm`).
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct Storage {
+    #[serde(default)]
+    pub import: Option<String>,
+    #[serde(default)]
+    pub disk: Option<String>,
 }
 
 /// Parses and validates a file's content. `origin` names it in every error.
@@ -259,6 +273,8 @@ pub fn proxmox_keys(px: &ProxmoxEntry) -> HashMap<&'static str, String> {
         ("DELONIX_PROXMOX_PASSWORD_FILE", &a.password_file),
         ("DELONIX_PROXMOX_CA_FILE", &px.tls.ca_file),
         ("DELONIX_PROXMOX_BRIDGE", &px.network.bridge),
+        ("DELONIX_PROXMOX_IMPORT_STORAGE", &px.storage.import),
+        ("DELONIX_PROXMOX_DISK_STORAGE", &px.storage.disk),
     ] {
         if let Some(v) = v {
             m.insert(k, v.clone());
@@ -506,6 +522,9 @@ providers:
     network:
       bridge: vmbr1
       vlan: 20
+    storage:
+      import: images-dir
+      disk: fast-lvm
 ";
 
     #[test]
@@ -530,6 +549,8 @@ providers:
         );
         assert_eq!(k["DELONIX_PROXMOX_CA_FILE"], "/etc/delonix/pve-ca.pem");
         assert_eq!(k["DELONIX_PROXMOX_BRIDGE"], "vmbr1");
+        assert_eq!(k["DELONIX_PROXMOX_IMPORT_STORAGE"], "images-dir");
+        assert_eq!(k["DELONIX_PROXMOX_DISK_STORAGE"], "fast-lvm");
         assert_eq!(k["DELONIX_PROXMOX_VLAN"], "20");
         assert!(!k.contains_key("DELONIX_PROXMOX_INSECURE_TLS"));
     }
