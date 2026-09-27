@@ -728,14 +728,24 @@ impl Client {
         &mut self,
         build: &dyn Fn(&reqwest::blocking::Client) -> reqwest::blocking::RequestBuilder,
     ) -> Result<reqwest::blocking::Response> {
-        let send = |http: &reqwest::blocking::Client, token: &Option<String>| {
-            let mut req = build(http);
+        self.write_req_try(&|http| Ok(build(http)))
+    }
+
+    /// [`Self::write_req`] with a builder that may fail — the one that opens
+    /// a blob's FILE for the body, once per attempt, instead of holding the
+    /// blob in memory to resend it.
+    fn write_req_try(
+        &mut self,
+        build: &dyn Fn(&reqwest::blocking::Client) -> Result<reqwest::blocking::RequestBuilder>,
+    ) -> Result<reqwest::blocking::Response> {
+        let send = |http: &reqwest::blocking::Client, token: &Option<String>| -> Result<_> {
+            let mut req = build(http)?;
             if let Some(t) = token {
                 req = req.bearer_auth(t);
             }
-            req.send()
+            Ok(req.send())
         };
-        let resp = send(&self.http, &self.token).map_err(|e| reg_err_with_hint(e, &self.host))?;
+        let resp = send(&self.http, &self.token)?.map_err(|e| reg_err_with_hint(e, &self.host))?;
         if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
             let www = resp
                 .headers()
@@ -745,7 +755,7 @@ impl Client {
                 .to_string();
             let scope = format!("repository:{}:pull,push", self.repo);
             self.token = Some(self.get_token(&www, Some(&scope))?);
-            let resp = send(&self.http, &self.token).map_err(reg_err)?;
+            let resp = send(&self.http, &self.token)?.map_err(reg_err)?;
             return Ok(resp);
         }
         Ok(resp)
@@ -764,9 +774,32 @@ impl Client {
         Ok(resp.status().is_success())
     }
 
-    /// Sends a blob (config or layer) via a monolithic upload: `POST` to open
-    /// the session, then `PUT …?digest=<sha256>` with the content.
+    /// Sends a small blob held in memory (a config, a signature).
     fn push_blob(&mut self, digest: &str, data: &[u8]) -> Result<()> {
+        self.push_blob_with(digest, &|| Ok(reqwest::blocking::Body::from(data.to_vec())))
+    }
+
+    /// Sends a blob STRAIGHT FROM ITS FILE: the body is read from disk as it
+    /// goes out, and the file is reopened if a 401 forces a second attempt.
+    /// The whole blob used to be in memory three times over (the read, a
+    /// `to_vec`, and a `clone` per attempt) — ~6 GiB for a 2 GiB VM image.
+    fn push_blob_file(&mut self, digest: &str, path: &std::path::Path, size: u64) -> Result<()> {
+        self.push_blob_with(digest, &|| {
+            Ok(reqwest::blocking::Body::sized(
+                std::fs::File::open(path)?,
+                size,
+            ))
+        })
+    }
+
+    /// Monolithic upload: `POST` to open the session, then
+    /// `PUT …?digest=<sha256>` with the body `body` produces (called once per
+    /// attempt).
+    fn push_blob_with(
+        &mut self,
+        digest: &str,
+        body: &dyn Fn() -> Result<reqwest::blocking::Body>,
+    ) -> Result<()> {
         if self.blob_exists(digest)? {
             return Ok(());
         }
@@ -798,11 +831,11 @@ impl Client {
         };
         let sep = if base.contains('?') { '&' } else { '?' };
         let put_url = format!("{base}{sep}digest={digest}");
-        let body = data.to_vec();
-        let resp = self.write_req(&|http| {
-            http.put(&put_url)
+        let resp = self.write_req_try(&|http| {
+            Ok(http
+                .put(&put_url)
                 .header(reqwest::header::CONTENT_TYPE, "application/octet-stream")
-                .body(body.clone())
+                .body(body()?))
         })?;
         if !resp.status().is_success() {
             let status = resp.status();
@@ -1419,7 +1452,6 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
     // 2) send the layers (those missing from the registry).
     let total = image.layers.len();
     for (i, dg) in image.layers.iter().enumerate() {
-        let data = store.cas().read(dg)?;
         tracing::debug!(
             index = i + 1,
             total,
@@ -1428,7 +1460,12 @@ pub fn push_to_registry(store: &ImageStore, source: &str, target: &str) -> Resul
             i + 1,
             total
         );
-        c.push_blob(&with_prefix(dg), &data)?;
+        // From the CAS file, never the whole layer in memory.
+        c.push_blob_file(
+            &with_prefix(dg),
+            &store.cas().path(dg),
+            store.cas().size(dg)?,
+        )?;
     }
 
     // 3) Docker schema-2 manifest (`oci_spec::image::ImageManifest`) + publication
@@ -1478,6 +1515,48 @@ pub fn push_oci_artifact_with_annotations(
     data: &[u8],
     annotations: &BTreeMap<String, String>,
 ) -> Result<String> {
+    push_artifact(
+        root,
+        target,
+        layer_media_type,
+        ArtifactLayer::Bytes(data),
+        annotations,
+    )
+}
+
+/// Like [`push_oci_artifact_with_annotations`], but the blob is a FILE and
+/// goes out straight from disk: hashed in 1 MiB chunks and streamed as the
+/// body, never held in memory. What `vm push` uses — a VM image is GiBs.
+pub fn push_oci_artifact_file(
+    root: &std::path::Path,
+    target: &str,
+    layer_media_type: &str,
+    path: &std::path::Path,
+    annotations: &BTreeMap<String, String>,
+) -> Result<String> {
+    push_artifact(
+        root,
+        target,
+        layer_media_type,
+        ArtifactLayer::File(path),
+        annotations,
+    )
+}
+
+/// Where the single layer of an artifact comes from.
+#[derive(Clone, Copy)]
+enum ArtifactLayer<'a> {
+    Bytes(&'a [u8]),
+    File(&'a std::path::Path),
+}
+
+fn push_artifact(
+    root: &std::path::Path,
+    target: &str,
+    layer_media_type: &str,
+    layer: ArtifactLayer<'_>,
+    annotations: &BTreeMap<String, String>,
+) -> Result<String> {
     let (host, repo, refr) = parse_reference(target);
     let http = transfer_client()?;
     let creds = crate::auth::lookup(root, &host);
@@ -1494,13 +1573,22 @@ pub fn push_oci_artifact_with_annotations(
     let config_digest = with_prefix(&sha256_hex(EMPTY_CONFIG_BYTES));
     c.push_blob(&config_digest, EMPTY_CONFIG_BYTES)?;
 
-    let layer_digest = with_prefix(&sha256_hex(data));
+    let (layer_digest, layer_size) = match layer {
+        ArtifactLayer::Bytes(data) => (with_prefix(&sha256_hex(data)), data.len() as u64),
+        ArtifactLayer::File(path) => (
+            with_prefix(&crate::cas::sha256_file(path)?),
+            std::fs::metadata(path)?.len(),
+        ),
+    };
     tracing::debug!(
         digest = %&layer_digest[..19.min(layer_digest.len())],
-        bytes = data.len(),
+        bytes = layer_size,
         "pushing blob"
     );
-    c.push_blob(&layer_digest, data)?;
+    match layer {
+        ArtifactLayer::Bytes(data) => c.push_blob(&layer_digest, data)?,
+        ArtifactLayer::File(path) => c.push_blob_file(&layer_digest, path, layer_size)?,
+    }
 
     // OCI 1.1 artifact manifest (`oci_spec::image::ImageManifest` with
     // `artifactType` + empty config `EmptyJSON`), ORAS/Helm standard.
@@ -1515,7 +1603,7 @@ pub fn push_oci_artifact_with_annotations(
         )?)
         .layers(vec![descriptor(
             layer_media_type,
-            data.len(),
+            layer_size as usize,
             &layer_digest,
         )?])
         .annotations(
@@ -2791,6 +2879,142 @@ mod tests {
         assert!(matches!(err, crate::Error::DigestMismatch(_)), "{err}");
         assert!(!dest.exists());
         assert!(leftovers(&dir).is_empty(), "{:?}", leftovers(&dir));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A VM image pushed straight from its file arrives whole, and the
+    /// manifest describes the file's real size.
+    #[test]
+    fn a_vm_artifact_pushed_from_its_file_round_trips() {
+        let (port, _gets, _h) = serve_anon_registry();
+        let dir = scratch("push-file");
+        let src = dir.join("img.qcow2");
+        let payload: Vec<u8> = (0..300_000u32).map(|i| (i % 239) as u8).collect();
+        std::fs::write(&src, &payload).unwrap();
+        let target = format!("127.0.0.1:{port}/vm:from-file");
+
+        crate::registry::push_oci_artifact_file(
+            &dir,
+            &target,
+            "application/vnd.delonix.vmimage.v1.qcow2",
+            &src,
+            &std::collections::BTreeMap::new(),
+        )
+        .expect("push from file");
+        let dest = dir.join("back.qcow2");
+        let pulled =
+            crate::registry::pull_oci_artifact_to_file(&dir, &target, &dest, None).unwrap();
+        assert_eq!(pulled.size, payload.len() as u64);
+        assert_eq!(std::fs::read(&dest).unwrap(), payload);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A registry that answers the first blob PUT with 401 makes the push
+    /// fetch a token and send the PUT again. The body is a FILE now, not a
+    /// buffer to clone — the second attempt must reopen it and send the whole
+    /// blob, with the token.
+    #[test]
+    fn a_401_on_the_blob_put_resends_the_whole_file() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::<(
+            String,
+            Option<String>,
+            Vec<u8>,
+        )>::new()));
+        let log = seen.clone();
+        std::thread::spawn(move || {
+            let mut puts = 0;
+            for stream in listener.incoming() {
+                let Ok(mut s) = stream else { continue };
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 8192];
+                let hend = loop {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break None;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if let Some(i) = crate::registry::find_subslice(&buf, b"\r\n\r\n") {
+                        break Some(i);
+                    }
+                };
+                let Some(hend) = hend else { continue };
+                let head = String::from_utf8_lossy(&buf[..hend]).to_string();
+                let first = head.lines().next().unwrap_or_default().to_string();
+                let lower = head.to_lowercase();
+                let len: usize = lower
+                    .lines()
+                    .find(|l| l.starts_with("content-length:"))
+                    .and_then(|l| l[15..].trim().parse().ok())
+                    .unwrap_or(0);
+                let auth = lower
+                    .lines()
+                    .find(|l| l.starts_with("authorization:"))
+                    .map(|l| l[14..].trim().to_string());
+                let mut body = buf[hend + 4..].to_vec();
+                while body.len() < len {
+                    let n = s.read(&mut chunk).unwrap_or(0);
+                    if n == 0 {
+                        break;
+                    }
+                    body.extend_from_slice(&chunk[..n]);
+                }
+                let (status, extra, resp_body): (&str, String, &[u8]) = if first
+                    .starts_with("HEAD ")
+                {
+                    ("404 Not Found", String::new(), b"")
+                } else if first.starts_with("POST ") {
+                    (
+                        "202 Accepted",
+                        "location: /v2/r/blobs/uploads/u1\r\n".into(),
+                        b"",
+                    )
+                } else if first.starts_with("GET /token") {
+                    ("200 OK", String::new(), br#"{"token":"tok"}"#)
+                } else if first.starts_with("PUT ") {
+                    puts += 1;
+                    log.lock()
+                        .unwrap()
+                        .push((first.clone(), auth.clone(), body.clone()));
+                    if puts == 1 {
+                        (
+                            "401 Unauthorized",
+                            format!("www-authenticate: Bearer realm=\"http://127.0.0.1:{port}/token\"\r\n"),
+                            b"",
+                        )
+                    } else {
+                        ("201 Created", String::new(), b"")
+                    }
+                } else {
+                    ("404 Not Found", String::new(), b"")
+                };
+                let _ = s.write_all(
+                    format!(
+                        "HTTP/1.1 {status}\r\n{extra}content-length: {}\r\nconnection: close\r\n\r\n",
+                        resp_body.len()
+                    )
+                    .as_bytes(),
+                );
+                let _ = s.write_all(resp_body);
+            }
+        });
+
+        let dir = scratch("put-401");
+        let path = dir.join("blob");
+        let payload: Vec<u8> = (0..500_000u32).map(|i| (i % 211) as u8).collect();
+        std::fs::write(&path, &payload).unwrap();
+        let digest = format!("sha256:{}", sha256_hex(&payload));
+        let mut c = test_client(&format!("127.0.0.1:{port}"), "r");
+        c.push_blob_file(&digest, &path, payload.len() as u64)
+            .expect("the push must retry the PUT after the 401");
+
+        let puts = seen.lock().unwrap().clone();
+        assert_eq!(puts.len(), 2, "one refused PUT, one retry");
+        let (_, auth, body) = &puts[1];
+        assert_eq!(auth.as_deref(), Some("bearer tok"));
+        assert_eq!(body, &payload, "the retry must carry the whole file again");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
