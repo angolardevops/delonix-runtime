@@ -690,8 +690,9 @@ pub(crate) const AUTO_HTTP_PORT: u16 = 8080;
 
 /// The MANUAL part of the config (routes/listeners/TLS from `kind: HTTPRoute`).
 fn manual_path(w: Where) -> std::path::PathBuf {
-    proxy_dir(w).join("manual.json")
+    proxy_dir(w).join(MANUAL_FILE)
 }
+const MANUAL_FILE: &str = "manual.json";
 /// The AUTO-REGISTERED routes of containers (`container run --expose`).
 fn auto_path() -> std::path::PathBuf {
     proxy_dir(Where::Holder).join("auto.json")
@@ -760,7 +761,11 @@ pub(crate) fn listeners_changed(w: Where, new: &[Listener]) -> bool {
 }
 
 fn read_manual(w: Where) -> Option<ProxyConfig> {
-    serde_json::from_slice(&std::fs::read(manual_path(w)).ok()?).ok()
+    read_manual_in(&proxy_dir(w))
+}
+
+fn read_manual_in(dir: &std::path::Path) -> Option<ProxyConfig> {
+    serde_json::from_slice(&std::fs::read(dir.join(MANUAL_FILE)).ok()?).ok()
 }
 pub(crate) fn auto_routes() -> Vec<AutoRoute> {
     read_auto()
@@ -791,38 +796,25 @@ fn read_auto() -> Vec<AutoRoute> {
 /// makes the last writer to finish always see (and publish) the final
 /// `auto.json`.
 fn with_auto_locked(f: impl FnOnce(&mut Vec<AutoRoute>)) -> Result<bool> {
-    use std::os::unix::io::AsRawFd;
     let w = Where::Holder;
     std::fs::create_dir_all(proxy_dir(w)).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
-    // A dedicated lock file (the flock is on the fd; the content stays in auto.json).
-    let lock = std::fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false)
-        .open(proxy_dir(w).join("auto.lock"))
-        .map_err(|e| Error::Runtime {
-            context: "auto.lock",
-            message: e.to_string(),
-        })?;
-    // SAFETY: flock(LOCK_EX) on the lock's fd; released on close (end of scope).
-    if unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX) } != 0 {
-        return Err(Error::Runtime {
-            context: "flock auto",
-            message: super::po::t("could not acquire the lock").into(),
-        });
-    }
+    // The same lock the manual part's writers take: both end in `rebuild`, which
+    // composes `config.json` from BOTH files.
+    let _compose = compose_lock(&proxy_dir(w))?;
     let mut auto = read_auto();
     let before = auto.clone();
     f(&mut auto);
     if auto == before {
         return Ok(false);
     }
-    std::fs::write(
-        auto_path(),
-        serde_json::to_vec_pretty(&auto).unwrap_or_default(),
+    // Atomic, like `manual.json`: `rebuild` from the host instance reads this
+    // without the holder's lock, and a half-written file reads as "no routes".
+    delonix_state::write_atomic(
+        &auto_path(),
+        &serde_json::to_vec_pretty(&auto).unwrap_or_default(),
     )
     .map_err(|e| Error::Runtime {
         context: "write auto",
@@ -1019,6 +1011,10 @@ fn rebuild(w: Where) -> Result<()> {
 
 /// Writes the MANUAL part (from `httproute apply`) and recomposes the final config.
 pub fn set_manual(cfg: &ProxyConfig, w: Where) -> Result<()> {
+    // One composition at a time: this reads the old manual part for its stamps,
+    // writes the new one and recomposes `config.json` — each step racing an
+    // `update_manual`, a `clear_manual` or an `--expose` registration otherwise.
+    let _compose = compose_lock(&proxy_dir(w))?;
     // The ownership records belong to the DOCUMENTS, not to one composition of them:
     // the config is rebuilt from the manifest on every apply, and a stamp written by the
     // last one must survive it for every document that is still here.
@@ -1036,7 +1032,11 @@ pub fn set_manual(cfg: &ProxyConfig, w: Where) -> Result<()> {
 }
 
 fn write_manual(w: Where, cfg: &ProxyConfig) -> Result<()> {
-    std::fs::create_dir_all(proxy_dir(w)).map_err(|e| Error::Runtime {
+    write_manual_in(&proxy_dir(w), cfg)
+}
+
+fn write_manual_in(dir: &std::path::Path, cfg: &ProxyConfig) -> Result<()> {
+    std::fs::create_dir_all(dir).map_err(|e| Error::Runtime {
         context: "httproute dir",
         message: e.to_string(),
     })?;
@@ -1046,7 +1046,7 @@ fn write_manual(w: Where, cfg: &ProxyConfig) -> Result<()> {
     })?;
     // Atomic: a reader (the other instance's `rebuild`, a plan) must never see half a
     // file and conclude the routes are gone.
-    delonix_state::write_atomic(&manual_path(w), &json).map_err(|e| Error::Runtime {
+    delonix_state::write_atomic(&dir.join(MANUAL_FILE), &json).map_err(|e| Error::Runtime {
         context: "write manual",
         message: e.to_string(),
     })
@@ -1056,14 +1056,27 @@ fn write_manual(w: Where, cfg: &ProxyConfig) -> Result<()> {
 /// records that do not change what is served (the ownership stamp). `f` returns whether
 /// it changed anything; nothing is written otherwise. `false` when there is no manual
 /// part to edit.
+///
+/// **Under the composition lock.** It was a bare read-modify-write: two `stack
+/// apply` stamping two documents at once both read the same `manual.json`, and the
+/// second write erased the first stamp — a route left with no owner, which
+/// `--prune` and `destroy` then cannot see.
 pub(crate) fn update_manual(w: Where, f: impl FnOnce(&mut ProxyConfig) -> bool) -> Result<bool> {
-    let Some(mut cfg) = read_manual(w) else {
+    update_manual_in(&proxy_dir(w), f)
+}
+
+fn update_manual_in(
+    dir: &std::path::Path,
+    f: impl FnOnce(&mut ProxyConfig) -> bool,
+) -> Result<bool> {
+    let _compose = compose_lock(dir)?;
+    let Some(mut cfg) = read_manual_in(dir) else {
         return Ok(false);
     };
     if !f(&mut cfg) {
         return Ok(false);
     }
-    write_manual(w, &cfg)?;
+    write_manual_in(dir, &cfg)?;
     Ok(true)
 }
 
@@ -1071,6 +1084,7 @@ pub(crate) fn update_manual(w: Where, f: impl FnOnce(&mut ProxyConfig) -> bool) 
 /// auto-registered routes of `--expose` containers SURVIVE (the proxy only stops if
 /// nothing else remains). Returns `true` if there were manual routes.
 pub fn clear_manual(w: Where) -> Result<bool> {
+    let _compose = compose_lock(&proxy_dir(w))?;
     let had = manual_path(w).exists();
     let _ = std::fs::remove_file(manual_path(w));
     rebuild(w)?;
@@ -1188,14 +1202,7 @@ pub fn ensure_running(cfg: &ProxyConfig, w: Where) -> Result<()> {
     // Captures the CURRENT listeners BEFORE overwriting the config (else `prev`
     // would already be the new one).
     let prev_ports = prev_listener_ports(w);
-    let json = serde_json::to_vec_pretty(cfg).map_err(|e| Error::Runtime {
-        context: "serialize config",
-        message: e.to_string(),
-    })?;
-    std::fs::write(config_path(w), &json).map_err(|e| Error::Runtime {
-        context: "write config",
-        message: e.to_string(),
-    })?;
+    write_config_in(&proxy_dir(w), cfg)?;
 
     // BUG FOUND: the running_pid(w)-check → spawn_proxy(w) decision used to
     // have NO lock at all. When no proxy exists yet, two concurrent callers
@@ -1246,6 +1253,40 @@ pub fn ensure_running(cfg: &ProxyConfig, w: Where) -> Result<()> {
         publish_listeners(cfg)?;
     }
     Ok(())
+}
+
+/// Writes `config.json` ATOMICALLY. It was `fs::write` — truncate, then write —
+/// and the proxy re-reads this file on every SIGHUP: a reload landing between the
+/// two, or a second writer, read an empty or half file and served NO routes.
+fn write_config_in(dir: &std::path::Path, cfg: &ProxyConfig) -> Result<()> {
+    let json = serde_json::to_vec_pretty(cfg).map_err(|e| Error::Runtime {
+        context: "serialize config",
+        message: e.to_string(),
+    })?;
+    delonix_state::write_atomic(&dir.join("config.json"), &json).map_err(|e| Error::Runtime {
+        context: "write config",
+        message: e.to_string(),
+    })
+}
+
+/// The lock every COMPOSITION of an instance's config takes: the manual part's
+/// writers (`set_manual`, `update_manual`, `clear_manual`) and the `--expose`
+/// registrations, each held through its `rebuild`.
+///
+/// Fails CLOSED, unlike the spawn lock below: without it two writers interleave and
+/// the last `config.json` is composed from a stale read — a route that was written
+/// and is not served, with nothing left to trigger another composition. The file
+/// keeps the name `auto.lock` it had when only the `--expose` side took it, so an
+/// older binary still running a registration serialises against this one.
+fn compose_lock(dir: &std::path::Path) -> Result<FileLock> {
+    std::fs::create_dir_all(dir).map_err(|e| Error::Runtime {
+        context: "httproute dir",
+        message: e.to_string(),
+    })?;
+    FileLock::acquire(&dir.join("auto.lock")).ok_or_else(|| Error::Runtime {
+        context: "flock httproute",
+        message: super::po::t("could not acquire the lock").into(),
+    })
 }
 
 /// Exclusive file lock (`flock`) — same minimal idiom `with_auto_locked`
@@ -1491,6 +1532,93 @@ pub(crate) fn stop_keeping_sources(w: Where) -> Result<()> {
 /// Is the proxy running? (for `httproute ls`/describe).
 pub fn is_running(w: Where) -> bool {
     running_pid(w).is_some()
+}
+
+#[cfg(test)]
+mod compose_tests {
+    use super::*;
+
+    fn scratch(tag: &str) -> std::path::PathBuf {
+        let d = std::env::temp_dir().join(format!("dlx-httproute-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn empty() -> ProxyConfig {
+        serde_json::from_str(r#"{"listeners":[],"routes":[]}"#).unwrap()
+    }
+
+    /// Eight stamps written at once all survive. Without the composition lock the
+    /// read-modify-write interleaves (the sleep only widens a window that is always
+    /// there) and later writes erase earlier stamps.
+    #[test]
+    fn concurrent_manual_updates_lose_nothing() {
+        let dir = scratch("rmw");
+        write_manual_in(&dir, &empty()).unwrap();
+        let threads: Vec<_> = (0..8)
+            .map(|i| {
+                let dir = dir.clone();
+                std::thread::spawn(move || {
+                    update_manual_in(&dir, |cfg| {
+                        std::thread::sleep(std::time::Duration::from_millis(20));
+                        cfg.stamps.push(Stamp {
+                            source: format!("doc{i}"),
+                            kind: "HTTPRoute".into(),
+                            stack: "s".into(),
+                            last_applied: String::new(),
+                        });
+                        true
+                    })
+                    .unwrap()
+                })
+            })
+            .collect();
+        for t in threads {
+            assert!(t.join().unwrap());
+        }
+        let got = read_manual_in(&dir).unwrap().stamps.len();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(got, 8, "stamps lost to an unlocked read-modify-write");
+    }
+
+    /// A reader of `config.json` (the proxy on SIGHUP) never sees a half-written
+    /// file while it is being rewritten.
+    #[test]
+    fn the_served_config_is_never_seen_half_written() {
+        let dir = scratch("atomic");
+        let mut cfg = empty();
+        for i in 0..400 {
+            cfg.routes.push(Route {
+                host: format!("svc{i}.example.internal"),
+                path: "/".into(),
+                backend: format!("10.200.{}.{}:8080", i / 250, i % 250),
+                source: format!("doc{i}"),
+            });
+        }
+        write_config_in(&dir, &cfg).unwrap();
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let reader = {
+            let (dir, stop) = (dir.clone(), stop.clone());
+            std::thread::spawn(move || {
+                let mut torn = 0;
+                while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                    let bytes = std::fs::read(dir.join("config.json")).unwrap_or_default();
+                    if serde_json::from_slice::<ProxyConfig>(&bytes).is_err() {
+                        torn += 1;
+                    }
+                }
+                torn
+            })
+        };
+        for _ in 0..300 {
+            write_config_in(&dir, &cfg).unwrap();
+        }
+        stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        let torn = reader.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(torn, 0, "the proxy could read a truncated config.json");
+    }
 }
 
 #[cfg(test)]

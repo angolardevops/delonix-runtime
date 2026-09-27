@@ -242,27 +242,30 @@ fn router(state: AppState) -> Router {
             "/v1/net/publish/:host_port",
             axum::routing::delete(unpublish_port),
         )
-        // Firewall por workload e política de saída. Mesma razão do publish para
-        // não passar pelo binário: o mecanismo é endereçado por IP e por bridge,
-        // e a CLI por nome.
+        // Firewall por workload, política de saída e ligação a redes: RECUSADAS
+        // (`net_route_withdrawn`) — escreviam o dataplane sem o registo do
+        // container. Ficam registadas para responderem 501 com o código, e não 404.
         .route(
             "/v1/net/firewall/:ip",
-            put(apply_firewall).delete(clear_firewall),
+            put(net_route_withdrawn).delete(net_route_withdrawn),
         )
-        .route("/v1/net/egress", put(set_egress_global))
-        .route("/v1/net/egress/:bridge", put(set_egress_net))
+        .route("/v1/net/egress", put(net_route_withdrawn))
+        .route("/v1/net/egress/:bridge", put(net_route_withdrawn))
         .route("/v1/containers/:id/rate", put(set_net_rate))
         // Endereços e ligação a redes: as perguntas que um cliente faz antes de
         // publicar um porto ou escrever uma regra.
         .route("/v1/net/dhcp/:net/:mac", get(dhcp_ip))
         .route("/v1/net/dhcp6/:net/:mac", get(dhcp_ip6))
         .route("/v1/net/container-ip/:id", get(container_ip))
-        .route("/v1/net/attach-extra", post(attach_extra))
+        .route("/v1/net/attach-extra", post(net_route_withdrawn))
         .route(
             "/v1/net/attach-extra/:id/:idx/:ip",
-            axum::routing::delete(detach_extra),
+            axum::routing::delete(net_route_withdrawn),
         )
-        .route("/v1/net/attach/:id/:ip", axum::routing::delete(detach))
+        .route(
+            "/v1/net/attach/:id/:ip",
+            axum::routing::delete(net_route_withdrawn),
+        )
         // Hot reconfig of a container: ONLY the subset that the runtime's `container
         // update` supports (publish-add/publish-rm). Any other field is refused here
         // (`ReconfigBody` denies unknown fields) — never silently ignored.
@@ -1005,81 +1008,38 @@ async fn container_ip(Path(id): Path<String>) -> Response {
     }
 }
 
-/// Corpo de `POST /v1/net/attach-extra`.
-#[derive(serde::Deserialize)]
-struct AttachExtraBody {
-    id: String,
-    /// Índice da interface adicional (0 é a primária, que não passa por aqui).
-    idx: u32,
-    net: String,
-    #[serde(default)]
-    namespace: String,
-}
-
-/// `POST /v1/net/attach-extra` — liga um container a uma rede ADICIONAL.
+/// The network MUTATIONS this API used to serve, withdrawn (P0-6 of the NaaS
+/// audit, `docs/discovery/62_NAAS_FASE0_AUDITORIA.md`; decided by the owner).
 ///
-/// Devolve `{ ifname, ip }`: quem chama precisa dos dois para o que vem a
-/// seguir (a regra de firewall é endereçada pelo IP, a de shaping pela
-/// interface), e obrigá-lo a uma segunda volta para os descobrir seria pagar
-/// duas viagens por uma operação.
-async fn attach_extra(Json(b): Json<AttachExtraBody>) -> Response {
-    if !valid_arg(&b.id) || !valid_arg(&b.net) {
-        return err_response(Error::Invalid(
-            "invalid container id or network".to_string(),
-        ));
-    }
-    if !b.namespace.is_empty() && !valid_arg(&b.namespace) {
-        return err_response(Error::Invalid("invalid namespace".to_string()));
-    }
-    let r = tokio::task::spawn_blocking(move || {
-        delonix_sdn::infra::attach_extra_container(&b.id, b.idx, &b.net, &b.namespace)
-    })
-    .await;
-    match r {
-        Ok(Ok((ifname, ip))) => {
-            Json(serde_json::json!({ "ifname": ifname, "ip": ip })).into_response()
-        }
-        Ok(Err(e)) => err_response(e.into()),
-        Err(e) => err_response(Error::Runtime {
-            context: "join",
-            message: e.to_string(),
-        }),
-    }
-}
-
-/// `DELETE /v1/net/attach-extra/:id/:idx/:ip` — desliga uma interface adicional.
+/// `PUT|DELETE /v1/net/firewall/:ip`, `PUT /v1/net/egress[/:bridge]`,
+/// `POST|DELETE /v1/net/attach-extra…` and `DELETE /v1/net/attach/:id/:ip` wrote
+/// nftables and the holder's netns straight from an IP and an id, WITHOUT the
+/// container's record: the next reapply from the record (a `start`, a respawn, an
+/// `ingress` edit) silently undid them, and a firewall written on the primary IP
+/// left a multi-homed container's other addresses open. They were a second writer
+/// of state the record owns.
 ///
-/// Best-effort, como os outros `detach`: o mecanismo não devolve resultado.
-async fn detach_extra(Path((id, idx, ip)): Path<(String, u32, String)>) -> Response {
-    if !valid_arg(&id) || delonix_sdn::Cidr::parse_addr(&ip).is_none() {
-        return err_response(Error::Invalid("invalid container id or IP".to_string()));
-    }
-    match tokio::task::spawn_blocking(move || {
-        delonix_sdn::infra::detach_extra_container(&id, idx, &ip)
-    })
-    .await
-    {
-        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Err(e) => err_response(Error::Runtime {
-            context: "join",
-            message: e.to_string(),
-        }),
-    }
-}
-
-/// `DELETE /v1/net/attach/:id/:ip` — desliga um container da rede primária.
-async fn detach(Path((id, ip)): Path<(String, String)>) -> Response {
-    if !valid_arg(&id) || delonix_sdn::Cidr::parse_addr(&ip).is_none() {
-        return err_response(Error::Invalid("invalid container id or IP".to_string()));
-    }
-    match tokio::task::spawn_blocking(move || delonix_sdn::infra::detach_container(&id, &ip)).await
-    {
-        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Err(e) => err_response(Error::Runtime {
-            context: "join",
-            message: e.to_string(),
-        }),
-    }
+/// Refused rather than widened: this surface is frozen (ADR-0041 D4 — bug and
+/// security fixes only), and making each route load and save the record would be
+/// the translation layer ADR-0040 removes. `501` with `DX-6302`, so a client learns
+/// the route is gone and where to go (the CLI, which goes through the record)
+/// instead of reading a `200` for a rule that will not survive.
+async fn net_route_withdrawn() -> Response {
+    let e = Error::coded(
+        6302,
+        Error::Unavailable(
+            "this management API route no longer changes the network: it wrote the dataplane \
+             without the container's record. Use the CLI (`delonix net ingress`/`net egress`, \
+             `delonix network connect`/`disconnect`)"
+                .to_string(),
+        ),
+    );
+    let body = serde_json::json!({
+        "error": e.to_string(),
+        "code": e.code(),
+        "number": delonix_model::codes::label(e.number()),
+    });
+    (StatusCode::NOT_IMPLEMENTED, Json(body)).into_response()
 }
 
 /// Um MAC é `aa:bb:cc:dd:ee:ff` — hexadecimal e dois-pontos, e mais nada.
@@ -1093,103 +1053,6 @@ fn valid_mac(mac: &str) -> bool {
         && mac
             .chars()
             .all(|c| c.is_ascii_hexdigit() || c == ':' || c == '-')
-}
-
-/// Corpo de `PUT /v1/net/firewall/:ip`.
-#[derive(serde::Deserialize)]
-struct FirewallBody {
-    /// Id do container — o mecanismo usa-o para nomear a cadeia.
-    id: String,
-    /// A política INTEIRA, tal como o `kind:Application` a exprime.
-    fw: delonix_model::records::ContainerFw,
-}
-
-/// `PUT /v1/net/firewall/:ip` — aplica a firewall de um workload.
-///
-/// **Substitui, não acumula.** O `apply_firewall` escreve a cadeia inteira a
-/// partir do que recebe; mandar metade das regras apaga a outra metade. É por
-/// isso que o corpo leva a `ContainerFw` completa e não um delta — uma API de
-/// deltas sobre uma cadeia que é reescrita de cada vez daria a ilusão de somar
-/// e o efeito de substituir.
-async fn apply_firewall(Path(ip): Path<String>, Json(b): Json<FirewallBody>) -> Response {
-    if delonix_sdn::Cidr::parse_addr(&ip).is_none() {
-        return err_response(Error::Invalid(format!("invalid IP: '{ip}'")));
-    }
-    if !valid_arg(&b.id) {
-        return err_response(Error::Invalid("invalid container id".to_string()));
-    }
-    let r =
-        tokio::task::spawn_blocking(move || delonix_sdn::infra::apply_firewall(&b.id, &ip, &b.fw))
-            .await;
-    match r {
-        Ok(Ok(())) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Ok(Err(e)) => err_response(e.into()),
-        Err(e) => err_response(Error::Runtime {
-            context: "join",
-            message: e.to_string(),
-        }),
-    }
-}
-
-/// `DELETE /v1/net/firewall/:ip` — retira a firewall de um workload.
-///
-/// Best-effort, como o `unpublish`: o `clear_firewall` não devolve resultado. Um
-/// 200 diz que a operação correu, não que havia cadeia para remover.
-async fn clear_firewall(Path(ip): Path<String>) -> Response {
-    if delonix_sdn::Cidr::parse_addr(&ip).is_none() {
-        return err_response(Error::Invalid(format!("invalid IP: '{ip}'")));
-    }
-    match tokio::task::spawn_blocking(move || delonix_sdn::infra::clear_firewall(&ip)).await {
-        Ok(()) => Json(serde_json::json!({ "ok": true })).into_response(),
-        Err(e) => err_response(Error::Runtime {
-            context: "join",
-            message: e.to_string(),
-        }),
-    }
-}
-
-/// Corpo das duas rotas de egress.
-#[derive(serde::Deserialize)]
-struct EgressBody {
-    /// `true` corta a saída para a Internet.
-    deny: bool,
-}
-
-/// `PUT /v1/net/egress` — política de saída de TODO o nó.
-///
-/// Rota separada da por-rede de propósito. As duas assinaturas do mecanismo
-/// diferem por um argumento, e um único endpoint com `bridge` opcional faria
-/// «cortar a saída de uma rede» e «cortar a saída do nó inteiro» distarem um
-/// campo esquecido. O raio de dano é diferente de mais para depender disso.
-async fn set_egress_global(Json(b): Json<EgressBody>) -> Response {
-    match tokio::task::spawn_blocking(move || delonix_sdn::infra::set_egress_policy(b.deny)).await {
-        Ok(Ok(())) => Json(serde_json::json!({ "ok": true, "deny": b.deny })).into_response(),
-        Ok(Err(e)) => err_response(e.into()),
-        Err(e) => err_response(Error::Runtime {
-            context: "join",
-            message: e.to_string(),
-        }),
-    }
-}
-
-/// `PUT /v1/net/egress/:bridge` — política de saída de UMA rede.
-async fn set_egress_net(Path(bridge): Path<String>, Json(b): Json<EgressBody>) -> Response {
-    if !valid_arg(&bridge) {
-        return err_response(Error::Invalid(format!("invalid bridge: '{bridge}'")));
-    }
-    let deny = b.deny;
-    let r = tokio::task::spawn_blocking(move || {
-        delonix_sdn::infra::set_egress_policy_net(&bridge, deny)
-    })
-    .await;
-    match r {
-        Ok(Ok(())) => Json(serde_json::json!({ "ok": true, "deny": deny })).into_response(),
-        Ok(Err(e)) => err_response(e.into()),
-        Err(e) => err_response(Error::Runtime {
-            context: "join",
-            message: e.to_string(),
-        }),
-    }
 }
 
 /// Corpo de `PUT /v1/containers/:id/rate`.
@@ -2384,82 +2247,54 @@ mod tests {
             assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "aceitou {mau:?}");
         }
     }
-    /// A firewall e a política de saída: o que é recusado ANTES de tocar no nft.
-    ///
-    /// Como no publish, o caminho feliz não vive aqui — aplicar uma cadeia exige
-    /// holder e nft de pé. O que se testa é o que a API deixa passar para uma
-    /// regra que decide tráfego.
+    /// As mutações de rede que escreviam o dataplane sem o registo do container
+    /// (P0-6) respondem 501 com `DX-6302` — TODAS, com um corpo válido ou não.
+    /// Um corpo válido é o caso que importa: era esse que passava e escrevia uma
+    /// regra que o próximo reapply desfazia.
     #[tokio::test]
-    async fn firewall_e_egress_recusam_entrada_invalida() {
+    async fn as_mutacoes_de_rede_sem_registo_sao_recusadas() {
         let (st, _d) = test_state();
         let app = router(st);
 
-        let put = |uri: &str, corpo: &'static str| {
+        let req = |method: &str, uri: &str, corpo: &'static str| {
             Request::builder()
-                .method("PUT")
+                .method(method)
                 .uri(uri.to_string())
                 .header("content-type", "application/json")
                 .body(Body::from(corpo))
                 .unwrap()
         };
-
-        // IP que não é IP: acabaria numa cadeia endereçada a coisa nenhuma.
-        let resp = app
-            .clone()
-            .oneshot(put(
+        let casos = [
+            (
+                "PUT",
+                "/v1/net/firewall/10.200.0.5",
+                r#"{"id":"abc","fw":{"enabled":true}}"#,
+            ),
+            (
+                "PUT",
                 "/v1/net/firewall/nao-e-ip",
                 r#"{"id":"abc","fw":{"enabled":true}}"#,
-            ))
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+            ),
+            ("DELETE", "/v1/net/firewall/10.200.0.5", ""),
+            ("PUT", "/v1/net/egress", r#"{"deny":true}"#),
+            ("PUT", "/v1/net/egress/dlxn0001", r#"{"deny":false}"#),
+            (
+                "POST",
+                "/v1/net/attach-extra",
+                r#"{"id":"abc","idx":1,"net":"app","namespace":""}"#,
+            ),
+            ("DELETE", "/v1/net/attach-extra/abc/1/10.201.0.9", ""),
+            ("DELETE", "/v1/net/attach/abc/10.200.0.5", ""),
+        ];
+        for (method, uri, corpo) in casos {
+            let resp = app.clone().oneshot(req(method, uri, corpo)).await.unwrap();
+            assert_eq!(resp.status(), StatusCode::NOT_IMPLEMENTED, "{method} {uri}");
+            let b = body_json(resp).await;
+            assert_eq!(b["number"], "DX-6302", "{method} {uri}: {b}");
+            assert_eq!(b["code"], "DX_UNAVAILABLE", "{method} {uri}: {b}");
+        }
 
-        // Id com metacaracteres passa pelo mesmo crivo do resto do módulo.
-        let resp = app
-            .clone()
-            .oneshot(put(
-                "/v1/net/firewall/10.200.0.5",
-                r#"{"id":"a; rm -rf /","fw":{"enabled":true}}"#,
-            ))
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-
-        // O DELETE valida o mesmo IP.
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/v1/net/firewall/..")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-
-        // Bridge inválida no egress por-rede. `..` e não `br; reboot`: o
-        // segundo nem chega a ser um URI legal, e o construtor do pedido
-        // rejeita-o antes do servidor — um teste assim não testava a API,
-        // testava o `http::Request`.
-        let resp = app
-            .clone()
-            .oneshot(put("/v1/net/egress/..", r#"{"deny":true}"#))
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-
-        // E o `deny` é OBRIGATÓRIO: um corpo sem ele não pode ser lido como
-        // «não negar» — cortar a saída e não a cortar são resultados opostos, e
-        // um default silencioso escolheria um deles por omissão.
-        let resp = app
-            .clone()
-            .oneshot(put("/v1/net/egress", r#"{}"#))
-            .await
-            .unwrap();
-        assert_ne!(resp.status(), StatusCode::OK, "corpo sem `deny` foi aceite");
-
+        let put = |uri: &str, corpo: &'static str| req("PUT", uri, corpo);
         // O limite de banda valida o id.
         let resp = app
             .oneshot(put(
@@ -2470,8 +2305,9 @@ mod tests {
             .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
-    /// Endereços e ligação a redes: o crivo, e o `valid_mac` que existe por
-    /// causa dos dois-pontos.
+    /// Endereços: o crivo, e o `valid_mac` que existe por causa dos dois-pontos.
+    /// (A ligação a redes deixou de ser servida — ver
+    /// `as_mutacoes_de_rede_sem_registo_sao_recusadas`.)
     #[tokio::test]
     async fn dhcp_e_attach_validam_o_que_recebem() {
         let (st, d) = test_state();
@@ -2505,36 +2341,6 @@ mod tests {
 
         // Id inválido é recusado.
         let resp = g("/v1/net/container-ip/..".into()).await.unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-
-        // Detach com um IP que não é IP.
-        let resp = app
-            .clone()
-            .oneshot(
-                Request::builder()
-                    .method("DELETE")
-                    .uri("/v1/net/attach/abc/nao-e-ip")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
-
-        // E o attach recusa rede inválida antes de tocar no holder.
-        let resp = app
-            .oneshot(
-                Request::builder()
-                    .method("POST")
-                    .uri("/v1/net/attach-extra")
-                    .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"id":"abc","idx":1,"net":"..","namespace":""}"#,
-                    ))
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
         assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
     }
 }
