@@ -3394,6 +3394,34 @@ histórico de commits `4c3e223`/`456925f`). Achado #3 acima é uma escalada do
 achado "por-verificar" MEDIUM de DNS hijack da corrida original (o CLI directo,
 sem manifesto nenhum, já bastava).
 
+### Superfície de privilégio do holder (S4 da auditoria NaaS, 2026-09-27)
+
+Origem: `docs/discovery/62_NAAS_FASE0_AUDITORIA.md` §6 P1 e §7 S4. O `SO_PEERCRED`
+diz QUEM fala no socket de controlo; não dizia o que um valor vindo de um manifesto
+ou de uma flag podia ser. Corrigido:
+
+- **`validate_control_tokens`** corre no topo do `handle_control`, antes de qualquer
+  ramo (as queries incluídas): nenhum token que chega a um argv começa por `-` (o
+  `sanitize` deixa passar `-`, logo `attach -n …` chegava ao `ip netns add -n`; a
+  única excepção é o `-` literal do `vxlan` sem peers, e o token de namespace, que é
+  só hash); `ip`/`gateway` do `attach`/`attach-extra`/`vmtap`/`vxlan` são IPv4
+  estritos; `rate`/`burst` do `netrate` e os dois do `l4guard` são só dígitos (antes
+  `unwrap_or` silencioso); `wg-up`/`wg-peer`/`wg-peer-del` validam interface, porta,
+  chave, endereço, endpoint `ip:porta` e allowed-ips.
+- **`wg-up ../../x` escrevia a chave PRIVADA do nó fora do directório `wg`**: o nome
+  da interface compõe o ficheiro temporário `.{name}.key.tmp`. `wg::ensure_iface` e
+  `wg::set_peer` validam agora no próprio sink (`valid_iface_name`, `validate_peer`),
+  cobrindo a API `pub` e não só a linha do holder. A resposta nunca ecoa a chave.
+- **`cni::resolve_plugin`** recusa `type` que não seja um nome simples: `Path::join`
+  substitui a base por um caminho absoluto e `..` sai dela, por isso um conflist com
+  `"type": "/tmp/x"` executava um binário arbitrário no holder. `run_one` e
+  `readiness` dizem «config inválida», não «plugin em falta».
+- **Compatibilidade**: o formato da linha NÃO muda — toda a linha que um cliente
+  deste build ou de um anterior envia legitimamente continua a passar (teste
+  `every_legitimate_line_still_passes`). Um holder ainda a correr de um binário antigo
+  mantém o comportamento antigo até ser recriado (`delonix net netns down` + `up`);
+  o cliente não precisa de nada.
+
 ## Ciclo de vida VM no libvirt (`vm stop/rm`) — managed save, órfãos, `--force`
 
 Bug report real (host kaeso-sys-01): `vm rm dev` vazava o stderr cru do `virsh`
@@ -3640,15 +3668,22 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
 (default = DRY-RUN que só imprime o plano). Módulo `cmd/vmbridge.rs`.
 
 - **Mecanismo** (`bridge_plan`, puro/testado): veth par no host → move a ponta SDN
-  para o netns do holder + enslave à bridge da rede → ponta host ganha
-  `<prefix>.255.254/16` → `ip_forward=1` → rota de retorno `<vm-subnet> via
-  <host-ip>` DENTRO do holder. Sem SNAT: o container vê o IP real da VM, e o
+  para o netns do holder + enslave à bridge da rede → ponta host ganha o último
+  endereço antes do broadcast, com o comprimento do prefixo da rede
+  (`10.210.255.254/16`; `172.20.7.254/22` numa rede `172.20.4.0/22` — até 2026-09-27
+  assumia-se um prefixo de dois octetos e saía `172.20.4.0/22.255.254`) →
+  `ip_forward=1` → rota de retorno `<vm-subnet> via <host-ip>` DENTRO do holder. Sem SNAT: o container vê o IP real da VM, e o
   firewall por-container continua a governar (um IP de VM não está em `@dlxall`,
   passa como gateway; regras `ingress` explícitas aplicam-se na mesma).
 - **Segurança**: abre VM↔container só na rede indicada; a subnet da VM é a NAT do
   libvirt (`192.168.122.0/24`), NÃO a LAN externa. `vm unbridge <rede>` desfaz.
+- **Entrada validada (S4, 2026-09-27)**: `--apply` recusa quem não é root ANTES de
+  qualquer comando (antes corria o plano de limpeza inteiro, falhando em EPERM); cada
+  `--vm-subnet` (e cada subnet detectada) tem de ser `a.b.c.d/len` estrito, nem `/0`
+  nem sobreposta à rede SDN, e segue canónica para o argv — `default` chegava ao
+  `ip route add` do holder como rota por omissão.
 - **Robustez**: regras `iptables -I FORWARD` ACCEPT nos dois sentidos
-  (`<vm-subnet>↔<sdn>/16`) contra o REJECT default do libvirt; establish
+  (`<vm-subnet>↔<sdn>`) contra o REJECT default do libvirt; establish
   IDEMPOTENTE (limpa um veth órfão antes de criar, p.ex. após respawn do holder).
 - **VALIDADO E2E ao vivo** (kaeso-sys-01, 2026-07-21): de DENTRO de uma VM libvirt
   (`ubuntu@192.168.122.50`) → `ping`/`curl` a um container da `kaeso-net` por IP
