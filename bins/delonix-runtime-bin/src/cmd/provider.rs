@@ -103,15 +103,17 @@ fn parse_kind(s: &str) -> std::result::Result<ProviderKind, String> {
         "network" => Ok(ProviderKind::Network),
         "storage" => Ok(ProviderKind::Storage),
         "image" => Ok(ProviderKind::Image),
+        "gateway" => Ok(ProviderKind::Gateway),
         other => Err(format!(
-            "unknown provider kind '{other}' (compute, network, storage, image)"
+            "unknown provider kind '{other}' (compute, network, storage, image, gateway)"
         )),
     }
 }
 
 /// Every provider report, MEASURED on this host. Order: the VM backends in
 /// registry order (the auto-detection preference), then the Linux provider's
-/// three kinds with Proxmox's network report after the Linux one. A Proxmox target that is not registered in this process still
+/// three kinds with Proxmox's network report after the Linux one, and the OPNsense
+/// gateway last. A Proxmox or OPNsense target that is not registered in this process still
 /// appears, declared and unavailable, so the list is the same set of names on
 /// every host — a reader compares hosts by state, not by which rows exist.
 pub fn measured_reports() -> Vec<ProviderReport> {
@@ -135,6 +137,11 @@ pub fn measured_reports() -> Vec<ProviderReport> {
     out.push(delonix_volume::provider_report::report(
         &delonix_volume::provider_report::StorageHost::probe(),
     ));
+    // The perimeter appliance (ADR-0051), declared like Proxmox and listed
+    // whether or not a target is registered (ADR-0059 D2).
+    out.push(delonix_opnsense::capability_report(
+        delonix_sdn::gateway::gateway_provider_ids().contains(&delonix_opnsense::ID),
+    ));
     out
 }
 
@@ -152,6 +159,7 @@ pub fn declared_reports() -> Vec<ProviderReport> {
         delonix_volume::provider_report::report(
             &delonix_volume::provider_report::StorageHost::ASSUMED,
         ),
+        delonix_opnsense::capability_report(true),
     ]
 }
 
@@ -534,7 +542,12 @@ pub fn matrix_markdown(reports: &[ProviderReport]) -> String {
         ProviderKind::Network,
         ProviderKind::Storage,
     ] {
-        let cols: Vec<&ProviderReport> = reports.iter().filter(|r| r.kind == kind).collect();
+        // A gateway answers the network rows (ADR-0059 D2): it is a column of
+        // that table, labelled with its own kind.
+        let cols: Vec<&ProviderReport> = reports
+            .iter()
+            .filter(|r| r.kind.catalog_kind() == kind)
+            .collect();
         if cols.is_empty() {
             continue;
         }
@@ -548,7 +561,7 @@ pub fn matrix_markdown(reports: &[ProviderReport]) -> String {
                 .collect();
             out.push_str(&format!(
                 "- **{}**: {} of {} — {}\n",
-                r.id,
+                column(r),
                 r.count("supported"),
                 r.capabilities.len(),
                 counts.join(", ")
@@ -557,7 +570,7 @@ pub fn matrix_markdown(reports: &[ProviderReport]) -> String {
         out.push('\n');
         out.push_str("| domain | capability |");
         for r in &cols {
-            out.push_str(&format!(" {} |", r.id));
+            out.push_str(&format!(" {} |", column(r)));
         }
         out.push('\n');
         out.push_str("|---|---|");
@@ -593,6 +606,15 @@ pub fn matrix_markdown(reports: &[ProviderReport]) -> String {
         out.push('\n');
     }
     out
+}
+
+/// A matrix column's label: the id, and the kind when it is not the table's.
+fn column(r: &ProviderReport) -> String {
+    if r.kind == r.kind.catalog_kind() {
+        r.id.clone()
+    } else {
+        format!("{} ({})", r.id, r.kind.as_str())
+    }
 }
 
 /// Where the credential of a Proxmox target comes from, never its value.
@@ -662,7 +684,7 @@ fn config_show(output: super::output::OutputFormat) -> Result<()> {
             pc::ProviderEntry::CloudHypervisor(_) => {
                 rows.push(serde_json::json!({"type": "cloud-hypervisor", "source": "file"}))
             }
-            pc::ProviderEntry::Proxmox(_) => {}
+            pc::ProviderEntry::Proxmox(_) | pc::ProviderEntry::Opnsense(_) => {}
         }
     }
     let px_lookup = super::vmbackends::configured_lookup()?;
@@ -689,6 +711,43 @@ fn config_show(output: super::output::OutputFormat) -> Result<()> {
         }));
     }
 
+    // The OPNsense target, from wherever this process takes it (ADR-0059 F1,
+    // the ADR-0054 D4 rule). The secret is shown only by where it comes from.
+    let op = pc::opnsense_lookup_with(env, cfg);
+    if op("DELONIX_OPNSENSE_URL").is_some() {
+        let source = if env("DELONIX_OPNSENSE_URL").is_some() {
+            "environment"
+        } else {
+            "file"
+        };
+        let credential = if let Some(name) = op("DELONIX_OPNSENSE_CREDENTIAL") {
+            super::po::tf("kind: Secret '{name}'", &[("name", &name)])
+        } else if let Some(f) = op("DELONIX_OPNSENSE_SECRET_FILE") {
+            super::po::tf("api key, secret from file {path}", &[("path", &f)])
+        } else if op("DELONIX_OPNSENSE_SECRET").is_some() {
+            super::po::t("api key, secret from the environment (redacted)").to_string()
+        } else {
+            super::po::t("nowhere — the secret is missing").to_string()
+        };
+        rows.push(serde_json::json!({
+            "type": "opnsense",
+            "source": source,
+            "url": op("DELONIX_OPNSENSE_URL"),
+            "credential": credential,
+            "caFile": op("DELONIX_OPNSENSE_CA_FILE"),
+            "insecureSkipVerify": op("DELONIX_OPNSENSE_INSECURE_TLS").is_some(),
+        }));
+    }
+    let network_defaults: serde_json::Map<String, serde_json::Value> = cfg
+        .and_then(|c| c.network_defaults.as_ref())
+        .map(|nd| {
+            nd.roles()
+                .iter()
+                .filter_map(|(role, v)| v.map(|v| (role.to_string(), serde_json::json!(v))))
+                .collect()
+        })
+        .unwrap_or_default();
+
     match output {
         super::output::OutputFormat::Json => {
             let doc = serde_json::json!({
@@ -696,6 +755,7 @@ fn config_show(output: super::output::OutputFormat) -> Result<()> {
                 "ignored": ignored,
                 "defaultProvider": default,
                 "defaultSource": default_source,
+                "networkDefaults": network_defaults,
                 "providers": rows,
             });
             let text = serde_json::to_string_pretty(&doc)
@@ -725,6 +785,14 @@ fn config_show(output: super::output::OutputFormat) -> Result<()> {
                 default.as_deref().unwrap_or("-"),
                 default_source
             );
+            for (role, v) in &network_defaults {
+                println!(
+                    "{:<18}{} → {}",
+                    super::po::t("Network default:"),
+                    role,
+                    v.as_str().unwrap_or("?")
+                );
+            }
             println!("{}", super::po::t("Providers:"));
             if rows.is_empty() {
                 println!("  -");
@@ -862,7 +930,7 @@ mod tests {
         for r in declared_reports() {
             let n = Capability::ALL
                 .iter()
-                .filter(|c| c.kind() == r.kind)
+                .filter(|c| c.kind() == r.kind.catalog_kind())
                 .count();
             assert_eq!(r.capabilities.len(), n, "{}/{}", r.id, r.kind.as_str());
         }

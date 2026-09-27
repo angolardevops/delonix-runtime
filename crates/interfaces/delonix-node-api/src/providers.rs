@@ -35,6 +35,10 @@ pub fn measured_reports() -> Vec<ProviderReport> {
     out.push(delonix_volume::provider_report::report(
         &delonix_volume::provider_report::StorageHost::probe(),
     ));
+    // The perimeter appliance (ADR-0059 D2), declared, same flag rule as Proxmox.
+    out.push(delonix_opnsense::capability_report(
+        delonix_sdn::gateway::gateway_provider_ids().contains(&delonix_opnsense::ID),
+    ));
     out
 }
 
@@ -52,6 +56,7 @@ pub fn declared_reports() -> Vec<ProviderReport> {
         delonix_volume::provider_report::report(
             &delonix_volume::provider_report::StorageHost::ASSUMED,
         ),
+        delonix_opnsense::capability_report(true),
     ]
 }
 
@@ -109,8 +114,14 @@ mod tests {
             if let Some(k) = line.strip_prefix("## ") {
                 kind = k.trim().to_string();
             } else if let Some(rest) = line.strip_prefix("- **") {
-                if let Some((id, _)) = rest.split_once("**") {
-                    published.insert((kind.clone(), id.to_string()));
+                if let Some((label, _)) = rest.split_once("**") {
+                    // A gateway is a column of the network table, labelled
+                    // `<id> (gateway)` (ADR-0059 D2): its own kind wins.
+                    let (id, k) = match label.strip_suffix(')').and_then(|l| l.split_once(" (")) {
+                        Some((id, k)) => (id, k.to_string()),
+                        None => (label, kind.clone()),
+                    };
+                    published.insert((k, id.to_string()));
                 }
             }
         }
