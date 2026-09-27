@@ -1,0 +1,438 @@
+# ADR-0059: Network providers answer by role, through small ports negotiated by capability, and every change goes through validate → plan → apply → observe → verify
+
+- **Status:** Proposed
+- **Date:** 2026-09-27
+- **Deciders:** Walter Angolar
+- **Relates to:** ADR-0050 (the capability catalog this extends to 1.1.0 and to a fifth
+  `ProviderKind`); ADR-0051 (`GatewayProvider` — moves, loses its refusing default methods,
+  and its native builtin); ADR-0049 (the `kind: NetworkZone` addendum of 2026-09-25, whose
+  resolution **by count** this ADR supersedes; D3, which keeps cluster-level administration
+  out); ADR-0052 (the per-VM firewall of a Proxmox node — one of the lowerings of D6);
+  ADR-0054 (`providers.yaml` — gains `type: opnsense` and `networkDefaults`); ADR-0044 D3/D4
+  (the `Provider` skeleton and the registry rules this reuses verbatim); ADR-0040 D2.2 (the
+  `delonix-networking` context this creates); ADR-0042 (problem+json, `ETag`/`If-Match`,
+  `request_id` — the envelope D5 extends); ADR-0043 (the `DX-CDNN` dictionary); ADR-0024,
+  ADR-0028, ADR-0055 (selector, origin bookkeeping and the per-VM anti-spoof opt-out — fields
+  the IR of D6 keeps)
+- **Evidence:** `docs/discovery/62_NAAS_FASE0_AUDITORIA.md` (PR #544: §4 capability matrix,
+  §6 P2, §7 session S5, §10 question 3) and the spike of this ADR,
+  `docs/discovery/63_NET_PROVIDER_CONTRATO_SPIKE.md`
+
+## Context
+
+### What the engine has today, measured on `origin/main` `d3d6f394`
+
+Four network ports exist, each shaped by the provider that arrived first, and none of them
+shares a lifecycle, an error envelope or a selection rule with another:
+
+| Port | Where | Selection | Lifecycle | "Not supported" |
+|---|---|---|---|---|
+| `NetworkProvider` (attach, publish, per-container firewall) | `crates/contexts/delonix-compute/src/ports.rs:128` | one implementation | apply, no plan | n/a |
+| `VmBackend::apply_firewall`/`read_firewall` | compute context (ADR-0052) | the VM's backend | apply + readback | default method refuses (DX-1501) |
+| `GatewayProvider` | `crates/adapters/delonix-sdn/src/gateway.rs:126` | **by name** (`gateway_provider_for`, `spec.provider` required) | `ensure_*` + `commit` | four default methods refuse, `commit` defaults to `Ok(())`; the builtin `native` refuses everything |
+| `NetworkZoneProvider` | `crates/adapters/delonix-sdn/src/network_zone.rs:66` | **by count** (`active_network_zone_provider`: 0 refused, 1 used, >1 refused) | `ensure_*` + `commit` | n/a |
+
+The catalog (ADR-0050, 1.0.0) has 20 `network`-kind entries (16 `net.*`, 4 `firewall.*`) and
+**no** entry for a perimeter gateway, NAT, a load balancer, a provider's DNS or a provider's
+IPAM beyond the engine's own (`net.ipam`, `net.dns`). `ProviderKind` has four words. OPNsense
+is registered from `DELONIX_OPNSENSE_*` only (`cmd/gatewayproviders.rs`), has **no report**,
+so `delonix provider ls` and the node contract's `ListProviders` do not show it, and
+`providers.yaml` (ADR-0054) does not know its type. The published matrix
+(`docs/providers/capability-matrix.md`) gives `linux` 7 of 20 network entries supported and
+`proxmox` 0 of 20 — the Proxmox SDN client has live-tested IPAM, DNS, fabric and lock routes
+(ADR-0049 slice 2, PR #542) that no port reaches, so the report is right to say
+`not-implemented`.
+
+`kind: NetworkZone` resolves its provider by count (ADR-0049 addendum, 2026-09-25): it works
+because this build registers one, and it becomes a refusal the day a second segment provider is
+linked — the one situation a by-name rule exists for. Its record does not even keep which
+provider served it (`NetworkZoneRecord`, `bins/delonix-runtime-bin/src/cmd/network_zone.rs:71`),
+although the port's doc comment says it does.
+
+There are **three** representations of a firewall rule: `delonix_model::records::FwRule`
+(stringly typed, persisted, containers), `delonix_compute::vm_firewall::{Policy, Rule}` (typed,
+refuses an unknown protocol, VMs) and `delonix_sdn::gateway::GatewayRule` (stringly typed,
+OPNsense). Nothing checks that the same intent means the same thing on each, and audit 62 found
+the nft one fail-open in five ways (P0-1…P0-5), which session S1 corrects.
+
+### What the brief asks, translated to this repository
+
+The canonical prompt (§10–§12, §18, §25, §35) describes a NaaS with tenants, network classes,
+quotas, provider scoring and persisted bindings. `AGENTS.md` forbids the engine to know any of
+that (guardrail 2). Audit 62 §0 already translated it; this ADR keeps to the engine's half:
+
+| Brief | This engine | Not this engine |
+|---|---|---|
+| role contracts, capability document, `unsupported_capability` | D1, D2 | — |
+| validate / plan (digest) / apply / observe / verify | D4 | cancel of a long-running operation, import/adopt (later) |
+| stable error envelope | D5 | tenant-facing redaction policy |
+| policy IR and compiler | D6 | tenant/admin ownership, expiry, NetworkClass guardrails |
+| selection | **a named target** or the node's configured default (D3) | scoring, candidates, `ProviderBinding` persistence, migration between providers (§10.1–10.5) |
+
+### Guardrails this decision touches
+
+1. **Daemonless** — the lifecycle runs inside the invoking process; `observe` is on demand;
+   nothing watches.
+2. **No consumer** — no tenant, class, quota or binding; a provider is chosen by a name the
+   node's operator configured or the caller passed.
+4. **Engine crates dependency-clean** — the new context crate takes `serde`/`serde_json`
+   (already in every context crate) and `sha2` for the plan digest. `sha2` is already in the
+   lockfile (`delonix-oci`, `delonix-mcp`, the `-bin`), so no new package enters the tree,
+   but it enters a context crate for the first time — this ADR is the record of that.
+6. **No silent failure** — the whole point of D1 (no no-op defaults), D3 (no fall-through
+   default), D4 (`stale_plan`, `partial_apply`, control-plane-only verification said out loud)
+   and D6 (a rule a lowering cannot represent is refused, never widened).
+
+## Decision
+
+### D1. One small port per role, born only with its first implementation, with no default bodies
+
+The engine's network roles are: **segment, port, ipam, route, gateway, firewall, nat, lb,
+dns**. A role gets a port when — and only when — a provider implements it:
+
+| Role | Port | First implementation | Phase |
+|---|---|---|---|
+| segment | `SegmentProvider` (replaces `NetworkZoneProvider`: zone + VNets) | Proxmox SDN | F2 |
+| gateway | `GatewayProvider` (moved; filter rules + aliases) | OPNsense | F2 |
+| nat | `NatProvider` | OPNsense `firewall/d_nat`, `source_nat`, `one_to_one`; Proxmox subnet `snat` | F5 |
+| ipam | `IpamProvider` | Proxmox SDN IPAM (`pve`/`netbox`/`phpipam` plugins) | F5 |
+| dns | `DnsProvider` | Proxmox SDN DNS (`powerdns`) | F5 |
+| lb | **none** — catalog rows only | none exists; OPNsense 26.1.2 ships no LB API (spike §4) | excluded |
+| port, firewall (per workload) | **unchanged**: `NetworkProvider::attach`/`apply_firewall`, `VmNetwork`, `VmBackend::apply_firewall` | native, libvirt, Proxmox | unified by D6's IR, not by a new port |
+| route, fabric, telemetry | none | no remote implementation reachable | excluded |
+
+Rules every role port keeps:
+
+1. **Every method is required.** No default body — neither a refusal nor an `Ok(())`. A
+   provider that cannot do a role does not implement its trait.
+2. **A provider serves a role by registering in that role's registry.** One registry per
+   role, keyed by the provider's registry id, with ADR-0008's four rules (no I/O at
+   registration, `auto_selectable` a fact of the registration, third-party opt-out, owned
+   names). One `providers.yaml` entry may register in several registries — as the Proxmox
+   target already registers a `VmBackend` and a `NetworkZoneProvider` from one configuration.
+   Asking a role of a provider that is not in that registry is **`unsupported_capability`**,
+   raised by the resolver and naming role and provider.
+3. **Inside a role, optional behaviour is a catalog entry, checked before the call.** The use
+   case compares the capabilities the intent needs with the provider's report (ADR-0050 D6's
+   comparison, extended to network Kinds) and refuses by name before any effect. An adapter
+   reached anyway returns the typed `UnsupportedCapability { capability }` — never success.
+4. **Every role port extends ADR-0044 D3's `Provider`** (`id`, `capabilities() ->
+   ProviderReport`, `health`) — the skeleton `delonix_compute::vm_provider::Provider` already
+   has; no second report type.
+5. **Identity is an ownership marker, not a name.** Every object a role port creates on a
+   remote provider carries an immutable marker the port reads back before it updates or
+   deletes; an object with the right name and no marker is `provider_conflict`, never adopted.
+   Session S6 (audit 62 §7) builds the markers — OPNsense `categories`, Proxmox SDN comments —
+   and this ADR makes them a precondition of F2's writes.
+
+The builtin `native` gateway provider is **removed**: it refused every alias and rule and its
+`commit` did nothing. The native masquerade and DNAT publish stay where they are
+(`delonix-sdn`), and the Linux network report answers the new `net.nat.*` rows for them.
+`kind: NetworkGateway` with `provider: native` becomes `unsupported_capability` (see D5 for
+the class change).
+
+### D2. The catalog grows to 1.1.0, and `ProviderKind` gains `gateway`
+
+This answers audit 62 §10 question 3: **the existing catalog**, not a second document. A
+second document would be a second denominator and would lose the property ADR-0050 D1 is
+built on — a provider cannot skip a row because the compiler walks the enum. Adding entries is
+a minor bump (ADR-0050 D1): **1.0.0 → 1.1.0**. New names keep the `net.` prefix so that
+`net.ipam` and `net.dns` keep their published meaning (the engine's own IPAM and resolver):
+
+| Group | Entries |
+|---|---|
+| gateway | `net.gateway.filter`, `net.gateway.alias`, `net.gateway.update-in-place`, `net.gateway.rule-order`, `net.gateway.multi-wan`, `net.gateway.vpn` |
+| nat | `net.nat.snat`, `net.nat.dnat`, `net.nat.one-to-one`, `net.nat.npt` |
+| lb | `net.lb.l4`, `net.lb.health-check` |
+| dns | `net.dns.records` (records in a provider's DNS), `net.dns.authoritative` |
+| ipam | `net.ipam.provider` (allocation in a provider's IPAM), `net.ipam.reservation` (fixed address per MAC), `net.ipam.dhcp` (a provider-served range) |
+| segment | `net.segment.remote` (a segment realized by a remote provider) |
+| lifecycle | `net.apply.staged` (stage, then activate), `net.apply.rollback` (discard staged changes before activation), `net.observe` (read the actual state back), `net.verify.dataplane` (a traffic probe, not a readback), `net.ownership-marker` |
+| firewall | `firewall.stateless`, `firewall.logging`, `firewall.icmp-type`, `firewall.workload-peer` (a peer named by namespace or selector, not a CIDR) |
+
+Every existing provider answers every new row in the same PR (the `match` has no wildcard
+arm); each `supported` cites evidence the existing gate greps for.
+
+**`ProviderKind::Gateway`** (serialized `gateway`) is a fifth word for a provider reached over
+the network that enforces policy at a boundary the workloads' traffic crosses, not on the node
+— OPNsense today. Its report walks the same `network`-kind entries, so `linux/network`,
+`proxmox/network` and `opnsense/gateway` compare row by row. It is additive on the wire:
+`ProviderInfo.kind` is a string (`proto/delonix/node/v1/common.proto:82`), and its comment
+gains the fifth value. The word collides with the `gateway.delonix.io` API group (L7 routes,
+ADR-0040 D2.2); it is kept because the port is already `GatewayProvider` and the Kind
+`NetworkGateway`, and the L7 group's Kinds are served by the engine's own proxy, which has no
+provider report.
+
+**The OPNsense report is declared, never probed**, like Proxmox's compute report (ADR-0050
+D3): building it contacts nothing; `provider describe opnsense --probe` reads
+`GET /api/core/firmware/status` and the installed plugin list. It is composed in both places
+the provider list is composed today (`cmd/provider.rs:117` and
+`delonix-node-api/src/providers.rs:18`), and the existing equality test keeps them together.
+Capabilities are discovered, not assumed from the name: the spike found the Proxmox lab node
+running `proxmox-firewall` with the host's `nftables` option unset, which makes the VNet
+firewall **stored but not enforced** (PR #542) — that row is `unavailable-on-host` there, from
+a probe, not `supported` because the provider is Proxmox.
+
+### D3. A provider is chosen by name — the caller's, the record's, or the node's
+
+`providers.yaml` (ADR-0054) gains two things:
+
+```yaml
+apiVersion: config.delonix.io/v1
+defaultProvider: libvirt            # compute, unchanged (ADR-0054 D3)
+networkDefaults:                    # NEW: which registry id answers a role when nothing names one
+  segment: proxmox
+  gateway: opnsense
+providers:
+  - type: proxmox
+    # … as ADR-0054 D1
+  - type: opnsense                  # NEW
+    url: https://fw.example
+    auth:
+      keyFile: /etc/delonix/opnsense.key          # 0600, like tokenSecretFile
+      secretFile: /etc/delonix/opnsense.secret    # or secretRef: <kind: Secret>
+    tls:
+      caFile: /etc/delonix/fw-ca.pem              # insecureSkipVerify only as opt-in
+```
+
+- The same rules as the Proxmox entry: no inline secret (refused by name at parse time), key
+  files owner-only, one entry per type while `name:` stays reserved (so "by name" is "by
+  registry id" until ADR-0054 lifts it). `DELONIX_OPNSENSE_URL` in the environment replaces
+  the whole entry (ADR-0054 D4). `defaultProvider: opnsense` is refused — it is compute's key.
+- **Resolution for a network Kind**, highest first: the provider the document names
+  (`NetworkGateway.spec.provider`, now optional; `NetworkZone` keeps no field — the owner's
+  transparency rule of the ADR-0049 addendum stands) → **the provider on the record** (an
+  existing resource never moves when a default changes) → `networkDefaults.<role>` → only when
+  **no** `providers.yaml` exists, the single registered provider of the role (today's count
+  rule, kept for a development node byte for byte) → otherwise refused. A default that names a
+  provider not registered for that role is an error, never a fall-through (ADR-0054 D3's rule).
+- **This supersedes the "resolution is by COUNT" paragraph of ADR-0049's 2026-09-25 addendum**
+  and the doc comment at `crates/adapters/delonix-sdn/src/network_zone.rs:20-31`.
+- **The record keeps the provider that served it** (`NetworkZoneRecord` gains `provider`), as
+  a VM record keeps `backend`. That is the engine's own record of its own resource.
+- **The engine persists no binding for anyone else.** Over the node contract a network request
+  carries an optional provider name; the answer carries the provider that served it, the
+  catalog version and the states of the capabilities the plan used. A caller that wants to pin
+  a resource to a provider stores that answer itself and sends the name back.
+
+### D4. Every network change is validate → plan (with digest) → apply(plan, digest) → observe → verify
+
+The use case lives in `delonix-networking` (D7). Its types — `Observed`, `NetPlan { steps,
+digest }`, `Step { id, role, op, target, reversible, compensation, pre, post }`, the step
+ledger — are plain data.
+
+1. **validate** — pure, no I/O: the document's syntax, then the capabilities it needs
+   (`required_capabilities(intent)`) against the resolved provider's report on this host.
+   Unknown capability name: `invalid_intent`; unmet: `unsupported_capability`, listing every
+   unmet row with its state and detail (ADR-0050 D6's message shape).
+2. **plan** — observes first, then `plan = f(intent, observed, report)`, deterministic. Steps
+   are ordered by dependency (segment before its VNets; aliases before the rules that name
+   them; rules removed before their aliases — the orders ADR-0051 phase 3 and the ADR-0049
+   addendum already measured). The **digest** is SHA-256 over the canonical JSON of: the
+   normalized intent, the observed fingerprint (the provider's own per-object digests where it
+   has them — Proxmox SDN returns one per IPAM/firewall object, spike §3 — otherwise the
+   normalized readback), the provider id, the catalog version, the states of the capabilities
+   the plan uses, and the plan-format version. A digest over the intent alone would never go
+   stale, so it is not one.
+3. **apply(plan, digest)** — re-observes and recomputes; a different digest is
+   **`stale_plan`** and nothing is written (the ADR-0042 `If-Match` rule, applied to a plan).
+   Where the provider has `net.apply.staged`, the steps run inside its transaction: the
+   Proxmox SDN global lock, which refuses while someone else's changes are pending (DX-5516)
+   and applies with the token or rolls back (PR #542, measured); OPNsense's stage-then-`apply`
+   (ADR-0051 phase 0), whose `savepoint`/`apply(rollback_revision)`/`cancelRollback` actions
+   exist in 26.1.2 (spike §4, not yet exercised). Each step is written to a ledger (through
+   `StateRepository`, ADR-0044 D6) **before** it runs and settled after — the shape of
+   ADR-0049 slice 1's task ledger — so a crashed apply is reconciled by the next plan, never
+   blindly resent. On failure: staged and not activated → the provider's rollback; activated →
+   the compensations of the reversible steps done, in reverse; an irreversible step reached →
+   **`partial_apply`** naming the steps done; a compensation that fails → **`rollback_failed`**
+   with the ledger.
+4. **observe** — read-only, on demand. `stack plan` shows a difference between the record and
+   the provider as drift (`drift_detected`, exit 2 under `--detailed-exitcode`). No loop, no
+   watcher.
+5. **verify** — each step's postcondition read back from **every node that realizes it** where
+   the provider reports per node (the spike and PR #542 measured that a Proxmox SDN apply's
+   verdict covers the entry node only: pve2's reload failed while the task said OK), plus a
+   traffic probe only when `net.verify.dataplane` is supported. Otherwise the result says
+   `verified: control-plane-only`. A green without the semantics is not a result.
+
+CLI (F4): `stack plan -o json` carries `planDigest` per network document; `stack apply
+--plan-digest <d>` refuses a stale plan. Without the flag, `stack apply` plans and applies in
+one invocation as it does today, with the ledger and verification added.
+
+### D5. One error envelope: a stable reason, a `DX-C3NN` code, and the context
+
+The envelope is ADR-0042's problem+json (`type`, `title`, `status`, `detail`, `instance`,
+`code`) plus `reason` (the stable slug below), and when they apply `capability`, `provider`,
+`role`, `step`, `planDigest`, and `cause` — the provider's message, redacted (the ADR-0049
+redaction test pattern: every rendered error is grepped for the secret). The CLI prints the
+same fields. The block **`NN` = 80–99 of the network domain** (`DX-C380`…`DX-C399`) is
+reserved for these reasons, so the parallel sessions S1–S4 cannot collide with them:
+
+| reason | class (ADR-0043) | exit | note |
+|---|---|---|---|
+| `invalid_intent` | 1 invalid argument | 1 | includes an unknown capability name |
+| `unsupported_capability` | 6 unavailable | 69 | the remedy is another provider, not the argument (ADR-0050 D6) |
+| `incompatible_provider` | 6 | 69 | the provider's version lacks what the catalog row needs |
+| `provider_unavailable` | 6 | 69 | |
+| `provider_rate_limited` | 6 | 69 | carries the retry hint when the provider gives one |
+| `provider_auth_failed` | 7 permission denied | 77 | OPNsense answers 401 **and** 302 for this (ADR-0051 phase 0) |
+| `policy_denied` | 7 | 77 | only the engine's own guardrails (D6) |
+| `address_conflict`, `address_exhausted` | 5 conflict | 5 | |
+| `provider_conflict` | 5 | 5 | pending changes of someone else; an object without our marker |
+| `stale_plan` | 5 | 5 | |
+| `drift_detected` | 2 changes pending | 2 | |
+| `operation_timeout` | 8 deadline | 124 | |
+| `partial_apply`, `verification_failed`, `rollback_failed`, `dependency_failed` | 9 system failure | 1 | the ledger is attached |
+
+`quota_exceeded` is not an engine reason (guardrail 2). **DX-1342
+`network.unsupported_by_gateway_provider` is replaced by `unsupported_capability`** — class 1
+→ 6, exit 1 → 69; the release notes say so in those words. DX-1345/1346 (no/ambiguous zone
+provider) stay configuration errors and are re-worded by role; DX-6507
+`vm.capability_not_supported` is unchanged.
+
+### D6. One typed policy IR, and a lowering per enforcement point that refuses what it cannot represent
+
+`PolicyIr` lives in `crates/foundation/delonix-net-rules` — hand-written, zero dependencies,
+as that crate is today — and moves with it into `delonix-networking`'s domain layer when
+ADR-0040 P2 absorbs it. `vm_firewall::{Policy, Rule}` is its seed (it already refuses an
+unknown protocol). One direction of one target:
+
+- `default`: allow | deny; `rules` in order, **first match wins — the order is the
+  priority**, there is no separate number to disagree with it;
+- per rule: `action` allow | deny; `family` IPv4 (IPv6 refused, audit 62 P3); `proto` tcp |
+  udp | icmp | any; `ports` (one or a range); `icmp_type`; `peer` = `Cidr` | `Any` |
+  `Namespace(name)` | `Selector(labels)` (ADR-0024); `stateful` (true; `false` needs
+  `firewall.stateless`); `log`; `origin` (ADR-0028's contribution ledger); `guardrail` (an
+  immutable, engine-owned rule).
+
+**Invariants it inherits from S1** (audit 62 §7; S1 must be merged before F3):
+
+1. a source's egress is evaluated whatever the destination's ingress says — an `accept` is
+   never terminal across the two (P0-1);
+2. `FwRule` → IR is a total parse: one rule the IR cannot hold refuses the **whole** set,
+   never skips the rule (P0-2);
+3. namespace isolation is a guardrail rule — its absence is an error, not a warning (P0-3,
+   P0-5), and removing every user rule keeps it (P0-4);
+4. guardrails come first and a later `allow` cannot reach past them (anti-spoof keeps its
+   explicit per-VM opt-out, ADR-0055).
+
+**Lowerings** — each declares the IR features it can represent with the same semantics and
+refuses the rest with `unsupported_capability` naming the row:
+
+| Enforcement point | What it cannot hold (measured or read) |
+|---|---|
+| nft in the holder (containers, `delonix-sdn`) | the reference lowering |
+| Proxmox per-VM firewall (ADR-0052) | `Namespace`/`Selector` peers (refused today, `fromWorkload`); the node inserts at position 0, so the lowering writes in reverse |
+| Proxmox VNet firewall | only `forward` rules; not enforced unless the host runs the nftables `proxmox-firewall` (PR #542; spike §3: unset on the lab) |
+| OPNsense filter | no engine namespace: a `Namespace`/`Selector` peer is **refused, not expanded into a CIDR snapshot** that goes stale; `stateful: false` maps to `statetype: none`, `log` to `log`, order to `sequence` + `moveRuleBefore` (spike §4) |
+
+**Golden equivalence tests**: one table of IR policies × a fixed set of packets × the expected
+verdict, run against every lowering's rendering (nft by `nft --check` plus an evaluator over
+the rendered set; the remote ones by their pure renderers, and live where a lab exists). A
+lowering that renders a different verdict for any cell fails.
+
+`FwRule` stays the persisted form (no record migration); `GatewayRule` and `vm_firewall::Rule`
+become lowering outputs.
+
+### D7. Where it lives: `delonix-networking`, and the direction of the dependency
+
+A new context crate, `crates/contexts/delonix-networking` — the name ADR-0040 D2.2 fixed
+(`networking.delonix.io`) — holds the role ports, the per-role registries, the lifecycle use
+case and the envelope. `GatewayProvider` and `NetworkZoneProvider` move there from
+`delonix-sdn` in F2. The condition ADR-0051 set for that move — "wherever `VmBackend`
+eventually moves, in the same commit shape" — is met: `VmBackend`'s port is in
+`delonix-compute` since #517. The two phase-tagged exceptions
+`("dep", "delonix-opnsense", "delonix-sdn")` and `("dep", "delonix-proxmox", "delonix-sdn")`
+in `scripts/arch_fitness.py` are **deleted**, not added to.
+
+`delonix-networking` depends on `delonix-compute` (the catalog and the `Provider` skeleton),
+**never the reverse**. `NetworkProvider` and `VmNetwork` therefore stay in `delonix-compute`:
+moving them into networking while the catalog is in compute would make the two contexts depend
+on each other. That move waits for the catalog to go down to the foundation — its own decision.
+
+### D8. What the engine does not do
+
+Scoring or ranking providers; candidates and "explain" of a choice; a `ProviderBinding` per
+anyone's resource; migration between providers; tenant, network class, quota, approval; a
+long-running reconciler or watcher; administration of the Proxmox cluster (ADR-0049 D3 — the
+cluster firewall and HA stay excluded); new routes on `delonix-mgmt` (frozen, ADR-0041 D4);
+any raw provider rule, XML, shell or endpoint arriving over the node contract (brief §25's
+"never accept" list holds).
+
+## Phases
+
+| Phase | Deliverable | Exit criterion | Depends on |
+|---|---|---|---|
+| **F0** | This ADR and its spike | owner accepts | — |
+| **F1** | catalog 1.1.0 (every provider answers every new row), `ProviderKind::Gateway`, the declared OPNsense report in `provider ls/describe/matrix` and in `ListProviders`; `providers.yaml` `type: opnsense` + `networkDefaults` parsed and shown by `provider config show/validate` | matrix regenerated and equal; evidence gate green; the E2E diff of the socket against `provider ls -o json` passes with `opnsense` in it; zero behaviour change for any Kind | ADR-0054 accepted |
+| **F2** | `delonix-networking`; `SegmentProvider`/`GatewayProvider` moved with no default bodies; per-role registries; D3 resolution (count only without a file); `NetworkZoneRecord.provider`; `native` removed; the D5 envelope and the DX-C380 block | the two `arch_fitness` exceptions gone; a battery check with two segment providers registered and `networkDefaults.segment` naming one; a check that a default naming an unregistered provider fails with exit 69 | F1; S6 markers for the remote writes |
+| **F3** | `PolicyIr`, the total parse from `FwRule`, lowerings nft / Proxmox VM / OPNsense, the golden table | golden table green on all three; S1's regression tests still green | **S1 merged** |
+| **F4** | plan + digest + ledger + observe + verify for `NetworkZone` and `NetworkGateway`; `planDigest` / `--plan-digest` | live: a stale plan refused against the lab (a VNet added out of band between plan and apply); an apply killed mid-way reconciled by the next plan; per-node verification on the two-node lab | F2 |
+| **F5** | `NatProvider`, `IpamProvider`, `DnsProvider`, one slice each, each with a live case | each row it touches cites its live test | F4 |
+| **F6** | node contract RPCs (validate/plan/apply/observe for network documents) | contract conformance suite | the ADR-0042 steps that bring mutations |
+
+## Excluded
+
+OpenStack Neutron (ADR-0039 stays Proposed; no environment); IPv6 (refused, audit 62 P3); a
+load-balancer port and any LB implementation; authoritative DNS as a product; fabric, route and
+telemetry ports; HA gateway; the Proxmox zone types beyond `simple` (evpn, qinq, vlan, vxlan,
+faucet are listed by the node, spike §3, and each needs its own slice); `cancel` of a
+long-running operation and `import/adopt` (the ownership marker comes first); everything in D8.
+
+## Alternatives considered
+
+- **One `NetworkProvider` with every role's methods.** Rejected: most providers would carry
+  default bodies — exactly the refusing and no-op defaults `GatewayProvider` has today, and the
+  shape ADR-0044 D3 already ruled out.
+- **A separate capability document per role** (audit 62 §10 question 3, second option).
+  Rejected: two denominators, and the compile-time walk of ADR-0050 D1 does not reach a second
+  document.
+- **Keep selection by count.** Rejected: it is correct only while one provider is linked, and
+  a second registration turns every `NetworkZone` into a refusal; the choice is invisible to
+  the operator either way.
+- **A `provider` field on `NetworkZone`.** Rejected: it contradicts the owner's transparency
+  rule; the node's file names it, the document does not.
+- **A digest over the intent alone.** Rejected: it never goes stale; the observed state has to
+  be inside it.
+- **Persist a binding and score candidates in the engine.** Rejected by guardrail 2.
+- **A reconciler that watches the providers.** Rejected by guardrail 1; observe on demand.
+- **Keep the ports in `delonix-sdn` with more exceptions.** Rejected: the condition ADR-0051
+  set for moving them is met, and each new role would add an exception instead of removing two.
+- **Do nothing.** Rejected: OPNsense stays invisible to `provider ls`, the second segment
+  provider breaks `NetworkZone`, and three rule types keep drifting.
+
+## Consequences
+
+- A caller can ask the node what each network provider can do, by role, with the reason for
+  every "no" — OPNsense included — before it sends anything.
+- `unsupported_capability` becomes one error with one class across VMs and networks.
+- A remote network change is refusable before it runs (validate), refusable when its world
+  changed (stale plan), recoverable when it dies mid-way (ledger), and honest about what was
+  checked (verify).
+- **Cost:** a new context crate, a catalog minor, a fifth `ProviderKind` word every consumer
+  of `ListProviders` has to accept, a new `providers.yaml` key, and the DX-1342 class change.
+- **Cost:** three lowerings to keep equivalent; the golden table is the price.
+- **Risk:** this ADR rests on two decisions still `Proposed` — ADR-0040 (the crate layout,
+  already enforced by `arch_fitness.py`) and ADR-0054 (`providers.yaml`, slices 2–4 built on
+  `main`). F1 does not start before ADR-0054 is accepted.
+
+## Proven vs not validated (the spike, `docs/discovery/63_…`)
+
+**Proven:** the Proxmox lab node (PVE 9.2.2, two-node cluster `lab`, read-only calls) lists
+the SDN sections, zone types (`evpn faucet qinq simple vlan vxlan`), IPAM plugins
+(`netbox phpipam pve`), DNS plugin (`powerdns`), DHCP backend (`dnsmasq`), the subnet `snat`
+flag, the global lock and rollback parameters, per-object digests, the datacenter firewall on,
+the host `nftables` option unset, and an **orphan IPAM entry** (`10.250.7.0/24`, zone `prfz`,
+VNet `prfv`) whose zone and VNet no longer exist — observed drift of the kind D4's `observe` and
+D1's marker are for. The OPNsense 26.1.2 image (offline, read-only) carries API controllers for
+filter, alias, category, D-NAT, source NAT, one-to-one, NPT, gateways and routes, Unbound, Kea
+and Dnsmasq, and none for a load balancer; `FilterBase` has `savepoint`, `apply` with a
+rollback revision, `cancelRollback` and `revert`; a filter rule has `sequence`, `log`,
+`statetype` (including `none`), `categories` and `ipprotocol`.
+
+**Not validated:** any write, lock or rollback by this spike (PR #542 measured the Proxmox
+lock; nothing measured OPNsense's rollback timer); OPNsense's API answering live (the appliance
+was not started and this session has no key); the drafted reports as code; the golden table;
+the digest's stability across engine versions; per-node verification beyond PR #542's
+observation.
