@@ -462,8 +462,8 @@ per-command fix needs no root:</p>
 <code>systemd-run --user --scope -p Delegate=yes</code> only receives what <code>user@.service</code> itself has
 (measured: still 1.2 GB/s under <code>--device-write-bps 5mb</code>). The remedy is root-only, once per host —
 a drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code> with <code>[Service]</code> and
-<code>Delegate=cpu cpuset io memory pids</code>, then <code>systemctl daemon-reload</code> and a restart of the user
-manager. <code>delonix system setup</code> prints it, and lists under <code>refused:</code> the flags <code>container run</code>
+<code>Delegate=cpu cpuset io memory pids</code>, then <code>systemctl daemon-reload</code> <strong>and</strong> <code>systemctl restart user@&lt;uid&gt;.service</code>
+(daemon-reload alone is not enough). <code>delonix system setup</code> prints it, and lists under <code>refused:</code> the flags <code>container run</code>
 will refuse on this host. <code>delonix system setup --delegate</code> writes that drop-in (needs root) when
 the <code>cpu</code> controller itself is missing.</p>
 <h3 id="a-stale-delonix-on-your-path">A stale <code>delonix</code> on your <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>

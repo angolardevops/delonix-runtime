@@ -207,8 +207,8 @@ Pour les workloads de longue durée, utilisez une unité systemd **utilisateur**
 `systemd-run --user --scope -p Delegate=yes` ne reçoit que ce que `user@.service` possède lui-même
 (mesuré : toujours 1,2 Go/s avec `--device-write-bps 5mb`). Le remède exige root, une fois par hôte —
 un drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf` avec `[Service]` et
-`Delegate=cpu cpuset io memory pids`, puis `systemctl daemon-reload` et un redémarrage du
-gestionnaire utilisateur. `delonix system setup` l’affiche, et liste sous `refused:` les options que
+`Delegate=cpu cpuset io memory pids`, puis `systemctl daemon-reload` **et** `systemctl restart user@<uid>.service`
+(daemon-reload seul ne suffit pas). `delonix system setup` l’affiche, et liste sous `refused:` les options que
 `container run` refusera sur cet hôte. `delonix system setup --delegate` écrit ce drop-in
 (nécessite root) lorsque le contrôleur `cpu` lui-même est absent.
 

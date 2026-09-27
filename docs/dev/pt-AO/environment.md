@@ -208,8 +208,8 @@ hosts delegam ao `user@.service` só `cpu memory pids`, e aí **nenhum scope res
 um `systemd-run --user --scope -p Delegate=yes` só recebe o que o próprio `user@.service` tem
 (medido: continua a 1,2 GB/s com `--device-write-bps 5mb`). O remédio é só de root, uma vez por
 host — um drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf` com `[Service]` e
-`Delegate=cpu cpuset io memory pids`, depois `systemctl daemon-reload` e reiniciar o gestor do
-utilizador. O `delonix system setup` imprime-o, e lista em `refused:` as flags que o `container run`
+`Delegate=cpu cpuset io memory pids`, depois `systemctl daemon-reload` **e** `systemctl restart user@<uid>.service`
+(o daemon-reload sozinho não chega). O `delonix system setup` imprime-o, e lista em `refused:` as flags que o `container run`
 vai recusar neste host. O `delonix system setup --delegate` escreve esse drop-in (precisa de root)
 quando falta o próprio controlador `cpu`.
 

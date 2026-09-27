@@ -464,8 +464,8 @@ pas root :</p>
 <code>systemd-run --user --scope -p Delegate=yes</code> ne reçoit que ce que <code>user@.service</code> possède lui-même
 (mesuré : toujours 1,2 Go/s avec <code>--device-write-bps 5mb</code>). Le remède exige root, une fois par hôte —
 un drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code> avec <code>[Service]</code> et
-<code>Delegate=cpu cpuset io memory pids</code>, puis <code>systemctl daemon-reload</code> et un redémarrage du
-gestionnaire utilisateur. <code>delonix system setup</code> l’affiche, et liste sous <code>refused:</code> les options que
+<code>Delegate=cpu cpuset io memory pids</code>, puis <code>systemctl daemon-reload</code> <strong>et</strong> <code>systemctl restart user@&lt;uid&gt;.service</code>
+(daemon-reload seul ne suffit pas). <code>delonix system setup</code> l’affiche, et liste sous <code>refused:</code> les options que
 <code>container run</code> refusera sur cet hôte. <code>delonix system setup --delegate</code> écrit ce drop-in
 (nécessite root) lorsque le contrôleur <code>cpu</code> lui-même est absent.</p>
 <h3 id="a-stale-delonix-on-your-path">Un <code>delonix</code> obsolète dans votre <code>PATH</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>

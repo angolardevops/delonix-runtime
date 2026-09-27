@@ -2294,8 +2294,9 @@ fn controller_limits_decision(
              the controller(s) `{controllers}` — the limit would not exist while this command reports \
              success. `systemd-run --user --scope -p Delegate=yes` does NOT fix this: a scope \
              only receives controllers user@.service itself has, and here it lacks them. Fix, once per host, as root: write `[Service]` and `{delegate}` to \
-             {dropin}, run `systemctl daemon-reload`, then restart the user manager (log out of \
-             all its sessions, or reboot) — a running user@.service keeps the old set. Or set \
+             {dropin}, run `systemctl daemon-reload`, then `systemctl restart user@<uid>.service` \
+             (it ends that user's sessions) or reboot — daemon-reload alone is not enough, and \
+             logging out does not restart a lingering user manager. Or set \
              DELONIX_ALLOW_UNENFORCED_LIMITS=1 to run without the limit.",
             &[
                 ("flags", &flags),

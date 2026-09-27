@@ -462,7 +462,7 @@ v4.2.0 起才有（v4.1.0 的发布里一个都没有）。
 <code>systemd-run --user --scope -p Delegate=yes</code> 只能拿到 <code>user@.service</code> 自己拥有的控制器
 （实测：<code>--device-write-bps 5mb</code> 下仍是 1.2 GB/s）。补救只能由 root 做、每台宿主机一次——
 写一个 drop-in <code>/etc/systemd/system/user@.service.d/50-delonix-delegate.conf</code>，内容为 <code>[Service]</code> 和
-<code>Delegate=cpu cpuset io memory pids</code>，然后 <code>systemctl daemon-reload</code> 并重启用户管理器。
+<code>Delegate=cpu cpuset io memory pids</code>，然后 <code>systemctl daemon-reload</code> <strong>并且</strong> <code>systemctl restart user@&lt;uid&gt;.service</code>（只做 daemon-reload 不够）。
 <code>delonix system setup</code> 会打印它，并在 <code>refused:</code> 下列出这台宿主机上 <code>container run</code> 会拒绝的 flag。
 当 <code>cpu</code> 控制器本身都缺失时，<code>delonix system setup --delegate</code> 会写这个 drop-in（需要 root）。</p>
 <h3 id="a-stale-delonix-on-your-path"><code>PATH</code> 上一个过期的 <code>delonix</code><a class="hanchor" href="#a-stale-delonix-on-your-path" aria-label="#">#</a></h3>

@@ -6766,8 +6766,11 @@ sonda por controlador (`leaf_controllers` no `delonix-linux`) porque o `cgroup_l
 num host que delega `cpu memory pids`. O `system setup` lista-os em `refused:` e deixou de dizer
 «nothing here needs them». O remédio que o erro indica é o drop-in `Delegate=cpu cpuset io memory
 pids` no `user@.service`: quem escreve o `subtree_control` do `user.slice` é o systemd (PID 1), não
-o utilizador, pelo que o «nunca podem aparecer» acima vale para o que se consegue SEM root. **Não
-medido aqui** — exige root e reiniciar o `user@1000`. Testes que chumbam se voltar o aviso:
+o utilizador, pelo que o «nunca podem aparecer» acima vale para o que se consegue SEM root. Medido
+a 2026-08-19 numa VM (role `cgroup_delegation`): com o drop-in E o restart do `user@`,
+`--device-write-bps 4mb` deu 4,0 MB/s contra 2,7 GB/s sem tecto; **só o `daemon-reload` é um falso
+verde** (o `user@` mostra `io` e um scope novo nasce sem ele), por isso o erro nomeia o
+`systemctl restart user@<uid>.service`. Não re-medido neste host (exige root). Testes que chumbam se voltar o aviso:
 `controller_limits_preflight_tests` em `cmd/container.rs`.
 
 ## O cgroup de um container desaparece com ele (medido 2026-08-09)

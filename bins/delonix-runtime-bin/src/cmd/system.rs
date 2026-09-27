@@ -2667,8 +2667,8 @@ fn cmd_setup(delegate: bool) -> Result<()> {
                  (root, once per host):"
             ),
             super::po::t(
-                "then `systemctl daemon-reload` and restart the user manager (log out of all its \
-                 sessions, or reboot) — a running user@.service keeps the old set"
+                "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends \
+                 that user's sessions) or reboot — daemon-reload alone is not enough"
             ),
         );
         return Ok(());
