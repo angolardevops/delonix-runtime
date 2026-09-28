@@ -19,6 +19,9 @@ thiserror = { workspace = true }
 [dev-dependencies]
 # Property-based testing dos invariantes de alocação de IP (S5).
 proptest = { workspace = true }
+# A per-test temp dir that is removed when the test ends, also on panic
+# (`scripts/tmp_roots_gate.py`).
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

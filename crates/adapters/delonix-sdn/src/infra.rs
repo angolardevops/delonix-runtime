@@ -11086,12 +11086,12 @@ mod tests_identidade_do_pidfile {
 mod tests_pidfile_read_identity {
     use super::*;
 
-    fn tmp_pidfile(tag: &str, body: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("dlx-pidfile-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let p = dir.join(tag);
+    /// A pidfile in a temp dir of its own, removed when the guard drops.
+    fn tmp_pidfile(body: &str) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("pidfile");
         std::fs::write(&p, body).unwrap();
-        p
+        (dir, p)
     }
 
     #[test]
@@ -11104,7 +11104,7 @@ mod tests_pidfile_read_identity {
     #[test]
     fn a_number_nothing_is_using_is_none() {
         // `i32::MAX` is above every kernel's `pid_max`, so it is never assigned.
-        let f = tmp_pidfile("dead", &i32::MAX.to_string());
+        let (_dir, f) = tmp_pidfile(&i32::MAX.to_string());
         assert_eq!(read_pid_verified(PidKind::Pin, &f), None);
     }
 
@@ -11121,7 +11121,7 @@ mod tests_pidfile_read_identity {
     fn a_live_pid_that_is_not_ours_is_none() {
         let mine = std::process::id() as i32;
         assert!(pid_alive(mine), "the test process must be alive");
-        let f = tmp_pidfile("recycled", &mine.to_string());
+        let (_dir, f) = tmp_pidfile(&mine.to_string());
         assert_eq!(read_pid_verified(PidKind::Pin, &f), None);
         assert_eq!(read_pid_verified(PidKind::Control, &f), None);
         assert_eq!(read_pid_verified(PidKind::Slirp, &f), None);
@@ -11131,7 +11131,7 @@ mod tests_pidfile_read_identity {
     #[test]
     fn a_pidfile_that_is_not_a_number_is_none() {
         for body in ["", "   ", "-1", "0", "not-a-pid", "1 2 3"] {
-            let f = tmp_pidfile("garbage", body);
+            let (_dir, f) = tmp_pidfile(body);
             assert_eq!(
                 read_pid_verified(PidKind::Pin, &f),
                 None,
