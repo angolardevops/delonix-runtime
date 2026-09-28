@@ -6111,6 +6111,16 @@ pub(crate) fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
     let mut v: Vec<NetDef> = Vec::new();
     if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
+            // RECORDS only — `<name>-<hash>.json` and the legacy `<name>.json` —,
+            // skipped by NAME, not by failing to parse. `write_atomic` writes a
+            // `.<record>.json.<pid>.<n>.tmp` next to the record and renames it;
+            // between `sync_all` and `rename` that temp holds the WHOLE JSON.
+            // Read as a record, it was a network seen before it was published
+            // and, if the process dies in that window, a ghost forever:
+            // `network_get` cannot find it, yet the allocator counts its `/16`.
+            if e.path().extension().is_none_or(|x| x != "json") {
+                continue;
+            }
             if let Ok(def) =
                 serde_json::from_slice::<NetDef>(&std::fs::read(e.path()).unwrap_or_default())
             {
@@ -11685,6 +11695,28 @@ mod tests_netdef_lock {
         assert_eq!(got.egress.hosts.len(), n, "egress writes lost");
         assert!(got.gateway.is_some(), "the gateway write was lost");
         assert_eq!(got.prefix, prefix);
+    }
+
+    /// `write_atomic`'s temp is not a network, EVEN when it parses. This is the
+    /// window between `sync_all` and `rename`, frozen — which is also what stays
+    /// on disk if the process dies in it. Before, `network_list` skipped the
+    /// temp only when it caught it mid-write (a failed parse, by accident);
+    /// whole, it returned it, and the allocator counted its `/16`.
+    #[test]
+    fn network_list_skips_the_atomic_writers_temp_even_when_it_parses() {
+        let root = std::env::temp_dir().join(format!("dlx-netlist-tmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("ingress").join("networks");
+        std::fs::create_dir_all(&dir).unwrap();
+        let published = serde_json::to_vec(&NetDef::new("published", "10.201")).unwrap();
+        std::fs::write(dir.join("published-00000000.json"), published).unwrap();
+        // The name `write_atomic` gives it: `.<record>.<pid>.<seq>.tmp`.
+        let in_flight = serde_json::to_vec(&NetDef::new("in-flight", "10.202")).unwrap();
+        std::fs::write(dir.join(".in-flight-00000000.json.4242.7.tmp"), in_flight).unwrap();
+
+        let names: Vec<String> = network_list_in(&root).into_iter().map(|d| d.name).collect();
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(names, ["published"], "a temp file was read as a network");
     }
 }
 

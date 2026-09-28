@@ -12277,6 +12277,15 @@ msgstr "Esta build só fala uma versão maior da API REST do TrueNAS; a superfí
 msgid "Point the manifest at a TrueNAS SCALE appliance on the supported major, or update this engine."
 msgstr "Aponta o manifesto a uma appliance TrueNAS SCALE na versão maior suportada, ou actualiza este motor."
 
+msgid "container still exiting after SIGKILL"
+msgstr "container ainda a sair depois do SIGKILL"
+
+msgid "`rm -f` killed the container, but its process had not finished exiting when the deadline passed — usually stuck in the kernel flushing the container's filesystem to a busy disk. The container is still listed, so no live process goes untracked."
+msgstr "O `rm -f` matou o container, mas o seu processo ainda não tinha acabado de sair quando o prazo passou — normalmente preso no kernel a despejar o sistema de ficheiros do container para um disco ocupado. O container continua listado, para nenhum processo vivo ficar sem registo."
+
+msgid "Run the same `rm -f` again once the host's disk settles; it removes the container as soon as its process is gone."
+msgstr "Corre o mesmo `rm -f` outra vez quando o disco do host acalmar; remove o container assim que o seu processo tiver saído."
+
 msgid "TrueNAS job timed out"
 msgstr "job do TrueNAS esgotou o tempo"
 
