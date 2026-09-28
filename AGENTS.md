@@ -6360,10 +6360,25 @@ segredo do token em qualquer `{:?}`.
   reload de cada nó em segundo plano e não o acompanha (`PVE/API2/Network/SDN.pm`, com um
   `FIXME` do upstream a dizê-lo). Logo o terceiro veredicto **não chega** a um apply de SDN: o
   `OK` dele quer dizer «pedidos enviados», e foi assim que os applies do #493 e do #497 foram
-  aceites e nunca realizados. **Por fechar** (Fatia 0b do plano 63): o `apply_sdn` tem de
-  encontrar o `srvreload networking` de cada nó (tipo, id e hora de início a partir da mãe) e
-  esperar por cada um, com os três veredictos. Não se fez aqui porque o #542 está aberto a
-  mexer no apply de SDN.
+  aceites e nunca realizados.
+- **Fechado na Fatia 0b do plano 63 (2026-09-27): um apply de SDN espera pelo reload de cada
+  nó.** Antes do `PUT /cluster/sdn`, o `apply_sdn_with` guarda por nó online os UPIDs
+  `srvreload networking` que já existem (`GET /nodes/{node}/tasks?typefilter=srvreload&source=all`);
+  depois da mãe, a filha de cada nó é o primeiro UPID que não estava nessa lista, e é esperada
+  com os três veredictos. **Não se identifica a filha pela hora**, e a medição é que o decidiu:
+  nas 13 mães do histórico, as filhas chegam 0 a 37 s depois dela, as do apply anterior 1 a 5 s
+  ANTES, e em applies seguidos as janelas sobrepõem-se; as filhas correm como `root@pam` mesmo
+  quando a mãe é de um token, logo o utilizador também não serve. Um nó sem filha até ao
+  `task_timeout` é erro com o nome do nó; uma filha falhada faz o apply falhar com DX-6512 mesmo
+  com a mãe em `OK`; os avisos sobem para `tracing::warn!` com `node=` e o texto. Vale também
+  para o apply com o lock do SDN (`apply_sdn_locked`). Três cenários de injecção (filha com
+  aviso e só a fresca seguida; filha falhada; nó sem filha), o do meio chumba com a espera
+  revertida. **Ao vivo**, com `source /etc/network/interfaces.d/*` retirado do `pve2`, o caso
+  `sdn_apply_waits_for_every_nodes_network_reload` passou e escreveu `node=pve2 … warning=missing
+  'source /etc/network/interfaces.d/sdn' directive for SDN support!`; reposto o ficheiro, a
+  corrida seguinte não escreveu aviso nenhum. O `live.rs` passou a aceitar um API token
+  (`DELONIX_PROXMOX_TEST_TOKEN_FILE`) e a mostrar o `tracing` com `DELONIX_LOG`. **Não medido**:
+  uma filha a FALHAR de verdade no nó (o `ifreload` a sair com erro) — só por injecção.
 
 **Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
 — a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; um fabric

@@ -12,6 +12,11 @@
 //!   cargo test -p delonix-proxmox --test live -- --nocapture --test-threads=1
 //! ```
 //!
+//! An API token can stand in for the account: `DELONIX_PROXMOX_TEST_TOKEN_FILE`
+//! names a file holding `<user>@<realm>!<tokenid>=<secret>` on one line, and
+//! then `DELONIX_PROXMOX_TEST_USER`/`_PASS` are not read. The secret stays in
+//! the file, out of the environment and the shell history.
+//!
 //! It creates one VM, walks it through snapshot, rollback, stop, resume and
 //! destroy, and leaves the node's VM list as it found it. The trace file is the
 //! numerator of the coverage matrix: `scripts/proxmox_api_inventory.py --trace`
@@ -36,20 +41,47 @@ fn backend(t: &Target) -> Result<ProxmoxBackend, delonix_proxmox::Error> {
     Ok(ProxmoxBackend::sharing(std::sync::Arc::new(client)))
 }
 
+/// The client's own `tracing` on stderr when `DELONIX_LOG` is set (for
+/// example `DELONIX_LOG=warn`): a task's warnings are logged there, not
+/// returned, so this is how a live run shows them.
+fn init_log() {
+    if let Ok(filter) = tracing_subscriber::EnvFilter::try_from_env("DELONIX_LOG") {
+        let _ = tracing_subscriber::fmt()
+            .with_env_filter(filter)
+            .with_test_writer()
+            .try_init();
+    }
+}
+
 fn target() -> Option<Target> {
+    init_log();
     Some(Target {
         base_url: std::env::var("DELONIX_PROXMOX_TEST_URL").ok()?,
         node: std::env::var("DELONIX_PROXMOX_TEST_NODE").unwrap_or_else(|_| "pve".into()),
-        auth: Auth::Password {
-            username: std::env::var("DELONIX_PROXMOX_TEST_USER").ok()?,
-            password: std::env::var("DELONIX_PROXMOX_TEST_PASS").ok()?,
-        },
+        auth: auth_from_env()?,
         insecure_tls: true,
         bridge: None,
         vlan: None,
         ca_cert_pem: None,
         import_storage: None,
         disk_storage: None,
+    })
+}
+
+/// A token from `DELONIX_PROXMOX_TEST_TOKEN_FILE` when it is set, the account
+/// from `DELONIX_PROXMOX_TEST_USER`/`_PASS` otherwise.
+fn auth_from_env() -> Option<Auth> {
+    if let Some(path) = std::env::var_os("DELONIX_PROXMOX_TEST_TOKEN_FILE") {
+        let text = std::fs::read_to_string(path).ok()?;
+        let (id, secret) = text.trim().split_once('=')?;
+        return Some(Auth::ApiToken {
+            id: id.to_string(),
+            secret: secret.to_string(),
+        });
+    }
+    Some(Auth::Password {
+        username: std::env::var("DELONIX_PROXMOX_TEST_USER").ok()?,
+        password: std::env::var("DELONIX_PROXMOX_TEST_PASS").ok()?,
     })
 }
 
@@ -1246,6 +1278,27 @@ fn the_vms_own_firewall_rule_round_trips_through_the_node() {
         client.config(vmid).is_err(),
         "the VM is still defined on the node after destroy — an orphan"
     );
+}
+
+/// An SDN apply with nothing staged still reloads every node's network, and
+/// the apply must wait for each of those reloads, not only for its own task:
+/// `reloadnetworkall` starts them in the background and does not follow them
+/// (plan 63, slice 0b). With `DELONIX_LOG=warn` the warnings of each node's
+/// reload are printed with the node's name — measured on 2026-09-27 with
+/// `source /etc/network/interfaces.d/*` removed from the second node, whose
+/// reload then warned `missing 'source /etc/network/interfaces.d/sdn'
+/// directive`, while the apply's own task said `OK`.
+#[test]
+fn sdn_apply_waits_for_every_nodes_network_reload() {
+    let Some(t) = target() else {
+        return;
+    };
+    let b = backend(&t).expect("connect");
+    let dir = tempfile::tempdir().expect("tempdir");
+    let ledger = delonix_proxmox::Ledger::at(dir.path());
+    b.client()
+        .apply_sdn(&ledger)
+        .expect("an apply with nothing staged, every node's reload followed");
 }
 
 /// Stages a Proxmox SDN zone and a vnet inside it, applies the PENDING

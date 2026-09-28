@@ -35,3 +35,6 @@ workspace = true
 rustls = { workspace = true, features = ["ring", "std", "tls12"] }
 rcgen = { workspace = true, features = ["ring", "pem"] }
 tempfile = { workspace = true }
+# The live tests show the client's own `tracing` (a task's warnings) when
+# `DELONIX_LOG` is set.
+tracing-subscriber = { workspace = true }
