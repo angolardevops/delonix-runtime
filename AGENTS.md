@@ -6515,6 +6515,14 @@ segredo do token em qualquer `{:?}`.
   corrida seguinte não escreveu aviso nenhum. O `live.rs` passou a aceitar um API token
   (`DELONIX_PROXMOX_TEST_TOKEN_FILE`) e a mostrar o `tracing` com `DELONIX_LOG`. **Não medido**:
   uma filha a FALHAR de verdade no nó (o `ifreload` a sair com erro) — só por injecção.
+  **Re-medido a 2026-09-28** (lab de dois nós, token de laboratório por ficheiro): o trace de
+  rotas mostra a lista de tarefas de cada nó lida antes do `PUT`, e depois o `srvreload`
+  NOVO do `pve2` encontrado e esperado até ao fim, não só o do nó de entrada. E apareceu um
+  aviso que ninguém provocou: no `pve` o reload acaba com `reloading frr configuration
+  failed` (`frr-reload.py` a sair 1) com a mãe em `OK` — antes disto perdia-se. O caso
+  `sdn_routing_chain_vnet_firewall_and_the_lock…` passa o apply com o lock e chumba depois,
+  na firewall de vnet, com 403 `user != root@pam`: essa rota recusa QUALQUER token, mesmo sem
+  privsep, e só corre com a password da conta.
 
 **Não validado nesta fatia**: o cluster `ngola-lda` de três nós (alvo da fatia 3) não foi tocado
 — a corrida foi contra uma VM libvirt arrancada da appliance `proxmox-ve_9.2` deste repo; um fabric
