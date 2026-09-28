@@ -8927,11 +8927,10 @@ mod tests {
     #[test]
     fn without_the_network_lock_nothing_changes_the_infra() {
         let mut env = crate::testenv::lock();
-        let root = std::env::temp_dir().join(format!("dlx-netlock-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).expect("temp root");
+        let tmp = tempfile::tempdir().expect("temp root");
+        let root = tmp.path();
         std::fs::write(root.join("ingress"), b"not a directory").expect("blocker file");
-        env.set("DELONIX_ROOT", &root);
+        env.set("DELONIX_ROOT", root);
 
         let e = teardown().expect_err("teardown must refuse without the lock");
         assert!(e.to_string().contains("network lock"), "{e}");
@@ -8949,8 +8948,6 @@ mod tests {
             root.join("ingress").is_file(),
             "the blocker must be untouched"
         );
-
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// **Um `accept` NÃO é terminal entre base chains**, e esquecê-lo partiu o
@@ -9088,15 +9085,9 @@ mod tests {
         use std::io::Write;
         use std::os::unix::net::{UnixListener, UnixStream};
 
-        let sock = std::env::temp_dir().join(format!(
-            "dlx-ctl-timeout-{}-{}.sock",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_file(&sock);
+        // Under CI's TMPDIR this is about 52 bytes, well inside `sun_path`.
+        let tmp = tempfile::tempdir().unwrap();
+        let sock = tmp.path().join("ctl.sock");
         let listener = UnixListener::bind(&sock).unwrap();
 
         // A peer that connects and sends NOTHING — held open for the whole test,
@@ -9137,7 +9128,6 @@ mod tests {
         );
 
         drop(silent);
-        let _ = std::fs::remove_file(&sock);
     }
 
     /// A newline-less flood is refused at the cap instead of growing without end.
@@ -9263,22 +9253,12 @@ Inter-|   Receive                                                |  Transmit
 
     use super::*;
 
-    /// Unique temporary dir (without depending on the `tempfile` crate) — the test runs
+    /// Unique temporary dir, removed when the guard drops — the test runs
     /// WITHOUT privilege: it only touches marker files, never namespaces.
-    fn tmp_refs_dir(tag: &str) -> PathBuf {
-        // SAFETY: getpid()/gettid() have no preconditions.
-        let uniq = format!(
-            "delonix-refs-{tag}-{}-{}",
-            // SAFETY: `getpid` takes no arguments and has no preconditions.
-            unsafe { libc::getpid() },
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        );
-        let dir = std::env::temp_dir().join(uniq).join("refs");
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
-        dir
+    fn tmp_refs_dir() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("refs");
+        (tmp, dir)
     }
 
     /// STRESS test of the ref-count (set model): create→destroy of N resources at
@@ -9289,7 +9269,7 @@ Inter-|   Receive                                                |  Transmit
     fn stress_refcount_volta_a_zero_e_reaper_apanha_orfaos() {
         use std::collections::HashSet;
         const N: usize = 500;
-        let dir = tmp_refs_dir("stress");
+        let (_tmp, dir) = tmp_refs_dir();
 
         // 1) Balanced cycle: each id attaches and detaches — refcount returns to 0.
         for i in 0..N {
@@ -9339,8 +9319,6 @@ Inter-|   Receive                                                |  Transmit
             refs_in(&dir).iter().any(|s| s == long),
             "id sobrevive round-trip"
         );
-
-        let _ = std::fs::remove_dir_all(dir.parent().unwrap());
     }
 
     #[test]
@@ -9512,15 +9490,13 @@ Inter-|   Receive                                                |  Transmit
 
     #[test]
     fn a_legacy_record_is_only_removed_when_it_is_the_same_record() {
-        let dir = std::env::temp_dir().join(format!("dlx-legacy-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("x.json");
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("x.json");
         std::fs::write(&f, br#"{"who":"other"}"#).unwrap();
         remove_legacy_if(&f, |b| b == br#"{"who":"me"}"#);
         assert!(f.exists(), "another tenant's record must survive");
         remove_legacy_if(&f, |b| b == br#"{"who":"other"}"#);
         assert!(!f.exists());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -11597,22 +11573,18 @@ mod tests_decisao_de_matar {
 mod tests_restore_lease {
     use super::restore_lease;
 
-    fn with_root<T>(tag: &str, f: impl FnOnce() -> T) -> T {
+    fn with_root<T>(f: impl FnOnce() -> T) -> T {
         let mut env = crate::testenv::lock();
-        let dir =
-            std::env::temp_dir().join(format!("dlx-restore-lease-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        env.set("DELONIX_ROOT", &dir);
-        let out = f();
-        let _ = std::fs::remove_dir_all(&dir);
-        out
+        let dir = tempfile::tempdir().unwrap();
+        env.set("DELONIX_ROOT", dir.path());
+        f()
     }
 
     /// A lease the failed attach CREATED is freed — the leak the reaper was
     /// otherwise left to clean up.
     #[test]
     fn a_lease_created_by_a_failed_attach_is_freed() {
-        with_root("new", || {
+        with_root(|| {
             let previous = crate::ipam::lookup("10.88", "failed01");
             crate::ipam::allocate("10.88", "failed01").unwrap();
             restore_lease("10.88", "failed01", previous);
@@ -11624,7 +11596,7 @@ mod tests_restore_lease {
     /// the same address — freeing it would move the container's IP.
     #[test]
     fn a_preexisting_lease_survives_a_failed_reattach() {
-        with_root("keep", || {
+        with_root(|| {
             let ip = crate::ipam::allocate("10.88", "stable01").unwrap();
             let previous = crate::ipam::lookup("10.88", "stable01");
             crate::ipam::allocate("10.88", "stable01").unwrap();
@@ -11640,7 +11612,7 @@ mod tests_restore_lease {
     /// the one the failed call just reserved.
     #[test]
     fn a_failed_fixed_ip_reattach_restores_the_old_address() {
-        with_root("pin", || {
+        with_root(|| {
             crate::ipam::reserve("10.88", "pinned01", "10.88.1.1").unwrap();
             let previous = crate::ipam::lookup("10.88", "pinned01");
             crate::ipam::reserve("10.88", "pinned01", "10.88.2.2").unwrap();
@@ -11666,10 +11638,10 @@ mod tests_netdef_lock {
     #[test]
     fn concurrent_netdef_writers_lose_no_write() {
         let mut env = crate::testenv::lock();
-        let d = std::env::temp_dir().join(format!("dlx-netdef-lock-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         std::fs::create_dir_all(d.join("run")).unwrap();
-        env.set("DELONIX_ROOT", &d);
+        env.set("DELONIX_ROOT", d);
         env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
         let def = network_create("s2lock").unwrap();
         let (bridge, prefix) = (def.bridge.clone(), def.prefix.clone());
@@ -11691,7 +11663,6 @@ mod tests_netdef_lock {
         a.join().unwrap();
         b.join().unwrap();
         let got = network_get("s2lock").unwrap();
-        let _ = std::fs::remove_dir_all(&d);
         assert_eq!(got.egress.hosts.len(), n, "egress writes lost");
         assert!(got.gateway.is_some(), "the gateway write was lost");
         assert_eq!(got.prefix, prefix);
@@ -11704,8 +11675,8 @@ mod tests_netdef_lock {
     /// whole, it returned it, and the allocator counted its `/16`.
     #[test]
     fn network_list_skips_the_atomic_writers_temp_even_when_it_parses() {
-        let root = std::env::temp_dir().join(format!("dlx-netlist-tmp-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let dir = root.join("ingress").join("networks");
         std::fs::create_dir_all(&dir).unwrap();
         let published = serde_json::to_vec(&NetDef::new("published", "10.201")).unwrap();
@@ -11714,8 +11685,7 @@ mod tests_netdef_lock {
         let in_flight = serde_json::to_vec(&NetDef::new("in-flight", "10.202")).unwrap();
         std::fs::write(dir.join(".in-flight-00000000.json.4242.7.tmp"), in_flight).unwrap();
 
-        let names: Vec<String> = network_list_in(&root).into_iter().map(|d| d.name).collect();
-        let _ = std::fs::remove_dir_all(&root);
+        let names: Vec<String> = network_list_in(root).into_iter().map(|d| d.name).collect();
         assert_eq!(names, ["published"], "a temp file was read as a network");
     }
 }

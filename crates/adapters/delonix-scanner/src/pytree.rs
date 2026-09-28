@@ -344,7 +344,8 @@ mod tests {
 
     #[test]
     fn scans_a_module_tree_end_to_end() {
-        let dir = std::env::temp_dir().join(format!("dlx-pytree-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let m = dir.join("meu_modulo");
         std::fs::create_dir_all(m.join("models")).unwrap();
         std::fs::write(m.join("__manifest__.py"), MANIFEST).unwrap();
@@ -355,7 +356,7 @@ mod tests {
             "import pickle\npickle.loads(data)\n",
         )
         .unwrap();
-        let reports = scan_modules_root(&dir).unwrap();
+        let reports = scan_modules_root(dir).unwrap();
         assert_eq!(reports.len(), 1);
         let r = &reports[0];
         assert_eq!(r.module, "meu_modulo");
@@ -365,14 +366,11 @@ mod tests {
                                 // a root that IS the module also works
         let direct = scan_modules_root(&m).unwrap();
         assert_eq!(direct.len(), 1);
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn rejects_non_module_dirs() {
-        let dir = std::env::temp_dir().join(format!("dlx-pytree-vazio-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(scan_modules_root(&dir).is_err());
-        std::fs::remove_dir_all(&dir).ok();
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(scan_modules_root(tmp.path()).is_err());
     }
 }

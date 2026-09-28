@@ -710,36 +710,28 @@ mod tests {
     /// só-leitura que ele instala vazava para um `allocate` concorrente, que
     /// falhava com ENOENT. Flaky, e por isso passou despercebido na corrida em
     /// que foi introduzido.
-    fn with_root<T>(tag: &str, f: impl FnOnce() -> T) -> T {
+    fn with_root<T>(f: impl FnOnce() -> T) -> T {
         // The lock is now crate-wide (`crate::testenv`): `infra`'s tests write
         // the same variable, and a mutex private to this module serialized
         // nothing against them — see the note on `testenv`.
         let mut env = crate::testenv::lock();
-        // The PID in the path, not just the tag. `ENV_LOCK` above serializes
-        // within the PROCESS; nothing serializes across processes, and this
-        // workspace runs several sessions at once (one worktree per task). With
-        // a fixed path, two `cargo test -p delonix-sdn` runs delete each other's
-        // directory in the entry and exit `remove_dir_all`, and whichever is
-        // midway through this test's 2000 allocations dies writing.
-        //
-        // Measured 2026-08-28: the suite failed the pre-push gate, passed when
-        // run alone, and `pgrep` caught ANOTHER session running this very test
-        // at that moment, chasing the same failure. The neighbour
-        // `dlx-ipam-nolock-{pid}`, 114 lines below, already did this — the fix
-        // was written in the same file.
-        let dir = std::env::temp_dir().join(format!("dlx-ipam-test-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        env.set("DELONIX_ROOT", &dir);
-        let out = f();
+        // A fresh directory per call, never a fixed path. The lock above
+        // serializes within the PROCESS; nothing serializes across processes,
+        // and this workspace runs several sessions at once (one worktree per
+        // task). With a fixed path, two `cargo test -p delonix-sdn` runs delete
+        // each other's directory, and whichever is midway through this test's
+        // 2000 allocations dies writing — measured 2026-08-28, when `pgrep`
+        // caught ANOTHER session running this very test at that moment.
+        let dir = tempfile::tempdir().unwrap();
+        env.set("DELONIX_ROOT", dir.path());
         // No explicit unset: the guard restores what it found when it drops,
         // including «was not set».
-        let _ = std::fs::remove_dir_all(&dir);
-        out
+        f()
     }
 
     #[test]
     fn ids_que_colidiam_no_hash_recebem_ips_distintos() {
-        with_root("collide", || {
+        with_root(|| {
             // "deadbeef1234" and "deadbeef9999" derive the SAME preferred IP (they share
             // the first 8 hex) — this was exactly the old allocator's collision.
             let a = allocate("10.88", "deadbeef1234").unwrap();
@@ -755,7 +747,7 @@ mod tests {
 
     #[test]
     fn allocate_e_idempotente_e_lookup_ve_o_lease() {
-        with_root("idem", || {
+        with_root(|| {
             let a1 = allocate("10.88", "cafe1234").unwrap();
             let a2 = allocate("10.88", "cafe1234").unwrap();
             assert_eq!(a1, a2, "o mesmo id devolve sempre o mesmo IP");
@@ -767,7 +759,7 @@ mod tests {
 
     #[test]
     fn release_liberta_o_ip_para_reuso() {
-        with_root("release", || {
+        with_root(|| {
             let ip = allocate("10.88", "deadbeef1234").unwrap();
             // a second colliding id got a probed IP (!= ip).
             let other = allocate("10.88", "deadbeef9999").unwrap();
@@ -785,7 +777,7 @@ mod tests {
     /// it would report an empty registry on a node that has leases.
     #[test]
     fn all_leases_sees_every_prefix_and_skips_the_lock() {
-        with_root("alllease", || {
+        with_root(|| {
             allocate("10.88", "aaaa0001").unwrap();
             allocate("10.88", "bbbb0002").unwrap();
             allocate("10.99", "cccc0003").unwrap();
@@ -816,7 +808,7 @@ mod tests {
         // registry + probing eliminates collision at scale. (The per-prefix file is
         // rewritten in full on each allocate — O(n) I/O per attach; 2000 is enough
         // for the guarantee without making the test O(n²) slow.)
-        with_root("stress", || {
+        with_root(|| {
             let mut seen = std::collections::HashSet::new();
             for i in 0..2000u32 {
                 let id = format!("{:08x}dead", i.wrapping_mul(2_654_435_761)); // spreads
@@ -834,7 +826,7 @@ mod tests {
         // in the respective prefix file. Disconnecting the extra network
         // (`detach_extra_container`, which now receives the ip) must free ONLY the
         // extra's lease, without touching the primary's. Regression of the v1 leak.
-        with_root("multihoming", || {
+        with_root(|| {
             let id = "cafebabe0001";
             let primary = allocate("10.88", id).unwrap(); // primary network
             let extra = allocate("10.204", id).unwrap(); // additional network
@@ -869,17 +861,16 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let mut env = crate::testenv::lock();
 
-        let dir = std::env::temp_dir().join(format!("dlx-ipam-nolock-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         // Read-only root: `ipam/` cannot be created, so the lock file cannot be
         // opened — the same shape as a full disk or a lost mount.
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
-        env.set("DELONIX_ROOT", &dir);
+        env.set("DELONIX_ROOT", dir);
         let got = allocate("10.88", "cafe0001");
 
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
 
         match got {
             Err(e) => {
@@ -901,7 +892,6 @@ mod tests {
                 eprintln!("aviso: a correr como root, os bits de permissão não se aplicam — asserção saltada");
             }
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -916,7 +906,7 @@ mod tests {
     /// to survive: a container mid-creation has no Store record yet.
     #[test]
     fn primeira_observacao_orfa_nunca_e_reclamada_de_imediato() {
-        with_root("reap-first", || {
+        with_root(|| {
             let ip = allocate("10.88", "orfao0001").unwrap();
             let live = std::collections::HashSet::new();
             let freed = reap_orphan_leases(&live);
@@ -934,7 +924,7 @@ mod tests {
     /// timestamp is aged past the window by hand before the 2nd call.
     #[test]
     fn lease_orfao_alem_da_graca_e_reclamado_na_segunda_chamada() {
-        with_root("reap-second", || {
+        with_root(|| {
             allocate("10.88", "orfao0002").unwrap();
             let live = std::collections::HashSet::new();
             assert_eq!(reap_orphan_leases(&live), 0);
@@ -962,7 +952,7 @@ mod tests {
     /// it consulted) had already crossed the window.
     #[test]
     fn candidato_que_reaparece_vivo_nunca_e_reclamado() {
-        with_root("reap-revive", || {
+        with_root(|| {
             let ip = allocate("10.88", "revive0001").unwrap();
             let empty = std::collections::HashSet::new();
             assert_eq!(reap_orphan_leases(&empty), 0);
@@ -996,7 +986,7 @@ mod tests {
     /// A live lease never enters the candidate list, call after call.
     #[test]
     fn lease_vivo_nunca_e_tocado() {
-        with_root("reap-alive", || {
+        with_root(|| {
             let ip = allocate("10.88", "vivo0001").unwrap();
             let mut live = std::collections::HashSet::new();
             live.insert("vivo0001".to_string());
@@ -1022,16 +1012,14 @@ mod tests_transactional {
     /// BOTH roots isolated: `detach_container` reaches the control socket, and
     /// without `DELONIX_NET_RUNTIME_DIR` that path would resolve to this host's
     /// real infra. With no holder, `control_send` fails fast.
-    fn with_roots<T>(tag: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+    fn with_roots<T>(f: impl FnOnce(&std::path::Path) -> T) -> T {
         let mut env = crate::testenv::lock();
-        let dir = std::env::temp_dir().join(format!("dlx-ipam-s2-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         std::fs::create_dir_all(dir.join("run")).unwrap();
-        env.set("DELONIX_ROOT", &dir);
+        env.set("DELONIX_ROOT", dir);
         env.set("DELONIX_NET_RUNTIME_DIR", dir.join("run"));
-        let out = f(&dir);
-        let _ = std::fs::remove_dir_all(&dir);
-        out
+        f(dir)
     }
 
     fn leases_of(id: &str) -> Vec<(String, String, String)> {
@@ -1048,7 +1036,7 @@ mod tests_transactional {
     /// still there after the detach.
     #[test]
     fn a_cidr_16_lease_leaves_on_detach() {
-        with_roots("cidr16", |_| {
+        with_roots(|_| {
             let def = crate::infra::network_create_with("s2cidr16", "10.77.0.0/16").unwrap();
             let plan = crate::infra::resolve_net(&def.name).unwrap();
             let id = "c1d20000feed0001";
@@ -1064,7 +1052,7 @@ mod tests_transactional {
     /// address came from the linear probe (`.0.2`, `.0.3`, …).
     #[test]
     fn a_cidr_16_hands_out_the_id_derived_address() {
-        with_roots("derived", |_| {
+        with_roots(|_| {
             let id = "0a0b0c0dfeed0002";
             let ip = allocate("10.78.0.0/16", id).unwrap();
             assert_eq!(ip, crate::derive_ip_in("10.78", id));
@@ -1080,7 +1068,7 @@ mod tests_transactional {
     /// `ipam ls --network` filters by the key `all_leases` returns.
     #[test]
     fn a_slash24_lease_leaves_on_detach_and_lists_under_its_key() {
-        with_roots("cidr24", |_| {
+        with_roots(|_| {
             let def = crate::infra::network_create_with("s2cidr24", "172.20.9.0/24").unwrap();
             let id = "c1d20000feed0003";
             let ip = allocate(&def.prefix, id).unwrap();
@@ -1101,7 +1089,7 @@ mod tests_transactional {
     /// key without losing a lease — the live container keeps the SAME address.
     #[test]
     fn raw_prefix_files_migrate_to_the_canonical_key() {
-        with_roots("migrate", |root| {
+        with_roots(|root| {
             let ipam = root.join("ipam");
             std::fs::create_dir_all(&ipam).unwrap();
             std::fs::write(
@@ -1138,7 +1126,7 @@ mod tests_transactional {
     /// and wrote — two containers on one address.
     #[test]
     fn reserving_another_containers_ip_is_refused() {
-        with_roots("dup", |_| {
+        with_roots(|_| {
             reserve("10.79", "owner000000000a1", "10.79.3.3").unwrap();
             let e = reserve("10.79", "intruder0000000b", "10.79.3.3").unwrap_err();
             assert!(matches!(e, Error::IpInUse(_)), "{e}");
@@ -1158,14 +1146,12 @@ mod tests_transactional {
     fn reserve_refuses_when_it_cannot_lock_the_registry() {
         use std::os::unix::fs::PermissionsExt;
         let mut env = crate::testenv::lock();
-        let dir = std::env::temp_dir().join(format!("dlx-ipam-s2-ro-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
-        env.set("DELONIX_ROOT", &dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        env.set("DELONIX_ROOT", dir);
         let got = reserve("10.88", "fixed00000000c1", "10.88.4.4");
-        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
-        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700)).unwrap();
         // As root the mode bits do not apply, and then `Ok` is legitimate.
         // SAFETY: `geteuid` takes no arguments and has no preconditions.
         if unsafe { libc::geteuid() } != 0 {
@@ -1179,7 +1165,7 @@ mod tests_transactional {
     /// An id whose preferred address is EXACTLY a VM's got it.
     #[test]
     fn allocate_never_hands_out_a_vm_dhcp_pool_address() {
-        with_roots("pool", |_| {
+        with_roots(|_| {
             let vm_ip = crate::vm_dhcp_lease_ip("10.81", "52:54:00:12:34:56").unwrap();
             let host: u32 = vm_ip.rsplit('.').next().unwrap().parse().unwrap();
             let id = format!("{:08x}c0ffee00", 0xfe00 | host);
@@ -1208,7 +1194,7 @@ mod tests_transactional {
     /// A fixed IP asked for a container inside the VM pool is refused.
     #[test]
     fn reserving_inside_the_vm_dhcp_pool_is_refused() {
-        with_roots("fixedpool", |_| {
+        with_roots(|_| {
             let e = reserve("10.82", "fixed00000000001", "10.82.254.50").unwrap_err();
             assert!(matches!(e, Error::IpInUse(_)), "{e}");
             assert_eq!(lookup("10.82", "fixed00000000001"), None);
@@ -1220,7 +1206,7 @@ mod tests_transactional {
     /// one's IP, and a VM's address shows in the registry.
     #[test]
     fn two_vms_on_one_dhcp_address_are_refused() {
-        with_roots("vmvm", |_| {
+        with_roots(|_| {
             reserve_vm_dhcp("10.86", "vm-a", "10.86.254.77").unwrap();
             let e = reserve_vm_dhcp("10.86", "vm-b", "10.86.254.77").unwrap_err();
             assert!(matches!(e, Error::IpInUse(_)), "{e}");
@@ -1241,7 +1227,7 @@ mod tests_transactional {
     /// only warned about, two ids ended up on one IP.
     #[test]
     fn concurrent_reserve_and_allocate_never_duplicate_an_address() {
-        with_roots("conc", |_| {
+        with_roots(|_| {
             let target = "10.87.5.5";
             let hs: Vec<_> = (0..16)
                 .map(|i| {

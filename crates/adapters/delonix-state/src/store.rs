@@ -648,9 +648,8 @@ mod tests {
 
     #[test]
     fn store_round_trip_and_lookup() {
-        let dir =
-            std::env::temp_dir().join(format!("delonix-test-{}", delonix_node::generate_id()));
-        let store = Store::open(&dir).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::open(dir.path()).unwrap();
 
         let mut c = Container::new(
             "aaaa1111bbbb2222".to_string(),
@@ -670,19 +669,14 @@ mod tests {
         assert_eq!(store.list().unwrap().len(), 1);
         store.remove("aaaa1111bbbb2222").unwrap();
         assert!(store.load("web").is_err());
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
-    fn tmp_dir(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "delonix-store-test-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ))
+    /// A fresh root and the guard that removes it when the test ends, also
+    /// when an assert fails.
+    fn tmp_dir() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        (tmp, root)
     }
 
     /// REGRESSION: `update` must REFUSE when it cannot take the lock, never do
@@ -697,8 +691,7 @@ mod tests {
     /// reproduce the failure without root and without a full filesystem.
     #[test]
     fn update_refuses_when_the_lock_cannot_be_taken() {
-        let root = tmp_dir("lock-eisdir");
-        fs::create_dir_all(&root).unwrap();
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
         let c = Container::new(
             "abc123".into(),
@@ -723,7 +716,6 @@ mod tests {
         );
         // And the refusal is total: nothing was written.
         assert_eq!(store.load("abc123").unwrap().name, "web");
-        fs::remove_dir_all(&root).ok();
     }
 
     /// REGRESSION: a reader must NEVER observe a partially-written file.
@@ -742,8 +734,7 @@ mod tests {
     /// for evidence that `fsync(tmp)` really does precede `rename()`.
     #[test]
     fn write_atomic_nunca_deixa_um_leitor_ver_ficheiro_parcial() {
-        let root = tmp_dir("write-atomic-torn");
-        fs::create_dir_all(&root).unwrap();
+        let (_tmp, root) = tmp_dir();
         let target = root.join("state.json");
 
         // Two payloads of very different sizes: a truncating writer leaves the
@@ -797,7 +788,6 @@ mod tests {
             leftovers.is_empty(),
             "ficheiros temporários órfãos: {leftovers:?}"
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// `load` por prefixo/nome tem de manter EXACTAMENTE a semântica anterior
@@ -806,7 +796,7 @@ mod tests {
     /// isso — o desempate pelo mais RECENTE quando um prefixo casa com vários.
     #[test]
     fn load_resolve_id_exacto_prefixo_e_nome_com_desempate_pelo_mais_recente() {
-        let root = tmp_dir("store-load-resolve");
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
 
         let mut old = Container::new(
@@ -847,8 +837,6 @@ mod tests {
         assert_eq!(full.command, vec!["x".to_string()]);
         // inexistente
         assert!(store.load("nao-existe").is_err_and(|e| e.is_not_found()));
-
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// REGRESSÃO (auditoria de segurança): um ficheiro temporário em `/tmp` não
@@ -923,8 +911,7 @@ mod tests {
     #[test]
     fn write_atomic_mode_cria_o_ficheiro_ja_restrito() {
         use std::os::unix::fs::PermissionsExt;
-        let root = tmp_dir("write-atomic-mode");
-        fs::create_dir_all(&root).unwrap();
+        let (_tmp, root) = tmp_dir();
         let target = root.join("segredo.json");
 
         write_atomic_mode(&target, b"selado", Some(0o600)).unwrap();
@@ -946,7 +933,6 @@ mod tests {
             .filter(|n| n.ends_with(".tmp"))
             .collect();
         assert!(leftovers.is_empty(), "temporários órfãos: {leftovers:?}");
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -967,11 +953,9 @@ mod tests {
 
     #[test]
     fn store_path_traversal_nunca_escreve_fora_da_raiz() {
-        let root = tmp_dir("store-path");
-        let outside = root
-            .parent()
-            .unwrap()
-            .join(format!("delonix-store-test-VICTIM-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("root");
+        let outside = tmp.path().join("delonix-store-test-VICTIM");
         let store = Store::open(&root).unwrap();
 
         // a malicious "id" coming from an unvalidated HTTP handler.
@@ -1016,9 +1000,6 @@ mod tests {
         );
         store.remove(&evil_id).unwrap();
         assert_eq!(fs::read_dir(&root).unwrap().flatten().count(), 0);
-
-        let _ = fs::remove_dir_all(&root);
-        let _ = fs::remove_dir_all(&outside);
     }
 
     /// REGRESSION (concurrency): [`JsonStore::update`] (added to close the same
@@ -1029,7 +1010,7 @@ mod tests {
     /// writes; through `update`, the final count must be exactly N.
     #[test]
     fn jsonstore_update_concorrente_nao_perde_escritas() {
-        let root = tmp_dir("jsonstore-update-race");
+        let (_tmp, root) = tmp_dir();
         let store: JsonStore<u64> = JsonStore::open(&root).unwrap();
         store.save("counter", &0u64).unwrap();
 
@@ -1054,28 +1035,26 @@ mod tests {
 
         let got = store.load("counter").unwrap();
         assert_eq!(got, N as u64, "perderam-se escritas: {got} de {N}");
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// `update` on a key that doesn't exist yet propagates `NotFound`
     /// (it re-reads under the lock via `load`, it doesn't create).
     #[test]
     fn jsonstore_update_de_chave_inexistente_da_not_found() {
-        let root = tmp_dir("jsonstore-update-missing");
+        let (_tmp, root) = tmp_dir();
         let store: JsonStore<u64> = JsonStore::open(&root).unwrap();
         let err = store.update("ghost", |n| {
             *n += 1;
             true
         });
         assert!(err.is_err_and(|e| e.is_not_found()));
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// `f` returning `false` aborts the write — the file on disk must stay
     /// untouched (same contract as `Store::update`).
     #[test]
     fn jsonstore_update_aborta_sem_escrever_quando_f_devolve_false() {
-        let root = tmp_dir("jsonstore-update-abort");
+        let (_tmp, root) = tmp_dir();
         let store: JsonStore<u64> = JsonStore::open(&root).unwrap();
         store.save("k", &10u64).unwrap();
         let v = store
@@ -1090,12 +1069,11 @@ mod tests {
             10,
             "mas nada foi persistido, porque f devolveu false"
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
     fn jsonstore_path_traversal_tambem_neutralizado() {
-        let root = tmp_dir("jsonstore-path");
+        let (_tmp, root) = tmp_dir();
         let store: JsonStore<String> = JsonStore::open(&root).unwrap();
         let evil_key = "../../../tmp/pwned-jsonstore";
         store.save(evil_key, &"conteudo".to_string()).unwrap();
@@ -1107,8 +1085,6 @@ mod tests {
             "JsonStore também tem de manter tudo dentro da raiz"
         );
         assert!(store.load(evil_key).is_ok());
-
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// REGRESSION (ADR-0011 §3): once names are unique per NAMESPACE rather
@@ -1118,7 +1094,7 @@ mod tests {
     /// tenant. It must refuse and name both instead.
     #[test]
     fn um_nome_em_duas_namespaces_e_recusado_nao_adivinhado() {
-        let root = tmp_dir("store-ns-names");
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
         let mk = |id: &str, ns: &str| {
             let mut c = Container::new(
@@ -1145,14 +1121,13 @@ mod tests {
         // The id keeps working, and a qualified miss is NotFound, not ambiguity.
         assert_eq!(store.load("bbb2").unwrap().namespace, "teamB");
         assert!(store.load("teamC/db").is_err_and(|e| e.is_not_found()));
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// The other half of the contract: a name that is unique on the node — every
     /// node not using namespaces — must resolve exactly as it always did.
     #[test]
     fn um_nome_unico_continua_a_resolver_como_sempre() {
-        let root = tmp_dir("store-ns-unique");
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
         let mut c = Container::new(
             "aaa1".into(),
@@ -1166,7 +1141,6 @@ mod tests {
         assert_eq!(store.load("web").unwrap().id, "aaa1");
         assert_eq!(store.load("teamA/web").unwrap().id, "aaa1");
         assert!(store.load("nope").is_err_and(|e| e.is_not_found()));
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// REGRESSION (concurrency): `update` sequences read-modify-write between
@@ -1174,7 +1148,7 @@ mod tests {
     /// update) and the final total comes out < N. With the lock, it must be exactly N.
     #[test]
     fn update_concorrente_nao_perde_escritas() {
-        let root = tmp_dir("store-update-race");
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
         let mut c = Container::new(
             "race1".into(),
@@ -1214,7 +1188,6 @@ mod tests {
             .parse()
             .unwrap();
         assert_eq!(got, N, "perderam-se escritas: {got} de {N}");
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// A store with no lock at all, used only to prove (by reversion) that
@@ -1283,7 +1256,7 @@ mod tests {
     /// `Store::update` directly the way the test above does.
     #[test]
     fn state_repository_update_through_the_port_does_not_lose_writes() {
-        let root = tmp_dir("store-port-race");
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
         let mut c = Container::new(
             "race-port".into(),
@@ -1307,7 +1280,6 @@ mod tests {
             .parse()
             .unwrap();
         assert_eq!(got, N, "lost writes through the port: {got} of {N}");
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// REVERSION PROOF: the same stress, through a `StateRepository` impl with no
@@ -1315,7 +1287,7 @@ mod tests {
     /// `flock`, not from anything the trait shape itself provides.
     #[test]
     fn state_repository_without_the_underlying_lock_loses_writes() {
-        let root = tmp_dir("store-port-race-unlocked");
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
         let mut c = Container::new(
             "race-unlocked".into(),
@@ -1347,7 +1319,6 @@ mod tests {
             "expected lost writes without a lock, got all {got} of {N} \
              — the reversion proof no longer proves anything"
         );
-        let _ = fs::remove_dir_all(&root);
     }
 
     /// REGRESSION: the `save` temporary must be unique per writer. With a
@@ -1355,7 +1326,7 @@ mod tests {
     /// interleaved in the temp and the `rename` published corrupted JSON.
     #[test]
     fn save_concorrente_nunca_publica_json_corrompido() {
-        let root = tmp_dir("store-save-race");
+        let (_tmp, root) = tmp_dir();
         let store = Store::open(&root).unwrap();
         let base = Container::new(
             "race2".into(),
@@ -1390,6 +1361,5 @@ mod tests {
         store
             .load("race2")
             .expect("estado final tem de ser um JSON válido");
-        let _ = fs::remove_dir_all(&root);
     }
 }

@@ -706,7 +706,8 @@ mod tests {
 
     #[test]
     fn resolve_plugin_encontra_no_primeiro_dir() {
-        let tmp = std::env::temp_dir().join(format!("dlx-cni-res-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let d1 = tmp.join("a");
         let d2 = tmp.join("b");
         std::fs::create_dir_all(&d1).unwrap();
@@ -715,22 +716,20 @@ mod tests {
         let dirs = vec![d1.clone(), d2.clone()];
         assert_eq!(resolve_plugin(&dirs, "bridge"), Some(d2.join("bridge")));
         assert_eq!(resolve_plugin(&dirs, "inexistente"), None);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn list_conf_files_ordena_e_filtra() {
-        let tmp = std::env::temp_dir().join(format!("dlx-cni-conf-{}", std::process::id()));
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         std::fs::write(tmp.join("20-b.conflist"), "{}").unwrap();
         std::fs::write(tmp.join("10-a.conf"), "{}").unwrap();
         std::fs::write(tmp.join("readme.txt"), "x").unwrap();
-        let got: Vec<String> = list_conf_files(&tmp)
+        let got: Vec<String> = list_conf_files(tmp)
             .iter()
             .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
             .collect();
         assert_eq!(got, vec!["10-a.conf", "20-b.conflist"]);
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// `NetworkReady` on a CNI node measures what an `ADD` needs: the config and
@@ -738,7 +737,8 @@ mod tests {
     /// (`cni0`), which only the first `ADD` creates.
     #[test]
     fn readiness_measures_config_and_binaries_not_the_bridge() {
-        let tmp = std::env::temp_dir().join(format!("dlx-cni-ready-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let (conf, bin) = (tmp.join("net.d"), tmp.join("bin"));
         std::fs::create_dir_all(&conf).unwrap();
         std::fs::create_dir_all(&bin).unwrap();
@@ -788,7 +788,6 @@ mod tests {
             readiness(&conf, &dirs),
             Readiness::InvalidConfig(_)
         ));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -833,7 +832,8 @@ mod tests {
     #[test]
     fn add_e_del_com_plugin_falso() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = std::env::temp_dir().join(format!("dlx-cni-e2e-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let bindir = tmp.join("bin");
         std::fs::create_dir_all(&bindir).unwrap();
         // ADD → prints result; DEL → nothing; unknown command → structured error.
@@ -861,7 +861,6 @@ esac
         assert_eq!(r.ips[0].gateway, "10.9.9.1");
         // DEL is best-effort and returns Ok.
         del(&net, &dirs, "cid", "/proc/1/ns/net", "eth0").unwrap();
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// S4: a conflist `type` that is a path executed a binary from outside
@@ -870,7 +869,8 @@ esac
     #[test]
     fn a_plugin_type_that_is_a_path_never_runs() {
         use std::os::unix::fs::PermissionsExt;
-        let tmp = std::env::temp_dir().join(format!("dlx-cni-s4-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let tmp = tmp.path();
         let bindir = tmp.join("bin");
         let conf = tmp.join("net.d");
         std::fs::create_dir_all(&bindir).unwrap();
@@ -914,6 +914,5 @@ esac
         assert!(!marker.exists(), "the out-of-CNI_PATH binary ran");
         // A bare name is still a plugin name.
         assert!(valid_plugin_type("bridge") && valid_plugin_type("host-local"));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }
