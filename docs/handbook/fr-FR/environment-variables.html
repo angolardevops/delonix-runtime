@@ -1210,6 +1210,13 @@ variable au moment où le programme s’exécute.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_OCI_ARCHIVE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>Une archive d’image aux media types OCI, écrite par le moteur (<code>write_oci_media_archive</code>), à partir de laquelle le cas en direct de l’ADR-0058 crée un conteneur système. Le stockage où elle est envoyée doit accepter <code>vztmpl</code>.</td>
+<td>Non défini : le cas est sauté.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_SHARED_STORAGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>Un stockage partagé par tous les nœuds du cluster (NFS, Ceph RBD), où les cas de déplacement placent le disque de la VM — un disque sur un stockage local est refusé, pas copié.</td>

@@ -98,6 +98,11 @@ pub enum Error {
     /// The storage has less free space than the container archive.
     #[error("{0}")]
     TemplateNoSpace(String),
+    /// A system container asked for something the provider refuses by name:
+    /// a privileged container, an entrypoint argument or an environment
+    /// variable the node cannot hold unambiguously (ADR-0058).
+    #[error("{0}")]
+    InvalidSystemContainer(String),
     /// A local image to upload could not be read or is not an image.
     #[error("{0}")]
     ImageUnreadable(String),
@@ -279,6 +284,7 @@ impl Error {
             Error::TemplateNotEnabled(_) => 6513,
             Error::TemplateNoSpace(_) => 6514,
             Error::ImageUnreadable(_) => 1539,
+            Error::InvalidSystemContainer(_) => 1540,
             Error::Unauthorized(_) => 9515,
             Error::Forbidden(_) => 9516,
             Error::ResponseTooLarge(_) => 9517,

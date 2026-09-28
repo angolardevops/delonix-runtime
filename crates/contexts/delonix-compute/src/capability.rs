@@ -36,7 +36,7 @@ use serde::Serialize;
 
 /// Version of the catalog itself (not of the engine). See the module docs for
 /// what bumps which part.
-pub const CATALOG_VERSION: &str = "1.1.0";
+pub const CATALOG_VERSION: &str = "1.2.0";
 
 /// Which port a capability belongs to — the words the node contract's
 /// `ProviderInfo.kind` uses. `Gateway` (catalog 1.1.0, ADR-0059 D2) is a
@@ -89,6 +89,10 @@ pub enum Domain {
     VmCompute,
     /// Containers and pods.
     Containers,
+    /// System containers: a whole OS userland run as one unit with VM-like
+    /// semantics (catalog 1.2.0, ADR-0058). Not a `Container`: no `exec`,
+    /// logs or exit status are promised by the domain itself.
+    SystemContainers,
     /// Networks, addressing, isolation and exposure.
     Network,
     /// Volumes, disks and pools.
@@ -113,6 +117,7 @@ impl Domain {
             Domain::Inventory => "inventory",
             Domain::VmCompute => "vm-compute",
             Domain::Containers => "containers",
+            Domain::SystemContainers => "system-containers",
             Domain::Network => "network",
             Domain::Storage => "storage",
             Domain::Protection => "protection",
@@ -193,6 +198,23 @@ pub enum Capability {
     PodSharedPid,
     /// Container image pull/build/scan (the image port, reported by the compute provider that consumes it).
     ContainerImages,
+
+    // --- system containers (catalog 1.2.0, ADR-0058) ----------------------
+    /// Create, start, stop and destroy a system container.
+    SystemContainerLifecycle,
+    /// Created from an OCI image the engine pulled and verified.
+    SystemContainerOciImage,
+    /// The entrypoint and environment asked for are the ones the provider
+    /// kept, read back after the create.
+    SystemContainerEntrypointEnv,
+    SystemContainerExec,
+    SystemContainerLogs,
+    /// The exit status of the container's entrypoint.
+    SystemContainerExitStatus,
+    /// Attached to a bridge (and VLAN) of the host that runs it.
+    SystemContainerNetworkBridge,
+    /// Runs in a user namespace, never as the host's root.
+    SystemContainerUnprivileged,
 
     // --- network --------------------------------------------------------
     NetBridge,
@@ -377,6 +399,14 @@ impl Capability {
         Self::PodSharedIpcUts,
         Self::PodSharedPid,
         Self::ContainerImages,
+        Self::SystemContainerLifecycle,
+        Self::SystemContainerOciImage,
+        Self::SystemContainerEntrypointEnv,
+        Self::SystemContainerExec,
+        Self::SystemContainerLogs,
+        Self::SystemContainerExitStatus,
+        Self::SystemContainerNetworkBridge,
+        Self::SystemContainerUnprivileged,
         Self::NetBridge,
         Self::NetMacvlanIpvlan,
         Self::NetVlan,
@@ -509,6 +539,14 @@ impl Capability {
             Self::PodSharedIpcUts => "pod.shared-ipc-uts",
             Self::PodSharedPid => "pod.shared-pid",
             Self::ContainerImages => "container.images",
+            Self::SystemContainerLifecycle => "system-container.lifecycle",
+            Self::SystemContainerOciImage => "system-container.oci-image",
+            Self::SystemContainerEntrypointEnv => "system-container.entrypoint-env",
+            Self::SystemContainerExec => "system-container.exec",
+            Self::SystemContainerLogs => "system-container.logs",
+            Self::SystemContainerExitStatus => "system-container.exit-status",
+            Self::SystemContainerNetworkBridge => "system-container.network.bridge",
+            Self::SystemContainerUnprivileged => "system-container.unprivileged",
             Self::NetBridge => "net.bridge",
             Self::NetMacvlanIpvlan => "net.macvlan-ipvlan",
             Self::NetVlan => "net.vlan",
@@ -642,6 +680,14 @@ impl Capability {
             | PodSharedIpcUts
             | PodSharedPid
             | ContainerImages => ProviderKind::Compute,
+            SystemContainerLifecycle
+            | SystemContainerOciImage
+            | SystemContainerEntrypointEnv
+            | SystemContainerExec
+            | SystemContainerLogs
+            | SystemContainerExitStatus
+            | SystemContainerNetworkBridge
+            | SystemContainerUnprivileged => ProviderKind::Compute,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan
@@ -756,6 +802,14 @@ impl Capability {
             | PodSharedIpcUts
             | PodSharedPid
             | ContainerImages => Domain::Containers,
+            SystemContainerLifecycle
+            | SystemContainerOciImage
+            | SystemContainerEntrypointEnv
+            | SystemContainerExec
+            | SystemContainerLogs
+            | SystemContainerExitStatus
+            | SystemContainerNetworkBridge
+            | SystemContainerUnprivileged => Domain::SystemContainers,
             NetBridge
             | NetMacvlanIpvlan
             | NetVlan

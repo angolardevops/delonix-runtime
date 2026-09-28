@@ -14269,6 +14269,16 @@ msgstr "A imagem seria enviada para o storage de importação do nó, e esse sto
 msgid "Free space on the storage, or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage with room."
 msgstr "Liberta espaço no storage, ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage com espaço."
 
+# DX-1540 — a system container the Proxmox node cannot hold (ADR-0058)
+msgid "the system container asks for something the node cannot hold"
+msgstr "o container de sistema pede algo que o nó não consegue guardar"
+
+msgid "A system container on a Proxmox node is always unprivileged: a privileged one would be a privilege decision on a remote host, with its own spike (ADR-0058). Its entrypoint is stored as one line split on spaces, so an argument with a space or a control character cannot be kept as written; its environment is a list of NAME=value, where the name is letters, digits and underscores."
+msgstr "Um container de sistema num nó Proxmox é sempre sem privilégio: um privilegiado seria uma decisão de privilégio num host remoto, com spike próprio (ADR-0058). O seu entrypoint é guardado como uma linha partida pelos espaços, por isso um argumento com um espaço ou um carácter de controlo não pode ficar como foi escrito; o seu ambiente é uma lista de NOME=valor, em que o nome tem letras, dígitos e underscores."
+
+msgid "Leave `unprivileged` true, write the entrypoint as arguments without spaces (or wrap it in a script inside the image), and name each variable with letters, digits and underscores only."
+msgstr "Deixa o `unprivileged` a true, escreve o entrypoint como argumentos sem espaços (ou põe-no num script dentro da imagem), e nomeia cada variável só com letras, dígitos e underscores."
+
 # DX-6513 / DX-6514 — a container archive staged on a Proxmox node (ADR-0058)
 msgid "the node's storage does not accept container archives"
 msgstr "o storage do nó não aceita arquivos de container"
