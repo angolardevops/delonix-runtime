@@ -6439,7 +6439,18 @@ fn spawn(
     // A hook that fails above now leaves the record untouched rather than saying
     // `Running` for a process it just SIGKILLed — the honest of the two, and the
     // same direction this engine has taken everywhere else.
-    store.save(container)?;
+    //
+    // Under the record's lock, never a bare `save` — see `publish_incarnation`.
+    // A publish that is refused leaves a running process that no record names,
+    // which is exactly the leak it exists to prevent: take it down. The cgroup
+    // stays, because the leaf is keyed by the id and may be the live rival's.
+    if let Err(e) = publish_incarnation(store, container) {
+        let _ = kill(pid, Signal::SIGKILL);
+        let _ = waitpid(pid, None);
+        container.pid = None;
+        container.pid_starttime = None;
+        return Err(e);
+    }
 
     if detach {
         return Ok(container.status.clone());
@@ -6463,6 +6474,73 @@ fn spawn(
     // `execve` of the entrypoint. Any CI job, migration, backup or health probe
     // run through this path saw success on failure.
     Ok(container.status.clone())
+}
+
+/// Publishes the incarnation `c` a spawn just started — its `pid`, its
+/// `starttime`, `Running` — as ONE critical section on the record, the lock
+/// every other writer of it already takes.
+///
+/// **It was a bare `save`, and a bare `save` does not take the lock.** Every
+/// other writer of a live record goes through `Store::update` — the old
+/// supervisor's `wait_and_record`, `stop`'s `persist_stop` — which re-reads the
+/// record under the `flock`, changes it, and writes it back. A `save` landing
+/// between that read and that write is simply undone: the update writes back the
+/// copy it read, and the new pid is gone from the record.
+///
+/// Observed on the chaos harness (2026-09-28, pod members restarted by `net
+/// netns up`): a `container start <id>` supervisor and its `sleep 300`, in S,
+/// alive after the teardown had `rm -f`'d every container and deleted the
+/// sandbox — never signalled. This is the interleaving that loses it, and
+/// `publish_tests` replays it on the real store and its real `flock`: the
+/// restart's `stop` gives up waiting after its bound (the SIGKILLed workload
+/// stuck in D, flushing its overlay — over 30 s on this host's loaded disk, the
+/// same day), records `Stopped`, and the `start` spawns the new incarnation.
+/// The old one finally exits, its supervisor's `update` reads `Stopped`, no pid
+/// — and writes it back AFTER the new `save`, and `rm -f` then finds a record
+/// with no process to signal. The window is wider than scheduling: both writes
+/// `fsync`, and on a disk that held a process in D for 30 s an `fsync` is
+/// anything but instant.
+///
+/// Under the lock the two serialize, and whichever comes second sees the other:
+/// the old supervisor's guard ([`describes_incarnation`]) leaves a newer pid
+/// alone, and this one refuses to write over ANOTHER live incarnation — two
+/// starts of the same record (a `start` racing a supervisor's policy restart)
+/// used to both publish, the last one winning and the other running outside
+/// the record. The loser gets [`Error::AlreadyRunning`], and its caller kills
+/// what it started.
+///
+/// A record that does not exist is a first publish (a `run`), and is created.
+fn publish_incarnation(store: &Store, c: &Container) -> Result<()> {
+    let pid = c.pid.unwrap_or(0);
+    let mut rival = None;
+    let published = store.update(&c.id, |cur| {
+        if publish_would_orphan(cur, pid, c.pid_starttime) {
+            rival = cur.pid;
+            return false;
+        }
+        *cur = c.clone();
+        true
+    });
+    match published {
+        Ok(_) => {}
+        Err(delonix_state::Error::NoSuchContainer(_)) => store.save(c)?,
+        Err(e) => return Err(e.into()),
+    }
+    match rival {
+        Some(other) => Err(Error::AlreadyRunning(format!(
+            "container {} is already running as pid {other}: this start was not published, \
+             and its process was stopped",
+            c.short_id()
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// Whether writing the incarnation (`pid`, `starttime`) over the record `cur`
+/// would drop ANOTHER live incarnation from it — the process that nothing would
+/// ever find again: not `ps`, not `rm -f`. PURE but for the liveness probe.
+fn publish_would_orphan(cur: &Container, pid: i32, starttime: Option<u64>) -> bool {
+    !describes_incarnation(cur, pid, starttime) && cur.is_live()
 }
 
 /// Whether a supervisor may record the death of the process (`pid`,
@@ -10402,5 +10480,153 @@ mod incarnation_tests {
         // `stop` already cleared the pid: the final status is still ours.
         c.pid = None;
         assert!(describes_incarnation(&c, 100, Some(7)));
+    }
+}
+
+#[cfg(test)]
+mod publish_tests {
+    use super::{publish_incarnation, publish_would_orphan, record_exit, Error, Status};
+    use delonix_compute::Container;
+    use delonix_state::Store;
+    use std::time::Duration;
+
+    /// A store of its own per test, removed on drop.
+    struct Scratch(std::path::PathBuf, Store);
+
+    impl Scratch {
+        fn new(tag: &str) -> Self {
+            let root = std::env::temp_dir().join(format!(
+                "delonix-publish-{tag}-{}-{}",
+                std::process::id(),
+                delonix_node::now_unix()
+            ));
+            let _ = std::fs::remove_dir_all(&root);
+            let store = Store::open(root.join("containers")).unwrap();
+            Scratch(root, store)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn member() -> Container {
+        Container::new(
+            "e1b736e018bc37f7".into(),
+            "rp-c0".into(),
+            "alpine:3.20".into(),
+            vec!["sleep".into(), "300".into()],
+            "64M".into(),
+        )
+    }
+
+    /// **A new incarnation's publish is never undone by the old supervisor's
+    /// update.**
+    ///
+    /// The leak of 2026-09-28: a pod member restarted by `net netns up` ran on
+    /// after the chaos teardown had `rm -f`'d every container — its record named
+    /// no pid. The interleaving, reproduced here with the real store and its
+    /// real `flock`: `stop` has recorded `Stopped` (it gave up on a SIGKILLed
+    /// process still in D), the old supervisor finally reaps that process and
+    /// its `update` has READ the record, and the new incarnation publishes
+    /// before that update writes back.
+    ///
+    /// With the publish as a bare `save` (what it was), the update's write-back
+    /// erased the new pid: this test read `pid: None`. Under the lock the publish
+    /// waits for the update, and lands after it.
+    #[test]
+    fn the_old_supervisors_update_does_not_erase_a_new_incarnation() {
+        let s = Scratch::new("undo");
+        let mut stopped = member();
+        stopped.status = Status::Stopped;
+        s.1.save(&stopped).unwrap();
+
+        let (loaded_tx, loaded_rx) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            // The OLD supervisor's `wait_and_record`, holding the record between
+            // its read and its write for longer than the publish needs.
+            let old = scope.spawn(|| {
+                s.1.update(&stopped.id, |cur| {
+                    loaded_tx.send(()).unwrap();
+                    std::thread::sleep(Duration::from_millis(400));
+                    record_exit(cur, 100, Some(5), &Status::Crashed, false)
+                })
+                .unwrap();
+            });
+            loaded_rx.recv().unwrap();
+            // The NEW incarnation, published while the update is mid-flight.
+            let mut fresh = stopped.clone();
+            fresh.status = Status::Running;
+            fresh.pid = Some(4242);
+            fresh.pid_starttime = Some(9);
+            publish_incarnation(&s.1, &fresh).unwrap();
+            old.join().unwrap();
+        });
+
+        let rec = s.1.load(&stopped.id).unwrap();
+        assert_eq!(
+            (rec.pid, rec.pid_starttime, rec.status),
+            (Some(4242), Some(9), Status::Running),
+            "the record lost the incarnation that is running: `rm -f` would not signal it"
+        );
+    }
+
+    /// Two starts of one record — a `start` racing a supervisor's policy
+    /// restart — must not both publish: the second would leave the first
+    /// running with no record naming it. The live rival here is this test
+    /// process, the only pid a test can promise is alive.
+    #[test]
+    fn a_publish_never_writes_over_another_live_incarnation() {
+        let s = Scratch::new("rival");
+        let me = std::process::id() as i32;
+        let mut live = member();
+        live.status = Status::Running;
+        live.pid = Some(me);
+        live.pid_starttime = delonix_node::proc_starttime(me);
+        s.1.save(&live).unwrap();
+
+        let mut second = live.clone();
+        second.pid = Some(4242);
+        second.pid_starttime = Some(9);
+        let e = publish_incarnation(&s.1, &second).unwrap_err();
+        assert!(matches!(e, Error::AlreadyRunning(_)), "{e}");
+
+        let rec = s.1.load(&live.id).unwrap();
+        assert_eq!((rec.pid, rec.pid_starttime), (live.pid, live.pid_starttime));
+    }
+
+    /// The guard's three answers: over a stopped record, over the same
+    /// incarnation, and over a dead or recycled pid, publishing is fine.
+    #[test]
+    fn only_a_live_other_incarnation_blocks_a_publish() {
+        let me = std::process::id() as i32;
+        let st = delonix_node::proc_starttime(me);
+        let mut cur = member();
+        assert!(
+            !publish_would_orphan(&cur, 4242, Some(9)),
+            "no pid recorded"
+        );
+        cur.pid = Some(me);
+        cur.pid_starttime = st;
+        assert!(publish_would_orphan(&cur, 4242, Some(9)), "a live rival");
+        assert!(!publish_would_orphan(&cur, me, st), "the same incarnation");
+        cur.pid_starttime = st.map(|t| t + 1);
+        assert!(
+            !publish_would_orphan(&cur, 4242, Some(9)),
+            "a recycled pid is not the rival's process"
+        );
+    }
+
+    /// A `run` publishes a record that does not exist yet.
+    #[test]
+    fn a_first_publish_creates_the_record() {
+        let s = Scratch::new("first");
+        let mut c = member();
+        c.status = Status::Running;
+        c.pid = Some(4242);
+        publish_incarnation(&s.1, &c).unwrap();
+        assert_eq!(s.1.load(&c.id).unwrap().pid, Some(4242));
     }
 }
