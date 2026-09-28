@@ -213,6 +213,20 @@ struct ContainerRestartParams {
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
+struct WorkloadUsageParams {
+    /// `container`, `vm`, or omitted for both.
+    #[serde(default)]
+    kind: Option<String>,
+    /// One workload by exact name (a container also answers to its id); omit for all.
+    #[serde(default)]
+    name: Option<String>,
+    /// Also read each container's network byte counters. Costs one `nsenter` per
+    /// running container, which is why it is off unless asked for.
+    #[serde(default)]
+    include_network: bool,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
 struct TaskIdParams {
     task_id: String,
 }
@@ -506,6 +520,75 @@ impl DelonixMcp {
     }
 
     #[tool(
+        name = "workload.usage",
+        description = "One sample of each container's and local VM's CUMULATIVE usage counters \
+                       (CPU time, memory and its peak, block I/O, optionally network) with the \
+                       ceilings in force. Counters are totals since the process started, not \
+                       rates: sample twice and divide, and never subtract across a change of \
+                       `process_started_at_unix`. Every missing number is listed in \
+                       `unmeasured` with its reason, never reported as zero. Read-only.",
+        annotations(read_only_hint = true)
+    )]
+    fn workload_usage(
+        &self,
+        Parameters(WorkloadUsageParams {
+            kind,
+            name,
+            include_network,
+        }): Parameters<WorkloadUsageParams>,
+    ) -> Result<String, ErrorData> {
+        let args = json!({ "kind": kind, "name": name, "include_network": include_network });
+        let (want_containers, want_vms) = match kind.as_deref().map(str::to_ascii_lowercase) {
+            None => (true, true),
+            Some(k) => match ResourceKind::parse(&k) {
+                Ok(ResourceKind::Container) => (true, false),
+                Ok(ResourceKind::Vm) => (false, true),
+                _ => {
+                    return Err(typed_err(
+                        "VALIDATION_FAILED",
+                        format!("kind must be `container` or `vm`, got `{k}`"),
+                    ))
+                }
+            },
+        };
+        let mut rows = Vec::new();
+        if want_containers {
+            for c in list_containers(&self.base)? {
+                if name.as_deref().is_some_and(|n| n != c.name && n != c.id) {
+                    continue;
+                }
+                rows.push(container_usage_row(&c, include_network));
+            }
+        }
+        if want_vms {
+            for vm in list_vms(&self.base)? {
+                if name.as_deref().is_some_and(|n| n != vm.name) {
+                    continue;
+                }
+                rows.push(vm_usage_row(&vm));
+            }
+        }
+        if let (Some(n), true) = (&name, rows.is_empty()) {
+            self.log(
+                "workload.usage",
+                "error",
+                &args,
+                Some(n.clone()),
+                None,
+                None,
+            );
+            return Err(typed_err("NOT_FOUND", format!("no such workload: {n}")));
+        }
+        self.log("workload.usage", "ok", &args, name, None, None);
+        Ok(pretty(json!({
+            "schema": "delonix.workload.usage/v1",
+            "sampled_at_unix_ms": now_unix_ms(),
+            "counters": "cumulative since process_started_at_unix; rates need two samples",
+            "workloads": rows,
+        })))
+    }
+
+    #[tool(
         name = "logs.query",
         description = "Container logs (wraps `delonix container logs`).",
         annotations(read_only_hint = true)
@@ -758,6 +841,112 @@ impl DelonixMcp {
     }
 }
 
+fn now_unix_ms() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0)
+}
+
+/// Why a workload row carries no sample, or `None` when it can be sampled.
+fn unsampled_reason(status: &delonix_model::records::Status, live: bool) -> Option<String> {
+    use delonix_model::records::Status;
+    if !matches!(status, Status::Running | Status::Paused) {
+        return Some(format!("not running (status {status:?})"));
+    }
+    (!live).then(|| "the recorded pid no longer belongs to this workload".to_string())
+}
+
+fn container_usage_row(c: &Container, include_network: bool) -> serde_json::Value {
+    let mut c = c.clone();
+    delonix_linux::reconcile_status(&mut c);
+    let base = json!({
+        "kind": "container",
+        "name": c.name,
+        "id": c.id,
+        "namespace": c.namespace,
+        "status": format!("{:?}", c.status),
+    });
+    if let Some(why) = unsampled_reason(&c.status, c.is_live()) {
+        return merge(base, json!({ "sampled": false, "reason": why }));
+    }
+    let pid = c.pid.unwrap_or_default();
+    let cgroup = delonix_linux::live_cgroup(&c);
+    let sample = delonix_linux::usage::cgroup_sample(Path::new(&cgroup));
+    let network = if !include_network {
+        json!({ "measured": false, "reason": "not requested (include_network=false)" })
+    } else {
+        match delonix_sdn::infra::container_net_bytes(&c.id) {
+            Some((rx, tx)) => json!({ "measured": true, "rx_bytes": rx, "tx_bytes": tx }),
+            None => json!({
+                "measured": false,
+                "reason": "no network namespace of its own to read (host/none network, \
+                           or the holder is not reachable)",
+            }),
+        }
+    };
+    merge(
+        base,
+        json!({
+            "sampled": true,
+            "pid": pid,
+            "process_started_at_unix": delonix_linux::usage::process_started_at_unix(pid),
+            "cgroup": cgroup,
+            "usage": sample,
+            "network": network,
+        }),
+    )
+}
+
+fn vm_usage_row(vm: &delonix_compute::Vm) -> serde_json::Value {
+    let base = json!({
+        "kind": "vm",
+        "name": vm.name,
+        "namespace": vm.namespace,
+        "backend": vm.backend,
+        "status": format!("{:?}", vm.status),
+        "configured": { "vcpus": vm.vcpus, "memory": vm.memory },
+    });
+    if vm.pid.is_none() && vm.status == delonix_model::records::Status::Running {
+        // libvirt and remote backends own their process; this engine records no
+        // pid for them, so there is nothing on this host to read.
+        return merge(
+            base,
+            json!({
+                "sampled": false,
+                "reason": format!(
+                    "backend `{}` manages the VM process; its usage is the backend's to report",
+                    vm.backend
+                ),
+            }),
+        );
+    }
+    if let Some(why) = unsampled_reason(&vm.status, vm.is_live()) {
+        return merge(base, json!({ "sampled": false, "reason": why }));
+    }
+    let pid = vm.pid.unwrap_or_default();
+    merge(
+        base,
+        json!({
+            "sampled": true,
+            "pid": pid,
+            "process_started_at_unix": delonix_linux::usage::process_started_at_unix(pid),
+            "usage": delonix_linux::usage::process_sample(pid),
+            "limitations": [
+                "memory is the VMM process's resident set on this host, not the guest's own usage",
+                "cpu time includes the VMM's overhead, not only guest vCPU time",
+            ],
+        }),
+    )
+}
+
+fn merge(mut a: serde_json::Value, b: serde_json::Value) -> serde_json::Value {
+    if let (Some(a), serde_json::Value::Object(b)) = (a.as_object_mut(), b) {
+        a.extend(b);
+    }
+    a
+}
+
 /// `(tool_name, risk, requires_confirm)` — what `delonix mcp capabilities` prints
 /// and what `delonix://runtime/capabilities` serves.
 pub fn capabilities_table() -> Vec<serde_json::Value> {
@@ -912,6 +1101,7 @@ mod tests {
             schemars::schema_for!(LogsQueryParams),
             schemars::schema_for!(StorageInspectParams),
             schemars::schema_for!(ContainerRestartParams),
+            schemars::schema_for!(WorkloadUsageParams),
             schemars::schema_for!(TaskIdParams),
             schemars::schema_for!(AuditQueryParams),
         ] {
@@ -921,6 +1111,105 @@ mod tests {
                 "schema has no properties: {value}"
             );
         }
+    }
+
+    fn vm(
+        backend: &str,
+        status: delonix_model::records::Status,
+        pid: Option<i32>,
+    ) -> delonix_compute::Vm {
+        let mut v = delonix_compute::Vm::new(
+            "v1".into(),
+            "d".into(),
+            "o".into(),
+            2,
+            "2G".into(),
+            "n".into(),
+            "t".into(),
+            "m".into(),
+            "s".into(),
+        );
+        v.backend = backend.into();
+        v.status = status;
+        v.pid = pid;
+        v
+    }
+
+    #[test]
+    fn a_stopped_container_is_listed_unsampled_with_its_reason() {
+        let c = Container::new(
+            "abc".into(),
+            "web".into(),
+            "alpine".into(),
+            vec![],
+            "64M".into(),
+        );
+        let row = container_usage_row(&c, false);
+        assert_eq!(row["sampled"], false);
+        assert!(
+            row["reason"].as_str().unwrap().starts_with("not running"),
+            "{row}"
+        );
+        assert!(
+            row.get("usage").is_none(),
+            "no numbers for a workload that is not running"
+        );
+    }
+
+    #[test]
+    fn a_running_vm_without_a_pid_says_the_backend_owns_its_numbers() {
+        use delonix_model::records::Status;
+        let row = vm_usage_row(&vm("libvirt", Status::Running, None));
+        assert_eq!(row["sampled"], false);
+        assert!(
+            row["reason"]
+                .as_str()
+                .unwrap()
+                .contains("backend `libvirt`"),
+            "{row}"
+        );
+        assert_eq!(row["configured"]["vcpus"], 2);
+    }
+
+    #[test]
+    fn a_recycled_vm_pid_is_not_sampled() {
+        use delonix_model::records::Status;
+        // Our own pid with a start time that cannot be ours: the identity guard
+        // must refuse it rather than report this test process as the VMM.
+        let mut v = vm(
+            "cloud-hypervisor",
+            Status::Running,
+            Some(std::process::id() as i32),
+        );
+        v.pid_starttime = Some(1);
+        let row = vm_usage_row(&v);
+        assert_eq!(row["sampled"], false);
+        assert!(
+            row["reason"]
+                .as_str()
+                .unwrap()
+                .contains("no longer belongs"),
+            "{row}"
+        );
+    }
+
+    #[test]
+    fn a_live_vmm_is_sampled_with_the_process_basis_and_its_limitations() {
+        use delonix_model::records::Status;
+        let me = std::process::id() as i32;
+        let mut v = vm("cloud-hypervisor", Status::Running, Some(me));
+        v.pid_starttime = delonix_node::proc_starttime(me);
+        let row = vm_usage_row(&v);
+        assert_eq!(row["sampled"], true, "{row}");
+        assert_eq!(row["usage"]["basis"], "vmm_process");
+        assert!(row["usage"]["memory_bytes"].as_u64().unwrap() > 0);
+        assert!(row["process_started_at_unix"].as_u64().is_some());
+        assert_eq!(row["limitations"].as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn workload_usage_is_a_read_tool() {
+        assert_eq!(risk_of("workload.usage"), risk::RiskLevel::Read);
     }
 
     #[test]
