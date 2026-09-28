@@ -330,13 +330,13 @@ jobs:
       # por release) regenera-se das notas e é comitado no main — a doc nunca
       # fica atrás da release. [skip ci] evita re-disparar a CI por isto.
       #
-      # Python próprio SÓ a partir daqui: o job corre em ubuntu-22.04 por causa da
-      # glibc 2.35 dos binários, e o python3 desse runner é o 3.10 — sem `tomllib`
-      # (dev_docs.py) e com um pip que não conhece `--break-system-packages`
-      # (dev_docs_site.py). Na v4.5.0 os dois geradores rebentaram assim e o passo
-      # disse «já actualizados». Os binários já estão construídos e publicados
-      # neste ponto, por isso mudar o python3 do PATH não toca no que se entrega.
-      # 3.12 é o do ubuntu-latest onde o ci.yml corre os mesmos geradores em --check.
+      # A Python of its own ONLY from here on: this job runs on ubuntu-22.04 for the
+      # binaries' glibc 2.35, and that runner's python3 is 3.10 — no `tomllib`
+      # (dev_docs.py) and a pip without `--break-system-packages` (dev_docs_site.py).
+      # On v4.5.0 both generators died that way and the step said all was up to date.
+      # The binaries are already built and published by now, so changing the python3
+      # on PATH does not touch what ships. 3.12 is ubuntu-latest's, where ci.yml runs
+      # the same generators with --check.
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
