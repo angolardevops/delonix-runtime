@@ -2173,6 +2173,36 @@ sys.exit(0 if cores <= 0.75 else 1)"
     [ "$dirs1" -le "$dirs0" ] || { echo "ficaram $((dirs1-dirs0)) registos de container por limpar"; exit 1; }
     [ "$fds1" -le "$((fds0+2))" ] || { echo "vazaram $((fds1-fds0)) descritores"; exit 1; }
   '
+
+  # --- FUGA: um arranque recusado DEPOIS do clone não deixa o cgroup -------
+  #
+  # Tudo o que falha entre o `clone` e o registo (os mapas de userns, o
+  # `setup_cgroup`, o hook `on_started` que liga o slirp) parava no SIGKILL: o
+  # caminho com userns devolvia sem remover o cgroup que o `setup_cgroup` acabara
+  # de criar, e o caminho sem userns removia-o com o processo ainda lá dentro. O
+  # registo nunca chega a ser escrito, por isso ninguém voltaria a encontrar a
+  # leaf. Medido 2026-09-28: `run -d -p` com um `slirp4netns` que falha deixou um
+  # `dlx-<id>` VAZIO no host em 4 corridas de 4. Um `slirp4netns` falso no PATH
+  # é o disparo: o hook corre depois de o cgroup existir. O id vem do evento
+  # `create`, o único rasto que um arranque recusado deixa.
+  check "um arranque recusado depois do clone não deixa o cgroup do container para trás" ok bash -c '
+    fb="$(dirname "$DELONIX_ROOT")/fakeslirp"; mkdir -p "$fb"
+    printf "#!/bin/sh\nexit 1\n" > "$fb/slirp4netns"; chmod +x "$fb/slirp4netns"
+    port=$(python3 -c "import socket;s=socket.socket();s.bind((\"127.0.0.1\",0));print(s.getsockname()[1])")
+    ev0=$(cat "$DELONIX_ROOT/events.jsonl" 2>/dev/null | wc -l)
+    if PATH="$fb:$PATH" timeout 60 "$BIN" container run -d -p "$port:80" "$IMG" sleep 60 >/dev/null 2>&1; then
+      rm -rf "$fb"
+      echo "o run arrancou com um slirp4netns que falha — não é o caso que se quer medir"; exit 1
+    fi
+    rm -rf "$fb"
+    id=$(tail -n +$((ev0+1)) "$DELONIX_ROOT/events.jsonl" 2>/dev/null | python3 -c "
+import json,sys
+ids=[e[\"id\"] for e in map(json.loads,sys.stdin) if e.get(\"action\")==\"create\"]
+print(ids[-1] if ids else \"\")")
+    [ -n "$id" ] || { echo "sem evento create: o run falhou antes do clone, e não há o que medir"; exit 1; }
+    left=$(find /sys/fs/cgroup -maxdepth 7 -type d \( -name "dlx-$id" -o -name "delonix-$id" \) 2>/dev/null)
+    [ -z "$left" ] || { echo "ficou para trás: $left (procs: $(cat $left/cgroup.procs 2>/dev/null | tr "\n" " "))"; exit 1; }
+  '
 else
   skip "limites: são impostos, não só escritos" "sem imagem no store (precisa de rede para o pull) (image ls rc=$_ils_rc: $(head -c 300 <<<"$_ils" | tr '\n' ' '))"
 fi

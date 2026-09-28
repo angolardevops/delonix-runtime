@@ -5543,9 +5543,20 @@ checklist para quem mexer aqui do que como lista de correcções:
   seguinte) espera pelo `process_gone` — agora `wait_until_gone`, partilhado — e, se o prazo
   esgotar, diz-o e mantém o registo** (`DX-8101 container.still_exiting`). Esperar pelo PID 1
   cobre a pidns inteira: o kernel mata e reapa os outros processos dela antes de o PID 1 virar
-  zombie. **Por fechar, sem medição**: o caminho de falha do `spawn` sem userns (o `on_started`
-  que falha) faz `kill` e logo `remove_container_cgroup`, com a mesma forma. Os caminhos de VM
-  (`terminate_vmm`/`wait_vmm_left`) e o `HeldChild` (`kill` + `waitpid`) já esperam.
+  zombie. **Terceira ocorrência, fechada a 2026-09-28**: os cinco `kill → return Err` do `spawn`
+  entre o `clone` e o registo (mapas de userns, `setup_cgroup`, hook `on_started`, nos dois
+  caminhos). O caso era mais largo do que a varredura dizia: o caminho SEM userns (só root, não
+  medido) removia o cgroup com o processo ainda lá dentro, mas o caminho COM userns — o normal
+  em rootless — nem o removia, e o registo nunca é escrito, por isso ninguém voltava a achar a
+  leaf. Medido: `run -d -p` com um `slirp4netns` que falha deixou um `dlx-<id>` VAZIO em 4
+  corridas de 4. Nenhum reapava o filho (zombie num chamador que vive). Agora passam pelo
+  `discard_child`: SIGKILL, `waitpid`, e só então `remove_container_cgroup` — a ordem que os
+  dois caminhos de falha do fim do `spawn` já seguiam. **Gates**: `a_discarded_child_is_reaped_
+  not_left_a_zombie` (vermelho sem o `waitpid`: o filho fica `Z`) e, ao vivo, o check do
+  `e2e.sh` «um arranque recusado depois do clone não deixa o cgroup do container para trás»,
+  com um `slirp4netns` falso no PATH e o id tirado do evento `create` (base: deixa
+  `dlx-<id>`; fix: 5/5 limpo com um escritor contínuo). Os caminhos de VM
+  (`terminate_vmm`/`wait_vmm_left`) e o `HeldChild` (`kill` + `waitpid`) já esperavam.
   **Gate** (#562): `remove_tests` no `delonix-linux` — um processo que sai 1 s DEPOIS do sinal
   e fica vermelho com a espera revertida (verificado). A primeira versão usava um `sleep`
   simples, que morre de imediato com SIGKILL, e **passava com a espera removida**: para um teste

@@ -5735,6 +5735,37 @@ fn wait_for_exec(exec_r: i32, ceiling_ms: i32) -> Option<String> {
     reason
 }
 
+/// Undoes a child that [`spawn`] cloned but will not hand over, in the only
+/// order that leaves nothing behind: SIGKILL, REAP it, and only then remove its
+/// cgroup.
+///
+/// Every failure between the `clone` and the record used to stop at the
+/// SIGKILL. A cgroup v2 leaf cannot be removed while a process is in it, and a
+/// killed process stays in its cgroup until it has finished exiting — which, for
+/// an init that already mounted its overlay, means flushing it to disk first
+/// (state `D`, measured at up to 15 s in the `rm -f` fix). So:
+///
+/// - the userns path returned without removing the cgroup at all, and the one
+///   `setup_cgroup` had just created stayed on the host for good. Measured
+///   2026-09-28: `run -d -p` with a `slirp4netns` that fails (the `on_started`
+///   hook, which runs after the cgroup exists) left an EMPTY `dlx-<id>` behind
+///   on 4 runs out of 4 — the record was never written, so nothing would ever
+///   find it again;
+/// - the path without userns removed it right after the signal, while the
+///   process was still in it, so the removal could fail with `EBUSY` and leave
+///   the same leaf (not measured: that path needs root);
+/// - nobody reaped the child: a caller that lives on (a supervisor that retries,
+///   a server) kept a zombie per failed start.
+///
+/// We are the child's parent, so the wait is a plain `waitpid` — the same one
+/// the two later failure paths of `spawn` already do before their cgroup
+/// removal.
+fn discard_child(container: &Container, pid: Pid) {
+    let _ = kill(pid, Signal::SIGKILL);
+    let _ = waitpid(pid, None);
+    remove_container_cgroup(container);
+}
+
 fn spawn(
     store: &Store,
     container: &mut Container,
@@ -6126,7 +6157,7 @@ fn spawn(
             unsafe {
                 libc::close(w);
             }
-            let _ = kill(pid, Signal::SIGKILL);
+            discard_child(container, pid);
             return Err(e);
         }
         // NETWORK BEFORE THE GO (critical order): the child is still BLOCKED waiting
@@ -6161,7 +6192,7 @@ fn spawn(
             unsafe {
                 libc::close(w);
             }
-            let _ = kill(pid, Signal::SIGKILL);
+            discard_child(container, pid);
             return Err(e);
         }
         cgroup_done = true;
@@ -6173,7 +6204,7 @@ fn spawn(
             libc::close(w);
         }
         if let Some(e) = net_err {
-            let _ = kill(pid, Signal::SIGKILL);
+            discard_child(container, pid);
             return Err(e);
         }
         net_done = true;
@@ -6338,7 +6369,7 @@ fn spawn(
         // (measured 2026-09-15, a cgroupfs pod parent with no controllers enabled). Same
         // teardown the userns path already does above.
         if let Err(e) = setup_cgroup(container, pid.as_raw()) {
-            let _ = kill(pid, Signal::SIGKILL);
+            discard_child(container, pid);
             return Err(e);
         }
     }
@@ -6349,8 +6380,7 @@ fn spawn(
     if !net_done {
         if let Some(hook) = spec.on_started {
             if let Err(e) = hook(pid.as_raw()) {
-                let _ = kill(pid, Signal::SIGKILL);
-                remove_container_cgroup(container);
+                discard_child(container, pid);
                 return Err(e);
             }
         }
@@ -8847,6 +8877,29 @@ mod remove_tests {
             "names what the process is doing: {msg}"
         );
         assert!(store.0.borrow().is_some(), "the record must survive: {msg}");
+    }
+
+    /// **A start that fails after the `clone` reaps its child before it returns.**
+    /// Stopping at the SIGKILL left the process in its cgroup while it exited, so
+    /// the cgroup could not be removed, and left a zombie behind in a caller that
+    /// lives on (see [`discard_child`]). Here the child is ours, as in `spawn`: gone
+    /// from `/proc` — not a zombie — the moment the call returns.
+    #[test]
+    fn a_discarded_child_is_reaped_not_left_a_zombie() {
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("sleep");
+        let c = record_of(&child);
+        let pid = c.pid.unwrap();
+        discard_child(&c, Pid::from_raw(pid));
+        assert!(
+            !std::path::Path::new(&format!("/proc/{pid}")).exists(),
+            "pid {pid} is still in /proc after discard_child (state {:?})",
+            std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()
+        );
+        // `child` is not waited on again: `discard_child` already reaped it.
+        std::mem::forget(child);
     }
 
     /// Without `--force`, a running container is refused and nothing is signalled.
