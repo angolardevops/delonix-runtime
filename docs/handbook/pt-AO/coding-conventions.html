@@ -1037,14 +1037,16 @@ let c = store.update(id_or_name, |c| match f(c) {
   <code>Drop</code>, não numa linha no fim: guarda a pasta num <code>tempfile::TempDir</code> (declarado uma vez no
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> da raiz). Uma raiz que um binário de testes inteiro partilha pelo <code>DELONIX_ROOT</code> usa
   o arrendamento de <code>delonix-sdn/tests/network_alloc_race.rs</code>. Uma pasta com o pid em <code>temp_dir()</code> e
-  um <code>remove_dir_all</code> no fim é o idioma antigo: não o copies. A 2026-09-28 só o teste ao vivo opt-in
-  <code>delonix-vm/tests/provider_live.rs</code> ainda cria uma. Uma árvore extraída de uma camada de imagem
-  pode manter directórios <code>0555</code>, por isso torna-os graváveis antes de a removeres. O <code>tempdir()</code>
-  cria a pasta com o modo <code>0700</code>: se outro uid a tiver de ler (um user namespace, um subuid mapeado,
-  um hipervisor), põe-lhe <code>0755</code>. Um socket Unix precisa de um caminho curto (o <code>sun_path</code> tem 108
-  bytes): usa <code>tempfile::tempdir_in("/tmp")</code>, e não um caminho literal em <code>/tmp</code> com o pid, que o
-  gate não vê. <strong>Imposto (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> chumba o job <code>test</code> por qualquer
-  coisa deixada no seu <code>TMPDIR</code>; a linha de base está vazia desde o #572.</li>
+  um <code>remove_dir_all</code> no fim é o idioma antigo: não o copies. Desde 2026-09-28 nenhum teste o faz.
+  Uma árvore extraída de uma camada de imagem pode manter directórios <code>0555</code>, por isso torna-os
+  graváveis antes de a removeres. O <code>tempdir()</code> cria a pasta com o modo <code>0700</code>: se outro uid a tiver
+  de ler (um user namespace, um subuid mapeado, um hipervisor), põe-lhe <code>0755</code>. Um socket Unix
+  precisa de um caminho curto (o <code>sun_path</code> tem 108 bytes): usa <code>tempfile::tempdir_in("/tmp")</code>
+  (<code>/tmp/.tmpXXXXXX/x.sock</code> tem 22 bytes), e não um caminho literal em <code>/tmp</code> com o pid, que um
+  assert falhado deixa para trás. <strong>Imposto (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> chumba o job
+  <code>test</code> por qualquer coisa que os testes deixem no seu <code>TMPDIR</code> (a linha de base está vazia desde o
+  #572) e por qualquer coisa nova em <code>/tmp</code>, julgada contra uma listagem tirada mesmo antes do
+  <code>cargo test</code> (<code>--before</code>). Os dois recenseamentos correm também quando um teste falha.</li>
 <li><strong>Um teste de regressão tem de falhar com a correcção revertida.</strong> Reverte a correcção, vê o teste
   falhar, e repõe a correcção. Um teste que passa nos dois casos não prova nada, e o AGENTS.md
   regista vários (uma verificação de código de saída que o <code>1</code> não conseguia distinguir; um cenário

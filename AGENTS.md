@@ -5657,25 +5657,29 @@ checklist para quem mexer aqui do que como lista de correcções:
   produção e de teste; nos testes, o gate apanha-os no caminho verde;
 - **uma regra citada num comentário não é uma regra do repo** — os testes do `mapped.rs` (desde
   2026-08-17) usavam `temp_dir()` + pid «porque este crate não tem `dev-dependencies` e a regra do
-  repo é não acrescentar dependências — nem para testes». Essa regra não está escrita no
-  AGENTS.md, no `docs/dev/coding-conventions.md` nem em ADR nenhum, e o `tempfile` já era
-  dev-dependency de 7 das crates do workspace (o commit e o PR do #572 dizem 8, por contar a
-  declaração na raiz). O idioma que o comentário justificava deixava 4 pastas
-  por corrida. **Regra: antes de obedecer a uma regra citada num comentário, encontra-a escrita**;
-  se não estiver, o comentário é uma hipótese de quem o escreveu. E quando a regra certa existe
-  só como prática, escreve-a: o #572 deixou-a em `coding-conventions.md` §9 («A test removes its
-  temporary directory on every exit»), que antes citava o `tmp_dir(tag)` sem guarda como a
-  convenção observada. O idioma antigo estava em 204 linhas de código de teste; a migração de
-  2026-09-28 passou 195 delas ao `TempDir` (e mais 2 que o `grep` não via, por guardarem o
-  `temp_dir()` numa variável: 197 no total). Das 9 que ficaram, 1 ainda cria pasta: o teste ao vivo opt-in
-  `delonix-vm/tests/provider_live.rs`, que entrega a pasta a um hipervisor que pode correr com
-  outro uid (o `tempdir()` cria-a com `0700`) e que não se pode validar sem esse hipervisor. (O do
-  `delonix-proxmox` esperou que a sessão que tinha o ficheiro aberto fundisse o #579.) As outras 8 não criam nada que se apague:
-  caminhos que têm de faltar, caminhos esperados que a produção calcula, código de produção e o
-  arrendamento do `netdef_naming`. Numa corrida verde a bateria deixava 0 antes e 0 depois (2419
-  testes, as mesmas listas); a diferença está na falha: com um `panic!` provocado depois de a pasta
-  existir (`store_roundtrip_and_resolve`, `delonix-state`), a base deixa `dlx-sec-<pid>` e a
-  migração não deixa nada, com rc=101 nas duas (verificado);
+  repo é não acrescentar dependências — nem para testes». Essa regra não está escrita no AGENTS.md,
+  no `docs/dev/coding-conventions.md` nem em ADR nenhum, e o `tempfile` já era dev-dependency de 7
+  das crates do workspace (o commit e o PR do #572 dizem 8, por contar a declaração na raiz). O
+  idioma que o comentário justificava deixava 4 pastas por corrida. **Regra: antes de obedecer a uma
+  regra citada num comentário, encontra-a escrita**; se não estiver, o comentário é uma hipótese de
+  quem o escreveu. E quando a regra certa existe só como prática, escreve-a: o #572 deixou-a em
+  `coding-conventions.md` §9 («A test removes its temporary directory on every exit»), que antes
+  citava o `tmp_dir(tag)` sem guarda como a convenção observada. O idioma antigo estava em 204
+  linhas de código de teste; a migração de 2026-09-28 passou 195 delas ao `TempDir` (e mais 2 que o
+  `grep` não via, por guardarem o `temp_dir()` numa variável: 197 no total). Das 9 que ficaram, 1
+  ainda cria pasta: o teste ao vivo opt-in `delonix-vm/tests/provider_live.rs`, que entrega a pasta
+  a um hipervisor que pode correr com outro uid (o `tempdir()` cria-a com `0700`) e que não se pode
+  validar sem esse hipervisor. Migrado a seguir, com `0755` na pasta (o QEMU de `qemu:///system`,
+  quando o teste corre como root, é outro uid): ao vivo em `qemu:///session` o libvirt fez o ciclo
+  completo antes e depois, sem deixar nada; com um `panic!` provocado depois de a pasta e o disco
+  existirem, antes ficava `dlx-p4-substitution-spike-<pid>`, depois nada. O caminho `qemu:///system`
+  (root) não foi corrido. (O do `delonix-proxmox` esperou que a sessão que tinha o ficheiro aberto
+  fundisse o #579.) As outras 8 não criam nada que se apague: caminhos que têm de faltar, caminhos
+  esperados que a produção calcula, código de produção e o arrendamento do `netdef_naming`. Numa
+  corrida verde a bateria deixava 0 antes e 0 depois (2419 testes, as mesmas listas); a diferença
+  está na falha: com um `panic!` provocado depois de a pasta existir (`store_roundtrip_and_resolve`,
+  `delonix-state`), a base deixa `dlx-sec-<pid>` e a migração não deixa nada, com rc=101 nas duas
+  (verificado);
 - **duas cópias do mesmo repo não são dois builds** — a prova acima deu primeiro o resultado
   ERRADO: a cópia migrada também deixava `dlx-sec-<pid>`. O log não tinha `Compiling
   delonix-state`: o cargo tinha corrido o binário da BASE. As duas cópias vinham de `git archive`,
@@ -5699,13 +5703,32 @@ checklist para quem mexer aqui do que como lista de correcções:
   Unix tem 108 bytes e o `TMPDIR` de uma sessão de agente já passa dos 90: `delonix-cri/tests/
   grpc_status.rs`, `delonix-node-api/tests/grpc_list_providers.rs` e `delonix-linux/tests/
   cgroup_parent.rs`. Medido a 2026-09-28: no caminho verde, nenhum dos três deixa nada em `/tmp`
-  nem no `TMPDIR`. O `cgroup_parent` apaga a raiz com um guarda `Drop`; os dois de gRPC apagam o
-  socket na ÚLTIMA linha, por isso uma falha deixa um socket em `/tmp` que o gate não vê (por
-  leitura, não provocado). Dos 161 literais `"/tmp/…"` em código de teste, os outros 158 são
-  dados que nunca se criam. **Regra: um caminho curto para um socket é `tempfile::tempdir_in
-  ("/tmp")` (`/tmp/.tmpXXXXXX/x.sock` = 22 bytes), curto E guardado, nunca um literal com o
-  pid.** Gate: nenhum ainda — o `/tmp` do runner teria de ser recenseado antes e depois do
-  `cargo test`;
+  nem no `TMPDIR`. O `cgroup_parent` apaga a raiz com um guarda `Drop`; os dois de gRPC apagavam o
+  socket na ÚLTIMA linha, por isso uma falha deixava um socket em `/tmp` que o gate não via —
+  provocado depois com um `panic!` logo a seguir ao socket existir: ficaram `/tmp/dlx-grpc-tN.sock`
+  e `/tmp/dlx-node-tN.sock`; com o `tempdir_in("/tmp")`, zero entradas novas (um
+  `CARGO_TARGET_DIR` por lado, `Compiling` dos dois crates em cada log). Dos 161 literais
+  `"/tmp/…"` em código de teste, os outros 158 são dados que nunca se criam. **Regra: um caminho
+  curto para um socket é `tempfile::tempdir_in("/tmp")` (`/tmp/.tmpXXXXXX/x.sock` = 22 bytes),
+  curto E guardado, nunca um literal com o pid.** Gate: o job `test` lista o `/tmp` mesmo antes
+  do `cargo test` e o `tmp_roots_gate.py --dir /tmp --before <listagem>` chumba qualquer entrada
+  nova (nome exacto que já lá estava não conta; o resto normaliza-se e julga-se contra a mesma
+  baseline vazia). Os dois recenseamentos correm também quando um teste falha — é aí que uma
+  limpeza na última linha não corre. Com a correcção revertida e o `panic!`, o gate chumba com os
+  dois sockets;
+- **um gate depois dos testes não é um gate sobre os testes que falharam** — um passo de CI a
+  seguir ao `cargo test` herda a condição por omissão do GitHub (`if: success()`): se um teste
+  falha, o passo SALTA. Do #569 (13:46Z) ao #585 (20:57Z) de 2026-09-28, o recenseamento do
+  `TMPDIR` foi um passo assim, e saltou precisamente na corrida para que existe: o primeiro job
+  `test` do #577 (15:16Z) teve `cargo test` a falhar e o passo do gate `skipped` (medido nos
+  passos do job). Um teste que falha antes da última linha é quando uma limpeza na última linha
+  não corre; um gate que só corre com tudo verde vê o caminho que já limpava. O #585 pôs aos dois
+  recenseamentos `if: !cancelled() && (outcome == success || outcome == failure)`. **Regra: um
+  passo que existe para ver o que uma falha deixa corre depois da falha, e isso diz-se no `if:`,
+  não se presume.** Gate: `scripts/test_tmp_roots_gate.py` lê o `ci.yml` e chumba se um passo que
+  chama o `tmp_roots_gate.py` não correr depois de uma falha, ou se deixar de haver os dois
+  recenseamentos — verificado com os `if:` retirados e com o `ci.yml` de antes do #585 (rc=1 nos
+  dois);
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para

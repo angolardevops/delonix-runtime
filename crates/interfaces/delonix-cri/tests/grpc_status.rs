@@ -18,16 +18,20 @@ use delonix_cri::cri::{
     ListMetricDescriptorsRequest, ListPodSandboxMetricsRequest, StatusRequest, VersionRequest,
 };
 
-/// Um caminho de socket CURTO — o `sun_path` do `AF_UNIX` são 108 bytes, e o
-/// `$TMPDIR` de uma sessão de agente já passa dos 90.
-fn sock_curto() -> String {
-    format!("/tmp/dlx-grpc-t{}.sock", std::process::id())
+/// A SHORT socket path: `sun_path` is 108 bytes and an agent session's
+/// `$TMPDIR` is already past 90, so the directory lives in `/tmp` itself
+/// (`/tmp/.tmpXXXXXX/x.sock`, 22 bytes). The `TempDir` removes it on every
+/// exit, a failed assert included, which a `remove_file` on the last line
+/// did not.
+fn short_sock() -> (tempfile::TempDir, String) {
+    let dir = tempfile::tempdir_in("/tmp").expect("a directory under /tmp");
+    let sock = dir.path().join("x.sock").to_str().unwrap().to_owned();
+    (dir, sock)
 }
 
 #[tokio::test]
 async fn o_status_chega_pelo_transporte_grpc_a_serio() {
-    let sock = sock_curto();
-    let _ = std::fs::remove_file(&sock);
+    let (_sock_dir, sock) = short_sock();
     let base_dir = tempfile::tempdir().unwrap();
     let base = base_dir.path().to_path_buf();
 
@@ -143,7 +147,6 @@ async fn o_status_chega_pelo_transporte_grpc_a_serio() {
     );
 
     drop(cli);
-    let _ = std::fs::remove_file(&sock);
     // O servidor não tem paragem limpa (é um `serve_blocking`); o processo de
     // teste termina e leva-o. Não se faz `join`, que penduraria.
     drop(servidor);

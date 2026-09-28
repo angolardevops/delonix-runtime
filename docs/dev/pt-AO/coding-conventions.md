@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:71fb0e69fbfb794403a15eba04eb4c0f3e6586101e2832a74e19937db534af69 -->
+<!-- translated-from: coding-conventions.md sha256:17684e2bd319eed3fd3635fa9f0cf0c6bf13df67d1293ff7da3fba96e25e4bb7 -->
 # Convenções de código
 
 **Antes de leres:** [Introdução ao Rust](rust-primer.md), [Arquitectura](architecture.md) e [As crates](crates.md) — as regras abaixo referem-se a camadas, portas e crates pelo nome.
@@ -691,14 +691,16 @@ recusar o que ele próprio não suporta.
   `Drop`, não numa linha no fim: guarda a pasta num `tempfile::TempDir` (declarado uma vez no
   `Cargo.toml` da raiz). Uma raiz que um binário de testes inteiro partilha pelo `DELONIX_ROOT` usa
   o arrendamento de `delonix-sdn/tests/network_alloc_race.rs`. Uma pasta com o pid em `temp_dir()` e
-  um `remove_dir_all` no fim é o idioma antigo: não o copies. A 2026-09-28 só o teste ao vivo opt-in
-  `delonix-vm/tests/provider_live.rs` ainda cria uma. Uma árvore extraída de uma camada de imagem
-  pode manter directórios `0555`, por isso torna-os graváveis antes de a removeres. O `tempdir()`
-  cria a pasta com o modo `0700`: se outro uid a tiver de ler (um user namespace, um subuid mapeado,
-  um hipervisor), põe-lhe `0755`. Um socket Unix precisa de um caminho curto (o `sun_path` tem 108
-  bytes): usa `tempfile::tempdir_in("/tmp")`, e não um caminho literal em `/tmp` com o pid, que o
-  gate não vê. **Imposto (gate)**: `scripts/tmp_roots_gate.py` chumba o job `test` por qualquer
-  coisa deixada no seu `TMPDIR`; a linha de base está vazia desde o #572.
+  um `remove_dir_all` no fim é o idioma antigo: não o copies. Desde 2026-09-28 nenhum teste o faz.
+  Uma árvore extraída de uma camada de imagem pode manter directórios `0555`, por isso torna-os
+  graváveis antes de a removeres. O `tempdir()` cria a pasta com o modo `0700`: se outro uid a tiver
+  de ler (um user namespace, um subuid mapeado, um hipervisor), põe-lhe `0755`. Um socket Unix
+  precisa de um caminho curto (o `sun_path` tem 108 bytes): usa `tempfile::tempdir_in("/tmp")`
+  (`/tmp/.tmpXXXXXX/x.sock` tem 22 bytes), e não um caminho literal em `/tmp` com o pid, que um
+  assert falhado deixa para trás. **Imposto (gate)**: `scripts/tmp_roots_gate.py` chumba o job
+  `test` por qualquer coisa que os testes deixem no seu `TMPDIR` (a linha de base está vazia desde o
+  #572) e por qualquer coisa nova em `/tmp`, julgada contra uma listagem tirada mesmo antes do
+  `cargo test` (`--before`). Os dois recenseamentos correm também quando um teste falha.
 - **Um teste de regressão tem de falhar com a correcção revertida.** Reverte a correcção, vê o teste
   falhar, e repõe a correcção. Um teste que passa nos dois casos não prova nada, e o AGENTS.md
   regista vários (uma verificação de código de saída que o `1` não conseguia distinguir; um cenário

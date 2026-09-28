@@ -33,9 +33,21 @@ in a guard that removes it on `Drop` (`tempfile::TempDir`, or the lease of
 `network_alloc_race.rs` for a root shared by a whole test binary), so the
 baseline is EMPTY and any entry at all is a new leak.
 
+The TMPDIR is not `/tmp`. A Unix socket's `sun_path` is 108 bytes, so a test
+that binds one puts it under `/tmp` itself, where the TMPDIR census never
+looks: the two gRPC tests used a pid-named `/tmp/dlx-*-t<pid>.sock` removed
+only on their last line, so a failed assert left it behind (provoked and
+measured 2026-09-28). `/tmp` on the runner is not empty, so it is judged with
+`--before`, a listing taken just before `cargo test` (one name per line, as
+`ls -A` prints it): an entry that was already there by its exact name is not
+the tests', and every other one is judged like the TMPDIR, against the same
+empty baseline.
+
     python3 scripts/tmp_roots_gate.py --dir "$TMPDIR"            # judge
     python3 scripts/tmp_roots_gate.py --dir "$TMPDIR" --list     # show only
     python3 scripts/tmp_roots_gate.py --dir "$TMPDIR" --update   # lower it
+    ls -A /tmp > before.txt; cargo test …
+    python3 scripts/tmp_roots_gate.py --dir /tmp --before before.txt
 """
 import argparse
 import json
@@ -79,14 +91,31 @@ def main(argv=None) -> int:
     mode.add_argument("--list", action="store_true")
     mode.add_argument("--update", action="store_true")
     ap.add_argument("--baseline", default=str(BASELINE))
+    ap.add_argument(
+        "--before",
+        help="a listing of --dir taken before the tests (one name per line); "
+        "those exact names are not counted",
+    )
     args = ap.parse_args(argv)
+    if args.before and args.update:
+        # The baseline is the TMPDIR's; what a shared /tmp holds does not write it.
+        ap.error("--update does not take --before")
 
     d = Path(args.dir)
     if not d.is_dir():
         # A missing dir would read as "nothing leaked": a green that measured nothing.
         print(f"FAIL  {d} is not a directory — the tests did not run with this TMPDIR", file=sys.stderr)
         return 2
-    found = census(p.name for p in d.iterdir())
+    already = set()
+    if args.before:
+        b = Path(args.before)
+        if not b.is_file():
+            # Without the listing, everything in a shared /tmp would be judged,
+            # or, worse, the step that wrote it did not run at all.
+            print(f"FAIL  {b} is not a file — no listing of {d} from before the tests", file=sys.stderr)
+            return 2
+        already = {line for line in b.read_text().splitlines() if line}
+    found = census(p.name for p in d.iterdir() if p.name not in already)
 
     for name, n in sorted(found.items()):
         print(f"{n:4}  {name}")
