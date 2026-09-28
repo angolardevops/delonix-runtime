@@ -5579,6 +5579,22 @@ checklist para quem mexer aqui do que como lista de correcções:
   O `sandbox-teardown` apanhou logo uma segunda classe de fuga, fora deste fix (um `container
   start <id>` vivo, em estado S, nascido do `netns down`/`netns up` do fim do
   `pod_holder_respawn`); ficou em investigação à parte;
+- **não aparecer numa varredura pela ordem errada não é estar certo** — a varredura dos
+  SIGKILL feita no #563 procurava «`kill` e logo a limpeza» e deu como aberto o único sítio do
+  `spawn` que tinha essa forma (o caminho sem userns, que só corre como root). Os outros quatro
+  não apareciam porque não limpavam NADA, e eram o caso pior: no caminho com userns, o normal em
+  rootless, o cgroup ficava para sempre (medido no #564, 4 corridas de 4). **Regra: numa
+  varredura de «X e logo Y», listar também os sítios que fazem X e NÃO fazem Y.** A limpeza em
+  falta não tem ordem para estar errada, por isso não aparece a quem procura a ordem;
+- **uma falha provocada não é a falha que se quer testar** — para exercitar o caminho de falha
+  do `spawn` DEPOIS do `clone`, a primeira tentativa foi publicar uma porta já ocupada. O `run`
+  devolveu rc=1, mas quem recusou foi a pré-verificação da CLI, ANTES do `spawn`: não nasceu
+  processo nem cgroup, e um gate construído assim passaria no binário com o defeito. O disparo
+  que passa pelas pré-verificações é a própria dependência a falhar, com um `slirp4netns` falso
+  no `PATH` que sai com 1 (o hook `on_started` corre depois de o cgroup existir). **Regra:
+  antes de confiar num gate de caminho de falha, confirmar que a falha chegou ao sítio que se
+  quer medir.** O gate do `e2e.sh` fá-lo pelo evento `create`: sem ele, o `run` falhou antes do
+  `clone` e o check FALHA em vez de passar por nada ter sobrado;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
