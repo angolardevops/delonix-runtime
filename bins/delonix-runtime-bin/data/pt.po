@@ -14269,6 +14269,25 @@ msgstr "A imagem seria enviada para o storage de importação do nó, e esse sto
 msgid "Free space on the storage, or point `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` in providers.yaml at a storage with room."
 msgstr "Liberta espaço no storage, ou aponta o `DELONIX_PROXMOX_IMPORT_STORAGE` / `storage.import` do providers.yaml para um storage com espaço."
 
+# DX-6513 / DX-6514 — a container archive staged on a Proxmox node (ADR-0058)
+msgid "the node's storage does not accept container archives"
+msgstr "o storage do nó não aceita arquivos de container"
+
+msgid "A system container on a Proxmox node is created from an OCI archive the engine uploads to a storage of the node as a container template, and the node accepts that only on a storage whose content types include `vztmpl` (ADR-0058). The engine never changes a storage's content types: that is administering the node."
+msgstr "Um container de sistema num nó Proxmox é criado a partir de um arquivo OCI que o motor envia para um storage do nó como template de container, e o nó só o aceita num storage cujos tipos de conteúdo incluam `vztmpl` (ADR-0058). O motor nunca muda os tipos de conteúdo de um storage: isso é administrar o nó."
+
+msgid "Enable it on the node (`pvesm set <storage> --content <current types>,vztmpl`, or Datacenter › Storage › Edit › Content), or use a storage that has it."
+msgstr "Activa-o no nó (`pvesm set <storage> --content <tipos actuais>,vztmpl`, ou Datacenter › Storage › Edit › Content), ou usa um storage que o tenha."
+
+msgid "the node's storage has no room for the container archive"
+msgstr "o storage do nó não tem espaço para o arquivo de container"
+
+msgid "The container archive would be uploaded to a storage of the node, and that storage has less free space than the archive. The upload is refused before it starts, because the node's own refusal would come after the bytes had been sent."
+msgstr "O arquivo de container seria enviado para um storage do nó, e esse storage tem menos espaço livre do que o arquivo. O envio é recusado antes de começar, porque a recusa do próprio nó só viria depois de os bytes terem sido enviados."
+
+msgid "Free space on the storage, or use a storage with room."
+msgstr "Liberta espaço no storage, ou usa um storage com espaço."
+
 # DX-1538 / DX-5507 — vm move --node (vm.migration.cold/live, ADR-0053)
 msgid "invalid node to move the VM to"
 msgstr "nó inválido para onde mover a VM"

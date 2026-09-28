@@ -2921,3 +2921,153 @@ fn an_image_without_room_or_asked_to_shrink_is_refused_before_the_upload() {
     assert!(err.to_string().contains("never shrink"), "{err}");
     assert_eq!(node.log().len(), before, "the refusal reached the node");
 }
+
+// ===========================================================================
+// ADR-0058 / plan 63 slice 2: a container archive staged as `vztmpl`
+// ===========================================================================
+
+const ARCHIVE_DIGEST: &str =
+    "sha256:a14b44155e4b8cefde8433bcf0f6fb5f460169571f5bff684d06572a98759035";
+const ARCHIVE_VOLID: &str =
+    "local:vztmpl/dlx-a14b44155e4b8cefde8433bcf0f6fb5f460169571f5bff684d06572a98759035.tar";
+
+fn tiny_archive(dir: &std::path::Path) -> std::path::PathBuf {
+    let path = dir.join("image.tar");
+    std::fs::write(&path, b"delonix test archive payload").unwrap();
+    path
+}
+
+fn uploads_of(node: &MockNode) -> Vec<String> {
+    node.log()
+        .into_iter()
+        .filter(|s| s.method == "POST" && s.path == LOCAL_UPLOAD)
+        .map(|s| s.body)
+        .collect()
+}
+
+/// A storage without `vztmpl`, or without room: refused before a byte is sent.
+#[test]
+fn an_archive_is_refused_before_the_upload_on_a_storage_without_vztmpl_or_room() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = tiny_archive(dir.path());
+
+    let node = MockNode::start(script(&[(
+        "GET",
+        LOCAL_STATUS,
+        status_reply("images,import", 1 << 40),
+    )]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let err = client
+        .stage_template("local", &archive, ARCHIVE_DIGEST)
+        .unwrap_err();
+    assert_eq!(err.number(), 6513, "{err}");
+    assert!(err.to_string().contains("pvesm set local"), "{err}");
+    assert!(uploads_of(&node).is_empty(), "the archive was uploaded");
+
+    let node = MockNode::start(script(&[
+        ("GET", LOCAL_STATUS, status_reply("vztmpl", 4)),
+        ("GET", LOCAL_CONTENT, ok_data("[]")),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let err = client
+        .stage_template("local", &archive, ARCHIVE_DIGEST)
+        .unwrap_err();
+    assert_eq!(err.number(), 6514, "{err}");
+    assert!(uploads_of(&node).is_empty(), "the archive was uploaded");
+}
+
+/// The node already has the archive under its digest name: not sent again.
+#[test]
+fn an_archive_the_node_already_has_is_not_uploaded_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let archive = tiny_archive(dir.path());
+    let node = MockNode::start(script(&[
+        ("GET", LOCAL_STATUS, status_reply("vztmpl,iso", 1 << 40)),
+        (
+            "GET",
+            LOCAL_CONTENT,
+            ok_data(&format!(
+                r#"[{{"volid":"{ARCHIVE_VOLID}","content":"vztmpl"}}]"#
+            )),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let staged = client
+        .stage_template("local", &archive, ARCHIVE_DIGEST)
+        .expect("stage");
+    assert_eq!(staged.volid, ARCHIVE_VOLID);
+    assert!(!staged.uploaded);
+    assert!(
+        uploads_of(&node).is_empty(),
+        "the archive was uploaded again"
+    );
+    let listed = node
+        .log()
+        .into_iter()
+        .find(|s| s.path == LOCAL_CONTENT)
+        .expect("the listing");
+    assert!(listed.query.contains("content=vztmpl"), "{}", listed.query);
+}
+
+/// Uploaded once as `vztmpl`, named by the manifest digest, with the FILE's
+/// sha256; a node that answers «checksum mismatch» fails the stage.
+#[test]
+fn an_archive_is_uploaded_as_vztmpl_with_its_checksum_and_a_mismatch_fails() {
+    const UPID: &str = "UPID:pve:00000300:00000400:6AB90010:imgcopy::root@pam:";
+    let dir = tempfile::tempdir().unwrap();
+    let archive = tiny_archive(dir.path());
+    let sha = sha256_hex(&archive);
+    let status = format!("/nodes/pve/tasks/{UPID}/status");
+
+    let node = MockNode::start(script(&[
+        ("GET", LOCAL_STATUS, status_reply("vztmpl", 1 << 40)),
+        ("GET", LOCAL_CONTENT, ok_data("[]")),
+        ("POST", LOCAL_UPLOAD, ok_data(&format!("\"{UPID}\""))),
+        (
+            "GET",
+            leak(status.clone()),
+            ok_data(r#"{"status":"stopped","exitstatus":"OK"}"#),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let staged = client
+        .stage_template("local", &archive, ARCHIVE_DIGEST)
+        .expect("stage");
+    assert!(staged.uploaded);
+    assert_eq!(staged.volid, ARCHIVE_VOLID);
+    let bodies = uploads_of(&node);
+    assert_eq!(bodies.len(), 1, "uploaded exactly once");
+    for want in [
+        "name=\"content\"\r\n\r\nvztmpl\r\n".to_string(),
+        format!("name=\"checksum\"\r\n\r\n{sha}\r\n"),
+        format!(
+            "filename=\"{}\"",
+            ARCHIVE_VOLID.trim_start_matches("local:vztmpl/")
+        ),
+        "delonix test archive payload".to_string(),
+    ] {
+        assert!(bodies[0].contains(&want), "upload body lacks {want:?}");
+    }
+
+    let mismatch = format!(
+        "checksum mismatch: got '{sha}' != expect '{}'",
+        "0".repeat(64)
+    );
+    let node = MockNode::start(script(&[
+        ("GET", LOCAL_STATUS, status_reply("vztmpl", 1 << 40)),
+        ("GET", LOCAL_CONTENT, ok_data("[]")),
+        ("POST", LOCAL_UPLOAD, ok_data(&format!("\"{UPID}\""))),
+        (
+            "GET",
+            leak(status),
+            ok_data(&format!(
+                r#"{{"status":"stopped","exitstatus":"{mismatch}"}}"#
+            )),
+        ),
+    ]));
+    let client = Client::connect_with(&token_target(&node), fast()).unwrap();
+    let err = client
+        .stage_template("local", &archive, ARCHIVE_DIGEST)
+        .unwrap_err();
+    assert!(err.to_string().contains("checksum mismatch"), "{err}");
+}

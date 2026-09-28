@@ -4535,8 +4535,9 @@ fn a_vm_boots_from_a_local_store_image_uploaded_and_imported() {
     // wrong sha256 fail the upload, and nothing is kept under that name.
     let bogus = format!("delonix-badsum{}.qcow2", std::process::id() % 10000);
     let err = client
-        .upload_import(
+        .upload(
             &import,
+            delonix_proxmox::UploadContent::Import,
             std::path::Path::new(&image),
             &bogus,
             &"0".repeat(64),
@@ -4550,6 +4551,89 @@ fn a_vm_boots_from_a_local_store_image_uploaded_and_imported() {
 
     b.destroy(vmdir, &vm).expect("destroy");
     assert_eq!(client.locate_vm(vmid).unwrap(), None, "an orphan was left");
+}
+
+/// ADR-0058 / plan 63 slice 2: a container archive is staged as `vztmpl`,
+/// named by a manifest digest, with its sha256 for the node to check. The
+/// node's `imgcopy` task must end OK and list it; a second staging uploads
+/// nothing; and the same bytes announced with a wrong sha256 fail with the
+/// node's «checksum mismatch», keeping nothing. The archive is a stand-in
+/// (the node does not parse it on upload; slice 1 proved it parses the
+/// engine's OCI archive on create). It stays on the storage, as the cache;
+/// its bytes are fixed, so a later run takes the cached path.
+#[test]
+fn a_container_archive_is_staged_as_vztmpl_and_a_wrong_checksum_is_refused() {
+    let Some(t) = target() else {
+        return;
+    };
+    init_log();
+    let storage = t.import_storage.clone().unwrap_or_else(|| "local".into());
+    let b = backend(&t).expect("connect");
+    let client = b.client();
+    let dir = tempfile::tempdir().expect("tempdir");
+    let archive = dir.path().join("archive.tar");
+    // Fixed bytes, so every run names the same file: the first run uploads
+    // it, later runs find it (the cache), and nothing piles up on the node.
+    let payload = "delonix plan 63 slice 2 live archive".to_string();
+    std::fs::write(&archive, payload.as_bytes()).unwrap();
+    let digest = {
+        use sha2::Digest;
+        let hex: String = sha2::Sha256::digest(payload.as_bytes())
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        format!("sha256:{hex}")
+    };
+
+    let before = client
+        .list_content(&storage, delonix_proxmox::UploadContent::Vztmpl)
+        .expect("list");
+    let staged = client
+        .stage_template(&storage, &archive, &digest)
+        .expect("stage the archive");
+    assert_eq!(
+        staged.uploaded,
+        !before.contains(&staged.volid),
+        "uploaded must mean «was not there before»: {staged:?}"
+    );
+    let listed = client
+        .list_content(&storage, delonix_proxmox::UploadContent::Vztmpl)
+        .expect("list");
+    assert!(
+        listed.contains(&staged.volid),
+        "{staged:?} not in {listed:?}"
+    );
+
+    let again = client
+        .stage_template(&storage, &archive, &digest)
+        .expect("stage again");
+    assert!(
+        !again.uploaded,
+        "the same archive was uploaded a second time"
+    );
+    assert_eq!(again.volid, staged.volid);
+
+    let bogus = format!("dlx-badsum{}.tar", std::process::id() % 10000);
+    let err = client
+        .upload(
+            &storage,
+            delonix_proxmox::UploadContent::Vztmpl,
+            &archive,
+            &bogus,
+            &"0".repeat(64),
+        )
+        .expect_err("a wrong checksum must fail the upload");
+    assert!(
+        err.to_string().contains("checksum mismatch"),
+        "the refusal does not say why: {err}"
+    );
+    let listed = client
+        .list_content(&storage, delonix_proxmox::UploadContent::Vztmpl)
+        .expect("list");
+    assert!(
+        !listed.contains(&format!("{storage}:vztmpl/{bogus}")),
+        "the node kept a file whose checksum did not match: {listed:?}"
+    );
 }
 
 /// Audit 62 §6 P1 / ADR-0059 D1.5 against the real cluster, through the
