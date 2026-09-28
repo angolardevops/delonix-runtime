@@ -14,7 +14,7 @@
 //! próprio `open`, logo threads do mesmo processo excluem-se de facto.
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 /// `DELONIX_ROOT` é lido do ambiente do PROCESSO. Definir por-teste faz os
 /// testes paralelos lutarem pela mesma variável, por isso é uma raiz por
@@ -28,6 +28,23 @@ fn raiz() -> &'static std::path::PathBuf {
         std::env::set_var("DELONIX_ROOT", &d);
         d
     })
+}
+
+/// The three tests share the root and run in parallel. The ones that CREATE
+/// networks may overlap each other — that is the race they measure — so they
+/// take this lock shared; the one that INSPECTS the registry folder takes it
+/// exclusive, to see it quiet. Without it, it caught the
+/// `.<record>.json.<pid>.<n>.tmp` another test's `write_atomic` had open at
+/// that instant (CI `test (arm64)`, 2026-09-28; 506/800 runs locally with the
+/// CPU constrained).
+static REGISTRY: RwLock<()> = RwLock::new(());
+
+fn writing() -> RwLockReadGuard<'static, ()> {
+    REGISTRY.read().unwrap_or_else(|e| e.into_inner())
+}
+
+fn quiet() -> RwLockWriteGuard<'static, ()> {
+    REGISTRY.write().unwrap_or_else(|e| e.into_inner())
 }
 
 /// Cria `n` redes em paralelo e devolve os `NetDef` resultantes.
@@ -56,6 +73,7 @@ fn criar_em_paralelo(prefixo_do_nome: &str, n: usize) -> Vec<delonix_sdn::infra:
 
 #[test]
 fn criacoes_concorrentes_nao_partilham_o_mesmo_16() {
+    let _g = writing();
     let defs = criar_em_paralelo("corrida", 16);
 
     let prefixos: HashSet<&str> = defs.iter().map(|d| d.prefix.as_str()).collect();
@@ -91,6 +109,7 @@ fn criacoes_concorrentes_nao_partilham_o_mesmo_16() {
 /// `criacoes_concorrentes_nao_partilham_o_mesmo_16`.
 #[test]
 fn o_mesmo_nome_em_paralelo_converge_numa_so_rede() {
+    let _g = writing();
     raiz();
     const N: usize = 12;
     let barreira = std::sync::Arc::new(std::sync::Barrier::new(N));
@@ -137,6 +156,13 @@ fn o_mesmo_nome_em_paralelo_converge_numa_so_rede() {
 fn a_fechadura_nao_entra_no_registo_de_redes() {
     // A fechadura vive ao LADO do registo. Se caísse lá dentro, `network_list`
     // teria de a saltar por acidente (por falhar o parse) em vez de por desenho.
+    //
+    // The assertion stays STRICT — anything that is not `.json` fails, temps
+    // included — and it is the quiet folder that makes it deterministic, not an
+    // exemption for `*.tmp`. With the writes finished, a temp still there is no
+    // longer in flight: it is junk `write_atomic` left behind, and that must
+    // break this test too.
+    let _g = quiet();
     let _ = criar_em_paralelo("vizinha", 2);
     let dir = raiz().join("ingress").join("networks");
     for e in std::fs::read_dir(&dir).unwrap().flatten() {
