@@ -113,6 +113,29 @@ neton() {
   dlx container exec "$1" ping -c1 -W2 "$gw" 2>/dev/null | grep -q "1 packets received"
 }
 
+# Remove os pods nomeados e MEDE que os membros saíram do `container ps -a`.
+# Imprime os membros que sobraram; rc 0 = limpo, 1 = sobrou algum, 2 = o
+# `ps -a` não respondeu (um `ps` vazio por falha não pode passar por limpo).
+#
+# Um pod por chamada: o `delete pod` pára no primeiro que falha, e uma limpeza
+# não pode deixar os seguintes de pé por causa de um que nunca chegou a existir.
+# Esta limpeza era `dlx pod rm -f`, depois de o `pod rm` ter saído da CLI para o
+# `delete pod`: falhava em silêncio (>/dev/null), os pods ficavam vivos até ao
+# `teardown_quiet`, e um cenário vazava para o seguinte. Por isso mede-se.
+#
+#   pod_cleanup "pa pa2 pb" pa-c0 pa2-c0 pb-c0
+pod_cleanup() {
+  local pods=$1; shift
+  local p ps m left=""
+  for p in $pods; do dlx delete pod "$p" --force >/dev/null 2>&1; done
+  ps=$(dlx container ps -a 2>/dev/null) || return 2
+  for m in "$@"; do
+    printf '%s\n' "$ps" | grep -qw -- "$m" && left+="$m "
+  done
+  printf '%s' "$left"
+  [ -z "$left" ]
+}
+
 setup() {
   teardown_quiet
   mkdir -p "$SANDBOX/root" "$SANDBOX/run"
@@ -696,7 +719,21 @@ scen_pod_namespace_isolation() {
       bad "pod-namespace-isolation" "same-namespace bloqueado — o isolamento é demasiado agressivo"
     fi
   fi
-  for n in pa pa2 pb; do dlx pod rm -f "$n" >/dev/null 2>&1; done
+  # A limpeza é uma propriedade deste cenário, com veredicto próprio: os pods
+  # que ficassem vivos entravam no seguinte com IPs e cadeias de isolamento.
+  local listed left rc
+  listed=$(dlx container ps -a 2>/dev/null | grep -cwE -- 'pa-c0|pa2-c0|pb-c0')
+  left=$(pod_cleanup "pa pa2 pb" pa-c0 pa2-c0 pb-c0); rc=$?
+  log "limpeza: ${listed:-0} membro(s) antes · sobraram: ${left:-nenhum}"
+  if [ "$rc" -eq 2 ]; then
+    bad "pod-namespace-isolation-cleanup" "\`container ps -a\` não respondeu depois do \`delete pod\`"
+  elif [ "${listed:-0}" -eq 0 ]; then
+    skip "pod-namespace-isolation-cleanup" "nenhum membro listado antes da limpeza — nada a medir"
+  elif [ "$rc" -ne 0 ]; then
+    bad "pod-namespace-isolation-cleanup" "\`delete pod --force\` deixou membros no \`container ps -a\`: $left"
+  else
+    ok "pod-namespace-isolation-cleanup (\`delete pod --force\` removeu os $listed membros)"
+  fi
   rm -rf "$d"
 }
 
@@ -900,7 +937,7 @@ scen_pod_holder_respawn() {
   sleep 3
   if ! neton rp-c0; then
     skip "pod-holder-respawn" "o pod não ganhou rede no cenário base"
-    dlx pod rm -f rp >/dev/null 2>&1; rm -rf "$d"; return
+    pod_cleanup rp rp-c0 rp-c1 >/dev/null; rm -rf "$d"; return
   fi
   local before after ctl_b sli_b
   before=$(holder_pid); ctl_b=$(control_pid); sli_b=$(slirp_pid)
@@ -960,7 +997,17 @@ reporta pin: o nó fica meio-de-pé e o attach seguinte falha"
   else
     ok "pod-holder-respawn (os dois membros recuperaram, e o nó volta inteiro: pin $after)"
   fi
-  dlx pod rm -f rp >/dev/null 2>&1
+  # Depois de um respawn do pin, o `delete pod` tem de desligar a netns partilhada
+  # dos membros sobre o pin NOVO — é aqui que uma limpeza que falha se esconde.
+  local left rc
+  left=$(pod_cleanup rp rp-c0 rp-c1); rc=$?
+  if [ "$rc" -eq 2 ]; then
+    bad "pod-holder-respawn-cleanup" "\`container ps -a\` não respondeu depois do \`delete pod\`"
+  elif [ "$rc" -ne 0 ]; then
+    bad "pod-holder-respawn-cleanup" "\`delete pod rp --force\` deixou membros no \`container ps -a\`: $left"
+  else
+    ok "pod-holder-respawn-cleanup (\`delete pod --force\` removeu rp-c0 e rp-c1)"
+  fi
   rm -rf "$d"
   # E o sandbox volta SERVÍVEL para o cenário seguinte, seja qual for o veredicto
   # acima. Sem isto, um defeito daqui deixa de ser um FAIL e passa a ser cinco:
