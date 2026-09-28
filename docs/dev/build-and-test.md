@@ -299,6 +299,7 @@ alignment in [Contribution workflow](contributing-workflow.md#language-english-i
 | `cli-surface` | `python3 scripts/docs_cli_gate.py` | a `delonix …` command quoted in current documentation does not exist in the binary's tree |
 | `clippy` | `cargo clippy --workspace --all-targets --locked -- -D warnings` | any warning |
 | `test` | `cargo build --workspace --locked && cargo test --workspace --locked --no-fail-fast` | any test fails |
+| `test` | `mkdir -p /tmp/t && TMPDIR=/tmp/t cargo test --workspace --locked --no-fail-fast && python3 scripts/tmp_roots_gate.py --dir /tmp/t --list` | the tests leave in their temp dir anything that is not the known debt in `scripts/tmp_roots_baseline.json` — a new leak, more of a known one, or less of one without lowering the baseline (`--update`). The baseline is what the hosted runner leaves; tests that need user namespaces skip there, so a local run leaves more — compare locally with `--list` |
 | `deny` | `cargo deny check advisories licenses sources` | a RUSTSEC advisory, a disallowed licence or source (`deny.toml`) |
 | `docs` | `cargo build --release -p delonix-runtime-bin && python3 docs/gen.py && git diff --exit-code -- docs/` | the committed site is not what the generator produces from this binary |
 | `docs` | `./target/release/delonix stack apply -f examples/<file>.yaml --dry-run` and `./target/release/delonix stack validate -f examples/<file>.yaml` | a published example uses a deprecated form or has unresolved references |

@@ -5595,6 +5595,37 @@ checklist para quem mexer aqui do que como lista de correcções:
   antes de confiar num gate de caminho de falha, confirmar que a falha chegou ao sítio que se
   quer medir.** O gate do `e2e.sh` fá-lo pelo evento `create`: sem ele, o `run` falhou antes do
   `clone` e o check FALHA em vez de passar por nada ter sobrado;
+- **corrigir um ficheiro não é corrigir o irmão copiado dele** — o `network_alloc_race.rs`
+  (2026-08-14) e o `netdef_naming.rs` nasceram com a mesma `raiz()`: uma pasta por pid em
+  `/tmp`, criada num `OnceLock` e nunca removida. A 2026-08-15 o `netdef_naming` passou a varrer
+  as pastas dos pids mortos, depois de 23 restos terem tornado inútil um check de caos que
+  contava `/tmp/delonix-net-*`. O vizinho, no mesmo `tests/` do mesmo crate, ficou de fora e
+  deixou uma pasta por corrida durante 44 dias (~2400 medidas a 2026-09-28, corrigido no #567).
+  E na sessão do #567 o varrimento foi desenhado DE NOVO, sem ir ver o do vizinho. **Regra: ao
+  corrigir um padrão, procurar o PADRÃO, não o nome, no resto do repo** (aqui
+  `temp_dir().join(format!(… process::id()))`) e dizer quantos sítios ficam de fora. É a
+  segunda ocorrência da mesma fuga no mesmo crate;
+- **varrer os restos das corridas mortas não é limpar no fim** — o varrimento por pid morto
+  nunca apanha a corrida que acabou de sair: o `netdef_naming` deixa sempre a SUA pasta à espera
+  da próxima corrida (medido: 1 depois de um `cargo test --workspace`). O libtest não tem gancho
+  «depois de todos» nem diz a um teste quantos vão correr (filtros e `--test-threads` mudam
+  isso), por isso o #567 conta os testes que ESTÃO a usar a raiz: o primeiro `lease()` cria-a, o
+  último `RootLease` a sair apaga-a, também em unwind. O varrimento fica só para o que o `Drop`
+  não cobre (Ctrl-C, timeout, SIGKILL). Medido: o binário anterior levou `/tmp` de 2 a 202 em 200
+  corridas; o novo ficou em 0 → 0 com threads por omissão, com `--test-threads=1` e preso a uma
+  CPU (400 corridas), sem falhas;
+- **um teste verde não é um teste que arrumou** — nada olhava para o temp dir depois dos testes,
+  por isso uma fuga destas nunca pôs nada vermelho. Um `cargo test --workspace` inteiro com um
+  `TMPDIR` vazio (rc=0, 2026-09-28, local) deixou **29 entradas de 10 fontes**: `delonix-oci`
+  13 (`detect.rs` 12, `overlay.rs` 1), `delonix-runtime-bin` 11 (`vm.rs` 5, `mapped.rs` 4,
+  `vmbackends.rs`/`vmimage.rs` 2), `delonix-sdn` 4 (`lib.rs` 2, `infra.rs` 1,
+  `netdef_naming.rs` 1) e `delonix-state` 1 (`store.rs`). Algumas usam nomes FIXOS
+  (`dlx-detect-go`), que duas corridas em paralelo partilham. **Gate**: o job `test` corre agora
+  com um `TMPDIR` próprio, e o `scripts/tmp_roots_gate.py` compara o que lá ficou com
+  `scripts/tmp_roots_baseline.json`, com ratchet nos dois sentidos e nomes normalizados (dígitos
+  → `N`). Com o #567 revertido dá `new leak: delonix-net-race-N` (verificado); com ele, verde. A
+  linha de base é a do runner alojado, onde os testes que precisam de userns saltam, por isso
+  uma corrida local deixa mais: compara-se com `--list`;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
