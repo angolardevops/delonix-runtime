@@ -1090,6 +1090,7 @@ fn with_prefix(digest: &str) -> String {
 const DOCKER_CONFIG_MEDIA_TYPE: &str = "application/vnd.docker.container.image.v1+json";
 pub(crate) const DOCKER_MANIFEST_MEDIA_TYPE: &str =
     "application/vnd.docker.distribution.manifest.v2+json";
+const DOCKER_LAYER_GZIP_MEDIA_TYPE: &str = "application/vnd.docker.image.rootfs.diff.tar.gzip";
 
 /// Builds an OCI [`Descriptor`] (`oci_spec`) from a mediaType, size
 /// and digest (with or without the `sha256:` prefix). Centralises the digest
@@ -1106,7 +1107,7 @@ fn descriptor(media_type: &str, size: usize, digest: &str) -> Result<Descriptor>
 /// The mediaType of a layer by its *magic number* (gzip/zstd/plain tar).
 fn layer_media_type(data: &[u8]) -> &'static str {
     if data.starts_with(&[0x1f, 0x8b]) {
-        "application/vnd.docker.image.rootfs.diff.tar.gzip"
+        DOCKER_LAYER_GZIP_MEDIA_TYPE
     } else if data.starts_with(&[0x28, 0xb5, 0x2f, 0xfd]) {
         "application/vnd.oci.image.layer.v1.tar+zstd"
     } else {
@@ -1721,6 +1722,67 @@ pub fn build_manifest(store: &ImageStore, image: &Image) -> Result<(Vec<u8>, Str
     let bytes = serde_json::to_vec(&manifest)?;
     let digest = format!("sha256:{}", crate::cas::sha256_hex(&bytes));
     Ok((bytes, digest))
+}
+
+/// Builds the manifest of a local image with **OCI media types** instead of the
+/// Docker schema-2 ones [`build_manifest`] uses. Returns `(bytes, digest)`.
+///
+/// Only the `mediaType` fields change: the config and the layers are the same
+/// blobs, byte for byte, so the image id (the config digest) is the same and
+/// only the manifest digest differs. Some consumers read nothing but the OCI
+/// types: a Proxmox VE node refuses an archive whose manifest says Docker v2,
+/// with a message about the CPU architecture (ADR-0058, measured).
+pub fn build_oci_manifest(store: &ImageStore, image: &Image) -> Result<(Vec<u8>, String)> {
+    let manifest = to_oci_manifest(&docker_manifest(store, image)?)?;
+    let bytes = serde_json::to_vec(&manifest)?;
+    let digest = format!("sha256:{}", crate::cas::sha256_hex(&bytes));
+    Ok((bytes, digest))
+}
+
+/// The OCI twin of a manifest: the same descriptors (digest and size) with the
+/// OCI media types. A layer with no plain OCI equivalent that has been measured
+/// against a real consumer (zstd, foreign/non-distributable) is refused by name
+/// rather than relabelled on a guess.
+pub(crate) fn to_oci_manifest(manifest: &ImageManifest) -> Result<ImageManifest> {
+    let config = manifest.config();
+    let config_type = match config.media_type() {
+        MediaType::ImageConfig => MediaType::ImageConfig,
+        MediaType::Other(t) if t == DOCKER_CONFIG_MEDIA_TYPE => MediaType::ImageConfig,
+        other => {
+            return Err(Error::Archive(format!(
+                "config {} has media type {other}: not an image config",
+                config.digest()
+            )))
+        }
+    };
+    let mut layers = Vec::with_capacity(manifest.layers().len());
+    for layer in manifest.layers() {
+        let layer_type = match layer.media_type() {
+            MediaType::ImageLayerGzip => MediaType::ImageLayerGzip,
+            MediaType::ImageLayer => MediaType::ImageLayer,
+            MediaType::Other(t) if t == DOCKER_LAYER_GZIP_MEDIA_TYPE => MediaType::ImageLayerGzip,
+            other => {
+                return Err(Error::Layer(format!(
+                    "layer {} has media type {other}: only gzip and plain tar layers \
+                     are converted to OCI, because only those were measured against a \
+                     consumer that needs the OCI types",
+                    layer.digest()
+                )))
+            }
+        };
+        let mut converted = layer.clone();
+        converted.set_media_type(layer_type);
+        layers.push(converted);
+    }
+    let mut oci_config = config.clone();
+    oci_config.set_media_type(config_type);
+    ImageManifestBuilder::default()
+        .schema_version(2u32)
+        .media_type(MediaType::ImageManifest)
+        .config(oci_config)
+        .layers(layers)
+        .build()
+        .map_err(oci_err)
 }
 
 /// Builds the Docker schema-2 [`ImageManifest`] of a local image (config +
@@ -2567,6 +2629,79 @@ fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
 
 #[cfg(test)]
 mod tests {
+
+    /// The Docker schema-2 manifest `delonix image save` wrote for `alpine:3.20`
+    /// on 2026-09-28: the archive a Proxmox VE node refused in the ADR-0058 spike
+    /// (same config `bf8527eb…`). Captured, not written by hand.
+    const ALPINE_320_DOCKER_V2: &str = r#"{"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json","config":{"mediaType":"application/vnd.docker.container.image.v1+json","digest":"sha256:bf8527eb54c3680e728d5b4b383a8ba730d72dae7236fbc8dff97ed6b224a731","size":612},"layers":[{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","digest":"sha256:25f1d6b1951ac8eb3740558fe94cb83d377bdadf95fd9f98b50d2e1b96130471","size":3630321}]}"#;
+
+    #[test]
+    fn a_docker_v2_manifest_becomes_oci_with_the_same_blobs() {
+        let docker: oci_spec::image::ImageManifest =
+            serde_json::from_str(ALPINE_320_DOCKER_V2).unwrap();
+        let oci = super::to_oci_manifest(&docker).unwrap();
+        let json: serde_json::Value = serde_json::to_value(&oci).unwrap();
+
+        assert_eq!(
+            json["mediaType"],
+            "application/vnd.oci.image.manifest.v1+json"
+        );
+        assert_eq!(
+            json["config"]["mediaType"],
+            "application/vnd.oci.image.config.v1+json"
+        );
+        assert_eq!(
+            json["layers"][0]["mediaType"],
+            "application/vnd.oci.image.layer.v1.tar+gzip"
+        );
+        // Only the labels change: every blob is still addressed by the same digest
+        // and size, so the node reads the same bytes the registry served.
+        assert_eq!(
+            json["config"]["digest"],
+            "sha256:bf8527eb54c3680e728d5b4b383a8ba730d72dae7236fbc8dff97ed6b224a731"
+        );
+        assert_eq!(json["config"]["size"], 612);
+        assert_eq!(
+            json["layers"][0]["digest"],
+            "sha256:25f1d6b1951ac8eb3740558fe94cb83d377bdadf95fd9f98b50d2e1b96130471"
+        );
+        assert_eq!(json["layers"][0]["size"], 3630321);
+        assert_eq!(json["layers"].as_array().unwrap().len(), 1);
+        // No Docker type survives anywhere in the document.
+        assert!(!serde_json::to_string(&oci).unwrap().contains("vnd.docker"));
+    }
+
+    #[test]
+    fn an_oci_manifest_converts_to_itself() {
+        let docker: oci_spec::image::ImageManifest =
+            serde_json::from_str(ALPINE_320_DOCKER_V2).unwrap();
+        let once = super::to_oci_manifest(&docker).unwrap();
+        assert_eq!(super::to_oci_manifest(&once).unwrap(), once);
+    }
+
+    #[test]
+    fn a_zstd_or_foreign_layer_is_refused_by_name() {
+        for kind in [
+            "application/vnd.oci.image.layer.v1.tar+zstd",
+            "application/vnd.docker.image.rootfs.foreign.diff.tar.gzip",
+        ] {
+            let json = ALPINE_320_DOCKER_V2
+                .replace("application/vnd.docker.image.rootfs.diff.tar.gzip", kind);
+            let docker: oci_spec::image::ImageManifest = serde_json::from_str(&json).unwrap();
+            let err = super::to_oci_manifest(&docker).unwrap_err();
+            assert_eq!(err.number(), 1409, "{kind}: {err}");
+            let text = err.to_string();
+            assert!(
+                text.contains(kind),
+                "the refusal names the media type: {text}"
+            );
+            assert!(
+                text.contains("25f1d6b1"),
+                "the refusal names the layer: {text}"
+            );
+        }
+    }
+
     /// Serves one response with `body_len` bytes, chunked (no Content-Length),
     /// so only the streaming cap can stop it.
     fn serve_chunked(body_len: usize) -> String {

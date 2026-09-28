@@ -30,6 +30,11 @@ código e travada por um teste antes do passo seguinte.
 
 ## Decisões do dono, antes de qualquer código das Fatias 1 a 6
 
+**Decididas a 2026-09-28** pelo dono: D1 aceite (o ADR-0058 passa a Accepted); D2 — a
+necessidade é a **paridade com o Proxmox**: cobrir no motor o LXC que o operador já usa no nó,
+para o gerir pela mesma API declarativa; D3 — `kind: SystemContainer` em
+`compute.delonix.io/v1alpha1`, sem grupo de CLI novo na v1; D4 cumprida (#541 fundido).
+
 - **D1 — Aceitar o ADR-0058.** As duas primeiras decisões dele (não é `Container`; é um recurso
   próprio) são o que este plano executa.
 - **D2 — Nomear a necessidade.** O ADR-0049 D5 constrói fatias contra uma necessidade, não
@@ -109,6 +114,16 @@ applies do #493 e do #497 foram aceites e nunca realizados.
   media types OCI e os blobs byte a byte iguais; e, ao vivo, o arquivo produzido pelo motor a ser
   aceite pelo nó (`Detected OCI archive`), com o controlo em Docker v2 a ser recusado na mesma
   corrida.
+
+- **Fechada a 2026-09-28.** `delonix_oci::write_oci_media_archive` (com `build_oci_manifest`
+  e a conversão pura `to_oci_manifest`) devolve os dois digests (`OciArchive`): o id da imagem,
+  que a conversão não muda, e o do manifesto convertido. O store não guarda o digest do
+  manifesto de registo; é a Fatia 2, que puxa a imagem, que o conhece. Uma layer zstd ou
+  estrangeira é recusada com DX-1409 a nomear o media type e a layer. O `image save` ficou com o
+  Docker v2 (teste a exigi-lo). Prova ao vivo no `pve` (PVE 9.2.2), na mesma corrida e pela API
+  (`pvesh create /nodes/pve/lxc`): o arquivo do motor para `alpine:3.20` foi aceite
+  («Detected container architecture: amd64», `vzcreate` `OK`); o controlo Docker v2 do
+  `image save` foi recusado com «Unsupported CPU architecture».
 
 ## Fatia 2 — O upload genérico, e uma imagem enviada uma vez
 
