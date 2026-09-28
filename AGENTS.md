@@ -5659,7 +5659,7 @@ checklist para quem mexer aqui do que como lista de correcções:
   2026-08-17) usavam `temp_dir()` + pid «porque este crate não tem `dev-dependencies` e a regra do
   repo é não acrescentar dependências — nem para testes». Essa regra não está escrita no
   AGENTS.md, no `docs/dev/coding-conventions.md` nem em ADR nenhum, e o `tempfile` já era
-  dev-dependency de 7 crates do workspace (o commit e o PR do #572 dizem 8, por contar a
+  dev-dependency de 7 das crates do workspace (o commit e o PR do #572 dizem 8, por contar a
   declaração na raiz). O idioma que o comentário justificava deixava 4 pastas
   por corrida. **Regra: antes de obedecer a uma regra citada num comentário, encontra-a escrita**;
   se não estiver, o comentário é uma hipótese de quem o escreveu. E quando a regra certa existe
