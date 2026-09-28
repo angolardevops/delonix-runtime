@@ -1155,15 +1155,22 @@ variable when the program runs.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
+<td>A file holding an API token as <code>user@realm!name=secret</code> on one line.</td>
+<td>Optional; read before <code>DELONIX_PROXMOX_TEST_TOKEN_ID</code> and the account.</td>
+<td>The secret stays in a 0600 file, out of the environment and the shell history.</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_TOKEN_ID</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
 <td>An API token id instead of the account (<code>user@realm!name</code>).</td>
 <td>Optional; with <code>DELONIX_PROXMOX_TEST_TOKEN</code> it is used before the account.</td>
 <td>Revocable on the node; a lab run can mint one without anybody's password.</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_TOKEN</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
 <td>Its secret.</td>
 <td>Optional, with the id.</td>
 <td></td>

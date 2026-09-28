@@ -77,9 +77,11 @@ lança o reload de cada nó em segundo plano e não o acompanha (`PVE/API2/Netwo
 `FIXME` do próprio upstream). O `OK` de um apply quer dizer «pedidos enviados», e foi assim que os
 applies do #493 e do #497 foram aceites e nunca realizados.
 
-- Depois do `reloadnetworkall`, o `apply_sdn` procura em cada nó do cluster a tarefa
-  `srvreload` com id `networking` iniciada a partir da hora da mãe, e espera por cada uma com os
-  três veredictos da Fatia 0. Um nó sem essa tarefa dentro de um prazo é um erro com o nome do
+- Antes do `PUT /cluster/sdn`, o `apply_sdn` guarda por nó online as tarefas `srvreload
+  networking` que já existem; depois da mãe, a filha de cada nó é a primeira que não estava na
+  lista, e é esperada com os três veredictos da Fatia 0. A hora da mãe não serve para a
+  encontrar: no histórico do laboratório as filhas chegam até 37 s depois dela e as do apply
+  anterior até 5 s antes. Um nó sem essa tarefa dentro de um prazo é um erro com o nome do
   nó, nunca um sucesso.
 - Os avisos das filhas sobem ao chamador com o nome do nó. Uma filha falhada faz o apply falhar,
   mesmo com a mãe em `OK`.
@@ -87,6 +89,9 @@ applies do #493 e do #497 foram aceites e nunca realizados.
   filha falhada; ao vivo, um apply no laboratório com a directiva `source` retirada de um nó
   tem de devolver o aviso desse nó.
 - **Espera pelo #542**, que está a mexer no apply de SDN. Não precisa de D1 a D4.
+- **Feita** (2026-09-27): os três cenários de injecção passam e o da filha falhada chumba com
+  a espera revertida; ao vivo, com a directiva retirada do `pve2`, o apply devolveu o aviso com
+  `node=pve2`, e sem ela nenhum. Uma filha a falhar de verdade no nó ficou só por injecção.
 
 ## Fatia 1 — O arquivo que o nó aceita
 

@@ -130,8 +130,10 @@
 //! a real node, and that `zone`/`vnet` reached the URL path unmangled —
 //! nothing about the dataplane.
 
-use crate::{parse, Client, Error, Ledger, Result, TaskKind, Wrapped};
+use crate::{parse, Client, ClusterNode, Error, Ledger, Result, TaskKind, Wrapped};
+use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, Ipv6Addr};
+use std::time::Instant;
 
 /// The `vmid` [`Client::apply_sdn`] hands to the shared task-submission path.
 ///
@@ -569,14 +571,121 @@ impl Client {
     /// and never calls this has changed nothing on any node — see the module
     /// doc comment.
     pub fn apply_sdn(&self, ledger: &Ledger) -> Result<()> {
+        self.apply_sdn_with(ledger, &[])
+    }
+
+    /// `PUT /cluster/sdn` with `form`, then what makes its `OK` mean
+    /// "realized": each online node's own network reload, waited on, and the
+    /// vnets read back ([`Self::verify_sdn_realized`]).
+    ///
+    /// The apply's task, `reloadnetworkall`, only starts a `srvreload
+    /// networking` on every node and does not follow them (PVE's own
+    /// `PVE/API2/Network/SDN.pm`, with an upstream `FIXME` saying so).
+    /// Measured on a two-node PVE 9.2.2 lab cluster on 2026-09-27: the parent
+    /// ended `OK` all 61 times in the task history, while 50 per-node reloads
+    /// ended `WARNINGS: 1` — among them `missing 'source
+    /// /etc/network/interfaces.d/sdn' directive` and `reloading frr
+    /// configuration failed`.
+    ///
+    /// A node's reload is found WITHOUT clocks: the `srvreload`/`networking`
+    /// tasks each online node lists before the apply are remembered, and the
+    /// first one that appears after it is that node's. Matching by start time
+    /// does not work: applies run back to back, and the history had the
+    /// previous apply's reload 1 to 5 s before a parent, while this one's came
+    /// 0 to 37 s after it.
+    pub(crate) fn apply_sdn_with(&self, ledger: &Ledger, form: &[(&str, &str)]) -> Result<()> {
+        let nodes: Vec<ClusterNode> = self
+            .cluster_nodes()?
+            .into_iter()
+            .filter(|n| n.online)
+            .collect();
+        let mut before = HashMap::new();
+        for node in &nodes {
+            before.insert(node.name.clone(), self.network_reloads(&node.name)?);
+        }
         self.task_or_done(
             ledger,
             SDN_VMID,
             TaskKind::ApplySdn,
-            || self.put_form("/cluster/sdn", &[]),
+            || self.put_form("/cluster/sdn", form),
             None,
         )?;
+        self.follow_network_reloads(&nodes, &before)?;
         self.verify_sdn_realized()
+    }
+
+    /// The UPIDs of the `srvreload`/`networking` tasks `node` lists, running
+    /// ones included (`source=all`).
+    fn network_reloads(&self, node: &str) -> Result<HashSet<String>> {
+        Ok(self
+            .network_reload_tasks(node)?
+            .into_iter()
+            .map(|(upid, _)| upid)
+            .collect())
+    }
+
+    fn network_reload_tasks(&self, node: &str) -> Result<Vec<(String, u64)>> {
+        crate::validate_node_name(node)?;
+        let body = self.get(&format!(
+            "/nodes/{node}/tasks?typefilter=srvreload&source=all&limit=50"
+        ))?;
+        let w: Wrapped<Vec<serde_json::Value>> = parse(&body, "node tasks")?;
+        Ok(network_reload_entries(&w.data))
+    }
+
+    /// Waits for each online node's reload that appeared after the apply.
+    /// Its warnings are logged with the node's name; a reload that failed, or
+    /// that never appeared within the task timeout, fails the apply, naming
+    /// the node — whatever the parent's `OK` said.
+    fn follow_network_reloads(
+        &self,
+        nodes: &[ClusterNode],
+        before: &HashMap<String, HashSet<String>>,
+    ) -> Result<()> {
+        let deadline = Instant::now() + self.task_timeout;
+        let mut failed = Vec::new();
+        for node in nodes {
+            let seen = before.get(&node.name).cloned().unwrap_or_default();
+            let mut wait = crate::POLL_MIN;
+            let upid = loop {
+                let fresh = self
+                    .network_reload_tasks(&node.name)?
+                    .into_iter()
+                    .filter(|(u, _)| !seen.contains(u))
+                    .min_by_key(|(_, start)| *start);
+                if let Some((upid, _)) = fresh {
+                    break Some(upid);
+                }
+                if Instant::now() >= deadline {
+                    break None;
+                }
+                std::thread::sleep(wait);
+                wait = crate::next_poll_wait(wait);
+            };
+            let Some(upid) = upid else {
+                failed.push(format!(
+                    "{}: no network reload appeared within {}s",
+                    node.name,
+                    self.task_timeout.as_secs()
+                ));
+                continue;
+            };
+            match self.wait_task_warnings(&upid) {
+                Ok(warnings) => {
+                    for w in &warnings {
+                        tracing::warn!(node = %node.name, %upid, warning = %w, "proxmox: the SDN reload on this node finished with a warning");
+                    }
+                }
+                Err(e) => failed.push(format!("{}: {e}", node.name)),
+            }
+        }
+        if failed.is_empty() {
+            return Ok(());
+        }
+        Err(Error::SdnNotRealized(format!(
+            "proxmox: the SDN apply task ended OK but the network reload did not: {}",
+            failed.join("; ")
+        )))
     }
 
     /// Checks that the configuration an apply just reloaded is real on every
@@ -1666,12 +1775,49 @@ fn subnet_option_fields(opts: &SubnetOptions<'_>) -> Result<Vec<(&'static str, S
     Ok(out)
 }
 
+/// The `srvreload` tasks of a node's task list whose id is `networking`, as
+/// `(upid, starttime)`. Other reloads (`srvreload` of another service) are
+/// not the network's and are left out.
+fn network_reload_entries(tasks: &[serde_json::Value]) -> Vec<(String, u64)> {
+    tasks
+        .iter()
+        .filter(|t| t.get("type").and_then(|v| v.as_str()) == Some("srvreload"))
+        .filter(|t| t.get("id").and_then(|v| v.as_str()) == Some("networking"))
+        .filter_map(|t| {
+            let upid = t.get("upid")?.as_str()?.to_string();
+            let start = t.get("starttime").and_then(|v| v.as_u64()).unwrap_or(0);
+            Some((upid, start))
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        sdn_subnet_id, subnet_option_fields, validate_cidr, validate_fabric_id, validate_ip,
-        validate_mac, validate_sdn_id, DhcpRange, SubnetOptions,
+        network_reload_entries, sdn_subnet_id, subnet_option_fields, validate_cidr,
+        validate_fabric_id, validate_ip, validate_mac, validate_sdn_id, DhcpRange, SubnetOptions,
     };
+
+    #[test]
+    fn only_network_reloads_are_taken_from_a_task_list() {
+        // The shape of `GET /nodes/{node}/tasks?typefilter=srvreload`, as a
+        // PVE 9.2.2 node returns it.
+        let tasks: Vec<serde_json::Value> = serde_json::from_str(
+            r#"[
+              {"upid":"UPID:pve:0000D4A1:0008881D:6AB8DEE2:srvreload:networking:root@pam:","type":"srvreload","id":"networking","starttime":1790500578,"status":"WARNINGS: 1"},
+              {"upid":"UPID:pve:00000001:00000002:6AB8DEE3:srvreload:pveproxy:root@pam:","type":"srvreload","id":"pveproxy","starttime":1790500579},
+              {"upid":"UPID:pve:00000003:00000004:6AB8DEE4:vzstart:100:root@pam:","type":"vzstart","id":"100","starttime":1790500580}
+            ]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            network_reload_entries(&tasks),
+            vec![(
+                "UPID:pve:0000D4A1:0008881D:6AB8DEE2:srvreload:networking:root@pam:".to_string(),
+                1790500578
+            )]
+        );
+    }
 
     #[test]
     fn a_fabric_id_follows_pve_sdn_fabric_id() {

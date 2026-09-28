@@ -415,18 +415,11 @@ impl Client {
     /// [`Self::apply_sdn`] under the lock: `PUT /cluster/sdn` with the token
     /// and `release-lock=1`, so the node commits and frees the lock in the
     /// same call. The reload that follows is the same cluster-wide task, waited
-    /// on the same way, then checked node by node
-    /// ([`Self::verify_sdn_realized`]).
+    /// on the same way, then followed and checked node by node
+    /// ([`Self::apply_sdn_with`]).
     pub fn apply_sdn_locked(&self, ledger: &Ledger, token: &SdnLockToken) -> Result<()> {
         let form = [("lock-token", token.0.as_str()), ("release-lock", "1")];
-        self.task_or_done(
-            ledger,
-            crate::sdn::SDN_VMID,
-            TaskKind::ApplySdn,
-            || self.put_form("/cluster/sdn", &form),
-            None,
-        )?;
-        self.verify_sdn_realized()
+        self.apply_sdn_with(ledger, &form)
     }
 
     /// Stages `change` under the cluster's SDN lock and applies it — or, if

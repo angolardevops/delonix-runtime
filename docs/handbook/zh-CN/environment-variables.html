@@ -1105,15 +1105,22 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN_FILE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
+<td>一个文件，单行保存 API 令牌，格式为 <code>user@realm!名字=密钥</code>。</td>
+<td>可选；先于 <code>DELONIX_PROXMOX_TEST_TOKEN_ID</code> 和账号读取。</td>
+<td>密钥留在 0600 文件里，不进环境变量也不进 shell 历史。</td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_TOKEN_ID</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
 <td>用 API 令牌 id 代替账号（<code>user@realm!名字</code>）。</td>
 <td>可选；和 <code>DELONIX_PROXMOX_TEST_TOKEN</code> 一起给时优先于账号。</td>
 <td>可在节点上撤销；实验室运行无需任何人的密码即可创建。</td>
 </tr>
 <tr>
 <td><code>DELONIX_PROXMOX_TEST_TOKEN</code></td>
-<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:auth_from_env</code></a></td>
 <td>它的密钥。</td>
 <td>可选，与 id 一起。</td>
 <td></td>
