@@ -1211,6 +1211,13 @@ variable when the program runs.</p>
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_PROXMOX_TEST_OCI_ARCHIVE</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
+<td>An image archive with OCI media types, written by the engine (<code>write_oci_media_archive</code>), that the ADR-0058 live case creates a system container from. The storage it is uploaded to must list <code>vztmpl</code>.</td>
+<td>Unset: the case skips.</td>
+<td></td>
+</tr>
+<tr>
 <td><code>DELONIX_PROXMOX_TEST_SHARED_STORAGE</code></td>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs</code></a></td>
 <td>A storage every node of the cluster shares (NFS, Ceph RBD), where the move cases put the VM's disk — a disk on local storage is refused, not copied.</td>

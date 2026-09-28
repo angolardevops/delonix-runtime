@@ -7881,3 +7881,28 @@ em vigor. O módulo é `delonix_linux::usage`; a tool só monta as linhas.
   `io`. **Não validado ao vivo**: uma VM Cloud Hypervisor real (o caminho do VMM está coberto
   por testes com `/proc` falso e com o próprio processo de teste) e a rede de um container
   numa rede custom.
+
+## Um container de sistema no Proxmox é uma porta própria, não um `Container` (ADR-0058, plano 63)
+
+O ADR-0058 decidiu, depois de um spike no PVE 9.2.2, que um LXC do Proxmox não serve
+`kind: Container`: a API não tem `exec`, logs nem código de saída, e o dataplane do motor não
+chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As fatias 0 a 3 do plano
+63 estão fundidas; a Fatia 4 (o `kind: SystemContainer`) vem a seguir.
+
+- **O arquivo que o nó aceita** (Fatia 1): `delonix_oci::write_oci_media_archive` reescreve só o
+  manifesto com media types OCI. O nó recusa o Docker v2 do `image save` com «Unsupported CPU
+  architecture», uma mensagem que nomeia a causa errada. O `image save` continua em Docker v2.
+- **Uma imagem enviada uma vez** (Fatia 2): `Client::stage_template` envia como `vztmpl`, com o
+  nome `dlx-<hex>.tar` tirado do digest do manifesto (a tag não é identidade: o pull do próprio nó
+  não guarda digest). O nó verifica o sha256: um checksum errado acaba em «checksum mismatch» e o
+  nó não guarda nada.
+- **A porta** (Fatia 3): `delonix_compute::system_container`. O provider fica em
+  `delonix-proxmox/src/lxc.rs`, e as três regras medidas são as do spike:
+  - **T2:** criar sem `entrypoint`/`env` (o nó substitui-os pelos da imagem), escrevê-los com
+    `PUT …/config`, reler e comparar. Uma diferença destrói o container.
+  - **T3:** um arranque cujo DHCP não teve resposta acaba em `WARNINGS: 1`. O arranque tem
+    sucesso, e a rede é `NotReady` com o aviso do nó.
+  - **Privilégio:** `unprivileged: false` é recusado por nome (DX-1540).
+- **O catálogo passou a 1.2.0** (domínio `system-containers`). `exec`, logs e código de saída
+  ficam `unsupported-by-provider` com a razão medida. A imagem e a rede ficam `partial`: cópia
+  inteira por container (T6), e bridge e VLAN do nó sem a SDN do motor (T7).

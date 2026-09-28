@@ -14,6 +14,7 @@ pub mod preflight;
 mod record;
 pub mod run;
 mod run_opts;
+pub mod system_container;
 pub mod vm_backend;
 pub mod vm_error;
 pub mod vm_firewall;

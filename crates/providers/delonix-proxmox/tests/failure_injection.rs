@@ -3071,3 +3071,208 @@ fn an_archive_is_uploaded_as_vztmpl_with_its_checksum_and_a_mismatch_fails() {
         .unwrap_err();
     assert!(err.to_string().contains("checksum mismatch"), "{err}");
 }
+
+// ===========================================================================
+// ADR-0058 / plan 63 slice 3: a system container
+// ===========================================================================
+
+const CT_VOLID: &str =
+    "local:vztmpl/dlx-a14b44155e4b8cefde8433bcf0f6fb5f460169571f5bff684d06572a98759035.tar";
+const CT_CREATE: &str = "/nodes/pve/lxc";
+const CT_CONFIG: &str = "/nodes/pve/lxc/100/config";
+
+fn ct_spec(dir: &std::path::Path) -> delonix_compute::system_container::SystemContainerSpec {
+    delonix_compute::system_container::SystemContainerSpec {
+        name: "dlx-ct".into(),
+        archive: dir.join("image.tar"),
+        manifest_digest: ARCHIVE_DIGEST.into(),
+        entrypoint: vec!["/bin/sleep".into(), "3600".into()],
+        env: vec![("DLX_TEST".into(), "one".into())],
+        memory_mib: 256,
+        swap_mib: 0,
+        cores: 1,
+        rootfs_gib: 1,
+        network: Some(delonix_compute::system_container::SystemContainerNet {
+            bridge: "vmbr0".into(),
+            vlan: None,
+            dhcp: true,
+        }),
+        unprivileged: true,
+    }
+}
+
+fn ct_provider(node: &MockNode) -> delonix_proxmox::ProxmoxSystemContainerProvider {
+    let client = Client::connect_with(&token_target(node), fast()).unwrap();
+    delonix_proxmox::ProxmoxSystemContainerProvider::new(Arc::new(client), "local", "local-lvm")
+}
+
+fn ct_cached_template() -> Vec<(&'static str, &'static str, Reply)> {
+    vec![
+        ("GET", LOCAL_STATUS, status_reply("vztmpl", 1 << 40)),
+        (
+            "GET",
+            LOCAL_CONTENT,
+            ok_data(&format!(r#"[{{"volid":"{CT_VOLID}","content":"vztmpl"}}]"#)),
+        ),
+        ("GET", NEXTID, ok_data("\"100\"")),
+        (
+            "POST",
+            CT_CREATE,
+            ok_data(r#""UPID:pve:00000500:00000600:6AB90020:vzcreate:100:root@pam:""#),
+        ),
+    ]
+}
+
+/// T2: the node keeps the image's entrypoint after the `PUT …/config`. The
+/// create fails naming the field, and the container is destroyed — nothing is
+/// left running with a configuration nobody asked for.
+#[test]
+fn a_system_container_whose_config_reads_back_different_is_destroyed() {
+    use delonix_compute::system_container::SystemContainerProvider;
+    let mut steps = ct_cached_template();
+    steps.push(("PUT", CT_CONFIG, ok_data("null")));
+    steps.push((
+        "GET",
+        CT_CONFIG,
+        ok_data(r#"{"entrypoint":"/bin/sh","env":"DLX_TEST=one","unprivileged":1}"#),
+    ));
+    steps.push((
+        "GET",
+        "/nodes/pve/lxc/100/status/current",
+        ok_data(r#"{"status":"stopped"}"#),
+    ));
+    steps.push((
+        "DELETE",
+        "/nodes/pve/lxc/100",
+        ok_data(r#""UPID:pve:00000501:00000601:6AB90021:vzdestroy:100:root@pam:""#),
+    ));
+    let node = MockNode::start(script(&steps));
+    let dir = tempfile::tempdir().unwrap();
+    let p = ct_provider(&node);
+    let err = p.create(dir.path(), &ct_spec(dir.path())).unwrap_err();
+    let shown = err.to_string();
+    assert!(
+        shown.contains("entrypoint") && shown.contains("/bin/sh"),
+        "{shown}"
+    );
+    assert!(shown.contains("destroyed"), "{shown}");
+
+    let create = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "POST" && s.path == CT_CREATE)
+        .expect("the create");
+    assert!(create.body.contains("unprivileged=1"), "{}", create.body);
+    assert!(
+        !create.body.contains("entrypoint") && !create.body.contains("env="),
+        "the create must not carry entrypoint/env, the node replaces them: {}",
+        create.body
+    );
+    let put = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "PUT" && s.path == CT_CONFIG)
+        .expect("the configure");
+    assert!(
+        put.body.contains("entrypoint=/bin/sleep+3600"),
+        "{}",
+        put.body
+    );
+    let delete = node
+        .log()
+        .into_iter()
+        .find(|s| s.method == "DELETE")
+        .expect("the destroy");
+    assert!(
+        delete.query.contains("purge=1") && delete.query.contains("destroy-unreferenced-disks=1"),
+        "{}",
+        delete.query
+    );
+}
+
+/// A privileged container is refused by name, before anything reaches the node.
+#[test]
+fn a_privileged_system_container_is_refused_before_any_call() {
+    use delonix_compute::system_container::SystemContainerProvider;
+    let node = MockNode::start(script(&[]));
+    let dir = tempfile::tempdir().unwrap();
+    let mut spec = ct_spec(dir.path());
+    spec.unprivileged = false;
+    let err = ct_provider(&node).create(dir.path(), &spec).unwrap_err();
+    assert_eq!(err.number(), 1540, "{err}");
+    // `connect_with` reads `/nodes` once; nothing else may reach the node.
+    let calls: Vec<_> = node
+        .log()
+        .into_iter()
+        .filter(|s| s.path != "/nodes")
+        .collect();
+    assert!(calls.is_empty(), "the node was called: {calls:?}");
+}
+
+/// T3: the start ends `WARNINGS: 1` because DHCP got no answer. The start
+/// succeeds, the container is running, and the network is `NotReady` with the
+/// node's warning — not "running, all good".
+#[test]
+fn a_system_container_whose_dhcp_failed_runs_with_the_network_not_ready() {
+    use delonix_compute::system_container::{NetworkState, SystemContainerProvider};
+    const START: &str = "UPID:pve:00000502:00000602:6AB90022:vzstart:100:root@pam:";
+    let mut steps = ct_cached_template();
+    steps.push(("PUT", CT_CONFIG, ok_data("null")));
+    steps.push((
+        "GET",
+        CT_CONFIG,
+        ok_data(r#"{"entrypoint":"/bin/sleep 3600","env":"DLX_TEST=one","unprivileged":1}"#),
+    ));
+    steps.push((
+        "POST",
+        "/nodes/pve/lxc/100/status/start",
+        ok_data(&format!("\"{START}\"")),
+    ));
+    steps.push((
+        "GET",
+        leak(format!("/nodes/pve/tasks/{START}/status")),
+        ok_data(r#"{"status":"stopped","exitstatus":"WARNINGS: 1"}"#),
+    ));
+    steps.push((
+        "GET",
+        leak(format!("/nodes/pve/tasks/{START}/log")),
+        ok_data(
+            r#"[{"n":1,"t":"WARN: DHCP failed - command 'lxc-attach -n 100 -- dhclient eth0' failed: exit code 2"},{"n":2,"t":"TASK WARNINGS: 1"}]"#,
+        ),
+    ));
+    steps.push((
+        "GET",
+        "/nodes/pve/lxc/100/status/current",
+        ok_data(r#"{"status":"running"}"#),
+    ));
+    steps.push((
+        "GET",
+        "/nodes/pve/lxc/100/interfaces",
+        ok_data(r#"[{"name":"lo","inet":"127.0.0.1/8"},{"name":"eth0","inet6":"fe80::1/64"}]"#),
+    ));
+    let node = MockNode::start(script(&steps));
+    let dir = tempfile::tempdir().unwrap();
+    let p = ct_provider(&node);
+    let spec = ct_spec(dir.path());
+    let h = p.create(dir.path(), &spec).expect("create");
+    assert_eq!(h.locator, "proxmox:pve:100");
+    let obs = p
+        .start(dir.path(), &h, &spec)
+        .expect("a start with warnings succeeds");
+    assert!(obs.running);
+    match obs.network {
+        NetworkState::NotReady { reason } => {
+            assert!(reason.contains("DHCP failed"), "{reason}")
+        }
+        other => panic!("expected NotReady, got {other:?}"),
+    }
+    let ledger = Ledger::at(dir.path());
+    assert!(
+        ledger
+            .records()
+            .iter()
+            .any(|r| r.action == "ct-start" && matches!(r.state, TaskState::OkWithWarnings { .. })),
+        "{:?}",
+        ledger.records()
+    );
+}

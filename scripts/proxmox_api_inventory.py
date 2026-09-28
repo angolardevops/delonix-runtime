@@ -61,6 +61,7 @@ CRATE_SOURCE = [
     Path("crates/providers/delonix-proxmox/src/cluster.rs"),
     Path("crates/providers/delonix-proxmox/src/sdn_lock.rs"),
     Path("crates/providers/delonix-proxmox/src/sdn_routing.rs"),
+    Path("crates/providers/delonix-proxmox/src/lxc.rs"),
 ]
 
 SUPPORTED_TESTED = "supported+tested"
@@ -101,7 +102,7 @@ EXCLUDED: list[tuple[str, str]] = [
     ("/nodes/{node}/journal", "host logs — host administration"),
     ("/nodes/{node}/replication", "replication status — cluster-dependent, slice 3"),
     ("/nodes/{node}/vzdump", "node-level dump — slice 2 covers per-VM backup through it, not yet called"),
-    ("/nodes/{node}/lxc", "LXC — needs its own container-boundary decision before any route (ADR-0049 D4)"),
+    ("/nodes/{node}/lxc", "LXC — a system container, not a `Container` (ADR-0058): only its lifecycle routes are called (plan 63 slice 3); the rest waits for a named need (ADR-0049 D5)"),
     # The guest agent: what serves an engine verb is called (describe's guest block,
     # the quiesced backup, exec, the IP); the rest is excluded one by one, then the
     # remainder, because an agent passthrough is the proxy ADR-0049 D3 rules out.
