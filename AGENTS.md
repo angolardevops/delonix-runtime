@@ -5625,7 +5625,13 @@ checklist para quem mexer aqui do que como lista de correcções:
   `scripts/tmp_roots_gate.py` compara o que lá ficou com `scripts/tmp_roots_baseline.json`, com
   ratchet nos dois sentidos e nomes normalizados (dígitos → `N`). Com o #567 revertido dá
   `new leak: delonix-net-race-N` (verificado); com ele, verde. A linha de base é a do runner;
-  uma corrida local compara-se com `--list`;
+  uma corrida local compara-se com `--list`. **Paga no #572** (2026-09-28): cada um destes testes
+  guarda a pasta num `tempfile::TempDir` (o `netdef_naming` no arrendamento do #567), e a mesma
+  árvore deu 29 → **0** no local e 0 no runner, rc=0 e 2397 passados nas duas corridas. A linha de
+  base é `{}`: QUALQUER entrada chumba. Com a correcção do `delonix-oci` revertida o `cargo test`
+  continua rc=0 e o gate dá 13 × `new leak` e rc=1 (verificado). O `main` mexeu três vezes
+  durante o PR (#571, #573, #574), e antes do merge refez-se a medição sobre cada ponta nova;
+  com a linha de base a zero, uma fuga de outro PR já não se esconde no meio da dívida;
 - **saltar um teste não é sair dele arrumado** — a entrada que só o runner deixa é do
   `uma_imagem_em_uso_por_uma_vm_e_detectada_pelo_disco` (`vmimage.rs`): cria a pasta, e se não
   houver `qemu-img` faz `return` ANTES do `remove_dir_all`. Numa máquina com `qemu-img` limpa;
@@ -5633,7 +5639,34 @@ checklist para quem mexer aqui do que como lista de correcções:
   userns, deixaria MENOS), e o primeiro CI do gate desmentiu-o: as outras 29 eram idênticas.
   **Regra: todo o `return` de um teste que já criou alguma coisa é uma saída que tem de limpar**,
   e por isso a limpeza vai num guarda com `Drop`, não numa linha no fim. É a regra do #565 («X e
-  NÃO Y») vista do lado dos testes;
+  NÃO Y») vista do lado dos testes. **Fechado no #572**: o `TempDir` cobre esse `return`.
+  Reproduz-se localmente com um `qemu-img` que FALHA à frente no `PATH` (o teste trata a falha
+  como a ausência): antes fica `dlx-test-vmsbacked-<pid>`, depois nada. Tirar o `/usr/bin` do
+  `PATH` não serve, porque parte o próprio `cargo`, que falhou sem dizer nada;
+- **uma limpeza que falha calada não é uma limpeza** — o `extract_layer_handles_readonly_dirs_…`
+  (`delonix-oci/src/overlay.rs`, desde 2026-09-15) acabava com `remove_dir_all(&dir).ok()`, e essa
+  linha falhou em TODAS as corridas: o `extract_layer` repõe o `0555` da camada no `ro/` depois de
+  lhe pôr os filhos, e sem o bit de escrita no pai não se apaga ficheiro nenhum lá dentro, nem com
+  `rm -rf` (medido: `Permission denied` ao limpar a pasta da medição). O `.ok()` transformou
+  EACCES em sucesso durante 13 dias. É a **segunda ocorrência no mesmo ficheiro**: a doc de
+  `remove_container_dir` regista que um `let _ = remove_dir_all(...)` escondeu um rootfs flat
+  órfão por container removido (39 MiB por `redis:7-alpine`). **Regra: quem engole o erro de uma
+  limpeza tem de OLHAR depois** — nos testes olha o `tmp_roots_gate.py`, e este teste acaba agora em
+  `TempDir::close().unwrap()`; uma árvore extraída de uma camada fica gravável antes de se
+  apagar. Ficam 64 `remove_dir_all(…).ok()` em `crates/` e `bins/` (2026-09-28), entre código de
+  produção e de teste; nos testes, o gate apanha-os no caminho verde;
+- **uma regra citada num comentário não é uma regra do repo** — os testes do `mapped.rs` (desde
+  2026-08-17) usavam `temp_dir()` + pid «porque este crate não tem `dev-dependencies` e a regra do
+  repo é não acrescentar dependências — nem para testes». Essa regra não está escrita no
+  AGENTS.md, no `docs/dev/coding-conventions.md` nem em ADR nenhum, e o `tempfile` já era
+  dev-dependency de 7 das crates do workspace (o commit e o PR do #572 dizem 8, por contar a
+  declaração na raiz). O idioma que o comentário justificava deixava 4 pastas
+  por corrida. **Regra: antes de obedecer a uma regra citada num comentário, encontra-a escrita**;
+  se não estiver, o comentário é uma hipótese de quem o escreveu. E quando a regra certa existe
+  só como prática, escreve-a: o #572 deixou-a em `coding-conventions.md` §9 («A test removes its
+  temporary directory on every exit»), que antes citava o `tmp_dir(tag)` sem guarda como a
+  convenção observada. O idioma antigo continua em 204 sítios de código de teste (2026-09-28):
+  limpos no caminho feliz, sujos num assert que falhe;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para

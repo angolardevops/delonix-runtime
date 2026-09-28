@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:5c91adc6b2f71d8a63325e98fe7cc34464469e6339179fb1178bf42d204ee147 -->
+<!-- translated-from: coding-conventions.md sha256:baf3ca276f4debbf4c3a6e405c4849442b3d2062d659f6bc1727edcfb40062c3 -->
 # Conventions de code
 
 **Avant de lire :** [Introduction à Rust](rust-primer.md), [Architecture](architecture.md) et [Les crates](crates.md) — les règles ci-dessous font référence aux couches, aux ports et aux crates par leur nom.
@@ -695,11 +695,20 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   N'appelez pas de code qui résout la vraie racine d'état. Ne faites pas de `set_var` (le ratchet
   `env_writes`, [§4.1](#41-the-layers-and-the-direction)).
   **Décidé** : AGENTS.md § « IaC nativo », la note sur la fusion de `ShareVolume` (« Nota de método: um
-  teste que chamasse `apply_share` … escreveria no estado REAL da máquina »). **Convention
-  (observée)** : les tests de `delonix-state/src/store.rs` utilisent un helper `tmp_dir(tag)`.
-  Pour les exécutions manuelles et E2E, isolez **à la fois** `DELONIX_ROOT` et
+  teste que chamasse `apply_share` … escreveria no estado REAL da máquina »). Pour les exécutions manuelles et E2E, isolez **à la fois** `DELONIX_ROOT` et
   `DELONIX_NET_RUNTIME_DIR`. N'en isoler qu'un est pire que n'en isoler aucun (AGENTS.md §
   « Meia-isolação é pior que nenhuma » ; [Cloner, compiler et tester](build-and-test.md#isolating-the-engines-state)).
+- **Un test supprime son répertoire temporaire à chaque sortie.** Un assert qui échoue, un
+  `return` anticipé et une vérification sautée sont aussi des sorties : la suppression vit donc
+  dans une garde avec `Drop`, pas dans une ligne à la fin. Gardez le répertoire dans un
+  `tempfile::TempDir` (déclaré une seule fois dans le `Cargo.toml` racine). Une racine qu'un binaire de
+  tests entier partage via `DELONIX_ROOT` utilise le bail de
+  `delonix-sdn/tests/network_alloc_race.rs`. Un dossier nommé d'après le pid sous `temp_dir()`
+  avec un `remove_dir_all` à la fin est l'ancien idiome, encore présent à 204 endroits du code de
+  test (2026-09-28) : ne le copiez pas. Un arbre extrait d'une couche d'image peut garder des
+  répertoires `0555` : rendez-les inscriptibles avant de le supprimer. **Imposé (gate)** :
+  `scripts/tmp_roots_gate.py` fait échouer le job `test` pour tout ce qui reste dans son `TMPDIR` ;
+  la baseline est vide depuis #572.
 - **Un test de régression doit échouer lorsque la correction est annulée.** Annulez la correction,
   constatez l'échec du test, puis rétablissez la correction. Un test qui passe dans les deux cas ne
   prouve rien, et AGENTS.md en consigne plusieurs (une vérification de code de sortie que `1` ne

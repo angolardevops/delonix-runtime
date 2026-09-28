@@ -1029,11 +1029,19 @@ let c = store.update(id_or_name, |c| match f(c) {
   código que resolva o state root real. Não faças <code>set_var</code> (o ratchet <code>env_writes</code>,
   <a href="#41-the-layers-and-the-direction">§4.1</a>).
   <strong>Decidido</strong>: AGENTS.md § «IaC nativo», a nota da fusão do <code>ShareVolume</code> («Nota de método: um
-  teste que chamasse <code>apply_share</code> … escreveria no estado REAL da máquina»). <strong>Convenção
-  (observada)</strong>: os testes de <code>delonix-state/src/store.rs</code> usam um helper <code>tmp_dir(tag)</code>.
-  Para corridas manuais e E2E, isola <strong>os dois</strong>, <code>DELONIX_ROOT</code> e <code>DELONIX_NET_RUNTIME_DIR</code>. Isolar
+  teste que chamasse <code>apply_share</code> … escreveria no estado REAL da máquina»). Para corridas manuais e E2E, isola <strong>os dois</strong>, <code>DELONIX_ROOT</code> e <code>DELONIX_NET_RUNTIME_DIR</code>. Isolar
   só um é pior que nenhum (AGENTS.md § «Meia-isolação é pior que nenhuma»;
   <a href="build-and-test.html#isolating-the-engines-state">Clonar, compilar e testar</a>).</li>
+<li><strong>Um teste remove a sua pasta temporária em todas as saídas.</strong> Um assert que falha, um <code>return</code>
+  antecipado e uma verificação saltada também são saídas, por isso a remoção vive num guarda com
+  <code>Drop</code>, não numa linha no fim: guarda a pasta num <code>tempfile::TempDir</code> (declarado uma vez no
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> da raiz). Uma raiz que um binário de testes inteiro partilha pelo <code>DELONIX_ROOT</code> usa o
+  arrendamento de <code>delonix-sdn/tests/network_alloc_race.rs</code>. Uma pasta com o pid em <code>temp_dir()</code> e
+  um <code>remove_dir_all</code> no fim é o idioma antigo, ainda em 204 sítios de código de teste
+  (2026-09-28): não o copies. Uma árvore extraída de uma camada de imagem pode manter directórios
+  <code>0555</code>, por isso torna-os graváveis antes de a removeres. <strong>Imposto (gate)</strong>:
+  <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> chumba o job <code>test</code> por qualquer coisa deixada no seu <code>TMPDIR</code>; a
+  linha de base está vazia desde o #572.</li>
 <li><strong>Um teste de regressão tem de falhar com a correcção revertida.</strong> Reverte a correcção, vê o teste
   falhar, e repõe a correcção. Um teste que passa nos dois casos não prova nada, e o AGENTS.md
   regista vários (uma verificação de código de saída que o <code>1</code> não conseguia distinguir; um cenário

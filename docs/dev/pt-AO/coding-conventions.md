@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:5c91adc6b2f71d8a63325e98fe7cc34464469e6339179fb1178bf42d204ee147 -->
+<!-- translated-from: coding-conventions.md sha256:baf3ca276f4debbf4c3a6e405c4849442b3d2062d659f6bc1727edcfb40062c3 -->
 # Convenções de código
 
 **Antes de leres:** [Introdução ao Rust](rust-primer.md), [Arquitectura](architecture.md) e [As crates](crates.md) — as regras abaixo referem-se a camadas, portas e crates pelo nome.
@@ -683,11 +683,19 @@ recusar o que ele próprio não suporta.
   código que resolva o state root real. Não faças `set_var` (o ratchet `env_writes`,
   [§4.1](#41-the-layers-and-the-direction)).
   **Decidido**: AGENTS.md § «IaC nativo», a nota da fusão do `ShareVolume` («Nota de método: um
-  teste que chamasse `apply_share` … escreveria no estado REAL da máquina»). **Convenção
-  (observada)**: os testes de `delonix-state/src/store.rs` usam um helper `tmp_dir(tag)`.
-  Para corridas manuais e E2E, isola **os dois**, `DELONIX_ROOT` e `DELONIX_NET_RUNTIME_DIR`. Isolar
+  teste que chamasse `apply_share` … escreveria no estado REAL da máquina»). Para corridas manuais e E2E, isola **os dois**, `DELONIX_ROOT` e `DELONIX_NET_RUNTIME_DIR`. Isolar
   só um é pior que nenhum (AGENTS.md § «Meia-isolação é pior que nenhuma»;
   [Clonar, compilar e testar](build-and-test.md#isolating-the-engines-state)).
+- **Um teste remove a sua pasta temporária em todas as saídas.** Um assert que falha, um `return`
+  antecipado e uma verificação saltada também são saídas, por isso a remoção vive num guarda com
+  `Drop`, não numa linha no fim: guarda a pasta num `tempfile::TempDir` (declarado uma vez no
+  `Cargo.toml` da raiz). Uma raiz que um binário de testes inteiro partilha pelo `DELONIX_ROOT` usa o
+  arrendamento de `delonix-sdn/tests/network_alloc_race.rs`. Uma pasta com o pid em `temp_dir()` e
+  um `remove_dir_all` no fim é o idioma antigo, ainda em 204 sítios de código de teste
+  (2026-09-28): não o copies. Uma árvore extraída de uma camada de imagem pode manter directórios
+  `0555`, por isso torna-os graváveis antes de a removeres. **Imposto (gate)**:
+  `scripts/tmp_roots_gate.py` chumba o job `test` por qualquer coisa deixada no seu `TMPDIR`; a
+  linha de base está vazia desde o #572.
 - **Um teste de regressão tem de falhar com a correcção revertida.** Reverte a correcção, vê o teste
   falhar, e repõe a correcção. Um teste que passa nos dois casos não prova nada, e o AGENTS.md
   regista vários (uma verificação de código de saída que o `1` não conseguia distinguir; um cenário
