@@ -150,7 +150,18 @@ jobs:
         run: rustup show
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --workspace --locked
-      - run: cargo test --workspace --locked --no-fail-fast
+      # The tests get an EMPTY temp dir of their own, so whatever is in it
+      # afterwards was left by them. `scripts/tmp_roots_gate.py` judges it
+      # against the known debt, both ways (#567: a test left one root per run,
+      # ~2400 of them, and nothing looked).
+      - name: cargo test, with a temp dir of its own
+        env:
+          TMPDIR: ${{ runner.temp }}/test-tmp
+        run: |
+          mkdir -p "$TMPDIR"
+          cargo test --workspace --locked --no-fail-fast
+      - name: The tests left only the known debt in the temp dir
+        run: python3 scripts/tmp_roots_gate.py --dir "${{ runner.temp }}/test-tmp"
 
   # ---- Native arm64 tests (issue #438) ----
   # A cross build only type-checks the `#[cfg(target_arch)]` branches; none of
