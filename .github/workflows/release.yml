@@ -329,6 +329,17 @@ jobs:
       # Documentação DINÂMICA por release: o apêndice docs/RELEASES.md (features
       # por release) regenera-se das notas e é comitado no main — a doc nunca
       # fica atrás da release. [skip ci] evita re-disparar a CI por isto.
+      #
+      # Python próprio SÓ a partir daqui: o job corre em ubuntu-22.04 por causa da
+      # glibc 2.35 dos binários, e o python3 desse runner é o 3.10 — sem `tomllib`
+      # (dev_docs.py) e com um pip que não conhece `--break-system-packages`
+      # (dev_docs_site.py). Na v4.5.0 os dois geradores rebentaram assim e o passo
+      # disse «já actualizados». Os binários já estão construídos e publicados
+      # neste ponto, por isso mudar o python3 do PATH não toca no que se entrega.
+      # 3.12 é o do ubuntu-latest onde o ci.yml corre os mesmos geradores em --check.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - name: Actualiza o apêndice de releases no main
         env:
           GH_TOKEN: ${{ github.token }}
@@ -341,16 +352,28 @@ jobs:
           # The generated facts of the contributor handbook follow the release too;
           # the narrative is reviewed by a person after the release is validated.
           # A generator failure must not cost the release appendix, which was independent
-          # of it before: warn loudly and commit what did regenerate.
-          python3 scripts/dev_docs.py || echo "::warning::dev_docs.py falhou — os factos de docs/dev ficam por regenerar nesta release"
-          { python3 -m pip install --break-system-packages markdown && python3 scripts/dev_docs_site.py; } \
-            || echo "::warning::dev_docs_site.py falhou — o site do manual fica por regenerar nesta release"
+          # of it before: commit what did regenerate, then FAIL the step. A warning was
+          # not enough — v4.5.0 shipped with both generators dead and a green run.
+          FAILED=""
+          python3 scripts/dev_docs.py \
+            || { echo "::error::dev_docs.py falhou — os factos de docs/dev ficam por regenerar nesta release"; FAILED="$FAILED dev_docs.py"; }
+          # A venv, not `pip --break-system-packages`: it works whatever pip the runner has.
+          VENV="$RUNNER_TEMP/dev-docs-venv"
+          { python3 -m venv "$VENV" && "$VENV/bin/python" -m pip install --quiet markdown \
+              && "$VENV/bin/python" scripts/dev_docs_site.py; } \
+            || { echo "::error::dev_docs_site.py falhou — o site do manual fica por regenerar nesta release"; FAILED="$FAILED dev_docs_site.py"; }
           # `git status`, not `git diff`: a page added to the handbook is an UNTRACKED
           # file, which `git diff --quiet` does not see.
           if [ -n "$(git status --porcelain -- docs/RELEASES.md docs/dev docs/handbook)" ]; then
             git add docs/RELEASES.md docs/dev docs/handbook
             git commit -m "docs(releases): apêndice e factos do manual actualizados para ${TAG} [skip ci]"
             git push origin main
-          else
+          elif [ -z "$FAILED" ]; then
             echo "docs/RELEASES.md e docs/dev já actualizados — nada a comitar"
+          else
+            echo "Nada a comitar, mas NÃO porque a doc esteja em dia: falhou${FAILED}"
+          fi
+          if [ -n "$FAILED" ]; then
+            echo "::error::Geradores do manual falharam:${FAILED} — regenerar à mão e abrir PR"
+            exit 1
           fi
