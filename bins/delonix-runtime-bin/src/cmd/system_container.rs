@@ -241,7 +241,37 @@ fn spec_fields(spec: &SystemContainerSpecDoc) -> Result<BTreeMap<String, String>
     Ok(f)
 }
 
+/// Refuses, by name, the fields that would ask for privilege or nesting.
+///
+/// The Kind has no such field on purpose, and the generic «unknown field —
+/// ignored» warning would be the worst answer here: a manifest that says
+/// `unprivileged: false` gets an unprivileged container with exit 0, the
+/// opposite of what it asked. A privileged container on a remote node is a
+/// decision of its own (ADR-0058), so the request fails before anything is
+/// pulled or created.
+fn reject_privilege(doc: &ManifestDoc) -> Result<()> {
+    const NOT_HERE: &[&str] = &["unprivileged", "privileged", "features", "nesting"];
+    let serde_yaml::Value::Mapping(map) = &doc.spec else {
+        return Ok(());
+    };
+    for field in NOT_HERE {
+        if map.contains_key(serde_yaml::Value::String((*field).to_string())) {
+            return Err(Error::coded(
+                1540,
+                Error::Invalid(po::tf(
+                    "systemcontainer/{name}: `{field}` is refused — a system container is \
+                     always unprivileged and without nesting; privilege on a remote node is a \
+                     decision of its own (ADR-0058)",
+                    &[("name", &doc.metadata.name), ("field", field)],
+                )),
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn desired(doc: &ManifestDoc) -> Result<super::reconcile::Desired> {
+    reject_privilege(doc)?;
     let spec: SystemContainerSpecDoc = manifest::spec_of(doc)?;
     Ok(super::reconcile::Desired {
         kind: k::SYSTEM_CONTAINER.into(),
@@ -389,6 +419,7 @@ fn record_fields(rec: &SystemContainerRecord) -> Result<BTreeMap<String, String>
 /// converges `memory`/`swap`/`cores` when there is. A cold field that differs
 /// is refused here and planned as a `Replace` by `stack plan`.
 fn apply_one(doc: &ManifestDoc) -> Result<()> {
+    reject_privilege(doc)?;
     let spec: SystemContainerSpecDoc = manifest::spec_of(doc)?;
     let name = doc.metadata.name.clone();
     if spec.image.trim().is_empty() {
@@ -686,6 +717,32 @@ mod tests {
         s.memory = "2 GB".into();
         let err = spec_fields(&s).unwrap_err();
         assert!(err.to_string().contains("memory"), "{err}");
+    }
+
+    /// A field asking for privilege is refused by name (DX-1540), never warned
+    /// about and dropped: dropped, it would give the opposite of what was asked.
+    #[test]
+    fn a_privilege_field_is_refused_not_ignored() {
+        for field in [
+            "unprivileged: false",
+            "privileged: true",
+            "features: nesting=1",
+        ] {
+            let text = format!(
+                "apiVersion: compute.delonix.io/v1alpha1\nkind: SystemContainer\n\
+                 metadata: {{name: t}}\nspec: {{image: alpine:3.20, {field}}}\n"
+            );
+            let docs = manifest::load_str(&text, "test").unwrap();
+            let err = desired(&docs[0]).unwrap_err();
+            assert_eq!(err.number(), 1540, "{field}: {err}");
+        }
+        let docs = manifest::load_str(
+            "apiVersion: compute.delonix.io/v1alpha1\nkind: SystemContainer\n\
+             metadata: {name: t}\nspec: {image: alpine:3.20}\n",
+            "test",
+        )
+        .unwrap();
+        assert!(desired(&docs[0]).is_ok());
     }
 
     #[test]

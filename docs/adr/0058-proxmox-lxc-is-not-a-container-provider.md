@@ -1,6 +1,8 @@
 # ADR-0058: A Proxmox LXC container is not a provider of `kind: Container`
 
-- **Status:** Accepted (2026-09-28; decisions D1–D4 of plan 63 recorded there)
+- **Status:** Accepted (2026-09-28; decisions D1–D4 of plan 63 recorded there). Implemented the
+  same day by plan 63 slices 0–4 (#546, #571, #574, #576, #579, #582) and closed by slice 6; see
+  «Implementation» at the end.
 - **Date:** 2026-09-27
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0049 D4 (LXC gets "an ADR of its own, after a spike, or it stays excluded";
@@ -164,3 +166,29 @@ the template were removed afterwards; the node was left as it was found).
   with a wrong checksum (the request never produced a task, for a reason not isolated). Whether
   QEMU tasks end in `WARNINGS` in practice was not measured; the verdict that would misread them
   is shared code.
+
+## Implementation (plan 63, 2026-09-28)
+
+Decision 2 said the resource would not be built until a need was named. The owner named one on
+2026-09-28 (parity with Proxmox, plan 63 decision D2), and it was built as this record
+describes: its own port, its own Kind, its own capability rows, and the six traps as rules.
+
+| Slice | PR | What it delivered |
+|---|---|---|
+| 0 | #546 | A task has three outcomes: `WARNINGS: <n>` succeeds and its `WARN:` lines go to the ledger (trap 5). |
+| 0b | #571 | An SDN apply waits for every node's `srvreload networking`, not only the parent task. |
+| 1 | #574 | `write_oci_media_archive`: the archive with OCI media types the node accepts (trap 6, point 5); zstd or foreign layers refused with DX-1409. |
+| 2 | #576 | The archive uploaded once as `vztmpl`, named `dlx-<hex>.tar` by its manifest digest; a wrong checksum ends the node's task with «checksum mismatch» and nothing kept. |
+| 3 | #579 | The port `SystemContainerProvider` and `ProxmoxSystemContainerProvider`: create without entrypoint/env, `PUT …/config`, read back and compare (trap 4); `unprivileged: false` refused (DX-1540); a start ending in `WARNINGS` is a success with the network `NotReady`. |
+| 4 | #582 | `kind: SystemContainer` (`compute.delonix.io/v1alpha1`): the engine pulls the image, memory/swap/cores converge in place, a hand edit on the node is drift. |
+| 6 | this | The inventory reason for the 53 routes still not called names this record and the Kind; a privilege field in the manifest (`unprivileged`, `privileged`, `features`, `nesting`), which the generic warning dropped so a node got an unprivileged container with exit 0, refused with DX-1540 before the provider is resolved; seven node-less checks in `scripts/e2e.sh`. |
+
+Slice 5 (day 2: snapshots, clone, migrate, backup, the per-guest firewall) waits for a request,
+route by route.
+
+**Measured after the spike, in the slices:** the `vztmpl` upload with a wrong checksum (slice 2:
+the node answers HTTP 200 and its `imgcopy` task fails, nothing is kept); the node's cgroup and
+cpuset taking memory, swap and cores on a running container (slice 4). **Still not measured:** a
+network where DHCP answers (the lab's `vmbr0` has no DHCP server), a pull from a private registry
+through `kind: SystemContainer`, and `features: nesting=1`, which the Kind does not offer. A
+privileged container is refused by the port and has no field in the Kind.

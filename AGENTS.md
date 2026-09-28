@@ -7958,8 +7958,8 @@ em vigor. O módulo é `delonix_linux::usage`; a tool só monta as linhas.
 
 O ADR-0058 decidiu, depois de um spike no PVE 9.2.2, que um LXC do Proxmox não serve
 `kind: Container`: a API não tem `exec`, logs nem código de saída, e o dataplane do motor não
-chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As fatias 0 a 4 do plano
-63 estão feitas; a 5 (dia 2) só entra a pedido.
+chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As fatias 0 a 4 e 6 do plano
+63 estão fundidas (#546, #571, #574, #576, #579, #582 e o fecho); a 5 (dia 2) só entra a pedido.
 
 - **O arquivo que o nó aceita** (Fatia 1): `delonix_oci::write_oci_media_archive` reescreve só o
   manifesto com media types OCI. O nó recusa o Docker v2 do `image save` com «Unsupported CPU
@@ -7987,3 +7987,11 @@ chega lá. Entra como um recurso próprio, com semântica próxima de uma VM. As
     escreve-os no cgroup e no cpuset). O resto é frio: planeia um `Replace`, recusado sem
     `--replace SystemContainer/<nome>`.
   - **Entrypoint e env não declarados** ficam fora da comparação: o nó tem os da imagem.
+- **Um campo de privilégio no manifesto é recusado, não ignorado** (Fatia 6). `unprivileged`,
+  `privileged`, `features` e `nesting` davam «campo desconhecido — ignorado», e com um nó
+  configurado o `apply` criava um container sem privilégio e saía com 0 — o contrário do pedido.
+  Agora saem com DX-1540 no `desired` e no `apply_one`, antes de resolver o provider, por isso a
+  recusa ganha ao DX-6000 mesmo sem nó. Gate: a secção «kind: SystemContainer — as recusas que
+  não precisam de nó» do `scripts/e2e.sh` (7 checks; 3 chumbam com a recusa revertida,
+  verificado). A layer zstd (DX-1409) fica no teste unitário do `delonix-oci`: pelo Kind só se
+  chega lá com um nó.

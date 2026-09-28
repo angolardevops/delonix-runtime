@@ -14553,3 +14553,6 @@ msgstr "já não existe no provider"
 msgid "not read: {err}"
 msgstr "não lido: {err}"
 
+
+msgid "systemcontainer/{name}: `{field}` is refused — a system container is always unprivileged and without nesting; privilege on a remote node is a decision of its own (ADR-0058)"
+msgstr "systemcontainer/{name}: `{field}` é recusado — um container de sistema é sempre sem privilégio e sem nesting; privilégio num nó remoto é uma decisão própria (ADR-0058)"
