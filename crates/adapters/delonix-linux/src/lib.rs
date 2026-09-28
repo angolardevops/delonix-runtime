@@ -9065,8 +9065,8 @@ mod tests {
     /// asserts nothing survives.
     #[test]
     fn remove_cgroup_tree_catches_a_tree_with_several_levels() {
-        let root = std::env::temp_dir().join(format!("delonix-cgtree-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&root);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("cgroup");
         std::fs::create_dir_all(root.join("system.slice/some.service")).unwrap();
         std::fs::create_dir_all(root.join("kubelet.slice/kubelet.service")).unwrap();
         std::fs::create_dir_all(root.join("init.scope")).unwrap();
@@ -9105,8 +9105,8 @@ mod tests {
     #[test]
     fn remove_container_cgroup_uses_the_marker_when_the_guesses_would_miss() {
         let cid = format!("cgmarker-{}", std::process::id());
-        let leaf = std::env::temp_dir().join(format!("delonix-cgleaf-{cid}"));
-        let _ = std::fs::remove_dir_all(&leaf);
+        let tmp = tempfile::tempdir().unwrap();
+        let leaf = tmp.path().join("leaf");
         // Shape a real kind node's leftover tree: nested, non-empty — exactly
         // what a single-level `remove_dir` (the pre-`remove_cgroup_tree` bug)
         // and a wrong-path guess (this bug) both fail to clear.
@@ -9300,8 +9300,8 @@ mod tests {
 
     #[test]
     fn mount_point_follows_the_source_shape() {
-        let dir = std::env::temp_dir().join(format!("delonix-shape-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
 
         let plain_file = dir.join("f");
         std::fs::write(&plain_file, b"x").unwrap();
@@ -9324,8 +9324,6 @@ mod tests {
         );
         // A source that is not there at all keeps the historical behaviour.
         assert!(mount_point_should_be_dir(&dir.join("nao-existe")));
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Achado de auditoria (MÉDIO): `bind_devices` construía o destino por
@@ -9336,14 +9334,8 @@ mod tests {
     /// ficar INTACTO. Sem a correcção, ficaria com 0 bytes.
     #[test]
     fn bind_devices_recusa_destino_que_escapa_o_rootfs() {
-        let dir = std::env::temp_dir().join(format!(
-            "dlx-devesc-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let rootfs = dir.join("rootfs");
         std::fs::create_dir_all(&rootfs).unwrap();
         // O "ficheiro do host" que o atacante quer destruir (fora do rootfs).
@@ -9367,8 +9359,6 @@ mod tests {
             !after.is_empty(),
             "o ficheiro do host foi truncado para 0 bytes"
         );
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// Os device nodes de memória/porta crua nunca são entregues a um container.
@@ -9394,7 +9384,8 @@ mod tests {
     /// contentor — é preferível perder uma entrada a perder o ficheiro).
     #[test]
     fn write_etc_files_escreve_as_entradas_de_add_host() {
-        let dir = std::env::temp_dir().join(format!("dlx-hosts-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         std::fs::create_dir_all(dir.join("etc")).unwrap();
         let rootfs = dir.to_str().unwrap();
 
@@ -9425,8 +9416,6 @@ mod tests {
             pos_extra < pos_canonica,
             "o override do utilizador tem de vir primeiro"
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     use super::*;
@@ -9442,14 +9431,8 @@ mod tests {
     fn lchown_tree_nao_segue_symlinks() {
         use std::os::unix::fs::MetadataExt;
 
-        let base = std::env::temp_dir().join(format!(
-            "delonix-lchown-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let tree = base.join("tree");
         let outside = base.join("outside");
         std::fs::create_dir_all(tree.join("sub")).unwrap();
@@ -9488,8 +9471,6 @@ mod tests {
             file_ctime_after >= file_ctime_before,
             "um ficheiro real dentro da árvore devia continuar a ser chown'd normalmente"
         );
-
-        std::fs::remove_dir_all(&base).ok();
     }
 
     #[test]
@@ -9502,14 +9483,8 @@ mod tests {
         // path. `safe_bind_target` must refuse to descend through ANY
         // symlink component, whether in the middle of the path or as the
         // final target itself.
-        let base = std::env::temp_dir().join(format!(
-            "delonix-safe-bind-target-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let rootfs = base.join("rootfs");
         std::fs::create_dir_all(&rootfs).unwrap();
 
@@ -9537,8 +9512,6 @@ mod tests {
             safe_bind_target(&rootfs.to_string_lossy(), "/data/inside"),
             Some(rootfs.join("data").join("inside"))
         );
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -9750,17 +9723,9 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
     }
 
     /// Cria uma base de cgroup falsa (só ficheiros — não é preciso cgroupfs real).
-    fn fake_base(tag: &str) -> std::path::PathBuf {
-        let base = std::env::temp_dir().join(format!(
-            "delonix-cg-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
-        std::fs::write(base.join("cgroup.subtree_control"), "").unwrap();
+    fn fake_base() -> tempfile::TempDir {
+        let base = tempfile::tempdir().unwrap();
+        std::fs::write(base.path().join("cgroup.subtree_control"), "").unwrap();
         base
     }
 
@@ -9776,7 +9741,8 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
     /// escritas de `try_delegated_base` faz este teste falhar.
     #[test]
     fn leaf_delegada_fecha_o_swap_e_mata_o_cgroup_inteiro_no_oom() {
-        let base = fake_base("swap-oom");
+        let tmp = fake_base();
+        let base = tmp.path();
         let c = Container::new(
             "swap01".into(),
             "t".into(),
@@ -9801,7 +9767,6 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             "1",
             "o OOM tem de matar o container inteiro, não um processo dele"
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// REGRESSION: uma leaf criada e NÃO usada tem de ser removida.
@@ -9816,15 +9781,8 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
         // Base SEM `cgroup.subtree_control` gravável de verdade: o
         // `create_dir_all` da leaf passa, mas a activação de controladores
         // falha — exactamente o caso do scope populado (no-internal-processes).
-        let base = std::env::temp_dir().join(format!(
-            "delonix-cg-orfa-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         // `subtree_control` existe (passa o gate inicial) mas é só-leitura, por
         // isso os `+ctrl` falham todos e `any` fica false.
         std::fs::write(base.join("cgroup.subtree_control"), "").unwrap();
@@ -9859,7 +9817,6 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
                 "a leaf ficou órfã depois de a delegação falhar — é este o bug"
             );
         }
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// REGRESSION (protecção do host): a base que o Delonix cria para si tem de
@@ -9872,7 +9829,8 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
     /// `cpu.max=max`.
     #[test]
     fn a_base_propria_leva_tecto_agregado_dimensionado_ao_host() {
-        let base = fake_base("agregado");
+        let tmp = fake_base();
+        let base = tmp.path();
         let bs = base.to_str().unwrap();
         apply_aggregate_ceiling(bs);
 
@@ -9934,7 +9892,6 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
                 "sem dispositivo utilizável não se escreve io.max nenhum"
             ),
         }
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// A FORMA do valor, que é o que se pode enganar sem um kernel por perto.
@@ -9970,29 +9927,22 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
     #[test]
     fn delegated_base_usable_exige_subtree_control_gravavel() {
         use std::os::unix::fs::PermissionsExt;
-        let base = std::env::temp_dir().join(format!(
-            "delonix-deleg-probe-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
 
         // Sem `cgroup.subtree_control` nenhum: não é uma base delegável.
-        assert!(!delegated_base_usable(&base));
+        assert!(!delegated_base_usable(base));
 
         // Com um gravável (o scope delegado): serve.
         let sc = base.join("cgroup.subtree_control");
         std::fs::write(&sc, "").unwrap();
-        assert!(delegated_base_usable(&base));
+        assert!(delegated_base_usable(base));
 
         // Só de leitura (o `session-N.scope` do SSH, dono root): NÃO serve.
         std::fs::set_permissions(&sc, std::fs::Permissions::from_mode(0o444)).unwrap();
-        let readonly_rejected = !delegated_base_usable(&base);
+        let readonly_rejected = !delegated_base_usable(base);
         std::fs::set_permissions(&sc, std::fs::Permissions::from_mode(0o644)).unwrap();
-        std::fs::remove_dir_all(&base).unwrap();
+        tmp.close().unwrap();
         assert!(
             readonly_rejected,
             "um subtree_control não gravável tem de ser recusado — é o caso do SSH"
@@ -10001,15 +9951,8 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
 
     #[test]
     fn try_delegated_base_aplica_cpu_weight_cpuset_e_io_weight_na_leaf() {
-        let base = std::env::temp_dir().join(format!(
-            "delonix-try-delegated-base-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         std::fs::write(base.join("cgroup.subtree_control"), "").unwrap();
 
         let mut c = Container::new(
@@ -10052,8 +9995,6 @@ full avg10=8.00 avg60=9.10 avg300=6.20 total=1000
             std::fs::read_to_string(leaf.join("memory.max")).unwrap(),
             (64 * 1024 * 1024).to_string()
         );
-
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -10600,14 +10541,13 @@ mod oom_tests {
 
     #[test]
     fn the_local_file_wins_over_the_hierarchical_one() {
-        let dir = std::env::temp_dir().join(format!("dlx-oom-local-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         std::fs::write(dir.join("memory.events"), "oom_kill 9\n").unwrap();
         std::fs::write(dir.join("memory.events.local"), "oom_kill 1\n").unwrap();
         assert_eq!(oom_kill_count(&dir.to_string_lossy()), Some(1));
         std::fs::remove_file(dir.join("memory.events.local")).unwrap();
         assert_eq!(oom_kill_count(&dir.to_string_lossy()), Some(9));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -10619,9 +10559,8 @@ mod root_slice_probe_tests {
     /// «no delegation» (which refused every limited container on a new node).
     #[test]
     fn a_missing_slice_is_created_not_reported_as_undelegated() {
-        let base = std::env::temp_dir().join(format!("dlx-slice-probe-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let slice = base.join("delonix.slice");
         assert!(!slice.exists());
         assert!(root_slice_writable(&slice));
@@ -10634,7 +10573,6 @@ mod root_slice_probe_tests {
             0,
             "the probe itself is removed"
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     /// Nowhere to write: still false.
@@ -10650,19 +10588,13 @@ mod root_slice_probe_tests {
 mod cgroup_delegation_tests {
     use super::{limit_failure_message, slice_missing_controllers};
 
-    fn tmp(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("dlx-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     /// The probe reads what the children RECEIVE and not what the slice COULD
     /// enable: a slice with `memory pids` in its `subtree_control` gives its
     /// leaves no `cpu.max`, whatever `cgroup.controllers` offers.
     #[test]
     fn a_slice_without_cpu_reports_cpu_as_missing() {
-        let dir = tmp("missing-ctrl");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         std::fs::write(dir.join("cgroup.subtree_control"), "memory pids\n").unwrap();
         assert_eq!(
             slice_missing_controllers(&dir.to_string_lossy()),
@@ -10674,7 +10606,6 @@ mod cgroup_delegation_tests {
         )
         .unwrap();
         assert!(slice_missing_controllers(&dir.to_string_lossy()).is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// No `cgroup.subtree_control` at all (nothing was created) means EVERY
@@ -10691,28 +10622,28 @@ mod cgroup_delegation_tests {
     /// the operator as «Permission denied».
     #[test]
     fn a_missing_limit_file_names_the_controller_and_not_the_errno() {
-        let dir = tmp("limit-msg");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let cg = dir.to_string_lossy().into_owned();
         let eacces = std::io::Error::from_raw_os_error(13);
         let msg = limit_failure_message(&cg, "cpu.max", "100000 100000", &eacces);
         assert!(msg.contains("`cpu` controller is not delegated"), "{msg}");
         assert!(msg.contains("cgroup.subtree_control"), "{msg}");
         assert!(!msg.contains("Permission denied"), "{msg}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A file that DOES exist keeps the kernel's own answer: the errno is the
     /// real reason there, and a delegation story would hide it.
     #[test]
     fn an_existing_limit_file_keeps_the_errno() {
-        let dir = tmp("limit-errno");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         std::fs::write(dir.join("cpu.max"), "max 100000").unwrap();
         let cg = dir.to_string_lossy().into_owned();
         let ebusy = std::io::Error::from_raw_os_error(16);
         let msg = limit_failure_message(&cg, "cpu.max", "100000 100000", &ebusy);
         assert!(msg.contains("cpu.max=100000 100000"), "{msg}");
         assert!(!msg.contains("not delegated"), "{msg}");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }
 
@@ -10754,24 +10685,16 @@ mod publish_tests {
     use std::time::Duration;
 
     /// A store of its own per test, removed on drop.
-    struct Scratch(std::path::PathBuf, Store);
-
-    impl Scratch {
-        fn new(tag: &str) -> Self {
-            let root = std::env::temp_dir().join(format!(
-                "delonix-publish-{tag}-{}-{}",
-                std::process::id(),
-                delonix_node::now_unix()
-            ));
-            let _ = std::fs::remove_dir_all(&root);
-            let store = Store::open(root.join("containers")).unwrap();
-            Scratch(root, store)
-        }
+    struct Scratch {
+        store: Store,
+        _root: tempfile::TempDir,
     }
 
-    impl Drop for Scratch {
-        fn drop(&mut self) {
-            let _ = std::fs::remove_dir_all(&self.0);
+    impl Scratch {
+        fn new() -> Self {
+            let root = tempfile::tempdir().unwrap();
+            let store = Store::open(root.path().join("containers")).unwrap();
+            Scratch { store, _root: root }
         }
     }
 
@@ -10801,22 +10724,23 @@ mod publish_tests {
     /// waits for the update, and lands after it.
     #[test]
     fn the_old_supervisors_update_does_not_erase_a_new_incarnation() {
-        let s = Scratch::new("undo");
+        let s = Scratch::new();
         let mut stopped = member();
         stopped.status = Status::Stopped;
-        s.1.save(&stopped).unwrap();
+        s.store.save(&stopped).unwrap();
 
         let (loaded_tx, loaded_rx) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
             // The OLD supervisor's `wait_and_record`, holding the record between
             // its read and its write for longer than the publish needs.
             let old = scope.spawn(|| {
-                s.1.update(&stopped.id, |cur| {
-                    loaded_tx.send(()).unwrap();
-                    std::thread::sleep(Duration::from_millis(400));
-                    record_exit(cur, 100, Some(5), &Status::Crashed, false)
-                })
-                .unwrap();
+                s.store
+                    .update(&stopped.id, |cur| {
+                        loaded_tx.send(()).unwrap();
+                        std::thread::sleep(Duration::from_millis(400));
+                        record_exit(cur, 100, Some(5), &Status::Crashed, false)
+                    })
+                    .unwrap();
             });
             loaded_rx.recv().unwrap();
             // The NEW incarnation, published while the update is mid-flight.
@@ -10824,11 +10748,11 @@ mod publish_tests {
             fresh.status = Status::Running;
             fresh.pid = Some(4242);
             fresh.pid_starttime = Some(9);
-            publish_incarnation(&s.1, &fresh).unwrap();
+            publish_incarnation(&s.store, &fresh).unwrap();
             old.join().unwrap();
         });
 
-        let rec = s.1.load(&stopped.id).unwrap();
+        let rec = s.store.load(&stopped.id).unwrap();
         assert_eq!(
             (rec.pid, rec.pid_starttime, rec.status),
             (Some(4242), Some(9), Status::Running),
@@ -10842,21 +10766,21 @@ mod publish_tests {
     /// process, the only pid a test can promise is alive.
     #[test]
     fn a_publish_never_writes_over_another_live_incarnation() {
-        let s = Scratch::new("rival");
+        let s = Scratch::new();
         let me = std::process::id() as i32;
         let mut live = member();
         live.status = Status::Running;
         live.pid = Some(me);
         live.pid_starttime = delonix_node::proc_starttime(me);
-        s.1.save(&live).unwrap();
+        s.store.save(&live).unwrap();
 
         let mut second = live.clone();
         second.pid = Some(4242);
         second.pid_starttime = Some(9);
-        let e = publish_incarnation(&s.1, &second).unwrap_err();
+        let e = publish_incarnation(&s.store, &second).unwrap_err();
         assert!(matches!(e, Error::AlreadyRunning(_)), "{e}");
 
-        let rec = s.1.load(&live.id).unwrap();
+        let rec = s.store.load(&live.id).unwrap();
         assert_eq!((rec.pid, rec.pid_starttime), (live.pid, live.pid_starttime));
     }
 
@@ -10885,11 +10809,11 @@ mod publish_tests {
     /// A `run` publishes a record that does not exist yet.
     #[test]
     fn a_first_publish_creates_the_record() {
-        let s = Scratch::new("first");
+        let s = Scratch::new();
         let mut c = member();
         c.status = Status::Running;
         c.pid = Some(4242);
-        publish_incarnation(&s.1, &c).unwrap();
-        assert_eq!(s.1.load(&c.id).unwrap().pid, Some(4242));
+        publish_incarnation(&s.store, &c).unwrap();
+        assert_eq!(s.store.load(&c.id).unwrap().pid, Some(4242));
     }
 }

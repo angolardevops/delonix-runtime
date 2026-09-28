@@ -1400,13 +1400,8 @@ mod tests {
     /// top level parallelises nothing) and a WIDE one (where it does).
     #[test]
     fn the_parallel_walk_gives_exactly_what_the_sequential_one_does() {
-        let root = &std::env::temp_dir().join(format!(
-            "dlx-vol-walk-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(root);
-        std::fs::create_dir_all(root).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
 
         // wide: 40 sibling subtrees
         for i in 0..40 {
@@ -1447,7 +1442,6 @@ mod tests {
             seq.bytes < 40 * 4096 + 12 * 8192 + 4 * 65536 + 40 * 4096,
             "os hardlinks foram contados mais do que uma vez"
         );
-        let _ = std::fs::remove_dir_all(root);
     }
     use super::*;
 
@@ -1484,11 +1478,10 @@ mod tests {
     /// someone re-bases a sweep on `list`, the second half stops being true.
     #[test]
     fn list_nao_ve_o_volume_de_um_inquilino_e_list_all_ve_com_o_dono() {
-        let tmp = std::env::temp_dir().join(format!("dlx-vol-listall-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
 
-        let store = VolumeStore::open(&tmp).unwrap();
+        let store = VolumeStore::open(tmp).unwrap();
         store.create("sem-dono").unwrap();
         store.scoped("acme").unwrap().create("pgdata").unwrap();
         store.scoped("globex").unwrap().create("pgdata").unwrap();
@@ -1520,8 +1513,6 @@ mod tests {
         let a = store.scoped("acme").unwrap().inspect("pgdata").unwrap();
         let b = store.scoped("globex").unwrap().inspect("pgdata").unwrap();
         assert_ne!(a.mountpoint, b.mountpoint);
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// The trap this repo has paid for four times (`-v` not persisted, `-p` on a
@@ -1533,10 +1524,9 @@ mod tests {
     /// stop recognizing its own volumes.
     #[test]
     fn as_labels_sobrevivem_a_um_create_repetido_e_a_set_quota() {
-        let tmp = std::env::temp_dir().join(format!("dlx-vol-labels-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        std::fs::create_dir_all(&tmp).unwrap();
-        let store = VolumeStore::open(&tmp).unwrap();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
+        let store = VolumeStore::open(tmp).unwrap();
         store.create("dados").unwrap();
         store
             .set_metadata(
@@ -1568,16 +1558,15 @@ mod tests {
             cleared.annotations.contains_key("delonix.io/last-applied"),
             "removing a label must not touch the annotations"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn bind_option_rejeita_selinux_e_desconhecidas() {
         // Fail-closed: an unsupported bind option (`:z`/`:Z` SELinux, `:U`,
         // propagation) gives an ERROR instead of being silently ignored.
-        let tmp = std::env::temp_dir().join(format!("dlx-vol-bindopt-{}", std::process::id()));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let store = VolumeStore::open(&tmp).unwrap();
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let tmp = tmp_dir.path();
+        let store = VolumeStore::open(tmp).unwrap();
         let src = tmp.to_string_lossy();
         assert!(store.resolve_spec(&format!("{src}:/dst:z")).is_err());
         assert!(store.resolve_spec(&format!("{src}:/dst:Z")).is_err());
@@ -1586,7 +1575,6 @@ mod tests {
         assert!(store.resolve_spec(&format!("{src}:/dst:ro")).is_ok());
         assert!(store.resolve_spec(&format!("{src}:/dst:rw")).is_ok());
         assert!(store.resolve_spec(&format!("{src}:/dst")).is_ok());
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -1612,7 +1600,7 @@ mod tests {
     /// block size into an assertion.
     #[test]
     fn quota_state_alerts() {
-        let (s, dir) = store();
+        let (s, _tmp) = store();
         s.create("qv").unwrap();
         std::fs::write(s.data_dir("qv").join("f"), vec![0u8; 950]).unwrap();
         let used = s.usage("qv");
@@ -1631,7 +1619,6 @@ mod tests {
         std::fs::write(s.data_dir("qv").join("g"), vec![0u8; 64 * 1024]).unwrap();
         let (_, over2) = s.quota_state(&v);
         assert!(over2, "{}/{quota} deve estar acima da quota", s.usage("qv"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// REGRESSION: a file reachable through several hardlinks must be charged
@@ -1641,8 +1628,9 @@ mod tests {
     /// `(dev, ino)` dedup in `dir_usage_inner` makes this fail.
     #[test]
     fn usage_conta_um_ficheiro_com_hardlinks_uma_so_vez() {
-        let base = tmpbase("hardlinks");
-        let store = VolumeStore::open(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let store = VolumeStore::open(base).unwrap();
         store.create("hl").unwrap();
         let data = store.data_dir("hl");
 
@@ -1669,7 +1657,6 @@ mod tests {
             store.usage("hl") > with_links,
             "um ficheiro NOVO tem de continuar a somar"
         );
-        let _ = fs::remove_dir_all(&base);
     }
 
     /// REGRESSION: a sparse file must count the blocks it actually occupies,
@@ -1683,8 +1670,9 @@ mod tests {
     #[test]
     fn usage_de_ficheiro_esparso_conta_blocos_nao_o_tamanho_nominal() {
         use std::io::{Seek, SeekFrom, Write};
-        let base = tmpbase("sparse");
-        let store = VolumeStore::open(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let store = VolumeStore::open(base).unwrap();
         store.create("sp").unwrap();
 
         const NOMINAL: u64 = 256 * 1024 * 1024; // 256 MiB de tamanho aparente
@@ -1716,7 +1704,6 @@ mod tests {
                 "um ficheiro esparso de 256 MiB com 1 byte escrito não pode contar {used} bytes"
             );
         }
-        let _ = fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -1738,18 +1725,19 @@ mod tests {
 
     #[test]
     fn register_external_recusa_nome_dot_dot() {
-        let (s, dir) = store();
+        let (s, tmp) = store();
+        let dir = tmp.path();
         let external = dir.join("shares").join("..");
         let err = s
             .register_external("..", &external, None, None, None)
             .unwrap_err();
         assert!(format!("{err}").contains("invalid volume name"));
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
     fn register_external_aponta_para_fora_e_e_idempotente() {
-        let (s, dir) = store();
+        let (s, tmp) = store();
+        let dir = tmp.path();
         let external = dir.join("shares").join("tenant-a");
         let v = s
             .register_external("share-a", &external, Some(1000), Some(80), Some("nas"))
@@ -1788,35 +1776,28 @@ mod tests {
             external.exists(),
             "remove() nunca deve tocar num mountpoint externo"
         );
-        let _ = std::fs::remove_dir_all(dir);
     }
 
-    fn store() -> (VolumeStore, PathBuf) {
-        let base = std::env::temp_dir().join(format!(
-            "delonix-vol-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        (VolumeStore::open(&base).unwrap(), base)
+    fn store() -> (VolumeStore, tempfile::TempDir) {
+        let base = tempfile::tempdir().unwrap();
+        (VolumeStore::open(base.path()).unwrap(), base)
     }
 
     #[test]
     fn create_list_inspect_remove() {
-        let (vs, base) = store();
+        let (vs, _tmp) = store();
         let v = vs.create("data").unwrap();
         assert!(v.mountpoint.ends_with("/data/_data"));
         assert_eq!(vs.list().unwrap().len(), 1);
         assert_eq!(vs.inspect("data").unwrap().name, "data");
         vs.remove("data").unwrap();
         assert!(vs.inspect("data").is_err());
-        fs::remove_dir_all(&base).ok();
     }
 
     #[test]
     fn create_with_driver_idempotent_and_meta_on_disk() {
-        let (vs, base) = store();
+        let (vs, tmp) = store();
+        let base = tmp.path();
         // create with explicit `local` driver
         let v = vs.create_with("app_data", "local", None, None).unwrap();
         assert_eq!(v.driver, "local");
@@ -1836,38 +1817,35 @@ mod tests {
             vs.create_with("nas", "nfs", None, None),
             Err(Error::MissingDevice(_))
         ));
-        fs::remove_dir_all(&base).ok();
     }
 
     #[test]
     fn resolve_named_volume_creates_it() {
-        let (vs, base) = store();
+        let (vs, _tmp) = store();
         let m = vs.resolve_spec("cache:/var/cache").unwrap();
         assert!(m.source.ends_with("/cache/_data"));
         assert_eq!(m.target, "/var/cache");
         assert!(!m.readonly);
         assert_eq!(vs.inspect("cache").unwrap().name, "cache");
-        fs::remove_dir_all(&base).ok();
     }
 
     #[test]
     fn resolve_bind_readonly() {
-        let (vs, base) = store();
+        let (vs, tmp) = store();
+        let base = tmp.path();
         let host = base.join("hostdir");
         fs::create_dir_all(&host).unwrap();
         let spec = format!("{}:/mnt:ro", host.display());
         let m = vs.resolve_spec(&spec).unwrap();
         assert_eq!(m.target, "/mnt");
         assert!(m.readonly);
-        fs::remove_dir_all(&base).ok();
     }
 
     #[test]
     fn rejects_relative_target_and_bad_spec() {
-        let (vs, base) = store();
+        let (vs, _tmp) = store();
         assert!(vs.resolve_spec("data:relative").is_err());
         assert!(vs.resolve_spec("oneword").is_err());
-        fs::remove_dir_all(&base).ok();
     }
 
     #[test]
@@ -1881,7 +1859,7 @@ mod tests {
 
     #[test]
     fn snapshot_paths_and_listing() {
-        let (vs, base) = store();
+        let (vs, _tmp) = store();
         vs.create("v1").unwrap();
         // validated path + non-existent ones list empty
         assert!(vs.snapshot_path("v1", "../evil").is_err());
@@ -1897,18 +1875,6 @@ mod tests {
         // remove
         vs.remove_snapshot("v1", "s1").unwrap();
         assert!(vs.remove_snapshot("v1", "s1").is_err());
-        fs::remove_dir_all(&base).ok();
-    }
-
-    fn tmpbase(tag: &str) -> PathBuf {
-        let b = std::env::temp_dir().join(format!(
-            "dlx-vol-{tag}-{}-{}",
-            std::process::id(),
-            now_unix()
-        ));
-        let _ = fs::remove_dir_all(&b);
-        fs::create_dir_all(&b).unwrap();
-        b
     }
 
     /// REGRESSION (silent overflow): the alert arithmetic must hold for quotas
@@ -1986,8 +1952,9 @@ mod tests {
     #[test]
     fn usage_marca_subarvore_ilegivel_em_vez_de_devolver_zero() {
         use std::os::unix::fs::PermissionsExt;
-        let base = tmpbase("usage-eacces");
-        let store = VolumeStore::open(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let store = VolumeStore::open(base).unwrap();
         store.create("v1").unwrap();
         let data = store.data_dir("v1");
         let hidden = data.join("hidden");
@@ -2028,7 +1995,6 @@ mod tests {
             );
         }
         fs::set_permissions(&hidden, fs::Permissions::from_mode(0o755)).unwrap();
-        let _ = fs::remove_dir_all(&base);
     }
 
     /// The cross-tenant leak: a `remove` that CANNOT delete the data must leave
@@ -2038,8 +2004,9 @@ mod tests {
     #[test]
     fn remove_que_falha_nao_apaga_o_meta_nem_orfaniza_os_dados() {
         use std::os::unix::fs::PermissionsExt;
-        let base = tmpbase("rm-partial");
-        let store = VolumeStore::open(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let store = VolumeStore::open(base).unwrap();
         store.create("v1").unwrap();
         let data = store.data_dir("v1");
         let inner = data.join("inner");
@@ -2070,15 +2037,15 @@ mod tests {
                 "os dados do dono continuam lá"
             );
         }
-        let _ = fs::remove_dir_all(&base);
     }
 
     /// The happy path still removes everything, and the injected `rmtree` hook
     /// is what gets a chance at a tree the plain `fs` path cannot unlink.
     #[test]
     fn remove_apaga_tudo_e_chama_o_rmtree_injectado() {
-        let base = tmpbase("rm-ok");
-        let store = VolumeStore::open(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let store = VolumeStore::open(base).unwrap();
         store.create("v1").unwrap();
         fs::write(store.data_dir("v1").join("f"), b"x").unwrap();
 
@@ -2094,15 +2061,15 @@ mod tests {
         assert!(called.get() >= 1, "o rmtree injectado tem de ser tentado");
         // Removing what is already gone is an error (docker parity), not a panic.
         assert!(store.remove("v1").is_err());
-        let _ = fs::remove_dir_all(&base);
     }
 
     /// A `ShareVolume`'s EXTERNAL data must survive un-registering it — only
     /// this store's own bookkeeping dir goes away.
     #[test]
     fn remove_de_volume_externo_preserva_os_dados_partilhados() {
-        let base = tmpbase("rm-external");
-        let store = VolumeStore::open(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let store = VolumeStore::open(base).unwrap();
         let shared = base.join("nas").join("shares").join("tenant-a");
         store
             .register_external("tenant-a", &shared, Some(1024), Some(90), Some("nas"))
@@ -2116,6 +2083,5 @@ mod tests {
             b"nas-payload",
             "os dados do NAS NUNCA saem por um `rm` de share"
         );
-        let _ = fs::remove_dir_all(&base);
     }
 }

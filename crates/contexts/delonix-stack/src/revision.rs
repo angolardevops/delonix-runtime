@@ -261,24 +261,12 @@ pub fn manifest_of(root: &Path, stack: &str, number: u32) -> Result<String> {
 mod tests {
     use super::*;
 
-    fn tmp() -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "dlx-rev-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&p).unwrap();
-        p
-    }
-
     #[test]
     fn a_revision_round_trips_and_numbers_from_one() {
-        let root = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         record(
-            &root,
+            root,
             "s",
             "kind: Volume\n",
             Outcome {
@@ -289,21 +277,21 @@ mod tests {
                 rollback_of: None,
             },
         );
-        let l = list(&root, "s");
+        let l = list(root, "s");
         assert_eq!(l.len(), 1);
         assert_eq!(l[0].number, 1, "numbering starts at 1, not 0");
         assert!(l[0].ok);
-        assert_eq!(manifest_of(&root, "s", 1).unwrap(), "kind: Volume\n");
-        std::fs::remove_dir_all(&root).ok();
+        assert_eq!(manifest_of(root, "s", 1).unwrap(), "kind: Volume\n");
     }
 
     /// A failed apply is recorded, and says so. Recording only successes would
     /// hide the revision most worth looking at after an incident.
     #[test]
     fn a_failed_apply_is_recorded_and_marked() {
-        let root = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         record(
-            &root,
+            root,
             "s",
             "kind: Volume\n",
             Outcome {
@@ -314,10 +302,9 @@ mod tests {
                 rollback_of: None,
             },
         );
-        let l = list(&root, "s");
+        let l = list(root, "s");
         assert!(!l[0].ok);
         assert_eq!(l[0].error.as_deref(), Some("boom"));
-        std::fs::remove_dir_all(&root).ok();
     }
 
     /// Retention has to drop the OLDEST, and drop both files. Dropping only the
@@ -325,10 +312,11 @@ mod tests {
     /// cleans — a leak in the very mechanism meant to bound growth.
     #[test]
     fn retention_keeps_the_newest_and_leaves_no_orphan_manifest() {
-        let root = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         for i in 0..KEEP + 5 {
             record(
-                &root,
+                root,
                 "s",
                 &format!("n: {i}\n"),
                 Outcome {
@@ -340,27 +328,27 @@ mod tests {
                 },
             );
         }
-        let l = list(&root, "s");
+        let l = list(root, "s");
         assert_eq!(l.len(), KEEP);
         assert_eq!(l[0].number, 6, "the five oldest go");
         assert_eq!(l[KEEP - 1].number, (KEEP + 5) as u32);
-        let d = dir(&root, "s");
+        let d = dir(root, "s");
         let yamls = std::fs::read_dir(&d)
             .unwrap()
             .flatten()
             .filter(|e| e.file_name().to_string_lossy().ends_with(".yaml"))
             .count();
         assert_eq!(yamls, KEEP, "a dropped revision must take its manifest too");
-        std::fs::remove_dir_all(&root).ok();
     }
 
     /// The stack name comes from a manifest, which is untrusted input. This repo
     /// has already paid for a `metadata.name` flowing raw into a path.
     #[test]
     fn a_hostile_stack_name_cannot_escape_the_root() {
-        let root = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         record(
-            &root,
+            root,
             "../../etc",
             "x: 1\n",
             Outcome {
@@ -379,19 +367,18 @@ mod tests {
             !root.parent().unwrap().join("etc/revisions").exists(),
             "a name with .. escaped the state root"
         );
-        std::fs::remove_dir_all(&root).ok();
     }
 
     /// Two writers must not both claim the same number.
     #[test]
     fn concurrent_writers_do_not_collide_on_a_number() {
-        let root = tmp();
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         std::thread::scope(|s| {
             for i in 0..8 {
-                let r = root.clone();
                 s.spawn(move || {
                     record(
-                        &r,
+                        root,
                         "s",
                         &format!("i: {i}\n"),
                         Outcome {
@@ -405,12 +392,11 @@ mod tests {
                 });
             }
         });
-        let l = list(&root, "s");
+        let l = list(root, "s");
         assert_eq!(l.len(), 8, "every writer got its own revision");
         let mut nums: Vec<u32> = l.iter().map(|r| r.number).collect();
         nums.sort_unstable();
         nums.dedup();
         assert_eq!(nums.len(), 8, "two writers claimed the same number");
-        std::fs::remove_dir_all(&root).ok();
     }
 }

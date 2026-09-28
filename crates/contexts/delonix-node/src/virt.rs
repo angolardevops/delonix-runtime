@@ -165,10 +165,10 @@ mod tests {
     fn driver_of_resolves_symlink() {
         // Sets up `<tmp>/eth0/device -> ../drivers/virtio_net` like the real sysfs
         // (`/sys/class/net/eth0/device/driver` points to the virtio driver).
-        let root = std::env::temp_dir().join(format!("delonix-virt-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let dev = root.join("eth0");
         let drvdir = root.join("drivers/virtio_net");
-        let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&dev).unwrap();
         std::fs::create_dir_all(&drvdir).unwrap();
         // device/ is a dir; device/driver is the symlink to the driver.
@@ -177,7 +177,6 @@ mod tests {
         assert_eq!(driver_of(&dev), "virtio_net");
         // no symlink → empty string (non-virtio).
         assert_eq!(driver_of(&root.join("nope")), "");
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -308,10 +308,10 @@ mod tests {
     /// esta função é uma fronteira de escrita por direito próprio.
     #[test]
     fn um_nome_com_travessia_nao_escreve_nada() {
-        let base = std::env::temp_dir().join(format!("dlx-ci-test-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let mau = "../../../etc/delonix-teste";
-        assert!(generate_seed_iso(&base, mau, None, None, &[], None, &[]).is_err());
+        assert!(generate_seed_iso(base, mau, None, None, &[], None, &[]).is_err());
         assert!(!base.join("vms").join(mau).exists());
-        let _ = std::fs::remove_dir_all(&base);
     }
 }

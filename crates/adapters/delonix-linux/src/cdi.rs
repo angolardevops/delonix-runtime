@@ -388,15 +388,8 @@ mod tests {
 
     #[test]
     fn resolve_cdi_device_parses_um_spec_json_de_exemplo() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-cdi-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let spec = serde_json::json!({
             "cdiVersion": "0.6.0",
             "kind": "nvidia.com/gpu",
@@ -429,8 +422,6 @@ mod tests {
         assert!(out.mounts[0].readonly);
         assert_eq!(out.env, vec!["NVIDIA_VISIBLE_DEVICES=0"]);
         assert!(!out.had_unexecuted_hooks);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Writes a spec shaped like the one `nvidia-ctk` 1.20.0 actually emits —
@@ -474,26 +465,14 @@ mod tests {
         std::fs::write(dir.join("nvidia.json"), spec.to_string()).unwrap();
     }
 
-    fn tmpdir(tag: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-cdi-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     #[test]
     fn resolve_all_brings_top_level_edits_not_just_dev_nvidia0() {
         // The regression this file was written to fix: with only per-device
         // edits, `--gpus all` injected /dev/nvidia0 and NOTHING else — no
         // control device, no uvm, no libcuda, no nvidia-smi — and exited 0.
-        let dir = tmpdir("topo");
-        spec_with_the_real_nvidia_shape(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        spec_with_the_real_nvidia_shape(dir);
         let mut out = CdiEdits::default();
         resolve_cdi_device_in(&[dir.join("nvidia.json")], "nvidia.com/gpu=all", &mut out).unwrap();
 
@@ -510,8 +489,6 @@ mod tests {
         assert!(out.mounts.iter().any(|m| m.target.contains("libcuda.so")));
         assert!(out.env.contains(&"NVIDIA_VISIBLE_DEVICES=void".to_string()));
         assert!(out.had_unexecuted_hooks);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -519,8 +496,9 @@ mod tests {
         // `=all` matches "0", "GPU-<uuid>" and "all" — the same three nodes
         // three times — and the top-level edits must be merged ONCE, not once
         // per matched device.
-        let dir = tmpdir("dedupe");
-        spec_with_the_real_nvidia_shape(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        spec_with_the_real_nvidia_shape(dir);
         let mut out = CdiEdits::default();
         resolve_cdi_device_in(&[dir.join("nvidia.json")], "nvidia.com/gpu=all", &mut out).unwrap();
 
@@ -542,21 +520,19 @@ mod tests {
             "os mounts de topo entraram mais do que uma vez"
         );
         assert_eq!(out.env.len(), 1, "env duplicado: {:?}", out.env);
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn resolve_named_device_also_gets_the_top_level_edits() {
         // A container asking for GPU 0 specifically needs the driver just as
         // much as one asking for all of them.
-        let dir = tmpdir("nomeado");
-        spec_with_the_real_nvidia_shape(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        spec_with_the_real_nvidia_shape(dir);
         let mut out = CdiEdits::default();
         resolve_cdi_device_in(&[dir.join("nvidia.json")], "nvidia.com/gpu=0", &mut out).unwrap();
         assert!(out.devices.iter().any(|d| d.starts_with("/dev/nvidiactl:")));
         assert!(out.mounts.iter().any(|m| m.target == "/usr/bin/nvidia-smi"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
@@ -565,8 +541,9 @@ mod tests {
         // a spec that actually matched the requested vendor/class, otherwise an
         // unrelated vendor's spec sitting in /etc/cdi would leak its mounts
         // into every GPU container.
-        let dir = tmpdir("vendor");
-        spec_with_the_real_nvidia_shape(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        spec_with_the_real_nvidia_shape(dir);
         let other_vendor = serde_json::json!({
             "cdiVersion": "0.7.0",
             "kind": "intel.com/gpu",
@@ -586,17 +563,16 @@ mod tests {
         .unwrap();
         assert!(!out.mounts.iter().any(|m| m.target == "/opt/intel/lib"));
         assert!(!out.devices.iter().any(|d| d.contains("renderD129")));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn resolve_rejects_a_name_no_spec_declares() {
-        let dir = tmpdir("ausente");
-        spec_with_the_real_nvidia_shape(&dir);
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        spec_with_the_real_nvidia_shape(dir);
         let mut out = CdiEdits::default();
         let err = resolve_cdi_device_in(&[dir.join("nvidia.json")], "nvidia.com/gpu=7", &mut out)
             .unwrap_err();
         assert!(format!("{err}").contains("not found"), "{err}");
-        std::fs::remove_dir_all(&dir).ok();
     }
 }

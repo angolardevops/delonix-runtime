@@ -480,7 +480,8 @@ mod tests {
         // A fake leaf: `cpu.weight` is just a file, which is exactly what it is
         // under /sys/fs/cgroup — so the write path is tested for real without
         // needing a delegated cgroup or a running container.
-        let root = std::env::temp_dir().join(format!("dlx-reg-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let leaf = root.join("leaf");
         std::fs::create_dir_all(&leaf).unwrap();
         std::fs::write(leaf.join("cpu.weight"), "100").unwrap();
@@ -488,60 +489,57 @@ mod tests {
         wl.cgroup = leaf.to_string_lossy().into_owned();
 
         let first = &plan_cpu(60.0, 40.0, std::slice::from_ref(&wl), 20)[0];
-        apply(&root, &wl, first).unwrap();
+        apply(root, &wl, first).unwrap();
         assert_eq!(
             std::fs::read_to_string(leaf.join("cpu.weight")).unwrap(),
             "50"
         );
-        assert_eq!(recorded_original(&root, &wl.id), Some(100));
+        assert_eq!(recorded_original(root, &wl.id), Some(100));
 
         // Still contended: it drops again, and the memo must keep the ORIGINAL
         // 100, not be overwritten with the 50 it has now. Losing that is how a
         // workload gets "restored" to half its real share.
         wl.cpu_weight = 50;
-        wl.original_weight = recorded_original(&root, &wl.id);
+        wl.original_weight = recorded_original(root, &wl.id);
         let second = &plan_cpu(60.0, 40.0, std::slice::from_ref(&wl), 20)[0];
-        apply(&root, &wl, second).unwrap();
+        apply(root, &wl, second).unwrap();
         assert_eq!(
             std::fs::read_to_string(leaf.join("cpu.weight")).unwrap(),
             "25"
         );
-        assert_eq!(recorded_original(&root, &wl.id), Some(100), "o memo mudou");
+        assert_eq!(recorded_original(root, &wl.id), Some(100), "o memo mudou");
 
         // Calm again: back to 100, and the claim is dropped.
         wl.cpu_weight = 25;
         let back = &plan_cpu(1.0, 1.0, std::slice::from_ref(&wl), 20)[0];
-        apply(&root, &wl, back).unwrap();
+        apply(root, &wl, back).unwrap();
         assert_eq!(
             std::fs::read_to_string(leaf.join("cpu.weight")).unwrap(),
             "100"
         );
-        assert_eq!(recorded_original(&root, &wl.id), None);
+        assert_eq!(recorded_original(root, &wl.id), None);
         // Restoring twice is not an error: the second call has nothing to
         // remove, and a regulator that panics while undoing is worse than one
         // that never ran.
-        apply(&root, &wl, back).unwrap();
-
-        std::fs::remove_dir_all(&root).ok();
+        apply(root, &wl, back).unwrap();
     }
 
     #[test]
     fn a_memo_for_a_workload_that_is_gone_is_dropped() {
-        let root = std::env::temp_dir().join(format!("dlx-forget-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let dir = root.join("regulate");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("alive"), "100").unwrap();
         std::fs::write(dir.join("dead"), "100").unwrap();
 
-        assert_eq!(forget_gone(&root, &["alive".to_string()]), 1);
+        assert_eq!(forget_gone(root, &["alive".to_string()]), 1);
         assert!(dir.join("alive").exists(), "o vivo não se apaga");
         assert!(!dir.join("dead").exists());
         // Idempotent, and an absent directory is not an error: the regulator
         // may never have run on this node.
-        assert_eq!(forget_gone(&root, &["alive".to_string()]), 0);
+        assert_eq!(forget_gone(root, &["alive".to_string()]), 0);
         assert_eq!(forget_gone(&root.join("nope"), &[]), 0);
-
-        std::fs::remove_dir_all(&root).ok();
     }
 
     const GIB: u64 = 1024 * 1024 * 1024;
@@ -646,7 +644,8 @@ mod tests {
 
     #[test]
     fn the_two_memos_do_not_erase_each_other() {
-        let root = std::env::temp_dir().join(format!("dlx-memo2-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         let leaf = root.join("leaf");
         std::fs::create_dir_all(&leaf).unwrap();
         std::fs::write(leaf.join("cpu.weight"), "100").unwrap();
@@ -657,13 +656,13 @@ mod tests {
         wl.cgroup = leaf.to_string_lossy().into_owned();
 
         apply(
-            &root,
+            root,
             &wl,
             &plan_cpu(60.0, 40.0, std::slice::from_ref(&wl), 20)[0],
         )
         .unwrap();
         apply(
-            &root,
+            root,
             &wl,
             &plan_memory(60.0, 40.0, std::slice::from_ref(&wl))[0],
         )
@@ -671,8 +670,8 @@ mod tests {
 
         // A workload can be throttled on both at once; one memo file per knob,
         // or the second claim erases the first and one of them never comes back.
-        assert_eq!(recorded_original(&root, &wl.id), Some(100));
-        assert!(memory_is_regulated(&root, &wl.id));
+        assert_eq!(recorded_original(root, &wl.id), Some(100));
+        assert!(memory_is_regulated(root, &wl.id));
         assert_eq!(
             std::fs::read_to_string(leaf.join("cpu.weight")).unwrap(),
             "50"
@@ -686,7 +685,7 @@ mod tests {
         wl.memory_high = Some(8 * GIB / 100 * MEMORY_SQUEEZE_PCT);
         wl.memory_regulated = true;
         apply(
-            &root,
+            root,
             &wl,
             &plan_memory(0.0, 0.0, std::slice::from_ref(&wl))[0],
         )
@@ -695,14 +694,12 @@ mod tests {
             std::fs::read_to_string(leaf.join("memory.high")).unwrap(),
             "max"
         );
-        assert!(!memory_is_regulated(&root, &wl.id));
-        assert_eq!(recorded_original(&root, &wl.id), Some(100), "o memo do cpu");
+        assert!(!memory_is_regulated(root, &wl.id));
+        assert_eq!(recorded_original(root, &wl.id), Some(100), "o memo do cpu");
 
         // And the sweep of dead workloads sees through the `.memory` suffix.
-        assert_eq!(forget_gone(&root, &[]), 1);
-        assert_eq!(recorded_original(&root, &wl.id), None);
-
-        std::fs::remove_dir_all(&root).ok();
+        assert_eq!(forget_gone(root, &[]), 1);
+        assert_eq!(recorded_original(root, &wl.id), None);
     }
 
     #[test]

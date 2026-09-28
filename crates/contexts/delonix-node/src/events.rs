@@ -194,30 +194,23 @@ mod tests {
     }
     use super::*;
 
-    fn tmp(tag: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("delonix-events-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
-    }
-
     #[test]
     fn emit_e_read_fazem_round_trip() {
-        let root = tmp("rt");
-        emit(&root, "container", "create", "abc123def456", "web", None);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        emit(root, "container", "create", "abc123def456", "web", None);
         emit(
-            &root,
+            root,
             "container",
             "die",
             "abc123def456",
             "web",
             Some("exit=42"),
         );
-        let evs = read(&root);
+        let evs = read(root);
         assert_eq!(evs.len(), 2);
         assert_eq!(evs[0].action, "create");
         assert_eq!(evs[1].detail.as_deref(), Some("exit=42"));
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// The guarantee that underpins the lock-free design: N processes (here threads,
@@ -225,14 +218,14 @@ mod tests {
     /// line remains valid JSON and none is lost.
     #[test]
     fn emits_concorrentes_nao_se_entrelacam() {
-        let root = tmp("race");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         const N: usize = 32;
         std::thread::scope(|sc| {
             for i in 0..N {
-                let root = root.clone();
                 sc.spawn(move || {
                     emit(
-                        &root,
+                        root,
                         "container",
                         "start",
                         &format!("id{i:04}"),
@@ -242,29 +235,28 @@ mod tests {
                 });
             }
         });
-        let evs = read(&root);
+        let evs = read(root);
         assert_eq!(
             evs.len(),
             N,
             "perderam-se ou corromperam-se eventos: {} de {N}",
             evs.len()
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
     fn read_from_continua_do_offset() {
-        let root = tmp("off");
-        emit(&root, "container", "create", "a1", "um", None);
-        let (first, off) = read_from(&root, 0);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        emit(root, "container", "create", "a1", "um", None);
+        let (first, off) = read_from(root, 0);
         assert_eq!(first.len(), 1);
         // With no new events, returns nothing (this is what `-f` needs).
-        let (none, off2) = read_from(&root, off);
+        let (none, off2) = read_from(root, off);
         assert!(none.is_empty());
-        emit(&root, "container", "die", "a1", "um", None);
-        let (novos, _) = read_from(&root, off2);
+        emit(root, "container", "die", "a1", "um", None);
+        let (novos, _) = read_from(root, off2);
         assert_eq!(novos.len(), 1);
         assert_eq!(novos[0].action, "die");
-        let _ = std::fs::remove_dir_all(&root);
     }
 }
