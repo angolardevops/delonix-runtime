@@ -29,7 +29,7 @@ pub use load::load_docker_archive;
 pub use registry::{
     build_manifest, http_get, pull_from_registry, pull_from_registry_with_creds, push_to_registry,
 };
-pub use save::write_oci_archive;
+pub use save::{write_oci_archive, write_oci_media_archive, OciArchive};
 pub use sign::verify_signature;
 
 #[cfg(test)]

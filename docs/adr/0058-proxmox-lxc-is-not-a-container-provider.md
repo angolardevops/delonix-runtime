@@ -1,6 +1,6 @@
 # ADR-0058: A Proxmox LXC container is not a provider of `kind: Container`
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-09-28; decisions D1–D4 of plan 63 recorded there)
 - **Date:** 2026-09-27
 - **Deciders:** Walter Angolar
 - **Related:** ADR-0049 D4 (LXC gets "an ADR of its own, after a spike, or it stays excluded";
