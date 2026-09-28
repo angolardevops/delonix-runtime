@@ -828,6 +828,25 @@ EOF2
   else
     bad "firewall-fail-closed/rm-preserva-isolamento" "depois de \`ingress rm\` outra namespace chegou ao container ($got/2, drop $d0→$d1)"
   fi
+
+  # 3b — an explicit inbound rule keeps the namespace isolation (NaaS S1 review,
+  # C1). A `deny` of ONE port used to switch the isolation off for the whole
+  # container: the chain kept only that rule, and another namespace reached every
+  # other port. The same namespace still gets through (it falls to the policy).
+  local same
+  # fwa is the same-namespace probe, and case 1 left it with `egress policy deny`.
+  dlx net egress policy fwa allow >/dev/null 2>&1
+  dlx net ingress deny fwb tcp/22 >/dev/null 2>&1
+  d0=$(fwcount "$B" "ct state new counter")
+  got=$(recv fwc "$B" 2); same=$(recv fwa "$B" 1)
+  d1=$(fwcount "$B" "ct state new counter")
+  log "com ingress deny tcp/22: fwB→fwA $got/2 · mesma ns $same/1 · guardrail $d0→$d1"
+  if [ "$got" = 0 ] && [ "$same" = 1 ] && [ "$d1" != - ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+    ok "firewall-fail-closed/regra-explicita-mantem-isolamento"
+  else
+    bad "firewall-fail-closed/regra-explicita-mantem-isolamento" "com uma regra de ingress explícita, outra namespace chegou ao container ($got/2, mesma ns $same/1, guardrail $d0→$d1)"
+  fi
+  dlx net ingress rm fwb tcp/22 >/dev/null 2>&1
   dlx container rm -f fwa fwb fwc >/dev/null 2>&1
 
   # 4 — a CIDR network is isolated like any other.
@@ -843,7 +862,6 @@ EOF2
   if [ -z "$D" ] || [ -z "$D2" ] || [ -z "$E" ]; then
     bad "firewall-fail-closed/rede-cidr" "containers na rede CIDR não arrancaram (o isolamento foi recusado?)"
   else
-    local same
     d0=$(fwcount "$E" "@dlxall ct state new counter")
     got=$(recv fwd "$E" 2); same=$(recv fwd "$D2" 1)
     d1=$(fwcount "$E" "@dlxall ct state new counter")

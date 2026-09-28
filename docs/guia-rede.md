@@ -473,11 +473,17 @@ outra infra.
 ### «Actualizei o motor e um `egress deny` ainda deixa passar para outro container»
 
 O despacho da firewall (as *base chains* `fwout` e `fwcont` na tabela `dlxing`)
-vive no netns do holder e é criado quando a infra nasce. Um **plano de controlo
-arrancado por um binário antigo** mantém a forma antiga, em que o *accept* do
-destino saltava o *egress* da origem, até ser substituído. Não é preciso derrubar
-a infra: basta reiniciar **só o controlo**, e o binário novo migra a tabela numa
-transacção atómica, sem tocar no pin, nas chains por container nem no `@fwmap`:
+vive no netns do holder. Um **plano de controlo arrancado por um binário antigo**
+tem a forma antiga, em que o *accept* do destino saltava o *egress* da origem.
+O binário novo **migra-o sozinho** na primeira operação de rede depois do
+upgrade (um `run`, um `start`, um `net ingress`/`egress`, um `net netns up`):
+entra nos namespaces do pin e troca o despacho numa transacção atómica, sem
+tocar no pin, nas chains por container nem no `@fwmap`, e sem reiniciar nada.
+Se a migração falhar, o comando **falha** com a razão, em vez de aplicar regras
+que não seriam cumpridas.
+
+Só se essa migração falhar é preciso o passo manual, que reinicia **só o
+controlo**:
 
 ```bash
 delonix net netns status                  # anota o pid do «control»
@@ -497,6 +503,10 @@ inválidas também é feita pela CLI, por isso protege já um nó com holder ant
 - Fora da namespace `default`, apagar a última regra **não** tira o isolamento
   de namespace: a chain fica, só com o *accept* da mesma namespace e o *drop*
   das outras.
+- Uma regra de *ingress* explícita (até um `deny` de uma porta) **também não** tira
+  o isolamento: as ligações novas vindas de outra namespace continuam cortadas.
+  Só um `allow` explícito — é o que um `kind: Dependency` escreve — deixa passar
+  o par que nomeia.
 
 ---
 
