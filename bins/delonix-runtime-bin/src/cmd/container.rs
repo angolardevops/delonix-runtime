@@ -6479,16 +6479,14 @@ mod tests {
     /// than silently dropped.
     #[test]
     fn env_file0_reads_exact_entries_and_dash_e_wins() {
-        let dir = std::env::temp_dir().join(format!("dlx-envf0-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        let f = dir.join("a.env0");
+        let tmp = tempfile::tempdir().unwrap();
+        let f = tmp.path().join("a.env0");
         std::fs::write(&f, b"A=1\0CERT=x\n  y=z\0").unwrap();
         let fs = vec![f.to_string_lossy().into_owned()];
         let got = super::with_env_file0(&fs, vec!["A=2".into()]).unwrap();
         assert_eq!(got, ["A=1", "CERT=x\n  y=z", "A=2"]);
         std::fs::write(&f, b"NOEQUALS\0").unwrap();
         assert!(super::with_env_file0(&fs, vec![]).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// **The contract of the whole reconciler**: an unchanged manifest must
@@ -7398,12 +7396,8 @@ restartPolicy: OnFailure
 
     #[test]
     fn a_stale_reconciliation_does_not_erase_a_newer_incarnation() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-stats-reconcile-test-{}",
-            std::process::id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = delonix_state::Store::open(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = delonix_state::Store::open(tmp.path()).unwrap();
         // A pid that is certainly dead: a child that already exited and was reaped.
         let dead = std::process::Command::new("true")
             .spawn()
@@ -7440,7 +7434,6 @@ restartPolicy: OnFailure
             rec.status,
             delonix_model::records::Status::Running
         ));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -7706,59 +7699,45 @@ containers:
         assert_eq!(fmt_status_of(&c, None), "Exited (0)");
     }
 
-    fn scratch_root(tag: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "dlx-restartcounts-test-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        dir
-    }
-
     /// The off-by-one this column shipped with, found live: `cmd_run`'s
     /// initial launch emits `"create"`, never `"start"` — a naive
     /// `count("start") - 1` therefore undercounted every container by
     /// exactly one restart the moment it was ACTUALLY restarted once.
     #[test]
     fn restart_counts_nao_subtrai_um_porque_o_run_nunca_emite_start() {
-        let root = scratch_root("basic");
-        delonix_node::events::emit(&root, "container", "create", "c1", "c1", None);
-        let counts = super::restart_counts(&root);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        delonix_node::events::emit(root, "container", "create", "c1", "c1", None);
+        let counts = super::restart_counts(root);
         assert_eq!(
             counts.get("c1").copied().unwrap_or(0),
             0,
             "create sozinho não é um restart"
         );
 
-        delonix_node::events::emit(&root, "container", "stop", "c1", "c1", None);
-        delonix_node::events::emit(&root, "container", "die", "c1", "c1", Some("exit=137"));
-        delonix_node::events::emit(&root, "container", "start", "c1", "c1", None);
-        let counts = super::restart_counts(&root);
+        delonix_node::events::emit(root, "container", "stop", "c1", "c1", None);
+        delonix_node::events::emit(root, "container", "die", "c1", "c1", Some("exit=137"));
+        delonix_node::events::emit(root, "container", "start", "c1", "c1", None);
+        let counts = super::restart_counts(root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 1);
 
-        delonix_node::events::emit(&root, "container", "stop", "c1", "c1", None);
-        delonix_node::events::emit(&root, "container", "start", "c1", "c1", None);
-        let counts = super::restart_counts(&root);
+        delonix_node::events::emit(root, "container", "stop", "c1", "c1", None);
+        delonix_node::events::emit(root, "container", "start", "c1", "c1", None);
+        let counts = super::restart_counts(root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 2);
-
-        std::fs::remove_dir_all(&root).ok();
     }
 
     /// Each container's count is independent — a `start` on `c2` must not
     /// bleed into `c1`'s row.
     #[test]
     fn restart_counts_e_por_container() {
-        let root = scratch_root("perid");
-        delonix_node::events::emit(&root, "container", "create", "c1", "c1", None);
-        delonix_node::events::emit(&root, "container", "create", "c2", "c2", None);
-        delonix_node::events::emit(&root, "container", "start", "c2", "c2", None);
-        let counts = super::restart_counts(&root);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        delonix_node::events::emit(root, "container", "create", "c1", "c1", None);
+        delonix_node::events::emit(root, "container", "create", "c2", "c2", None);
+        delonix_node::events::emit(root, "container", "start", "c2", "c2", None);
+        let counts = super::restart_counts(root);
         assert_eq!(counts.get("c1").copied().unwrap_or(0), 0);
         assert_eq!(counts.get("c2").copied().unwrap_or(0), 1);
-        std::fs::remove_dir_all(&root).ok();
     }
 }

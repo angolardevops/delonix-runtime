@@ -5740,11 +5740,11 @@ mod tests {
                 );
             }
         });
-        let dest = std::env::temp_dir().join(format!("dlx-206-{}", std::process::id()));
+        let tmp = tempfile::tempdir().unwrap();
+        let dest = tmp.path().join("dl");
         std::fs::write(&dest, b"AAAAA").unwrap();
         stream_download(&format!("http://127.0.0.1:{port}/x"), &dest).unwrap();
         let got = std::fs::read(&dest).unwrap();
-        let _ = std::fs::remove_file(&dest);
         assert_eq!(got, b"0123456789");
     }
 
@@ -6891,7 +6891,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn no_k8s_false_com_distro_rocky_e_rejeitado() {
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         let err = cmd_build(
             &store,
             "t",
@@ -6913,48 +6913,25 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         );
         assert!(err.is_err());
         assert!(format!("{}", err.unwrap_err()).contains("--no-k8s"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
-    /// Six tests share this helper and cargo runs them in PARALLEL, in one
-    /// process — so `pid` is the same for all of them and only the timestamp
-    /// separates the directories. Two threads that read the clock in the same
-    /// tick get the SAME path, and each test ends with `remove_dir_all`: one
-    /// deletes the other's store mid-run, and the victim fails on whichever
-    /// assertion it happened to reach. That is the shape of the CI flake seen
-    /// on 2026-08-27 (`a_unique_bare_name_still_resolves_exactly_as_before`
-    /// getting something other than `NotFound` for a name that was never
-    /// there) — it passed on every local run, because losing that race needs
-    /// the timing a loaded runner gives.
-    ///
-    /// A counter cannot tie. The clock is kept because it also separates one
-    /// RUN from the next, which the counter alone would not.
-    fn tmp_store() -> (VmImageStore, PathBuf) {
-        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-vmimage-test-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-        ));
-        (VmImageStore::open(&dir).unwrap(), dir)
+    /// Each test gets its own store in a unique temp dir. Cargo runs these
+    /// tests in parallel in one process, so a name built from the pid (and the
+    /// clock) once let one test delete another's store mid-run; the returned
+    /// guard removes the dir when the test ends, also on a failed assert.
+    fn tmp_store() -> (VmImageStore, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        (VmImageStore::open(dir.path()).unwrap(), dir)
     }
 
     #[test]
     fn hex_sha512_file_bate_com_vector_conhecido() {
         // NIST test vector: SHA-512("abc").
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-vmimage-sha512-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::write(&dir, b"abc").unwrap();
-        let got = hex_sha512_file(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("abc");
+        std::fs::write(&file, b"abc").unwrap();
+        let got = hex_sha512_file(&file).unwrap();
         assert_eq!(got, "ddaf35a193617abacc417349ae20413112e6fa4e89a97ea20a9eeee64b55d39a2192992a274fc1a836ba3c23a3feebbd454d4423643ce80e2a9ac94fa54ca49f");
-        let _ = std::fs::remove_file(&dir);
     }
 
     #[test]
@@ -7027,9 +7004,11 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // `Path::join` can't treat them as multiple segments), so the result
         // stays confined to a single filename inside `_base/`.
         let evil = store.base_cache_path(Distro::Debian, "../../../etc/cron.d/x");
-        assert_eq!(evil.parent().unwrap(), dir.join("vm-images").join("_base"));
+        assert_eq!(
+            evil.parent().unwrap(),
+            dir.path().join("vm-images").join("_base")
+        );
         assert!(!evil.file_name().unwrap().to_str().unwrap().contains('/'));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A golden tem de nascer com disco para um nó de Kubernetes. Com os 3,5
@@ -7126,7 +7105,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn no_k8s_rejeita_k8s_version_offline_e_cri_bin() {
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         let base = |k8s_version: Option<String>, offline: bool, cri_bin: Option<PathBuf>| {
             cmd_build(
                 &store,
@@ -7151,7 +7130,6 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         assert!(base(Some("1.34".into()), false, None).is_err());
         assert!(base(None, true, None).is_err());
         assert!(base(None, false, Some(PathBuf::from("/tmp/x"))).is_err());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A `--delonix-bin` that does not exist is refused BEFORE the base image
@@ -7175,7 +7153,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // Under the store's own directory, so no path on the developer's
         // machine can make this pass or fail by accident — `/tmp/delonix` is a
         // plausible scratch path and was the old value.
-        let missing = dir.join("no-such-delonix");
+        let missing = dir.path().join("no-such-delonix");
         let err = cmd_build(
             &store,
             "t",
@@ -7212,7 +7190,6 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             downloaded.is_empty(),
             "the refusal happened after network I/O: {downloaded:?}"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// The same guarantee for `--cri-bin`, which shares the trap: it too was
@@ -7220,7 +7197,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
     #[test]
     fn a_missing_cri_bin_is_refused_before_anything_is_downloaded() {
         let (store, dir) = tmp_store();
-        let missing = dir.join("no-such-delonix-cri");
+        let missing = dir.path().join("no-such-delonix-cri");
         let err = cmd_build(
             &store,
             "t",
@@ -7254,7 +7231,6 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             downloaded.is_empty(),
             "the refusal happened after network I/O: {downloaded:?}"
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -7610,7 +7586,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
 
     #[test]
     fn fedora_sem_no_k8s_e_rejeitado() {
-        let (store, dir) = tmp_store();
+        let (store, _dir) = tmp_store();
         let err = cmd_build(
             &store,
             "t",
@@ -7637,7 +7613,6 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             "a recusa tem de nomear a distro: {err}"
         );
         assert!(err.contains("--no-k8s"), "{err}");
-        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -3019,18 +3019,16 @@ mod tests {
 
     use super::*;
 
-    /// A state root and a `$HOME` under `temp_dir`, each with its own files —
+    /// A state root and a `$HOME` in one temp dir, each with its own files —
     /// the shape of the defect: an isolated `DELONIX_ROOT` on a host whose
     /// `~/.kube` holds real clusters.
-    fn kubeconfig_fixture(tag: &str, cached: &[&str], home_kube: &[&str]) -> (PathBuf, PathBuf) {
-        let base = std::env::temp_dir().join(format!(
-            "delonix-kc-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&base);
-        let root = base.join("root");
-        let home = base.join("home");
+    fn kubeconfig_fixture(
+        cached: &[&str],
+        home_kube: &[&str],
+    ) -> (tempfile::TempDir, PathBuf, PathBuf) {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("root");
+        let home = base.path().join("home");
         std::fs::create_dir_all(root.join("clusters")).unwrap();
         std::fs::create_dir_all(home.join(".kube")).unwrap();
         for n in cached {
@@ -3044,7 +3042,7 @@ mod tests {
             std::fs::write(home.join(".kube").join(format!("config-{n}")), "").unwrap();
         }
         std::fs::write(home.join(".kube").join("config"), "").unwrap();
-        (root, home)
+        (base, root, home)
     }
 
     /// The defect of 2026-09-16: with an EMPTY `DELONIX_ROOT`, `cluster
@@ -3053,7 +3051,7 @@ mod tests {
     /// omitted name looks at the state root and nothing else.
     #[test]
     fn kubeconfig_without_a_name_only_sees_the_state_root() {
-        let (root, home) = kubeconfig_fixture("empty", &[], &["delonix-dev", "dev"]);
+        let (_empty, root, home) = kubeconfig_fixture(&[], &["delonix-dev", "dev"]);
         assert!(cached_kubeconfig_names_in(&root).is_empty());
         let err = resolve_kubeconfig_name_in(None, &root)
             .unwrap_err()
@@ -3061,11 +3059,10 @@ mod tests {
         assert!(err.contains("no cluster kubeconfig cached"), "{err}");
         assert!(!err.contains("dev"), "read outside the state root: {err}");
 
-        let (one, _) = kubeconfig_fixture("one", &["ck1"], &["delonix-dev", "dev"]);
+        let (_one, one, _) = kubeconfig_fixture(&["ck1"], &["delonix-dev", "dev"]);
         assert_eq!(resolve_kubeconfig_name_in(None, &one).unwrap(), "ck1");
-        let _ = std::fs::remove_dir_all(one.parent().unwrap());
 
-        let (root, _) = kubeconfig_fixture("two", &["ck2", "ck1"], &["delonix-dev"]);
+        let (_two, root, _) = kubeconfig_fixture(&["ck2", "ck1"], &["delonix-dev"]);
         let err = resolve_kubeconfig_name_in(None, &root)
             .unwrap_err()
             .to_string();
@@ -3091,8 +3088,6 @@ mod tests {
             reachable_kubeconfig_names_in(&root, None),
             vec!["ck1", "ck2"]
         );
-        let _ = std::fs::remove_dir_all(root.parent().unwrap());
-        let _ = std::fs::remove_dir_all(home.parent().unwrap());
     }
 
     /// Gap closed: host prep now runs in parallel (`std::thread::scope`) instead of
@@ -3175,13 +3170,8 @@ users:
         // legally carry an `exec:` auth-provider (arbitrary LOCAL command
         // execution the next time `kubectl` uses this context) or
         // `insecure-skip-tls-verify: true`. Neither may survive the merge.
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-merge-kubeconfig-malicious-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let source = tmp.join("admin.conf");
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("admin.conf");
         std::fs::write(
             &source,
             r#"apiVersion: v1
@@ -3209,7 +3199,7 @@ users:
 "#,
         )
         .unwrap();
-        let dest = tmp.join("config");
+        let dest = tmp.path().join("config");
 
         merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
 
@@ -3233,21 +3223,14 @@ users:
             .get("insecure-skip-tls-verify")
             .is_none());
         assert!(merged["users"][0]["user"].get("exec").is_none());
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn merge_kubeconfig_renomeia_e_cria_de_novo() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-merge-kubeconfig-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let source = tmp.join("admin.conf");
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("admin.conf");
         std::fs::write(&source, fake_admin_conf()).unwrap();
-        let dest = tmp.join("config");
+        let dest = tmp.path().join("config");
 
         merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
 
@@ -3260,20 +3243,13 @@ users:
         assert_eq!(merged["users"][0]["name"], "lab-admin");
         // Fresh file: current-context follows the new (only) cluster.
         assert_eq!(merged["current-context"], "lab");
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn merge_kubeconfig_acumula_varios_clusters_sem_colidir() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-merge-kubeconfig-multi-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let source = tmp.join("admin.conf");
-        let dest = tmp.join("config");
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("admin.conf");
+        let dest = tmp.path().join("config");
 
         // 1st cluster: creates the file, becomes current-context.
         std::fs::write(&source, fake_admin_conf()).unwrap();
@@ -3306,8 +3282,6 @@ users:
         let merged: serde_yaml::Value =
             serde_yaml::from_str(&std::fs::read_to_string(&dest).unwrap()).unwrap();
         assert_eq!(merged["clusters"].as_sequence().unwrap().len(), 2);
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -3316,14 +3290,9 @@ users:
         // Reported live: `current-context` absent while three contexts sat in
         // the file, so a bare `kubectl` went to localhost:8080 and failed with
         // an error that reads like a broken cluster.
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-merge-kubeconfig-current-context-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        std::fs::create_dir_all(&tmp).unwrap();
-        let source = tmp.join("admin.conf");
-        let dest = tmp.join("config");
+        let tmp = tempfile::tempdir().unwrap();
+        let source = tmp.path().join("admin.conf");
+        let dest = tmp.path().join("config");
 
         std::fs::write(&source, fake_admin_conf()).unwrap();
         merge_into_local_kubeconfig(&source, "lab", &dest).unwrap();
@@ -3354,22 +3323,16 @@ users:
             merged["current-context"], "outro",
             "an absent current-context must be filled by the cluster just created"
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_vm_image_usa_a_explicita_sem_tocar_no_store() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-resolve-image-test-{}",
-            std::process::id()
-        ));
-        let store = VmImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = VmImageStore::open(tmp.path()).unwrap();
         assert_eq!(
             resolve_vm_image(&store, Some("minha-tag".to_string()), None).unwrap(),
             "minha-tag"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -3379,11 +3342,8 @@ users:
         // `--vm-image 1.34` — the short form. Before this fix that returned
         // "1.34" verbatim, `qcow2_path("1.34")` never matched the real file,
         // and the CLI reported the already-pulled image as missing.
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-resolve-image-explicit-convention-{}",
-            std::process::id()
-        ));
-        let store = VmImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = VmImageStore::open(tmp.path()).unwrap();
         store
             .save(&vmimage::VmImage {
                 name: "delonix-vm-k8s:1.34".to_string(),
@@ -3434,28 +3394,20 @@ users:
             resolve_vm_image(&store, Some("custom-name".to_string()), None).unwrap(),
             "custom-name"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_vm_image_falha_claro_sem_imagens_locais() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-resolve-image-empty-{}",
-            std::process::id()
-        ));
-        let store = VmImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = VmImageStore::open(tmp.path()).unwrap();
         let err = resolve_vm_image(&store, None, None).unwrap_err();
         assert!(format!("{err}").contains("build"));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_vm_image_usa_a_unica_existente() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-resolve-image-one-{}",
-            std::process::id()
-        ));
-        let store = VmImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = VmImageStore::open(tmp.path()).unwrap();
         store
             .save(&vmimage::VmImage {
                 name: "ubuntu-26.04-k8s".to_string(),
@@ -3478,16 +3430,12 @@ users:
             resolve_vm_image(&store, None, None).unwrap(),
             "ubuntu-26.04-k8s"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_vm_image_falha_claro_com_multiplas_imagens() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-resolve-image-many-{}",
-            std::process::id()
-        ));
-        let store = VmImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = VmImageStore::open(tmp.path()).unwrap();
         for tag in ["a", "b"] {
             store
                 .save(&vmimage::VmImage {
@@ -3510,16 +3458,12 @@ users:
         }
         let err = resolve_vm_image(&store, None, None).unwrap_err();
         assert!(format!("{err}").contains("--vm-image"));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn resolve_vm_image_k8s_version_escolhe_a_convencao_de_nome() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-cluster-resolve-image-k8sver-{}",
-            std::process::id()
-        ));
-        let store = VmImageStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = VmImageStore::open(tmp.path()).unwrap();
         for tag in ["delonix-vm-k8s:1.34", "delonix-vm-k8s:1.35"] {
             store
                 .save(&vmimage::VmImage {
@@ -3567,7 +3511,6 @@ users:
             .unwrap(),
             "delonix-vm-k8s:1.34"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     const SAMPLE_KUBEADM_INIT_OUTPUT: &str = "\

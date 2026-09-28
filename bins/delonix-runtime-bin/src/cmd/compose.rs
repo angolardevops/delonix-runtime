@@ -3478,11 +3478,8 @@ services:
     /// (Compose secrets are always file-mounted, never env vars).
     #[test]
     fn secret_file_source_becomes_a_secret_doc_and_flows_into_run_opts() {
-        let path = std::env::temp_dir().join(format!(
-            "dlx-compose-secret-test-{}-{}.txt",
-            std::process::id(),
-            "a"
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("db_password.txt");
         std::fs::write(&path, "s3cr3t\n").unwrap();
         let yaml = format!(
             "secrets:\n  db_password:\n    file: {}\nservices:\n  web:\n    image: x\n    secrets:\n      - db_password\n",
@@ -3490,7 +3487,6 @@ services:
         );
         let compose: ComposeFile = serde_yaml::from_str(&yaml).unwrap();
         let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
-        std::fs::remove_file(&path).ok();
 
         let (opts, _) = &t.containers["web"][0];
         assert!(opts.secret_files, "compose secrets must be file-delivered");
@@ -3513,11 +3509,8 @@ services:
     /// message this module always gave for both keys.
     #[test]
     fn config_file_source_also_becomes_a_secret_doc() {
-        let path = std::env::temp_dir().join(format!(
-            "dlx-compose-config-test-{}-{}.txt",
-            std::process::id(),
-            "a"
-        ));
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("nginx.conf");
         std::fs::write(&path, "server { }\n").unwrap();
         let yaml = format!(
             "configs:\n  nginx_conf:\n    file: {}\nservices:\n  web:\n    image: x\n    configs:\n      - nginx_conf\n",
@@ -3525,7 +3518,6 @@ services:
         );
         let compose: ComposeFile = serde_yaml::from_str(&yaml).unwrap();
         let t = translate(&compose, "p", Path::new("/"), &[]).unwrap();
-        std::fs::remove_file(&path).ok();
 
         let (opts, _) = &t.containers["web"][0];
         assert!(opts.secret_files);

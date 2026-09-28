@@ -790,15 +790,8 @@ providers:
 
     #[test]
     fn the_first_file_found_wins_and_an_explicit_path_must_exist() {
-        let base = std::env::temp_dir().join(format!(
-            "delonix-providers-config-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&base).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
         let system = base.join("etc.yaml");
         let xdg = base.join("xdg");
         std::fs::create_dir_all(xdg.join("delonix")).unwrap();
@@ -828,7 +821,6 @@ providers:
             locate_with(&with_explicit, &system).unwrap(),
             Some(explicit)
         );
-        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
@@ -847,19 +839,6 @@ providers:
             Some("https://other:8006")
         );
         assert_eq!(from_env("DELONIX_PROXMOX_NODE"), None);
-    }
-
-    fn scratch(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "delonix-pc-{tag}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&d).unwrap();
-        d
     }
 
     #[test]
@@ -884,7 +863,8 @@ providers:
     #[test]
     fn set_default_in_creates_edits_clears_and_keeps_the_mode() {
         use std::os::unix::fs::PermissionsExt;
-        let d = scratch("set");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let f = d.join("sub/providers.yaml");
         set_default_in(&f, None).unwrap();
         assert!(!f.exists(), "clearing a missing file must not create one");
@@ -911,24 +891,24 @@ providers:
         assert!(!std::fs::read_to_string(&f)
             .unwrap()
             .contains("defaultProvider"));
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn set_default_in_refuses_to_write_a_file_this_build_would_refuse() {
-        let d = scratch("bad");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let f = d.join("providers.yaml");
         let bad = "apiVersion: config.delonix.io/v2\n";
         std::fs::write(&f, bad).unwrap();
         assert!(set_default_in(&f, Some("libvirt")).is_err());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), bad, "left untouched");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn validate_refuses_a_default_without_an_entry_and_a_readable_token() {
         use std::os::unix::fs::PermissionsExt;
-        let d = scratch("val");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let origin = d.join("providers.yaml");
         let nopx = parse(
             "apiVersion: config.delonix.io/v1\ndefaultProvider: proxmox\nproviders:\n  - type: libvirt\n",
@@ -957,7 +937,6 @@ providers:
         assert!(e.contains("chmod 600"), "{e}");
         std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
         validate(&cfg, &origin).unwrap();
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     const OPN: &str = "apiVersion: config.delonix.io/v1
@@ -1051,7 +1030,8 @@ networkDefaults:
     #[test]
     fn validate_refuses_a_network_default_without_an_entry_and_an_opnsense_secret_others_read() {
         use std::os::unix::fs::PermissionsExt;
-        let d = scratch("opn");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let origin = d.join("providers.yaml");
         let unlisted = parse(
             "apiVersion: config.delonix.io/v1\nnetworkDefaults:\n  gateway: opnsense\n",
@@ -1073,12 +1053,12 @@ networkDefaults:
         assert!(e.contains("chmod 600"), "{e}");
         std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
         validate(&cfg, &origin).unwrap();
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn a_file_the_precedence_skips_is_listed_as_ignored() {
-        let d = scratch("ign");
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
         let system = d.join("etc.yaml");
         let xdg = d.join("xdg");
         std::fs::create_dir_all(xdg.join("delonix")).unwrap();
@@ -1088,7 +1068,6 @@ networkDefaults:
         let xdg_s = xdg.display().to_string();
         let env = |k: &str| (k == "XDG_CONFIG_HOME").then(|| xdg_s.clone());
         assert_eq!(ignored_with(&env, &system, &user), vec![system.clone()]);
-        let _ = std::fs::remove_dir_all(&d);
     }
     /// `docs/schema/v1/providers.json` is what an editor fetches, so it has to
     /// BE the generated one. Regenerate with:

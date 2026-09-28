@@ -1819,19 +1819,12 @@ mod tests {
 
     #[test]
     fn parse_build_secrets_le_id_e_src_e_recusa_ficheiro_inexistente() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-secret-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::write(&tmp, b"hunter2").unwrap();
-        let raw = vec![format!("id=npm,src={}", tmp.display())];
+        let tmp = tempfile::tempdir().unwrap();
+        let secret = tmp.path().join("secret");
+        std::fs::write(&secret, b"hunter2").unwrap();
+        let raw = vec![format!("id=npm,src={}", secret.display())];
         let secrets = parse_build_secrets(&raw).unwrap();
-        assert_eq!(secrets.get("npm"), Some(&tmp));
-        std::fs::remove_file(&tmp).ok();
+        assert_eq!(secrets.get("npm"), Some(&secret));
 
         assert!(parse_build_secrets(&["id=x,src=/does/not/exist".to_string()]).is_err());
         assert!(parse_build_secrets(&["src=/tmp".to_string()]).is_err()); // missing id=
@@ -1920,10 +1913,9 @@ mod tests {
         // build-context entry or a malicious `FROM` image layer) could still walk
         // out. `confine_to` must catch it even though the requested relative path
         // itself never contained `..`.
-        let dir = std::env::temp_dir().join(format!("delonix-confine-test-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        let base = dir.join("base");
-        let outside = dir.join("outside");
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let outside = tmp.path().join("outside");
         std::fs::create_dir_all(&base).unwrap();
         std::fs::create_dir_all(&outside).unwrap();
         std::fs::write(outside.join("secret"), b"top secret").unwrap();
@@ -1939,27 +1931,23 @@ mod tests {
         assert!(confine_to(&canon_base, &base.join("escape/not-yet-created")).is_err());
         // A normal, non-symlinked path stays accepted.
         assert!(confine_to(&canon_base, &base.join("plain/not-yet-created")).is_ok());
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn prefere_delonixfile_quando_existe() {
-        let dir = std::env::temp_dir().join(format!("delonix-build-test-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         std::fs::write(dir.join("Dockerfile"), "FROM alpine\n").unwrap();
         std::fs::write(dir.join("Delonixfile"), "FROM alpine\n").unwrap();
-        assert_eq!(default_build_file(&dir), dir.join("Delonixfile"));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(default_build_file(dir), dir.join("Delonixfile"));
     }
 
     #[test]
     fn recorre_a_dockerfile_sem_delonixfile() {
-        let dir = std::env::temp_dir().join(format!("delonix-build-test2-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         std::fs::write(dir.join("Dockerfile"), "FROM alpine\n").unwrap();
-        assert_eq!(default_build_file(&dir), dir.join("Dockerfile"));
-        let _ = std::fs::remove_dir_all(&dir);
+        assert_eq!(default_build_file(dir), dir.join("Dockerfile"));
     }
 }
 

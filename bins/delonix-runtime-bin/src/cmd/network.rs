@@ -1916,12 +1916,10 @@ mod tests {
     /// tráfego com o registo a dizer que saiu.
     #[test]
     fn o_nome_do_device_vxlan_e_o_do_motor() {
-        let tmp = std::env::temp_dir().join(format!("dlx-vxdev-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&tmp);
-        let store = delonix_sdn::NetworkStore::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = delonix_sdn::NetworkStore::open(tmp.path()).unwrap();
         let net = store.create_overlay("m", 42, &[], None).unwrap();
         assert_eq!(net.vxlan_dev().as_deref(), Some("dlxvx002a"));
         assert_ne!(net.vxlan_dev().as_deref(), Some("dlxvx42"));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

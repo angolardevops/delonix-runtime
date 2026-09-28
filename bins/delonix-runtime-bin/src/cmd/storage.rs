@@ -454,27 +454,20 @@ mod tests {
         assert!(build_mount("s3", "x", "y", None, false, None).is_err());
     }
 
-    fn tmp_dir(tag: &str) -> PathBuf {
-        std::env::temp_dir().join(format!(
-            "delonix-storage-test-{tag}-{}-{}",
-            std::process::id(),
-            line!()
-        ))
-    }
-
     #[test]
     fn write_cifs_credentials_sem_username_nem_password_devolve_none() {
-        let dir = tmp_dir("none");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("creds");
         assert_eq!(
             super::write_cifs_credentials_in(&dir, "x", None, None).unwrap(),
             None
         );
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
     fn write_cifs_credentials_escreve_0600_e_recusa_quebra_de_linha() {
-        let dir = tmp_dir("write");
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("creds");
         // BUG regression guard: a password containing a newline could inject
         // an extra `key=value` line into the credentials file itself (the
         // same class of injection the comma used to allow inline).
@@ -495,7 +488,5 @@ mod tests {
         use std::os::unix::fs::PermissionsExt as _;
         let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600, "ficheiro de credenciais tem de ser 0600");
-
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

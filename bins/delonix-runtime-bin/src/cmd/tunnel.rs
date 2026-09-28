@@ -1566,12 +1566,8 @@ mod tests {
 
     #[test]
     fn other_alive_ngrok_ignores_a_not_genuinely_alive_record() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-tunnel-otherngrok-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        let store = JsonStore::<TunnelRecord>::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = JsonStore::<TunnelRecord>::open(tmp.path()).unwrap();
         // A "running" record claiming the fixed ngrok web port — is_alive
         // requires a real /proc entry, so fake it with our OWN pid (this test
         // process, definitely alive) and a cmdline that won't contain
@@ -1595,17 +1591,12 @@ mod tests {
             other_alive_ngrok(&store).unwrap().is_none(),
             "o registo não está genuinamente vivo (cmdline não é ngrok)"
         );
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn other_alive_ngrok_ignores_other_providers() {
-        let tmp = std::env::temp_dir().join(format!(
-            "delonix-tunnel-otherngrok-provider-test-{}-{}",
-            std::process::id(),
-            line!()
-        ));
-        let store = JsonStore::<TunnelRecord>::open(&tmp).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let store = JsonStore::<TunnelRecord>::open(tmp.path()).unwrap();
         let pinggy_rec = TunnelRecord {
             name: "p".to_string(),
             provider: "pinggy".to_string(),
@@ -1621,6 +1612,5 @@ mod tests {
         };
         store.save("p", &pinggy_rec).unwrap();
         assert!(other_alive_ngrok(&store).unwrap().is_none());
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

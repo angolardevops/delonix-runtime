@@ -1001,22 +1001,17 @@ fn readme(o: &InitOpts) -> String {
 mod tests {
     use super::*;
 
-    fn scratch(label: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-scaffold-test-{label}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        dir
+    /// A project path that does not exist yet, inside a temp dir the guard
+    /// removes when the test ends.
+    fn scratch() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("project");
+        (tmp, dir)
     }
 
     #[test]
     fn dir_has_content_e_falso_para_um_caminho_que_nao_existe() {
-        let dir = scratch("missing");
+        let (_tmp, dir) = scratch();
         assert!(
             !dir_has_content(&dir),
             "um caminho inexistente não tem conteúdo"
@@ -1025,19 +1020,17 @@ mod tests {
 
     #[test]
     fn dir_has_content_e_falso_para_um_directorio_vazio() {
-        let dir = scratch("empty");
+        let (_tmp, dir) = scratch();
         std::fs::create_dir_all(&dir).unwrap();
         assert!(!dir_has_content(&dir));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn dir_has_content_e_verdadeiro_assim_que_ha_uma_entrada() {
-        let dir = scratch("nonempty");
+        let (_tmp, dir) = scratch();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("ja-tem-algo"), "x").unwrap();
         assert!(dir_has_content(&dir));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Um directório vazio continua a receber o scaffold INTEIRO — o caso
@@ -1045,7 +1038,7 @@ mod tests {
     /// de adopção.
     #[test]
     fn scaffold_num_directorio_vazio_escreve_o_projecto_completo() {
-        let dir = scratch("scaffold-empty");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "app".into(),
@@ -1067,7 +1060,6 @@ mod tests {
             dir.join(".github/workflows/ci.yml").exists(),
             "um scaffold novo já nasce com CI/CD pronto"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Um directório com um projecto REAL já lá dentro só recebe o Delonixfile,
@@ -1075,7 +1067,7 @@ mod tests {
     /// que colidiria com (ou ficaria sem uso ao lado de) o código verdadeiro.
     #[test]
     fn adopcao_num_projecto_existente_so_escreve_o_glue() {
-        let dir = scratch("adopt");
+        let (_tmp, dir) = scratch();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("package.json"), "{}").unwrap();
         std::fs::write(dir.join("server.js"), "// o código real do utilizador").unwrap();
@@ -1105,7 +1097,6 @@ mod tests {
             std::fs::read_to_string(dir.join("server.js")).unwrap(),
             "// o código real do utilizador"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// CI/CD (workflows, SonarQube, CONTRIBUTING.md, commitlint) does not
@@ -1114,7 +1105,7 @@ mod tests {
     /// included in adopt mode too, unlike the Delonixfile/manifest.
     #[test]
     fn adopcao_tambem_recebe_o_ci_cd_generico() {
-        let dir = scratch("adopt-cicd");
+        let (_tmp, dir) = scratch();
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("package.json"), "{}").unwrap();
         let o = InitOpts {
@@ -1132,7 +1123,6 @@ mod tests {
         assert!(dir.join("sonar-project.properties").exists());
         assert!(dir.join("CONTRIBUTING.md").exists());
         assert!(dir.join("commitlint.config.js").exists());
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Re-correr `init` sobre o SEU PRÓPRIO scaffold anterior (agora não-vazio)
@@ -1140,7 +1130,7 @@ mod tests {
     /// por cima de edições que o utilizador já tenha feito.
     #[test]
     fn re_correr_init_sobre_o_proprio_output_muda_para_adopcao() {
-        let dir = scratch("rerun");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "app".into(),
@@ -1157,7 +1147,6 @@ mod tests {
             !dir.join("src").exists(),
             "a segunda passagem não pode recriar o código de exemplo"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v`/`--template-version` only means anything on a template that
@@ -1191,7 +1180,7 @@ mod tests {
     /// `None` deterministically here.
     #[test]
     fn v_sem_t_nenhum_e_recusado_antes_de_gerar_seja_o_que_for() {
-        let dir = scratch("v-sem-t");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "app".into(),
@@ -1215,7 +1204,7 @@ mod tests {
     /// and `config/odoo.conf`, not just the README.
     #[test]
     fn odoo_com_v_substitui_a_versao_em_todos_os_ficheiros() {
-        let dir = scratch("odoo-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myodoo".into(),
@@ -1237,14 +1226,13 @@ mod tests {
             !delonixfile.contains("__TEMPLATE_VERSION__"),
             "token não substituído"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Without `-v`, the `odoo` template falls back to `template.meta`'s own
     /// default version — the token must never survive by anyone's omission.
     #[test]
     fn odoo_sem_v_usa_a_versao_por_omissao() {
-        let dir = scratch("odoo-default-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myodoo".into(),
@@ -1260,7 +1248,6 @@ mod tests {
             !delonixfile.contains("__TEMPLATE_VERSION__"),
             "sem -v, a versão por omissão do template.meta tem de preencher o token:\n{delonixfile}"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on the `django` template pins `pyproject.toml`'s dependency as
@@ -1269,7 +1256,7 @@ mod tests {
     /// documents what it was actually pinned to.
     #[test]
     fn django_com_v_fixa_a_dependencia_como_wildcard() {
-        let dir = scratch("django-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1291,7 +1278,6 @@ mod tests {
         );
         let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
         assert!(readme.contains("django==5.2.*"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// Without `-v`, `django` falls back to `template.meta`'s own default
@@ -1299,7 +1285,7 @@ mod tests {
     /// unannounced) and never the raw token surviving into the file.
     #[test]
     fn django_sem_v_usa_a_versao_por_omissao() {
-        let dir = scratch("django-default-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1316,14 +1302,13 @@ mod tests {
             "sem -v, devia cair no default do template.meta:\n{pyproject}"
         );
         assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// A bare major (`-v 5`, no minor) is a valid form too — it pins
     /// `django==5.*`, i.e. "any 5.x", not a specific minor.
     #[test]
     fn django_com_v_major_nu_fixa_qualquer_5x() {
-        let dir = scratch("django-v-major");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1339,7 +1324,6 @@ mod tests {
             pyproject.contains("\"django==5.*\""),
             "um major nu devia fixar `==5.*`, não uma versão específica:\n{pyproject}"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on `python` pins `pyproject.toml`'s FastAPI dependency the same
@@ -1347,7 +1331,7 @@ mod tests {
     /// template hardcoded before this session.
     #[test]
     fn python_com_v_fixa_o_fastapi_como_wildcard() {
-        let dir = scratch("python-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1364,7 +1348,6 @@ mod tests {
             "pyproject.toml não fixou o fastapi pedido:\n{pyproject}"
         );
         assert!(!pyproject.contains("__TEMPLATE_VERSION__"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on `go` has no framework to pin — it fixes the TOOLCHAIN, in
@@ -1372,7 +1355,7 @@ mod tests {
     /// (what actually builds it). The two must never disagree.
     #[test]
     fn go_com_v_fixa_o_toolchain_no_gomod_e_no_delonixfile() {
-        let dir = scratch("go-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1393,14 +1376,13 @@ mod tests {
             delonixfile.contains("FROM golang:1.22-alpine"),
             "Delonixfile não fixou o toolchain:\n{delonixfile}"
         );
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on `laravel` pins `composer.json`'s `laravel/framework` — the PHP
     /// version stays independent (it tracks the FrankenPHP base image, not `-v`).
     #[test]
     fn laravel_com_v_fixa_o_framework_sem_tocar_no_php() {
-        let dir = scratch("laravel-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1421,13 +1403,12 @@ mod tests {
             "a versão do PHP não devia mexer com -v:\n{composer}"
         );
         assert!(!composer.contains("__TEMPLATE_VERSION__"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on `node` pins `package.json`'s `fastify` dependency.
     #[test]
     fn node_com_v_fixa_o_fastify() {
-        let dir = scratch("node-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1444,13 +1425,12 @@ mod tests {
             "package.json não fixou o fastify pedido:\n{pkg}"
         );
         assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on `nextjs` pins `package.json`'s `next` dependency.
     #[test]
     fn nextjs_com_v_fixa_o_next() {
-        let dir = scratch("nextjs-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1467,7 +1447,6 @@ mod tests {
             "package.json não fixou o next pedido:\n{pkg}"
         );
         assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on `nestjs` pins EVERY `@nestjs/*` package to the SAME version —
@@ -1475,7 +1454,7 @@ mod tests {
     /// mixed-major install.
     #[test]
     fn nestjs_com_v_fixa_todos_os_pacotes_nestjs_juntos() {
-        let dir = scratch("nestjs-v");
+        let (_tmp, dir) = scratch();
         let o = InitOpts {
             dir: dir.clone(),
             name: "myapp".into(),
@@ -1499,7 +1478,6 @@ mod tests {
             );
         }
         assert!(!pkg.contains("__TEMPLATE_VERSION__"));
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     /// `-v` on the pure-config templates (`nginx`/`httpd`/`haproxy`) pins the
@@ -1511,7 +1489,7 @@ mod tests {
             ("httpd", "FROM httpd:"),
             ("haproxy", "FROM haproxy:"),
         ] {
-            let dir = scratch(&format!("{tpl}-v"));
+            let (_tmp, dir) = scratch();
             let o = InitOpts {
                 dir: dir.clone(),
                 name: "myapp".into(),
@@ -1531,7 +1509,6 @@ mod tests {
                 !delonixfile.contains("__TEMPLATE_VERSION__"),
                 "{tpl}: token não substituído"
             );
-            std::fs::remove_dir_all(&dir).ok();
         }
     }
 }

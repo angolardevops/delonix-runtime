@@ -718,13 +718,6 @@ mod tests {
             .contains("not valid"));
     }
 
-    fn scratch(tag: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("dlx-ippool-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     fn seed(d: &std::path::Path, name: &str, addrs: &[&str]) {
         write_in(
             d,
@@ -740,90 +733,90 @@ mod tests {
 
     #[test]
     fn a_claim_is_idempotent_and_an_address_has_one_holder() {
-        let d = scratch("claim");
-        seed(&d, "edge", &["203.0.113.1-203.0.113.2"]);
-        let first = claim_in(&d, "edge", "HTTPRoute/a", Mode::Take).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        seed(d, "edge", &["203.0.113.1-203.0.113.2"]);
+        let first = claim_in(d, "edge", "HTTPRoute/a", Mode::Take).unwrap();
         assert_eq!(first.to_string(), "203.0.113.1");
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/a", Mode::Take).unwrap(),
+            claim_in(d, "edge", "HTTPRoute/a", Mode::Take).unwrap(),
             first
         );
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/b", Mode::Take)
+            claim_in(d, "edge", "HTTPRoute/b", Mode::Take)
                 .unwrap()
                 .to_string(),
             "203.0.113.2"
         );
-        let e = claim_in(&d, "edge", "HTTPRoute/c", Mode::Take).unwrap_err();
+        let e = claim_in(d, "edge", "HTTPRoute/c", Mode::Take).unwrap_err();
         assert_eq!(
             delonix_model::exitcode::for_error(&e),
             delonix_model::exitcode::CONFLICT,
             "{e}"
         );
         assert!(e.to_string().contains("exhausted"), "{e}");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn peek_shows_the_address_a_claim_would_take_without_taking_it() {
-        let d = scratch("peek");
-        seed(&d, "edge", &["203.0.113.1"]);
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        seed(d, "edge", &["203.0.113.1"]);
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/a", Mode::Peek)
+            claim_in(d, "edge", "HTTPRoute/a", Mode::Peek)
                 .unwrap()
                 .to_string(),
             "203.0.113.1"
         );
         assert!(
-            get_in(&d, "edge").unwrap().leases.is_empty(),
+            get_in(d, "edge").unwrap().leases.is_empty(),
             "peek must not write"
         );
         // and the same address is still free for a real claim by someone else
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/b", Mode::Take)
+            claim_in(d, "edge", "HTTPRoute/b", Mode::Take)
                 .unwrap()
                 .to_string(),
             "203.0.113.1"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn a_released_address_goes_back_to_the_pool_and_release_is_idempotent() {
-        let d = scratch("release");
-        seed(&d, "edge", &["203.0.113.1"]);
-        claim_in(&d, "edge", "HTTPRoute/a", Mode::Take).unwrap();
-        release_unlisted_in(&d, "HTTPRoute/", &[]).unwrap();
-        release_unlisted_in(&d, "HTTPRoute/", &[]).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        seed(d, "edge", &["203.0.113.1"]);
+        claim_in(d, "edge", "HTTPRoute/a", Mode::Take).unwrap();
+        release_unlisted_in(d, "HTTPRoute/", &[]).unwrap();
+        release_unlisted_in(d, "HTTPRoute/", &[]).unwrap();
         assert_eq!(
-            claim_in(&d, "edge", "HTTPRoute/b", Mode::Take)
+            claim_in(d, "edge", "HTTPRoute/b", Mode::Take)
                 .unwrap()
                 .to_string(),
             "203.0.113.1"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn a_damaged_ledger_is_an_error_and_is_never_overwritten() {
-        let d = scratch("damaged");
-        std::fs::write(path_in(&d, "edge"), b"{ not json").unwrap();
-        let e = claim_in(&d, "edge", "HTTPRoute/x", Mode::Take)
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        std::fs::write(path_in(d, "edge"), b"{ not json").unwrap();
+        let e = claim_in(d, "edge", "HTTPRoute/x", Mode::Take)
             .unwrap_err()
             .to_string();
         assert!(e.contains("damaged"), "{e}");
-        assert_eq!(std::fs::read(path_in(&d, "edge")).unwrap(), b"{ not json");
-        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(std::fs::read(path_in(d, "edge")).unwrap(), b"{ not json");
     }
 
     #[test]
     fn a_plan_that_peeks_twice_does_not_hand_out_one_address_twice() {
-        let d = scratch("peek2");
-        seed(&d, "edge", &["203.0.113.1-203.0.113.3"]);
-        let a = claim_in_excluding(&d, "edge", "HTTPRoute/a", Mode::Peek, &[]).unwrap();
-        let b = claim_in_excluding(&d, "edge", "HTTPRoute/b", Mode::Peek, &[a]).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        seed(d, "edge", &["203.0.113.1-203.0.113.3"]);
+        let a = claim_in_excluding(d, "edge", "HTTPRoute/a", Mode::Peek, &[]).unwrap();
+        let b = claim_in_excluding(d, "edge", "HTTPRoute/b", Mode::Peek, &[a]).unwrap();
         assert_ne!(a, b);
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
@@ -836,78 +829,78 @@ mod tests {
 
     #[test]
     fn release_unlisted_keeps_the_live_claimants_and_only_that_prefix() {
-        let d = scratch("unlisted");
-        seed(&d, "edge", &["203.0.113.1-203.0.113.4"]);
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        seed(d, "edge", &["203.0.113.1-203.0.113.4"]);
         for c in ["HTTPRoute/keep", "HTTPRoute/gone", "Other/x"] {
-            claim_in(&d, "edge", c, Mode::Take).unwrap();
+            claim_in(d, "edge", c, Mode::Take).unwrap();
         }
-        release_unlisted_in(&d, "HTTPRoute/", &["HTTPRoute/keep".to_string()]).unwrap();
-        let p = get_in(&d, "edge").unwrap();
+        release_unlisted_in(d, "HTTPRoute/", &["HTTPRoute/keep".to_string()]).unwrap();
+        let p = get_in(d, "edge").unwrap();
         assert!(p.leases.contains_key("HTTPRoute/keep"));
         assert!(!p.leases.contains_key("HTTPRoute/gone"));
         assert!(
             p.leases.contains_key("Other/x"),
             "a different kind of claimant is not ours to release"
         );
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn one_claimant_cannot_hold_addresses_in_two_pools() {
-        let d = scratch("two");
-        seed(&d, "a", &["203.0.113.1"]);
-        seed(&d, "b", &["198.51.100.1"]);
-        claim_in(&d, "a", "HTTPRoute/x", Mode::Take).unwrap();
-        let e = claim_in(&d, "b", "HTTPRoute/x", Mode::Take)
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        seed(d, "a", &["203.0.113.1"]);
+        seed(d, "b", &["198.51.100.1"]);
+        claim_in(d, "a", "HTTPRoute/x", Mode::Take).unwrap();
+        let e = claim_in(d, "b", "HTTPRoute/x", Mode::Take)
             .unwrap_err()
             .to_string();
         assert!(e.contains("already holds"), "{e}");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn a_claimant_can_move_between_pools_and_a_peek_never_fails_on_the_old_lease() {
-        let d = scratch("move");
-        seed(&d, "a", &["203.0.113.1"]);
-        seed(&d, "b", &["198.51.100.1"]);
-        claim_in(&d, "a", "HTTPRoute/x", Mode::Take).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        seed(d, "a", &["203.0.113.1"]);
+        seed(d, "b", &["198.51.100.1"]);
+        claim_in(d, "a", "HTTPRoute/x", Mode::Take).unwrap();
         // a plan looking at the move must not fail, nor write
         assert_eq!(
-            claim_in(&d, "b", "HTTPRoute/x", Mode::Peek)
+            claim_in(d, "b", "HTTPRoute/x", Mode::Peek)
                 .unwrap()
                 .to_string(),
             "198.51.100.1"
         );
-        assert_eq!(get_in(&d, "a").unwrap().leases.len(), 1);
-        assert!(get_in(&d, "b").unwrap().leases.is_empty());
+        assert_eq!(get_in(d, "a").unwrap().leases.len(), 1);
+        assert!(get_in(d, "b").unwrap().leases.is_empty());
         // the apply moves it: new lease written, old one given back
         assert_eq!(
-            claim_in(&d, "b", "HTTPRoute/x", Mode::Move)
+            claim_in(d, "b", "HTTPRoute/x", Mode::Move)
                 .unwrap()
                 .to_string(),
             "198.51.100.1"
         );
-        assert!(get_in(&d, "a").unwrap().leases.is_empty());
-        assert_eq!(get_in(&d, "b").unwrap().leases.len(), 1);
+        assert!(get_in(d, "a").unwrap().leases.is_empty());
+        assert_eq!(get_in(d, "b").unwrap().leases.len(), 1);
         // and the plain Take still refuses to hold two
-        let e = claim_in(&d, "a", "HTTPRoute/x", Mode::Take)
+        let e = claim_in(d, "a", "HTTPRoute/x", Mode::Take)
             .unwrap_err()
             .to_string();
         assert!(e.contains("already holds"), "{e}");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]
     fn claiming_from_a_pool_that_does_not_exist_says_how_to_declare_it() {
-        let d = scratch("missing");
-        let e = claim_in(&d, "nope", "HTTPRoute/x", Mode::Take).unwrap_err();
+        let tmp = tempfile::tempdir().unwrap();
+        let d = tmp.path();
+        let e = claim_in(d, "nope", "HTTPRoute/x", Mode::Take).unwrap_err();
         assert_eq!(
             delonix_model::exitcode::for_error(&e),
             delonix_model::exitcode::NOT_FOUND,
             "{e}"
         );
         assert!(e.to_string().contains("kind: IPPool"), "{e}");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test]

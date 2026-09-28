@@ -692,21 +692,6 @@ mod tests {
         );
     }
 
-    /// Unique temp dir (without depending on the `tempfile` crate).
-    fn tmp_root(tag: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!(
-            "delonix-vmbridge-{tag}-{}-{}",
-            // SAFETY: `getpid` takes no arguments and has no preconditions.
-            unsafe { libc::getpid() },
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos())
-                .unwrap_or(0)
-        ));
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     fn detect_must_not_run() -> Vec<String> {
         panic!("the virbr* detection ran although the bridge left a record")
     }
@@ -716,8 +701,9 @@ mod tests {
         // Measured 2026-09-27: `bridge --vm-subnet 192.168.200.0/24 --apply`,
         // then `unbridge --apply` detected only virbr0's 192.168.122.0/24 and
         // left both FORWARD ACCEPT rules and the holder's return route for .200.
-        let root = tmp_root("record");
-        let record = applied_subnets_path(&root, "dlxnabc");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let record = applied_subnets_path(root, "dlxnabc");
         assert!(record.starts_with(root.join("ingress")));
         write_applied_subnets(&record, &["192.168.200.0/24".into()]).unwrap();
 
@@ -741,13 +727,14 @@ mod tests {
                 "missing {want:?} in {shown:#?}"
             );
         }
-        std::fs::remove_dir_all(&root).unwrap();
+        tmp.close().unwrap();
     }
 
     #[test]
     fn without_a_record_the_teardown_falls_back_to_explicit_then_detection() {
-        let root = tmp_root("absent");
-        let record = applied_subnets_path(&root, "dlxnabc");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let record = applied_subnets_path(root, "dlxnabc");
         assert_eq!(read_applied_subnets(&record), None, "no file, no record");
         // An empty file is no record either: detection still has a chance.
         std::fs::create_dir_all(record.parent().unwrap()).unwrap();
@@ -771,14 +758,15 @@ mod tests {
             ),
             vec!["192.168.200.0/24".to_string(), "10.9.0.0/24".to_string()]
         );
-        std::fs::remove_dir_all(&root).unwrap();
+        tmp.close().unwrap();
     }
 
     #[test]
     fn the_record_round_trips_one_canonical_cidr_per_line() {
-        let root = tmp_root("roundtrip");
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         // The `ingress/` directory may not exist yet: the write creates it.
-        let record = applied_subnets_path(&root, "delonix0");
+        let record = applied_subnets_path(root, "delonix0");
         let subs = vec![
             "192.168.122.0/24".to_string(),
             "192.168.200.0/24".to_string(),
@@ -789,7 +777,7 @@ mod tests {
             "192.168.122.0/24\n192.168.200.0/24\n"
         );
         assert_eq!(read_applied_subnets(&record), Some(subs));
-        std::fs::remove_dir_all(&root).unwrap();
+        tmp.close().unwrap();
     }
 
     #[test]

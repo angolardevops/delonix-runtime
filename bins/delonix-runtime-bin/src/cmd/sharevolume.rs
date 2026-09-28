@@ -209,27 +209,14 @@ fn apply_one(
 mod tests {
     use super::*;
 
-    fn tmp_root(tag: &str) -> std::path::PathBuf {
-        static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-        let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        std::env::temp_dir().join(format!(
-            "delonix-sharevolume-test-{tag}-{}-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos(),
-            seq
-        ))
-    }
-
     #[test]
     fn um_share_e_possuivel_por_uma_stack() {
-        let tmp = tmp_root("owned");
-        let vstore = VolumeStore::open(&tmp).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let tmp = root.path();
+        let vstore = VolumeStore::open(tmp).unwrap();
         vstore.create("nas-shared").unwrap();
         apply_one(
-            &tmp,
+            tmp,
             "db",
             &ShareVolumeSpec {
                 storage_ref: "nas-shared".into(),
@@ -239,7 +226,7 @@ mod tests {
             Some("teamA"),
         )
         .unwrap();
-        let scoped = VolumeStore::open_scoped(&tmp, "teamA").unwrap();
+        let scoped = VolumeStore::open_scoped(tmp, "teamA").unwrap();
         scoped
             .set_metadata(
                 "db",
@@ -253,26 +240,26 @@ mod tests {
             Some("loja")
         );
         assert_eq!(v.parent.as_deref(), Some("nas-shared"));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn apply_recusa_storage_ref_inexistente() {
-        let tmp = tmp_root("no-parent");
+        let root = tempfile::tempdir().unwrap();
+        let tmp = root.path();
         let spec = ShareVolumeSpec {
             storage_ref: "nao-existe".to_string(),
             quota: None,
             alert_pct: None,
         };
-        let err = apply_one(&tmp, "sv1", &spec, Some("default")).unwrap_err();
+        let err = apply_one(tmp, "sv1", &spec, Some("default")).unwrap_err();
         assert!(format!("{err}").contains("storageRef"));
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn apply_e_idempotente_e_isola_por_subdirectorio() {
-        let tmp = tmp_root("idempotent");
-        let vstore = VolumeStore::open(&tmp).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let tmp = root.path();
+        let vstore = VolumeStore::open(tmp).unwrap();
         // The parent "Storage" — a plain local volume stands in for a
         // network one here (register_external doesn't care which).
         vstore.create("nas-shared").unwrap();
@@ -281,10 +268,10 @@ mod tests {
             quota: Some("1M".to_string()),
             alert_pct: Some(80),
         };
-        apply_one(&tmp, "tenant-a", &spec, Some("default")).unwrap();
-        apply_one(&tmp, "tenant-b", &spec, Some("default")).unwrap();
+        apply_one(tmp, "tenant-a", &spec, Some("default")).unwrap();
+        apply_one(tmp, "tenant-b", &spec, Some("default")).unwrap();
 
-        let scoped = VolumeStore::open_scoped(&tmp, "default").unwrap();
+        let scoped = VolumeStore::open_scoped(tmp, "default").unwrap();
         let a = scoped.inspect("tenant-a").unwrap();
         let b = scoped.inspect("tenant-b").unwrap();
         assert_ne!(
@@ -297,15 +284,13 @@ mod tests {
 
         // Idempotent re-apply: same name, `created_unix` preserved.
         std::thread::sleep(std::time::Duration::from_millis(5));
-        apply_one(&tmp, "tenant-a", &spec, Some("default")).unwrap();
+        apply_one(tmp, "tenant-a", &spec, Some("default")).unwrap();
         let a2 = scoped.inspect("tenant-a").unwrap();
         assert_eq!(a.created_unix, a2.created_unix);
         assert_eq!(
             a.mountpoint, a2.mountpoint,
             "um re-apply não pode mudar o directório debaixo dos dados"
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// ACH-001: a share with no `--namespace` lands where the UNFLAGGED reads look.
@@ -317,15 +302,16 @@ mod tests {
     /// returns), and it is NOT in `default`.
     #[test]
     fn share_with_no_namespace_lands_in_the_unowned_root() {
-        let tmp = tmp_root("no-owner");
-        let vstore = VolumeStore::open(&tmp).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let tmp = root.path();
+        let vstore = VolumeStore::open(tmp).unwrap();
         vstore.create("nas-shared").unwrap();
         let spec = ShareVolumeSpec {
             storage_ref: "nas-shared".to_string(),
             quota: None,
             alert_pct: None,
         };
-        apply_one(&tmp, "solta", &spec, None).unwrap();
+        apply_one(tmp, "solta", &spec, None).unwrap();
 
         let v = vstore
             .inspect("solta")
@@ -345,8 +331,8 @@ mod tests {
         );
 
         // The same name under `--namespace default` is a DIFFERENT share, elsewhere.
-        apply_one(&tmp, "solta", &spec, Some("default")).unwrap();
-        let d = VolumeStore::open_scoped(&tmp, "default")
+        apply_one(tmp, "solta", &spec, Some("default")).unwrap();
+        let d = VolumeStore::open_scoped(tmp, "default")
             .unwrap()
             .inspect("solta")
             .unwrap();
@@ -354,8 +340,6 @@ mod tests {
             v.mountpoint, d.mountpoint,
             "`--namespace default` and the unowned root are two different places"
         );
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     /// O invariante do B2: dois inquilinos, o MESMO nome, e caminhos distintos.
@@ -366,22 +350,23 @@ mod tests {
     /// namespace.
     #[test]
     fn dois_namespaces_com_o_mesmo_share_nao_se_tocam() {
-        let tmp = tmp_root("two-ns");
-        let vstore = VolumeStore::open(&tmp).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let tmp = root.path();
+        let vstore = VolumeStore::open(tmp).unwrap();
         vstore.create("nas-shared").unwrap();
         let spec = ShareVolumeSpec {
             storage_ref: "nas-shared".to_string(),
             quota: None,
             alert_pct: None,
         };
-        apply_one(&tmp, "db", &spec, Some("teamA")).unwrap();
-        apply_one(&tmp, "db", &spec, Some("teamB")).unwrap();
+        apply_one(tmp, "db", &spec, Some("teamA")).unwrap();
+        apply_one(tmp, "db", &spec, Some("teamB")).unwrap();
 
-        let a = VolumeStore::open_scoped(&tmp, "teamA")
+        let a = VolumeStore::open_scoped(tmp, "teamA")
             .unwrap()
             .inspect("db")
             .unwrap();
-        let b = VolumeStore::open_scoped(&tmp, "teamB")
+        let b = VolumeStore::open_scoped(tmp, "teamB")
             .unwrap()
             .inspect("db")
             .unwrap();
@@ -395,7 +380,5 @@ mod tests {
         // `-v db:/data` resolve para o db da namespace de quem monta, nao para o outro.
         let m = vstore.resolve_spec_in("db:/data", "teamB").unwrap();
         assert_eq!(m.source, b.mountpoint, "teamB tem de receber o SEU db");
-
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 }

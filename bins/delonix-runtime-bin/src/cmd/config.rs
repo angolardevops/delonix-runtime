@@ -168,58 +168,40 @@ mod tests {
     /// invocation exercises.
     #[test]
     fn resolve_output_only_fills_in_the_unrequested_default() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-config-test-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
 
         // No config file at all: default stays the default.
         assert_eq!(
-            resolve_output(&dir, OutputFormat::Table),
+            resolve_output(dir, OutputFormat::Table),
             OutputFormat::Table
         );
 
-        cmd_set(&dir, "output", "json").unwrap();
+        cmd_set(dir, "output", "json").unwrap();
         // The compile-time default gets upgraded...
-        assert_eq!(
-            resolve_output(&dir, OutputFormat::Table),
-            OutputFormat::Json
-        );
+        assert_eq!(resolve_output(dir, OutputFormat::Table), OutputFormat::Json);
         // ...but an explicit non-default request is never touched.
-        assert_eq!(resolve_output(&dir, OutputFormat::Json), OutputFormat::Json);
+        assert_eq!(resolve_output(dir, OutputFormat::Json), OutputFormat::Json);
 
-        cmd_unset(&dir, "output").unwrap();
+        cmd_unset(dir, "output").unwrap();
         assert_eq!(
-            resolve_output(&dir, OutputFormat::Table),
+            resolve_output(dir, OutputFormat::Table),
             OutputFormat::Table
         );
-
-        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]
     fn an_unknown_key_is_refused_by_name() {
-        let dir = std::env::temp_dir().join(format!(
-            "delonix-config-test-unknown-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(cmd_set(&dir, "namespace", "prod").is_err());
-        assert!(cmd_get(&dir, Some("namespace")).is_err());
-        std::fs::remove_dir_all(&dir).ok();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(cmd_set(dir, "namespace", "prod").is_err());
+        assert!(cmd_get(dir, Some("namespace")).is_err());
     }
 
     #[test]
     fn an_invalid_value_is_refused_not_silently_accepted() {
-        let dir =
-            std::env::temp_dir().join(format!("delonix-config-test-badval-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
-        assert!(cmd_set(&dir, "output", "yaml").is_err());
-        std::fs::remove_dir_all(&dir).ok();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        assert!(cmd_set(dir, "output", "yaml").is_err());
     }
 }

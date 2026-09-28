@@ -306,17 +306,6 @@ pub fn run(cmd: NamespaceCmd) -> Result<()> {
 mod tests {
     use super::collect_in;
 
-    fn tmp(line: u32) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "delonix-namespace-ls-test-{}-{}",
-            std::process::id(),
-            line
-        ));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
-    }
-
     /// The drift this command was built with, and then had to close.
     ///
     /// A tenant whose volume sub-tree exists but holds no RECORD yet was
@@ -329,10 +318,11 @@ mod tests {
     /// this test says so out loud so nobody «simplifies» the seeding back.
     #[test]
     fn a_namespace_with_no_records_yet_is_still_listed() {
-        let root = tmp(line!());
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         std::fs::create_dir_all(root.join("volumes/.ns/inquilino-b")).unwrap();
 
-        let store = delonix_volume::VolumeStore::open(&root).unwrap();
+        let store = delonix_volume::VolumeStore::open(root).unwrap();
         assert!(
             store.list_all().unwrap_or_default().is_empty(),
             "precondition: no volume RECORD exists yet"
@@ -342,21 +332,20 @@ mod tests {
             "the owning module sees the sub-tree even with no record in it"
         );
 
-        let listed = collect_in(&root);
+        let listed = collect_in(root);
         assert!(
             listed.contains_key("inquilino-b"),
             "a namespace TAB offers has to be in the listing; got {:?}",
             listed.keys().collect::<Vec<_>>()
         );
-        let _ = std::fs::remove_dir_all(&root);
     }
 
     /// `default` is always there: a node with nothing running printing an empty
     /// table reads as «this engine has no namespaces», not «nothing is running».
     #[test]
     fn default_is_always_listed() {
-        let root = tmp(line!());
-        assert!(collect_in(&root).contains_key("default"));
-        let _ = std::fs::remove_dir_all(&root);
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        assert!(collect_in(root).contains_key("default"));
     }
 }
