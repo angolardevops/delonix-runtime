@@ -4498,7 +4498,7 @@ mod tests {
     fn um_kind_vm_precisa_de_exactamente_um_de_disk_ou_build() {
         let dir = std::path::Path::new(".");
         let spec = |y: &str| -> super::VmSpec { serde_yaml::from_str(y).unwrap() };
-        let (_tmp, store) = store_de_teste("exclusividade");
+        let (_tmp, store) = store_de_teste();
 
         let e = super::resolve_vm_disk(&store, "v", &spec("disk: img\nbuild: {tag: x}"), dir)
             .unwrap_err();
@@ -4518,15 +4518,11 @@ mod tests {
     }
 
     /// Um store vazio numa pasta temporária, para a resolução se poder provar
-    /// sem depender das imagens que este host por acaso tenha.
-    fn store_de_teste(tag: &str) -> (std::path::PathBuf, super::super::vmimage::VmImageStore) {
-        let dir = std::env::temp_dir().join(format!(
-            "dlx-vmresolve-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&dir);
-        let store = super::super::vmimage::VmImageStore::open(&dir).unwrap();
+    /// sem depender das imagens que este host por acaso tenha. The folder is
+    /// removed when the returned guard drops, also when an assert fails.
+    fn store_de_teste() -> (tempfile::TempDir, super::super::vmimage::VmImageStore) {
+        let dir = tempfile::tempdir().unwrap();
+        let store = super::super::vmimage::VmImageStore::open(dir.path()).unwrap();
         (dir, store)
     }
 
@@ -4556,7 +4552,7 @@ mod tests {
     /// um seed de cloud-init que a CLI recusa em voz alta.
     #[test]
     fn o_manifesto_resolve_um_nome_de_imagem_local_como_a_cli() {
-        let (_tmp, store) = store_de_teste("nome-local");
+        let (_tmp, store) = store_de_teste();
         let mut img = imagem_de_teste("opnsense:26.1");
         img.cloud_init = Some(false);
         img.default_vcpus = Some(2);
@@ -4591,7 +4587,7 @@ mod tests {
     /// deita fora o disco overlay.
     #[test]
     fn o_caminho_do_qcow2_de_uma_imagem_do_store_resolve_como_o_nome() {
-        let (_tmp, store) = store_de_teste("caminho-do-store");
+        let (tmp, store) = store_de_teste();
         let mut img = imagem_de_teste("opnsense:26.1");
         img.cloud_init = Some(false);
         img.default_vcpus = Some(2);
@@ -4624,7 +4620,7 @@ mod tests {
 
         // Um qcow2 que NÃO é do store continua a resolver-se a si próprio, sem
         // metadados — é o que se sabe dele, e é honesto dizê-lo.
-        let fora = std::path::Path::new(&_tmp).join("alheio.qcow2");
+        let fora = tmp.path().join("alheio.qcow2");
         std::fs::write(&fora, b"").unwrap();
         let (disk, meta) = super::resolve_image_ref(&store, &fora.to_string_lossy());
         assert_eq!(disk, fora.to_string_lossy());
@@ -4660,7 +4656,7 @@ mod tests {
     /// pelas MESMAS duas funções.
     #[test]
     fn o_plano_compara_o_mesmo_que_o_apply_grava() {
-        let (_tmp, store) = store_de_teste("sem-deriva");
+        let (_tmp, store) = store_de_teste();
         let mut img = imagem_de_teste("golden:1");
         img.default_vcpus = Some(4);
         img.default_memory = Some("8G".into());
@@ -4688,7 +4684,7 @@ mod tests {
     /// prova-se pelo caminho que a recusa NOMEIA quando o VMfile falta.
     #[test]
     fn o_contexto_do_build_e_relativo_ao_manifesto_e_nao_ao_cwd() {
-        let (_tmp, store) = store_de_teste("contexto");
+        let (_tmp, store) = store_de_teste();
         let spec: super::VmSpec = serde_yaml::from_str("build: {context: sub}").unwrap();
         let e = super::resolve_vm_disk(&store, "v", &spec, std::path::Path::new("/tmp/proj"))
             .unwrap_err()

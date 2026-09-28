@@ -868,8 +868,10 @@ mod tests {
     fn write_private_temp_nao_escreve_num_caminho_sequestrado() {
         use std::os::unix::fs::PermissionsExt;
 
-        let root = tmp_dir("private-temp");
-        fs::create_dir_all(&root).unwrap();
+        // Removed when the test ends, also when an assert fails; this test
+        // used to be the one here that never removed its folder.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
         // O "ficheiro do sistema" que o atacante quer que nós sobrescrevamos.
         let victim = root.join("ficheiro-importante");
         fs::write(&victim, b"conteudo-original").unwrap();

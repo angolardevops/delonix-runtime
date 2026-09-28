@@ -212,24 +212,21 @@ pub fn detect(dir: &Path) -> Option<Detected> {
 mod tests {
     use super::*;
 
-    /// Creates a temporary directory with the given files (name→content).
-    fn scratch(name: &str, files: &[(&str, &str)]) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("dlx-detect-{name}"));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+    /// Creates a temporary directory with the given files (name→content). It is
+    /// removed when the returned guard drops, and its name is unique, so two
+    /// runs in parallel do not share it.
+    fn scratch(files: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
         for (f, c) in files {
-            std::fs::write(dir.join(f), c).unwrap();
+            std::fs::write(dir.path().join(f), c).unwrap();
         }
         dir
     }
 
     #[test]
     fn detects_node_express_and_spa() {
-        let d = scratch(
-            "node-exp",
-            &[("package.json", r#"{"dependencies":{"express":"4"}}"#)],
-        );
-        let got = detect(&d).unwrap();
+        let d = scratch(&[("package.json", r#"{"dependencies":{"express":"4"}}"#)]);
+        let got = detect(d.path()).unwrap();
         assert_eq!(
             (
                 got.stack,
@@ -240,14 +237,11 @@ mod tests {
             ("node", Some("express"), "node-express", 3000)
         );
 
-        let s = scratch(
-            "node-spa",
-            &[(
-                "package.json",
-                r#"{"dependencies":{"react":"18","vite":"5"}}"#,
-            )],
-        );
-        let got = detect(&s).unwrap();
+        let s = scratch(&[(
+            "package.json",
+            r#"{"dependencies":{"react":"18","vite":"5"}}"#,
+        )]);
+        let got = detect(s.path()).unwrap();
         assert_eq!(
             (got.stack, got.framework, got.proxy_template),
             ("node", Some("spa"), "spa")
@@ -262,8 +256,8 @@ mod tests {
             ("Flask==3.0", "flask", "py-flask", 5000),
             ("requests==2", "fastapi", "py-fastapi", 8000), // no framework → default
         ] {
-            let d = scratch(&format!("py-{fw}"), &[("requirements.txt", deps)]);
-            let got = detect(&d).unwrap();
+            let d = scratch(&[("requirements.txt", deps)]);
+            let got = detect(d.path()).unwrap();
             assert_eq!(
                 (
                     got.stack,
@@ -279,31 +273,31 @@ mod tests {
     #[test]
     fn detects_compiled_and_jvm_and_static() {
         assert_eq!(
-            detect(&scratch("go", &[("go.mod", "module x")]))
+            detect(scratch(&[("go.mod", "module x")]).path())
                 .unwrap()
                 .proxy_template,
             "go"
         );
         assert_eq!(
-            detect(&scratch("rs", &[("Cargo.toml", "[package]")]))
+            detect(scratch(&[("Cargo.toml", "[package]")]).path())
                 .unwrap()
                 .proxy_template,
             "rust"
         );
         assert_eq!(
-            detect(&scratch("java", &[("pom.xml", "<project/>")]))
+            detect(scratch(&[("pom.xml", "<project/>")]).path())
                 .unwrap()
                 .proxy_template,
             "java-spring"
         );
         assert_eq!(
-            detect(&scratch("ruby", &[("Gemfile", "gem 'rails'")]))
+            detect(scratch(&[("Gemfile", "gem 'rails'")]).path())
                 .unwrap()
                 .framework,
             Some("rails")
         );
         assert_eq!(
-            detect(&scratch("static", &[("index.html", "<h1>oi</h1>")]))
+            detect(scratch(&[("index.html", "<h1>oi</h1>")]).path())
                 .unwrap()
                 .stack,
             "static"
@@ -313,9 +307,9 @@ mod tests {
     #[test]
     fn precedence_compiled_over_static_and_none_when_empty() {
         // go.mod + index.html → Go wins (language manifest has priority).
-        let d = scratch("prec", &[("go.mod", "module x"), ("index.html", "<h1/>")]);
-        assert_eq!(detect(&d).unwrap().stack, "go");
+        let d = scratch(&[("go.mod", "module x"), ("index.html", "<h1/>")]);
+        assert_eq!(detect(d.path()).unwrap().stack, "go");
         // empty folder → None.
-        assert!(detect(&scratch("empty", &[])).is_none());
+        assert!(detect(scratch(&[]).path()).is_none());
     }
 }

@@ -5758,15 +5758,8 @@ mod tests {
 
     #[test]
     fn a_tampered_cached_base_is_discarded_and_an_unsealed_one_is_trusted() {
-        let dir = std::env::temp_dir().join(format!(
-            "dlx-low-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_nanos()
-        ));
-        std::fs::create_dir_all(&dir).unwrap();
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
         let f = dir.join("base.img");
         std::fs::write(&f, b"original").unwrap();
         assert!(cache_intact(&f), "no seal: trusted as before");
@@ -7847,9 +7840,13 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
         // it permanently unreadable. The check reads the OVERLAY, not the
         // registry, because a VM made outside this engine (or a record edited
         // by hand) holds the image open just the same.
-        let Ok(dir) = tempdir_for_test("vmsbacked") else {
+        // Removed when the guard drops, which also covers the early return
+        // below when `qemu-img` is missing: the hosted runner has none, and the
+        // old pid-named folder was left there on every run.
+        let Ok(tmp) = tempfile::tempdir() else {
             return; // no writable temp dir: nothing to assert about
         };
+        let dir = tmp.path();
         let base = dir.join("base.qcow2");
         let vms = dir.join("vms");
         std::fs::create_dir_all(&vms).unwrap();
@@ -7882,7 +7879,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             overlay.as_os_str(),
         ]));
 
-        assert_eq!(vms_backed_by(&dir, &base), vec!["uservm".to_string()]);
+        assert_eq!(vms_backed_by(dir, &base), vec!["uservm".to_string()]);
 
         // An unrelated image is NOT reported as used — a guard that says
         // everything is in use is the same as no guard, because the first
@@ -7895,14 +7892,14 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             other.as_os_str(),
             OsStr::new("1M"),
         ]));
-        assert!(vms_backed_by(&dir, &other).is_empty());
+        assert!(vms_backed_by(dir, &other).is_empty());
 
         // A file that is not a qcow2 at all is read as `raw` with no backing
         // file — measured — so it is correctly NOT a user. This assertion is
         // here because the first version of the test assumed the opposite and
         // failed, which is what sent me to measure it.
         std::fs::write(vms.join("plain.qcow2"), b"not a qcow2").unwrap();
-        assert!(vms_backed_by(&dir, &other).is_empty());
+        assert!(vms_backed_by(dir, &other).is_empty());
 
         // An overlay that cannot be OPENED counts as a user: not knowing what
         // it points at is exactly when refusing to delete the base is right.
@@ -7914,7 +7911,7 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
             // Root reads regardless of the mode, so the case is unobservable there.
             if std::fs::read(&locked).is_err() {
-                let users = vms_backed_by(&dir, &other);
+                let users = vms_backed_by(dir, &other);
                 assert!(
                     users.iter().any(|u| u.contains("locked")),
                     "an unopenable overlay must be reported, got {users:?}"
@@ -7922,13 +7919,5 @@ Date: Fri, 12 Jun 2026 12:40:56 UTC
             }
             std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o644)).unwrap();
         }
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    /// A writable scratch directory for a test, or `Err` if there is none.
-    fn tempdir_for_test(tag: &str) -> std::io::Result<std::path::PathBuf> {
-        let d = std::env::temp_dir().join(format!("dlx-test-{tag}-{}", std::process::id()));
-        std::fs::create_dir_all(&d)?;
-        Ok(d)
     }
 }

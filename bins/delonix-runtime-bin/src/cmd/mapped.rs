@@ -705,14 +705,11 @@ mod migrate_tests {
     use super::*;
     use std::io::Write;
 
-    /// O idioma dos testes vizinhos (`backup.rs`/`cdi.rs`): `temp_dir` + pid,
-    /// porque este crate não tem `dev-dependencies` e a regra do repo é não
-    /// acrescentar dependências — nem para testes.
-    fn scratch(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("delonix-mig-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+    /// A unique temp dir, removed when the guard drops — also when an assert
+    /// fails. The `temp_dir` + pid idiom this replaced was never removed, and
+    /// left four directories behind on every run (`scripts/tmp_roots_gate.py`).
+    fn scratch() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
     }
 
     fn write(dir: &std::path::Path, rel: &str, body: &[u8], mode: u32) -> std::path::PathBuf {
@@ -730,31 +727,30 @@ mod migrate_tests {
     /// two files can differ while looking alike to a careless comparison.
     #[test]
     fn same_entry_so_diz_igual_quando_tudo_bate() {
-        const NAME: &str = "eq";
-        let t = scratch(NAME);
-        let a = write(t.as_path(), "a/f", b"conteudo", 0o644);
-        let b = write(t.as_path(), "b/f", b"conteudo", 0o644);
+        let t = scratch();
+        let a = write(t.path(), "a/f", b"conteudo", 0o644);
+        let b = write(t.path(), "b/f", b"conteudo", 0o644);
         assert!(
             same_entry(&a, &b),
             "mesmos bytes, modo e dono deviam ser iguais"
         );
 
         // Conteúdo diferente do MESMO tamanho — um comparador por len passaria.
-        let c = write(t.as_path(), "c/f", b"conteudX", 0o644);
+        let c = write(t.path(), "c/f", b"conteudX", 0o644);
         assert!(
             !same_entry(&a, &c),
             "bytes diferentes do mesmo tamanho não são iguais"
         );
 
         // Só o modo difere: o container fez chmod e essa mudança é dele.
-        let d = write(t.as_path(), "d/f", b"conteudo", 0o755);
+        let d = write(t.path(), "d/f", b"conteudo", 0o755);
         assert!(
             !same_entry(&a, &d),
             "um chmod do container não pode ser apagado"
         );
 
         // Tamanhos diferentes.
-        let e = write(t.as_path(), "e/f", b"conteudo-maior", 0o644);
+        let e = write(t.path(), "e/f", b"conteudo-maior", 0o644);
         assert!(!same_entry(&a, &e));
     }
 
@@ -763,16 +759,15 @@ mod migrate_tests {
     /// onde o container pôs um link, e vice-versa.
     #[test]
     fn same_entry_distingue_symlink_de_ficheiro() {
-        const NAME: &str = "link";
-        let t = scratch(NAME);
-        let f = write(t.as_path(), "a/f", b"alvo", 0o644);
-        let l = t.as_path().join("b/f");
+        let t = scratch();
+        let f = write(t.path(), "a/f", b"alvo", 0o644);
+        let l = t.path().join("b/f");
         std::fs::create_dir_all(l.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink("alvo", &l).unwrap();
         assert!(!same_entry(&f, &l), "symlink e ficheiro não são o mesmo");
 
         // Dois symlinks para alvos diferentes também não.
-        let l2 = t.as_path().join("c/f");
+        let l2 = t.path().join("c/f");
         std::fs::create_dir_all(l2.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink("outro", &l2).unwrap();
         assert!(
@@ -781,7 +776,7 @@ mod migrate_tests {
         );
 
         // O mesmo alvo, sim.
-        let l3 = t.as_path().join("d/f");
+        let l3 = t.path().join("d/f");
         std::fs::create_dir_all(l3.parent().unwrap()).unwrap();
         std::os::unix::fs::symlink("alvo", &l3).unwrap();
         assert!(same_entry(&l, &l3));
@@ -792,16 +787,15 @@ mod migrate_tests {
     /// topo da lower vira um whiteout e a árvore fica destruída para sempre.
     #[test]
     fn um_rootfs_truncado_nao_migra() {
-        const NAME: &str = "trunc";
-        let t = scratch(NAME);
-        let low = t.join("low");
+        let t = scratch();
+        let low = t.path().join("low");
         for d in ["usr", "etc", "bin"] {
             std::fs::create_dir_all(low.join(d)).unwrap();
         }
         let lowers = vec![low.clone()];
 
         // Vazio: o caso medido em produção.
-        let vazio = t.join("vazio");
+        let vazio = t.path().join("vazio");
         std::fs::create_dir_all(&vazio).unwrap();
         assert!(
             !flat_looks_complete(&lowers, &vazio),
@@ -809,7 +803,7 @@ mod migrate_tests {
         );
 
         // Truncado: tem parte, falta-lhe um directório de sistema.
-        let parcial = t.join("parcial");
+        let parcial = t.path().join("parcial");
         std::fs::create_dir_all(parcial.join("usr")).unwrap();
         std::fs::create_dir_all(parcial.join("etc")).unwrap();
         assert!(
@@ -819,7 +813,7 @@ mod migrate_tests {
 
         // Completo: migra, e um ficheiro apagado LÁ DENTRO continua a poder
         // levar whiteout — a guarda é só ao nível de topo.
-        let cheio = t.join("cheio");
+        let cheio = t.path().join("cheio");
         for d in ["usr", "etc", "bin"] {
             std::fs::create_dir_all(cheio.join(d)).unwrap();
         }
@@ -835,10 +829,9 @@ mod migrate_tests {
     /// ser NÃO apagar, senão um erro de I/O transitório apaga dados.
     #[test]
     fn same_entry_falha_para_o_lado_seguro() {
-        const NAME: &str = "safe";
-        let t = scratch(NAME);
-        let a = write(t.as_path(), "a/f", b"x", 0o644);
-        assert!(!same_entry(&a, &t.as_path().join("nao/existe")));
-        assert!(!same_entry(&t.as_path().join("nao/existe"), &a));
+        let t = scratch();
+        let a = write(t.path(), "a/f", b"x", 0o644);
+        assert!(!same_entry(&a, &t.path().join("nao/existe")));
+        assert!(!same_entry(&t.path().join("nao/existe"), &a));
     }
 }

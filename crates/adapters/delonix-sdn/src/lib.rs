@@ -3377,14 +3377,6 @@ mod tests_alocacao_16 {
     use super::*;
     use std::collections::HashSet;
 
-    fn raiz(etiqueta: &str) -> std::path::PathBuf {
-        let d =
-            std::env::temp_dir().join(format!("dlx-store-alloc-{}-{etiqueta}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
-    }
-
     /// `n` nomes que caem TODOS no mesmo candidato inicial.
     fn nomes_que_colidem(n: usize) -> Vec<String> {
         let mut por_base: std::collections::HashMap<u8, Vec<String>> = Default::default();
@@ -3402,7 +3394,9 @@ mod tests_alocacao_16 {
     #[test]
     fn criacoes_concorrentes_com_nomes_a_colidir_nao_partilham_o_mesmo_16() {
         let nomes = nomes_que_colidem(8);
-        let store = std::sync::Arc::new(NetworkStore::open(raiz("corrida")).unwrap());
+        // Removed when the test ends, also when an assert fails.
+        let root = tempfile::tempdir().unwrap();
+        let store = std::sync::Arc::new(NetworkStore::open(root.path()).unwrap());
         let barreira = std::sync::Arc::new(std::sync::Barrier::new(nomes.len()));
 
         let hs: Vec<_> = nomes
@@ -3451,7 +3445,8 @@ mod tests_alocacao_16 {
         // which this test used to count as a free slot — 55 instead of 54.
         let capacidade = usize::from(last_user_base() - first_user_base()) + 1;
 
-        let store = NetworkStore::open(raiz("tecto")).unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let store = NetworkStore::open(root.path()).unwrap();
         for i in 0..capacidade {
             store
                 .create(&format!("r{i}"))
