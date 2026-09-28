@@ -5524,6 +5524,50 @@ checklist para quem mexer aqui do que como lista de correcções:
   **E foi a varredura POR PADRÃO que achou a terceira** — nenhum finder por-subsistema tinha o
   `cmd/tunnel.rs` na sua superfície. É a mesma lição que a auditoria #3 já tinha deixado escrita
   para o `bpf.rs`;
+- **um SIGKILL entregue não é um processo morto** — e é a **segunda ocorrência** da mesma
+  armadilha no ciclo de vida do container. Primeiro foi o `stop` (2026-09-17: um membro de pod
+  em `D` 1,5–6,8 s depois do SIGKILL deixou o `start` seguinte correr uma segunda incarnação ao
+  lado da que morria; corrigido com `process_gone` e uma espera limitada). O `remove` ficou de
+  fora, e a 2026-09-27, com load ~111, o `delete pod --force` reportou sucesso e o `container ps
+  -a` deixou de listar os membros enquanto os cinco workloads (`sleep 300`, PID 1 da sua pidns),
+  os supervisores `netns run` e os log shims (já zombies) continuavam no host depois de o chaos
+  apagar o sandbox. **A hipótese inicial, «o pid registado é o `delonix` intermédio», estava
+  errada, e foi medido antes de se mexer**: o pid registado é o workload (`NSpid <host> 1`) e o
+  sinal chega-lhe. O que demora é a SAÍDA: o PID 1 desmonta a sua mount namespace, e o overlay
+  despeja o upper para o disco à saída (`wchan = wb_wait_for_completion`, estado `D`). Na
+  960c7bc6, com um escritor no mesmo fs, o `delete pod rp --force` devolveu em 0,76 s e os
+  processos saíram 14,9 s depois (20 s noutra corrida, 0,4 s com o disco calmo). Entretanto o
+  `rm` já tinha purgado o directório que o overlay ainda despejava, e o `delete pod` desligado a
+  netns por baixo dele. **Regra: todo o caminho que sinaliza e a seguir faz algo que pressupõe o
+  processo morto (apagar o registo, o cgroup ou o rootfs, desligar a netns, arrancar a incarnação
+  seguinte) espera pelo `process_gone` — agora `wait_until_gone`, partilhado — e, se o prazo
+  esgotar, diz-o e mantém o registo** (`DX-8101 container.still_exiting`). Esperar pelo PID 1
+  cobre a pidns inteira: o kernel mata e reapa os outros processos dela antes de o PID 1 virar
+  zombie. **Por fechar, sem medição**: o caminho de falha do `spawn` sem userns (o `on_started`
+  que falha) faz `kill` e logo `remove_container_cgroup`, com a mesma forma. Os caminhos de VM
+  (`terminate_vmm`/`wait_vmm_left`) e o `HeldChild` (`kill` + `waitpid`) já esperam.
+  **Gate** (#562): `remove_tests` no `delonix-linux` — um processo que sai 1 s DEPOIS do sinal
+  e fica vermelho com a espera revertida (verificado). A primeira versão usava um `sleep`
+  simples, que morre de imediato com SIGKILL, e **passava com a espera removida**: para um teste
+  de «espera pela saída», o sujeito tem de demorar a sair. **Para reproduzir ao vivo, um `dd`
+  isolado não chega** (6 GB acabam em 3 s, antes das remoções, e o binário antigo passou);
+  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda;
+- **sair do `container ps -a` não é sair do host** — o `pod_cleanup` do chaos (#561) media os
+  registos, e a fuga acima passava-o: os registos saíam, os processos ficavam. Desde o #562 mede
+  os PROCESSOS de cada membro, lidos ANTES de o remover: o pid registado, o supervisor (o pai,
+  que só conta se o seu `/proc/<pid>/environ` tiver um `DELONIX_ROOT` debaixo do sandbox) e os
+  filhos dele (o log shim). Devolve rc 3 se algum sobreviver. E o fim da corrida tem um
+  veredicto `sandbox-teardown`: nada com `DELONIX_ROOT` debaixo do sandbox pode ficar no host.
+  **Três pormenores medidos**:
+  - o workload NÃO herda `DELONIX_ROOT` (o seu ambiente é o do container); quem o denuncia é o
+    supervisor, que só sai depois de o reapar;
+  - identificar pelo `environ`, nunca pelo nome: o host corre outra instância do motor, com os
+    mesmos nomes de processo;
+  - listar com o `comm`, não com o `cmdline`, que vem VAZIO num processo a meio da saída —
+    exactamente o caso a mostrar.
+  O `sandbox-teardown` apanhou logo uma segunda classe de fuga, fora deste fix (um `container
+  start <id>` vivo, em estado S, nascido do `netns down`/`netns up` do fim do
+  `pod_holder_respawn`); ficou em investigação à parte;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
