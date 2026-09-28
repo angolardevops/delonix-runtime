@@ -6421,6 +6421,22 @@ pub fn network_capability_report(configured: bool) -> delonix_compute::capabilit
         | C::NetPacketCapture => S::UnsupportedByProvider { reason: "a feature of the engine's own SDN on this host; a VM on a Proxmox node is not on it" },
         C::NetTunnelEgress => S::UnsupportedByProvider { reason: "a tunnel agent runs on this host, not on the node" },
         C::NetIpv6 => S::NotImplemented,
+        // Catalog 1.1.0 (ADR-0059 D2), from the spike against PVE 9.2.2 (docs/discovery/64).
+        C::NetGatewayFilter | C::NetGatewayAlias | C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder
+        | C::NetGatewayMultiWan | C::NetGatewayVpn => S::UnsupportedByProvider { reason: "the node's SDN has no perimeter filter of its own; the cluster firewall is administration (ADR-0049 D3)" },
+        C::NetNatSnat => S::NotImplemented,
+        C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt => S::UnsupportedByProvider { reason: "the SDN has source NAT on a subnet (`snat`) and nothing else" },
+        C::NetLbL4 | C::NetLbHealthCheck => S::UnsupportedByProvider { reason: "PVE has no load balancer" },
+        C::NetDnsRecords | C::NetDnsAuthoritative => S::RequiresExternalComponent { component: "a PowerDNS server — the only DNS plugin of PVE 9.2.2" },
+        C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp => S::NotImplemented,
+        C::NetSegmentRemote => S::Partial { detail: "`kind: NetworkZone` creates a simple zone and its VNets in one SDN transaction, live in the e2e section «providers remotos» (S6); the other five zone types are not created" },
+        C::NetApplyStaged | C::NetApplyRollback => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change" },
+        C::NetObserve => S::Partial { detail: "zones, VNets and the IPAM are read back; no comparison with the record yet (ADR-0059 F4)" },
+        C::NetVerifyDataplane => S::NotImplemented,
+        C::NetOwnershipMarker => S::Supported { evidence: "live:crates/providers/delonix-proxmox/tests/live.rs::network_zone_provider_owns_by_mark_and_never_pushes_someone_elses_pending_change" },
+        C::FirewallStateless => S::UnsupportedByProvider { reason: "the node's firewall tracks connections; there is no stateless rule" },
+        C::FirewallLogging | C::FirewallIcmpType => S::NotImplemented,
+        C::FirewallWorkloadPeer => S::UnsupportedByProvider { reason: "`fromWorkload` is refused: a workload address is on the engine's SDN, which the VM is not on" },
         C::ProviderAvailability | C::ResourceReadback | C::Events | C::AsyncOperations
         | C::VmCreate | C::VmStart | C::VmStop | C::VmDestroy | C::VmRestart | C::VmPause
         | C::VmResume | C::VmResumeSameIdentity | C::VmClone | C::VmTemplate | C::VmResizeCold
@@ -6536,7 +6552,7 @@ pub fn capability_report(configured: bool) -> delonix_compute::capability::Provi
         C::HostCapacity => S::NotImplemented,
         C::TransportVerified => S::Partial { detail: "TLS verified by default (webpki roots, or `ca_cert_pem`/`DELONIX_PROXMOX_CA_FILE` for an internal CA); `insecure_tls` is an explicit opt-out; 16 MiB response bound; `Debug` redacts the credential (ADR-0049 slice 1)" },
         C::CredentialInVault => S::Partial { detail: "`DELONIX_PROXMOX_SECRET` names a `kind: Secret`; the env-var form keeps the token in the environment" },
-        C::NetBridge | C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts | C::NetRoutesBetweenNetworks | C::NetNamespaceIsolation | C::NetTunnelEgress | C::NetRateLimit | C::NetPacketCapture | C::NetL7Proxy | C::NetIpv6 | C::VolumeLocal | C::VolumeBind | C::VolumeNfs | C::VolumeCifs | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot | C::VolumeProvisionNas | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph | C::FirewallPerWorkload | C::FirewallDefaultDeny | C::FirewallSourceFiltering | C::FirewallEgressPolicy => {
+        C::NetBridge | C::NetMacvlanIpvlan | C::NetVlan | C::NetOverlayVxlan | C::NetOverlayEncrypted | C::NetIpam | C::NetStaticIp | C::NetDns | C::NetPublishPorts | C::NetRoutesBetweenNetworks | C::NetNamespaceIsolation | C::NetTunnelEgress | C::NetRateLimit | C::NetPacketCapture | C::NetL7Proxy | C::NetIpv6 | C::VolumeLocal | C::VolumeBind | C::VolumeNfs | C::VolumeCifs | C::VolumeWebdav | C::VolumeQuota | C::VolumeSnapshot | C::VolumeProvisionNas | C::StorageLvmThin | C::StorageZfsBtrfs | C::StorageCeph | C::FirewallPerWorkload | C::FirewallDefaultDeny | C::FirewallSourceFiltering | C::FirewallEgressPolicy | C::NetGatewayFilter | C::NetGatewayAlias | C::NetGatewayUpdateInPlace | C::NetGatewayRuleOrder | C::NetGatewayMultiWan | C::NetGatewayVpn | C::NetNatSnat | C::NetNatDnat | C::NetNatOneToOne | C::NetNatNpt | C::NetLbL4 | C::NetLbHealthCheck | C::NetDnsRecords | C::NetDnsAuthoritative | C::NetIpamProvider | C::NetIpamReservation | C::NetIpamDhcp | C::NetSegmentRemote | C::NetApplyStaged | C::NetApplyRollback | C::NetObserve | C::NetVerifyDataplane | C::NetOwnershipMarker | C::FirewallStateless | C::FirewallLogging | C::FirewallIcmpType | C::FirewallWorkloadPeer => {
             S::UnsupportedByProvider { reason: "not a compute capability: answered by the network/storage provider" }
         }
     }

@@ -32,6 +32,15 @@ is the only name that is true in every environment.
    nothing — the API keeps reporting the config as applied while no bridge
    exists. The rewritten file carries the directive again.
 
+4. **`/etc/hosts` names the node by the build address** (found 2026-09-27, in
+   the two-node lab): the installer writes `10.0.2.15 <fqdn> <host>`, and
+   defect 1 only moves the NIC to DHCP. `pve-cluster` needs the hostname to
+   resolve to an address of the node, and the firewall derives its "local
+   network" from it — with the build address it detected only `127.0.0.0/8`,
+   and enabling the datacenter firewall cut the node off. A oneshot now points
+   the hostname line at the address `vmbr0` holds, on every boot, before
+   `pve-cluster` and the other products' daemons start.
+
 Driven over SSH with pexpect because that is what is available: the appliance
 has sshd running and a known root password, and its serial console has no getty
 to talk to (that is defect 2, and this is what fixes it).
@@ -148,6 +157,57 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 systemctl enable dlx-regen-hostkeys.service >/dev/null 2>&1 || true
+
+# The hostname line of /etc/hosts still carries the build address (defect 4).
+# Rewritten on every boot, not once: the address comes from DHCP and can change,
+# and the line has to be right before pve-cluster starts. Only the first line
+# naming this host is touched, and a missing address leaves the file as it is.
+cat > /usr/local/sbin/dlx-hosts-ip <<'EOF'
+#!/bin/sh
+# Point this node's hostname line in /etc/hosts at the address vmbr0 holds now.
+HOSTS=${DLX_HOSTS_FILE:-/etc/hosts}
+IFACE=${DLX_HOSTS_IFACE:-vmbr0}
+WAIT=${DLX_HOSTS_WAIT:-60}
+short=$(hostname -s 2>/dev/null || hostname)
+short=${short%%.*}
+addr=""
+i=0
+while [ "$i" -lt "$WAIT" ]; do
+    addr=$(ip -4 -o addr show dev "$IFACE" scope global 2>/dev/null | awk '{split($4, a, "/"); print a[1]; exit}')
+    [ -n "$addr" ] && break
+    i=$((i + 1))
+    sleep 1
+done
+if [ -z "$addr" ]; then
+    echo "dlx-hosts-ip: $IFACE has no IPv4 address; $HOSTS left as it is" >&2
+    exit 0
+fi
+awk -v addr="$addr" -v host="$short" '
+    !done && $1 !~ /^(#|127\.|::1|fe00:|ff0[0-9]:)/ {
+        for (i = 2; i <= NF; i++) {
+            n = $i
+            sub(/\..*/, "", n)
+            if (n == host) { $1 = addr; done = 1; break }
+        }
+    }
+    { print }
+' "$HOSTS" > "$HOSTS.dlx-new" && cat "$HOSTS.dlx-new" > "$HOSTS" && rm -f "$HOSTS.dlx-new"
+EOF
+chmod 0755 /usr/local/sbin/dlx-hosts-ip
+cat > /etc/systemd/system/dlx-hosts-ip.service <<'EOF'
+[Unit]
+Description=Point this node's hostname at its current address in /etc/hosts
+Wants=network-online.target
+After=network-online.target
+Before=pve-cluster.service proxmox-backup-proxy.service pmgproxy.service proxmox-datacenter-api.service
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/dlx-hosts-ip
+RemainAfterExit=yes
+[Install]
+WantedBy=multi-user.target
+EOF
+systemctl enable dlx-hosts-ip.service >/dev/null 2>&1 || true
 
 echo "DLX: done"
 """

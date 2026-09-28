@@ -30,12 +30,20 @@ fn ipam_dir() -> PathBuf {
     base_root().join("ipam")
 }
 
-/// Lease file of a `/16` (one per prefix, e.g.: `10.88.json`). The prefix
-/// only has digits and a dot, but we sanitize for safety (it never goes to a path
-/// with `/`/`..`).
-fn prefix_file(prefix: &str) -> PathBuf {
-    let safe: String = prefix
-        .chars()
+/// The file of a registry KEY (`10.88.json`, `192.168.1.0_24.json`). The key
+/// only has digits, dots and a `/`, but we sanitize for safety (it never goes to
+/// a path with `/`/`..`): the `/` of a CIDR becomes `_`, which [`key_of_stem`]
+/// reverses.
+///
+/// Takes a KEY, never a raw prefix — the leak this module had came from the
+/// two being mixed: `allocate` wrote the file of the raw `10.77.0.0/16` while
+/// `release` removed from the file of its key, `10.77`.
+fn key_file(key: &str) -> PathBuf {
+    ipam_dir().join(format!("{}.json", sanitize_key(key)))
+}
+
+fn sanitize_key(key: &str) -> String {
+    key.chars()
         .map(|c| {
             if c.is_ascii_digit() || c == '.' {
                 c
@@ -43,8 +51,15 @@ fn prefix_file(prefix: &str) -> PathBuf {
                 '_'
             }
         })
-        .collect();
-    ipam_dir().join(format!("{safe}.json"))
+        .collect()
+}
+
+/// The registry key a file stem stands for. `None` for what is not a registry
+/// (the `lock`, the reaper's side file). A stem written under an old key — the
+/// raw `10.77.0.0_16` of the leak — maps to its CANONICAL key, which is how the
+/// migration finds it.
+fn key_of_stem(stem: &str) -> String {
+    registry_key(&stem.replace('_', "/"))
 }
 
 /// Exclusive lock (`flock`) of the IPAM registry — serializes read-modify-write of
@@ -84,7 +99,9 @@ impl IpamLock {
             unsafe { libc::close(fd) };
             return None;
         }
-        Some(IpamLock(fd))
+        let lock = IpamLock(fd);
+        migrate_stray_files();
+        Some(lock)
     }
 
     /// The error every caller reports when the lock cannot be taken. Naming the
@@ -116,9 +133,12 @@ impl Drop for IpamLock {
 /// Reads the `id → ip` map of a prefix. Returns `None` if the file does not exist
 /// (never creates it — important so `lookup` doesn't seed state when recomputing a
 /// cleanup IP, and for the pure tests that only derive).
-fn load(prefix: &str) -> Option<BTreeMap<String, String>> {
-    let bytes = std::fs::read(prefix_file(prefix)).ok()?;
-    serde_json::from_slice(&bytes).ok()
+fn load(key: &str) -> Option<BTreeMap<String, String>> {
+    load_path(&key_file(key))
+}
+
+fn load_path(path: &std::path::Path) -> Option<BTreeMap<String, String>> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
 /// Persists the `id → ip` map of a prefix (pretty, like the `NetDef`s).
@@ -135,7 +155,7 @@ fn load(prefix: &str) -> Option<BTreeMap<String, String>> {
 /// whole module exists to eliminate (~50 % at ~300 containers). Losing it to a
 /// crash is not a degraded metric — it is two containers on one IP, with the
 /// firewall and DNAT rules indexed on the wrong one.
-fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
+fn store(key: &str, map: &BTreeMap<String, String>) -> Result<()> {
     std::fs::create_dir_all(ipam_dir()).map_err(|e| Error::Command {
         context: "ipam dir",
         message: e.to_string(),
@@ -144,7 +164,7 @@ fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
         context: "ipam serialize",
         message: e.to_string(),
     })?;
-    delonix_state::write_atomic(&prefix_file(prefix), &json).map_err(|e| Error::Command {
+    delonix_state::write_atomic(&key_file(key), &json).map_err(|e| Error::Command {
         context: "ipam write",
         message: e.to_string(),
     })
@@ -156,13 +176,21 @@ fn store(prefix: &str, map: &BTreeMap<String, String>) -> Result<()> {
 /// rest of the `/16`. Clear error if the `/16` is full (~65k hosts). Under `flock`.
 pub fn allocate(prefix: &str, id: &str) -> Result<String> {
     let _lock = IpamLock::acquire().ok_or_else(IpamLock::unavailable)?;
+    // The KEY, not the prefix as the caller spelled it: `10.77.0.0/16` and
+    // `10.77` are one network and must be one registry. It is also what gives a
+    // CIDR `/16` its hash-derived address back — `derive_ip_in` of the raw CIDR
+    // produced `10.77.0.0/16.A.B`, never valid, so every address came from the
+    // linear probe (`.0.2`, `.0.3`, …) and no id kept a stable preferred one.
+    let prefix = &registry_key(prefix);
     let mut map = load(prefix).unwrap_or_default();
     if let Some(ip) = map.get(id) {
         return Ok(ip.clone());
     }
     let used: std::collections::HashSet<&str> = map.values().map(String::as_str).collect();
     let preferred = crate::derive_ip_in(prefix, id);
-    let ip = if crate::valid_ip_in_subnet(prefix, &preferred) && !used.contains(preferred.as_str())
+    let ip = if crate::valid_ip_in_subnet(prefix, &preferred)
+        && !crate::in_vm_dhcp_pool(prefix, &preferred)
+        && !used.contains(preferred.as_str())
     {
         preferred
     } else {
@@ -178,7 +206,8 @@ pub fn allocate(prefix: &str, id: &str) -> Result<String> {
 
 /// Linear probe over the `/16`'s host space, starting at the preferred IP's host
 /// (locality — the IP stays close to the deterministic one), skipping reserved ones
-/// (`.0.0`/`.0.1`/`.255.255`) and those already in use. `None` if the `/16` is full.
+/// (`.0.0`/`.0.1`/`.255.255`), the VM DHCP pool ([`crate::in_vm_dhcp_pool`]) and
+/// those already in use. `None` if the `/16` is full.
 fn probe_free(
     prefix: &str,
     preferred: &str,
@@ -200,7 +229,10 @@ fn probe_free(
         // silêncio, gastando o ciclo inteiro sem nunca encontrar nada.
         let desloc = (inicio.wrapping_sub(net.base).wrapping_add(k)) % tamanho;
         let cand = crate::Cidr::fmt_u32(net.base + desloc);
-        if crate::valid_ip_in_subnet(prefix, &cand) && !used.contains(cand.as_str()) {
+        if crate::valid_ip_in_subnet(prefix, &cand)
+            && !crate::in_vm_dhcp_pool(prefix, &cand)
+            && !used.contains(cand.as_str())
+        {
             return Some(cand);
         }
     }
@@ -210,44 +242,99 @@ fn probe_free(
 /// Registers a PINNED `id → ip` lease (IP chosen by the user at attach),
 /// so that other containers' probing sees it as occupied and never reassigns it.
 /// Idempotent. Under `flock`.
-pub fn reserve(prefix: &str, id: &str, ip: &str) {
-    // Sem lock não se escreve: um read-modify-write destravado aqui apaga o
-    // lease de outro container tão bem como no `allocate`.
-    let Some(_lock) = IpamLock::acquire() else {
-        tracing::error!(
-            prefix = %prefix, container_id = %id,
-            "{}", IpamLock::unavailable()
-        );
-        return;
-    };
-    let mut map = load(prefix).unwrap_or_default();
-    if map.get(id).map(String::as_str) == Some(ip) {
-        return;
+///
+/// **Fail-closed**, in the three ways it used to fail open:
+///
+/// * without the lock it logged and RETURNED — and the attach went on to wire
+///   an address the registry never heard of, free to be handed to the next
+///   container;
+/// * an address already leased to ANOTHER id was only a warning, and was
+///   written anyway: two containers on one IP, with the anti-spoof and every
+///   rule indexed on the wrong one;
+/// * an address in the VM DHCP pool was accepted, and the DHCP server hands
+///   that same address to a VM whose MAC hashes onto it.
+///
+/// Each of those is now an error, and the attach does not happen.
+pub fn reserve(prefix: &str, id: &str, ip: &str) -> Result<()> {
+    let key = registry_key(prefix);
+    if crate::in_vm_dhcp_pool(&key, ip) {
+        return Err(Error::IpInUse(format!(
+            "IP {ip} is in the VM DHCP pool of {prefix} (.254.10–.254.249) — the \
+             network's DHCP server hands it to a VM; pick an address outside it"
+        )));
     }
-    // WARN if the pinned IP already belongs (by lease) to ANOTHER container: we don't
-    // reject it (the user chose it explicitly), but we don't silence it either —
-    // two containers would end up with the same IP on the wire.
-    if let Some(other) = map
+    reserve_in(&key, id, ip, "pick another address")
+}
+
+/// The lease of a VM's DHCP address — the pool's half of [`reserve`].
+///
+/// The DHCP server computes a VM's address from its MAC, outside this registry,
+/// and two MACs can hash onto one address (240 slots per network: by the
+/// birthday paradox, ~50 % at 18 VMs). Recording the address here is what turns
+/// that collision into a refusal at attach instead of two guests answering ARP
+/// for one IP — and what makes a VM's address show in `network ipam ls` beside
+/// the containers'.
+pub fn reserve_vm_dhcp(prefix: &str, id: &str, ip: &str) -> Result<()> {
+    let key = registry_key(prefix);
+    if !crate::in_vm_dhcp_pool(&key, ip) {
+        return Err(Error::IpNotInSubnet(format!(
+            "IP {ip} is not in the VM DHCP pool of {prefix}"
+        )));
+    }
+    // A VM does not choose its address: the DHCP derives it from the MAC, and
+    // the MAC from the VM's name. "Pick another address" is advice it cannot
+    // follow (measured: that is what the refusal said).
+    reserve_in(
+        &key,
+        id,
+        ip,
+        "a VM's DHCP address comes from its MAC, which comes from its NAME — create it \
+         under another name",
+    )
+}
+
+/// `remedy` is the one thing the refused caller can actually do about it.
+fn reserve_in(key: &str, id: &str, ip: &str, remedy: &str) -> Result<()> {
+    if !crate::valid_ip_in_subnet(key, ip) {
+        return Err(Error::IpNotInSubnet(format!(
+            "IP {ip} is not a usable address of {key}"
+        )));
+    }
+    let _lock = IpamLock::acquire().ok_or_else(IpamLock::unavailable)?;
+    let mut map = load(key).unwrap_or_default();
+    if map.get(id).map(String::as_str) == Some(ip) {
+        return Ok(());
+    }
+    if let Some((other, _)) = map
         .iter()
         .find(|(other_id, v)| v.as_str() == ip && other_id.as_str() != id)
     {
-        tracing::warn!(
-            ip = %ip,
-            container_id = %id,
-            held_by = %other.0,
-            "pinned IP {ip} is already leased to '{}'; '{id}' will collide on the network",
-            other.0
-        );
+        return Err(Error::IpInUse(format!(
+            "IP {ip} is already leased to '{other}' — two owners of one address \
+             would collide on the wire; {remedy}"
+        )));
     }
     map.insert(id.to_string(), ip.to_string());
-    let _ = store(prefix, &map);
+    store(key, &map)
 }
 
 /// Looks up `id`'s leased IP in `prefix`'s `/16`, creating nothing. `None` if
 /// there is no lease (the caller then falls back to the hash-derived IP — compat with a
 /// container pre-existing this registry, or not yet attached).
 pub fn lookup(prefix: &str, id: &str) -> Option<String> {
-    load(prefix)?.get(id).cloned()
+    let key = registry_key(prefix);
+    if let Some(ip) = load(&key).and_then(|m| m.get(id).cloned()) {
+        return Some(ip);
+    }
+    // Lockless, so it can run before any locked operation has migrated a stray
+    // file: read the file the prefix as SPELLED would have had, too. Without
+    // this, the first cleanup after an upgrade would fall back to the derived
+    // IP of a container whose real address lives in the old file.
+    let raw = ipam_dir().join(format!("{}.json", sanitize_key(prefix)));
+    if raw != key_file(&key) {
+        return load_path(&raw)?.get(id).cloned();
+    }
+    None
 }
 
 /// Frees `id`'s lease in `prefix`'s `/16` (on detach). Best-effort and
@@ -262,9 +349,97 @@ pub fn release(prefix: &str, id: &str) {
         );
         return;
     };
-    if let Some(mut map) = load(prefix) {
+    let key = registry_key(prefix);
+    if let Some(mut map) = load(&key) {
         if map.remove(id).is_some() {
-            let _ = store(prefix, &map);
+            let _ = store(&key, &map);
+        }
+    }
+}
+
+/// Frees every lease `id` holds, in every registry — for the caller that no
+/// longer knows on which network it was (a VM detached from its orphan
+/// cleanup, with no record to read the address from). Best-effort, under `flock`.
+pub fn release_everywhere(id: &str) {
+    let Some(_lock) = IpamLock::acquire() else {
+        tracing::error!(container_id = %id, "{}", IpamLock::unavailable());
+        return;
+    };
+    for key in registry_keys() {
+        if let Some(mut map) = load(&key) {
+            if map.remove(id).is_some() {
+                let _ = store(&key, &map);
+            }
+        }
+    }
+}
+
+/// The keys of every registry file present (skips `lock` and side files).
+fn registry_keys() -> Vec<String> {
+    let Ok(rd) = std::fs::read_dir(ipam_dir()) else {
+        return Vec::new();
+    };
+    let mut keys: Vec<String> = rd
+        .flatten()
+        .filter_map(|e| {
+            e.path()
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_suffix(".json"))
+                .map(key_of_stem)
+        })
+        .collect();
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
+/// Moves the leases of every file written under a NON-canonical key into the
+/// file of its canonical one, and removes the stray file.
+///
+/// The stray files are what the leak left behind: a network created with
+/// `--subnet 10.X.0.0/16` leased in `10.X.0.0_16.json` and was released in
+/// `10.X.json`, so every container ever run on it still holds its lease there.
+/// Their entries WIN over the canonical file's for the same id — they are what
+/// `allocate`/`lookup` actually handed out and read back, so a live container
+/// keeps its address on the next `start`. The dead ones among them are then
+/// ordinary orphans, for `network ipam prune` and its grace window.
+///
+/// Runs under the lock (from [`IpamLock::acquire`]), so it never races an
+/// allocation; a file that cannot be rewritten is left in place, never dropped.
+fn migrate_stray_files() {
+    let Ok(rd) = std::fs::read_dir(ipam_dir()) else {
+        return;
+    };
+    for e in rd.flatten() {
+        let path = e.path();
+        let Some(stem) = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .and_then(|n| n.strip_suffix(".json"))
+        else {
+            continue;
+        };
+        let key = key_of_stem(stem);
+        if key_file(&key) == path {
+            continue;
+        }
+        let Some(stray) = load_path(&path) else {
+            continue;
+        };
+        let mut canon = load(&key).unwrap_or_default();
+        for (id, ip) in stray {
+            if let Some((other, _)) = canon.iter().find(|(o, v)| **v == ip && **o != id) {
+                tracing::warn!(
+                    ip = %ip, container_id = %id, held_by = %other,
+                    "ipam migration: {ip} is leased to two ids — `network ipam prune` \
+                     reclaims whichever of them is dead"
+                );
+            }
+            canon.insert(id, ip);
+        }
+        if store(&key, &canon).is_ok() {
+            let _ = std::fs::remove_file(&path);
         }
     }
 }
@@ -338,9 +513,13 @@ pub fn all_leases() -> Vec<(String, String, String)> {
         let Some(prefix) = name.strip_suffix(".json") else {
             continue; // the `lock` file, and anything else that is not a registry
         };
-        if let Some(map) = load(prefix) {
+        // The canonical key, not the file stem: it is what `network ipam ls
+        // --network` filters on (`registry_key`), and a stem (`…_24`) never
+        // matched it.
+        if let Some(map) = load_path(&path) {
+            let key = key_of_stem(prefix);
             for (id, ip) in map {
-                out.push((prefix.to_string(), id, ip));
+                out.push((key.clone(), id, ip));
             }
         }
     }
@@ -408,19 +587,8 @@ pub fn reap_orphan_leases(live: &std::collections::HashSet<String>) -> usize {
     let candidates = load_reap_candidates();
     let mut freed = 0usize;
 
-    let Ok(rd) = std::fs::read_dir(ipam_dir()) else {
-        return 0;
-    };
-    let prefixes: Vec<String> = rd
-        .flatten()
-        .filter_map(|e| {
-            e.path()
-                .file_name()
-                .and_then(|n| n.to_str())
-                .and_then(|n| n.strip_suffix(".json"))
-                .map(str::to_string)
-        })
-        .collect();
+    // Canonical keys: the lock above already migrated any stray file.
+    let prefixes = registry_keys();
 
     let mut still_candidate: BTreeMap<String, u64> = BTreeMap::new();
     for prefix in prefixes {
@@ -474,16 +642,19 @@ mod tests {
     /// **Esgotar um prefixo por inteiro** — a prova anti-colisão que um /16
     /// nunca dá, porque ninguém enche 65 mil endereços num teste.
     ///
-    /// Num /28 há 16 endereços e 13 utilizáveis. A sonda tem de devolver os 13,
-    /// todos distintos e todos dentro, e depois dizer que não há mais — em vez
-    /// de repetir um (colisão silenciosa: dois containers com o mesmo IP, e a
-    /// rede a funcionar para um deles) ou de devolver um de fora.
+    /// A /28 has 16 addresses and 13 usable: 2 of them are the VM DHCP pool
+    /// (`crate::vm_dhcp_pool`), so the probe must return the other 11, all
+    /// distinct, all inside, none in the pool — and then say there is no more,
+    /// instead of repeating one (a silent collision: two containers on one IP)
+    /// or handing out one from outside.
     #[test]
     fn esgotar_um_28_da_13_enderecos_distintos_e_depois_nada() {
         let cidr = "192.168.1.0/28";
         let net = crate::Cidr::parse(cidr).unwrap();
         let mut usados: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for i in 0..13 {
+        let (_, pool) = crate::vm_dhcp_pool(cidr).unwrap();
+        let for_containers = 13 - pool as usize;
+        for i in 0..for_containers {
             let refs: std::collections::HashSet<&str> = usados.iter().map(String::as_str).collect();
             let preferido = crate::derive_ip_in(cidr, &format!("{i:08x}"));
             let ip = probe_free(cidr, &preferido, &refs)
@@ -493,9 +664,10 @@ mod tests {
             assert_ne!(a, net.base);
             assert_ne!(a, net.base + 1);
             assert_ne!(a, net.last());
+            assert!(!crate::in_vm_dhcp_pool(cidr, &ip), "{ip} is in the VM pool");
             assert!(usados.insert(ip.clone()), "REPETIU {ip}");
         }
-        assert_eq!(usados.len(), 13);
+        assert_eq!(usados.len(), 11);
         // E agora está mesmo cheio.
         let refs: std::collections::HashSet<&str> = usados.iter().map(String::as_str).collect();
         assert_eq!(
@@ -836,6 +1008,265 @@ mod tests {
                 load_reap_candidates().is_empty(),
                 "um id vivo nunca deve aparecer como candidato"
             );
+        });
+    }
+}
+
+/// Transactional IPAM (NaaS audit S2, doc 62 §6 P1): the leases that were left
+/// behind, and the two address authorities. Every test here was seen FAILING
+/// against the code before this fix.
+#[cfg(test)]
+mod tests_transactional {
+    use super::*;
+
+    /// BOTH roots isolated: `detach_container` reaches the control socket, and
+    /// without `DELONIX_NET_RUNTIME_DIR` that path would resolve to this host's
+    /// real infra. With no holder, `control_send` fails fast.
+    fn with_roots<T>(tag: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+        let mut env = crate::testenv::lock();
+        let dir = std::env::temp_dir().join(format!("dlx-ipam-s2-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("run")).unwrap();
+        env.set("DELONIX_ROOT", &dir);
+        env.set("DELONIX_NET_RUNTIME_DIR", dir.join("run"));
+        let out = f(&dir);
+        let _ = std::fs::remove_dir_all(&dir);
+        out
+    }
+
+    fn leases_of(id: &str) -> Vec<(String, String, String)> {
+        all_leases()
+            .into_iter()
+            .filter(|(_, i, _)| i == id)
+            .collect()
+    }
+
+    /// Finding 1: a network created with `--subnet 10.X.0.0/16` leased in
+    /// `10.X.0.0_16.json` (the raw prefix) and the detach released in
+    /// `10.X.json` (`key_for_ip` → `registry_key`). The lease never left.
+    /// Measured before: `[("10.77.0.0_16", "c1d20000feed0001", "10.77.0.2")]`
+    /// still there after the detach.
+    #[test]
+    fn a_cidr_16_lease_leaves_on_detach() {
+        with_roots("cidr16", |_| {
+            let def = crate::infra::network_create_with("s2cidr16", "10.77.0.0/16").unwrap();
+            let plan = crate::infra::resolve_net(&def.name).unwrap();
+            let id = "c1d20000feed0001";
+            let ip = allocate(&plan.prefix, id).unwrap();
+            assert_eq!(leases_of(id).len(), 1, "the attach must leave ONE lease");
+            crate::infra::detach_container(id, &ip);
+            assert!(leases_of(id).is_empty(), "left behind: {:?}", leases_of(id));
+        });
+    }
+
+    /// And a CIDR `/16` gets the id's PREFERRED address back: with the raw
+    /// prefix, `derive_ip_in` gave `10.77.0.0/16.A.B` (invalid) and every
+    /// address came from the linear probe (`.0.2`, `.0.3`, …).
+    #[test]
+    fn a_cidr_16_hands_out_the_id_derived_address() {
+        with_roots("derived", |_| {
+            let id = "0a0b0c0dfeed0002";
+            let ip = allocate("10.78.0.0/16", id).unwrap();
+            assert_eq!(ip, crate::derive_ip_in("10.78", id));
+            // The same address through both spellings of one prefix, one key.
+            assert_eq!(lookup("10.78", id).as_deref(), Some(ip.as_str()));
+            assert_eq!(lookup("10.78.0.0/16", id).as_deref(), Some(ip.as_str()));
+            let keys: Vec<String> = leases_of(id).into_iter().map(|(p, _, _)| p).collect();
+            assert_eq!(keys, vec![registry_key("10.78.0.0/16")]);
+        });
+    }
+
+    /// A non-/16 prefix never leaked — the canonical key must not break it, and
+    /// `ipam ls --network` filters by the key `all_leases` returns.
+    #[test]
+    fn a_slash24_lease_leaves_on_detach_and_lists_under_its_key() {
+        with_roots("cidr24", |_| {
+            let def = crate::infra::network_create_with("s2cidr24", "172.20.9.0/24").unwrap();
+            let id = "c1d20000feed0003";
+            let ip = allocate(&def.prefix, id).unwrap();
+            assert_eq!(
+                leases_of(id)
+                    .into_iter()
+                    .map(|(p, _, _)| p)
+                    .collect::<Vec<_>>(),
+                vec![registry_key(&def.prefix)],
+                "`ipam ls` showed the file stem (`…_24`), which never matched the filter"
+            );
+            crate::infra::detach_container(id, &ip);
+            assert!(leases_of(id).is_empty(), "{:?}", leases_of(id));
+        });
+    }
+
+    /// Finding 1, migration: the files the bug left behind move to the canonical
+    /// key without losing a lease — the live container keeps the SAME address.
+    #[test]
+    fn raw_prefix_files_migrate_to_the_canonical_key() {
+        with_roots("migrate", |root| {
+            let ipam = root.join("ipam");
+            std::fs::create_dir_all(&ipam).unwrap();
+            std::fs::write(
+                ipam.join("10.83.0.0_16.json"),
+                r#"{ "live00000000mig1": "10.83.0.7" }"#,
+            )
+            .unwrap();
+            std::fs::write(
+                ipam.join("10.83.json"),
+                r#"{ "old000000000mig2": "10.83.9.9" }"#,
+            )
+            .unwrap();
+            // Before any locked operation, `lookup` already sees it.
+            assert_eq!(
+                lookup("10.83.0.0/16", "live00000000mig1").as_deref(),
+                Some("10.83.0.7")
+            );
+            let ip = allocate("10.83.0.0/16", "live00000000mig1").unwrap();
+            assert_eq!(ip, "10.83.0.7", "the live container's address changed");
+            assert!(
+                !ipam.join("10.83.0.0_16.json").exists(),
+                "the raw file stayed"
+            );
+            assert_eq!(
+                lookup("10.83", "old000000000mig2").as_deref(),
+                Some("10.83.9.9")
+            );
+            release(&key_for_ip(&ip), "live00000000mig1");
+            assert!(leases_of("live00000000mig1").is_empty());
+        });
+    }
+
+    /// Finding 2: reserving an IP ANOTHER container already holds only warned
+    /// and wrote — two containers on one address.
+    #[test]
+    fn reserving_another_containers_ip_is_refused() {
+        with_roots("dup", |_| {
+            reserve("10.79", "owner000000000a1", "10.79.3.3").unwrap();
+            let e = reserve("10.79", "intruder0000000b", "10.79.3.3").unwrap_err();
+            assert!(matches!(e, Error::IpInUse(_)), "{e}");
+            assert_eq!(lookup("10.79", "intruder0000000b"), None);
+            assert_eq!(
+                lookup("10.79", "owner000000000a1").as_deref(),
+                Some("10.79.3.3")
+            );
+            // The owner itself may repeat it (idempotent).
+            reserve("10.79", "owner000000000a1", "10.79.3.3").unwrap();
+        });
+    }
+
+    /// Finding 2: without the lock `reserve` logged and RETURNED, and the attach
+    /// went on with an address the registry never heard of.
+    #[test]
+    fn reserve_refuses_when_it_cannot_lock_the_registry() {
+        use std::os::unix::fs::PermissionsExt;
+        let mut env = crate::testenv::lock();
+        let dir = std::env::temp_dir().join(format!("dlx-ipam-s2-ro-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o500)).unwrap();
+        env.set("DELONIX_ROOT", &dir);
+        let got = reserve("10.88", "fixed00000000c1", "10.88.4.4");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        // As root the mode bits do not apply, and then `Ok` is legitimate.
+        // SAFETY: `geteuid` takes no arguments and has no preconditions.
+        if unsafe { libc::geteuid() } != 0 {
+            let e = got.expect_err("reserve without the lock had to refuse");
+            assert!(format!("{e}").contains("same IP to two containers"), "{e}");
+        }
+    }
+
+    /// Finding 4: the VM DHCP hands out `<prefix>.254.10–.249` from the MAC,
+    /// outside the IPAM, and the IPAM walked the whole /16 — the pool included.
+    /// An id whose preferred address is EXACTLY a VM's got it.
+    #[test]
+    fn allocate_never_hands_out_a_vm_dhcp_pool_address() {
+        with_roots("pool", |_| {
+            let vm_ip = crate::vm_dhcp_lease_ip("10.81", "52:54:00:12:34:56").unwrap();
+            let host: u32 = vm_ip.rsplit('.').next().unwrap().parse().unwrap();
+            let id = format!("{:08x}c0ffee00", 0xfe00 | host);
+            assert_eq!(crate::derive_ip_in("10.81", &id), vm_ip);
+            let ip = allocate("10.81", &id).unwrap();
+            assert_ne!(ip, vm_ip, "the container got a VM's DHCP address");
+            assert!(!crate::in_vm_dhcp_pool("10.81", &ip), "{ip}");
+        });
+    }
+
+    /// And the probe skips the whole pool, not just the preferred address: a
+    /// /16 with everything taken but the pool and one address returns that one.
+    #[test]
+    fn the_probe_skips_the_dhcp_pool() {
+        let used: Vec<String> = (0u32..=0xffff)
+            .map(|h| format!("10.81.{}.{}", h >> 8, h & 0xff))
+            .filter(|ip| !crate::in_vm_dhcp_pool("10.81", ip) && ip != "10.81.254.5")
+            .collect();
+        let refs: std::collections::HashSet<&str> = used.iter().map(String::as_str).collect();
+        assert_eq!(
+            probe_free("10.81", "10.81.254.100", &refs).as_deref(),
+            Some("10.81.254.5")
+        );
+    }
+
+    /// A fixed IP asked for a container inside the VM pool is refused.
+    #[test]
+    fn reserving_inside_the_vm_dhcp_pool_is_refused() {
+        with_roots("fixedpool", |_| {
+            let e = reserve("10.82", "fixed00000000001", "10.82.254.50").unwrap_err();
+            assert!(matches!(e, Error::IpInUse(_)), "{e}");
+            assert_eq!(lookup("10.82", "fixed00000000001"), None);
+        });
+    }
+
+    /// Finding 4, the other half: two VMs whose MACs hash onto one DHCP
+    /// address. The second is refused instead of answering ARP for the first
+    /// one's IP, and a VM's address shows in the registry.
+    #[test]
+    fn two_vms_on_one_dhcp_address_are_refused() {
+        with_roots("vmvm", |_| {
+            reserve_vm_dhcp("10.86", "vm-a", "10.86.254.77").unwrap();
+            let e = reserve_vm_dhcp("10.86", "vm-b", "10.86.254.77").unwrap_err();
+            assert!(matches!(e, Error::IpInUse(_)), "{e}");
+            assert!(format!("{e}").contains("another name"), "{e}");
+            assert_eq!(
+                leases_of("vm-a"),
+                vec![("10.86".into(), "vm-a".into(), "10.86.254.77".into())]
+            );
+            // Outside the pool it is not a DHCP address.
+            assert!(reserve_vm_dhcp("10.86", "vm-c", "10.86.3.3").is_err());
+            release_everywhere("vm-a");
+            assert!(leases_of("vm-a").is_empty());
+        });
+    }
+
+    /// CONCURRENCY: `reserve` and `allocate` in parallel, with the ids asking
+    /// for the SAME address. Without the lock in `reserve`, or with a duplicate
+    /// only warned about, two ids ended up on one IP.
+    #[test]
+    fn concurrent_reserve_and_allocate_never_duplicate_an_address() {
+        with_roots("conc", |_| {
+            let target = "10.87.5.5";
+            let hs: Vec<_> = (0..16)
+                .map(|i| {
+                    std::thread::spawn(move || {
+                        if i % 2 == 0 {
+                            let _ = reserve("10.87", &format!("fix{i:013}"), target);
+                        } else {
+                            // This id's preferred address is the target (0x0505).
+                            let _ = allocate("10.87", &format!("00000505{i:08}"));
+                        }
+                    })
+                })
+                .collect();
+            for h in hs {
+                h.join().unwrap();
+            }
+            let map = load("10.87").unwrap();
+            let mut seen = std::collections::HashSet::new();
+            for (id, ip) in &map {
+                assert!(
+                    seen.insert(ip.clone()),
+                    "{ip} duplicated (id {id}): {map:?}"
+                );
+            }
+            assert!(map.values().any(|v| v == target), "nobody got the target");
         });
     }
 }

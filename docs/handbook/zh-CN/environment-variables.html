@@ -849,7 +849,7 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <tbody>
 <tr>
 <td><code>DELONIX_OPNSENSE_URL</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>这台设备的 API 端点。设置它就是启用这个 provider 的开关。</td>
 <td><code>https://&lt;host&gt;</code>。</td>
 <td>需要一份凭据。</td>
@@ -876,15 +876,29 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_OPNSENSE_KEY_FILE</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code></td>
+<td>存放 API key 的文件。</td>
+<td>路径；读取后去掉首尾空白。</td>
+<td>优先于 <code>DELONIX_OPNSENSE_KEY</code>。<code>providers.yaml</code> 的 <code>auth.keyFile</code> 会映射到它（ADR-0059 F1）。</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_SECRET_FILE</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code>（通过 <code>credential_value</code>）</td>
+<td>存放 API secret 的文件。</td>
+<td>一个 <code>chmod 600</code> 的路径；别人可读时会被拒绝。</td>
+<td><code>providers.yaml</code> 的 <code>auth.secretFile</code> 会映射到它（ADR-0059 F1）。</td>
+</tr>
+<tr>
 <td><code>DELONIX_OPNSENSE_INSECURE_TLS</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>跳过对这台设备的 TLS 证书校验。</td>
 <td><code>1</code>、<code>true</code> 或 <code>yes</code> → 跳过；默认要校验。</td>
 <td>一台开箱即用的 OPNsense 提供的是自签名证书（实机测量过，ADR-0051 阶段 0）。<strong>冒充这台设备应答的另一台机器会拿到凭据。</strong> 只能主动选择加入。</td>
 </tr>
 <tr>
 <td><code>DELONIX_OPNSENSE_CA_FILE</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>除了系统根证书之外，额外为这台设备信任的一份 CA 证书（PEM）。</td>
 <td>PEM 文件的路径；读不了是一个<strong>错误</strong>。</td>
 <td>用它代替 <code>DELONIX_OPNSENSE_INSECURE_TLS</code>。</td>
@@ -1088,6 +1102,20 @@ mkdir -p &quot;$DELONIX_ROOT&quot; &quot;$DELONIX_NET_RUNTIME_DIR&quot;
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>它的密码。</td>
 <td>必填。</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN_ID</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>用 API 令牌 id 代替账号（<code>user@realm!名字</code>）。</td>
+<td>可选；和 <code>DELONIX_PROXMOX_TEST_TOKEN</code> 一起给时优先于账号。</td>
+<td>可在节点上撤销；实验室运行无需任何人的密码即可创建。</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>它的密钥。</td>
+<td>可选，与 id 一起。</td>
 <td></td>
 </tr>
 <tr>

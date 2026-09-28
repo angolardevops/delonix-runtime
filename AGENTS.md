@@ -3394,6 +3394,47 @@ histórico de commits `4c3e223`/`456925f`). Achado #3 acima é uma escalada do
 achado "por-verificar" MEDIUM de DNS hijack da corrida original (o CLI directo,
 sem manifesto nenhum, já bastava).
 
+### Superfície de privilégio do holder (S4 da auditoria NaaS, 2026-09-27)
+
+Origem: `docs/discovery/62_NAAS_FASE0_AUDITORIA.md` §6 P1 e §7 S4. O `SO_PEERCRED`
+diz QUEM fala no socket de controlo; não dizia o que um valor vindo de um manifesto
+ou de uma flag podia ser. Corrigido:
+
+- **`validate_control_tokens`** corre no topo do `handle_control`, antes de qualquer
+  ramo (as queries incluídas): nenhum token que chega a um argv começa por `-` (o
+  `sanitize` deixa passar `-`, logo `attach -n …` chegava ao `ip netns add -n`; a
+  única excepção é o `-` literal do `vxlan` sem peers, e o token de namespace, que é
+  só hash); `ip`/`gateway` do `attach`/`attach-extra`/`vmtap`/`vxlan` são IPv4
+  estritos; `rate`/`burst` do `netrate` e os dois do `l4guard` são só dígitos (antes
+  `unwrap_or` silencioso); `wg-up`/`wg-peer`/`wg-peer-del` validam interface, porta,
+  chave, endereço, endpoint `ip:porta` e allowed-ips.
+- **O nome da interface do `wg-up` compõe o caminho do ficheiro temporário com a
+  chave PRIVADA** (`.{name}.key.tmp`). **Correcção de 2026-09-27 ao que o #552
+  afirmou**: um `../` no nome NÃO chegava a escrever a chave fora do directório `wg`
+  — o `ip link add` corre antes e o iproute2 recusa um nome com `/` («not a valid
+  ifname», medido ao vivo no iproute2 6.1). Era só a ORDEM das operações a proteger.
+  `wg::ensure_iface` e `wg::set_peer` validam agora no próprio sink
+  (`valid_iface_name`, `validate_peer`), o que deixa de depender dessa ordem e cobre
+  a API `pub`, não só a linha do holder. A resposta nunca ecoa a chave.
+- **`cni::resolve_plugin`** recusa `type` que não seja um nome simples: `Path::join`
+  substitui a base por um caminho absoluto e `..` sai dela, por isso um conflist com
+  `"type": "/tmp/x"` executava um binário arbitrário no holder. `run_one` e
+  `readiness` dizem «config inválida», não «plugin em falta».
+- **Compatibilidade**: o formato da linha NÃO muda — toda a linha que um cliente
+  deste build ou de um anterior envia legitimamente continua a passar (teste
+  `every_legitimate_line_still_passes`). Um holder ainda a correr de um binário antigo
+  mantém o comportamento antigo até ser recriado (`delonix net netns down` + `up`);
+  o cliente não precisa de nada.
+- **Validado ao vivo (2026-09-27, VM descartável Ubuntu 24.04, binário `79648b55`)**,
+  só caminhos legítimos: `attach` numa rede CIDR `172.20.4.0/22` (IP `172.20.7.x/22`,
+  gateway `172.20.4.1`); `attach` de 6 tokens com `--namespace`; `--net-connect`
+  (`eth1` em `10.231.0.2`); `--net-rate 10mbit`; overlay cifrado (`wgo000064` com
+  `10.99.0.1/24`, peer com endpoint `ip:porta` e allowed-ips `/32`, sem ficheiro
+  temporário da chave deixado para trás); `vm bridge --apply` como root (secção
+  própria). Nove arranques a frio iguais com o binário anterior e com este.
+  **Visto de caminho e NÃO do S4**: numa rede CIDR fora de 10.200–10.254 o tráfego
+  entre namespaces passa (P0-5, S1); na `10.231` é cortado (100% de perda).
+
 ## Ciclo de vida VM no libvirt (`vm stop/rm`) — managed save, órfãos, `--force`
 
 Bug report real (host kaeso-sys-01): `vm rm dev` vazava o stderr cru do `virsh`
@@ -3640,16 +3681,40 @@ de root** — é a excepção deliberada ao daemonless-rootless, atrás de `--ap
 (default = DRY-RUN que só imprime o plano). Módulo `cmd/vmbridge.rs`.
 
 - **Mecanismo** (`bridge_plan`, puro/testado): veth par no host → move a ponta SDN
-  para o netns do holder + enslave à bridge da rede → ponta host ganha
-  `<prefix>.255.254/16` → `ip_forward=1` → rota de retorno `<vm-subnet> via
-  <host-ip>` DENTRO do holder. Sem SNAT: o container vê o IP real da VM, e o
+  para o netns do holder + enslave à bridge da rede → ponta host ganha o último
+  endereço antes do broadcast, com o comprimento do prefixo da rede
+  (`10.210.255.254/16`; `172.20.7.254/22` numa rede `172.20.4.0/22` — até 2026-09-27
+  assumia-se um prefixo de dois octetos e saía `172.20.4.0/22.255.254`) →
+  `ip_forward=1` → rota de retorno `<vm-subnet> via <host-ip>` DENTRO do holder. Sem SNAT: o container vê o IP real da VM, e o
   firewall por-container continua a governar (um IP de VM não está em `@dlxall`,
   passa como gateway; regras `ingress` explícitas aplicam-se na mesma).
 - **Segurança**: abre VM↔container só na rede indicada; a subnet da VM é a NAT do
   libvirt (`192.168.122.0/24`), NÃO a LAN externa. `vm unbridge <rede>` desfaz.
+- **Entrada validada (S4, 2026-09-27)**: `--apply` recusa quem não é root ANTES de
+  qualquer comando (antes corria o plano de limpeza inteiro, falhando em EPERM); cada
+  `--vm-subnet` (e cada subnet detectada) tem de ser `a.b.c.d/len` estrito, nem `/0`
+  nem sobreposta à rede SDN, e segue canónica para o argv — `default` chegava ao
+  `ip route add` do holder como rota por omissão.
+- **O `unbridge` desfaz o que o `bridge` abriu (2026-09-27)**: o `bridge --apply` grava
+  as subnets canónicas em `<state>/ingress/vmbridge-<bridge>.subnets` ANTES de correr o
+  plano (uma ponte que falha a meio também se desfaz), e o `unbridge` apaga as regras
+  FORWARD e a rota de retorno dessas subnets, mais as de `--vm-subnet`, e remove o
+  ficheiro no fim. Sem registo (ponte anterior), usa o `--vm-subnet` ou, na falta dele,
+  a detecção `virbr*`. Antes, o `unbridge` só detectava: uma ponte feita com
+  `--vm-subnet` explícito, ou num host sem `virbr*`, perdia o veth e deixava as duas
+  regras ACCEPT e a rota no holder, com a abertura VM↔SDN viva depois do teardown.
+  O re-`bridge` com outras subnets limpa também as registadas. Puro e testado:
+  `teardown_subnets`, `read_applied_subnets`/`write_applied_subnets`.
 - **Robustez**: regras `iptables -I FORWARD` ACCEPT nos dois sentidos
-  (`<vm-subnet>↔<sdn>/16`) contra o REJECT default do libvirt; establish
+  (`<vm-subnet>↔<sdn>`) contra o REJECT default do libvirt; establish
   IDEMPOTENTE (limpa um veth órfão antes de criar, p.ex. após respawn do holder).
+- **Validado numa rede CIDR (2026-09-27, S4)**: `vm bridge s4cidr --vm-subnet
+  192.168.200.0/24 --apply` como root numa rede `172.20.4.0/22` põe `172.20.7.254/22`
+  na ponta do host; ping host→containers e container→host com 0% de perda. As
+  recusas medidas: `--apply` sem root, `default`, `0.0.0.0/0`, uma subnet sobreposta à
+  SDN, e uma sem comprimento. A lacuna que esta passagem mediu — o `unbridge` a
+  deixar as duas regras `iptables FORWARD … ACCEPT` e a rota de retorno de uma ponte
+  feita com `--vm-subnet` — está fechada pelo registo das subnets (bullet acima).
 - **VALIDADO E2E ao vivo** (kaeso-sys-01, 2026-07-21): de DENTRO de uma VM libvirt
   (`ubuntu@192.168.122.50`) → `ping`/`curl` a um container da `kaeso-net` por IP
   DIRECTO (`10.210.37.150:8069` → HTTP 200, ttl=63 = uma hop pelo forward do
@@ -5459,6 +5524,77 @@ checklist para quem mexer aqui do que como lista de correcções:
   **E foi a varredura POR PADRÃO que achou a terceira** — nenhum finder por-subsistema tinha o
   `cmd/tunnel.rs` na sua superfície. É a mesma lição que a auditoria #3 já tinha deixado escrita
   para o `bpf.rs`;
+- **um SIGKILL entregue não é um processo morto** — e é a **segunda ocorrência** da mesma
+  armadilha no ciclo de vida do container. Primeiro foi o `stop` (2026-09-17: um membro de pod
+  em `D` 1,5–6,8 s depois do SIGKILL deixou o `start` seguinte correr uma segunda incarnação ao
+  lado da que morria; corrigido com `process_gone` e uma espera limitada). O `remove` ficou de
+  fora, e a 2026-09-27, com load ~111, o `delete pod --force` reportou sucesso e o `container ps
+  -a` deixou de listar os membros enquanto os cinco workloads (`sleep 300`, PID 1 da sua pidns),
+  os supervisores `netns run` e os log shims (já zombies) continuavam no host depois de o chaos
+  apagar o sandbox. **A hipótese inicial, «o pid registado é o `delonix` intermédio», estava
+  errada, e foi medido antes de se mexer**: o pid registado é o workload (`NSpid <host> 1`) e o
+  sinal chega-lhe. O que demora é a SAÍDA: o PID 1 desmonta a sua mount namespace, e o overlay
+  despeja o upper para o disco à saída (`wchan = wb_wait_for_completion`, estado `D`). Na
+  960c7bc6, com um escritor no mesmo fs, o `delete pod rp --force` devolveu em 0,76 s e os
+  processos saíram 14,9 s depois (20 s noutra corrida, 0,4 s com o disco calmo). Entretanto o
+  `rm` já tinha purgado o directório que o overlay ainda despejava, e o `delete pod` desligado a
+  netns por baixo dele. **Regra: todo o caminho que sinaliza e a seguir faz algo que pressupõe o
+  processo morto (apagar o registo, o cgroup ou o rootfs, desligar a netns, arrancar a incarnação
+  seguinte) espera pelo `process_gone` — agora `wait_until_gone`, partilhado — e, se o prazo
+  esgotar, diz-o e mantém o registo** (`DX-8101 container.still_exiting`). Esperar pelo PID 1
+  cobre a pidns inteira: o kernel mata e reapa os outros processos dela antes de o PID 1 virar
+  zombie. **Terceira ocorrência, fechada a 2026-09-28**: os cinco `kill → return Err` do `spawn`
+  entre o `clone` e o registo (mapas de userns, `setup_cgroup`, hook `on_started`, nos dois
+  caminhos). O caso era mais largo do que a varredura dizia: o caminho SEM userns (só root, não
+  medido) removia o cgroup com o processo ainda lá dentro, mas o caminho COM userns — o normal
+  em rootless — nem o removia, e o registo nunca é escrito, por isso ninguém voltava a achar a
+  leaf. Medido: `run -d -p` com um `slirp4netns` que falha deixou um `dlx-<id>` VAZIO em 4
+  corridas de 4. Nenhum reapava o filho (zombie num chamador que vive). Agora passam pelo
+  `discard_child`: SIGKILL, `waitpid`, e só então `remove_container_cgroup` — a ordem que os
+  dois caminhos de falha do fim do `spawn` já seguiam. **Gates**: `a_discarded_child_is_reaped_
+  not_left_a_zombie` (vermelho sem o `waitpid`: o filho fica `Z`) e, ao vivo, o check do
+  `e2e.sh` «um arranque recusado depois do clone não deixa o cgroup do container para trás»,
+  com um `slirp4netns` falso no PATH e o id tirado do evento `create` (base: deixa
+  `dlx-<id>`; fix: 5/5 limpo com um escritor contínuo). Os caminhos de VM
+  (`terminate_vmm`/`wait_vmm_left`) e o `HeldChild` (`kill` + `waitpid`) já esperavam.
+  **Gate** (#562): `remove_tests` no `delonix-linux` — um processo que sai 1 s DEPOIS do sinal
+  e fica vermelho com a espera revertida (verificado). A primeira versão usava um `sleep`
+  simples, que morre de imediato com SIGKILL, e **passava com a espera removida**: para um teste
+  de «espera pela saída», o sujeito tem de demorar a sair. **Para reproduzir ao vivo, um `dd`
+  isolado não chega** (6 GB acabam em 3 s, antes das remoções, e o binário antigo passou);
+  é preciso um escritor CONTÍNUO no mesmo fs durante a corrida toda;
+- **sair do `container ps -a` não é sair do host** — o `pod_cleanup` do chaos (#561) media os
+  registos, e a fuga acima passava-o: os registos saíam, os processos ficavam. Desde o #562 mede
+  os PROCESSOS de cada membro, lidos ANTES de o remover: o pid registado, o supervisor (o pai,
+  que só conta se o seu `/proc/<pid>/environ` tiver um `DELONIX_ROOT` debaixo do sandbox) e os
+  filhos dele (o log shim). Devolve rc 3 se algum sobreviver. E o fim da corrida tem um
+  veredicto `sandbox-teardown`: nada com `DELONIX_ROOT` debaixo do sandbox pode ficar no host.
+  **Três pormenores medidos**:
+  - o workload NÃO herda `DELONIX_ROOT` (o seu ambiente é o do container); quem o denuncia é o
+    supervisor, que só sai depois de o reapar;
+  - identificar pelo `environ`, nunca pelo nome: o host corre outra instância do motor, com os
+    mesmos nomes de processo;
+  - listar com o `comm`, não com o `cmdline`, que vem VAZIO num processo a meio da saída —
+    exactamente o caso a mostrar.
+  O `sandbox-teardown` apanhou logo uma segunda classe de fuga, fora deste fix (um `container
+  start <id>` vivo, em estado S, nascido do `netns down`/`netns up` do fim do
+  `pod_holder_respawn`); ficou em investigação à parte;
+- **não aparecer numa varredura pela ordem errada não é estar certo** — a varredura dos
+  SIGKILL feita no #563 procurava «`kill` e logo a limpeza» e deu como aberto o único sítio do
+  `spawn` que tinha essa forma (o caminho sem userns, que só corre como root). Os outros quatro
+  não apareciam porque não limpavam NADA, e eram o caso pior: no caminho com userns, o normal em
+  rootless, o cgroup ficava para sempre (medido no #564, 4 corridas de 4). **Regra: numa
+  varredura de «X e logo Y», listar também os sítios que fazem X e NÃO fazem Y.** A limpeza em
+  falta não tem ordem para estar errada, por isso não aparece a quem procura a ordem;
+- **uma falha provocada não é a falha que se quer testar** — para exercitar o caminho de falha
+  do `spawn` DEPOIS do `clone`, a primeira tentativa foi publicar uma porta já ocupada. O `run`
+  devolveu rc=1, mas quem recusou foi a pré-verificação da CLI, ANTES do `spawn`: não nasceu
+  processo nem cgroup, e um gate construído assim passaria no binário com o defeito. O disparo
+  que passa pelas pré-verificações é a própria dependência a falhar, com um `slirp4netns` falso
+  no `PATH` que sai com 1 (o hook `on_started` corre depois de o cgroup existir). **Regra:
+  antes de confiar num gate de caminho de falha, confirmar que a falha chegou ao sítio que se
+  quer medir.** O gate do `e2e.sh` fá-lo pelo evento `create`: sem ele, o `run` falhou antes do
+  `clone` e o check FALHA em vez de passar por nada ter sobrado;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
@@ -7669,3 +7805,32 @@ backends estes métodos recusam por nome (DX-1501).
 - **O perímetro por `/cluster/firewall` NÃO foi feito**: o ADR-0049 D3 exclui essas escritas
   como administração do provider, e as regras de datacenter guardam os NÓS, não as VMs. Só
   entrou a leitura `GET /cluster/firewall/options`.
+
+## `workload.usage` no `delonix-mcp` — contadores, não taxas (2026-09-27)
+
+Uma tool de leitura nova no servidor MCP: uma amostra dos contadores CUMULATIVOS de cada
+container (leaf de cgroup) e de cada VM local (o processo do VMM, por `/proc`), com os tectos
+em vigor. O módulo é `delonix_linux::usage`; a tool só monta as linhas.
+
+- **O motor não guarda histórico, e a tool não finge que guarda.** É daemonless: nada está
+  acordado entre dois comandos para registar uma série. Devolve o que o kernel já conta
+  (`cpu.stat usage_usec`, `io.stat`, `utime+stime`) e o `process_started_at_unix` do dono dos
+  contadores. Quem amostra duas vezes tem uma taxa; quem vê essa hora mudar sabe que os
+  contadores recomeçaram e não subtrai através dela. Janela, quantis e retenção são de quem
+  guarda as amostras.
+- **Um número em falta vem em `unmeasured`, com a razão, nunca como zero.** Num leaf rootless
+  sem `io` delegado o `io.stat` não existe, e a razão diz isso. Um `io.stat` vazio é um zero
+  verdadeiro (nada lido ainda) e é devolvido como zero.
+- **Duas bases, e não são a mesma grandeza** (`basis`): `cgroup` para um container,
+  `vmm_process` para uma VM. A memória de uma VM é o resident set do VMM neste host, não o uso
+  do convidado; a linha diz isso em `limitations`. VMs libvirt e remotas não têm pid registado
+  e aparecem como `sampled: false` com o backend nomeado.
+- **A identidade do pid é verificada** (`is_live`: pid + `starttime`). Um pid reciclado não é
+  amostrado — sem isto a tool reportaria um processo alheio como o VMM.
+- **Rede só a pedido** (`include_network`): custa um `nsenter` por container.
+- **Validado ao vivo** (root isolado, os dois roots): um container com `--cpus 0.5` a queimar
+  CPU deu **0,498 cores** entre duas amostras com 3 s de intervalo, `cpu.max 50000/100000` e
+  `memory.max` de 64 MiB lidos do cgroup real; I/O em `unmeasured` porque este host não delega
+  `io`. **Não validado ao vivo**: uma VM Cloud Hypervisor real (o caminho do VMM está coberto
+  por testes com `/proc` falso e com o próprio processo de teste) e a rede de um container
+  numa rede custom.

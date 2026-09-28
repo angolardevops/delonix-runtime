@@ -3895,9 +3895,6 @@ msgstr "(confirma com: systemd-run --user --scope -p Delegate=yes -- delonix sys
 msgid "Only if the above still says `cpu` is missing (needs root, survives reboot):"
 msgstr "Só se o acima continuar a dizer que falta o `cpu` (precisa de root, sobrevive ao reboot):"
 
-msgid "Re-run with --delegate to write fix 2. (This run changed nothing.)"
-msgstr "Volta a correr com --delegate para escrever a correcção 2. (Esta execução não mudou nada.)"
-
 # ---- ferramentas de host em falta / rede no build (v0.44.1) ---------------
 
 msgid "`{bin}` is not installed. Install it with `sudo apt install {deb}` (Debian/Ubuntu) or `sudo dnf install {rpm}` (Fedora/Rocky)."
@@ -4528,6 +4525,9 @@ msgstr "EXPERIMENTAL (root): dá a uma VM libvirt alcançabilidade DIRECTA por I
 msgid "Tear down a `vm bridge` (dry-run without `--apply`)."
 msgstr "Desfaz um `vm bridge` (dry-run sem `--apply`)."
 
+msgid "Tear down a `vm bridge` (dry-run without `--apply`).\n\nRemoves the subnets `vm bridge --apply` recorded. A bridge made before that record existed falls back to the auto-detected `virbr*`."
+msgstr "Desfaz um `vm bridge` (dry-run sem `--apply`).\n\nRemove as subnets que o `vm bridge --apply` registou. Uma ponte feita antes de existir esse registo recorre às `virbr*` auto-detectadas."
+
 msgid "Take a named snapshot (libvirt: a running VM's snapshot is a system checkpoint — memory + disk; `restore` reverts to it). Not yet supported on the cloud-hypervisor backend."
 msgstr "Tira um snapshot com nome (libvirt: o snapshot de uma VM a correr é um checkpoint de sistema — memória + disco; o `restore` volta a ele). Ainda não suportado no backend cloud-hypervisor."
 
@@ -5129,6 +5129,9 @@ msgstr "URL absoluto de uma cloud image qcow2 a partir da qual arrancar esta VM"
 msgid "Actually run the privileged plan (requires root). Without it: dry-run"
 msgstr "Executa mesmo o plano privilegiado (precisa de root). Sem isto: dry-run"
 
+msgid "Actually run the privileged teardown (requires root). Without it: dry-run"
+msgstr "Executa mesmo o desmontar privilegiado (precisa de root). Sem isto: dry-run"
+
 msgid "A local VM image name (`vm ls`) or a literal `.qcow2`/`.raw` path"
 msgstr "Um nome de imagem VM local (`vm ls`) ou um caminho literal `.qcow2`/`.raw`"
 
@@ -5173,6 +5176,9 @@ msgstr "vCPUs (por omissão: 1, ou o `VCPUS` da imagem — ver `HYPERVISOR`/`VCP
 
 msgid "VM subnet(s) to route back (default: auto-detected `virbr*`). Repeatable"
 msgstr "Subnet(s) de VM a rotear de volta (por omissão: as `virbr*` auto-detectadas). Repetível"
+
+msgid "VM subnet(s) to close as well (default: the ones `vm bridge` recorded). Repeatable"
+msgstr "Subnet(s) de VM a fechar também (por omissão: as que o `vm bridge` registou). Repetível"
 
 msgid "With no `source`, pull the official NO-Kubernetes golden (just the `delonix` engine, rootless-ready) instead of the Kubernetes one"
 msgstr "Sem `source`, puxa a dourada oficial SEM Kubernetes (só o motor `delonix`, pronto a rootless) em vez da de Kubernetes"
@@ -7220,8 +7226,11 @@ msgstr "encaminha de volta uma subnet de VM que a auto-detecção de `virbr*` n�
 msgid "what the teardown would remove, without removing it"
 msgstr "o que o teardown removeria, sem o remover"
 
-msgid "actually tear the veth and the routes down, as root"
-msgstr "derruba mesmo o veth e as rotas, como root"
+msgid "actually tear the veth and the routes down, as root — the subnets `vm bridge --apply` recorded, whatever `virbr*` exists now"
+msgstr "derruba mesmo o veth e as rotas, como root — as subnets que o `vm bridge --apply` registou, sejam quais forem as `virbr*` que existem agora"
+
+msgid "also close a subnet a bridge from before the record opened"
+msgstr "fecha também uma subnet que uma ponte anterior ao registo abriu"
 
 msgid "build a bootable qcow2 from the `VMfile` in this directory"
 msgstr "constrói um qcow2 arrancável a partir do `VMfile` deste directório"
@@ -10505,11 +10514,11 @@ msgstr "unidades escritas mas o `systemctl enable --now` falhou — activa-o à 
 msgid "{n} flag(s) are accepted and silently ignored: {flags}"
 msgstr "{n} flag(s) são aceites e ignoradas em silêncio: {flags}"
 
-msgid "sudo delonix system setup --delegate, then log out and back in"
-msgstr "sudo delonix system setup --delegate, e depois sair e voltar a entrar"
+msgid "sudo delonix system setup --delegate, then systemctl restart user@<uid>.service (daemon-reload alone is not enough)"
+msgstr "sudo delonix system setup --delegate, e depois systemctl restart user@<uid>.service (o daemon-reload sozinho não chega)"
 
-msgid "--io-weight and the --device-*-bps flags cannot apply: systemd never delegates the io controller to a rootless user"
-msgstr "o --io-weight e as flags --device-*-bps não se aplicam: o systemd nunca delega o controlador io a um utilizador sem privilégios"
+msgid "--io-weight and the --device-* flags are refused here (exit 69): this user's systemd manager does not delegate the io controller"
+msgstr "o --io-weight e as flags --device-* são recusados aqui (exit 69): o gestor systemd deste utilizador não delega o controlador io"
 
 msgid "no aggregate ceiling: one workload with no --memory can take the whole host, and the thermal governor has no slice to lower"
 msgstr "sem tecto agregado: uma carga sem --memory pode levar o anfitrião inteiro, e o governador térmico não tem slice para baixar"
@@ -12268,6 +12277,15 @@ msgstr "Esta build só fala uma versão maior da API REST do TrueNAS; a superfí
 msgid "Point the manifest at a TrueNAS SCALE appliance on the supported major, or update this engine."
 msgstr "Aponta o manifesto a uma appliance TrueNAS SCALE na versão maior suportada, ou actualiza este motor."
 
+msgid "container still exiting after SIGKILL"
+msgstr "container ainda a sair depois do SIGKILL"
+
+msgid "`rm -f` killed the container, but its process had not finished exiting when the deadline passed — usually stuck in the kernel flushing the container's filesystem to a busy disk. The container is still listed, so no live process goes untracked."
+msgstr "O `rm -f` matou o container, mas o seu processo ainda não tinha acabado de sair quando o prazo passou — normalmente preso no kernel a despejar o sistema de ficheiros do container para um disco ocupado. O container continua listado, para nenhum processo vivo ficar sem registo."
+
+msgid "Run the same `rm -f` again once the host's disk settles; it removes the container as soon as its process is gone."
+msgstr "Corre o mesmo `rm -f` outra vez quando o disco do host acalmar; remove o container assim que o seu processo tiver saído."
+
 msgid "TrueNAS job timed out"
 msgstr "job do TrueNAS esgotou o tempo"
 
@@ -13139,6 +13157,23 @@ msgstr "Um NetDef de ingress já está realizado num prefixo diferente do que o 
 msgid "Remove the network (`delonix network rm <name>`) and create it again, or keep the recorded subnet."
 msgstr "Remove a rede (`delonix network rm <name>`) e cria-a de novo, ou mantém a subnet registada."
 
+msgid "network is in use"
+msgstr "a rede está em uso"
+
+msgid "The network still has containers, pod members or VMs attached, and removing it would leave them addressed on a bridge that no longer exists."
+msgstr "A rede ainda tem containers, membros de pod ou VMs ligados, e removê-la deixá-los-ia endereçados numa bridge que já não existe."
+
+msgid "Remove or disconnect what the message lists (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`), then remove the network."
+msgstr "Remove ou desliga o que a mensagem lista (`delonix container rm`, `delonix network disconnect`, `delonix vm rm`) e só depois remove a rede."
+msgid "address already taken"
+msgstr "endereço já ocupado"
+
+msgid "The address asked for is already leased to another container, or it belongs to the pool the network's DHCP server hands to VMs."
+msgstr "O endereço pedido já está arrendado a outro container, ou pertence ao pool que o servidor DHCP da rede entrega às VMs."
+
+msgid "Pick another address (`delonix network ipam ls` shows the leased ones), or leave the address to the engine."
+msgstr "Escolhe outro endereço (`delonix network ipam ls` mostra os arrendados), ou deixa o endereço ao motor."
+
 msgid "'wg' is not available on this host"
 msgstr "o 'wg' não está disponível neste host"
 
@@ -13150,6 +13185,15 @@ msgstr "Instala o wireguard-tools (Debian/Ubuntu: apt install wireguard-tools; F
 
 msgid "a network system call failed"
 msgstr "uma chamada de sistema de rede falhou"
+
+msgid "this management API route no longer changes the network"
+msgstr "esta rota da API de gestão já não altera a rede"
+
+msgid "The route wrote the dataplane without the container's record, so the next reapply undid it and a multi-homed workload kept its other addresses open. The management API is frozen (ADR-0041 D4) and refuses instead of writing half a policy."
+msgstr "A rota escrevia no dataplane sem o registo do container, por isso o reapply seguinte desfazia-a e um workload com várias redes ficava com os outros endereços abertos. A API de gestão está congelada (ADR-0041 D4) e recusa em vez de escrever meia política."
+
+msgid "Use the CLI, which goes through the record: `delonix net ingress`/`net egress` for firewall and egress, `delonix network connect`/`disconnect` for extra networks, `delonix container rm`/`stop` to detach."
+msgstr "Usa a CLI, que passa pelo registo: `delonix net ingress`/`net egress` para firewall e saída, `delonix network connect`/`disconnect` para redes adicionais, `delonix container rm`/`stop` para desligar."
 
 msgid "A host tool this engine shells out to for networking (ip, nft, wg, bridge, a CNI plugin, newuidmap/newgidmap, or a raw syscall) could not be run or exited badly. The message names the operation and carries the tool's own error."
 msgstr "Uma ferramenta do host a que este motor recorre para redes (ip, nft, wg, bridge, um plugin CNI, newuidmap/newgidmap, ou uma syscall crua) não pôde correr ou terminou mal. A mensagem nomeia a operação e leva o erro próprio da ferramenta."
@@ -14316,3 +14360,129 @@ msgstr "Os limites de container funcionam, mas não as flags recusadas acima. S�
 
 msgid "then `systemctl daemon-reload` and `systemctl restart user@<uid>.service` (it ends that user's sessions) or reboot — daemon-reload alone is not enough"
 msgstr "depois `systemctl daemon-reload` e `systemctl restart user@<uid>.service` (termina as sessões desse utilizador) ou reinicia a máquina — o daemon-reload sozinho não chega"
+
+# ---- vm bridge: subnets validadas e root antes do --apply (S4, 2026-09-27) ----
+
+msgid "the network's prefix is not a CIDR: '{prefix}'"
+msgstr "o prefixo da rede não é um CIDR: '{prefix}'"
+
+msgid "the network's prefix /{len} has no room for the bridge's host address"
+msgstr "o prefixo /{len} da rede não tem espaço para o endereço do host na ponte"
+
+msgid "--vm-subnet must be an IPv4 prefix a.b.c.d/len: '{subnet}'"
+msgstr "o --vm-subnet tem de ser um prefixo IPv4 a.b.c.d/len: '{subnet}'"
+
+msgid "--vm-subnet '{subnet}' is every address, not a VM subnet"
+msgstr "o --vm-subnet '{subnet}' abrange todos os endereços, não é uma subrede de VMs"
+
+msgid "--vm-subnet '{subnet}' overlaps the SDN network {sdn}"
+msgstr "o --vm-subnet '{subnet}' sobrepõe-se à rede SDN {sdn}"
+
+msgid "could not record the bridged subnets in {path}: {err}"
+msgstr "não foi possível registar as subnets da ponte em {path}: {err}"
+
+msgid "could not remove the bridge record {path}: {err}"
+msgstr "não foi possível remover o registo da ponte {path}: {err}"
+
+msgid "`--apply` needs root: this command changes the host's network namespace (run it with sudo, or drop `--apply` for the dry-run)"
+msgstr "o `--apply` precisa de root: este comando altera o namespace de rede do host (corre-o com sudo, ou tira o `--apply` para ver o plano)"
+
+# ADR-0059 F1 — providers.yaml: type opnsense, networkDefaults
+msgid "{path}: a secret VALUE is never written in this file — use `secretFile` (a 0600 file) or `secretRef` (a `kind: Secret` with `key` and `secret`)"
+msgstr "{path}: um VALOR de segredo nunca se escreve neste ficheiro — usa `secretFile` (um ficheiro 0600) ou `secretRef` (um `kind: Secret` com `key` e `secret`)"
+
+msgid "{path}: defaultProvider is the COMPUTE default and opnsense is not a compute provider — a perimeter gateway goes in `networkDefaults.gateway`"
+msgstr "{path}: o defaultProvider é o de COMPUTAÇÃO e o opnsense não é um provider de computação — um gateway de perímetro vai em `networkDefaults.gateway`"
+
+msgid "{path}: networkDefaults.{role}: no provider serves the role '{role}' in this build (ADR-0059 F5)"
+msgstr "{path}: networkDefaults.{role}: nenhum provider serve o papel '{role}' nesta build (ADR-0059 F5)"
+
+msgid "{path}: networkDefaults.{role}: '{name}' does not serve the role '{role}' (it is served by: {serving})"
+msgstr "{path}: networkDefaults.{role}: '{name}' não serve o papel '{role}' (quem o serve: {serving})"
+
+msgid "{path}: networkDefaults.{role} '{name}' has no entry in this file, so no process can serve it"
+msgstr "{path}: o networkDefaults.{role} '{name}' não tem entrada neste ficheiro, logo nenhum processo o pode servir"
+
+msgid "an OPNsense target is configured but no credential is: use DELONIX_OPNSENSE_CREDENTIAL (a `kind: Secret` with `key`+`secret` fields, preferred), or DELONIX_OPNSENSE_KEY with DELONIX_OPNSENSE_SECRET — in providers.yaml, `auth: {key or keyFile, secretFile or secretRef}`. A GUI account's username/password does not work here — only a generated API key/secret pair does (ADR-0051 Phase 0, measured)."
+msgstr "há um alvo OPNsense configurado mas nenhuma credencial: usa DELONIX_OPNSENSE_CREDENTIAL (um `kind: Secret` com os campos `key`+`secret`, preferível), ou DELONIX_OPNSENSE_KEY com DELONIX_OPNSENSE_SECRET — no providers.yaml, `auth: {key ou keyFile, secretFile ou secretRef}`. O utilizador/palavra-passe de uma conta da interface web não serve aqui — só um par de chave/segredo de API gerado (ADR-0051 fase 0, medido)."
+
+msgid "kind: Secret '{name}'"
+msgstr "kind: Secret '{name}'"
+
+msgid "api key, secret from file {path}"
+msgstr "chave de API, segredo do ficheiro {path}"
+
+msgid "api key, secret from the environment (redacted)"
+msgstr "chave de API, segredo do ambiente (ocultado)"
+
+msgid "nowhere — the secret is missing"
+msgstr "em lado nenhum — falta o segredo"
+
+msgid "Network default:"
+msgstr "Rede por omissão:"
+
+msgid "remote object not owned by this engine"
+msgstr "objecto remoto que não pertence a este motor"
+
+msgid "An object with the name (or rule description) being ensured or removed already exists on the remote provider — an OPNsense appliance, a Proxmox cluster's SDN — without this engine's owner mark. It belongs to someone else, and this engine refuses to adopt it by name, and never deletes it."
+msgstr "Já existe no provider remoto — um appliance OPNsense, a SDN de um cluster Proxmox — um objecto com o nome (ou a descrição de regra) que se pediu para garantir ou remover, sem a marca de posse deste motor. É de outra pessoa: este motor recusa adoptá-lo pelo nome, e nunca o apaga."
+
+msgid "Rename the object in the manifest, or remove or rename the one on the provider if it is really stale. The mark is a firewall category named `delonix-owner:<token>` (OPNsense) or `[delonix-owner:<token>]` at the end of the vnet alias (Proxmox); a Proxmox zone has no text field and is owned only when this engine's own record says it created it."
+msgstr "Muda o nome do objecto no manifesto, ou remove ou renomeia o que está no provider se estiver mesmo abandonado. A marca é uma categoria de firewall chamada `delonix-owner:<token>` (OPNsense) ou `[delonix-owner:<token>]` no fim do alias da vnet (Proxmox); uma zona do Proxmox não tem campo de texto e só é deste motor quando o registo do próprio motor diz que foi ele a criá-la."
+
+msgid "remote object drifted from the declaration"
+msgstr "objecto remoto divergiu do declarado"
+
+msgid "An object this engine created on the remote provider was edited there, and no longer matches the manifest. The provider has no update in place in this engine, so the object is neither overwritten nor reported as present."
+msgstr "Um objecto que este motor criou no provider remoto foi editado lá e já não corresponde ao manifesto. Este motor não tem actualização no lugar para esse provider, por isso o objecto nem é sobrescrito nem é dado como presente."
+
+msgid "Put the object back as declared on the provider, or replace it (`delonix stack apply --replace <Kind>/<name>`) so the engine removes and recreates it."
+msgstr "Repõe o objecto como foi declarado no provider, ou substitui-o (`delonix stack apply --replace <Kind>/<nome>`) para o motor o remover e recriar."
+
+msgid "remote provider has staged changes that are not this engine's"
+msgstr "o provider remoto tem alterações preparadas que não são deste motor"
+
+msgid "The remote provider applies everything that is staged at once (OPNsense `filter/apply` and `alias/reconfigure`, Proxmox `PUT /cluster/sdn`). Other staged changes are waiting there, so committing now would push someone else's half-finished work along with this engine's."
+msgstr "O provider remoto aplica de uma vez tudo o que está preparado (`filter/apply` e `alias/reconfigure` do OPNsense, `PUT /cluster/sdn` do Proxmox). Há outras alterações preparadas à espera, por isso aplicar agora empurraria o trabalho a meio de outra pessoa junto com o deste motor."
+
+msgid "Have whoever staged them apply or discard them on the provider (the message lists what was found), then apply again."
+msgstr "Pede a quem as preparou que as aplique ou descarte no provider (a mensagem lista o que foi encontrado) e volta a aplicar."
+
+msgid "networkgateway/{name}: {kind} '{object}' left on the appliance: {why}"
+msgstr "networkgateway/{name}: {kind} '{object}' ficou no appliance: {why}"
+
+msgid "networkgateway/{name} is recorded on provider '{old}', not '{new}' — replace the document (`--replace NetworkGateway/{name}`) to move it"
+msgstr "networkgateway/{name} está registado no provider '{old}', não em '{new}' — substitui o documento (`--replace NetworkGateway/{name}`) para o mudar"
+
+msgid "networkzone/{name}: {kind} '{object}' left on the cluster: {why}"
+msgstr "networkzone/{name}: {kind} '{object}' ficou no cluster: {why}"
+
+msgid "zone '{name}' already exists in the cluster's SDN and this engine did not create it — refusing to adopt it by name; pick another zone name, or remove the zone on the cluster if it is really stale"
+msgstr "a zona '{name}' já existe na SDN do cluster e não foi este motor que a criou — recuso adoptá-la pelo nome; escolhe outro nome de zona, ou remove a zona no cluster se estiver mesmo abandonada"
+
+msgid "--delegate writes under /etc/systemd/system and needs root: re-run it with sudo. (This run changed nothing.)"
+msgstr "o --delegate escreve em /etc/systemd/system e precisa de root: volta a correr com sudo. (Esta execução não mudou nada.)"
+
+msgid "To write the drop-in: sudo delonix system setup --delegate. (This run changed nothing.)"
+msgstr "Para escrever o drop-in: sudo delonix system setup --delegate. (Esta execução não mudou nada.)"
+
+msgid "Re-run with --delegate to write it. (This run changed nothing.)"
+msgstr "Volta a correr com --delegate para o escrever. (Esta execução não mudou nada.)"
+
+msgid "reporting for uid {uid}, who runs the rootless containers"
+msgstr "relatório para o uid {uid}, que corre os containers rootless"
+
+msgid "user@{uid}.service is not running (no session, no linger), so there is nothing to read. The drop-in applies the next time it starts."
+msgstr "o user@{uid}.service não está a correr (sem sessão, sem linger), por isso não há nada para ler. O drop-in aplica-se da próxima vez que arrancar."
+
+msgid "(what a container under user@.service gets — a desktop session or `systemd-run --user --scope`; an SSH session scope gets none of it)"
+msgstr "(o que recebe um container debaixo do user@.service — uma sessão gráfica ou `systemd-run --user --scope`; um scope de sessão SSH não recebe nada disto)"
+
+msgid "What fixes this for uid {uid} is the drop-in (root, once per host):"
+msgstr "O que resolve isto para o uid {uid} é o drop-in (root, uma vez por host):"
+
+msgid "Not in effect yet. daemon-reload alone is a false green: user@.service lists the controllers while a new scope is still born without them. Restart the user manager (it ends that user's sessions) or reboot:"
+msgstr "Ainda não está em vigor. O daemon-reload sozinho é um falso verde: o user@.service lista os controladores enquanto um scope novo ainda nasce sem eles. Reinicia o gestor do utilizador (termina as sessões desse utilizador) ou reinicia a máquina:"
+
+msgid "Then check it AS THAT USER, not as root: systemd-run --user --scope -p Delegate=yes -- delonix system setup"
+msgstr "Depois confirma COMO ESSE UTILIZADOR, não como root: systemd-run --user --scope -p Delegate=yes -- delonix system setup"

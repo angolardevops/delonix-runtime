@@ -665,15 +665,16 @@ pub fn ingress_table_ruleset() -> String {
     // over the default. The `forward` (priority 0) allows returns + egress +
     // inbound + **same network** (intra-bridge `delonix0`); the rest falls into the `policy drop`.
     //
-    // WHERE THE PER-CONTAINER FIREWALL IS DISPATCHED: its own base chain `fwcont`
-    // (priority -5), between `fwdeny` (-10) and `forward` (0). Deliberately NOT in
-    // `fwdeny`: the dispatch rules would be appended among the network-wide egress
-    // rules, and their relative order would then depend on the ORDER OF EVENTS (which
-    // command ran first), not on intent. Placing it in its own chain makes precedence
-    // a property of the design — network-level egress policy is evaluated first and
-    // stays authoritative, per-container rules apply within it. An `accept` in
-    // `fwdeny` is not terminal across base chains, so a network-level accept never
-    // bypasses the container's own firewall.
+    // WHERE THE PER-CONTAINER FIREWALL IS DISPATCHED: two base chains of its own,
+    // `fwout` (priority -6, by SOURCE) and `fwcont` (-5, by DESTINATION), between
+    // `fwdeny` (-10) and `forward` (0) — see [`fw_dispatch_chains`] for why it takes
+    // two. Deliberately NOT in `fwdeny`: the dispatch rules would be appended among
+    // the network-wide egress rules, and their relative order would then depend on
+    // the ORDER OF EVENTS (which command ran first), not on intent. Placing them in
+    // their own chains makes precedence a property of the design — network-level
+    // egress policy is evaluated first and stays authoritative, per-container rules
+    // apply within it. An `accept` in `fwdeny` is not terminal across base chains,
+    // so a network-level accept never bypasses the container's own firewall.
     //
     // INTRA-NETWORK: with `br_netfilter` (bridge-nf-call-iptables=1) the traffic between
     // containers on the SAME bridge traverses the forward and would fall into the drop → apps
@@ -736,7 +737,7 @@ pub fn ingress_table_ruleset() -> String {
     // the L7 proxy listens in this netns, so any container could reach it on its bridge
     // gateway and be relayed to ANY registered backend — across namespaces, and past a
     // `ingress policy deny` on the backend (both measured; the proxy→backend leg originates
-    // here, so it never meets `fwcont` either).
+    // here, so it never meets `fwout`/`fwcont` either).
     //
     // The allowlist is what a container legitimately needs FROM the holder, and nothing
     // else: the internal DNS, DHCP (the VM leases), ICMP for diagnostics, and the return
@@ -763,6 +764,16 @@ pub fn ingress_table_ruleset() -> String {
     } else {
         "\x20\x20 ct state new counter drop\n".to_string()
     };
+    let dispatch: String = fw_dispatch_chains()
+        .iter()
+        .map(|(chain, prio, rule)| {
+            format!(
+                "\x20 chain {chain} {{ type filter hook forward priority {prio};\n\
+                 \x20\x20 {rule}\n\
+                 \x20 }}\n"
+            )
+        })
+        .collect();
     format!(
         "table ip {INGRESS_TABLE} {{\n\
          \x20 set {DLXALL_SET} {{ type ipv4_addr; }}\n\
@@ -772,10 +783,7 @@ pub fn ingress_table_ruleset() -> String {
          \x20 chain fwguard {{ type filter hook forward priority -20;\n\
          {guard}\
          \x20 }}\n\
-         \x20 chain fwcont {{ type filter hook forward priority -5;\n\
-         \x20\x20 ip daddr vmap @{FWMAP}\n\
-         \x20\x20 ip saddr vmap @{FWMAP}\n\
-         \x20 }}\n\
+         {dispatch}\
          \x20 chain pre {{ type nat hook prerouting priority -100; }}\n\
          \x20 chain post {{ type nat hook postrouting priority 100; oifname \"tap0\" masquerade; }}\n\
          \x20 chain fwdeny {{ type filter hook forward priority -10;\n\
@@ -802,6 +810,177 @@ pub fn ingress_table_ruleset() -> String {
          \x20 }}\n\
          }}\n"
     )
+}
+
+/// The per-container firewall dispatch, as `(base chain, priority, rule)` — one
+/// base chain per DIRECTION, the SOURCE's first.
+///
+/// **It used to be ONE base chain** (`fwcont`) with `ip daddr vmap @fwmap` and then
+/// `ip saddr vmap @fwmap`. The map's elements are `jump fw<hash>`, and an `accept`
+/// inside a jumped-to chain is terminal for the BASE chain that jumped: when the
+/// DESTINATION's chain accepted (same namespace, a Dependency, an `ingress allow`),
+/// the packet left `fwcont` right there and the SOURCE's chain was never walked. An
+/// `egress policy deny` or `egress deny` was silently void towards every destination
+/// that accepted the source — measured live (NaaS audit P0-1): A with `egress policy
+/// deny` pinged B in its namespace 3/3, the drop in A's chain counted 0 packets and
+/// the namespace accept in B's counted 2.
+///
+/// Two base chains fix that without a second lookup structure: across base chains
+/// an `accept` only ends ITS chain and the packet goes on to the next priority,
+/// while a `drop` is final everywhere. So the source decides first (`fwout`, -6) and
+/// the destination still decides after (`fwcont`, -5) — a flow needs BOTH to let it
+/// through. Each direction stays one hashed lookup in the same `@fwmap`, however many
+/// containers there are. The per-container chain body is unchanged: every rule in it
+/// is anchored on `ip saddr <own-ip>` or `ip daddr <own-ip>`, so walking the chain
+/// from the "wrong" direction matches only the stateful prologue, which accepts
+/// exactly what the other direction would have accepted anyway.
+///
+/// `fwcont` keeps its name so a table created by an older holder is MIGRATED in place
+/// ([`fw_dispatch_migration_script`]) rather than left with a second, duplicate
+/// destination dispatch.
+pub fn fw_dispatch_chains() -> [(&'static str, i32, String); 2] {
+    [
+        ("fwout", -6, format!("ip saddr vmap @{FWMAP}")),
+        ("fwcont", -5, format!("ip daddr vmap @{FWMAP}")),
+    ]
+}
+
+/// One `nft -f` transaction that brings the dispatch of an EXISTING `dlxing` table to
+/// the shape of [`fw_dispatch_chains`], whatever shape it had.
+///
+/// Needed because the base ruleset is only loaded when the infra netns is BUILT: a
+/// control plane restarted by a newer binary reattaches to the table an older one
+/// created — which still has the single `fwcont` with both lookups, i.e. still the
+/// P0-1 bypass. Flushing and re-adding both chains in one transaction is idempotent
+/// (the second run changes nothing) and atomic (no packet ever sees the table with
+/// no dispatch), and it never touches the per-container chains or `@fwmap`, so every
+/// container keeps its firewall across the migration.
+pub fn fw_dispatch_migration_script() -> String {
+    let mut s = format!("add map ip {INGRESS_TABLE} {FWMAP} {{ type ipv4_addr : verdict; }}\n");
+    for (chain, prio, _) in fw_dispatch_chains() {
+        s.push_str(&format!(
+            "add chain ip {INGRESS_TABLE} {chain} {{ type filter hook forward priority {prio}; }}\n\
+             flush chain ip {INGRESS_TABLE} {chain}\n"
+        ));
+    }
+    for (chain, _, rule) in fw_dispatch_chains() {
+        s.push_str(&format!("add rule ip {INGRESS_TABLE} {chain} {rule}\n"));
+    }
+    s
+}
+
+/// Brings the firewall dispatch of the RUNNING holder to [`fw_dispatch_chains`],
+/// once per pin, from the host.
+///
+/// [`fw_dispatch_migration_script`] used to run only when the control plane
+/// started (`reattach_or_setup_infra_netns`). An in-place upgrade leaves the old
+/// control running, so the old single-chain dispatch — the P0-1 bypass, where the
+/// destination's accept skipped the source's egress rules — stayed in force, with
+/// nothing saying so, until someone killed the control by hand (NaaS S1 review, A1).
+/// This enters the pin's user and network namespaces with `nsenter`, the way
+/// [`disable_ipv6_live`] reconfigures an old holder it cannot ask, so it works
+/// whatever binary the control came from.
+///
+/// Called on the paths every network change takes ([`ensure_up`] with the infra
+/// already up, [`apply_firewall_all`]). A marker per pin pid keeps it to one `nft -f`
+/// per holder lifetime; a new pin gets a new marker, and the script is idempotent
+/// anyway. A failure is an error, never a warning: leaving the old dispatch in place
+/// means every egress policy on the node is silently void.
+pub fn ensure_fw_dispatch_current() -> Result<()> {
+    let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) else {
+        return Ok(()); // no holder: the next one is built with the new dispatch
+    };
+    let marker = fw_dispatch_marker(pin);
+    if marker.exists() {
+        return Ok(());
+    }
+    // Already INSIDE the pin's user namespace — the second pass of a `run --net`
+    // re-exec, the control itself: `nsenter -U` into the namespace we are in is
+    // EINVAL, and it is not needed. Every path that reaches here from inside was
+    // preceded by one from the host (the attach that created the netns), and a
+    // control started by this binary writes the marker itself.
+    if same_user_namespace(pin) {
+        return Ok(());
+    }
+    use std::io::Write;
+    let script = fw_dispatch_migration_script();
+    let pin_s = pin.to_string();
+    let spawned = Command::new("nsenter")
+        .args(fw_dispatch_nsenter_args(&pin_s))
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .spawn();
+    let fail = |why: String| Error::Command {
+        context: "firewall dispatch migration",
+        message: format!(
+            "the running holder (pin {pin}) still has the old firewall dispatch, where a \
+             destination's accept skips the source's egress rules, and migrating it failed: \
+             {why}. Egress policies are NOT enforced until it is migrated: restart only the \
+             control plane (`delonix net netns status`, kill the control pid, then \
+             `delonix net netns up`)"
+        ),
+    };
+    let mut child = spawned.map_err(|e| fail(e.to_string()))?;
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(script.as_bytes())
+            .map_err(|e| fail(e.to_string()))?;
+    }
+    let out = child.wait_with_output().map_err(|e| fail(e.to_string()))?;
+    if !out.status.success() {
+        return Err(fail(
+            String::from_utf8_lossy(&out.stderr).trim().to_string(),
+        ));
+    }
+    // Best effort: without the marker the next call migrates again, which is
+    // idempotent — a cost, never a hole.
+    let _ = std::fs::write(&marker, b"2\n");
+    Ok(())
+}
+
+/// Where [`ensure_fw_dispatch_current`] records that a pin's dispatch is current.
+fn fw_dispatch_marker(pin: i32) -> PathBuf {
+    ingress_dir().join(format!("fw-dispatch-v2.{pin}"))
+}
+
+/// Written by a control plane of THIS binary once it has built or migrated the
+/// dispatch, so the host side never enters the namespaces for a pin whose control
+/// already did the work. Best effort for the same reason as the host-side marker.
+fn mark_fw_dispatch_current() {
+    if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
+        let _ = std::fs::write(fw_dispatch_marker(pin), b"2\n");
+    }
+}
+
+/// `true` when this process already lives in `pin`'s user namespace.
+fn same_user_namespace(pin: i32) -> bool {
+    match (
+        std::fs::read_link("/proc/self/ns/user"),
+        std::fs::read_link(format!("/proc/{pin}/ns/user")),
+    ) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => false,
+    }
+}
+
+/// `nsenter` arguments that run `nft -f -` in the pin's user and network
+/// namespaces. Pure, so the invocation is testable without a holder.
+pub fn fw_dispatch_nsenter_args(pin: &str) -> Vec<String> {
+    [
+        "-t",
+        pin,
+        "-U",
+        "-n",
+        "--preserve-credentials",
+        "--",
+        "nft",
+        "-f",
+        "-",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 // ---- ref-count (lifecycle shared by the containers, Phase 3) ----------------
@@ -1132,7 +1311,9 @@ fn ensure_up_locked() -> Result<()> {
     // intact. The only question is whether the CONTROL plane is there.
     if let Some(pin) = read_pid_verified(PidKind::Pin, &holder_pid_path()) {
         if control_reachable() {
-            return Ok(());
+            // The control may predate the two-chain dispatch (an in-place upgrade):
+            // migrate it here, on the path every workload attach takes.
+            return ensure_fw_dispatch_current();
         }
         // An in-place upgrade over a PRE-split build: that holder is a single
         // process serving the legacy socket path, and its presence on disk is the
@@ -2036,10 +2217,170 @@ fn control_loop(listener: std::os::unix::net::UnixListener) -> ! {
     std::process::exit(0);
 }
 
+/// A strict dotted IPv4 address — `std`'s parser, which refuses the `+1`
+/// octets and the short forms `Cidr::parse_addr`/`Cidr::parse` tolerate.
+fn control_ipv4_ok(s: &str) -> bool {
+    s.parse::<std::net::Ipv4Addr>().is_ok()
+}
+
+/// A strict `a.b.c.d/len` — the address strict as above, the length digits
+/// only, and the whole thing a prefix [`crate::Cidr`] accepts.
+fn control_ipv4_cidr_ok(s: &str) -> bool {
+    let Some((addr, len)) = s.split_once('/') else {
+        return false;
+    };
+    control_ipv4_ok(addr)
+        && !len.is_empty()
+        && len.bytes().all(|b| b.is_ascii_digit())
+        && crate::Cidr::parse(s).is_some()
+}
+
+/// A count sent as bare decimal digits (`u64` so the holder never truncates
+/// what the host computed). `str::parse` alone would also take a leading `+`.
+fn control_count_ok(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 20
+        && s.bytes().all(|b| b.is_ascii_digit())
+        && s.parse::<u64>().is_ok()
+}
+
+/// **Every token of a control line, checked BEFORE the dispatch runs a single
+/// command** (S4 of the NaaS audit, doc 62 §6 P1).
+///
+/// The holder is mapped-root with `CAP_NET_ADMIN` over the infra netns, and
+/// each token below lands verbatim in an `ip`/`tc`/`wg`/`nft` argv — or, for
+/// the WireGuard interface, in a FILE NAME. `SO_PEERCRED` limits who may speak
+/// on the socket, not what a value that came from a manifest or a flag is
+/// allowed to be. Before this, `attach`'s `ip`/`gateway`, `netrate`'s `burst`
+/// and every `wg-up`/`wg-peer` field reached their command unchecked:
+///
+/// * `wg-up`'s interface name also builds the path of the temp file that holds
+///   the node's PRIVATE KEY (`ensure_iface`). Only the order of operations kept
+///   a `../` in it harmless — `ip link add` runs first and iproute2 refuses a
+///   name with `/` (measured live 2026-09-27) — which is not a guarantee;
+/// * a token that starts with `-` is read by `ip`/`tc`/`wg` as an OPTION —
+///   `sanitize` keeps `-` (it is a legal interface character), so even the
+///   sanitized names were exposed.
+///
+/// Two layers: a universal one (no argv-bound token may start with `-`; the
+/// only exception is the literal `-` placeholder of `vxlan`'s peer list) and a
+/// typed one per verb for the fields that are not names. Names keep going
+/// through `sanitize` at their `do_*`, as before.
+///
+/// **Compatibility**: the wire format does not change — every line a client of
+/// this build or an older one legitimately sends passes. What changes is that
+/// a holder started from THIS binary refuses values it used to pass on. A
+/// holder still running from an older binary keeps the old behaviour until it
+/// is respawned (`delonix net netns down` + `up`); the client needs nothing.
+fn validate_control_tokens(parts: &[&str]) -> Result<()> {
+    let refuse = |field: &str, v: &str| {
+        Err(Error::InvalidControlCommand(format!(
+            "control token refused: {field} {v:?}"
+        )))
+    };
+    let Some((verb, args)) = parts.split_first() else {
+        return Ok(());
+    };
+    // The logical namespace is the one token that never reaches an argv: it is
+    // canonicalised by `namespace_isolation_key` and HASHED into a set name.
+    // Holding it to the option rule would refuse a namespace the rest of the
+    // engine accepts, for no gain.
+    let ns_pos = match (*verb, args.len()) {
+        ("attach", 5) | ("vmtap", 5) => Some(4),
+        ("attach-extra", 6) => Some(5),
+        _ => None,
+    };
+    for (i, t) in args.iter().enumerate() {
+        if Some(i) != ns_pos && t.starts_with('-') && *t != "-" {
+            return refuse("option-like", t);
+        }
+    }
+    match parts {
+        ["attach", _, ip, _, gw] | ["attach", _, ip, _, gw, _] => {
+            if !control_ipv4_ok(ip) {
+                return refuse("attach ip", ip);
+            }
+            if !control_ipv4_ok(gw) {
+                return refuse("attach gateway", gw);
+            }
+        }
+        ["attach-extra", _, _, ip, _, gw] | ["attach-extra", _, _, ip, _, gw, _] => {
+            if !control_ipv4_ok(ip) {
+                return refuse("attach-extra ip", ip);
+            }
+            if !control_ipv4_ok(gw) {
+                return refuse("attach-extra gateway", gw);
+            }
+        }
+        ["vmtap", _, _, gw] | ["vmtap", _, _, gw, _, _] | ["vxlan", _, _, _, gw, _] => {
+            if !control_ipv4_ok(gw) {
+                return refuse("gateway", gw);
+            }
+            if let ["vmtap", _, _, _, ip, _] = parts {
+                if !control_ipv4_ok(ip) {
+                    return refuse("vmtap ip", ip);
+                }
+            }
+        }
+        ["netrate", _, rate, burst] => {
+            if !control_count_ok(rate) {
+                return refuse("netrate rate", rate);
+            }
+            if !control_count_ok(burst) {
+                return refuse("netrate burst", burst);
+            }
+        }
+        ["l4guard", rate, max] => {
+            if !control_count_ok(rate) || rate.parse::<u32>().is_err() {
+                return refuse("l4guard rate", rate);
+            }
+            if !control_count_ok(max) || max.parse::<u32>().is_err() {
+                return refuse("l4guard max", max);
+            }
+        }
+        ["wg-up", iface, port, key, addr] => {
+            if !crate::wg::valid_iface_name(iface) {
+                return refuse("wg-up iface", iface);
+            }
+            if !control_count_ok(port) || port.parse::<u16>().map_or(true, |p| p == 0) {
+                return refuse("wg-up port", port);
+            }
+            if !crate::wg::valid_wg_key(key) {
+                // Never echo a private key back, not even a malformed one.
+                return refuse("wg-up private key", "<redacted>");
+            }
+            if !control_ipv4_cidr_ok(addr) {
+                return refuse("wg-up addr", addr);
+            }
+        }
+        ["wg-peer", iface, key, endpoint, allowed] => {
+            if !crate::wg::valid_iface_name(iface) {
+                return refuse("wg-peer iface", iface);
+            }
+            let peer = crate::wg::Peer {
+                public: key.to_string(),
+                endpoint: endpoint.to_string(),
+                allowed_ips: allowed.split(',').map(str::to_string).collect(),
+            };
+            crate::wg::validate_peer(&peer)?;
+        }
+        ["wg-peer-del", iface, _] if !crate::wg::valid_iface_name(iface) => {
+            return refuse("wg-peer-del iface", iface);
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Dispatches a control command (`attach <netns> <ip>`, `detach <netns>`,
 /// `ping`) and returns the reply (`ok\n` or `err: <msg>\n`).
 fn handle_control(line: &str) -> String {
     let parts: Vec<&str> = line.split_whitespace().collect();
+    // Before ANY branch below, the read-only queries included: see
+    // `validate_control_tokens`.
+    if let Err(e) = validate_control_tokens(&parts) {
+        return format!("err: {e}\n");
+    }
     // CNI (rootless): the plugin runs HERE, in the holder — mapped-root and owner of the netns
     // (the host, the user's uid, wouldn't have CAP_NET_ADMIN in it). `cni-add` returns
     // the assigned IP in the reply body (`ok <cidr>`), for the host to register.
@@ -2058,7 +2399,7 @@ fn handle_control(line: &str) -> String {
     // Hex-encoded because the reply is a single line and an nft listing is not — the
     // same encoding the `firewall` command already uses in the other direction.
     if let ["fwstats", ip] = parts.as_slice() {
-        if !is_ingress_ip(ip) {
+        if !is_sdn_workload_ip(ip) {
             return "err: IP outside the ingress space\n".to_string();
         }
         let listing = crate::capture(
@@ -2331,12 +2672,15 @@ fn ensure_net_bridge(bridge: &str, fallback_addr: &str) -> Result<()> {
             &["add", "element", "ip", INGRESS_TABLE, target, &element],
         );
     }
-    // the network's DHCP server (for VMs/clients that request an IP). It takes the
-    // TWO-OCTET form and nothing else — `dhcp_serve`/`dhcp_lease_ip` both bail out
-    // on `oct.len() != 2`, and bailing out means no server at all, in silence. So
-    // it is derived from the bridge's own address (never from a declared gateway,
-    // which would move the whole pool onto the appliance's octets).
-    start_dhcp(bridge, &prefix_of(gateway));
+    // The network's DHCP server (for VMs/clients that request an IP), given the
+    // network's REAL prefix. It used to get the two octets of the bridge's
+    // address, which named the right network only on a `/16`: on a `/24` the
+    // server offered an address, a mask and a router of a `/16` the VM was not
+    // on (measured: `172.20.254.110/16` via `172.20.0.1` on `172.20.9.0/24`).
+    // With no `NetDef` (the infra bridge) the two octets are still the network
+    // — a legacy `/16`. Never a declared gateway: that would move the pool onto
+    // the appliance.
+    start_dhcp(bridge, &dhcp_network(cidr, gateway));
     // Re-applies the PERSISTED egress intent when the bridge is (re)created — it's what
     // makes it survive the holder's respawn (the nft and the FQDN registry live in the
     // ephemeral netns). Only on `!exists` (new bridge): idempotent and cheap.
@@ -2365,26 +2709,76 @@ fn ensure_net_bridge(bridge: &str, fallback_addr: &str) -> Result<()> {
     Ok(())
 }
 
-/// Bridges that already have the native DHCP server running (one thread per bridge).
-static DHCP_STARTED: std::sync::Mutex<std::collections::BTreeSet<String>> =
-    std::sync::Mutex::new(std::collections::BTreeSet::new());
+/// The network a bridge's DHCP server serves: the `NetDef`'s real prefix, or —
+/// with no `NetDef` (the infra bridge) — the legacy `/16` named by the first two
+/// octets of the bridge's own address. PURE, so the choice is testable: the
+/// server itself is only reachable inside the holder's netns.
+fn dhcp_network(cidr: Option<crate::Cidr>, bridge_addr: &str) -> String {
+    cidr.map_or_else(|| prefix_of(bridge_addr), |c| c.to_string_cidr())
+}
+
+/// The native DHCP servers running in this holder, one thread per bridge, each
+/// with the flag that stops it.
+///
+/// **It used to be a set of names that only ever grew.** `do_netdel` deleted the
+/// bridge and left the entry — and the thread, still blocked in `recv` on a socket
+/// bound to an ifindex that no longer exists. A network recreated under the same
+/// name gets the same bridge name, `start_dhcp` found it "already running" and
+/// returned: measured, the recreated network had NO server on `:67` (the old
+/// socket showed up as `0.0.0.0%if4:67`), so every VM on it waited for a lease
+/// forever. The flag is what lets `do_netdel` end the old thread, and removing the
+/// entry is what lets the next create start a fresh one.
+struct DhcpServers(
+    std::sync::Mutex<
+        std::collections::BTreeMap<String, std::sync::Arc<std::sync::atomic::AtomicBool>>,
+    >,
+);
+
+impl DhcpServers {
+    const fn new() -> Self {
+        DhcpServers(std::sync::Mutex::new(std::collections::BTreeMap::new()))
+    }
+
+    /// The stop flag of a NEW server for `bridge`, or `None` if one is running.
+    fn claim(&self, bridge: &str) -> Option<std::sync::Arc<std::sync::atomic::AtomicBool>> {
+        let mut m = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        if m.contains_key(bridge) {
+            return None;
+        }
+        let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        m.insert(bridge.to_string(), stop.clone());
+        Some(stop)
+    }
+
+    /// Stops `bridge`'s server (it notices within one receive timeout) and forgets
+    /// it, so a bridge recreated under the same name gets a server of its own.
+    fn release(&self, bridge: &str) {
+        let mut m = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some(stop) = m.remove(bridge) {
+            stop.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+}
+
+static DHCP_SERVERS: DhcpServers = DhcpServers::new();
+
+/// How long a DHCP server blocks in `recv` before it looks at its stop flag.
+const DHCP_RECV_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(1);
 
 /// Starts a network bridge's **NATIVE** (Rust) DHCP server, if it isn't already
 /// running. Replaces `busybox udhcpd` — the holder becomes self-contained
 /// (no dependency on host binaries). One thread per bridge.
 fn start_dhcp(bridge: &str, prefix: &str) {
-    {
-        let mut s = DHCP_STARTED.lock().unwrap();
-        if !s.insert(bridge.to_string()) {
-            return; // already has a DHCP server
-        }
-    }
+    let Some(stop) = DHCP_SERVERS.claim(bridge) else {
+        return; // already has a DHCP server
+    };
     let (b, p) = (bridge.to_string(), prefix.to_string());
-    std::thread::spawn(move || dhcp_serve(b, p));
+    std::thread::spawn(move || dhcp_serve(b, p, stop));
 }
 
-/// The IPv4 address the holder's native DHCP server will hand to `mac` on a
-/// bridge whose `prefix` is `<o0>.<o1>` — pool `<prefix>.254.10–.254.249`.
+/// The IPv4 address the holder's native DHCP server will hand to `mac` on the
+/// network `prefix` (a CIDR, or the legacy two-octet `/16`) — see
+/// [`crate::vm_dhcp_pool`] for where the pool sits.
 ///
 /// Deterministic from the MAC, and deliberately so: it is the ONLY reason the
 /// HOST side can know a VM's address before the guest has even booted, which is
@@ -2398,29 +2792,23 @@ fn start_dhcp(bridge: &str, prefix: &str) {
 /// symptom would be the worst kind: a VM firewalled at an address nobody uses,
 /// reported as isolated.
 pub fn dhcp_lease_ip(prefix: &str, mac: &str) -> Option<String> {
-    let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
-    if oct.len() != 2 {
-        return None;
-    }
-    // The server hashes the MAC as it renders it off the wire: lowercase,
-    // `:`-separated. Normalizing here (and not at each call site) is what stops
-    // an upper-case MAC from a record producing a different, unused address.
-    let host = 10 + (crate::fnv32(&mac.to_lowercase()) % 240) as u8; // pool .254.10–.254.249
-    Some(format!("{}.{}.254.{}", oct[0], oct[1], host))
+    // The arithmetic lives in `delonix-net-rules`, shared with the container
+    // IPAM, which has to know which addresses it must NOT hand out.
+    crate::vm_dhcp_lease_ip(prefix, mac)
 }
 
 /// Native DHCPv4 server of a bridge: listens on UDP `:67` (only on that bridge, via
-/// `SO_BINDTODEVICE`) and responds to DISCOVER/REQUEST with an IP from the pool
-/// `<prefix>.254.10–.254.250` (deterministic from the MAC), **gateway/DNS = ingress**.
-fn dhcp_serve(bridge: String, prefix: String) {
+/// `SO_BINDTODEVICE`) and answers DISCOVER/REQUEST with the address of the pool
+/// [`crate::vm_dhcp_pool`] that is derived from the MAC, with the network's own
+/// mask and **gateway/DNS = the holder's address on the bridge**.
+///
+/// `prefix` is the network: a CIDR, or the legacy two-octet form of a `/16`.
+fn dhcp_serve(bridge: String, prefix: String, stop: std::sync::Arc<std::sync::atomic::AtomicBool>) {
     use std::os::unix::io::FromRawFd;
-    let oct: Vec<u8> = prefix.split('.').filter_map(|x| x.parse().ok()).collect();
-    if oct.len() != 2 {
+    if crate::vm_dhcp_pool(&prefix).is_none() {
         return;
     }
-    let (o0, o1) = (oct[0], oct[1]);
-    let gw = [o0, o1, 0, 1]; // gateway/server/DNS = <prefix>.0.1 (the ingress)
-                             // SAFETY: UDP socket; setsockopt REUSEADDR/PORT/BROADCAST/BINDTODEVICE; bind :67.
+    // SAFETY: UDP socket; setsockopt REUSEADDR/PORT/BROADCAST/BINDTODEVICE; bind :67.
     let sock = unsafe {
         let fd = libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0);
         if fd < 0 {
@@ -2462,57 +2850,92 @@ fn dhcp_serve(bridge: String, prefix: String) {
         }
         std::net::UdpSocket::from_raw_fd(fd)
     };
+    // A bounded `recv` so the thread can see `do_netdel`'s stop flag; without a
+    // timeout it would block forever on a socket whose device is gone.
+    let _ = sock.set_read_timeout(Some(DHCP_RECV_TIMEOUT));
     let mut buf = [0u8; 1024];
     loop {
+        if stop.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
         let n = match sock.recv(&mut buf) {
             Ok(n) => n,
-            Err(_) => continue,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                continue
+            }
+            // Any other error would repeat on the next call: pace it instead of
+            // spinning a core until the flag comes.
+            Err(_) => {
+                std::thread::sleep(DHCP_RECV_TIMEOUT);
+                continue;
+            }
         };
-        if n < 240 || buf[236..240] != [99, 130, 83, 99] {
-            continue; // BOOTP + magic cookie
+        if let Some(r) = dhcp_reply(&prefix, &buf[..n]) {
+            let _ = sock.send_to(&r, "255.255.255.255:68");
         }
-        let reply_type = match dhcp_opt(&buf[240..n], 53).and_then(|v| v.first().copied()) {
-            Some(1) => 2u8, // DISCOVER → OFFER
-            Some(3) => 5u8, // REQUEST → ACK
-            _ => continue,
-        };
-        let mac = &buf[28..34];
-        let macs = mac
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<Vec<_>>()
-            .join(":");
-        // Same arithmetic the host side used at attach time — see `dhcp_lease_ip`.
-        let host = match dhcp_lease_ip(&prefix, &macs)
-            .and_then(|ip| ip.rsplit('.').next().and_then(|h| h.parse::<u8>().ok()))
-        {
-            Some(h) => h,
-            None => continue,
-        };
-        let yi = [o0, o1, 254, host];
-        let mut r = vec![0u8; 240];
-        r[0] = 2; // BOOTREPLY
-        r[1] = 1; // htype ethernet
-        r[2] = 6; // hlen
-        r[4..8].copy_from_slice(&buf[4..8]); // xid
-        r[10..12].copy_from_slice(&buf[10..12]); // flags
-        r[16..20].copy_from_slice(&yi); // yiaddr
-        r[20..24].copy_from_slice(&gw); // siaddr (server)
-        r[28..34].copy_from_slice(mac); // chaddr
-        r[236..240].copy_from_slice(&[99, 130, 83, 99]); // magic
-        r.extend_from_slice(&[53, 1, reply_type]); // message type
-        r.extend_from_slice(&[54, 4]);
-        r.extend_from_slice(&gw); // server id
-        r.extend_from_slice(&[51, 4]);
-        r.extend_from_slice(&3600u32.to_be_bytes()); // lease time
-        r.extend_from_slice(&[1, 4, 255, 255, 0, 0]); // subnet mask /16
-        r.extend_from_slice(&[3, 4]);
-        r.extend_from_slice(&gw); // router
-        r.extend_from_slice(&[6, 4]);
-        r.extend_from_slice(&gw); // DNS (our server)
-        r.push(255); // end
-        let _ = sock.send_to(&r, "255.255.255.255:68");
     }
+}
+
+/// The OFFER/ACK for one DHCP request on network `prefix`, or `None` when the
+/// packet is not a DISCOVER/REQUEST or the network has no pool. PURE — the
+/// whole reply is testable without a socket.
+///
+/// Address, mask and router all come from the network itself. They used to be
+/// `<a>.<b>.254.<h>`, `255.255.0.0` and `<a>.<b>.0.1` whatever the network was,
+/// which is only right on a `/16`.
+fn dhcp_reply(prefix: &str, req: &[u8]) -> Option<Vec<u8>> {
+    let net = crate::Cidr::parse(prefix)?;
+    if req.len() < 240 || req[236..240] != [99, 130, 83, 99] {
+        return None; // BOOTP + magic cookie
+    }
+    let reply_type = match dhcp_opt(&req[240..], 53).and_then(|v| v.first().copied()) {
+        Some(1) => 2u8, // DISCOVER → OFFER
+        Some(3) => 5u8, // REQUEST → ACK
+        _ => return None,
+    };
+    let mac = &req[28..34];
+    let macs = mac
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(":");
+    // Same arithmetic the host side used at attach time — see `dhcp_lease_ip`.
+    let yi = crate::Cidr::parse_addr(&dhcp_lease_ip(prefix, &macs)?)?.to_be_bytes();
+    // The holder's own address on the bridge: server, router and resolver.
+    let gw = crate::Cidr::parse_addr(&net.gateway()?)?.to_be_bytes();
+    let mask = if net.len == 0 {
+        0
+    } else {
+        u32::MAX << (32 - u32::from(net.len))
+    };
+    let mut r = vec![0u8; 240];
+    r[0] = 2; // BOOTREPLY
+    r[1] = 1; // htype ethernet
+    r[2] = 6; // hlen
+    r[4..8].copy_from_slice(&req[4..8]); // xid
+    r[10..12].copy_from_slice(&req[10..12]); // flags
+    r[16..20].copy_from_slice(&yi); // yiaddr
+    r[20..24].copy_from_slice(&gw); // siaddr (server)
+    r[28..34].copy_from_slice(mac); // chaddr
+    r[236..240].copy_from_slice(&[99, 130, 83, 99]); // magic
+    r.extend_from_slice(&[53, 1, reply_type]); // message type
+    r.extend_from_slice(&[54, 4]);
+    r.extend_from_slice(&gw); // server id
+    r.extend_from_slice(&[51, 4]);
+    r.extend_from_slice(&3600u32.to_be_bytes()); // lease time
+    r.extend_from_slice(&[1, 4]);
+    r.extend_from_slice(&mask.to_be_bytes()); // subnet mask
+    r.extend_from_slice(&[3, 4]);
+    r.extend_from_slice(&gw); // router
+    r.extend_from_slice(&[6, 4]);
+    r.extend_from_slice(&gw); // DNS (our server)
+    r.push(255); // end
+    Some(r)
 }
 
 /// Extracts the value of a DHCP option (TLV) from the options block.
@@ -2777,7 +3200,7 @@ fn drop_from_every_ns_set(elem: &str) {
 /// unbounded kernel state and, worse for whoever is debugging, a set that cannot answer the
 /// question it exists to answer: which addresses on this node belong to containers.
 fn ns_set_leave(ip: &str) {
-    if !is_ingress_ip(ip) {
+    if !is_sdn_workload_ip(ip) {
         return; // only SDN IPs
     }
     let elem = format!("{{ {ip} }}");
@@ -2789,7 +3212,7 @@ fn ns_set_leave(ip: &str) {
 }
 
 fn ns_set_join(ip: &str, ns: &str) {
-    if !is_ingress_ip(ip) {
+    if !is_sdn_workload_ip(ip) {
         return; // only SDN IPs
     }
     let elem = format!("{{ {ip} }}");
@@ -3257,7 +3680,19 @@ fn do_wg_peer_del(iface: &str, key: &str) -> Result<()> {
     crate::wg::remove_peer(&sanitize(iface), key)
 }
 
-/// Removes a private network's bridge from the infra netns (on `network rm`).
+/// Removes a private network's bridge from the infra netns (on `network rm`), and
+/// everything the holder built AROUND it.
+///
+/// **It used to delete the link and nothing else.** Measured on `network rm` of a
+/// network with an egress policy: the bridge went, and `@dlxbr` still listed it,
+/// `@netpair` still held its self-pair, `fwdeny` still carried its `deny` rule and
+/// its DHCP thread kept running. Recreating the network under the same name (same
+/// bridge name) then came up with no DHCP server and with the OLD `deny` in force
+/// while `net egress show` answered `allow` — the record and the dataplane
+/// disagreeing, in the direction nobody asked for.
+///
+/// Also the teardown of a VXLAN uplink (`vxlan_remove`): that device is not a
+/// network bridge and owns none of this, so only the link goes.
 fn do_netdel(bridge: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     if bridge == INFRA_BRIDGE {
@@ -3265,8 +3700,64 @@ fn do_netdel(bridge: &str) -> Result<()> {
             "the default ingress bridge cannot be removed".into(),
         ));
     }
+    if bridge.starts_with("dlxn") {
+        DHCP_SERVERS.release(&bridge);
+        // The default state is "allow, no hosts": it removes this bridge's rules and
+        // inserts none — the same function that wrote them, so the two cannot
+        // disagree about what a rule of this bridge looks like.
+        let _ = apply_egress_from_state(&bridge, &EgressState::default());
+        fqdn_forget(&bridge);
+        let pairs = crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, NETPAIR_MAP])
+            .unwrap_or_default();
+        for spec in netdel_nft_deletes(&bridge, &pairs) {
+            let args: Vec<&str> = spec.iter().map(String::as_str).collect();
+            run_ok("nft", &args);
+        }
+    }
     run_ok("ip", &["link", "del", &bridge]);
     Ok(())
+}
+
+/// The `nft delete element` argument vectors that take `bridge` out of the
+/// isolation model: its `@dlxbr` member, and EVERY `@netpair` key that names it —
+/// the self-pair [`isolation_elements`] installed, and any route pair whose record
+/// was already gone (a pair naming a bridge that no longer exists would silently
+/// open a path to whatever network gets that bridge name next).
+///
+/// PURE: `netpair_listing` is the output of `nft list map`, so what gets deleted is
+/// checkable without a holder. The self-pair is always included, even when the
+/// listing came back empty — a failed read must not turn into "nothing to delete".
+fn netdel_nft_deletes(bridge: &str, netpair_listing: &str) -> Vec<Vec<String>> {
+    let del = |set: &str, element: String| -> Vec<String> {
+        ["delete", "element", "ip", INGRESS_TABLE, set]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(std::iter::once(element))
+            .collect()
+    };
+    let mut pairs: Vec<(String, String)> = vec![(bridge.to_string(), bridge.to_string())];
+    // Quoted strings are the odd fields of a split on `"`; two of them joined by a
+    // bare `.` are one `ifname . ifname` key.
+    let fields: Vec<&str> = netpair_listing.split('"').collect();
+    let mut i = 1;
+    while i + 2 < fields.len() {
+        if fields[i + 1].trim() == "." {
+            let (a, b) = (fields[i], fields[i + 2]);
+            if (a == bridge || b == bridge) && !pairs.iter().any(|(x, y)| x == a && y == b) {
+                pairs.push((a.to_string(), b.to_string()));
+            }
+            i += 4;
+        } else {
+            i += 2;
+        }
+    }
+    let mut out = vec![del(DLXBR_SET, format!("{{ \"{bridge}\" }}"))];
+    out.extend(
+        pairs
+            .into_iter()
+            .map(|(a, b)| del(NETPAIR_MAP, format!("{{ \"{a}\" . \"{b}\" }}"))),
+    );
+    out
 }
 
 /// Installs the DNAT of a published port in the `dlxing`'s `pre` chain (runs in the
@@ -3568,10 +4059,11 @@ fn do_egress_net(bridge: &str, policy: &str) -> Result<()> {
     let bridge = sanitize(bridge);
     // Persists the new policy and re-applies the COMPLETE chain (policy + existing
     // FQDN hosts) — so `egress net` and `egress host` compose.
-    let state = update_netdef_egress(&bridge, |e| e.policy = norm.clone()).unwrap_or(EgressState {
-        policy: norm,
-        hosts: Vec::new(),
-    });
+    let state =
+        update_netdef_egress(&bridge, |e| e.policy = norm.clone())?.unwrap_or(EgressState {
+            policy: norm,
+            hosts: Vec::new(),
+        });
     apply_egress_from_state(&bridge, &state)
 }
 
@@ -3621,7 +4113,7 @@ fn do_egress_host(bridge: &str, suffix: &str) -> Result<()> {
         if !e.hosts.contains(&suffix) {
             e.hosts.push(suffix.clone());
         }
-    })
+    })?
     .unwrap_or(EgressState {
         policy: None,
         hosts: vec![suffix],
@@ -3839,6 +4331,41 @@ fn is_ingress_ip(ip: &str) -> bool {
     delonix_compute::workload_net::is_workload_ipv4(addr)
         && (n[2], n[3]) != (0, 0)
         && (n[2], n[3]) != (255, 255)
+}
+
+/// `true` if `ip` is a workload address the holder may put under the firewall and the
+/// namespace sets: the ingress space ([`is_ingress_ip`]) OR a usable host of a network
+/// declared with its own CIDR.
+///
+/// **Networks created with `--subnet` / `kind: Network` `cidr:` (any RFC 1918 range)
+/// were outside every isolation mechanism.** The holder guarded `firewall`,
+/// `ns_set_join` and `fwstats` with [`is_ingress_ip`] alone, so a container on
+/// `172.20.0.0/24` got no chain (the firewall was refused) and never joined
+/// `@dlxall` (the join returned early in silence) — its own ingress rules did not
+/// exist, and every other namespace's `@dlxall ... drop` did not recognise it as a
+/// container (NaaS audit P0-5).
+///
+/// Still anti-injection, because the text is interpolated into nft: only the
+/// canonical dotted form of an IPv4 address is accepted (so `010.0.0.1` or anything
+/// with extra characters is refused before the containment check), and only inside a
+/// network this node actually declared, never its network or broadcast address.
+fn is_sdn_workload_ip(ip: &str) -> bool {
+    is_ingress_ip(ip) || ip_in_declared_network(ip, &network_list())
+}
+
+/// The pure half of [`is_sdn_workload_ip`]: is `ip` a usable host of one of `defs`?
+fn ip_in_declared_network(ip: &str, defs: &[NetDef]) -> bool {
+    let Ok(parsed) = ip.parse::<std::net::Ipv4Addr>() else {
+        return false;
+    };
+    if parsed.to_string() != ip {
+        return false;
+    }
+    let addr = u32::from(parsed);
+    defs.iter().any(|d| {
+        crate::Cidr::parse(&d.prefix)
+            .is_some_and(|c| c.contains(addr) && addr != c.base && addr != c.last())
+    })
 }
 
 /// Name of the bridge-side `veth` for a netns (deterministic, <= 15 chars).
@@ -4102,14 +4629,71 @@ pub fn parse_fw_counters(listing: &str) -> Vec<(String, u64, u64)> {
     out
 }
 
+/// Refuses a firewall the dataplane could not enforce EXACTLY as written — the whole
+/// spec, before any of it reaches nft.
+///
+/// **This used to be a silent skip inside [`fw_chain_body`].** A rule whose fields
+/// were not `nft_safe` was dropped from the chain and the rest applied, which is
+/// fail-OPEN for the one kind of rule that matters: a `deny` that disappears lets its
+/// traffic fall through to the default policy, and the default is usually `allow`.
+/// The operator saw success and the rule they wrote was not there (NaaS audit P0-2).
+///
+/// The same reasoning covers the fields the generator reads with an `if`: a `dir` that
+/// is not `out` used to be read as `in` (so a mistyped egress deny became an ingress
+/// deny, and the egress stayed open), and a policy that is not `deny` used to be read
+/// as `allow`. Only the values the model documents are accepted. `action` was already
+/// fail-closed (anything but `allow` became a drop) and is held to the same two values
+/// so a typo is reported instead of silently dropping.
+///
+/// Called on BOTH sides: the holder (authoritative — it is the last thing before
+/// `nft -f`, and keeps the previous ruleset in place on a refusal) and
+/// [`apply_firewall_all`] on the host, so an older holder that still skips gets the
+/// refusal from the CLI instead.
+pub fn validate_container_fw(fw: &delonix_model::records::ContainerFw) -> Result<()> {
+    let refuse = |what: String| {
+        Err(Error::FirewallJsonInvalid(format!(
+            "firewall refused, nothing was applied (the previous rules stay in force): {what}"
+        )))
+    };
+    for (field, value) in [("policyIn", &fw.policy_in), ("policyOut", &fw.policy_out)] {
+        if !matches!(value.as_str(), "" | "allow" | "deny") {
+            return refuse(format!("{field} {value:?} is neither `allow` nor `deny`"));
+        }
+    }
+    for (i, r) in fw.rules.iter().enumerate() {
+        let n = i + 1;
+        if !matches!(r.dir.as_str(), "in" | "out") {
+            return refuse(format!(
+                "rule #{n}: direction {:?} is neither `in` nor `out`",
+                r.dir
+            ));
+        }
+        if !matches!(r.action.as_str(), "allow" | "deny") {
+            return refuse(format!(
+                "rule #{n}: action {:?} is neither `allow` nor `deny`",
+                r.action
+            ));
+        }
+        if fw_rule_tail(r).is_none() {
+            return refuse(format!(
+                "rule #{n}: proto {:?} / port {:?} / peer {:?} is not a valid tcp|udp|any, \
+                 port or range, and IPv4 address/CIDR",
+                r.proto, r.port, r.src
+            ));
+        }
+    }
+    Ok(())
+}
+
 pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> String {
     let mut body = String::new();
     if !fw.enabled {
         return body; // empty chain = open (behavior prior to fw/namespace)
     }
     for r in &fw.rules {
-        // Defense against nft injection: skips rules with unsafe fields
-        // (src/proto/port are interpolated into the ruleset fed to `nft -f`).
+        // Defense against nft injection: an unsafe rule is never interpolated. The
+        // skip is NOT the policy — `validate_container_fw` refuses the whole spec
+        // before `do_firewall` gets here; this only keeps the generator safe on its own.
         if !r.nft_safe() {
             continue;
         }
@@ -4119,20 +4703,31 @@ pub fn fw_chain_body(ip: &str, fw: &delonix_model::records::ContainerFw) -> Stri
         };
         body.push_str(&format!("\t\tip {self_dir} {ip} {tail}\n"));
     }
-    // NAMESPACE isolation on INGRESS — only when there is NO explicit inbound
-    // policy (a Dependency/Ingress is authoritative and replaces this): accepts the
-    // same namespace and drops NEW connections from containers of ANOTHER namespace. The
-    // `ct state new` exempts the return (established/related), and the `@dlxall` limits the
-    // drop to sources that ARE SDN containers (lets gateway/DNS/internet through).
-    // The EXPLICIT rules above take precedence (first-match terminal in the chain).
+    // NAMESPACE isolation on INGRESS is a GUARDRAIL: it survives every explicit
+    // inbound rule. It used to be emitted only when there was NO explicit inbound
+    // policy ("a Dependency/Ingress is authoritative and replaces this"), and that
+    // made ANY `in` rule — a `deny tcp/22` included — switch the isolation off: the
+    // chain kept only that rule, and every other namespace reached every other port
+    // (NaaS S1 review, C1). An explicit `allow` still gets through, because the
+    // rules above are first-match terminal (that is how a `kind: Dependency` admits
+    // one peer of another namespace); what no rule can do any more is OPEN the rest.
+    //
+    // The `ct state new` exempts the return (established/related), and the `@dlxall`
+    // limits the drop to sources that ARE SDN workloads (gateway, DNS and the
+    // internet pass). `namespace_isolation_key`, not the raw `fw.namespace`: this is
+    // the side of the attach/chain pair that must agree with the wire token
+    // `attach_container`/`attach_extra_container`/`vmtap_line` compute — see that
+    // function's doc comment for the cross-tenant bypass this closes.
+    let nsset = dlxns_set(&namespace_isolation_key(&fw.namespace));
     let has_explicit_in = fw.policy_in == "deny" || fw.rules.iter().any(|r| r.dir == "in");
-    if !has_explicit_in {
-        // `namespace_isolation_key`, not the raw `fw.namespace`: this is the
-        // side of the attach/chain pair that must agree with the wire token
-        // `attach_container`/`attach_extra_container`/`vmtap_line` compute —
-        // see that function's doc comment for the cross-tenant bypass this
-        // closes.
-        let nsset = dlxns_set(&namespace_isolation_key(&fw.namespace));
+    if has_explicit_in {
+        // The same namespace falls through to the explicit rules' default policy
+        // (an `ingress policy deny` still closes the container to its own
+        // namespace); only another namespace's NEW flows are cut here.
+        body.push_str(&format!(
+            "\t\tip daddr {ip} ip saddr @{DLXALL_SET} ip saddr != @{nsset} ct state new counter drop\n"
+        ));
+    } else {
         body.push_str(&format!(
             "\t\tip daddr {ip} ip saddr @{nsset} counter accept\n"
         ));
@@ -4327,19 +4922,48 @@ pub fn network_routes_live_counted() -> Result<Vec<(String, String, u64, u64)>> 
 /// simply matches none of IP-A's lines.
 fn do_firewall(ips: &str, hex: &str) -> Result<()> {
     let ips: Vec<&str> = ips.split(',').filter(|s| !s.is_empty()).collect();
-    if ips.is_empty() {
-        return Err(Error::FirewallNoIp("firewall: no IP given".into()));
-    }
-    for ip in &ips {
-        if !is_ingress_ip(ip) {
-            return Err(Error::IpOutsideIngressSpace(format!(
-                "IP {ip} outside the ingress space (10.200-254.x)"
-            )));
-        }
-    }
     let bytes = hex_decode(hex).ok_or_else(|| Error::InvalidHex("invalid hex".into()))?;
     let fw: delonix_model::records::ContainerFw = serde_json::from_slice(&bytes)
         .map_err(|e| Error::FirewallJsonInvalid(format!("firewall JSON: {e}")))?;
+    // Reading is outside the transaction, which is harmless: a stale read can only
+    // leave an entry that the next apply removes (see `firewall_script`).
+    let listing =
+        crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, FWMAP]).unwrap_or_default();
+    // The declared networks are only needed for an address outside the ingress space;
+    // the common case does not pay a directory scan per firewall apply.
+    let defs = if ips.iter().all(|ip| is_ingress_ip(ip)) {
+        Vec::new()
+    } else {
+        network_list()
+    };
+    apply_nft_stdin(&firewall_script(&ips, &fw, &listing, &defs)?)
+}
+
+/// The whole `nft -f` transaction [`do_firewall`] applies, or the refusal — PURE, so
+/// what reaches the kernel (and what is refused before it) is testable without a
+/// holder. `listing` is the current `@fwmap`; `defs` are the declared networks, the
+/// only non-ingress addresses a chain may be keyed on ([`ip_in_declared_network`]).
+///
+/// Every refusal happens BEFORE a single line of script exists, so a refused spec
+/// leaves the container's current chain and `@fwmap` entries exactly as they were.
+fn firewall_script(
+    ips: &[&str],
+    fw: &delonix_model::records::ContainerFw,
+    listing: &str,
+    defs: &[NetDef],
+) -> Result<String> {
+    if ips.is_empty() {
+        return Err(Error::FirewallNoIp("firewall: no IP given".into()));
+    }
+    for ip in ips {
+        if !(is_ingress_ip(ip) || ip_in_declared_network(ip, defs)) {
+            return Err(Error::IpOutsideIngressSpace(format!(
+                "IP {ip} is neither in the ingress space (10.200-254.x) nor a host of a \
+                 declared network"
+            )));
+        }
+    }
+    validate_container_fw(fw)?;
     // The chain is named after the PRIMARY IP so it stays stable as extra networks
     // come and go (`do_unfirewall` finds it by the same name).
     let chain = fw_chain_name(ips[0]);
@@ -4350,11 +4974,8 @@ fn do_firewall(ips: &str, hex: &str) -> Result<()> {
     // next tenant this container's firewall; (b) any address we are about to claim
     // that is currently mapped elsewhere — `add element` on an existing key is an
     // error, which would abort the whole transaction and leave the container
-    // unprotected. Reading is outside the transaction, which is harmless: a stale
-    // read can only leave an entry that the next apply removes.
-    let listing =
-        crate::capture("nft", &["list", "map", "ip", INGRESS_TABLE, FWMAP]).unwrap_or_default();
-    let mut stale: Vec<String> = parse_fwmap_elements(&listing)
+    // unprotected.
+    let mut stale: Vec<String> = parse_fwmap_elements(listing)
         .into_iter()
         .filter(|(addr, c)| c == &chain || ips.contains(&addr.as_str()))
         .map(|(addr, _)| addr)
@@ -4366,8 +4987,8 @@ fn do_firewall(ips: &str, hex: &str) -> Result<()> {
     // all anchored to a concrete address, so the container is governed identically on
     // every network it is attached to. The prologue (conntrack fast-path) is emitted
     // once for the whole chain — state belongs to the flow, not to an address.
-    let body: String = std::iter::once(fw_chain_prologue(&fw))
-        .chain(ips.iter().map(|ip| fw_chain_body(ip, &fw)))
+    let body: String = std::iter::once(fw_chain_prologue(fw))
+        .chain(ips.iter().map(|ip| fw_chain_body(ip, fw)))
         .collect();
     let mut script = String::new();
     // Idempotent re-declarations: they let a table created by an older holder grow
@@ -4382,7 +5003,7 @@ fn do_firewall(ips: &str, hex: &str) -> Result<()> {
             "delete element ip {INGRESS_TABLE} {FWMAP} {{ {addr} }}\n"
         ));
     }
-    for ip in &ips {
+    for ip in ips {
         script.push_str(&format!(
             "add element ip {INGRESS_TABLE} {FWMAP} {{ {ip} : jump {chain} }}\n"
         ));
@@ -4390,7 +5011,7 @@ fn do_firewall(ips: &str, hex: &str) -> Result<()> {
     script.push_str(&format!(
         "table ip {INGRESS_TABLE} {{\n\tchain {chain} {{\n{body}\t}}\n}}\n"
     ));
-    apply_nft_stdin(&script)
+    Ok(script)
 }
 
 /// Removes a container's firewall from `dlxing`: drops every `fwmap` entry pointing at
@@ -4544,20 +5165,27 @@ pub struct EgressState {
 /// Updates (and persists) the egress intent of the network whose bridge is `bridge`,
 /// returning the resulting state. `None` if no `NetDef` matches (e.g.:
 /// the default bridge `delonix0`, which is not persisted).
+///
+/// Under the `NetDef` lock ([`netdef_lock`]) — this runs in the HOLDER, and the
+/// CLI's gateway rewrite of the same record used to race it with neither side
+/// locked. `Err` when the lock or the write fails: the egress change is then
+/// refused rather than applied to the dataplane while the record says
+/// otherwise (a holder respawn would silently revert it).
 fn update_netdef_egress(
     bridge: &str,
     mutate: impl FnOnce(&mut EgressState),
-) -> Option<EgressState> {
+) -> Result<Option<EgressState>> {
+    let _lock = netdef_lock()?;
     for mut def in network_list() {
         if def.bridge == bridge {
             mutate(&mut def.egress);
             // Pelo escritor único: escrever aqui à parte era como o registo
             // legado ficava para trás depois de uma mudança de egress.
-            let _ = write_netdef(&def.name, &def);
-            return Some(def.egress);
+            write_netdef(&def.name, &def)?;
+            return Ok(Some(def.egress));
         }
     }
-    None
+    Ok(None)
 }
 
 /// Builds a bridge's COMPLETE egress chain from the combined state
@@ -4929,6 +5557,18 @@ fn fqdn_register(bridge: &str, set: &str, hosts: &[String]) {
             }
         }
     }
+}
+
+/// Forgets a removed bridge's FQDN allowlist: the DNS thread stops feeding its set,
+/// and the set itself goes (its rules were removed first, or nft would refuse).
+fn fqdn_forget(bridge: &str) {
+    if let Ok(mut g) = FQDN_ALLOW.lock() {
+        g.retain(|(b, _, _)| b != bridge);
+    }
+    run_ok(
+        "nft",
+        &["delete", "set", "ip", INGRESS_TABLE, &fqdn_set(bridge)],
+    );
 }
 
 fn networks_dir() -> PathBuf {
@@ -5460,16 +6100,34 @@ pub fn network_get(name: &str) -> Option<NetDef> {
 
 /// Lists the defined ingress private networks.
 pub fn network_list() -> Vec<NetDef> {
+    network_list_in(&base_root())
+}
+
+/// [`network_list`] under an explicit state root — for the `NetworkStore`,
+/// which is opened on a root of its own and has to see the `NetDef`s of THAT
+/// root when it picks a free `/16` (see [`crate::used_bases`]).
+pub(crate) fn network_list_in(root: &std::path::Path) -> Vec<NetDef> {
+    let dir = root.join("ingress").join("networks");
     let mut v: Vec<NetDef> = Vec::new();
-    if let Ok(rd) = std::fs::read_dir(networks_dir()) {
+    if let Ok(rd) = std::fs::read_dir(&dir) {
         for e in rd.flatten() {
+            // RECORDS only — `<name>-<hash>.json` and the legacy `<name>.json` —,
+            // skipped by NAME, not by failing to parse. `write_atomic` writes a
+            // `.<record>.json.<pid>.<n>.tmp` next to the record and renames it;
+            // between `sync_all` and `rename` that temp holds the WHOLE JSON.
+            // Read as a record, it was a network seen before it was published
+            // and, if the process dies in that window, a ghost forever:
+            // `network_get` cannot find it, yet the allocator counts its `/16`.
+            if e.path().extension().is_none_or(|x| x != "json") {
+                continue;
+            }
             if let Ok(def) =
                 serde_json::from_slice::<NetDef>(&std::fs::read(e.path()).unwrap_or_default())
             {
                 // Uma rede com registo legado E novo (a meio da migração) é UMA
                 // rede. Sem isto, apareceria duas vezes no `network ls` e — pior
                 // — duas vezes no conjunto de prefixos usados que a alocação lê.
-                let novo = e.path() == netdef_path(&def.name);
+                let novo = e.file_name() == netdef_path(&def.name).file_name().unwrap_or_default();
                 match v.iter_mut().find(|d| d.name == def.name) {
                     Some(ja) if novo => *ja = def,
                     Some(_) => {}
@@ -5501,30 +6159,65 @@ pub fn network_create(name: &str) -> Result<NetDef> {
     //
     // Same mechanism as `NetworkStore::create` (and as `ipam::IpamLock`, whose
     // doc records what happens when a lock that guards uniqueness fails open).
-    let trinco = networks_lock();
-    let _lock = crate::flock::ExclusiveLock::acquire(&trinco).ok_or_else(|| {
+    //
+    // And it is the SAME lock the `NetworkStore` allocates under — the one
+    // allocator of `/16`s, not a second one beside it. This function used to
+    // walk 10.201–254 over the `NetDef`s alone while `NetworkStore::create`
+    // walked 10.200–254 over its records alone: a network this one made (a
+    // VM's `ensure_network`) was invisible to the other, and the next `network
+    // create` could land on the same `/16`. Store lock first, `NetDef` lock
+    // second — the order every path takes.
+    let root = base_root();
+    let store_lock = crate::NetworkStore::lock_path_in(&root);
+    let _store = crate::flock::ExclusiveLock::acquire(&store_lock).ok_or_else(|| {
         crate::flock::ExclusiveLock::unavailable(
-            &trinco,
+            &store_lock,
             "an unsynchronised allocation can put two networks on the same /16",
         )
     })?;
+    let _lock = netdef_lock()?;
     // Re-check UNDER the lock: another process may have created this very name
     // while we waited for it. Without this, the winner's `NetDef` would be
     // overwritten by ours, moving the bridge under whatever is already attached.
     if let Some(def) = network_get(name) {
         return Ok(def);
     }
-    let used: std::collections::HashSet<String> =
-        network_list().into_iter().map(|d| d.prefix).collect();
-    let prefix = (201..=254)
-        .map(|o| format!("10.{o}"))
-        .find(|p| !used.contains(p))
-        .ok_or_else(|| {
-            Error::NoFreeIngressPrefix("no free /16 prefixes for ingress networks".into())
-        })?;
+    // A network the registry already declares keeps ITS prefix: realizing it
+    // here on another `/16` would give its VMs a different subnet from its
+    // containers.
+    let prefix = match crate::NetworkStore::open(&root).and_then(|s| s.get(name)) {
+        Ok(n) if !n.is_lan_driver() => n.prefix,
+        _ => {
+            let used = crate::used_bases(&root);
+            let base = crate::pick_user_base(crate::first_user_base(), &used).ok_or_else(|| {
+                Error::NoFreeIngressPrefix("no free /16 prefixes for ingress networks".into())
+            })?;
+            format!("10.{base}")
+        }
+    };
     let def = NetDef::new(name, &prefix);
     write_netdef(name, &def)?;
     Ok(def)
+}
+
+/// The lock of the `NetDef` registry. Every read-modify-write of a `NetDef`
+/// takes it — `network_create`, `network_create_with_gateway`,
+/// `network_remove` and the holder's `update_netdef_egress` — because three of
+/// the four used to write with no lock at all, and a gateway change racing an
+/// egress change lost one of them (measured: 60 concurrent egress writes
+/// against gateway rewrites, 0 survived).
+///
+/// Never held across a `control_send`: the holder takes this same lock in
+/// `update_netdef_egress`, so a caller waiting on the holder while holding it
+/// would wait forever.
+fn netdef_lock() -> Result<crate::flock::ExclusiveLock> {
+    let trinco = networks_lock();
+    crate::flock::ExclusiveLock::acquire(&trinco).ok_or_else(|| {
+        crate::flock::ExclusiveLock::unavailable(
+            &trinco,
+            "two writers of one network record can each erase the other's change",
+        )
+    })
 }
 
 /// Like [`network_create`], but with an **explicit prefix** (e.g.: `"10.50"`) and,
@@ -5545,6 +6238,7 @@ pub fn network_create_with_gateway(
     prefix: &str,
     gateway: Option<&str>,
 ) -> Result<NetDef> {
+    let _lock = netdef_lock()?;
     if let Some(mut def) = network_get(name) {
         // The PREFIX was the half still being dropped on the floor. It is not a
         // preference like the gateway — it is the address space every container
@@ -5601,9 +6295,15 @@ fn write_netdef(name: &str, def: &NetDef) -> Result<()> {
         context: "netdef",
         message: e.to_string(),
     })?;
-    std::fs::write(netdef_path(name), body).map_err(|e| Error::Command {
-        context: "netdef",
-        message: e.to_string(),
+    // Atomic: `network_get`/`network_list` read without the lock (`resolve_net`
+    // on every attach, the holder on every bridge), and a torn file read as
+    // «no such network» — the egress write that found no `NetDef` was simply
+    // dropped.
+    delonix_state::write_atomic(&netdef_path(name), body.as_bytes()).map_err(|e| {
+        Error::Command {
+            context: "netdef",
+            message: e.to_string(),
+        }
     })?;
     // O registo antigo desta MESMA rede desaparece agora que há um novo, para o
     // `network_list` não a ver duas vezes. Só o desta rede: um ficheiro legado
@@ -5633,6 +6333,14 @@ pub fn network_remove(name: &str) {
     // `control_send` fails right away if the holder is down (network with no workloads) —
     // the bridge never lived in a netns, nothing to delete. Best-effort.
     let _ = control_send(&format!("netdel {}", def.bridge));
+    // The record under the lock, AFTER the `control_send` (never across it).
+    let _lock = match netdef_lock() {
+        Ok(l) => l,
+        Err(e) => {
+            tracing::error!(network = %name, "network record kept: {e}");
+            return;
+        }
+    };
     let _ = std::fs::remove_file(netdef_path(name));
     // E o legado, se for MESMO desta rede — senão a rede reapareceria no
     // próximo `ls`, com a bridge que se acabou de apagar.
@@ -5840,7 +6548,13 @@ pub fn attach_container(id: &str, net: &str, namespace: &str) -> Result<(String,
 fn restore_lease(prefix: &str, id: &str, previous: Option<String>) {
     match previous {
         None => crate::ipam::release(prefix, id),
-        Some(ip) => crate::ipam::reserve(prefix, id, &ip),
+        Some(ip) => {
+            if let Err(e) = crate::ipam::reserve(prefix, id, &ip) {
+                // Only the lock can fail here (the address was this id's own):
+                // say so, since the next attach may then get another address.
+                tracing::warn!(container_id = %id, "could not restore the lease {ip}: {e}");
+            }
+        }
     }
 }
 
@@ -5876,7 +6590,10 @@ pub fn attach_container_on_ip(
         )));
     }
     let previous_lease = crate::ipam::lookup(&prefix, id);
-    crate::ipam::reserve(&prefix, id, ip);
+    // Refused BEFORE anything is wired: an address the registry could not
+    // record (no lock, another owner, the VM DHCP pool) is an address the next
+    // container can be handed too. This used to log and carry on.
+    crate::ipam::reserve(&prefix, id, ip)?;
     if let Err(e) = acquire(id) {
         restore_lease(&prefix, id, previous_lease);
         return Err(e);
@@ -5974,21 +6691,43 @@ pub fn clear_net_rate(id: &str) {
 /// holder to remove the extra `veth` and frees the IP lease on that network. `ip` is the
 /// container's IP on the additional network (from the `ExtraNet` record). Best-effort.
 pub fn detach_extra_container(id: &str, idx: u32, ip: &str) {
+    detach_extra_container_keep_lease(id, idx, ip);
+    crate::ipam::release(&crate::ipam::key_for_ip(ip), id); // frees the extra network's lease
+}
+
+/// [`detach_extra_container`] for a `stop`: the wire goes, the lease stays — see
+/// [`detach_container_keep_lease`].
+pub fn detach_extra_container_keep_lease(id: &str, idx: u32, ip: &str) {
     let netns = sanitize(id);
     let ifname = format!("eth{idx}");
     let _ = control_send(&format!("detach-extra {netns} {ifname}"));
     let _ = control_send(&format!("nsleave {ip}"));
-    crate::ipam::release(&crate::ipam::key_for_ip(ip), id); // frees the extra network's lease
 }
 
 /// **Detaches a container from the ingress**: clears the firewall (on its `ip`), asks the
-/// holder for the `detach` and lowers the ref-count (tears down the infra on the last). Best-effort.
+/// holder for the `detach` and lowers the ref-count (tears down the infra on the last),
+/// and frees the lease. For a container that is GOING AWAY (`rm`, a `run` that failed);
+/// a `stop` uses [`detach_container_keep_lease`]. Best-effort.
 pub fn detach_container(id: &str, ip: &str) {
+    detach_container_keep_lease(id, ip);
+    crate::ipam::release(&crate::ipam::key_for_ip(ip), id); // frees the IP lease
+}
+
+/// The dataplane half of [`detach_container`]: the container leaves the wire
+/// and the ref-count, and KEEPS its lease.
+///
+/// This is what a `stop` means. The lease belongs to the container for as long
+/// as the container exists, and everything keyed on its address outlives a
+/// stop — the record's `ip`, a DNS name, a `Dependency` or an access rule
+/// written against it, the address a client has cached. `stop` used to free it,
+/// so a `start` after anyone else's attach could come back on a DIFFERENT
+/// address: the very move [`restore_lease`] exists to prevent on a failed
+/// re-attach, done on purpose on every stop. `rm` frees it.
+pub fn detach_container_keep_lease(id: &str, ip: &str) {
     let netns = sanitize(id);
     let _ = control_send(&format!("unfirewall {ip}"));
     let _ = control_send(&format!("detach {netns}"));
     let _ = control_send(&format!("nsleave {ip}"));
-    crate::ipam::release(&crate::ipam::key_for_ip(ip), id); // frees the IP lease
     release(id); // removes the ref marker (teardown when it becomes empty)
 }
 
@@ -6018,6 +6757,12 @@ pub fn apply_firewall_all(
     if ips.is_empty() {
         return Err(Error::FirewallNoIp("apply_firewall: no IP given".into()));
     }
+    // Also checked by the holder; checking here too is what protects a node whose
+    // holder predates the refusal and would still skip the bad rule.
+    validate_container_fw(fw)?;
+    // An egress rule written into an old single-chain dispatch is void (P0-1): the
+    // dispatch is brought current before any rule is sent.
+    ensure_fw_dispatch_current()?;
     let json = serde_json::to_vec(fw).map_err(|e| Error::FirewallEncodeFailed(e.to_string()))?;
     control_send(&format!(
         "firewall {} {} {}",
@@ -6213,6 +6958,32 @@ fn vmtap_line(tap: &str, bridge: &str, gateway: &str, ip: Option<&str>, namespac
     }
 }
 
+/// Refuses a namespaced VM whose address cannot be derived — before anything is
+/// attached.
+///
+/// The address the guest WILL get is what both halves of the isolation are keyed
+/// on: the membership in `@dlxall`/`@dlxns_<ns>` and the VM's own chain. On a
+/// network with a CIDR prefix [`dhcp_lease_ip`] has no answer (and the holder's
+/// DHCP does not serve such a network either), so the attach used to go ahead
+/// with the 4-token `vmtap` line and NO chain: a VM of `teamA` reachable from
+/// every namespace, reported as attached (NaaS S1 review, A3). The `default`
+/// namespace has nothing to isolate and keeps working as before.
+fn vm_isolation_derivable(
+    net: &str,
+    prefix: &str,
+    namespace: &str,
+    lease: Option<&str>,
+) -> Result<()> {
+    if namespace == "default" || lease.is_some() {
+        return Ok(());
+    }
+    Err(Error::SubnetNotSupported(format!(
+        "network '{net}' ({prefix}) gives a VM no address the engine can derive, so a VM in \
+         namespace '{namespace}' cannot be isolated on it — its prefix has no VM DHCP pool; use \
+         another network, or the `default` namespace"
+    )))
+}
+
 /// `mac` is the guest's MAC (deterministic from the VM name — see
 /// `delonix_vm::mac_for`) and `namespace` its logical isolation namespace.
 /// Together they are what makes a VM a first-class citizen of the namespace
@@ -6237,12 +7008,27 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
     // Ref key `vm-<name>` — its own namespace, distinct from the container ids
     // and the `cri-*` pods; the `prune` reaper preserves the `vm-*` (managed by
     // another store) just like the `cri-*`.
-    acquire(&format!("vm-{vm}"))?;
-    let tap = vm_tap_name(vm);
+    let owner = format!("vm-{vm}");
     let lease = dhcp_lease_ip(&prefix, mac);
+    vm_isolation_derivable(net, &prefix, namespace, lease.as_deref())?;
+    // The DHCP address goes into the IPAM under the same `vm-<name>` key as the
+    // ref marker (so the reaper's liveness — `attached_refs` — covers it): it is
+    // what makes two VMs whose MACs hash onto one address a refusal here rather
+    // than two guests answering ARP for one IP, and what shows a VM's address in
+    // `network ipam ls`.
+    let previous_lease = crate::ipam::lookup(&prefix, &owner);
+    if let Some(ip) = &lease {
+        crate::ipam::reserve_vm_dhcp(&prefix, &owner, ip)?;
+    }
+    if let Err(e) = acquire(&owner) {
+        restore_lease(&prefix, &owner, previous_lease);
+        return Err(e);
+    }
+    let tap = vm_tap_name(vm);
     let line = vmtap_line(&tap, &bridge, &gateway, lease.as_deref(), namespace);
     if let Err(e) = control_send(&line) {
-        release(&format!("vm-{vm}"));
+        release(&owner);
+        restore_lease(&prefix, &owner, previous_lease);
         return Err(e);
     }
     // The chain is what actually DROPS cross-namespace traffic; the set
@@ -6256,7 +7042,14 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
                 namespace: namespace.to_string(),
                 ..Default::default()
             };
-            apply_firewall(&format!("vm-{vm}"), ip, &fw)?;
+            // A refused chain undoes the whole attach. The `?` used to return with
+            // the tap on the bridge, the address in the namespace sets and the
+            // `vm-<name>` ref marker held — a VM that never booted keeping the
+            // holder up and a tap nobody would delete, until a `system prune`.
+            if let Err(e) = apply_firewall(&format!("vm-{vm}"), ip, &fw) {
+                vm_detach(vm, Some(ip));
+                return Err(e);
+            }
         }
     }
     Ok(tap)
@@ -6269,11 +7062,21 @@ pub fn vm_attach(vm: &str, net: &str, mac: &str, namespace: &str) -> Result<Stri
 /// recomputed with [`dhcp_lease_ip`]); `None` skips the firewall teardown, which
 /// is right for the orphan-cleanup path where there is no record to trust.
 pub fn vm_detach(vm: &str, ip: Option<&str>) {
+    let owner = format!("vm-{vm}");
     if let Some(ip) = ip {
         clear_firewall(ip);
+        // The membership `vmtap` gave the address in `@dlxall`/`@dlxns_*`. Nothing
+        // took it back, so every VM that ever ran in a namespace stayed a member —
+        // the container detach already sends this line for the same reason.
+        let _ = control_send(&format!("nsleave {ip}"));
     }
     let _ = control_send(&format!("vmtapdel {}", vm_tap_name(vm)));
-    release(&format!("vm-{vm}"));
+    match ip {
+        Some(ip) => crate::ipam::release(&crate::ipam::key_for_ip(ip), &owner),
+        // No address to find the network by (the orphan cleanup): every registry.
+        None => crate::ipam::release_everywhere(&owner),
+    }
+    release(&owner);
 }
 
 /// `argv` to run a process (QEMU) INSIDE the holder's infra netns
@@ -6422,7 +7225,23 @@ pub fn publish_port(cip: &str, spec: &str) -> Result<()> {
         host_addr.as_deref(),
     )?;
     // tap0:host_port → container:cont_port (DNAT in the infra netns, via the holder).
-    control_send(&format!("publish {proto} {host_port} {cip} {cont_port}"))
+    //
+    // If the DNAT is refused, the hostfwd above has to go with it. It used to stay:
+    // the caller got an error and no record, and the host port stayed LISTENING in
+    // the shared slirp with nothing behind it and nobody who would ever remove it —
+    // the same orphan `wire_network`'s rollback left (see there). A successful `add_hostfwd` means the bind was ours — the slirp refuses a
+    // second one on the same address — so removing that exact entry never takes
+    // another publication with it.
+    if let Err(e) = control_send(&format!("publish {proto} {host_port} {cip} {cont_port}")) {
+        slirp_remove_hostfwd_exact(
+            &slirp_sock_path(),
+            &host_port,
+            &proto,
+            &crate::publish_bind_addr(host_addr.as_deref()),
+        );
+        return Err(e);
+    }
+    Ok(())
 }
 
 // REMOVED: `publish_port_allow` / the `publish-allow` control verb — a pre-DNAT
@@ -6645,32 +7464,70 @@ fn hostfwd_entries(v: &serde_json::Value) -> Option<&Vec<serde_json::Value>> {
 /// the record still claiming `18100:53/tcp` while nothing was bound and `curl` got
 /// nothing. Removal now mirrors publication.
 pub fn slirp_remove_hostfwd_proto(sock: &Path, host_port: &str, proto: Option<&str>) -> Result<()> {
+    slirp_remove_hostfwd_matching(sock, host_port, proto, None)
+}
+
+/// Removes ONLY the hostfwd a publish of ours has just added: same port, same
+/// proto, same host address. The rollback of [`publish_port`].
+///
+/// Narrower than [`slirp_remove_hostfwd_proto`] on purpose. Two publications of
+/// one port on two different host addresses coexist in the slirp (`127.0.0.1:8080`
+/// and `192.168.1.5:8080` both bind), and undoing OUR half-done publish must not
+/// take down another container's working one.
+fn slirp_remove_hostfwd_exact(sock: &Path, host_port: &str, proto: &str, host_addr: &str) {
+    let _ = slirp_remove_hostfwd_matching(sock, host_port, Some(proto), Some(host_addr));
+}
+
+fn slirp_remove_hostfwd_matching(
+    sock: &Path,
+    host_port: &str,
+    proto: Option<&str>,
+    host_addr: Option<&str>,
+) -> Result<()> {
     trace_unpublish("slirp_remove_hostfwd", host_port);
     let hp: u32 = host_port
         .parse()
         .map_err(|_| Error::InvalidPort("invalid port".into()))?;
     let listed = slirp_api(sock, r#"{"execute":"list_hostfwd"}"#)?;
     let v: serde_json::Value = serde_json::from_str(&listed).unwrap_or(serde_json::Value::Null);
-    if let Some(entries) = hostfwd_entries(&v) {
-        for e in entries {
-            if e.get("host_port").and_then(|p| p.as_u64()) != Some(hp as u64) {
-                continue;
-            }
-            // An entry whose proto the slirp doesn't report is NOT skipped when a proto
-            // was asked for — better to remove a publication we can't disambiguate than
-            // to leave the host port held by something the record no longer knows about.
-            if let (Some(want), Some(have)) = (proto, e.get("proto").and_then(|p| p.as_str())) {
-                if !have.eq_ignore_ascii_case(want) {
-                    continue;
-                }
-            }
-            if let Some(id) = e.get("id").and_then(|i| i.as_u64()) {
-                let cmd = format!(r#"{{"execute":"remove_hostfwd","arguments":{{"id":{id}}}}}"#);
-                let _ = slirp_api(sock, &cmd);
-            }
-        }
+    for id in hostfwd_ids_matching(&v, hp, proto, host_addr) {
+        let cmd = format!(r#"{{"execute":"remove_hostfwd","arguments":{{"id":{id}}}}}"#);
+        let _ = slirp_api(sock, &cmd);
     }
     Ok(())
+}
+
+/// The ids of the `list_hostfwd` entries on `host_port`, narrowed by `proto` and
+/// `host_addr` when given. PURE — the matching is what decides whose publication
+/// goes, so it is testable against a canned listing.
+fn hostfwd_ids_matching(
+    v: &serde_json::Value,
+    host_port: u32,
+    proto: Option<&str>,
+    host_addr: Option<&str>,
+) -> Vec<u64> {
+    let Some(entries) = hostfwd_entries(v) else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter(|e| e.get("host_port").and_then(|p| p.as_u64()) == Some(host_port as u64))
+        // An entry whose proto the slirp doesn't report is NOT skipped when a proto
+        // was asked for — better to remove a publication we can't disambiguate than
+        // to leave the host port held by something the record no longer knows about.
+        .filter(|e| match (proto, e.get("proto").and_then(|p| p.as_str())) {
+            (Some(want), Some(have)) => have.eq_ignore_ascii_case(want),
+            _ => true,
+        })
+        // The address, by contrast, is only ever asked for by the rollback, which
+        // knows exactly what it added: an entry that does not say is not ours to
+        // take.
+        .filter(|e| match host_addr {
+            Some(want) => e.get("host_addr").and_then(|a| a.as_str()) == Some(want),
+            None => true,
+        })
+        .filter_map(|e| e.get("id").and_then(|i| i.as_u64()))
+        .collect()
 }
 
 /// [`slirp_remove_hostfwd_proto`] for every proto on the port (teardown paths:
@@ -6958,10 +7815,21 @@ fn link_exists(name: &str) -> bool {
 /// process-local static, so a fresh process starts with an empty set and every
 /// bridge legitimately needs one again — the default ingress plus each private
 /// network's own.
+///
+/// The one piece of KERNEL state it does rewrite is the firewall dispatch, and only
+/// because a table built by an older control can carry the single-chain dispatch
+/// whose `accept` skipped the source's egress (see [`fw_dispatch_chains`]). That
+/// rewrite is one atomic, idempotent transaction and leaves every per-container
+/// chain and `@fwmap` untouched. It is `?`: a control that cannot put the dispatch
+/// in its safe shape must not come up announcing a working firewall.
 fn reattach_or_setup_infra_netns() -> Result<()> {
     if !infra_netns_already_built() {
-        return setup_infra_netns();
+        setup_infra_netns()?;
+        mark_fw_dispatch_current();
+        return Ok(());
     }
+    apply_nft_stdin(&fw_dispatch_migration_script())?;
+    mark_fw_dispatch_current();
     start_dhcp(INFRA_BRIDGE, INFRA_PREFIX);
     for def in network_list() {
         if link_exists(&def.bridge) {
@@ -8703,8 +9571,19 @@ Inter-|   Receive                                                |  Transmit
         assert!(body.contains("ip saddr 10.200.0.5 counter drop"), "{body}");
         // policy in=deny → final drop on the daddr
         assert!(body.contains("ip daddr 10.200.0.5 counter drop"), "{body}");
-        // EXPLICIT inbound policy (deny) → does NOT emit namespace rules.
-        assert!(!body.contains("@dlxall"), "{body}");
+        // EXPLICIT inbound policy (deny) → the namespace guardrail stays, and it is
+        // the only namespace line: the same namespace falls to the policy.
+        let def = dlxns_set("default");
+        assert!(
+            body.contains(&format!(
+                "ip daddr 10.200.0.5 ip saddr @dlxall ip saddr != @{def} ct state new counter drop"
+            )),
+            "{body}"
+        );
+        assert!(
+            !body.contains(&format!("ip saddr @{def} counter accept")),
+            "{body}"
+        );
         // disabled → empty body
         let off = delonix_model::records::ContainerFw {
             enabled: false,
@@ -8787,6 +9666,105 @@ Inter-|   Receive                                                |  Transmit
         );
         assert!(
             body.contains("ip daddr 10.200.0.7 ip saddr @dlxall ct state new counter drop"),
+            "{body}"
+        );
+    }
+
+    /// REGRESSION (NaaS S1 review, C1): one explicit inbound rule — a `deny` of a
+    /// single port — used to switch namespace isolation off for the WHOLE
+    /// container: the chain kept only that rule, and a container of any other
+    /// namespace reached every other port. The guardrail is now emitted after the
+    /// explicit rules and before the policy, so a `deny` never opens anything and
+    /// an explicit `allow` (a `kind: Dependency`) still admits its one peer.
+    /// Found by the chaos run of this very change: a `run --net` whose re-exec
+    /// reached the migration from INSIDE the pin's user namespace got `nsenter:
+    /// reassociate to namespace 'ns/user' failed: Invalid argument`, and the
+    /// container did not start. The guard reads the namespace, not a flag.
+    #[test]
+    fn a_process_is_in_its_own_user_namespace_and_not_in_a_dead_pids() {
+        assert!(same_user_namespace(std::process::id() as i32));
+        assert!(!same_user_namespace(i32::MAX));
+    }
+
+    #[test]
+    fn the_dispatch_migration_enters_only_the_pins_user_and_network_namespaces() {
+        let a = fw_dispatch_nsenter_args("4242");
+        assert_eq!(
+            a,
+            [
+                "-t",
+                "4242",
+                "-U",
+                "-n",
+                "--preserve-credentials",
+                "--",
+                "nft",
+                "-f",
+                "-"
+            ]
+        );
+        // The script it feeds is the reattach one: both chains, flushed and re-added.
+        let s = fw_dispatch_migration_script();
+        assert!(s.contains("flush chain ip dlxing fwout"), "{s}");
+        assert!(s.contains("flush chain ip dlxing fwcont"), "{s}");
+    }
+
+    #[test]
+    fn a_namespaced_vm_without_a_derivable_address_is_refused_before_attaching() {
+        // No lease → refused, naming the network and the namespace.
+        let e = vm_isolation_derivable("lab", "10.77.0.0/16", "teama", None)
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains("lab") && e.contains("teama"), "{e}");
+        // `default` has nothing to isolate; a derivable address is fine.
+        vm_isolation_derivable("lab", "10.77.0.0/16", "default", None).unwrap();
+        vm_isolation_derivable("net", "10.230", "teama", Some("10.230.254.12")).unwrap();
+        // A CIDR network is no longer such a case: every usable prefix has a pool
+        // inside itself (`crate::vm_dhcp_pool`), so a namespaced VM on one gets an
+        // address — and its isolation — instead of this refusal.
+        for net in ["10.77.0.0/16", "172.20.9.0/24"] {
+            let lease = dhcp_lease_ip(net, "52:54:00:12:34:56");
+            assert!(lease.is_some(), "{net}");
+            vm_isolation_derivable("lab", net, "teama", lease.as_deref()).unwrap();
+        }
+    }
+
+    #[test]
+    fn an_explicit_inbound_rule_keeps_namespace_isolation() {
+        let rule = |action: &str, port: &str, src: &str| delonix_model::records::FwRule {
+            dir: "in".into(),
+            proto: "tcp".into(),
+            port: port.into(),
+            src: src.into(),
+            action: action.into(),
+            note: String::new(),
+            origin: None,
+        };
+        let fw = delonix_model::records::ContainerFw {
+            enabled: true,
+            namespace: "teama".into(),
+            rules: vec![rule("deny", "22", ""), rule("allow", "5432", "10.201.0.9")],
+            ..Default::default()
+        };
+        let body = fw_chain_body("10.200.0.7", &fw);
+        let nsset = dlxns_set("teama");
+        let guard = format!(
+            "ip daddr 10.200.0.7 ip saddr @dlxall ip saddr != @{nsset} ct state new counter drop"
+        );
+        assert!(body.contains(&guard), "{body}");
+        let at = |needle: &str| {
+            body.find(needle)
+                .unwrap_or_else(|| panic!("{needle}: {body}"))
+        };
+        // After the explicit rules (the Dependency-style allow still wins)...
+        assert!(at("tcp dport 22 counter drop") < at(&guard), "{body}");
+        assert!(
+            at("ip saddr 10.201.0.9 tcp dport 5432 counter accept") < at(&guard),
+            "{body}"
+        );
+        // ...and the same namespace is not blanket-accepted past the explicit rules.
+        assert!(
+            !body.contains(&format!("ip saddr @{nsset} counter accept")),
             "{body}"
         );
     }
@@ -9095,6 +10073,218 @@ Inter-|   Receive                                                |  Transmit
             "fwguard ({guard}) must run before every other hook: {priorities:?}"
         );
         assert!(priorities.iter().filter(|p| **p == guard).count() == 1);
+    }
+
+    /// The forward-hook base chains of a ruleset, as `(name, priority, rule lines)`.
+    fn forward_base_chains(rs: &str) -> Vec<(String, i32, Vec<String>)> {
+        let mut out = Vec::new();
+        let lines: Vec<&str> = rs.lines().collect();
+        for (i, l) in lines.iter().enumerate() {
+            let Some(name) = l
+                .trim()
+                .strip_prefix("chain ")
+                .and_then(|r| r.split_whitespace().next())
+            else {
+                continue;
+            };
+            let Some((_, rest)) = l.split_once("hook forward priority ") else {
+                continue;
+            };
+            let prio: i32 = rest
+                .split(|c: char| c == ';' || c.is_whitespace())
+                .next()
+                .and_then(|p| p.parse().ok())
+                .expect("a numeric priority");
+            let body = lines[i + 1..]
+                .iter()
+                .take_while(|b| b.trim() != "}")
+                .map(|b| b.trim().to_string())
+                .filter(|b| !b.is_empty())
+                .collect();
+            out.push((name.to_string(), prio, body));
+        }
+        out
+    }
+
+    /// NaaS audit P0-1. With both lookups in ONE base chain, the destination's
+    /// `accept` ended that base chain and the source's egress chain was never walked —
+    /// measured live: `egress policy deny` on A, A→B (same namespace) 3/3, A's drop
+    /// counter 0. The fix is a property of the base ruleset: the SOURCE lookup sits in
+    /// its own base chain, evaluated before the destination's, so an accept there only
+    /// ends that chain and a drop there is final.
+    #[test]
+    fn the_source_egress_is_its_own_base_chain_evaluated_before_the_destination() {
+        let rs = ingress_table_ruleset();
+        let chains = forward_base_chains(&rs);
+        let holding = |rule: &str| -> Vec<(String, i32)> {
+            chains
+                .iter()
+                .filter(|(_, _, body)| body.iter().any(|b| b == rule))
+                .map(|(n, p, _)| (n.clone(), *p))
+                .collect()
+        };
+        let by_src = holding("ip saddr vmap @fwmap");
+        let by_dst = holding("ip daddr vmap @fwmap");
+        assert_eq!(by_src.len(), 1, "one source dispatch: {chains:?}");
+        assert_eq!(by_dst.len(), 1, "one destination dispatch: {chains:?}");
+        let ((src_chain, src_prio), (dst_chain, dst_prio)) = (&by_src[0], &by_dst[0]);
+        assert_ne!(
+            src_chain, dst_chain,
+            "the two lookups in one base chain let the destination's accept skip the \
+             source's egress: {chains:?}"
+        );
+        assert!(src_prio < dst_prio, "the source decides first: {chains:?}");
+        // Still inside the network-wide policy and before the default forward.
+        let prio_of = |n: &str| chains.iter().find(|c| c.0 == n).map(|c| c.1).unwrap();
+        assert!(prio_of("fwdeny") < *src_prio && *dst_prio < prio_of("forward"));
+        // Nothing else shares a priority with the dispatch: equal priorities have no
+        // defined order between them.
+        for p in [src_prio, dst_prio] {
+            assert_eq!(chains.iter().filter(|c| c.1 == *p).count(), 1, "{chains:?}");
+        }
+    }
+
+    /// The base ruleset is only loaded when the infra netns is BUILT, so a control
+    /// restarted by this binary over a table an older one created would keep the P0-1
+    /// dispatch forever. The migration applied on reattach has to end in exactly the
+    /// shape a fresh setup has, and has to be safe to run twice (every restart).
+    #[test]
+    fn the_dispatch_migration_ends_in_the_shape_of_a_fresh_install() {
+        let script = fw_dispatch_migration_script();
+        let fresh = forward_base_chains(&ingress_table_ruleset());
+        for (chain, prio, rule) in fw_dispatch_chains() {
+            // Idempotent: flushed then refilled, never appended to.
+            let flush = format!("flush chain ip {INGRESS_TABLE} {chain}\n");
+            let add = format!("add rule ip {INGRESS_TABLE} {chain} {rule}\n");
+            assert!(script.contains(&flush) && script.contains(&add), "{script}");
+            assert!(script.find(&flush) < script.find(&add), "{script}");
+            assert_eq!(script.matches(&add).count(), 1, "{script}");
+            assert!(
+                script.contains(&format!("hook forward priority {prio};")),
+                "{script}"
+            );
+            let (_, p, body) = fresh.iter().find(|c| c.0 == chain).expect("in the ruleset");
+            assert_eq!((*p, body.clone()), (prio, vec![rule.clone()]));
+        }
+        // The old `fwcont` carried BOTH lookups; only a flush removes the second one.
+        assert!(script.contains(&format!("flush chain ip {INGRESS_TABLE} fwcont")));
+        assert!(
+            !script.contains("delete"),
+            "must not touch per-container state: {script}"
+        );
+    }
+
+    fn fw_rule(
+        dir: &str,
+        proto: &str,
+        port: &str,
+        src: &str,
+        action: &str,
+    ) -> delonix_model::records::FwRule {
+        delonix_model::records::FwRule {
+            dir: dir.into(),
+            proto: proto.into(),
+            port: port.into(),
+            src: src.into(),
+            action: action.into(),
+            note: String::new(),
+            origin: None,
+        }
+    }
+
+    fn fw_with(rules: Vec<delonix_model::records::FwRule>) -> delonix_model::records::ContainerFw {
+        delonix_model::records::ContainerFw {
+            enabled: true,
+            policy_in: String::new(),
+            policy_out: String::new(),
+            rules,
+            namespace: "teamA".into(),
+        }
+    }
+
+    /// NaaS audit P0-2. A rule the generator cannot render used to be SKIPPED and the
+    /// rest applied: a `deny` vanished and its traffic fell into the default (allow).
+    /// Now the whole spec is refused before a line of nft exists — which is what keeps
+    /// the previous ruleset in force.
+    #[test]
+    fn an_invalid_rule_refuses_the_whole_firewall_instead_of_being_skipped() {
+        let ip = ["10.200.0.5"];
+        let good = fw_rule("out", "tcp", "5432", "10.200.0.9", "deny");
+        let ok = firewall_script(&ip, &fw_with(vec![good.clone()]), "", &[]).expect("valid");
+        assert!(
+            ok.contains("ip saddr 10.200.0.5 ip daddr 10.200.0.9 tcp dport 5432 counter drop"),
+            "{ok}"
+        );
+
+        let bad_cases = [
+            fw_rule("out", "tcp", "80; flush ruleset", "", "deny"), // injection attempt
+            fw_rule("out", "icmp", "", "", "deny"),                 // proto nft_safe refuses
+            fw_rule("out", "tcp", "80", "2001:db8::/32", "deny"),   // v6 peer
+            fw_rule("Out", "tcp", "80", "", "deny"),                // read as `in` before
+            fw_rule("", "tcp", "80", "", "deny"),
+            fw_rule("out", "tcp", "80", "", "Deny"),
+            fw_rule("out", "tcp", "80", "", ""),
+        ];
+        for bad in bad_cases {
+            let fw = fw_with(vec![good.clone(), bad.clone()]);
+            match firewall_script(&ip, &fw, "", &[]) {
+                Err(Error::FirewallJsonInvalid(m)) => {
+                    assert!(m.contains("rule #2"), "names the rule: {m}")
+                }
+                other => panic!("{bad:?} must refuse the WHOLE spec, got {other:?}"),
+            }
+        }
+        // A policy that is not `deny` used to be read as `allow`.
+        for (pin, pout) in [("Deny", ""), ("", "drop"), ("closed", "")] {
+            let mut fw = fw_with(vec![good.clone()]);
+            fw.policy_in = pin.into();
+            fw.policy_out = pout.into();
+            assert!(
+                matches!(
+                    firewall_script(&ip, &fw, "", &[]),
+                    Err(Error::FirewallJsonInvalid(_))
+                ),
+                "{pin:?}/{pout:?}"
+            );
+        }
+    }
+
+    /// NaaS audit P0-5. A network declared with its own CIDR was outside the holder's
+    /// address guard, so its containers got no chain (refused) and no `@dlxall`
+    /// membership (skipped in silence) — measured live: teamA→teamB 2/2 on
+    /// `172.30.5.0/24`. A usable host of a DECLARED network is now a workload address;
+    /// anything else is still refused, because the text goes into nft.
+    #[test]
+    fn a_container_on_a_declared_cidr_network_gets_a_firewall() {
+        let defs = [
+            NetDef::new("lab", "172.30.5.0/24"),
+            NetDef::new("old", "10.201"),
+        ];
+        let fw = fw_with(vec![]);
+        let s = firewall_script(&["172.30.5.10"], &fw, "", &defs).expect("declared network");
+        assert!(s.contains("172.30.5.10 : jump fw"), "{s}");
+        assert!(
+            s.contains("ip daddr 172.30.5.10 ip saddr @dlxall ct state new counter drop"),
+            "{s}"
+        );
+        // Not declared → still refused.
+        assert!(matches!(
+            firewall_script(&["172.30.6.10"], &fw, "", &defs),
+            Err(Error::IpOutsideIngressSpace(_))
+        ));
+        assert!(!ip_in_declared_network("172.30.5.10", &[]));
+        for refused in [
+            "172.30.5.0",   // network
+            "172.30.5.255", // broadcast
+            "172.30.5.010", // not canonical
+            "172.30.5.10 ", // stray byte
+            "172.30.5.10;",
+            "172.30.5.10/32",
+        ] {
+            assert!(!ip_in_declared_network(refused, &defs), "{refused:?}");
+        }
+        // The legacy two-octet prefix still means its /16.
+        assert!(ip_in_declared_network("10.201.3.4", &defs));
     }
 
     #[test]
@@ -10451,14 +11641,361 @@ mod tests_restore_lease {
     #[test]
     fn a_failed_fixed_ip_reattach_restores_the_old_address() {
         with_root("pin", || {
-            crate::ipam::reserve("10.88", "pinned01", "10.88.1.1");
+            crate::ipam::reserve("10.88", "pinned01", "10.88.1.1").unwrap();
             let previous = crate::ipam::lookup("10.88", "pinned01");
-            crate::ipam::reserve("10.88", "pinned01", "10.88.2.2");
+            crate::ipam::reserve("10.88", "pinned01", "10.88.2.2").unwrap();
             restore_lease("10.88", "pinned01", previous);
             assert_eq!(
                 crate::ipam::lookup("10.88", "pinned01").as_deref(),
                 Some("10.88.1.1")
             );
         });
+    }
+}
+
+/// Finding 5 (doc 62 §6 P1): three of the four `NetDef` writers wrote without a
+/// lock, and with a non-atomic `fs::write`.
+#[cfg(test)]
+mod tests_netdef_lock {
+    use super::*;
+
+    /// CONCURRENCY: the holder registering egress hosts (`update_netdef_egress`)
+    /// while the CLI rewrites the gateway of the same network. Measured before
+    /// the fix: 60 egress writes, 0 survivors — each gateway rewritten from a
+    /// stale read erased them, and a torn read made the egress miss the network.
+    #[test]
+    fn concurrent_netdef_writers_lose_no_write() {
+        let mut env = crate::testenv::lock();
+        let d = std::env::temp_dir().join(format!("dlx-netdef-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("run")).unwrap();
+        env.set("DELONIX_ROOT", &d);
+        env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
+        let def = network_create("s2lock").unwrap();
+        let (bridge, prefix) = (def.bridge.clone(), def.prefix.clone());
+        let n = 60;
+        let a = std::thread::spawn(move || {
+            for i in 0..n {
+                update_netdef_egress(&bridge, |e| e.hosts.push(format!("h{i}.example")))
+                    .unwrap()
+                    .expect("the network exists");
+            }
+        });
+        let gw = prefix.clone();
+        let b = std::thread::spawn(move || {
+            for i in 0..n {
+                network_create_with_gateway("s2lock", "", Some(&format!("{gw}.0.{}", 10 + i % 2)))
+                    .unwrap();
+            }
+        });
+        a.join().unwrap();
+        b.join().unwrap();
+        let got = network_get("s2lock").unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(got.egress.hosts.len(), n, "egress writes lost");
+        assert!(got.gateway.is_some(), "the gateway write was lost");
+        assert_eq!(got.prefix, prefix);
+    }
+
+    /// `write_atomic`'s temp is not a network, EVEN when it parses. This is the
+    /// window between `sync_all` and `rename`, frozen — which is also what stays
+    /// on disk if the process dies in it. Before, `network_list` skipped the
+    /// temp only when it caught it mid-write (a failed parse, by accident);
+    /// whole, it returned it, and the allocator counted its `/16`.
+    #[test]
+    fn network_list_skips_the_atomic_writers_temp_even_when_it_parses() {
+        let root = std::env::temp_dir().join(format!("dlx-netlist-tmp-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let dir = root.join("ingress").join("networks");
+        std::fs::create_dir_all(&dir).unwrap();
+        let published = serde_json::to_vec(&NetDef::new("published", "10.201")).unwrap();
+        std::fs::write(dir.join("published-00000000.json"), published).unwrap();
+        // The name `write_atomic` gives it: `.<record>.<pid>.<seq>.tmp`.
+        let in_flight = serde_json::to_vec(&NetDef::new("in-flight", "10.202")).unwrap();
+        std::fs::write(dir.join(".in-flight-00000000.json.4242.7.tmp"), in_flight).unwrap();
+
+        let names: Vec<String> = network_list_in(&root).into_iter().map(|d| d.name).collect();
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(names, ["published"], "a temp file was read as a network");
+    }
+}
+
+/// The DHCP reply is the network's, whatever its length (doc 62, finding 4).
+#[cfg(test)]
+mod tests_dhcp_reply {
+    use super::dhcp_reply;
+
+    /// A DISCOVER from `mac`, the minimum the server reads.
+    fn discover(mac: [u8; 6]) -> Vec<u8> {
+        let mut p = vec![0u8; 240];
+        p[0] = 1;
+        p[4..8].copy_from_slice(&[1, 2, 3, 4]);
+        p[28..34].copy_from_slice(&mac);
+        p[236..240].copy_from_slice(&[99, 130, 83, 99]);
+        p.extend_from_slice(&[53, 1, 1, 255]);
+        p
+    }
+
+    fn opt(r: &[u8], code: u8) -> Vec<u8> {
+        super::dhcp_opt(&r[240..], code).unwrap()
+    }
+
+    /// A `/24`: address inside the network, mask `/24`, router = the bridge.
+    /// Before: `172.20.254.x`, `255.255.0.0`, router `172.20.0.1`.
+    #[test]
+    fn a_slash24_reply_is_all_on_the_network() {
+        let mac = [0x52, 0x54, 0, 0xc4, 0xb1, 0xe4];
+        let r = dhcp_reply("172.20.9.0/24", &discover(mac)).unwrap();
+        let yi = std::net::Ipv4Addr::new(r[16], r[17], r[18], r[19]);
+        assert_eq!(&r[16..19], &[172, 20, 9], "yiaddr {yi} off the network");
+        assert_eq!(
+            yi.to_string(),
+            crate::vm_dhcp_lease_ip("172.20.9.0/24", "52:54:00:c4:b1:e4").unwrap()
+        );
+        assert_eq!(opt(&r, 1), vec![255, 255, 255, 0]);
+        assert_eq!(opt(&r, 3), vec![172, 20, 9, 1]);
+        assert_eq!(opt(&r, 53), vec![2], "DISCOVER answers OFFER");
+    }
+
+    /// A `/16` answers exactly what it always did — every existing VM keeps its
+    /// address, mask and router.
+    #[test]
+    fn a_slash16_reply_is_unchanged() {
+        let mac = [0x52, 0x54, 0, 0x72, 0x00, 0xce];
+        for net in ["10.210", "10.210.0.0/16"] {
+            let r = dhcp_reply(net, &discover(mac)).unwrap();
+            assert_eq!(&r[16..19], &[10, 210, 254]);
+            assert!((10..250).contains(&r[19]));
+            assert_eq!(opt(&r, 1), vec![255, 255, 0, 0]);
+            assert_eq!(opt(&r, 3), vec![10, 210, 0, 1]);
+        }
+    }
+
+    /// The server is started with the network's REAL prefix. It got the two
+    /// octets of the bridge's address, and on a `/24` served a `/16` it was not
+    /// on — measured live, with the reply code already fixed and this call not.
+    #[test]
+    fn the_server_serves_the_networks_own_prefix() {
+        let c = crate::Cidr::parse("172.20.9.0/24");
+        assert_eq!(super::dhcp_network(c, "172.20.9.1"), "172.20.9.0/24");
+        assert_eq!(super::dhcp_network(None, "10.200.0.1"), "10.200");
+        let r = dhcp_reply(
+            &super::dhcp_network(c, "172.20.9.1"),
+            &discover([0x52, 0x54, 0, 0xc4, 0xb1, 0xe4]),
+        )
+        .unwrap();
+        assert_eq!(&r[16..19], &[172, 20, 9]);
+    }
+
+    #[test]
+    fn what_is_not_a_request_gets_no_reply() {
+        let mut p = discover([0x52, 0x54, 0, 1, 2, 3]);
+        p[242] = 7; // RELEASE
+        assert!(dhcp_reply("10.210", &p).is_none());
+        assert!(dhcp_reply("10.210", &[0u8; 100]).is_none());
+    }
+}
+
+/// `network rm` in the holder: what `do_netdel` takes out, and the DHCP registry
+/// that lets a recreated bridge get a server again.
+#[cfg(test)]
+mod tests_netdel {
+    use super::*;
+
+    /// The listing is `nft list map` as the kernel prints it: the bridge's own
+    /// self-pair, a route pair naming it (its record already gone), and pairs of
+    /// OTHER bridges that must not be touched.
+    #[test]
+    fn netdel_takes_every_element_naming_the_bridge_and_nothing_else() {
+        let listing = r#"table ip dlxing {
+	map netpair {
+		type ifname . ifname : verdict
+		counter
+		elements = { "dlxnaaaa0001" . "dlxnaaaa0001" counter packets 3 bytes 180 : accept,
+			     "dlxnaaaa0001" . "dlxnbbbb0002" counter packets 0 bytes 0 : accept,
+			     "dlxnbbbb0002" . "dlxnbbbb0002" counter packets 0 bytes 0 : accept,
+			     "dlxnbbbb0002" . "dlxncccc0003" counter packets 0 bytes 0 : accept }
+	}
+}"#;
+        let got: Vec<String> = netdel_nft_deletes("dlxnaaaa0001", listing)
+            .into_iter()
+            .map(|v| v.join(" "))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                r#"delete element ip dlxing dlxbr { "dlxnaaaa0001" }"#,
+                r#"delete element ip dlxing netpair { "dlxnaaaa0001" . "dlxnaaaa0001" }"#,
+                r#"delete element ip dlxing netpair { "dlxnaaaa0001" . "dlxnbbbb0002" }"#,
+            ]
+        );
+    }
+
+    /// A listing that could not be read is not "nothing to delete": the self-pair
+    /// and the set member are what `isolation_elements` always installs.
+    #[test]
+    fn netdel_without_a_listing_still_removes_what_create_installed() {
+        let got = netdel_nft_deletes("dlxnaaaa0001", "");
+        assert_eq!(got.len(), 2);
+        let installed: Vec<(&str, String)> = isolation_elements("dlxnaaaa0001");
+        assert_eq!(got[0][4], installed[0].0);
+        assert_eq!(got[1][4], installed[1].0);
+    }
+
+    /// The registry that used to be a set that only grew: a released bridge is
+    /// stopped AND forgotten, so claiming it again starts a fresh server.
+    #[test]
+    fn a_released_dhcp_server_is_stopped_and_can_be_claimed_again() {
+        let reg = DhcpServers::new();
+        let first = reg
+            .claim("dlxnaaaa0001")
+            .expect("first claim starts a server");
+        assert!(reg.claim("dlxnaaaa0001").is_none(), "one server per bridge");
+        reg.release("dlxnaaaa0001");
+        assert!(
+            first.load(std::sync::atomic::Ordering::SeqCst),
+            "old thread told to stop"
+        );
+        let second = reg
+            .claim("dlxnaaaa0001")
+            .expect("a recreated bridge gets a server");
+        assert!(!second.load(std::sync::atomic::Ordering::SeqCst));
+        reg.release("dlxnunknown"); // releasing what is not there is a no-op
+    }
+
+    /// The rollback removes the entry it added and not a sibling on another
+    /// address or protocol; the unpublish path keeps matching by port and proto.
+    #[test]
+    fn the_publish_rollback_removes_only_its_own_hostfwd() {
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"entries":[
+                {"id":1,"proto":"tcp","host_addr":"127.0.0.1","host_port":8080,"guest_port":8080},
+                {"id":2,"proto":"tcp","host_addr":"192.168.1.5","host_port":8080,"guest_port":8080},
+                {"id":3,"proto":"udp","host_addr":"127.0.0.1","host_port":8080,"guest_port":8080},
+                {"id":4,"proto":"tcp","host_addr":"127.0.0.1","host_port":9090,"guest_port":9090}
+            ]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            hostfwd_ids_matching(&v, 8080, Some("tcp"), Some("127.0.0.1")),
+            [1]
+        );
+        assert_eq!(hostfwd_ids_matching(&v, 8080, Some("tcp"), None), [1, 2]);
+        assert_eq!(hostfwd_ids_matching(&v, 8080, None, None), [1, 2, 3]);
+        assert!(hostfwd_ids_matching(&v, 7070, None, None).is_empty());
+    }
+}
+
+/// S4 (NaaS audit, doc 62 §6 P1): every token of the holder's control line is
+/// checked before a single command runs. Each test drives `handle_control`
+/// with the exploit line itself and requires the VALIDATOR's refusal — with
+/// the check removed the same line reaches `ip`/`tc`/`wg` and fails (or not)
+/// with a different message, so these tests fail too.
+#[cfg(test)]
+mod tests_control_tokens {
+    use super::{handle_control, validate_control_tokens};
+
+    fn key() -> String {
+        format!("{}=", "A".repeat(43))
+    }
+
+    fn assert_refused(line: &str) {
+        let reply = handle_control(line);
+        assert!(
+            reply.starts_with("err: control token refused"),
+            "{line:?} must be refused by the validator, got {reply:?}"
+        );
+    }
+
+    #[test]
+    fn attach_ip_and_gateway_cannot_smuggle_an_option() {
+        assert_refused("attach abc123 -batch delonix0 10.200.0.1");
+        assert_refused("attach abc123 10.200.0.5 delonix0 -force");
+        // Not an option, but not an address either: `ip route add default via dev`.
+        assert_refused("attach abc123 10.200.0.5 delonix0 dev");
+        assert_refused("attach abc123 10.200.0.5/8 delonix0 10.200.0.1");
+        assert_refused("attach abc123 +10.200.0.5 delonix0 10.200.0.1 team-a");
+        assert_refused("attach-extra abc123 eth1 10.201.0.5 dlxnabc help");
+        assert_refused("vmtap tap1 delonix0 10.200.0.1 all team-a");
+    }
+
+    #[test]
+    fn a_sanitized_name_is_no_longer_an_option_either() {
+        // `sanitize` keeps `-`: `ip netns add -n` was reachable.
+        assert_refused("attach -n 10.200.0.5 delonix0 10.200.0.1");
+        assert_refused("detach -all");
+        assert_refused("netdel -force");
+    }
+
+    #[test]
+    fn netrate_burst_and_rate_are_byte_counts_only() {
+        assert_refused("netrate vh1234 1000000 -help");
+        assert_refused("netrate vh1234 1000000 1mb");
+        assert_refused("netrate vh1234 +1000000 12500");
+        assert_refused("netrate vh1234 fast 12500");
+    }
+
+    #[test]
+    fn wg_up_iface_cannot_walk_the_private_key_out_of_the_wg_dir() {
+        let k = key();
+        assert_refused(&format!("wg-up ../../../tmp/pwn 51820 {k} 10.99.0.1/24"));
+        assert_refused(&format!("wg-up wg0/../x 51820 {k} 10.99.0.1/24"));
+        assert_refused(&format!("wg-up wg0 99999 {k} 10.99.0.1/24"));
+        assert_refused(&format!("wg-up wg0 51820 {k} 10.99.0.1"));
+        assert_refused("wg-up wg0 51820 not-a-key 10.99.0.1/24");
+    }
+
+    #[test]
+    fn wg_up_never_echoes_a_private_key() {
+        let secret = format!("{}!", "S".repeat(43));
+        let reply = handle_control(&format!("wg-up wg0 51820 {secret} 10.99.0.1/24"));
+        assert!(reply.starts_with("err: control token refused"), "{reply:?}");
+        assert!(!reply.contains(&secret), "the key leaked into {reply:?}");
+    }
+
+    #[test]
+    fn wg_peer_fields_are_a_key_an_ip_port_and_ipv4_prefixes() {
+        let k = key();
+        assert_refused(&format!("wg-peer ../x {k} 192.168.1.10:51820 10.99.0.2/32"));
+        assert_refused("wg-peer wg0 -private-key 192.168.1.10:51820 10.99.0.2/32");
+        let reply = handle_control(&format!("wg-peer wg0 {k} evil.example:51820 10.99.0.2/32"));
+        assert!(reply.contains("endpoint"), "{reply:?}");
+        let reply = handle_control(&format!("wg-peer wg0 {k} 192.168.1.10:51820 0/0,x"));
+        assert!(reply.contains("allowed-ips"), "{reply:?}");
+    }
+
+    /// Compatibility: the wire format did not change, and every line a client
+    /// of this build (or an older one) legitimately emits still passes. The
+    /// shapes are those of the `format!`s in `attach_container`,
+    /// `attach_extra`, `set_net_rate`, `set_wg_iface`, `set_wg_peer`,
+    /// `set_vxlan`, `vmtap_line`, `set_l4_guard`.
+    #[test]
+    fn every_legitimate_line_still_passes() {
+        let k = key();
+        for line in [
+            "ping".to_string(),
+            "attach abc123def456 10.200.0.5 delonix0 10.200.0.1".into(),
+            "attach abc123def456 172.20.4.9 dlxnabc 172.20.4.1 team-a".into(),
+            // A namespace is hashed, never an argv: a leading `-` stays legal there.
+            "attach abc123def456 10.200.0.5 delonix0 10.200.0.1 -odd".into(),
+            "attach-extra abc123def456 eth1 10.201.0.5 dlxnabc 10.201.0.1".into(),
+            "attach-extra abc123def456 eth1 10.201.0.5 dlxnabc 10.201.0.1 team-a".into(),
+            "netrate vh1a2b3c4d 1000000 12500".into(),
+            "l4guard 50 200".into(),
+            format!("wg-up wgo000064 51820 {k} 10.99.0.1/24"),
+            format!("wg-peer wgo000064 {k} 192.168.1.10:51820 10.99.0.2/32"),
+            format!("wg-peer-del wgo000064 {k}"),
+            "vxlan dlxv000064 100 dlxnabc 10.201.0.1 -".into(),
+            "vxlan dlxv000064 100 dlxnabc 10.201.0.1 192.168.1.10,192.168.1.11".into(),
+            "vmtap dlxt1234 delonix0 10.200.0.1".into(),
+            "vmtap dlxt1234 delonix0 10.200.0.1 10.200.0.9 team-a".into(),
+        ] {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            assert!(
+                validate_control_tokens(&parts).is_ok(),
+                "{line:?} is a legitimate line: {:?}",
+                validate_control_tokens(&parts)
+            );
+        }
     }
 }

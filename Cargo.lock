@@ -793,6 +793,7 @@ dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "tempfile",
  "thiserror 2.0.19",
 ]
 
@@ -898,6 +899,7 @@ dependencies = [
  "delonix-linux",
  "delonix-model",
  "delonix-node",
+ "delonix-opnsense",
  "delonix-proxmox",
  "delonix-sdn",
  "delonix-vm",
@@ -959,6 +961,7 @@ dependencies = [
 name = "delonix-opnsense"
 version = "4.4.0"
 dependencies = [
+ "delonix-compute",
  "delonix-model",
  "delonix-sdn",
  "rcgen",

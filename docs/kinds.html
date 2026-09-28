@@ -3789,6 +3789,12 @@ spec:
 #
 # metadata.name is the zone&#x27;s SDN id on the node — a lowercase letter and up to
 # seven more lowercase letters or digits; the provider checks the exact format.
+# Ownership: every vnet&#x27;s alias ends with this document&#x27;s owner mark
+# (`[delonix-owner:&lt;token&gt;]`), and a zone is this document&#x27;s only if the engine
+# created it (a zone has no text field to mark). A zone or vnet of the same name
+# that is not is refused, never adopted, and never deleted. Each apply and each
+# teardown is one transaction under the cluster&#x27;s SDN lock: refused while
+# someone else&#x27;s SDN changes are pending, rolled back if a step fails.
 # There is no update in place: `apply` ensures every vnet listed is present, and
 # a vnet dropped from the list stays until the whole zone is torn down
 # (`stack apply --prune`, `stack destroy`, or `--replace NetworkZone/&lt;name&gt;`),
@@ -3810,9 +3816,14 @@ spec:
 # the appliance. `manifest validate` does not contact it.
 #
 # Aliases are applied before rules and removed after them, because the
-# appliance checks a rule&#x27;s source against its alias table. A rule&#x27;s identity
-# on the appliance is its `description`. There is no update in place: a changed
-# spec is removed and applied again.
+# appliance checks a rule&#x27;s source against its alias table. A rule is FOUND by
+# its `description` and an alias by its `name`, but OWNED only when it carries
+# this document&#x27;s owner mark — a firewall category `delonix-owner:&lt;token&gt;` the
+# engine creates and attaches. One with the same name and no mark is refused,
+# never adopted, and the teardown leaves it alone. The apply is also refused
+# while the appliance has changes someone saved and did not apply: its apply
+# pushes everything staged. There is no update in place: a changed spec is
+# removed and applied again.
 apiVersion: networking.delonix.io/v1alpha1
 kind: NetworkGateway
 metadata: { name: edge }

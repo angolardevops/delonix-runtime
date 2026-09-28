@@ -10,6 +10,12 @@
 //!     url: https://pve.example:8006
 //!     node: pve
 //!     auth: { tokenId: delonix@pve!engine, tokenSecretFile: /etc/delonix/proxmox.token }
+//!   - type: opnsense                     # ADR-0059 F1
+//!     url: https://fw.example
+//!     auth: { keyFile: /etc/delonix/opnsense.key, secretFile: /etc/delonix/opnsense.secret }
+//! networkDefaults:                       # which provider answers a network role
+//!   segment: proxmox
+//!   gateway: opnsense
 //! ```
 //!
 //! **Read here, in the composition root, and nowhere else.** The engine crates
@@ -54,6 +60,55 @@ pub struct ProviderConfig {
     /// One entry per provider type this node has.
     #[serde(default)]
     pub providers: Vec<ProviderEntry>,
+    /// Which provider answers each network role when nothing names one
+    /// (ADR-0059 D3). `defaultProvider` stays the compute default.
+    #[serde(default)]
+    pub network_defaults: Option<NetworkDefaults>,
+}
+
+/// One provider type per network role (ADR-0059 D3). Parsed and shown from
+/// catalog 1.1.0 on; the network Kinds resolve through it from ADR-0059 F2.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NetworkDefaults {
+    /// The provider of `kind: NetworkZone` (today: `proxmox`).
+    #[serde(default)]
+    pub segment: Option<String>,
+    /// The perimeter gateway of `kind: NetworkGateway` (today: `opnsense`).
+    #[serde(default)]
+    pub gateway: Option<String>,
+    /// No provider serves this role yet (ADR-0059 F5): a value is refused.
+    #[serde(default)]
+    pub nat: Option<String>,
+    /// No provider serves this role yet (ADR-0059 F5): a value is refused.
+    #[serde(default)]
+    pub ipam: Option<String>,
+    /// No provider serves this role yet (ADR-0059 F5): a value is refused.
+    #[serde(default)]
+    pub dns: Option<String>,
+}
+
+impl NetworkDefaults {
+    /// Every role with the value the file gives it.
+    pub fn roles(&self) -> [(&'static str, Option<&str>); 5] {
+        [
+            ("segment", self.segment.as_deref()),
+            ("gateway", self.gateway.as_deref()),
+            ("nat", self.nat.as_deref()),
+            ("ipam", self.ipam.as_deref()),
+            ("dns", self.dns.as_deref()),
+        ]
+    }
+}
+
+/// The provider types that serve a network role in this build. A role with
+/// none is refused by name until its port exists (ADR-0059 D1).
+pub fn role_providers(role: &str) -> &'static [&'static str] {
+    match role {
+        "segment" => &["proxmox"],
+        "gateway" => &["opnsense"],
+        _ => &[],
+    }
 }
 
 /// One provider. Tagged by `type`, the same name `--backend` and a VM record use.
@@ -63,6 +118,7 @@ pub enum ProviderEntry {
     Libvirt(LocalEntry),
     CloudHypervisor(LocalEntry),
     Proxmox(Box<ProxmoxEntry>),
+    Opnsense(Box<OpnsenseEntry>),
 }
 
 impl ProviderEntry {
@@ -71,12 +127,14 @@ impl ProviderEntry {
             ProviderEntry::Libvirt(_) => "libvirt",
             ProviderEntry::CloudHypervisor(_) => "cloud-hypervisor",
             ProviderEntry::Proxmox(_) => "proxmox",
+            ProviderEntry::Opnsense(_) => "opnsense",
         }
     }
     fn name(&self) -> Option<&str> {
         match self {
             ProviderEntry::Libvirt(e) | ProviderEntry::CloudHypervisor(e) => e.name.as_deref(),
             ProviderEntry::Proxmox(e) => e.name.as_deref(),
+            ProviderEntry::Opnsense(e) => e.name.as_deref(),
         }
     }
 }
@@ -131,6 +189,39 @@ pub struct ProxmoxAuth {
     #[serde(default)]
     #[schemars(skip)]
     password: Option<serde_yaml::Value>,
+}
+
+/// An OPNsense appliance reached through its REST API (ADR-0051, ADR-0059 F1).
+/// Only a generated API key/secret pair authenticates (ADR-0051 phase 0).
+#[derive(Debug, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct OpnsenseEntry {
+    #[serde(default)]
+    pub name: Option<String>,
+    pub url: String,
+    pub auth: OpnsenseAuth,
+    #[serde(default)]
+    pub tls: Tls,
+}
+
+/// The API key pair, by reference: the key (an identifier, like a Proxmox
+/// `tokenId`) inline or in a file, the secret only in a 0600 file or a
+/// `kind: Secret` with `key` and `secret` fields.
+#[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct OpnsenseAuth {
+    #[serde(default)]
+    pub key: Option<String>,
+    #[serde(default)]
+    pub key_file: Option<String>,
+    #[serde(default)]
+    pub secret_file: Option<String>,
+    #[serde(default)]
+    pub secret_ref: Option<String>,
+    // Out of the schema: it exists only to be refused by name.
+    #[serde(default)]
+    #[schemars(skip)]
+    secret: Option<serde_yaml::Value>,
 }
 
 #[derive(Debug, Default, Deserialize, schemars::JsonSchema)]
@@ -203,6 +294,47 @@ pub fn parse(content: &str, origin: &Path) -> Result<ProviderConfig> {
                      (a 0600 file) or `secretRef` (a `kind: Secret`), or `passwordFile` for a \
                      password",
                     &[("path", &at)],
+                )));
+            }
+        }
+        if let ProviderEntry::Opnsense(o) = p {
+            if o.auth.secret.is_some() {
+                return Err(Error::Invalid(po::tf(
+                    "{path}: a secret VALUE is never written in this file — use `secretFile` \
+                     (a 0600 file) or `secretRef` (a `kind: Secret` with `key` and `secret`)",
+                    &[("path", &at)],
+                )));
+            }
+        }
+    }
+    if cfg.default_provider.as_deref() == Some("opnsense") {
+        return Err(Error::Invalid(po::tf(
+            "{path}: defaultProvider is the COMPUTE default and opnsense is not a compute \
+             provider — a perimeter gateway goes in `networkDefaults.gateway`",
+            &[("path", &at)],
+        )));
+    }
+    if let Some(nd) = &cfg.network_defaults {
+        for (role, value) in nd.roles() {
+            let Some(v) = value else { continue };
+            let serving = role_providers(role);
+            if serving.is_empty() {
+                return Err(Error::Invalid(po::tf(
+                    "{path}: networkDefaults.{role}: no provider serves the role '{role}' in this \
+                     build (ADR-0059 F5)",
+                    &[("path", &at), ("role", role)],
+                )));
+            }
+            if !serving.contains(&v) {
+                return Err(Error::Invalid(po::tf(
+                    "{path}: networkDefaults.{role}: '{name}' does not serve the role '{role}' \
+                     (it is served by: {serving})",
+                    &[
+                        ("path", &at),
+                        ("role", role),
+                        ("name", v),
+                        ("serving", &serving.join(", ")),
+                    ],
                 )));
             }
         }
@@ -315,6 +447,50 @@ pub fn proxmox_lookup_with<'a>(
     })
 }
 
+/// The OPNsense entry as the `DELONIX_OPNSENSE_*` keys the gateway
+/// registration reads — one reader for the file and the environment.
+pub fn opnsense_keys(o: &OpnsenseEntry) -> HashMap<&'static str, String> {
+    let mut m = HashMap::new();
+    m.insert("DELONIX_OPNSENSE_URL", o.url.clone());
+    let a = &o.auth;
+    for (k, v) in [
+        ("DELONIX_OPNSENSE_KEY", &a.key),
+        ("DELONIX_OPNSENSE_KEY_FILE", &a.key_file),
+        ("DELONIX_OPNSENSE_SECRET_FILE", &a.secret_file),
+        ("DELONIX_OPNSENSE_CREDENTIAL", &a.secret_ref),
+        ("DELONIX_OPNSENSE_CA_FILE", &o.tls.ca_file),
+    ] {
+        if let Some(v) = v {
+            m.insert(k, v.clone());
+        }
+    }
+    if o.tls.insecure_skip_verify {
+        m.insert("DELONIX_OPNSENSE_INSECURE_TLS", "1".into());
+    }
+    m
+}
+
+/// Where the OPNsense target comes from for this process (ADR-0054 D4, applied
+/// to the gateway): the environment as a whole when it carries
+/// `DELONIX_OPNSENSE_URL`, else the file's entry — never field by field.
+pub fn opnsense_lookup_with<'a>(
+    env: impl Fn(&str) -> Option<String> + 'a,
+    file: Option<&ProviderConfig>,
+) -> Lookup<'a> {
+    if env("DELONIX_OPNSENSE_URL").is_some() {
+        return Box::new(env);
+    }
+    let keys = file
+        .and_then(|c| {
+            c.providers.iter().find_map(|p| match p {
+                ProviderEntry::Opnsense(o) => Some(opnsense_keys(o)),
+                _ => None,
+            })
+        })
+        .unwrap_or_default();
+    Box::new(move |k| keys.get(k).cloned())
+}
+
 /// Hands the file's default provider to the engine (ADR-0054 D3). A file that
 /// could not be read is handed over as an error, so a VM request that would
 /// have used its default fails with the reason instead of guessing one.
@@ -404,7 +580,27 @@ pub fn validate(cfg: &ProviderConfig, origin: &Path) -> Result<()> {
             )));
         }
     }
+    if let Some(nd) = &cfg.network_defaults {
+        for (role, value) in nd.roles() {
+            if let Some(v) = value.filter(|v| !listed.contains(v)) {
+                return Err(Error::Invalid(po::tf(
+                    "{path}: networkDefaults.{role} '{name}' has no entry in this file, so no \
+                     process can serve it",
+                    &[
+                        ("path", &origin.display().to_string()),
+                        ("role", role),
+                        ("name", v),
+                    ],
+                )));
+            }
+        }
+    }
     for p in &cfg.providers {
+        if let ProviderEntry::Opnsense(o) = p {
+            let keys = opnsense_keys(o);
+            let lookup = |k: &str| keys.get(k).cloned();
+            super::gatewayproviders::opnsense_target_with(&lookup)?;
+        }
         if let ProviderEntry::Proxmox(px) = p {
             let keys = proxmox_keys(px);
             let lookup = |k: &str| keys.get(k).cloned();
@@ -760,6 +956,122 @@ providers:
         let e = validate(&cfg, &origin).unwrap_err().to_string();
         assert!(e.contains("chmod 600"), "{e}");
         std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+        validate(&cfg, &origin).unwrap();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    const OPN: &str = "apiVersion: config.delonix.io/v1
+providers:
+  - type: proxmox
+    url: https://pve.invalid:8006
+    node: pve
+    auth:
+      tokenId: 'a@pve!t'
+      tokenSecretFile: /etc/delonix/proxmox.token
+  - type: opnsense
+    url: https://fw.invalid
+    auth:
+      keyFile: /etc/delonix/opnsense.key
+      secretFile: /etc/delonix/opnsense.secret
+    tls:
+      caFile: /etc/delonix/fw-ca.pem
+networkDefaults:
+  segment: proxmox
+  gateway: opnsense
+";
+
+    #[test]
+    fn an_opnsense_entry_and_network_defaults_parse_and_map_onto_the_env_keys() {
+        let cfg = parse(OPN, &p()).unwrap();
+        let nd = cfg.network_defaults.as_ref().unwrap();
+        assert_eq!(nd.segment.as_deref(), Some("proxmox"));
+        assert_eq!(nd.gateway.as_deref(), Some("opnsense"));
+        let none = |_: &str| None;
+        let l = opnsense_lookup_with(none, Some(&cfg));
+        assert_eq!(
+            l("DELONIX_OPNSENSE_URL").as_deref(),
+            Some("https://fw.invalid")
+        );
+        assert_eq!(
+            l("DELONIX_OPNSENSE_KEY_FILE").as_deref(),
+            Some("/etc/delonix/opnsense.key")
+        );
+        assert_eq!(
+            l("DELONIX_OPNSENSE_SECRET_FILE").as_deref(),
+            Some("/etc/delonix/opnsense.secret")
+        );
+        assert_eq!(
+            l("DELONIX_OPNSENSE_CA_FILE").as_deref(),
+            Some("/etc/delonix/fw-ca.pem")
+        );
+        assert_eq!(l("DELONIX_OPNSENSE_INSECURE_TLS"), None);
+    }
+
+    #[test]
+    fn the_environment_replaces_the_opnsense_entry_as_a_whole() {
+        let cfg = parse(OPN, &p()).unwrap();
+        let env =
+            |k: &str| (k == "DELONIX_OPNSENSE_URL").then(|| "https://other.invalid".to_string());
+        let l = opnsense_lookup_with(env, Some(&cfg));
+        assert_eq!(
+            l("DELONIX_OPNSENSE_URL").as_deref(),
+            Some("https://other.invalid")
+        );
+        assert_eq!(l("DELONIX_OPNSENSE_KEY_FILE"), None, "never field by field");
+    }
+
+    #[test]
+    fn an_inline_opnsense_secret_and_an_opnsense_compute_default_are_refused() {
+        let inline = "apiVersion: config.delonix.io/v1\nproviders:\n  - type: opnsense\n    url: https://fw.invalid\n    auth:\n      key: k\n      secret: s\n";
+        let e = parse(inline, &p()).unwrap_err().to_string();
+        assert!(e.contains("secretFile"), "{e}");
+        let compute = "apiVersion: config.delonix.io/v1\ndefaultProvider: opnsense\nproviders:\n  - type: opnsense\n    url: https://fw.invalid\n    auth:\n      key: k\n      secretFile: /x\n";
+        let e = parse(compute, &p()).unwrap_err().to_string();
+        assert!(e.contains("networkDefaults.gateway"), "{e}");
+    }
+
+    #[test]
+    fn a_network_default_must_serve_its_role_and_a_role_without_a_port_is_refused() {
+        let wrong = "apiVersion: config.delonix.io/v1\nnetworkDefaults:\n  gateway: proxmox\n";
+        let e = parse(wrong, &p()).unwrap_err().to_string();
+        assert!(
+            e.contains("does not serve") && e.contains("opnsense"),
+            "{e}"
+        );
+        let unserved = "apiVersion: config.delonix.io/v1\nnetworkDefaults:\n  nat: opnsense\n";
+        let e = parse(unserved, &p()).unwrap_err().to_string();
+        assert!(e.contains("F5"), "{e}");
+        let unknown = "apiVersion: config.delonix.io/v1\nnetworkDefaults:\n  lb: x\n";
+        assert!(
+            parse(unknown, &p()).is_err(),
+            "an unknown role is an unknown field"
+        );
+    }
+
+    #[test]
+    fn validate_refuses_a_network_default_without_an_entry_and_an_opnsense_secret_others_read() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = scratch("opn");
+        let origin = d.join("providers.yaml");
+        let unlisted = parse(
+            "apiVersion: config.delonix.io/v1\nnetworkDefaults:\n  gateway: opnsense\n",
+            &origin,
+        )
+        .unwrap();
+        let e = validate(&unlisted, &origin).unwrap_err().to_string();
+        assert!(e.contains("networkDefaults.gateway"), "{e}");
+
+        let secret = d.join("secret");
+        std::fs::write(&secret, "s").unwrap();
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let y = format!(
+            "apiVersion: config.delonix.io/v1\nproviders:\n  - type: opnsense\n    url: https://fw.invalid\n    auth:\n      key: k\n      secretFile: {}\nnetworkDefaults:\n  gateway: opnsense\n",
+            secret.display()
+        );
+        let cfg = parse(&y, &origin).unwrap();
+        let e = validate(&cfg, &origin).unwrap_err().to_string();
+        assert!(e.contains("chmod 600"), "{e}");
+        std::fs::set_permissions(&secret, std::fs::Permissions::from_mode(0o600)).unwrap();
         validate(&cfg, &origin).unwrap();
         let _ = std::fs::remove_dir_all(&d);
     }

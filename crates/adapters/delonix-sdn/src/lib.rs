@@ -34,8 +34,8 @@ use std::process::{Command, Stdio};
 // callers: no call site in this crate had to change.
 pub(crate) use delonix_net_rules::fnv32;
 pub use delonix_net_rules::{
-    bridge_name, derive_ip_in, matches_labels, parse_overlay_peer, service_vip, valid_ip_in_subnet,
-    Cidr,
+    bridge_name, derive_ip_in, in_vm_dhcp_pool, matches_labels, parse_overlay_peer, service_vip,
+    valid_ip_in_subnet, vm_dhcp_lease_ip, vm_dhcp_pool, Cidr,
 };
 
 pub mod bpf;
@@ -47,6 +47,7 @@ pub mod gc;
 pub mod infra;
 pub mod ipam;
 pub mod network_zone;
+pub mod ownership;
 mod pin_userns;
 pub mod provider_report;
 pub mod run_network;
@@ -882,6 +883,97 @@ impl Network {
     }
 }
 
+/// Address space this engine uses for itself, and that no user network may
+/// overlap: the default ingress network every pod and `--net ingress` workload
+/// sits on, and the network libslirp emulates behind every per-container slirp
+/// (`SLIRP_GW`/`SLIRP_DNS`/`SLIRP_IP`).
+///
+/// `validate_subnet` accepted both: a `--subnet 10.200.0.0/16` network shared
+/// its addresses with the ingress, and a `10.0.2.0/24` one made the slirp's
+/// gateway and resolver ambiguous inside every container that has both.
+const RESERVED_PREFIXES: &[(&str, &str)] = &[
+    ("10.200.0.0/16", "the engine's default ingress network"),
+    (
+        "10.0.2.0/24",
+        "the network libslirp emulates for published ports",
+    ),
+];
+
+/// The reserved prefix `c` overlaps, with what it is — `None` if none.
+fn reserved_overlap(c: &Cidr) -> Option<(&'static str, &'static str)> {
+    RESERVED_PREFIXES
+        .iter()
+        .find(|(r, _)| Cidr::parse(r).is_some_and(|r| r.overlaps(c)))
+        .copied()
+}
+
+/// The span of `/16` base octets a user network is drawn from: the workload
+/// space (`delonix_compute::workload_net`) MINUS the default ingress network's
+/// own octet. `NetworkStore::create` drew from 10.200 upward, and the day a name
+/// hashed onto 200 the new network was the ingress (measured: the 53rd network
+/// of a fresh root landed on `10.200`).
+pub(crate) fn first_user_base() -> u8 {
+    delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1] + 1
+}
+
+fn last_user_base() -> u8 {
+    delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1]
+}
+
+/// Every `/16` base octet of the user span that something at `root` already
+/// occupies — a `NetworkStore` record OR a `NetDef` (a network only the VM path
+/// realized has no record), in either form (`10.X` or any CIDR that overlaps
+/// `10.X.0.0/16`), plus the reserved prefixes.
+///
+/// The ONE view both allocators read. There were two, each blind to the other's
+/// networks — and the octet parse (`rsplit('.')`) did not even see a CIDR
+/// network of its own store (`10.220.0.0/16` parses to `0/16`).
+pub(crate) fn used_bases(root: &std::path::Path) -> std::collections::HashSet<u8> {
+    let mut taken: Vec<Cidr> = RESERVED_PREFIXES
+        .iter()
+        .filter_map(|(r, _)| Cidr::parse(r))
+        .collect();
+    if let Ok(rd) = std::fs::read_dir(root.join("networks")) {
+        let store = NetworkStore {
+            dir: root.join("networks"),
+        };
+        for e in rd.flatten() {
+            if let Some(n) = e.file_name().to_str().and_then(|n| store.get(n).ok()) {
+                taken.extend(Cidr::parse(&n.subnet));
+            }
+        }
+    }
+    taken.extend(
+        infra::network_list_in(root)
+            .iter()
+            .filter_map(|d| Cidr::parse(&d.prefix)),
+    );
+    (first_user_base()..=last_user_base())
+        .filter(|b| {
+            let slash16 = Cidr {
+                base: u32::from_be_bytes([10, *b, 0, 0]),
+                len: 16,
+            };
+            taken.iter().any(|c| c.overlaps(&slash16))
+        })
+        .collect()
+}
+
+/// The first base octet of the user span not in `used`, walking ONE full circle
+/// from `start` (clamped into the span). `None` when every one is taken — the
+/// caller says so instead of writing a network onto another's `/16`.
+pub(crate) fn pick_user_base(start: u8, used: &std::collections::HashSet<u8>) -> Option<u8> {
+    let (lo, hi) = (first_user_base(), last_user_base());
+    let mut base = start.clamp(lo, hi);
+    for _ in lo..=hi {
+        if !used.contains(&base) {
+            return Some(base);
+        }
+        base = if base >= hi { lo } else { base + 1 };
+    }
+    None
+}
+
 /// Persistent registry of user networks, at `<root>/networks/<name>`
 /// (the file only holds the base octet; the rest is derived from the name). The
 /// `bridge` network is implicit (has no file).
@@ -1074,48 +1166,44 @@ impl NetworkStore {
                 "network '{name}' already exists"
             )));
         }
-        let used: Vec<u8> = self
-            .list()?
-            .iter()
-            .filter_map(|n| n.prefix.rsplit('.').next().and_then(|o| o.parse().ok()))
-            .collect();
-        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
-        // searches for a free base octet starting from the candidate.
-        let mut base = Network::base_for(name);
-        let mut livre = false;
-        // Uma volta COMPLETA ao espaço, e não um número redondo de tentativas: o
-        // `0..140` percorria 140 candidatos num espaço de 55, o que dava duas
-        // voltas e meia e escondia o caso em que não há nenhum livre.
-        for _ in 0..=(hi - lo) {
-            if !used.contains(&base) {
-                livre = true;
-                break;
-            }
-            // Wrap WITHIN the workload space (not 100..239, which fell outside it).
-            base = if base >= hi { lo } else { base + 1 };
-        }
-        // Sem lugar livre, o ciclo saía com o ÚLTIMO candidato tentado e escrevia-o
-        // à mesma: a rede nº 56 ficava em silêncio no `/16` de outra. Um limite
-        // atingido é uma resposta legítima; entregar uma rede que colide não é.
-        if !livre {
-            return Err(Error::NoFreeSubnet(format!(
-                "no free /16 left for network '{name}': the workload space \
-                 10.{lo}.0.0-10.{hi}.255.255 holds {} networks and all are taken \
-                 — remove one (`delonix network rm <name>`) to free a subnet",
-                (hi - lo) as u16 + 1
-            )));
-        }
+        // ONE full circle of the space from the name's candidate, over what
+        // THIS root occupies — records, `NetDef`s and the reserved prefixes (see
+        // `used_bases`). With no free slot, refuse: network no. 55 used to land,
+        // in silence, on another one's `/16`.
+        let base = pick_user_base(Network::base_for(name), &used_bases(&self.root()))
+            .ok_or_else(|| self.no_free_subnet(name))?;
         delonix_state::write_atomic(&self.path(name), base.to_string().as_bytes())?;
         self.get(name)
+    }
+
+    /// The state root this store lives under (`<root>/networks`).
+    fn root(&self) -> std::path::PathBuf {
+        self.dir
+            .parent()
+            .map(std::path::Path::to_path_buf)
+            .unwrap_or_default()
+    }
+
+    fn no_free_subnet(&self, name: &str) -> Error {
+        let (lo, hi) = (first_user_base(), last_user_base());
+        Error::NoFreeSubnet(format!(
+            "no free /16 left for network '{name}': the workload space \
+             10.{lo}.0.0-10.{hi}.255.255 holds {} networks and all are taken \
+             — remove one (`delonix network rm <name>`) to free a subnet",
+            (hi - lo) as u16 + 1
+        ))
+    }
+
+    /// The lock of the registry under `root` — the SAME file for this store and
+    /// for `infra::network_create`, so there is one allocator of `/16`s.
+    pub(crate) fn lock_path_in(root: &std::path::Path) -> std::path::PathBuf {
+        root.join("networks.lock")
     }
 
     /// A fechadura do registo, IRMÃ da pasta e não dentro dela — `list()` varre
     /// a pasta e não deve ter de saltar ficheiros que não são redes.
     fn lock_path(&self) -> std::path::PathBuf {
-        let mut p = self.dir.clone();
-        p.set_extension("lock");
-        p
+        Self::lock_path_in(&self.root())
     }
 
     /// The base octet a requested `subnet` maps to — `10.<base>.0.0/16` is the
@@ -1204,6 +1292,9 @@ impl NetworkStore {
             return Err(porque("outside the private address space (RFC 1918)"));
         }
         c.usable_for_network().map_err(|e| porque(&e))?;
+        if let Some((r, what)) = reserved_overlap(&c) {
+            return Err(porque(&format!("overlaps {r}, {what}")));
+        }
         Ok(c)
     }
 
@@ -1267,20 +1358,41 @@ impl NetworkStore {
         if let Ok(existente) = self.get(name) {
             return Ok(existente);
         }
-        for outra in self.list().unwrap_or_default() {
-            if let Some(c) = Cidr::parse(&outra.subnet) {
+        if let Some((r, what)) = reserved_overlap(&cidr) {
+            return Err(Error::SubnetOverlap(format!(
+                "subnet {} overlaps {r}, {what}",
+                cidr.to_string_cidr()
+            )));
+        }
+        // The records AND the realized `NetDef`s: a network only the VM path
+        // created has no record here, and its addresses are just as taken.
+        let records = self
+            .list()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|n| (n.name, n.subnet));
+        let realized = infra::network_list_in(&self.root())
+            .into_iter()
+            .map(|d| (d.name, d.prefix));
+        for (other, subnet) in records.chain(realized) {
+            if other == name {
+                continue;
+            }
+            if let Some(c) = Cidr::parse(&subnet) {
                 if c.overlaps(&cidr) {
                     return Err(Error::SubnetOverlap(format!(
-                        "subnet {} overlaps network '{}' ({})",
+                        "subnet {} overlaps network '{other}' ({})",
                         cidr.to_string_cidr(),
-                        outra.name,
-                        outra.subnet
+                        c.to_string_cidr()
                     )));
                 }
             }
         }
         std::fs::create_dir_all(&self.dir)?;
-        std::fs::write(self.path(name), format!("cidr={}\n", cidr.to_string_cidr()))?;
+        delonix_state::write_atomic(
+            &self.path(name),
+            format!("cidr={}\n", cidr.to_string_cidr()).as_bytes(),
+        )?;
         self.get(name)
     }
 
@@ -1320,23 +1432,48 @@ impl NetworkStore {
             }
             return Ok(existing);
         }
-        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
+        let (lo, hi) = (first_user_base(), last_user_base());
         if !(lo..=hi).contains(&base) {
             return Err(Error::InvalidBaseOctet(format!(
-                "invalid /16 base octet: {base} (workload space is 10.{lo}..10.{hi})"
+                "invalid /16 base octet: {base} (workload space is 10.{lo}..10.{hi}; \
+                 10.{} is the engine's default ingress network)",
+                lo - 1
             )));
         }
+        // Under the allocator's lock: a check-then-write of an octet races
+        // another creation of the same octet exactly like `create` did.
+        let lock_path = self.lock_path();
+        let _lock = flock::ExclusiveLock::acquire(&lock_path).ok_or_else(|| {
+            flock::ExclusiveLock::unavailable(
+                &lock_path,
+                "an unsynchronised allocation can put two networks on the same /16",
+            )
+        })?;
         // Two networks on the same /16 would share an IPAM range without either
         // knowing — the second one's allocations would collide with the first's.
-        if let Some(clash) = self
-            .list()?
-            .into_iter()
-            .find(|n| n.prefix == format!("10.{base}"))
-        {
+        // Every occupant counts: a record in either form, and a `NetDef`.
+        if used_bases(&self.root()).contains(&base) {
+            let who = self
+                .list()?
+                .into_iter()
+                .map(|n| (n.name, n.subnet))
+                .chain(
+                    infra::network_list_in(&self.root())
+                        .into_iter()
+                        .map(|d| (d.name, d.prefix)),
+                )
+                .find(|(_, sub)| {
+                    Cidr::parse(sub).is_some_and(|c| {
+                        c.overlaps(&Cidr {
+                            base: u32::from_be_bytes([10, base, 0, 0]),
+                            len: 16,
+                        })
+                    })
+                })
+                .map(|(n, _)| n)
+                .unwrap_or_else(|| "?".into());
             return Err(Error::BaseOctetTaken(format!(
-                "10.{base}.0.0/16 is already used by network '{}'",
-                clash.name
+                "10.{base}.0.0/16 is already used by network '{who}'"
             )));
         }
         delonix_state::write_atomic(&self.path(name), base.to_string().as_bytes())?;
@@ -1413,21 +1550,13 @@ impl NetworkStore {
         self.get(name)
     }
 
-    /// Free `/16` base octet for the given name (avoids collision with existing ones).
+    /// Free `/16` base octet for the given name — the same allocator as
+    /// [`Self::create`]. It was a third one, walking `100..239` (mostly OUTSIDE
+    /// the workload space, where `-p` is refused) and falling through to the
+    /// last candidate tried when everything was taken. The caller holds the lock.
     fn free_base(&self, name: &str) -> Result<u8> {
-        let used: Vec<u8> = self
-            .list()?
-            .iter()
-            .filter_map(|n| n.prefix.rsplit('.').next().and_then(|o| o.parse().ok()))
-            .collect();
-        let mut base = Network::base_for(name);
-        for _ in 0..140 {
-            if !used.contains(&base) {
-                break;
-            }
-            base = if base >= 239 { 100 } else { base + 1 };
-        }
-        Ok(base)
+        pick_user_base(Network::base_for(name), &used_bases(&self.root()))
+            .ok_or_else(|| self.no_free_subnet(name))
     }
 
     /// Creates an `overlay` network (bridge + VXLAN uplink): same as a user
@@ -1467,6 +1596,13 @@ impl NetworkStore {
         if vni == 0 || vni > 0x00ff_ffff {
             return Err(Error::InvalidVni("invalid VNI (1..16777215)".into()));
         }
+        let lock_path = self.lock_path();
+        let _lock = flock::ExclusiveLock::acquire(&lock_path).ok_or_else(|| {
+            flock::ExclusiveLock::unavailable(
+                &lock_path,
+                "an unsynchronised allocation can put two networks on the same /16",
+            )
+        })?;
         let base = self.free_base(name)?;
         let wgip_line = wg_ip.map(|w| format!("wgip={w}\n")).unwrap_or_default();
         let body = format!(
@@ -3220,7 +3356,11 @@ mod tests {
         // 50 is a valid octet but not a valid WORKLOAD one; the old guard was
         // `1..=254`, which let a network be created where nothing else looks.
         assert!(store.create_with_base("x", 50).is_err());
-        assert!(store.create_with_base("x", 200).is_ok());
+        // 200 is inside the workload space but it IS the default ingress
+        // network: this line used to assert `is_ok()` here, which is the defect
+        // (a user network sharing the ingress's addresses) written as a test.
+        assert!(store.create_with_base("x", 200).is_err());
+        assert!(store.create_with_base("x", 201).is_ok());
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
@@ -3307,9 +3447,9 @@ mod tests_alocacao_16 {
 
     #[test]
     fn sem_16_livre_recusa_em_vez_de_entregar_um_duplicado() {
-        let lo = delonix_compute::workload_net::WORKLOAD_IPV4_LO.octets()[1];
-        let hi = delonix_compute::workload_net::WORKLOAD_IPV4_HI.octets()[1];
-        let capacidade = (hi - lo) as usize + 1;
+        // The USER space: the workload space minus the ingress `/16` (10.200),
+        // which this test used to count as a free slot — 55 instead of 54.
+        let capacidade = usize::from(last_user_base() - first_user_base()) + 1;
 
         let store = NetworkStore::open(raiz("tecto")).unwrap();
         for i in 0..capacidade {
@@ -3460,5 +3600,149 @@ mod tests_posse_do_slirp {
         let argv = vec!["/usr/bin/qemu-system-x86_64".to_string(), "1234".into()];
         assert!(parse(&argv).is_none());
         assert!(slirp_from_argv(1, &[]).is_none());
+    }
+}
+
+/// Finding 6 (doc 62 §6 P1): two `/16` allocators blind to each other, and a
+/// `validate_subnet` that accepted overlapping the engine's own space.
+#[cfg(test)]
+mod tests_single_allocator {
+    use super::*;
+
+    fn with_root<T>(tag: &str, f: impl FnOnce(&std::path::Path) -> T) -> T {
+        let mut env = crate::testenv::lock();
+        let d = std::env::temp_dir().join(format!("dlx-allocator-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("run")).unwrap();
+        env.set("DELONIX_ROOT", &d);
+        env.set("DELONIX_NET_RUNTIME_DIR", d.join("run"));
+        let out = f(&d);
+        let _ = std::fs::remove_dir_all(&d);
+        out
+    }
+
+    #[test]
+    fn validate_subnet_refuses_the_engines_own_space() {
+        for s in [
+            "10.200.0.0/16",
+            "10.200.7.0/24",
+            "10.0.0.0/8",
+            "10.0.2.0/24",
+            "10.0.0.0/16",
+        ] {
+            let e = NetworkStore::validate_subnet(s).unwrap_err();
+            assert!(format!("{e}").contains("overlaps"), "{s}: {e}");
+        }
+        NetworkStore::validate_subnet("10.201.0.0/16").unwrap();
+        NetworkStore::validate_subnet("10.0.3.0/24").unwrap();
+    }
+
+    /// Measured before: the 53rd network of an empty root landed on `10.200` —
+    /// the default ingress network. Fill the whole space; none lands there.
+    #[test]
+    fn the_network_store_never_hands_out_the_ingress_slash16() {
+        with_root("ingress", |root| {
+            let store = NetworkStore::open(root).unwrap();
+            let mut seen = std::collections::HashSet::new();
+            for i in 0.. {
+                match store.create(&format!("s2n{i}")) {
+                    Ok(n) => {
+                        assert_ne!(n.prefix, "10.200", "network {i} on top of the ingress");
+                        assert!(seen.insert(n.prefix.clone()), "{} repeated", n.prefix);
+                    }
+                    Err(e) => {
+                        assert!(e.is_conflict(), "{e}");
+                        break;
+                    }
+                }
+            }
+            assert_eq!(
+                seen.len(),
+                usize::from(last_user_base() - first_user_base()) + 1
+            );
+        });
+    }
+
+    /// A network only the VM path realized (`infra::network_create`, no record)
+    /// occupies its `/16` for the `NetworkStore` too.
+    #[test]
+    fn the_network_store_sees_networks_only_vms_created() {
+        with_root("vmnet", |root| {
+            let vm = infra::network_create("s2vmnet").unwrap();
+            let store = NetworkStore::open(root).unwrap();
+            for i in 0..20 {
+                let n = store.create(&format!("s2m{i}")).unwrap();
+                assert_ne!(n.prefix, vm.prefix, "network {i} on the VM network's /16");
+            }
+            let cidr = Cidr::parse(&format!("{}.0.0/16", vm.prefix)).unwrap();
+            let e = store.create_with_cidr("s2over", cidr).unwrap_err();
+            assert!(e.is_conflict(), "{e}");
+            let base: u8 = vm.prefix.rsplit('.').next().unwrap().parse().unwrap();
+            let e = store.create_with_base("s2base", base).unwrap_err();
+            assert!(e.is_conflict(), "{e}");
+        });
+    }
+
+    /// And the other way round: the VM allocator honours the registry — a
+    /// declared network is realized on ITS prefix, and others stay off it.
+    #[test]
+    fn the_vm_allocator_sees_the_registry() {
+        with_root("registry", |root| {
+            let store = NetworkStore::open(root).unwrap();
+            let declared = store.create_with_base("s2decl", first_user_base()).unwrap();
+            let cidr = store
+                .create_with_cidr("s2cidr", Cidr::parse("10.202.0.0/16").unwrap())
+                .unwrap();
+            let def = infra::network_create("s2decl").unwrap();
+            assert_eq!(
+                def.prefix, declared.prefix,
+                "the VM on a different subnet than the containers"
+            );
+            let vm_only = infra::network_create("s2vmonly").unwrap();
+            assert_ne!(vm_only.prefix, declared.prefix);
+            assert_eq!(cidr.subnet, "10.202.0.0/16");
+            assert_ne!(
+                vm_only.prefix, "10.202",
+                "the VM network on top of a CIDR one"
+            );
+        });
+    }
+
+    /// `create_with_base` on the ingress octet is refused, saying why.
+    #[test]
+    fn create_with_base_refuses_the_ingress() {
+        with_root("base200", |root| {
+            let store = NetworkStore::open(root).unwrap();
+            let e = store.create_with_base("s2ing", 200).unwrap_err();
+            assert!(format!("{e}").contains("ingress"), "{e}");
+        });
+    }
+
+    /// CONCURRENCY: both allocators in parallel on one root never give one
+    /// `/16` to two networks.
+    #[test]
+    fn both_allocators_in_parallel_never_share_a_slash16() {
+        with_root("parallel", |root| {
+            let root = root.to_path_buf();
+            let hs: Vec<_> = (0..24)
+                .map(|i| {
+                    let root = root.clone();
+                    std::thread::spawn(move || {
+                        if i % 2 == 0 {
+                            infra::network_create(&format!("p-vm{i}")).map(|d| d.prefix)
+                        } else {
+                            NetworkStore::open(&root)
+                                .and_then(|s| s.create(&format!("p-ct{i}")))
+                                .map(|n| n.prefix)
+                        }
+                    })
+                })
+                .collect();
+            let mut seen = std::collections::HashSet::new();
+            for h in hs {
+                let p = h.join().unwrap().unwrap();
+                assert!(seen.insert(p.clone()), "/16 {p} handed out twice");
+            }
+        });
     }
 }

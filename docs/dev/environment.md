@@ -206,8 +206,9 @@ For long-lived workloads, use a systemd **user** unit with `Delegate=yes`. Many 
 a drop-in `/etc/systemd/system/user@.service.d/50-delonix-delegate.conf` with `[Service]` and
 `Delegate=cpu cpuset io memory pids`, then `systemctl daemon-reload` **and** `systemctl restart user@<uid>.service`
 (daemon-reload alone is not enough). `delonix system setup` prints it, and lists under `refused:` the flags `container run`
-will refuse on this host. `delonix system setup --delegate` writes that drop-in (needs root) when
-the `cpu` controller itself is missing.
+will refuse on this host. `sudo delonix system setup --delegate` writes that drop-in whatever the
+diagnosis says, runs `daemon-reload`, and prints the `systemctl restart user@<uid>.service` still to
+do; under `sudo` it reports on the invoking user's `user@<uid>.service` (from `SUDO_UID`), not on root.
 
 ### A stale `delonix` on your `PATH`
 

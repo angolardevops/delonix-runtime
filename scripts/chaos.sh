@@ -113,6 +113,102 @@ neton() {
   dlx container exec "$1" ping -c1 -W2 "$gw" 2>/dev/null | grep -q "1 packets received"
 }
 
+# Os PIDs cujo `DELONIX_ROOT` está debaixo do sandbox — lido do
+# `/proc/<pid>/environ`, nunca pelo nome: o host pode correr outra instância do
+# motor, com os mesmos nomes de processo, e essa não é nossa. Apanha o que o
+# motor lança (pin, control, slirp, o supervisor `netns run`, o log shim); NÃO
+# apanha o workload, cujo ambiente é o do container — esse conta-se pelo pid
+# registado (`member_procs`).
+sandbox_pids() {
+  SANDBOX="$SANDBOX" python3 - <<'EOF'
+import os
+want = os.environ["SANDBOX"].rstrip("/") + "/"
+for d in os.listdir("/proc"):
+    if not d.isdigit():
+        continue
+    try:
+        env = open(f"/proc/{d}/environ", "rb").read().split(b"\0")
+    except OSError:
+        continue
+    for kv in env:
+        if kv.startswith(b"DELONIX_ROOT="):
+            if (kv[len(b"DELONIX_ROOT="):].decode(errors="replace") + "/").startswith(want):
+                print(d)
+            break
+EOF
+}
+
+# Os processos de um membro, lidos ANTES de o remover: o init do workload (o
+# pid registado — PID 1 da sua pid namespace), o supervisor que o reapa (o
+# `netns run`, pai dele) e os filhos desse supervisor (o log shim). O supervisor
+# só entra se for comprovadamente do sandbox (`sandbox_pids`), para a medição
+# nunca apontar a um processo alheio.
+#
+#   member_procs rp-c0   →   "4101 4099 4103"
+member_procs() {
+  local pid sup mine out=""
+  pid=$(cpid "$1"); [ -n "$pid" ] && [ -e "/proc/$pid" ] || return 0
+  out="$pid"
+  sup=$(awk '{print $4}' "/proc/$pid/stat" 2>/dev/null)
+  mine=" $(sandbox_pids | tr '\n' ' ') "
+  if [ -n "$sup" ] && [[ "$mine" == *" $sup "* ]]; then
+    out+=" $sup $(cat "/proc/$sup/task/"*/children 2>/dev/null | tr ' ' '\n' | grep -vx "$pid")"
+  fi
+  printf '%s' "$out"
+}
+
+# Dos PIDs dados, os que ainda existem, como `pid:estado:comm` (o `comm` e não o
+# `cmdline`: um processo a meio da saída já largou a memória, e o seu `cmdline`
+# vem vazio — era exactamente o caso a mostrar). Espera até
+# `$2` décimos de segundo por eles — o supervisor só sai DEPOIS de reapar o
+# workload, e esses milissegundos não são o defeito; os 15 s medidos são.
+procs_left() {
+  local pids=$1 ticks=${2:-20} p left
+  while :; do
+    left=""
+    for p in $pids; do
+      [ -e "/proc/$p" ] || continue
+      left+="$p:$(awk '{print $3}' "/proc/$p/stat" 2>/dev/null):$(cat "/proc/$p/comm" 2>/dev/null) "
+    done
+    [ -z "$left" ] || [ "$ticks" -le 0 ] && break
+    ticks=$((ticks-1)); sleep 0.1
+  done
+  printf '%s' "$left"
+}
+
+# Remove os pods nomeados e MEDE que os membros saíram — do `container ps -a` E
+# do host. Imprime o que sobrou; rc 0 = limpo, 1 = sobrou algum membro no `ps
+# -a`, 2 = o `ps -a` não respondeu (um `ps` vazio por falha não pode passar por
+# limpo), 3 = os registos saíram mas os PROCESSOS ficaram.
+#
+# Um pod por chamada: o `delete pod` pára no primeiro que falha, e uma limpeza
+# não pode deixar os seguintes de pé por causa de um que nunca chegou a existir.
+# Esta limpeza era `dlx pod rm -f`, depois de o `pod rm` ter saído da CLI para o
+# `delete pod`: falhava em silêncio (>/dev/null), os pods ficavam vivos até ao
+# `teardown_quiet`, e um cenário vazava para o seguinte. Por isso mede-se.
+#
+# E mede-se nos processos, não só nos registos: a 2026-09-27, com load ~111, o
+# `delete pod --force` devolveu sucesso, o `ps -a` deixou de listar os membros,
+# e os cinco workloads (`sleep 300` em estado D, a esvaziar o overlay para o
+# disco) mais os seus supervisores continuavam no host depois de o harness
+# apagar o sandbox. O `rm -f` devolvia no SIGKILL, não na saída do processo.
+#
+#   pod_cleanup "pa pa2 pb" pa-c0 pa2-c0 pb-c0
+pod_cleanup() {
+  local pods=$1; shift
+  local p ps m left="" pids=""
+  for m in "$@"; do pids+="$(member_procs "$m") "; done
+  for p in $pods; do dlx delete pod "$p" --force >/dev/null 2>&1; done
+  ps=$(dlx container ps -a 2>/dev/null) || return 2
+  for m in "$@"; do
+    printf '%s\n' "$ps" | grep -qw -- "$m" && left+="$m "
+  done
+  if [ -n "$left" ]; then printf '%s' "$left"; return 1; fi
+  left=$(procs_left "$pids")
+  printf '%s' "$left"
+  [ -z "$left" ] || return 3
+}
+
 setup() {
   teardown_quiet
   mkdir -p "$SANDBOX/root" "$SANDBOX/run"
@@ -696,8 +792,200 @@ scen_pod_namespace_isolation() {
       bad "pod-namespace-isolation" "same-namespace bloqueado — o isolamento é demasiado agressivo"
     fi
   fi
-  for n in pa pa2 pb; do dlx pod rm -f "$n" >/dev/null 2>&1; done
+  # A limpeza é uma propriedade deste cenário, com veredicto próprio: os pods
+  # que ficassem vivos entravam no seguinte com IPs e cadeias de isolamento.
+  local listed left rc
+  listed=$(dlx container ps -a 2>/dev/null | grep -cwE -- 'pa-c0|pa2-c0|pb-c0')
+  left=$(pod_cleanup "pa pa2 pb" pa-c0 pa2-c0 pb-c0); rc=$?
+  log "limpeza: ${listed:-0} membro(s) antes · sobraram: ${left:-nenhum}"
+  if [ "$rc" -eq 2 ]; then
+    bad "pod-namespace-isolation-cleanup" "\`container ps -a\` não respondeu depois do \`delete pod\`"
+  elif [ "${listed:-0}" -eq 0 ]; then
+    skip "pod-namespace-isolation-cleanup" "nenhum membro listado antes da limpeza — nada a medir"
+  elif [ "$rc" -eq 3 ]; then
+    bad "pod-namespace-isolation-cleanup" "\`delete pod --force\` tirou os registos mas os processos ficaram: $left"
+  elif [ "$rc" -ne 0 ]; then
+    bad "pod-namespace-isolation-cleanup" "\`delete pod --force\` deixou membros no \`container ps -a\`: $left"
+  else
+    ok "pod-namespace-isolation-cleanup (\`delete pod --force\` removeu os $listed membros, e nenhum processo deles ficou)"
+  fi
   rm -rf "$d"
+}
+
+# The firewall FAILS CLOSED — the four ways it used to fail open (NaaS audit,
+# docs/discovery/62, P0-1/2/4/5), each measured in PACKETS and in the counter of
+# the rule that has to catch them, never in a command's exit code. Every one of
+# them reported success while the traffic flowed:
+#
+#   1. egress of the SOURCE skipped when the destination accepts. Both lookups
+#      lived in one base chain and the destination's `accept` ended it. Measured
+#      before the fix: `egress policy deny` on A, A→B (same namespace) 3/3, and
+#      the drop in A's chain at 0 packets.
+#   2. a rule that cannot be rendered was SKIPPED and the rest applied — a deny
+#      that disappears is an allow. The whole spec must be refused and the chain
+#      that was there must stay exactly as it was.
+#   3. `ingress rm` of the last rule tore down the chain, and outside `default`
+#      the chain is also the namespace isolation. Measured before: another
+#      namespace reached the container 2/2 right after the `rm`.
+#   4. a network declared with its own CIDR had no isolation at all: no chain,
+#      no `@dlxall`. Measured before: teamA→teamB 2/2 on 172.30.5.0/24.
+scen_firewall_fail_closed() {
+  head_ "firewall-fail-closed — egress da origem, regra inválida, rm, rede CIDR"
+  dlx net netns up >/dev/null 2>&1
+  # The pin is asked for on EVERY call, never cached: removing the last container
+  # of a phase drops the refcount to 0 and the next phase gets a NEW infra — a
+  # cached pid then reads a dead netns and every counter comes back `-`.
+  nft_() { nsenter -t "$(holder_pid)" -U -m -n -- nft "$@"; }
+  ipof() { DELONIX_ROOT="$SANDBOX/root" python3 - "$1" <<'EOF2'
+import json,glob,os,sys
+for f in glob.glob(os.path.join(os.environ["DELONIX_ROOT"],"containers","*.json")):
+    d=json.load(open(f))
+    if d.get("name")==sys.argv[1]: print(d.get("ip") or ""); break
+EOF2
+  }
+  # The counter of the rule of <ip>'s chain whose text contains <fixed string>.
+  # `-` when the chain or the rule is absent: absence is an answer, never a 0.
+  fwcount() {
+    local ch n
+    ch=$(nft_ list map ip dlxing fwmap 2>/dev/null | grep -oP "$1 : jump \Kfw[0-9a-f]+")
+    [ -n "$ch" ] || { echo -; return; }
+    n=$(nft_ list chain ip dlxing "$ch" 2>/dev/null | grep -F -- "$2" | grep -oP 'packets \K[0-9]+' | head -1)
+    echo "${n:--}"
+  }
+  # Replies received. NOT `… | grep … || echo 0`: under `pipefail` a ping with no
+  # reply fails the pipeline AFTER grep printed its `0`, and the fallback adds a
+  # second one.
+  recv() {
+    local n
+    n=$(dlx container exec "$1" ping -c"$3" -W2 "$2" 2>/dev/null | grep -oP '[0-9]+(?= packets received)')
+    echo "${n:-0}"
+  }
+  local c
+  for c in fwa:fwA fwb:fwA fwc:fwB; do
+    dlx container run -d --name "${c%%:*}" --net chaosnet --namespace "${c##*:}" "$IMAGE" sleep 300 >/dev/null 2>&1
+  done
+  sleep 3
+  local A B C; A=$(ipof fwa); B=$(ipof fwb); C=$(ipof fwc)
+  if [ -z "$A" ] || [ -z "$B" ] || [ -z "$C" ] || [ -z "$(holder_pid)" ] || [ "$(recv fwa "$B" 1)" != 1 ]; then
+    skip "firewall-fail-closed" "containers sem IP ou sem tráfego antes de qualquer regra"
+    dlx container rm -f fwa fwb fwc >/dev/null 2>&1; return
+  fi
+
+  # 1 — the source's egress deny wins over the destination's same-namespace accept.
+  dlx net egress policy fwa deny >/dev/null 2>&1
+  local d0 d1 got
+  d0=$(fwcount "$A" "ip saddr $A counter")
+  got=$(recv fwa "$B" 3)
+  d1=$(fwcount "$A" "ip saddr $A counter")
+  log "egress deny: A→B $got/3 · drop da origem $d0→$d1"
+  if [ "$got" = 0 ] && [ "$d0" != - ] && [ "$d1" != - ] && [ $((d1 - d0)) -ge 3 ]; then
+    ok "firewall-fail-closed/egress-origem (0/3, o drop da origem contou $((d1 - d0)))"
+  else
+    bad "firewall-fail-closed/egress-origem" "A→B $got/3 com egress deny em A; o drop da origem foi $d0→$d1 — o accept do destino contornou-o"
+  fi
+
+  # 2 — a spec with one unrenderable rule is refused whole; the chain stays.
+  #
+  # Sent RAW to the holder's control socket, not through the CLI: the CLI now
+  # refuses the same spec on its own (for an older holder's sake), so going
+  # through it would prove the host check and never reach the holder's — which
+  # is the authoritative one, the last thing before `nft -f`. The spec is
+  # «allow everything out» plus one deny that cannot be rendered: the old holder
+  # skipped the deny, applied the rest, and A's `egress policy deny` was gone.
+  #
+  # Measured towards `fwz`, a container in `default` with NO chain of its own, so
+  # only A's chain decides and case 1's bypass cannot blur this one.
+  dlx container run -d --name fwz --net chaosnet "$IMAGE" sleep 300 >/dev/null 2>&1
+  sleep 2
+  local Z before after reply hex spec
+  Z=$(ipof fwz)
+  spec='{"enabled":true,"policyIn":"","policyOut":"","namespace":"fwA","rules":[{"dir":"out","proto":"any","port":"","src":"","action":"allow"},{"dir":"out","proto":"tcp","port":"80; flush ruleset","src":"","action":"deny"}]}'
+  hex=$(printf '%s' "$spec" | od -An -v -tx1 | tr -d ' \n')
+  chain_of_a() {
+    nft_ list chain ip dlxing "$(nft_ list map ip dlxing fwmap | grep -oP "$A : jump \Kfw[0-9a-f]+")" 2>/dev/null \
+      | sed 's/packets [0-9]* bytes [0-9]*//'
+  }
+  before=$(chain_of_a)
+  reply=$(python3 - "$SANDBOX/run/control.sock" "firewall fwa $A $hex" <<'EOF2'
+import socket, sys
+s = socket.socket(socket.AF_UNIX)
+s.settimeout(30)
+s.connect(sys.argv[1])
+s.sendall((sys.argv[2] + "\n").encode())
+s.shutdown(socket.SHUT_WR)
+print(s.makefile().read().strip())
+EOF2
+)
+  after=$(chain_of_a)
+  got=$([ -n "$Z" ] && recv fwa "$Z" 2 || echo "?")
+  log "spec com regra inválida no holder: resposta '${reply:0:60}' · chain $([ "$before" = "$after" ] && echo intacta || echo MUDOU) · A→Z $got/2"
+  if [ -z "$Z" ] || [ -z "$before" ]; then
+    skip "firewall-fail-closed/regra-invalida" "sem container de controlo ou sem chain de A para comparar"
+  elif [ "$before" = "$after" ] && [ "$got" = 0 ]; then
+    ok "firewall-fail-closed/regra-invalida (o holder recusou a spec inteira, a política anterior continua a cortar)"
+  else
+    bad "firewall-fail-closed/regra-invalida" "o holder aplicou a spec em parte (chain $([ "$before" = "$after" ] && echo intacta || echo alterada), A→Z $got/2) — um deny perdido abriu o tráfego"
+  fi
+  dlx container rm -f fwz >/dev/null 2>&1
+
+  # 3 — removing the last rule keeps the namespace isolation.
+  dlx net ingress allow fwb tcp/8080 >/dev/null 2>&1
+  dlx net ingress rm fwb tcp/8080 >/dev/null 2>&1
+  d0=$(fwcount "$B" "@dlxall ct state new counter")
+  got=$(recv fwc "$B" 2)
+  d1=$(fwcount "$B" "@dlxall ct state new counter")
+  log "após ingress rm: fwB→fwA $got/2 · drop cross-namespace $d0→$d1"
+  if [ "$got" = 0 ] && [ "$d1" != - ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+    ok "firewall-fail-closed/rm-preserva-isolamento"
+  else
+    bad "firewall-fail-closed/rm-preserva-isolamento" "depois de \`ingress rm\` outra namespace chegou ao container ($got/2, drop $d0→$d1)"
+  fi
+
+  # 3b — an explicit inbound rule keeps the namespace isolation (NaaS S1 review,
+  # C1). A `deny` of ONE port used to switch the isolation off for the whole
+  # container: the chain kept only that rule, and another namespace reached every
+  # other port. The same namespace still gets through (it falls to the policy).
+  local same
+  # fwa is the same-namespace probe, and case 1 left it with `egress policy deny`.
+  dlx net egress policy fwa allow >/dev/null 2>&1
+  dlx net ingress deny fwb tcp/22 >/dev/null 2>&1
+  d0=$(fwcount "$B" "ct state new counter")
+  got=$(recv fwc "$B" 2); same=$(recv fwa "$B" 1)
+  d1=$(fwcount "$B" "ct state new counter")
+  log "com ingress deny tcp/22: fwB→fwA $got/2 · mesma ns $same/1 · guardrail $d0→$d1"
+  if [ "$got" = 0 ] && [ "$same" = 1 ] && [ "$d1" != - ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+    ok "firewall-fail-closed/regra-explicita-mantem-isolamento"
+  else
+    bad "firewall-fail-closed/regra-explicita-mantem-isolamento" "com uma regra de ingress explícita, outra namespace chegou ao container ($got/2, mesma ns $same/1, guardrail $d0→$d1)"
+  fi
+  dlx net ingress rm fwb tcp/22 >/dev/null 2>&1
+  dlx container rm -f fwa fwb fwc >/dev/null 2>&1
+
+  # 4 — a CIDR network is isolated like any other.
+  if ! dlx network create chaoscidr --subnet 172.31.77.0/24 >/dev/null 2>&1; then
+    skip "firewall-fail-closed/rede-cidr" "não consegui criar a rede 172.31.77.0/24"
+    return
+  fi
+  for c in fwd:fwA fwd2:fwA fwe:fwB; do
+    dlx container run -d --name "${c%%:*}" --net chaoscidr --namespace "${c##*:}" "$IMAGE" sleep 300 >/dev/null 2>&1
+  done
+  sleep 3
+  local D D2 E; D=$(ipof fwd); D2=$(ipof fwd2); E=$(ipof fwe)
+  if [ -z "$D" ] || [ -z "$D2" ] || [ -z "$E" ]; then
+    bad "firewall-fail-closed/rede-cidr" "containers na rede CIDR não arrancaram (o isolamento foi recusado?)"
+  else
+    d0=$(fwcount "$E" "@dlxall ct state new counter")
+    got=$(recv fwd "$E" 2); same=$(recv fwd "$D2" 1)
+    d1=$(fwcount "$E" "@dlxall ct state new counter")
+    log "rede CIDR: cross-ns $got/2 · mesma ns $same/1 · drop $d0→$d1"
+    if [ "$got" = 0 ] && [ "$same" = 1 ] && [ "$d1" != - ] && [ "$d0" != - ] && [ $((d1 - d0)) -ge 1 ]; then
+      ok "firewall-fail-closed/rede-cidr (fronteira fechada em 172.31.77.0/24)"
+    else
+      bad "firewall-fail-closed/rede-cidr" "cross-ns $got/2, mesma ns $same/1, drop $d0→$d1 — a rede CIDR está fora do isolamento"
+    fi
+  fi
+  dlx container rm -f fwd fwd2 fwe >/dev/null 2>&1
+  dlx network rm chaoscidr >/dev/null 2>&1
 }
 
 # A holder respawn with a POD alive. The container case is `holder_kill` above;
@@ -724,7 +1012,7 @@ scen_pod_holder_respawn() {
   sleep 3
   if ! neton rp-c0; then
     skip "pod-holder-respawn" "o pod não ganhou rede no cenário base"
-    dlx pod rm -f rp >/dev/null 2>&1; rm -rf "$d"; return
+    pod_cleanup rp rp-c0 rp-c1 >/dev/null; rm -rf "$d"; return
   fi
   local before after ctl_b sli_b
   before=$(holder_pid); ctl_b=$(control_pid); sli_b=$(slirp_pid)
@@ -784,7 +1072,19 @@ reporta pin: o nó fica meio-de-pé e o attach seguinte falha"
   else
     ok "pod-holder-respawn (os dois membros recuperaram, e o nó volta inteiro: pin $after)"
   fi
-  dlx pod rm -f rp >/dev/null 2>&1
+  # Depois de um respawn do pin, o `delete pod` tem de desligar a netns partilhada
+  # dos membros sobre o pin NOVO — é aqui que uma limpeza que falha se esconde.
+  local left rc
+  left=$(pod_cleanup rp rp-c0 rp-c1); rc=$?
+  if [ "$rc" -eq 2 ]; then
+    bad "pod-holder-respawn-cleanup" "\`container ps -a\` não respondeu depois do \`delete pod\`"
+  elif [ "$rc" -eq 3 ]; then
+    bad "pod-holder-respawn-cleanup" "\`delete pod rp --force\` tirou os registos mas os processos ficaram: $left"
+  elif [ "$rc" -ne 0 ]; then
+    bad "pod-holder-respawn-cleanup" "\`delete pod rp --force\` deixou membros no \`container ps -a\`: $left"
+  else
+    ok "pod-holder-respawn-cleanup (\`delete pod --force\` removeu rp-c0 e rp-c1, e nenhum processo deles ficou)"
+  fi
   rm -rf "$d"
   # E o sandbox volta SERVÍVEL para o cenário seguinte, seja qual for o veredicto
   # acima. Sem isto, um defeito daqui deixa de ser um FAIL e passa a ser cinco:
@@ -1515,7 +1815,7 @@ $(cat "/sys/fs/cgroup$cg1/memory.max" 2>/dev/null || echo ausente))"
   dlx container rm -f ckg0 ckg1 >/dev/null 2>&1
 }
 
-ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
+ALL=(holder_kill full_holder_death control_restart posse_destrutiva holder_wedge slirp_kill idempotent_up oom concurrent_attach namespace_isolation pod_namespace_isolation firewall_fail_closed pod_holder_respawn scale abrupt_kill aggregate_ceiling delegated_scope cgroup_netns disk_full write_failure stack_converge stack_netroute stack_partial_apply truenas_destroy)
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -1559,6 +1859,22 @@ trap '[ $KEEP -eq 0 ] && teardown_quiet' EXIT
 for s in "${SELECTED[@]}"; do
   "scen_${s}" || true
 done
+
+# O teardown também é medido, e nos PROCESSOS: depois dele nada com
+# `DELONIX_ROOT` debaixo do sandbox pode continuar no host — nem infra, nem
+# supervisores, nem shims. Foi depois do teardown que a fuga de 2026-09-27 se
+# viu (os workloads de cinco pods vivos com o sandbox já apagado), e nenhum
+# veredicto a registava. O workload em si não herda `DELONIX_ROOT`; o seu
+# supervisor sim, e só sai depois de o reapar — por isso é ele que o denuncia.
+if [ "$KEEP" -eq 0 ]; then
+  teardown_quiet
+  leftover=$(procs_left "$(sandbox_pids | tr '\n' ' ')" 50)
+  if [ -n "$leftover" ]; then
+    bad "sandbox-teardown" "processos do sandbox continuam no host depois do teardown: $leftover"
+  else
+    ok "sandbox-teardown (nenhum processo com DELONIX_ROOT em $SANDBOX ficou no host)"
+  fi
+fi
 
 printf '\n\033[1m── resumo ──\033[0m\n'
 for r in "${RESULTS[@]}"; do printf '  %s\n' "$r"; done

@@ -196,12 +196,14 @@ the same way as the Proxmox backend above and read by `cmd::gatewayproviders`.
 
 | Variable | Read by | Purpose | Values / default | Notes |
 |---|---|---|---|---|
-| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:register_opnsense_with` | API endpoint of the appliance. Setting it is what enables the provider. | `https://<host>`. | Requires a credential. |
+| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:opnsense_target_with` | API endpoint of the appliance. Setting it is what enables the provider. | `https://<host>`. | Requires a credential. |
 | `DELONIX_OPNSENSE_CREDENTIAL` | `cmd/gatewayproviders.rs:opnsense_auth` | Name of a `kind: Secret` holding the credential. | Secret with `key`+`secret` fields — a generated API key/secret pair, never a GUI account's username/password (ADR-0051 Phase 0: those are refused by the API). | Checked **first**. |
 | `DELONIX_OPNSENSE_KEY` | `cmd/gatewayproviders.rs:opnsense_auth` | API key. | | Used with `DELONIX_OPNSENSE_SECRET`; checked after the `kind: Secret`. |
 | `DELONIX_OPNSENSE_SECRET` | `cmd/gatewayproviders.rs:opnsense_auth` (via `credential_value`) | API secret. | Prefer `DELONIX_OPNSENSE_SECRET_FILE` (a `chmod 600` path). | |
-| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:register_opnsense_with` | Skips TLS certificate verification for the appliance. | `1`, `true` or `yes` → skip; default verify. | A stock OPNsense serves a self-signed certificate (measured live, ADR-0051 Phase 0). **Another machine answering in the appliance's name receives the credential.** Opt-in only. |
-| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:register_opnsense_with` | A CA certificate (PEM) to trust for the appliance, in addition to the system roots. | Path to a PEM file; unreadable is an **error**. | Instead of `DELONIX_OPNSENSE_INSECURE_TLS`. |
+| `DELONIX_OPNSENSE_KEY_FILE` | `cmd/gatewayproviders.rs:opnsense_auth` | A file holding the API key. | Path; read and trimmed. | Wins over `DELONIX_OPNSENSE_KEY`. `providers.yaml` `auth.keyFile` maps onto it (ADR-0059 F1). |
+| `DELONIX_OPNSENSE_SECRET_FILE` | `cmd/gatewayproviders.rs:opnsense_auth` (via `credential_value`) | A file holding the API secret. | A `chmod 600` path; refused when others can read it. | `providers.yaml` `auth.secretFile` maps onto it (ADR-0059 F1). |
+| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:opnsense_target_with` | Skips TLS certificate verification for the appliance. | `1`, `true` or `yes` → skip; default verify. | A stock OPNsense serves a self-signed certificate (measured live, ADR-0051 Phase 0). **Another machine answering in the appliance's name receives the credential.** Opt-in only. |
+| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:opnsense_target_with` | A CA certificate (PEM) to trust for the appliance, in addition to the system roots. | Path to a PEM file; unreadable is an **error**. | Instead of `DELONIX_OPNSENSE_INSECURE_TLS`. |
 
 ### TrueNAS
 
@@ -257,6 +259,8 @@ These are read only by tests. Without them the live tests **skip** and print `SK
 | `DELONIX_PROXMOX_TEST_NODE` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Node name. | Default `pve`. | |
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Account for password authentication. | e.g. `root@pam`. Required. | TLS verification is disabled in these tests. |
 | `DELONIX_PROXMOX_TEST_PASS` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Its password. | Required. | |
+| `DELONIX_PROXMOX_TEST_TOKEN_ID` | `crates/providers/delonix-proxmox/tests/live.rs:target` | An API token id instead of the account (`user@realm!name`). | Optional; with `DELONIX_PROXMOX_TEST_TOKEN` it is used before the account. | Revocable on the node; a lab run can mint one without anybody's password. |
+| `DELONIX_PROXMOX_TEST_TOKEN` | `crates/providers/delonix-proxmox/tests/live.rs:target` | Its secret. | Optional, with the id. | |
 | `DELONIX_PROXMOX_TEST_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage for the test VM's disk. | Default `local-lvm`. | |
 | `DELONIX_PROXMOX_TEST_BACKUP_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | Storage the backup archive lands on — the node may not accept backup content on the disk storage (a thin-LVM pool cannot). | Default: same as `DELONIX_PROXMOX_TEST_STORAGE`. | |
 | `DELONIX_PROXMOX_TEST_MOVE_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | A SECOND storage `move_disk` moves the test VM's boot disk to — the node refuses a move to the same storage with the same format, so this has to be a genuinely different pool. | Default `local` (must have `content=images` enabled on it). | |

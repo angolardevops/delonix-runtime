@@ -264,6 +264,16 @@ que chega ao operador é «a aplicação está lenta», não «a firewall bloque
 novos. Para verificar uma alteração, reinicia o workload ou espera que a ligação
 caia.
 
+**Entrada e saída decidem ambas.** Um fluxo de `app` para `db` só passa se a
+saída de `app` o deixar **e** a entrada de `db` o deixar; um *accept* de um lado
+não salta a decisão do outro. Até à correcção P0-1 da auditoria NaaS, um
+`egress policy deny` ficava sem efeito para qualquer destino que aceitasse a
+origem — os da mesma namespace, por exemplo.
+
+**Uma regra que o motor não consegue impor tal como está escrita é recusada, e
+com ela a especificação inteira**: as regras anteriores continuam em vigor. Não
+há aplicação parcial — um *deny* descartado em silêncio seria um *allow*.
+
 ### 5.5 Saída ao nível da rede
 
 Além do por-container, uma rede inteira tem política de saída:
@@ -460,11 +470,43 @@ estado**. Correr dois `DELONIX_ROOT` diferentes com o mesmo uid é a receita par
 isto. A recusa é intencional: reconstruir dali abaixo desligaria os workloads da
 outra infra.
 
+### «Actualizei o motor e um `egress deny` ainda deixa passar para outro container»
+
+O despacho da firewall (as *base chains* `fwout` e `fwcont` na tabela `dlxing`)
+vive no netns do holder. Um **plano de controlo arrancado por um binário antigo**
+tem a forma antiga, em que o *accept* do destino saltava o *egress* da origem.
+O binário novo **migra-o sozinho** na primeira operação de rede depois do
+upgrade (um `run`, um `start`, um `net ingress`/`egress`, um `net netns up`):
+entra nos namespaces do pin e troca o despacho numa transacção atómica, sem
+tocar no pin, nas chains por container nem no `@fwmap`, e sem reiniciar nada.
+Se a migração falhar, o comando **falha** com a razão, em vez de aplicar regras
+que não seriam cumpridas.
+
+Só se essa migração falhar é preciso o passo manual, que reinicia **só o
+controlo**:
+
+```bash
+delonix net netns status                  # anota o pid do «control»
+kill <pid-do-control>
+delonix net netns up                      # o controlo novo reata e migra
+```
+
+Confirma com `nsenter -t <pid-do-pin> -U -m -n -- nft list chain ip dlxing fwout`:
+tem de existir e ter uma única regra, `ip saddr vmap @fwmap`. A recusa de regras
+inválidas também é feita pela CLI, por isso protege já um nó com holder antigo.
+
 ### «A regra está lá e não passa»
 
 - O porto na regra de *ingress* é o do **container**, não o do host.
 - Uma mudança de política não corta ligações já estabelecidas.
 - `macvlan`/`ipvlan` **não passam pela firewall** do Delonix.
+- Fora da namespace `default`, apagar a última regra **não** tira o isolamento
+  de namespace: a chain fica, só com o *accept* da mesma namespace e o *drop*
+  das outras.
+- Uma regra de *ingress* explícita (até um `deny` de uma porta) **também não** tira
+  o isolamento: as ligações novas vindas de outra namespace continuam cortadas.
+  Só um `allow` explícito — é o que um `kind: Dependency` escreve — deixa passar
+  o par que nomeia.
 
 ---
 

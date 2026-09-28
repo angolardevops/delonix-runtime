@@ -162,12 +162,14 @@ mkdir -p "$DELONIX_ROOT" "$DELONIX_NET_RUNTIME_DIR"
 
 | 变量 | 读取方 | 用途 | 取值／默认 | 备注 |
 |---|---|---|---|---|
-| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:register_opnsense_with` | 这台设备的 API 端点。设置它就是启用这个 provider 的开关。 | `https://<host>`。 | 需要一份凭据。 |
+| `DELONIX_OPNSENSE_URL` | `cmd/gatewayproviders.rs:opnsense_target_with` | 这台设备的 API 端点。设置它就是启用这个 provider 的开关。 | `https://<host>`。 | 需要一份凭据。 |
 | `DELONIX_OPNSENSE_CREDENTIAL` | `cmd/gatewayproviders.rs:opnsense_auth` | 一个持有凭据的 `kind: Secret` 的名字。 | 带有 `key`+`secret` 字段的 Secret——一对生成出来的 API key/secret，绝不能是某个图形界面账号的用户名/密码（ADR-0051 阶段 0：那些会被这个 API 拒绝）。 | **最先**被检查。 |
 | `DELONIX_OPNSENSE_KEY` | `cmd/gatewayproviders.rs:opnsense_auth` | API key。 | | 和 `DELONIX_OPNSENSE_SECRET` 一起用；在那个 `kind: Secret` 之后被检查。 |
 | `DELONIX_OPNSENSE_SECRET` | `cmd/gatewayproviders.rs:opnsense_auth`（通过 `credential_value`） | API secret。 | 优先用 `DELONIX_OPNSENSE_SECRET_FILE`（一个 `chmod 600` 的路径）。 | |
-| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:register_opnsense_with` | 跳过对这台设备的 TLS 证书校验。 | `1`、`true` 或 `yes` → 跳过；默认要校验。 | 一台开箱即用的 OPNsense 提供的是自签名证书（实机测量过，ADR-0051 阶段 0）。**冒充这台设备应答的另一台机器会拿到凭据。** 只能主动选择加入。 |
-| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:register_opnsense_with` | 除了系统根证书之外，额外为这台设备信任的一份 CA 证书（PEM）。 | PEM 文件的路径；读不了是一个**错误**。 | 用它代替 `DELONIX_OPNSENSE_INSECURE_TLS`。 |
+| `DELONIX_OPNSENSE_KEY_FILE` | `cmd/gatewayproviders.rs:opnsense_auth` | 存放 API key 的文件。 | 路径；读取后去掉首尾空白。 | 优先于 `DELONIX_OPNSENSE_KEY`。`providers.yaml` 的 `auth.keyFile` 会映射到它（ADR-0059 F1）。 |
+| `DELONIX_OPNSENSE_SECRET_FILE` | `cmd/gatewayproviders.rs:opnsense_auth`（通过 `credential_value`） | 存放 API secret 的文件。 | 一个 `chmod 600` 的路径；别人可读时会被拒绝。 | `providers.yaml` 的 `auth.secretFile` 会映射到它（ADR-0059 F1）。 |
+| `DELONIX_OPNSENSE_INSECURE_TLS` | `cmd/gatewayproviders.rs:opnsense_target_with` | 跳过对这台设备的 TLS 证书校验。 | `1`、`true` 或 `yes` → 跳过；默认要校验。 | 一台开箱即用的 OPNsense 提供的是自签名证书（实机测量过，ADR-0051 阶段 0）。**冒充这台设备应答的另一台机器会拿到凭据。** 只能主动选择加入。 |
+| `DELONIX_OPNSENSE_CA_FILE` | `cmd/gatewayproviders.rs:opnsense_target_with` | 除了系统根证书之外，额外为这台设备信任的一份 CA 证书（PEM）。 | PEM 文件的路径；读不了是一个**错误**。 | 用它代替 `DELONIX_OPNSENSE_INSECURE_TLS`。 |
 
 ### TrueNAS
 
@@ -218,6 +220,8 @@ TrueNAS 的配置器（`kind: Volume` 加上 `spec.provision.truenas`）从清�
 | `DELONIX_PROXMOX_TEST_NODE` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 节点名字。 | 默认 `pve`。 | |
 | `DELONIX_PROXMOX_TEST_USER` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 用密码认证的账号。 | 比如 `root@pam`。必填。 | 这些测试里 TLS 校验是关闭的。 |
 | `DELONIX_PROXMOX_TEST_PASS` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 它的密码。 | 必填。 | |
+| `DELONIX_PROXMOX_TEST_TOKEN_ID` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 用 API 令牌 id 代替账号（`user@realm!名字`）。 | 可选；和 `DELONIX_PROXMOX_TEST_TOKEN` 一起给时优先于账号。 | 可在节点上撤销；实验室运行无需任何人的密码即可创建。 |
+| `DELONIX_PROXMOX_TEST_TOKEN` | `crates/providers/delonix-proxmox/tests/live.rs:target` | 它的密钥。 | 可选，与 id 一起。 | |
 | `DELONIX_PROXMOX_TEST_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | 测试用 VM 磁盘所在的存储。 | 默认 `local-lvm`。 | |
 | `DELONIX_PROXMOX_TEST_BACKUP_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | 备份归档落地的存储——节点可能不接受在磁盘存储上放备份内容（一个 thin-LVM 池就不行）。 | 默认：和 `DELONIX_PROXMOX_TEST_STORAGE` 一样。 | |
 | `DELONIX_PROXMOX_TEST_MOVE_STORAGE` | `crates/providers/delonix-proxmox/tests/live.rs` | `move_disk` 会把测试 VM 的启动磁盘移到的**第二个**存储——节点会拒绝移到格式相同的同一个存储，所以这个必须是真正不同的一个池。 | 默认 `local`（必须在它上面启用了 `content=images`）。 | |

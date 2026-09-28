@@ -332,7 +332,7 @@ fn create_pod(name: &str, namespace: Option<String>, spec: PodSpec) -> Result<()
             message: format!("failed to create the pod netns '{netns}': {e}"),
         })
     })?;
-    apply_pod_namespace_isolation(&netns, &ip, &ns);
+    apply_pod_namespace_isolation(&netns, &ip, &ns)?;
     container::warn_if_namespace_isolation_inert(&ns);
 
     // 2. Each container joins THAT netns (via `--pod`) — same IP, localhost peers.
@@ -414,8 +414,8 @@ fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>>
 /// pod's IP DOES join `@dlxall`/`@dlxns_<ns>` — which means other namespaces'
 /// containers already refuse new connections coming FROM the pod. What never
 /// existed is the other direction. The isolation rules live in each workload's
-/// OWN chain (`fw_chain_body`: same-namespace accept, then `@dlxall ct state
-/// new drop`), and a pod had no chain at all, so nothing dropped traffic INTO
+/// OWN chain (`fw_chain_body`: the explicit rules, then the `@dlxall ct state
+/// new drop` guardrail for other namespaces), and a pod had no chain at all, so nothing dropped traffic INTO
 /// it. The boundary was open in exactly one direction, which is the same as
 /// open.
 ///
@@ -436,26 +436,24 @@ fn members_of(store: &delonix_state::Store, pod: &str) -> Result<Vec<Container>>
 /// teardown is already covered: `remove_pod` calls `detach_container`, which
 /// sends `unfirewall <ip>`.
 ///
-/// Best-effort, like the container path: a pod whose isolation could not be
-/// installed still runs, but says so loudly instead of pretending to be fenced.
-pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) {
-    if ns == "default" {
-        return; // `default` is the open SDN — same contract as containers
-    }
-    let fw = delonix_model::records::ContainerFw {
-        enabled: true,
-        namespace: ns.to_string(),
-        ..Default::default()
+/// A pod whose isolation could not be installed does NOT run, and the attach of
+/// its netns is undone — the rule is `delonix_compute::network::isolate_shared_netns`
+/// (NaaS audit P0-3), reached here through the host's `NetworkProvider`, which is
+/// what makes that rule testable without a holder.
+pub(crate) fn apply_pod_namespace_isolation(netns: &str, ip: &str, ns: &str) -> Result<()> {
+    let net = delonix_sdn::run_network::HostNetwork {
+        state_root: super::util::state_root(),
+        on_attached: &|_| {},
+        register_expose: &|_, _, _, _| Ok(()),
     };
-    if let Err(e) = infra::apply_firewall(netns, ip, &fw) {
-        eprintln!(
-            "{}",
-            super::po::tf(
-                "warning: namespace isolation '{namespace}' not applied: {e}",
-                &[("namespace", ns), ("e", &e.to_string())],
-            )
-        );
-    }
+    delonix_compute::network::isolate_shared_netns(&net, netns, ip, ns).map_err(|e| {
+        Error::Runtime {
+            context: "pod",
+            message: format!(
+                "namespace isolation '{ns}' not applied, the pod was not started: {e}"
+            ),
+        }
+    })
 }
 
 pub(crate) fn remove_pod(name: &str, force: bool) -> Result<()> {

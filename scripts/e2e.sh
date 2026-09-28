@@ -532,7 +532,7 @@ check "provider ls -o json: cada capacidade leva name/supported/state/detail" ok
   "'$BIN' provider ls -o json | python3 -c '
 import json,sys
 for p in json.load(sys.stdin):
-    assert p[\"id\"] and p[\"kind\"] in (\"compute\",\"network\",\"storage\"), p
+    assert p[\"id\"] and p[\"kind\"] in (\"compute\",\"network\",\"storage\",\"gateway\"), p
     assert p[\"health\"][\"reason\"], p[\"id\"]
     for c in p[\"capabilities\"]:
         assert set(c) >= {\"name\",\"supported\",\"state\",\"detail\",\"domain\"}, c
@@ -540,6 +540,11 @@ for p in json.load(sys.stdin):
 '"
 check "provider ls --kind network só traz a rede" ok bash -c \
   "'$BIN' provider ls --kind network -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert v and all(p[\"kind\"]==\"network\" for p in v), [p[\"kind\"] for p in v]'"
+# ADR-0059 F1: the perimeter appliance is a `gateway` provider, listed whether or
+# not a target is registered, and it answers the network rows (catalog 1.1.0).
+check "provider ls --kind gateway traz o opnsense e responde às linhas de rede" ok bash -c \
+  "'$BIN' provider ls --kind gateway -o json | python3 -c 'import json,sys; v=json.load(sys.stdin); assert [p[\"id\"] for p in v]==[\"opnsense\"] and all(p[\"kind\"]==\"gateway\" for p in v), v; assert any(c[\"name\"]==\"net.gateway.filter\" for c in v[0][\"capabilities\"])'"
+check "provider describe opnsense" ok "$BIN" provider describe opnsense
 check "provider describe libvirt" ok "$BIN" provider describe libvirt
 check "provider describe linux --kind storage" ok "$BIN" provider describe linux --kind storage
 check "provider describe de um provider inexistente diz 4" 4 "$BIN" provider describe naoexiste
@@ -573,6 +578,8 @@ if [[ -x "$NODEBIN" ]]; then
     "curl -s --unix-socket '$NODESOCK' http://localhost/v1/providers | python3 -c 'import json,sys; d=json.load(sys.stdin); assert all(set(c)>={\"name\",\"supported\",\"state\",\"detail\"} for p in d[\"providers\"] for c in p[\"capabilities\"]); assert all(p[\"catalog_version\"] for p in d[\"providers\"])'"
   check "GET /v1/providers?kind=network só traz a rede" ok bash -c \
     "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=network' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert d and all(p[\"kind\"]==\"network\" for p in d)'"
+  check "GET /v1/providers?kind=gateway traz o opnsense (ADR-0059 F1)" ok bash -c \
+    "curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=gateway' | python3 -c 'import json,sys; d=json.load(sys.stdin)[\"providers\"]; assert [p[\"id\"] for p in d]==[\"opnsense\"], d'"
   check "GET /v1/providers?kind=ceph é 400 com google.rpc.Status code 3" ok bash -c \
     "[[ \$(curl -s -o /dev/null -w '%{http_code}' --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph') == 400 ]] && curl -s --unix-socket '$NODESOCK' 'http://localhost/v1/providers?kind=ceph' | grep -q '\"code\":3'"
   # BUG REAL, medido na 1.ª corrida deste check: o fallback do router do tonic
@@ -1433,6 +1440,90 @@ fi
 "$BIN" network rm "$NET2" >/dev/null 2>&1
 
 ########################################
+section "network: IPAM sem leases órfãos (S2, doc 62 §6 P1)"
+########################################
+# O registo de endereços (`network ipam ls`) ANTES e DEPOIS de cada caminho de
+# saída tem de ter o MESMO número de leases órfãos — zero novos. Medido contra a
+# v4.4.0+68: numa rede criada com `--subnet 10.X.0.0/16` o lease era gravado em
+# `10.X.0.0_16` e libertado em `10.X`, por isso `rm -f` e `network rm` deixavam
+# DOIS órfãos por container multi-homed (a rede primária e a extra). E o `stop`
+# que liberta o lease (outra metade do mesmo achado) mudava o IP no `start`.
+#
+# Conta-se pelo JSON e não pela tabela: a coluna OWNER diz `<orphaned>` para um
+# id sem registo, e é exactamente isso que se quer contar.
+ipam_orfaos() {
+  "$BIN" network ipam ls -o json 2>/dev/null | python3 -c \
+    'import json,sys; print(sum(1 for r in json.load(sys.stdin) if r["owner"]=="<orphaned>"))'
+}
+# Os leases de um container, pelo NOME do dono (o `ls` resolve id → nome).
+ipam_de() {
+  "$BIN" network ipam ls -o json 2>/dev/null | python3 -c \
+    'import json,sys; print(" ".join(sorted(r["ip"] for r in json.load(sys.stdin) if r["owner"]==sys.argv[1])))' "$1"
+}
+# A rede PRIMÁRIA é criada SEM `--subnet` (chave legada `10.X`) e a extra COM
+# ele: é na primária que o `stop` libertava o lease na chave CERTA — numa rede
+# CIDR o release ia para a chave errada e o lease «ficava» por acidente, e o
+# check do stop passava contra o defeito.
+LC="lc-$PFX"; NET3="net3-$PFX"; NET4="net4-$PFX"
+ORF0=$(ipam_orfaos)
+if [ -n "$ORF0" ] && "$BIN" network create "$NET3" --subnet 10.250.0.0/16 >/dev/null 2>&1 \
+   && "$BIN" network create "$NET4" >/dev/null 2>&1 \
+   && "$BIN" container run -d --name "$LC" --net "$NET4" "$IMG" sleep 600 >/dev/null 2>&1 \
+   && "$BIN" network connect "$NET3" "$LC" >/dev/null 2>&1; then
+  IPS0=$(ipam_de "$LC")
+  check "ipam: um container multi-homed tem um lease por rede" ok bash -c \
+    "[ \"\$(wc -w <<<'$IPS0')\" = 2 ]"
+  "$BIN" container stop "$LC" >/dev/null 2>&1
+  # A expansão `$(ipam_de ...)` corre AQUI, depois do stop — o `bash -c` só
+  # compara; é o mesmo padrão dos checks abaixo.
+  check "ipam: o stop guarda os leases (as duas redes)" ok bash -c "[ \"$(ipam_de "$LC")\" = '$IPS0' ]"
+  "$BIN" container start "$LC" >/dev/null 2>&1
+  check "ipam: o start volta aos MESMOS endereços" ok bash -c "[ \"$(ipam_de "$LC")\" = '$IPS0' ]"
+  "$BIN" container rm -f "$LC" >/dev/null 2>&1
+  check "ipam: rm -f não deixa lease nenhum do container" ok bash -c "[ -z \"$(ipam_de "$LC")\" ]"
+  check "ipam: rm -f não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
+  "$BIN" network rm "$NET3" >/dev/null 2>&1
+  "$BIN" network rm "$NET4" >/dev/null 2>&1
+  check "ipam: network rm não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
+else
+  "$BIN" container rm -f "$LC" >/dev/null 2>&1
+  "$BIN" network rm "$NET3" >/dev/null 2>&1
+  "$BIN" network rm "$NET4" >/dev/null 2>&1
+  skip "ipam: ciclo run/connect/stop/start/rm" "rede ou container em rede custom indisponível neste host"
+fi
+# O mesmo pelo caminho declarativo: uma rede com CIDR e um container nela, e o
+# `stack destroy` tem de levar os leases com eles.
+IWORK="$OUT/ipam-$PFX"; mkdir -p "$IWORK"
+cat >"$IWORK/m.yaml" <<YAML
+apiVersion: delonix.io/v1
+kind: Network
+metadata:
+  name: in-$PFX
+spec:
+  driver: bridge
+  subnet: 10.249.0.0/16
+---
+apiVersion: compute.delonix.io/v1alpha1
+kind: Container
+metadata:
+  name: ic-$PFX
+spec:
+  image: $IMG
+  command: ["sleep", "600"]
+  network: in-$PFX
+YAML
+ORF0=$(ipam_orfaos)
+if "$BIN" stack apply -f "$IWORK/m.yaml" >/dev/null 2>&1 && [ -n "$(ipam_de "ic-$PFX")" ]; then
+  "$BIN" stack destroy -f "$IWORK/m.yaml" >/dev/null 2>&1
+  check "ipam: stack destroy não deixa leases órfãos (antes $ORF0)" ok bash -c "[ \"$(ipam_orfaos)\" = '$ORF0' ]"
+  check "ipam: nenhum lease fica na rede destruída" ok bash -c \
+    "! '$BIN' network ipam ls -o json | grep -q '10\\.249\\.'"
+else
+  "$BIN" stack destroy -f "$IWORK/m.yaml" >/dev/null 2>&1
+  skip "ipam: stack apply/destroy de rede + container" "o apply não passou neste host"
+fi
+
+########################################
 section "stack / manifesto"
 ########################################
 WORK="$OUT/stack-$PFX"; mkdir -p "$WORK"
@@ -2081,6 +2172,36 @@ sys.exit(0 if cores <= 0.75 else 1)"
     fds1=$(ls /proc/self/fd | wc -l)
     [ "$dirs1" -le "$dirs0" ] || { echo "ficaram $((dirs1-dirs0)) registos de container por limpar"; exit 1; }
     [ "$fds1" -le "$((fds0+2))" ] || { echo "vazaram $((fds1-fds0)) descritores"; exit 1; }
+  '
+
+  # --- FUGA: um arranque recusado DEPOIS do clone não deixa o cgroup -------
+  #
+  # Tudo o que falha entre o `clone` e o registo (os mapas de userns, o
+  # `setup_cgroup`, o hook `on_started` que liga o slirp) parava no SIGKILL: o
+  # caminho com userns devolvia sem remover o cgroup que o `setup_cgroup` acabara
+  # de criar, e o caminho sem userns removia-o com o processo ainda lá dentro. O
+  # registo nunca chega a ser escrito, por isso ninguém voltaria a encontrar a
+  # leaf. Medido 2026-09-28: `run -d -p` com um `slirp4netns` que falha deixou um
+  # `dlx-<id>` VAZIO no host em 4 corridas de 4. Um `slirp4netns` falso no PATH
+  # é o disparo: o hook corre depois de o cgroup existir. O id vem do evento
+  # `create`, o único rasto que um arranque recusado deixa.
+  check "um arranque recusado depois do clone não deixa o cgroup do container para trás" ok bash -c '
+    fb="$(dirname "$DELONIX_ROOT")/fakeslirp"; mkdir -p "$fb"
+    printf "#!/bin/sh\nexit 1\n" > "$fb/slirp4netns"; chmod +x "$fb/slirp4netns"
+    port=$(python3 -c "import socket;s=socket.socket();s.bind((\"127.0.0.1\",0));print(s.getsockname()[1])")
+    ev0=$(cat "$DELONIX_ROOT/events.jsonl" 2>/dev/null | wc -l)
+    if PATH="$fb:$PATH" timeout 60 "$BIN" container run -d -p "$port:80" "$IMG" sleep 60 >/dev/null 2>&1; then
+      rm -rf "$fb"
+      echo "o run arrancou com um slirp4netns que falha — não é o caso que se quer medir"; exit 1
+    fi
+    rm -rf "$fb"
+    id=$(tail -n +$((ev0+1)) "$DELONIX_ROOT/events.jsonl" 2>/dev/null | python3 -c "
+import json,sys
+ids=[e[\"id\"] for e in map(json.loads,sys.stdin) if e.get(\"action\")==\"create\"]
+print(ids[-1] if ids else \"\")")
+    [ -n "$id" ] || { echo "sem evento create: o run falhou antes do clone, e não há o que medir"; exit 1; }
+    left=$(find /sys/fs/cgroup -maxdepth 7 -type d \( -name "dlx-$id" -o -name "delonix-$id" \) 2>/dev/null)
+    [ -z "$left" ] || { echo "ficou para trás: $left (procs: $(cat $left/cgroup.procs 2>/dev/null | tr "\n" " "))"; exit 1; }
   '
 else
   skip "limites: são impostos, não só escritos" "sem imagem no store (precisa de rede para o pull) (image ls rc=$_ils_rc: $(head -c 300 <<<"$_ils" | tr '\n' ' '))"
@@ -3770,6 +3891,162 @@ SH
     "[ ! -S \"\$DELONIX_NET_RUNTIME_DIR/control.sock\" ]"
   # down duas vezes é idempotente (é o comando de recuperação de um host).
   check "net netns down é idempotente" ok "$BIN" net netns down
+fi
+
+section "net — ciclo de vida: o que fica no holder depois de um rm"
+
+# Porque esta secção existe (auditoria NaaS, doc 62 §6 P1, sessão S3): `network
+# rm` apagava a rede debaixo de um container a correr, e o `netdel` só tirava o
+# link — `@dlxbr`, `@netpair`, a regra de egress e a thread DHCP ficavam, e a rede
+# recriada com o mesmo nome nascia sem DHCP e com o `deny` da anterior. Um publish
+# que falhava a meio deixava a primeira porta a escutar no host sem dono, e a rede
+# que uma VM criava não tinha registo (`network ls` não a via, `rm` dizia 4).
+# Medido contra `d3d6f394`: 8/8 chumbam. Cada check CONTA o que resta (nft, ss,
+# `network ls`, portas do host) em vez de confiar no código de saída do comando.
+#
+# A lógica vive em `scripts/net-lifecycle-leaks.sh` para correr sozinha contra
+# dois binários; aqui é UM check, e o detalhe sai nas linhas do FAIL.
+if [[ -z "${DELONIX_ROOT:-}" || -z "${DELONIX_NET_RUNTIME_DIR:-}" ]]; then
+  skip "net: ciclo de vida sem fugas" "exige DELONIX_ROOT E DELONIX_NET_RUNTIME_DIR (ver cabeçalho)"
+else
+  check "net: ciclo de vida sem fugas (rm, DHCP, egress, publish, rede de VM)" ok \
+    env E2E_IMAGE="$IMG" bash "$(dirname "$0")/net-lifecycle-leaks.sh" "$BIN" "lk$PFX"
+fi
+
+section "providers remotos: NetworkGateway e NetworkZone — posse pela marca, não pelo nome"
+########################################
+# Auditoria 62, §6 P1 (S6). O que se prova em QUALQUER máquina é a recusa
+# honesta sem appliance. O resto — a marca de posse, a recusa de adoptar por
+# nome, a recusa com pendentes alheios — só existe contra um OPNsense e um
+# cluster Proxmox reais; sem eles cada check sai como SKIP com a razão, que o
+# resumo conta como NÃO COBERTO. Nunca PASS por omissão.
+RWORK="$OUT/remote-$PFX"; mkdir -p "$RWORK"
+GW="gw-$PFX"
+ZN="z$(( $$ % 100000 ))"            # id SDN: letra + até 7 minúsculas/dígitos
+VN="v$(( $$ % 100000 ))a"
+
+cat > "$RWORK/gw-native.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: $GW-native }
+spec:
+  provider: native
+  aliases: [{ name: dlx_$PFX, kind: host, content: ["10.99.0.1"] }]
+YAML
+check "NetworkGateway no provider native recusa (não tem aliases nem regras)" fail \
+  "$BIN" apply -f "$RWORK/gw-native.yaml"
+# O registo é gravado ANTES da primeira escrita remota (write-ahead), por isso
+# um apply recusado deixa-o; o delete tem de o conseguir tirar.
+check "delete de um NetworkGateway recusado termina" ok \
+  "$BIN" delete networkgateways "$GW-native"
+check "... e o registo desaparece" ok bash -c \
+  "! '$BIN' get networkgateways 2>/dev/null | grep -q '$GW-native'"
+
+cat > "$RWORK/zone.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkZone
+metadata: { name: $ZN }
+spec:
+  vnets: [{ name: $VN, alias: "e2e $PFX" }]
+YAML
+if [[ -z "${DELONIX_PROXMOX_URL:-}" ]]; then
+  check "NetworkZone sem provider configurado recusa" fail "$BIN" apply -f "$RWORK/zone.yaml"
+fi
+
+# --- OPNsense ---------------------------------------------------------------
+if [[ -n "${DELONIX_OPNSENSE_URL:-}" && -n "${DELONIX_OPNSENSE_KEY:-}" && -n "${DELONIX_OPNSENSE_SECRET:-}" ]]; then
+  opn() {  # opn <rota> [json] — a mão do operador, SEM a marca do motor
+    curl -sk -u "$DELONIX_OPNSENSE_KEY:$DELONIX_OPNSENSE_SECRET" -H 'Content-Type: application/json' \
+      -X POST -d "${2:-{\}}" "$DELONIX_OPNSENSE_URL/api/$1"
+  }
+  opn_rule_uuid() {  # uuid da regra cuja descrição é EXACTAMENTE $1
+    opn firewall/filter/search_rule '{"current":1,"rowCount":-1}' | python3 -c \
+      'import json,sys; d=sys.argv[1]; print(next((r["uuid"] for r in json.load(sys.stdin)["rows"] if r.get("description")==d), ""))' "$1"
+  }
+  cat > "$RWORK/gw.yaml" <<YAML
+apiVersion: networking.delonix.io/v1alpha1
+kind: NetworkGateway
+metadata: { name: $GW }
+spec:
+  provider: opnsense
+  aliases: [{ name: dlx_$PFX, kind: host, content: ["10.99.0.1"], description: "e2e $PFX" }]
+  rules: [{ description: "e2e $PFX", source: dlx_$PFX, destination: "10.0.0.0/24", protocol: TCP }]
+YAML
+  check "NetworkGateway aplica alias e regra no OPNsense" ok "$BIN" apply -f "$RWORK/gw.yaml"
+  check "... e o segundo apply é idempotente" ok "$BIN" apply -f "$RWORK/gw.yaml"
+  check "... a regra no appliance leva a categoria de posse delonix-owner:" ok bash -c \
+    "curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{}' \"\$DELONIX_OPNSENSE_URL/api/firewall/category/search_item\" > '$RWORK/cats.json' && curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{\"current\":1,\"rowCount\":-1}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/search_rule\" | python3 -c 'import json,sys; cats={c[\"uuid\"]:c[\"name\"] for c in json.load(open(\"$RWORK/cats.json\"))[\"rows\"]}; r=[x for x in json.load(sys.stdin)[\"rows\"] if x.get(\"description\")==\"e2e $PFX\"]; sys.exit(0 if r and any(cats.get(u,\"\").startswith(\"delonix-owner:dlx-\") for u in r[0].get(\"categories\",\"\").split(\",\")) else 1)'"
+  # Uma regra feita à mão (e APLICADA) com a mesma descrição de outro
+  # documento: recusada com 5, nunca adoptada; o teardown desse documento não
+  # lhe toca.
+  HAND="e2e $PFX hand"
+  opn firewall/filter/add_rule "{\"rule\":{\"description\":\"$HAND\",\"source_net\":\"any\",\"destination_net\":\"10.77.0.0/24\"}}" >/dev/null
+  opn firewall/filter/apply >/dev/null
+  HAND_UUID="$(opn_rule_uuid "$HAND")"
+  sed "s/name: $GW }/name: $GW-hand }/; s/description: \"e2e $PFX\", source/description: \"$HAND\", source/; s/name: dlx_$PFX,/name: dlx_${PFX}h,/; s/source: dlx_$PFX,/source: dlx_${PFX}h,/" \
+    "$RWORK/gw.yaml" > "$RWORK/gw-hand.yaml"
+  check "regra à mão com a mesma descrição: apply recusa com 5 (não adopta)" 5 \
+    "$BIN" apply -f "$RWORK/gw-hand.yaml"
+  check "delete do documento recusado deixa a regra à mão" ok bash -c \
+    "'$BIN' delete networkgateways '$GW-hand' >/dev/null && [ -n '$HAND_UUID' ] && curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -X POST -H 'Content-Type: application/json' -d '{}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/get_rule/$HAND_UUID\" | grep -q '$HAND'"
+  # A mesma regra apagada à mão e NÃO aplicada: uma alteração pendente
+  # alheia. O apply recusa (5) antes de escrever, e a apagada continua a
+  # correr no pf até o operador aplicar.
+  opn "firewall/filter/del_rule/$HAND_UUID" >/dev/null
+  check "com uma alteração pendente alheia no appliance, o apply recusa com 5" 5 \
+    "$BIN" apply -f "$RWORK/gw.yaml"
+  opn firewall/filter/apply >/dev/null
+  check "delete do NetworkGateway tira o alias e a regra dele" ok \
+    "$BIN" delete networkgateways "$GW"
+  check "... e no appliance não sobra a regra dele" ok bash -c \
+    "[ -z \"\$(curl -sk -u \"\$DELONIX_OPNSENSE_KEY:\$DELONIX_OPNSENSE_SECRET\" -H 'Content-Type: application/json' -X POST -d '{\"current\":1,\"rowCount\":-1}' \"\$DELONIX_OPNSENSE_URL/api/firewall/filter/search_rule\" | grep -o '\"description\":\"e2e $PFX\"')\" ]"
+else
+  for n in "NetworkGateway aplica no OPNsense com a marca de posse" \
+           "regra à mão com a mesma descrição é recusada, não adoptada" \
+           "delete tira só o que tem a marca"; do
+    skip "$n" "sem DELONIX_OPNSENSE_URL/_KEY/_SECRET: não há appliance OPNsense, a posse não foi medida aqui"
+  done
+fi
+
+# --- Proxmox SDN ------------------------------------------------------------
+if [[ -n "${DELONIX_PROXMOX_URL:-}" && -n "${DELONIX_PROXMOX_TOKEN_ID:-}" && -n "${DELONIX_PROXMOX_TOKEN:-}" ]]; then
+  pve() {  # pve <método> <caminho> [--data ...] — a mão do operador
+    local m="$1" p="$2"; shift 2
+    curl -sk -X "$m" -H "Authorization: PVEAPIToken=$DELONIX_PROXMOX_TOKEN_ID=$DELONIX_PROXMOX_TOKEN" \
+      "$DELONIX_PROXMOX_URL/api2/json$p" "$@"
+  }
+  check "NetworkZone aplica zona e vnet no cluster" ok "$BIN" apply -f "$RWORK/zone.yaml"
+  check "... e o segundo apply é idempotente" ok "$BIN" apply -f "$RWORK/zone.yaml"
+  check "... a vnet leva a marca de posse no alias" ok bash -c \
+    "curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/vnets/$VN\" | grep -q 'delonix-owner:dlx-'"
+  # Uma zona que já existe e que o motor não criou: recusada, nunca adoptada.
+  HZ="h$(( $$ % 100000 ))"
+  pve POST /cluster/sdn/zones --data-urlencode "zone=$HZ" --data-urlencode type=simple >/dev/null
+  pve PUT /cluster/sdn >/dev/null; sleep 3
+  sed "s/name: $ZN }/name: $HZ }/; s/name: $VN,/name: ${VN}h,/" "$RWORK/zone.yaml" > "$RWORK/zone-hand.yaml"
+  check "zona feita à mão com o mesmo nome: apply recusa com 5 (não adopta)" 5 \
+    "$BIN" apply -f "$RWORK/zone-hand.yaml"
+  check "delete desse documento deixa a zona à mão de pé" ok bash -c \
+    "'$BIN' delete networkzones '$HZ' >/dev/null; curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones/$HZ\" | grep -q '\"zone\":\"$HZ\"'"
+  pve DELETE "/cluster/sdn/zones/$HZ" >/dev/null; pve PUT /cluster/sdn >/dev/null; sleep 3
+  # Uma alteração pendente de outro (staged, não aplicada): o apply recusa
+  # ANTES de escrever, e a alteração do outro continua pendente, não aplicada.
+  pve POST /cluster/sdn/zones --data-urlencode "zone=$HZ" --data-urlencode type=simple >/dev/null
+  check "com uma alteração SDN pendente alheia, o apply recusa com 5" 5 \
+    "$BIN" apply -f "$RWORK/zone.yaml"
+  check "... e a alteração alheia continua pendente (não foi empurrada)" ok bash -c \
+    "curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones?pending=1\" | python3 -c 'import json,sys; z=[x for x in json.load(sys.stdin)[\"data\"] if x.get(\"zone\")==\"$HZ\"]; sys.exit(0 if z and z[0].get(\"state\")==\"new\" else 1)'"
+  pve POST /cluster/sdn/rollback >/dev/null
+  check "delete do NetworkZone tira a vnet e a zona dele" ok "$BIN" delete networkzones "$ZN"
+  check "... e a zona já não existe no cluster" ok bash -c \
+    "! curl -sk -H \"Authorization: PVEAPIToken=\$DELONIX_PROXMOX_TOKEN_ID=\$DELONIX_PROXMOX_TOKEN\" \"\$DELONIX_PROXMOX_URL/api2/json/cluster/sdn/zones\" | grep -q '\"zone\":\"$ZN\"'"
+else
+  for n in "NetworkZone aplica zona e vnet com a marca de posse" \
+           "zona à mão com o mesmo nome é recusada, não adoptada" \
+           "alteração SDN pendente alheia recusa o apply" \
+           "delete tira só a zona e as vnets do motor"; do
+    skip "$n" "sem DELONIX_PROXMOX_URL/_TOKEN_ID/_TOKEN: não há cluster Proxmox, a posse na SDN não foi medida aqui"
+  done
 fi
 
 section "api-resources: o registo que os outros verbos leem"

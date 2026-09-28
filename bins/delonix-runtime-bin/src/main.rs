@@ -575,7 +575,9 @@ fn run() -> Result<()> {
     cmd::gatewayproviders::register_configured();
     // The VM engine attaches a Cloud Hypervisor guest through this port instead of
     // reaching into the SDN itself (ADR-0040 P3).
-    delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork));
+    delonix_vm::set_network(Box::new(delonix_sdn::vm_network::HostVmNetwork {
+        state_root: cmd::util::state_root(),
+    }));
     match cli.cmd {
         Cmd::Container { action } => cmd::container::run(action),
         Cmd::Pod { action } => cmd::pod::run(action),

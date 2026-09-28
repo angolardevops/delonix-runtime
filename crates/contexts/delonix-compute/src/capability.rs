@@ -36,10 +36,14 @@ use serde::Serialize;
 
 /// Version of the catalog itself (not of the engine). See the module docs for
 /// what bumps which part.
-pub const CATALOG_VERSION: &str = "1.0.0";
+pub const CATALOG_VERSION: &str = "1.1.0";
 
-/// Which port a capability belongs to — the same four words the node
-/// contract's `ProviderInfo.kind` uses.
+/// Which port a capability belongs to — the words the node contract's
+/// `ProviderInfo.kind` uses. `Gateway` (catalog 1.1.0, ADR-0059 D2) is a
+/// provider reached over the network that enforces policy at a boundary the
+/// workloads' traffic crosses, not on the node — a perimeter appliance. It owns
+/// no catalog entry of its own: its report walks the `Network` entries, so a
+/// node's network provider and a perimeter appliance compare row by row.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ProviderKind {
@@ -47,6 +51,7 @@ pub enum ProviderKind {
     Network,
     Storage,
     Image,
+    Gateway,
 }
 
 impl ProviderKind {
@@ -56,6 +61,16 @@ impl ProviderKind {
             ProviderKind::Network => "network",
             ProviderKind::Storage => "storage",
             ProviderKind::Image => "image",
+            ProviderKind::Gateway => "gateway",
+        }
+    }
+
+    /// The kind of catalog entry a report of this kind walks: its own, except
+    /// `Gateway`, which answers the `Network` rows (see the type's docs).
+    pub fn catalog_kind(self) -> ProviderKind {
+        match self {
+            ProviderKind::Gateway => ProviderKind::Network,
+            k => k,
         }
     }
 }
@@ -196,6 +211,52 @@ pub enum Capability {
     NetIpv6,
     NetRateLimit,
     NetPacketCapture,
+    /// Perimeter filter rules on a boundary the workloads' traffic crosses (ADR-0059).
+    NetGatewayFilter,
+    /// Named address sets a perimeter rule refers to.
+    NetGatewayAlias,
+    /// A perimeter rule or alias is changed where it is, not removed and re-created.
+    NetGatewayUpdateInPlace,
+    /// The engine sets the exact evaluation order of perimeter rules.
+    NetGatewayRuleOrder,
+    /// More than one uplink, with gateway groups or failover.
+    NetGatewayMultiWan,
+    /// VPN termination at the boundary.
+    NetGatewayVpn,
+    /// Source NAT (masquerade) of a segment's traffic.
+    NetNatSnat,
+    /// Destination NAT (port forward) to a workload.
+    NetNatDnat,
+    /// One external address mapped to one internal address.
+    NetNatOneToOne,
+    /// IPv6 network prefix translation.
+    NetNatNpt,
+    /// A layer-4 load balancer: a virtual address in front of a backend set.
+    NetLbL4,
+    /// Backends are taken out of rotation by a health check.
+    NetLbHealthCheck,
+    /// Records written in a provider's DNS (not the engine's own resolver, `net.dns`).
+    NetDnsRecords,
+    /// An authoritative zone served by the provider.
+    NetDnsAuthoritative,
+    /// Addresses allocated in a provider's IPAM (not the engine's own, `net.ipam`).
+    NetIpamProvider,
+    /// A fixed address reserved per MAC in a provider's IPAM.
+    NetIpamReservation,
+    /// A DHCP range served by the provider.
+    NetIpamDhcp,
+    /// A segment realized by a remote provider (zone and VNets).
+    NetSegmentRemote,
+    /// Changes are staged, then activated in one step.
+    NetApplyStaged,
+    /// Staged changes are discarded before activation when a step fails.
+    NetApplyRollback,
+    /// The actual state is read back so a plan can compare it with the record.
+    NetObserve,
+    /// An apply is verified by a traffic probe, not only by a readback.
+    NetVerifyDataplane,
+    /// Objects the engine writes carry an immutable marker; one without it is never adopted by name.
+    NetOwnershipMarker,
     /// A NAT network provided by the hypervisor (libvirt `nat`), addresses observed by lease.
     VmNetworkNat,
     /// A host bridge the VM's NIC is enslaved to.
@@ -243,6 +304,14 @@ pub enum Capability {
     FirewallDefaultDeny,
     FirewallSourceFiltering,
     FirewallEgressPolicy,
+    /// A rule that bypasses connection tracking.
+    FirewallStateless,
+    /// A rule logs the packets it matches.
+    FirewallLogging,
+    /// A rule matches an ICMP type and code.
+    FirewallIcmpType,
+    /// A rule's peer is named by namespace or selector, not by a CIDR.
+    FirewallWorkloadPeer,
 
     // --- console --------------------------------------------------------
     VmConsoleSerial,
@@ -324,6 +393,29 @@ impl Capability {
         Self::NetIpv6,
         Self::NetRateLimit,
         Self::NetPacketCapture,
+        Self::NetGatewayFilter,
+        Self::NetGatewayAlias,
+        Self::NetGatewayUpdateInPlace,
+        Self::NetGatewayRuleOrder,
+        Self::NetGatewayMultiWan,
+        Self::NetGatewayVpn,
+        Self::NetNatSnat,
+        Self::NetNatDnat,
+        Self::NetNatOneToOne,
+        Self::NetNatNpt,
+        Self::NetLbL4,
+        Self::NetLbHealthCheck,
+        Self::NetDnsRecords,
+        Self::NetDnsAuthoritative,
+        Self::NetIpamProvider,
+        Self::NetIpamReservation,
+        Self::NetIpamDhcp,
+        Self::NetSegmentRemote,
+        Self::NetApplyStaged,
+        Self::NetApplyRollback,
+        Self::NetObserve,
+        Self::NetVerifyDataplane,
+        Self::NetOwnershipMarker,
         Self::VmNetworkNat,
         Self::VmNetworkBridge,
         Self::VmNetworkSdn,
@@ -357,6 +449,10 @@ impl Capability {
         Self::FirewallDefaultDeny,
         Self::FirewallSourceFiltering,
         Self::FirewallEgressPolicy,
+        Self::FirewallStateless,
+        Self::FirewallLogging,
+        Self::FirewallIcmpType,
+        Self::FirewallWorkloadPeer,
         Self::VmConsoleSerial,
         Self::VmConsoleVnc,
         Self::VmGuestAgent,
@@ -429,6 +525,29 @@ impl Capability {
             Self::NetIpv6 => "net.ipv6",
             Self::NetRateLimit => "net.rate-limit",
             Self::NetPacketCapture => "net.capture",
+            Self::NetGatewayFilter => "net.gateway.filter",
+            Self::NetGatewayAlias => "net.gateway.alias",
+            Self::NetGatewayUpdateInPlace => "net.gateway.update-in-place",
+            Self::NetGatewayRuleOrder => "net.gateway.rule-order",
+            Self::NetGatewayMultiWan => "net.gateway.multi-wan",
+            Self::NetGatewayVpn => "net.gateway.vpn",
+            Self::NetNatSnat => "net.nat.snat",
+            Self::NetNatDnat => "net.nat.dnat",
+            Self::NetNatOneToOne => "net.nat.one-to-one",
+            Self::NetNatNpt => "net.nat.npt",
+            Self::NetLbL4 => "net.lb.l4",
+            Self::NetLbHealthCheck => "net.lb.health-check",
+            Self::NetDnsRecords => "net.dns.records",
+            Self::NetDnsAuthoritative => "net.dns.authoritative",
+            Self::NetIpamProvider => "net.ipam.provider",
+            Self::NetIpamReservation => "net.ipam.reservation",
+            Self::NetIpamDhcp => "net.ipam.dhcp",
+            Self::NetSegmentRemote => "net.segment.remote",
+            Self::NetApplyStaged => "net.apply.staged",
+            Self::NetApplyRollback => "net.apply.rollback",
+            Self::NetObserve => "net.observe",
+            Self::NetVerifyDataplane => "net.verify.dataplane",
+            Self::NetOwnershipMarker => "net.ownership-marker",
             Self::VmNetworkNat => "vm.network.nat",
             Self::VmNetworkBridge => "vm.network.bridge",
             Self::VmNetworkSdn => "vm.network.sdn",
@@ -462,6 +581,10 @@ impl Capability {
             Self::FirewallDefaultDeny => "firewall.default-deny",
             Self::FirewallSourceFiltering => "firewall.source-filtering",
             Self::FirewallEgressPolicy => "firewall.egress-policy",
+            Self::FirewallStateless => "firewall.stateless",
+            Self::FirewallLogging => "firewall.logging",
+            Self::FirewallIcmpType => "firewall.icmp-type",
+            Self::FirewallWorkloadPeer => "firewall.workload-peer",
             Self::VmConsoleSerial => "vm.console.serial",
             Self::VmConsoleVnc => "vm.console.vnc",
             Self::VmGuestAgent => "vm.guest-agent",
@@ -534,7 +657,30 @@ impl Capability {
             | NetTunnelEgress
             | NetIpv6
             | NetRateLimit
-            | NetPacketCapture => ProviderKind::Network,
+            | NetPacketCapture
+            | NetGatewayFilter
+            | NetGatewayAlias
+            | NetGatewayUpdateInPlace
+            | NetGatewayRuleOrder
+            | NetGatewayMultiWan
+            | NetGatewayVpn
+            | NetNatSnat
+            | NetNatDnat
+            | NetNatOneToOne
+            | NetNatNpt
+            | NetLbL4
+            | NetLbHealthCheck
+            | NetDnsRecords
+            | NetDnsAuthoritative
+            | NetIpamProvider
+            | NetIpamReservation
+            | NetIpamDhcp
+            | NetSegmentRemote
+            | NetApplyStaged
+            | NetApplyRollback
+            | NetObserve
+            | NetVerifyDataplane
+            | NetOwnershipMarker => ProviderKind::Network,
             VmNetworkNat | VmNetworkBridge | VmNetworkSdn | VmStaticIp => ProviderKind::Compute,
             VolumeLocal | VolumeBind | VolumeNfs | VolumeCifs | VolumeWebdav | VolumeQuota
             | VolumeSnapshot | VolumeProvisionNas | StorageLvmThin | StorageZfsBtrfs
@@ -555,7 +701,11 @@ impl Capability {
             FirewallPerWorkload
             | FirewallDefaultDeny
             | FirewallSourceFiltering
-            | FirewallEgressPolicy => ProviderKind::Network,
+            | FirewallEgressPolicy
+            | FirewallStateless
+            | FirewallLogging
+            | FirewallIcmpType
+            | FirewallWorkloadPeer => ProviderKind::Network,
             VmConsoleSerial | VmConsoleVnc | VmGuestAgent | VmIpObserved => ProviderKind::Compute,
             MetricsPrometheus | MetricsPerWorkloadNetwork | HostHealth | HostCapacity => {
                 ProviderKind::Compute
@@ -622,6 +772,29 @@ impl Capability {
             | NetIpv6
             | NetRateLimit
             | NetPacketCapture
+            | NetGatewayFilter
+            | NetGatewayAlias
+            | NetGatewayUpdateInPlace
+            | NetGatewayRuleOrder
+            | NetGatewayMultiWan
+            | NetGatewayVpn
+            | NetNatSnat
+            | NetNatDnat
+            | NetNatOneToOne
+            | NetNatNpt
+            | NetLbL4
+            | NetLbHealthCheck
+            | NetDnsRecords
+            | NetDnsAuthoritative
+            | NetIpamProvider
+            | NetIpamReservation
+            | NetIpamDhcp
+            | NetSegmentRemote
+            | NetApplyStaged
+            | NetApplyRollback
+            | NetObserve
+            | NetVerifyDataplane
+            | NetOwnershipMarker
             | VmNetworkNat
             | VmNetworkBridge
             | VmNetworkSdn
@@ -644,7 +817,11 @@ impl Capability {
             FirewallPerWorkload
             | FirewallDefaultDeny
             | FirewallSourceFiltering
-            | FirewallEgressPolicy => Domain::Firewall,
+            | FirewallEgressPolicy
+            | FirewallStateless
+            | FirewallLogging
+            | FirewallIcmpType
+            | FirewallWorkloadPeer => Domain::Firewall,
             VmConsoleSerial | VmConsoleVnc | VmGuestAgent | VmIpObserved => Domain::Console,
             MetricsPrometheus | MetricsPerWorkloadNetwork | HostHealth | HostCapacity => {
                 Domain::Metrics
@@ -805,7 +982,8 @@ pub struct ProviderReport {
 impl ProviderReport {
     /// Builds a report by asking `classify` about EVERY catalog entry of the
     /// provider's `kind` (and the cross-kind entries a compute provider owns,
-    /// see [`Capability::kind`]). The walk is the whole point: a provider
+    /// see [`Capability::kind`]; a `Gateway` report walks the `Network` entries,
+    /// see [`ProviderKind::catalog_kind`]). The walk is the whole point: a provider
     /// cannot skip an entry, and a new catalog entry makes every provider's
     /// `classify` fail to compile until it answers.
     pub fn build(
@@ -818,7 +996,7 @@ impl ProviderReport {
         let capabilities = Capability::ALL
             .iter()
             .copied()
-            .filter(|c| c.kind() == kind)
+            .filter(|c| c.kind() == kind.catalog_kind())
             .map(|c| CapabilityReport::new(c, classify(c)))
             .collect();
         Self {
@@ -929,6 +1107,37 @@ mod tests {
             .iter()
             .all(|c| c.capability.kind() == ProviderKind::Network));
         assert_eq!(r.count("not-implemented"), expected);
+    }
+
+    #[test]
+    fn a_gateway_report_walks_the_network_entries_and_keeps_its_own_kind() {
+        let r = ProviderReport::build(
+            "appliance",
+            ProviderKind::Gateway,
+            false,
+            ProviderHealth {
+                status: HealthStatus::Unknown,
+                reason: "NotProbed",
+                message: String::new(),
+            },
+            |_| CapabilityState::NotImplemented,
+        );
+        assert_eq!(r.kind, ProviderKind::Gateway);
+        let network = Capability::ALL
+            .iter()
+            .filter(|c| c.kind() == ProviderKind::Network)
+            .count();
+        assert_eq!(r.capabilities.len(), network);
+        assert!(r
+            .capabilities
+            .iter()
+            .any(|c| c.capability == Capability::NetGatewayFilter));
+        assert!(
+            !Capability::ALL
+                .iter()
+                .any(|c| c.kind() == ProviderKind::Gateway),
+            "no entry is tagged Gateway: a gateway answers the network rows"
+        );
     }
 
     #[test]

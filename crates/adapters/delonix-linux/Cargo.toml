@@ -28,5 +28,8 @@ serde_yaml = { workspace = true }
 # for this exact purpose (`delonix-vm`, `delonix-truenas`, `delonix-proxmox`).
 thiserror = { workspace = true }
 
+[dev-dependencies]
+tempfile = { workspace = true }
+
 [lints]
 workspace = true

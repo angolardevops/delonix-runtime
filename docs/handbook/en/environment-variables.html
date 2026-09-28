@@ -894,7 +894,7 @@ the same way as the Proxmox backend above and read by <code>cmd::gatewayprovider
 <tbody>
 <tr>
 <td><code>DELONIX_OPNSENSE_URL</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>API endpoint of the appliance. Setting it is what enables the provider.</td>
 <td><code>https://&lt;host&gt;</code>.</td>
 <td>Requires a credential.</td>
@@ -921,15 +921,29 @@ the same way as the Proxmox backend above and read by <code>cmd::gatewayprovider
 <td></td>
 </tr>
 <tr>
+<td><code>DELONIX_OPNSENSE_KEY_FILE</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code></td>
+<td>A file holding the API key.</td>
+<td>Path; read and trimmed.</td>
+<td>Wins over <code>DELONIX_OPNSENSE_KEY</code>. <code>providers.yaml</code> <code>auth.keyFile</code> maps onto it (ADR-0059 F1).</td>
+</tr>
+<tr>
+<td><code>DELONIX_OPNSENSE_SECRET_FILE</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_auth</code> (via <code>credential_value</code>)</td>
+<td>A file holding the API secret.</td>
+<td>A <code>chmod 600</code> path; refused when others can read it.</td>
+<td><code>providers.yaml</code> <code>auth.secretFile</code> maps onto it (ADR-0059 F1).</td>
+</tr>
+<tr>
 <td><code>DELONIX_OPNSENSE_INSECURE_TLS</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>Skips TLS certificate verification for the appliance.</td>
 <td><code>1</code>, <code>true</code> or <code>yes</code> → skip; default verify.</td>
 <td>A stock OPNsense serves a self-signed certificate (measured live, ADR-0051 Phase 0). <strong>Another machine answering in the appliance's name receives the credential.</strong> Opt-in only.</td>
 </tr>
 <tr>
 <td><code>DELONIX_OPNSENSE_CA_FILE</code></td>
-<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:register_opnsense_with</code></td>
+<td><code>cmd/<wbr>gatewayproviders.<wbr>rs:opnsense_target_with</code></td>
 <td>A CA certificate (PEM) to trust for the appliance, in addition to the system roots.</td>
 <td>Path to a PEM file; unreadable is an <strong>error</strong>.</td>
 <td>Instead of <code>DELONIX_OPNSENSE_INSECURE_TLS</code>.</td>
@@ -1138,6 +1152,20 @@ variable when the program runs.</p>
 <td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
 <td>Its password.</td>
 <td>Required.</td>
+<td></td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN_ID</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>An API token id instead of the account (<code>user@realm!name</code>).</td>
+<td>Optional; with <code>DELONIX_PROXMOX_TEST_TOKEN</code> it is used before the account.</td>
+<td>Revocable on the node; a lab run can mint one without anybody's password.</td>
+</tr>
+<tr>
+<td><code>DELONIX_PROXMOX_TEST_TOKEN</code></td>
+<td><a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/crates/providers/delonix-proxmox/tests/live.rs" target="_blank" rel="noopener"><code>crates/<wbr>providers/<wbr>delonix-proxmox/<wbr>tests/<wbr>live.<wbr>rs:target</code></a></td>
+<td>Its secret.</td>
+<td>Optional, with the id.</td>
 <td></td>
 </tr>
 <tr>
