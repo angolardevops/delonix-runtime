@@ -682,9 +682,11 @@ doesn't support.
   can keep `0555` directories, so make them writable before removing it. `tempdir()` creates the
   directory with mode `0700`: if another uid must read it (a user namespace, a mapped subuid, a
   hypervisor), set `0755` on it. A Unix socket needs a short path (`sun_path` is 108 bytes): use
-  `tempfile::tempdir_in("/tmp")`, not a literal `/tmp` path with the pid, which the gate does not
-  see. **Enforced (gate)**: `scripts/tmp_roots_gate.py` fails the `test` job on anything left in its
-  `TMPDIR`; the baseline has been empty since #572.
+  `tempfile::tempdir_in("/tmp")` (`/tmp/.tmpXXXXXX/x.sock` is 22 bytes), not a literal `/tmp` path
+  with the pid, which a failed assert leaves behind. **Enforced (gate)**: `scripts/tmp_roots_gate.py`
+  fails the `test` job on anything the tests leave in their `TMPDIR` (the baseline has been empty
+  since #572) and on anything new in `/tmp`, judged against a listing taken just before
+  `cargo test` (`--before`). Both censuses run when a test fails too.
 - **A regression test must fail with the fix reverted.** Revert the fix, watch the test fail, then
   restore the fix. A test that passes either way proves nothing, and AGENTS.md records several
   (an exit-code check that `1` couldn't distinguish; a chaos scenario that stayed green with a

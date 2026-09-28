@@ -1029,9 +1029,11 @@ let c = store.update(id_or_name, |c| match f(c) {
   can keep <code>0555</code> directories, so make them writable before removing it. <code>tempdir()</code> creates the
   directory with mode <code>0700</code>: if another uid must read it (a user namespace, a mapped subuid, a
   hypervisor), set <code>0755</code> on it. A Unix socket needs a short path (<code>sun_path</code> is 108 bytes): use
-  <code>tempfile::tempdir_in("/tmp")</code>, not a literal <code>/tmp</code> path with the pid, which the gate does not
-  see. <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fails the <code>test</code> job on anything left in its
-  <code>TMPDIR</code>; the baseline has been empty since #572.</li>
+  <code>tempfile::tempdir_in("/tmp")</code> (<code>/tmp/.tmpXXXXXX/x.sock</code> is 22 bytes), not a literal <code>/tmp</code> path
+  with the pid, which a failed assert leaves behind. <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a>
+  fails the <code>test</code> job on anything the tests leave in their <code>TMPDIR</code> (the baseline has been empty
+  since #572) and on anything new in <code>/tmp</code>, judged against a listing taken just before
+  <code>cargo test</code> (<code>--before</code>). Both censuses run when a test fails too.</li>
 <li><strong>A regression test must fail with the fix reverted.</strong> Revert the fix, watch the test fail, then
   restore the fix. A test that passes either way proves nothing, and AGENTS.md records several
   (an exit-code check that <code>1</code> couldn't distinguish; a chaos scenario that stayed green with a
