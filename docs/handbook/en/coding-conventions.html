@@ -1024,16 +1024,15 @@ let c = store.update(id_or_name, |c| match f(c) {
   end: hold the directory in a <code>tempfile::TempDir</code> (declared once in the root <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a>). A root
   that a whole test binary shares through <code>DELONIX_ROOT</code> uses the lease of
   <code>delonix-sdn/tests/network_alloc_race.rs</code>. A pid-named folder under <code>temp_dir()</code> with a
-  <code>remove_dir_all</code> at the end is the old idiom: don't copy it. On 2026-09-28 only the opt-in live
-  test <code>delonix-vm/tests/provider_live.rs</code> still creates one. A tree extracted from an image layer
-  can keep <code>0555</code> directories, so make them writable before removing it. <code>tempdir()</code> creates the
-  directory with mode <code>0700</code>: if another uid must read it (a user namespace, a mapped subuid, a
-  hypervisor), set <code>0755</code> on it. A Unix socket needs a short path (<code>sun_path</code> is 108 bytes): use
-  <code>tempfile::tempdir_in("/tmp")</code> (<code>/tmp/.tmpXXXXXX/x.sock</code> is 22 bytes), not a literal <code>/tmp</code> path
-  with the pid, which a failed assert leaves behind. <strong>Enforced (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a>
-  fails the <code>test</code> job on anything the tests leave in their <code>TMPDIR</code> (the baseline has been empty
-  since #572) and on anything new in <code>/tmp</code>, judged against a listing taken just before
-  <code>cargo test</code> (<code>--before</code>). Both censuses run when a test fails too.</li>
+  <code>remove_dir_all</code> at the end is the old idiom: don't copy it. Since 2026-09-28 no test does. A tree
+  extracted from an image layer can keep <code>0555</code> directories, so make them writable before removing
+  it. <code>tempdir()</code> creates the directory with mode <code>0700</code>: if another uid must read it (a user
+  namespace, a mapped subuid, a hypervisor), set <code>0755</code> on it. A Unix socket needs a short path
+  (<code>sun_path</code> is 108 bytes): use <code>tempfile::tempdir_in("/tmp")</code> (<code>/tmp/.tmpXXXXXX/x.sock</code> is 22
+  bytes), not a literal <code>/tmp</code> path with the pid, which a failed assert leaves behind. <strong>Enforced
+  (gate)</strong>: <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> fails the <code>test</code> job on anything the tests leave in their
+  <code>TMPDIR</code> (the baseline has been empty since #572) and on anything new in <code>/tmp</code>, judged against a
+  listing taken just before <code>cargo test</code> (<code>--before</code>). Both censuses run when a test fails too.</li>
 <li><strong>A regression test must fail with the fix reverted.</strong> Revert the fix, watch the test fail, then
   restore the fix. A test that passes either way proves nothing, and AGENTS.md records several
   (an exit-code check that <code>1</code> couldn't distinguish; a chaos scenario that stayed green with a

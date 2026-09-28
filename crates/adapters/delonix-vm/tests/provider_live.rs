@@ -130,16 +130,22 @@ fn the_same_vmspec_converges_cloud_hypervisor_and_libvirt() {
         return;
     }
 
-    let tmp =
-        std::env::temp_dir().join(format!("dlx-p4-substitution-spike-{}", std::process::id()));
-    std::fs::create_dir_all(&tmp).expect("mkdir tmp root");
-    let disk = base_disk(&tmp);
+    // Removed on Drop, so an `expect` or `assert!` below does not leave it behind.
+    // `tempdir()` makes it 0700; 0755 keeps it readable by QEMU when the test runs
+    // as root and libvirt picks `qemu:///system`, where QEMU is another uid
+    // (`libvirt-qemu`). As a user it is `qemu:///session` and the mode is moot.
+    let guard = tempfile::tempdir().expect("mkdir tmp root");
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(guard.path(), std::fs::Permissions::from_mode(0o755))
+        .expect("chmod 0755 tmp root");
+    let tmp = guard.path();
+    let disk = base_disk(tmp);
 
     let mut ran_at_least_one = false;
     let mut summary = Vec::new();
 
     if !ch_missing {
-        match run_lifecycle(&tmp, &disk, "cloud-hypervisor") {
+        match run_lifecycle(tmp, &disk, "cloud-hypervisor") {
             Some(log) => {
                 summary.push("=== cloud-hypervisor ===".to_string());
                 summary.extend(log.iter().map(|l| format!("  {l}")));
@@ -152,7 +158,7 @@ fn the_same_vmspec_converges_cloud_hypervisor_and_libvirt() {
     }
 
     if !lv_missing {
-        match run_lifecycle(&tmp, &disk, "libvirt") {
+        match run_lifecycle(tmp, &disk, "libvirt") {
             Some(log) => {
                 summary.push("=== libvirt ===".to_string());
                 summary.extend(log.iter().map(|l| format!("  {l}")));
@@ -165,7 +171,6 @@ fn the_same_vmspec_converges_cloud_hypervisor_and_libvirt() {
     }
 
     report(&summary);
-    let _ = std::fs::remove_dir_all(&tmp);
     assert!(
         ran_at_least_one,
         "neither provider completed a lifecycle — nothing was proven"
