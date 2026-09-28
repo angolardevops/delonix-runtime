@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:ca6216244a6145d8b8504d28f00eee6da04acd8f7561b63286cee6f39a95ee26 -->
+<!-- translated-from: coding-conventions.md sha256:ad6bb03af4e3ac52f5a3a1229e3f49d35b474786a3f79f6f26bab5e49ef41b46 -->
 # Conventions de code
 
 **Avant de lire :** [Introduction à Rust](rust-primer.md), [Architecture](architecture.md) et [Les crates](crates.md) — les règles ci-dessous font référence aux couches, aux ports et aux crates par leur nom.
@@ -704,9 +704,8 @@ confiance à un appelant pour refuser ce qu'il ne prend pas en charge.
   `tempfile::TempDir` (déclaré une seule fois dans le `Cargo.toml` racine). Une racine qu'un binaire de
   tests entier partage via `DELONIX_ROOT` utilise le bail de
   `delonix-sdn/tests/network_alloc_race.rs`. Un dossier nommé d'après le pid sous `temp_dir()`
-  avec un `remove_dir_all` à la fin est l'ancien idiome : ne le copiez pas. Le 2026-09-28, seuls deux tests en
-  créent encore un (dans `delonix-proxmox/src/lib.rs` et dans le test live opt-in
-  `delonix-vm/tests/provider_live.rs`). Un arbre extrait d'une couche d'image peut garder des
+  avec un `remove_dir_all` à la fin est l'ancien idiome : ne le copiez pas. Le 2026-09-28, seul le test live opt-in
+  `delonix-vm/tests/provider_live.rs` en crée encore un. Un arbre extrait d'une couche d'image peut garder des
   répertoires `0555` : rendez-les inscriptibles avant de le supprimer. **Imposé (gate)** :
   `scripts/tmp_roots_gate.py` fait échouer le job `test` pour tout ce qui reste dans son `TMPDIR` ;
   la baseline est vide depuis #572.

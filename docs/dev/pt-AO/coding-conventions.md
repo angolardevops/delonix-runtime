@@ -1,4 +1,4 @@
-<!-- translated-from: coding-conventions.md sha256:ca6216244a6145d8b8504d28f00eee6da04acd8f7561b63286cee6f39a95ee26 -->
+<!-- translated-from: coding-conventions.md sha256:ad6bb03af4e3ac52f5a3a1229e3f49d35b474786a3f79f6f26bab5e49ef41b46 -->
 # Convenções de código
 
 **Antes de leres:** [Introdução ao Rust](rust-primer.md), [Arquitectura](architecture.md) e [As crates](crates.md) — as regras abaixo referem-se a camadas, portas e crates pelo nome.
@@ -691,9 +691,8 @@ recusar o que ele próprio não suporta.
   `Drop`, não numa linha no fim: guarda a pasta num `tempfile::TempDir` (declarado uma vez no
   `Cargo.toml` da raiz). Uma raiz que um binário de testes inteiro partilha pelo `DELONIX_ROOT` usa o
   arrendamento de `delonix-sdn/tests/network_alloc_race.rs`. Uma pasta com o pid em `temp_dir()` e
-  um `remove_dir_all` no fim é o idioma antigo: não o copies. A 2026-09-28 só dois testes ainda
-  criam uma (em `delonix-proxmox/src/lib.rs` e no teste ao vivo opt-in
-  `delonix-vm/tests/provider_live.rs`). Uma árvore extraída de uma camada de imagem pode manter directórios
+  um `remove_dir_all` no fim é o idioma antigo: não o copies. A 2026-09-28 só o teste ao vivo opt-in
+  `delonix-vm/tests/provider_live.rs` ainda cria uma. Uma árvore extraída de uma camada de imagem pode manter directórios
   `0555`, por isso torna-os graváveis antes de a removeres. **Imposto (gate)**:
   `scripts/tmp_roots_gate.py` chumba o job `test` por qualquer coisa deixada no seu `TMPDIR`; a
   linha de base está vazia desde o #572.

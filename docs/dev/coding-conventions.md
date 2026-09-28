@@ -677,9 +677,8 @@ doesn't support.
   end: hold the directory in a `tempfile::TempDir` (declared once in the root `Cargo.toml`). A
   root that a whole test binary shares through `DELONIX_ROOT` uses the lease of
   `delonix-sdn/tests/network_alloc_race.rs`. A pid-named folder under `temp_dir()` with a
-  `remove_dir_all` at the end is the old idiom: don't copy it. On 2026-09-28 only two tests still
-  create one (in `delonix-proxmox/src/lib.rs`, and the opt-in live test
-  `delonix-vm/tests/provider_live.rs`). A tree extracted from an image layer can keep `0555` directories, so make them
+  `remove_dir_all` at the end is the old idiom: don't copy it. On 2026-09-28 only the opt-in live test
+  `delonix-vm/tests/provider_live.rs` still creates one. A tree extracted from an image layer can keep `0555` directories, so make them
   writable before removing it. **Enforced (gate)**: `scripts/tmp_roots_gate.py` fails the `test`
   job on anything left in its `TMPDIR`; the baseline has been empty since #572.
 - **A regression test must fail with the fix reverted.** Revert the fix, watch the test fail, then

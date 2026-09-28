@@ -1037,9 +1037,8 @@ let c = store.update(id_or_name, |c| match f(c) {
   <code>Drop</code>, não numa linha no fim: guarda a pasta num <code>tempfile::TempDir</code> (declarado uma vez no
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/Cargo.toml" target="_blank" rel="noopener"><code>Cargo.toml</code></a> da raiz). Uma raiz que um binário de testes inteiro partilha pelo <code>DELONIX_ROOT</code> usa o
   arrendamento de <code>delonix-sdn/tests/network_alloc_race.rs</code>. Uma pasta com o pid em <code>temp_dir()</code> e
-  um <code>remove_dir_all</code> no fim é o idioma antigo: não o copies. A 2026-09-28 só dois testes ainda
-  criam uma (em <code>delonix-proxmox/src/lib.rs</code> e no teste ao vivo opt-in
-  <code>delonix-vm/tests/provider_live.rs</code>). Uma árvore extraída de uma camada de imagem pode manter directórios
+  um <code>remove_dir_all</code> no fim é o idioma antigo: não o copies. A 2026-09-28 só o teste ao vivo opt-in
+  <code>delonix-vm/tests/provider_live.rs</code> ainda cria uma. Uma árvore extraída de uma camada de imagem pode manter directórios
   <code>0555</code>, por isso torna-os graváveis antes de a removeres. <strong>Imposto (gate)</strong>:
   <a class="src" href="https://github.com/angolardevops/delonix-runtime/blob/main/scripts/tmp_roots_gate.py" target="_blank" rel="noopener"><code>scripts/tmp_roots_gate.py</code></a> chumba o job <code>test</code> por qualquer coisa deixada no seu <code>TMPDIR</code>; a
   linha de base está vazia desde o #572.</li>

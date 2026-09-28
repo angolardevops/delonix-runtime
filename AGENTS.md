@@ -5667,10 +5667,10 @@ checklist para quem mexer aqui do que como lista de correcções:
   temporary directory on every exit»), que antes citava o `tmp_dir(tag)` sem guarda como a
   convenção observada. O idioma antigo estava em 204 linhas de código de teste; a migração de
   2026-09-28 passou-as ao `TempDir` (e mais 2 que o `grep` não via, por guardarem o
-  `temp_dir()` numa variável). Ficaram 2 que ainda criam pasta: um teste do `delonix-proxmox`,
-  cujo ficheiro outra sessão tinha aberto nessa hora, e o teste ao vivo opt-in
+  `temp_dir()` numa variável). Ficou 1 que ainda cria pasta: o teste ao vivo opt-in
   `delonix-vm/tests/provider_live.rs`, que entrega a pasta a um hipervisor que pode correr com
-  outro uid (o `tempdir()` cria-a com `0700`). As outras 8 linhas não criam nada que se apague:
+  outro uid (o `tempdir()` cria-a com `0700`) e que não se pode validar sem esse hipervisor. (O do
+  `delonix-proxmox` esperou que a sessão que tinha o ficheiro aberto fundisse o #579.) As outras 8 linhas não criam nada que se apague:
   caminhos que têm de faltar, caminhos esperados que a produção calcula, código de produção e o
   arrendamento do `netdef_naming`. Numa corrida verde a bateria deixava 0 antes e 0 depois (2419
   testes, as mesmas listas); a diferença está na falha: com um `panic!` provocado depois de a pasta
