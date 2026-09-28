@@ -154,14 +154,25 @@ jobs:
       # afterwards was left by them. `scripts/tmp_roots_gate.py` judges it
       # against the known debt, both ways (#567: a test left one root per run,
       # ~2400 of them, and nothing looked).
+      # The TMPDIR is not `/tmp`: a test that binds a Unix socket needs a short
+      # path (`sun_path` is 108 bytes) and puts it under `/tmp` itself. `/tmp`
+      # is listed just before `cargo test`, and only what is new afterwards is
+      # judged. Both censuses run when a test fails too (but not when the tests
+      # never ran): a failed test is when a cleanup on its last line never runs.
       - name: cargo test, with a temp dir of its own
+        id: tests
         env:
           TMPDIR: ${{ runner.temp }}/test-tmp
         run: |
           mkdir -p "$TMPDIR"
+          ls -A /tmp > "${{ runner.temp }}/slash-tmp-before.txt"
           cargo test --workspace --locked --no-fail-fast
       - name: The tests left only the known debt in the temp dir
+        if: ${{ !cancelled() && (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure') }}
         run: python3 scripts/tmp_roots_gate.py --dir "${{ runner.temp }}/test-tmp"
+      - name: The tests left nothing new in /tmp
+        if: ${{ !cancelled() && (steps.tests.outcome == 'success' || steps.tests.outcome == 'failure') }}
+        run: python3 scripts/tmp_roots_gate.py --dir /tmp --before "${{ runner.temp }}/slash-tmp-before.txt"
 
   # ---- Native arm64 tests (issue #438) ----
   # A cross build only type-checks the `#[cfg(target_arch)]` branches; none of

@@ -5699,13 +5699,19 @@ checklist para quem mexer aqui do que como lista de correcções:
   Unix tem 108 bytes e o `TMPDIR` de uma sessão de agente já passa dos 90: `delonix-cri/tests/
   grpc_status.rs`, `delonix-node-api/tests/grpc_list_providers.rs` e `delonix-linux/tests/
   cgroup_parent.rs`. Medido a 2026-09-28: no caminho verde, nenhum dos três deixa nada em `/tmp`
-  nem no `TMPDIR`. O `cgroup_parent` apaga a raiz com um guarda `Drop`; os dois de gRPC apagam o
-  socket na ÚLTIMA linha, por isso uma falha deixa um socket em `/tmp` que o gate não vê (por
-  leitura, não provocado). Dos 161 literais `"/tmp/…"` em código de teste, os outros 158 são
-  dados que nunca se criam. **Regra: um caminho curto para um socket é `tempfile::tempdir_in
-  ("/tmp")` (`/tmp/.tmpXXXXXX/x.sock` = 22 bytes), curto E guardado, nunca um literal com o
-  pid.** Gate: nenhum ainda — o `/tmp` do runner teria de ser recenseado antes e depois do
-  `cargo test`;
+  nem no `TMPDIR`. O `cgroup_parent` apaga a raiz com um guarda `Drop`; os dois de gRPC apagavam o
+  socket na ÚLTIMA linha, por isso uma falha deixava um socket em `/tmp` que o gate não via —
+  provocado depois com um `panic!` logo a seguir ao socket existir: ficaram `/tmp/dlx-grpc-tN.sock`
+  e `/tmp/dlx-node-tN.sock`; com o `tempdir_in("/tmp")`, zero entradas novas (um
+  `CARGO_TARGET_DIR` por lado, `Compiling` dos dois crates em cada log). Dos 161 literais
+  `"/tmp/…"` em código de teste, os outros 158 são dados que nunca se criam. **Regra: um caminho
+  curto para um socket é `tempfile::tempdir_in("/tmp")` (`/tmp/.tmpXXXXXX/x.sock` = 22 bytes),
+  curto E guardado, nunca um literal com o pid.** Gate: o job `test` lista o `/tmp` mesmo antes
+  do `cargo test` e o `tmp_roots_gate.py --dir /tmp --before <listagem>` chumba qualquer entrada
+  nova (nome exacto que já lá estava não conta; o resto normaliza-se e julga-se contra a mesma
+  baseline vazia). Os dois recenseamentos correm também quando um teste falha — é aí que uma
+  limpeza na última linha não corre. Com a correcção revertida e o `panic!`, o gate chumba com os
+  dois sockets;
 
 **Achado vivo da varredura (v0.42.2)**: `delonix system info` reportava `cgroup2 delegated: yes`
 incondicionalmente, por ler os ficheiros do cgroup raiz do host — o comando que se corre para
